@@ -1,0 +1,12 @@
+# Ignore environment variables and secrets
+.env
+
+# Ignore temporary files
+tmp/
+
+# Ignore node modules
+node_modules/
+
+# Ignore python cache
+__pycache__/
+*.pyc
