@@ -1,0 +1,30 @@
+Review the attached menu and provide a detailed analysis identifying errors, inconsistencies, and potential improvements across the following categories to ensure 100% menu accuracy and professionalism:
+
+1. DIETARY / ALLERGEN INFORMATION:
+- Cross-check each menu item against the allergen key provided in the footer. Identify any missing or inaccurate dietary or allergen markers based on assumptions from the item name, ingredients, and description.
+- Highlight any ambiguities or unclear allergen information that could cause confusion or risk for guests with dietary restrictions.
+
+2. SPELLING, GRAMMAR, AND LANGUAGE CONSISTENCY:
+- Flag any spelling, punctuation, or grammatical errors in menu item names and descriptions.
+- Ensure language usage (English, Spanish, Japanese, French, etc.) is consistent with proper conventions and formatting for the respective cuisine or origin of the dish (e.g., accents, diacritical marks, capitalization rules, etc.).
+- Identify any inconsistencies in the style or tone of descriptions, such as changes between formal and informal language.
+
+3. FORMATTING AND VISUAL CONSISTENCY:
+- Identify any inconsistencies in formatting, such as font styles, sizes, alignment, spacing, or bullet points.
+- Ensure all menu items and descriptions are consistently structured, including capitalization (e.g., dish names vs. descriptions), use of periods, pricing format, and placement of allergen/dietary markers).
+- Flag any categories or subcategories that lack uniform presentation or organization.
+
+4. CLARITY AND READABILITY:
+- Highlight any descriptions that may be unclear, overly complex, or lacking detail.
+- Suggest improvements for descriptions that could better highlight ingredients, preparation methods, or flavor profiles to enhance guest understanding.
+
+5. CULTURAL AND CONTEXTUAL APPROPRIATENESS:
+- Flag any potential cultural inaccuracies or insensitivities in the menu items or descriptions.
+- Ensure dish names and descriptions accurately reflect the cuisine’s cultural origins and avoid misrepresentation.
+
+6. INSTRUCTIONS FOR OUTPUT
+For each error or inconsistency identified, include the following:
+- Menu Category: Identify the section of the menu (e.g., appetizers, entrées, desserts, beverages, etc.) where the issue appears.
+- Menu Item: Clearly state the name of the menu item.
+- Description of Issue: Provide a clear and concise explanation of the problem.
+- Recommendation: Suggest a specific edit or solution to address the issue.

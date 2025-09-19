@@ -1,6 +1,7 @@
 import express from 'express';
 import nodemailer from 'nodemailer';
 import dotenv from 'dotenv';
+import { generateRedlinedDoc } from './src/doc-generator';
 
 dotenv.config({ path: '../../../.env' });
 
@@ -29,42 +30,46 @@ app.post('/notify', async (req, res) => {
     try {
         let mailOptions;
 
-        if (report.needs_resubmit) {
+        if (report.status === 'needs_resubmission') {
+            // Tier 1 Failure: Send general feedback email
             mailOptions = {
                 from: `"Menu Review Bot" <${process.env.GRAPH_MAILBOX_ADDRESS}>`,
                 to: submitter_email,
                 subject: 'Action Required: Menu Submission Review',
                 html: `
                     <p>Hello,</p>
-                    <p>Your recent menu submission requires a few corrections. Please review the issues below and resubmit:</p>
-                    <ul>
-                        ${report.issues.map((issue: any) => `<li><b>${issue.type} at ${issue.location}:</b> ${issue.explanation} (Suggested fix: ${issue.fix})</li>`).join('')}
-                    </ul>
+                    <p>Your recent menu submission requires corrections before it can be finalized. Please review the feedback below and submit a revised version.</p>
+                    <hr>
+                    <h3>Automated Review Feedback:</h3>
+                    <pre style="background-color: #f5f5f5; padding: 10px; border-radius: 5px; white-space: pre-wrap;">${report.feedback_content}</pre>
                     <p>Thank you,</p>
                     <p>Menu Review Bot</p>
                 `,
             };
-        } else {
+        } else if (report.status === 'approved_with_edits') {
+            // Tier 2 Success: Generate and send red-lined document
+            const docBuffer = await generateRedlinedDoc(report.redlined_content);
+
             mailOptions = {
                 from: `"Menu Review Bot" <${process.env.GRAPH_MAILBOX_ADDRESS}>`,
                 to: submitter_email,
                 subject: 'Your Menu Submission has been Processed',
                 html: `
                     <p>Hello,</p>
-                    <p>Your menu submission has been reviewed and corrected. Please find the red-lined version attached.</p>
-                    <p>Summary of changes: ${report.summary}</p>
+                    <p>Your menu submission has been reviewed and corrected. Please find the red-lined version attached for your final approval.</p>
                     <p>Thank you,</p>
                     <p>Menu Review Bot</p>
                 `,
                 attachments: [
                     {
-                        filename: 'redlined_document.docx',
-                        content: report.redlined_doc,
-                        encoding: 'base64',
+                        filename: 'redlined_menu.docx',
+                        content: docBuffer,
                         contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
                     },
                 ],
             };
+        } else {
+            return res.status(400).send('Invalid report status.');
         }
 
         await transporter.sendMail(mailOptions);

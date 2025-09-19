@@ -1,0 +1,22 @@
+[
+  {
+    "example_id": "ex_001",
+    "input": "Spicy Tuna Roll - Fresh tuna with our spicy mayo sauce.",
+    "output": [
+      {
+        "correction": "Spicy Tuna Roll - Fresh tuna with our spicy mayo sauce. [S, E]",
+        "reason": "Missing allergen codes for Shellfish/Seafood (S) and Egg (E) as per rule ALG-001."
+      }
+    ]
+  },
+  {
+    "example_id": "ex_002",
+    "input": "MAIN COURSES\\nOur famous burger...",
+    "output": [
+      {
+        "correction": "**MAIN COURSES**",
+        "reason": "Section heading 'MAIN COURSES' was not bolded, violating formatting rule FMT-001."
+      }
+    ]
+  }
+]
