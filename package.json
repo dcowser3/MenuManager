@@ -1,0 +1,27 @@
+{
+  "name": "menumanager",
+  "version": "1.0.0",
+  "description": "AI-powered menu submission review service.",
+  "private": true,
+  "workspaces": [
+    "services/*"
+  ],
+  "scripts": {
+    "test": "jest"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@types/express": "^5.0.3",
+    "@types/isomorphic-fetch": "^0.0.39",
+    "typescript": "^5.9.2"
+  },
+  "dependencies": {
+    "@azure/msal-node": "^3.7.4",
+    "@microsoft/microsoft-graph-client": "^3.0.7",
+    "dotenv": "^17.2.2",
+    "express": "^5.1.0",
+    "isomorphic-fetch": "^3.0.0"
+  }
+}

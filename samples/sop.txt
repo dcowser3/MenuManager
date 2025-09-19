@@ -1,0 +1,6 @@
+This document outlines the Standard Operating Procedures for menu design submissions.
+
+1.  All submissions must be in .docx format.
+2.  The official RSH template must be used.
+3.  The document must include all required headings and fields.
+...
