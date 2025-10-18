@@ -1,0 +1,132 @@
+<% 
+function renderLayout(body) {
+    return `
+        <!DOCTYPE html>
+        <html lang="en">
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>${title}</title>
+            <style>
+                * { margin: 0; padding: 0; box-sizing: border-box; }
+                body {
+                    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                    background: #f5f7fa;
+                    color: #2d3748;
+                }
+                .header {
+                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                    color: white;
+                    padding: 2rem;
+                    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+                }
+                .container { max-width: 1200px; margin: 0 auto; padding: 2rem; }
+                .card {
+                    background: white;
+                    border-radius: 8px;
+                    padding: 1.5rem;
+                    margin-bottom: 1.5rem;
+                    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+                }
+                .review-item {
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                    padding: 1.5rem;
+                    border-bottom: 1px solid #e2e8f0;
+                }
+                .review-item:last-child { border-bottom: none; }
+                .review-info h3 { font-size: 1.125rem; margin-bottom: 0.5rem; }
+                .review-meta {
+                    color: #718096;
+                    font-size: 0.875rem;
+                    display: flex;
+                    gap: 1rem;
+                    margin-top: 0.5rem;
+                }
+                .badge {
+                    display: inline-block;
+                    padding: 0.25rem 0.75rem;
+                    border-radius: 12px;
+                    font-size: 0.875rem;
+                    font-weight: 500;
+                }
+                .badge-pending { background: #fef3c7; color: #92400e; }
+                .badge-food { background: #dbeafe; color: #1e40af; }
+                .badge-beverage { background: #fce7f3; color: #9f1239; }
+                .btn {
+                    padding: 0.75rem 1.5rem;
+                    border-radius: 6px;
+                    text-decoration: none;
+                    background: #667eea;
+                    color: white;
+                    font-weight: 500;
+                    transition: all 0.2s;
+                }
+                .btn:hover {
+                    background: #5a67d8;
+                    transform: translateY(-1px);
+                }
+                .empty-state {
+                    text-align: center;
+                    padding: 4rem 2rem;
+                    color: #718096;
+                }
+                .empty-state svg {
+                    width: 64px;
+                    height: 64px;
+                    margin-bottom: 1rem;
+                    opacity: 0.5;
+                }
+            </style>
+        </head>
+        <body>
+            <div class="header">
+                <div class="container">
+                    <h1>🍽️ Menu Review Dashboard</h1>
+                    <p>RSH Menu Management System</p>
+                </div>
+            </div>
+            <div class="container">
+                ${body}
+            </div>
+        </body>
+        </html>
+    `;
+}
+%>
+
+<%= renderLayout(`
+    <div class="card">
+        <h2 style="margin-bottom: 1.5rem;">Pending Reviews</h2>
+        
+        <% if (reviews && reviews.length > 0) { %>
+            <% reviews.forEach(function(review) { %>
+                <div class="review-item">
+                    <div class="review-info">
+                        <h3><%= review.filename %></h3>
+                        <div class="review-meta">
+                            <span>From: <%= review.submitter_email %></span>
+                            <span>•</span>
+                            <span>Submitted: <%= new Date(review.created_at).toLocaleDateString() %></span>
+                            <span>•</span>
+                            <span class="badge badge-pending">Pending Review</span>
+                        </div>
+                    </div>
+                    <div>
+                        <a href="/review/<%= review.id %>" class="btn">Review Now →</a>
+                    </div>
+                </div>
+            <% }); %>
+        <% } else { %>
+            <div class="empty-state">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+                <h3>No Pending Reviews</h3>
+                <p style="margin-top: 0.5rem;">All submissions have been reviewed. Great job!</p>
+            </div>
+        <% } %>
+    </div>
+`) %>
+
