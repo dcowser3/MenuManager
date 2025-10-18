@@ -13,7 +13,7 @@ const REPORTS_DB = path.join(DB_DIR, 'reports.json');
 async function initDb() {
     try {
         await fs.mkdir(DB_DIR, { recursive: true });
-        await fs.access(SUBMISSIONS_DB).catch(() => fs.writeFile(SUBMISSIONS_DB, '[]'));
+        await fs.access(SUBMISSIONS_DB).catch(() => fs.writeFile(SUBMISSIONS_DB, '{}')); // Now an object
         await fs.access(REPORTS_DB).catch(() => fs.writeFile(REPORTS_DB, '[]'));
     } catch (error) {
         console.error('Failed to initialize database:', error);
@@ -25,16 +25,21 @@ app.use(express.json());
 // Endpoint to create a new submission
 app.post('/submissions', async (req, res) => {
     try {
-        const { submitter_email, filename, parsed_json } = req.body;
+        const { submitter_email, filename, original_path } = req.body;
         const submissions = JSON.parse(await fs.readFile(SUBMISSIONS_DB, 'utf-8'));
+        const newId = `sub_${Date.now()}`;
         const newSubmission = {
-            id: Date.now().toString(),
+            id: newId,
             submitter_email,
             filename,
-            parsed_json,
-            created_at: new Date().toISOString()
+            original_path,
+            status: 'processing', // Initial status
+            ai_draft_path: null,
+            final_path: null,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
         };
-        submissions.push(newSubmission);
+        submissions[newId] = newSubmission;
         await fs.writeFile(SUBMISSIONS_DB, JSON.stringify(submissions, null, 2));
         res.status(201).json(newSubmission);
     } catch (error) {
@@ -43,7 +48,61 @@ app.post('/submissions', async (req, res) => {
     }
 });
 
-// Endpoint to create a new report
+// Endpoint to get a single submission by ID
+app.get('/submissions/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const submissions = JSON.parse(await fs.readFile(SUBMISSIONS_DB, 'utf-8'));
+
+        if (!submissions[id]) {
+            return res.status(404).send('Submission not found.');
+        }
+
+        res.status(200).json(submissions[id]);
+    } catch (error) {
+        console.error('Error getting submission:', error);
+        res.status(500).send('Error getting submission.');
+    }
+});
+
+// Endpoint to get all pending submissions (for dashboard)
+app.get('/submissions/pending', async (req, res) => {
+    try {
+        const submissions = JSON.parse(await fs.readFile(SUBMISSIONS_DB, 'utf-8'));
+        const pending = Object.values(submissions).filter(
+            (sub: any) => sub.status === 'pending_human_review'
+        );
+        res.status(200).json(pending);
+    } catch (error) {
+        console.error('Error getting pending submissions:', error);
+        res.status(500).send('Error getting pending submissions.');
+    }
+});
+
+// Endpoint to update a submission's status and paths
+app.put('/submissions/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { status, ai_draft_path, final_path } = req.body;
+        const submissions = JSON.parse(await fs.readFile(SUBMISSIONS_DB, 'utf-8'));
+
+        if (!submissions[id]) {
+            return res.status(404).send('Submission not found.');
+        }
+
+        const updatedSubmission = { ...submissions[id], ...req.body, updated_at: new Date().toISOString() };
+        submissions[id] = updatedSubmission;
+
+        await fs.writeFile(SUBMISSIONS_DB, JSON.stringify(submissions, null, 2));
+        res.status(200).json(updatedSubmission);
+    } catch (error) {
+        console.error('Error updating submission:', error);
+        res.status(500).send('Error updating submission.');
+    }
+});
+
+
+// Endpoint to create a new report (can be deprecated or used for logging)
 app.post('/reports', async (req, res) => {
     try {
         const { submission_id, report_json, ai_confidence } = req.body;
