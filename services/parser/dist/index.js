@@ -5,7 +5,6 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = __importDefault(require("express"));
 const multer_1 = __importDefault(require("multer"));
-const fs_1 = require("fs");
 const validator_1 = require("./src/validator");
 const axios_1 = __importDefault(require("axios"));
 const app = (0, express_1.default)();
@@ -42,7 +41,8 @@ app.post('/parser', upload.single('file'), async (req, res) => {
             text: validationResult.text,
             submission_id: submission.id,
             submitter_email: submission.submitter_email,
-            filename: submission.filename
+            filename: submission.filename,
+            original_path: req.file.path // Pass the original file path for formatting preservation
         });
         res.status(200).json({
             message: 'File passed validation and was sent for AI review.',
@@ -54,10 +54,11 @@ app.post('/parser', upload.single('file'), async (req, res) => {
         res.status(500).send('Error parsing file.');
     }
     finally {
-        // Clean up the uploaded file
-        if (req.file) {
-            await fs_1.promises.unlink(req.file.path);
-        }
+        // DON'T clean up the uploaded file yet - AI review needs it to preserve formatting
+        // The AI review service will handle cleanup after creating the draft
+        // if (req.file) {
+        //     await fs.unlink(req.file.path);
+        // }
     }
 });
 app.listen(port, () => {

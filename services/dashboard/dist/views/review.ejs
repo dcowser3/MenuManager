@@ -234,29 +234,6 @@
             </div>
         </div>
         
-        <div class="card">
-            <h3 style="margin-bottom: 1.5rem;">✨ Advanced Redlining</h3>
-            <p style="color: #718096; margin-bottom: 1.5rem;">
-                Generate a document with visual tracked changes: red strikethrough for deletions, yellow highlight for additions. All formatting preserved.
-            </p>
-            
-            <div style="display: flex; gap: 1rem; align-items: center;">
-                <button onclick="generateRedlined()" id="redlineBtn" class="btn btn-primary">
-                    🔍 Generate Redlined Version
-                </button>
-                
-                <div id="redlineDownload" style="display: none;">
-                    <a href="#" id="redlineDownloadLink" class="btn btn-success">
-                        📥 Download Redlined Document
-                    </a>
-                </div>
-                
-                <div id="redlineLoading" style="display: none; color: #667eea;">
-                    ⏳ Generating redlined version...
-                </div>
-            </div>
-        </div>
-        
         <div class="actions">
             <!-- Option 1: Quick Approve -->
             <div class="action-card">
@@ -418,39 +395,6 @@
             } catch (error) {
                 showAlert('❌ Failed to upload corrected version', 'error');
                 showLoading(false);
-            }
-        }
-        
-        async function generateRedlined() {
-            const btn = document.getElementById('redlineBtn');
-            const loading = document.getElementById('redlineLoading');
-            const download = document.getElementById('redlineDownload');
-            
-            btn.disabled = true;
-            loading.style.display = 'block';
-            
-            try {
-                const response = await fetch('/redline/' + submissionId, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' }
-                });
-                
-                const data = await response.json();
-                
-                if (data.success) {
-                    showAlert('✅ Redlined version generated successfully!', 'success');
-                    document.getElementById('redlineDownloadLink').href = data.download_url;
-                    download.style.display = 'block';
-                    btn.style.display = 'none';
-                } else {
-                    showAlert('❌ Error: ' + (data.error || 'Failed to generate redlined version'), 'error');
-                    btn.disabled = false;
-                }
-            } catch (error) {
-                showAlert('❌ Failed to generate redlined version', 'error');
-                btn.disabled = false;
-            } finally {
-                loading.style.display = 'none';
             }
         }
     </script>

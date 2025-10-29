@@ -9,7 +9,7 @@ const port = 3001;
 
 const upload = multer({ dest: '../../../tmp/uploads/' });
 
-app.post('/parser', upload.single('file'), async (req, res) => {
+app.post('/parser', upload.single('file') as any, async (req, res) => {
     if (!req.file) {
         return res.status(400).send('No file uploaded.');
     }
@@ -45,7 +45,8 @@ app.post('/parser', upload.single('file'), async (req, res) => {
             text: validationResult.text,
             submission_id: submission.id,
             submitter_email: submission.submitter_email,
-            filename: submission.filename
+            filename: submission.filename,
+            original_path: req.file.path  // Pass the original file path for formatting preservation
         });
         
         res.status(200).json({ 
@@ -57,10 +58,11 @@ app.post('/parser', upload.single('file'), async (req, res) => {
         console.error('Error parsing file:', error);
         res.status(500).send('Error parsing file.');
     } finally {
-        // Clean up the uploaded file
-        if (req.file) {
-            await fs.unlink(req.file.path);
-        }
+        // DON'T clean up the uploaded file yet - AI review needs it to preserve formatting
+        // The AI review service will handle cleanup after creating the draft
+        // if (req.file) {
+        //     await fs.unlink(req.file.path);
+        // }
     }
 });
 
