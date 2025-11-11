@@ -293,9 +293,23 @@ app.post('/redline/:submissionId', async (req, res) => {
         const redlinedPath = path.join(__dirname, '..', '..', '..', 'tmp', 'redlined', `${submissionId}-redlined.docx`);
         await fs_1.promises.mkdir(path.dirname(redlinedPath), { recursive: true });
         // Call the Python redliner
-        const pythonScript = path.join(__dirname, '..', 'docx-redliner', 'process_menu.py');
-        const venvPython = path.join(__dirname, '..', 'docx-redliner', 'venv', 'bin', 'python');
-        const command = `"${venvPython}" "${pythonScript}" "${inputPath}" "${redlinedPath}"`;
+        // __dirname points to services/dashboard/dist when built
+        const pythonScript = path.resolve(__dirname, '..', '..', 'docx-redliner', 'process_menu.py');
+        const venvPython = path.resolve(__dirname, '..', '..', 'docx-redliner', 'venv', 'bin', 'python');
+        const pythonExec = venvPython; // fallback handled below
+        // Fallback: if venv python doesn't exist, use system python3
+        let command = `"${pythonExec}" "${pythonScript}" "${inputPath}" "${redlinedPath}"`;
+        try {
+            // simple existence check by attempting to stat via shell 'test -x'
+            await execAsync(`[ -x "${venvPython}" ] || echo "NO_VENV"`);
+        }
+        catch (_) {
+            // ignore
+        }
+        const venvCheck = await execAsync(`[ -x "${venvPython}" ] && echo OK || echo NO`);
+        if (venvCheck.stdout.trim() === 'NO') {
+            command = `python3 "${pythonScript}" "${inputPath}" "${redlinedPath}"`;
+        }
         console.log(`Executing: ${command}`);
         const { stdout, stderr } = await execAsync(command, {
             env: { ...process.env },
