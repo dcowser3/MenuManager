@@ -15,6 +15,8 @@ from docx.shared import RGBColor
 from docx.enum.text import WD_COLOR_INDEX
 import diff_match_patch as dmp_module
 from typing import List, Tuple, Optional
+import re
+import difflib
 import os
 from pathlib import Path
 
@@ -167,15 +169,65 @@ class MenuRedliner:
         if original_text == corrected_text:
             return False
         
-        # Compute the difference between the two strings
-        diffs = self.dmp.diff_main(original_text, corrected_text)
-        # Clean up the diffs to be more semantic (word-level)
-        self.dmp.diff_cleanupSemantic(diffs)
+        # Compute the difference using WORD-LEVEL diffs so replacements
+        # appear as whole-word changes rather than single letters.
+        diffs = self._word_level_diffs(original_text, corrected_text)
         
         # Apply the formatted diffs
         self.apply_formatted_diffs(para, diffs)
         
         return True
+
+    def _tokenize(self, text: str) -> List[str]:
+        """Split text into tokens: words, whitespace, and punctuation.
+        This ensures diffs happen on word boundaries.
+        """
+        return re.findall(r"\w+|\s+|[^\w\s]", text)
+
+    def _word_level_diffs(self, original_text: str, corrected_text: str) -> List[Tuple[int, str]]:
+        """
+        Produce diffs at word/token level using difflib, then map to
+        diff_match_patch-style tuples. This forces whole-word replacements.
+        """
+        DIFF_EQUAL = dmp_module.diff_match_patch.DIFF_EQUAL
+        DIFF_DELETE = dmp_module.diff_match_patch.DIFF_DELETE
+        DIFF_INSERT = dmp_module.diff_match_patch.DIFF_INSERT
+
+        orig_tokens = self._tokenize(original_text)
+        corr_tokens = self._tokenize(corrected_text)
+
+        sm = difflib.SequenceMatcher(a=orig_tokens, b=corr_tokens)
+        diffs: List[Tuple[int, str]] = []
+
+        for tag, i1, i2, j1, j2 in sm.get_opcodes():
+            if tag == 'equal':
+                text = ''.join(orig_tokens[i1:i2])
+                if text:
+                    diffs.append((DIFF_EQUAL, text))
+            elif tag == 'replace':
+                del_text = ''.join(orig_tokens[i1:i2])
+                ins_text = ''.join(corr_tokens[j1:j2])
+                if del_text:
+                    diffs.append((DIFF_DELETE, del_text))
+                if ins_text:
+                    diffs.append((DIFF_INSERT, ins_text))
+            elif tag == 'delete':
+                del_text = ''.join(orig_tokens[i1:i2])
+                if del_text:
+                    diffs.append((DIFF_DELETE, del_text))
+            elif tag == 'insert':
+                ins_text = ''.join(corr_tokens[j1:j2])
+                if ins_text:
+                    diffs.append((DIFF_INSERT, ins_text))
+
+        # Optional: merge adjacent same-op segments
+        merged: List[Tuple[int, str]] = []
+        for op, text in diffs:
+            if merged and merged[-1][0] == op:
+                merged[-1] = (op, merged[-1][1] + text)
+            else:
+                merged.append((op, text))
+        return merged
     
     def process_document(self, file_path: str, ai_correction_func, output_path: Optional[str] = None) -> str:
         """

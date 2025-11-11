@@ -45,6 +45,8 @@ CRITICAL RULES:
 1. Return ONLY the corrected text - no explanations, no comments, no markdown
 2. Preserve the original structure and capitalization style
 3. Fix spelling errors (e.g., "avacado" → "avocado")
+   - IMPORTANT: When a word contains an error, REPLACE THE ENTIRE WORD with the corrected word.
+   - Do NOT make partial, within-word edits (e.g., changing just a letter). Always output the full corrected word so diffs can redline whole words.
 4. Ensure proper formatting:
    - Item names should be in Title Case
    - Descriptions use sentence case
@@ -159,6 +161,7 @@ RULES:
 - Keep the same structure
 - Return ONLY the corrected items, no other text
 - If an item is correct, return it unchanged
+ - IMPORTANT: When a word contains an error, REPLACE THE ENTIRE WORD with the corrected word (no partial letter edits). Ensure the corrected text reflects whole-word substitutions so redlining shows full-word changes.
 
 Example:
 Input: "Guacamole - Fresh avacado|||Ceasar Salad - Romaine lettuce"
