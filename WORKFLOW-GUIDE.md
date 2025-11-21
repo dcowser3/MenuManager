@@ -155,6 +155,32 @@ Even with folder-based processing, we have **multiple layers of safety**:
 └─────────────────────────────────────────────────────────────┘
 ```
 
+## Current Rules & Guidance
+
+### Tier 1: QA Pre‑Check (Chef‑Facing, SOP‑Only)
+- Purpose: Gatekeep obvious quality issues before human review.
+- Prompt: Uses `sop-processor/qa_prompt.txt` exactly as given to chefs in the SOP.
+- Scope: General spelling/grammar/language consistency, formatting consistency, clarity, cultural appropriateness.
+- No custom house rules are applied here. If it fails, the system auto‑replies instructing the chef to run the SOP prompt themselves and resubmit.
+
+### Tier 2: Redlining (Internal, Custom Rules Applied)
+- After Tier 1 passes, we generate a red‑lined draft using enhanced house rules from `sop-processor/sop_rules.json`.
+- Enforced items include:
+  - Ingredient separators: use " / " (space‑slash‑space), do not use hyphens as separators.
+  - Dual prices: use " | " (space‑bar‑space), disallow "/".
+  - Allergen/dietary markers: on the item line, uppercase, comma‑separated with no spaces, alphabetized; append "*" for raw/undercooked.
+  - Diacritics: enforce correct accents (e.g., jalapeño, tajín, crème brûlée, rosé, rhône, leña, Ànima, Vē‑vē).
+  - Non‑trivial spellings: tartare, mozzarella, parmesan, Caesar, yuzu kosho.
+  - Item names not ALL CAPS (except approved acronyms/brands).
+- Legacy interpretation: When reviewing older documents, red highlight may indicate deletions. For output going forward, we always use proper redlining (red strikethrough for deletions, yellow highlight for insertions).
+- Letter‑level edits are allowed when they reflect the true change (e.g., adding "ñ" in jalapeño). The redliner preserves run‑level formatting.
+
+### Where these rules live
+- SOP rules JSON: `sop-processor/sop_rules.json` (consumed by Tier 2 prompt).
+- Tier 1 QA prompt: `sop-processor/qa_prompt.txt` (SOP‑only, no customizations).
+- Redline system prompt: `services/ai-review/index.ts` (reads SOP rules JSON).
+- AI Corrector guidance: `services/docx-redliner/ai_corrector.py` (applies normalizations).
+
 ## What Happens to Correction Emails?
 
 When the system sends the final corrected document back to the chef:

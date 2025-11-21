@@ -25,6 +25,16 @@ The solution uses a 3-phase approach that **preserves character-level formatting
 
 This solves the "formatting loss" problem that occurs with simple text replacement.
 
+### Current Editing Guidance (applied by the redliner)
+- Letter‑level edits are allowed and preserved (e.g., adding "ñ" within a word).
+- Normalizations enforced by prompts:
+  - Ingredient separators: " / " (space‑slash‑space), not hyphens as separators.
+  - Dual prices: " | " (space‑bar‑space), not "/".
+  - Diacritics: jalapeño, tajín, crème brûlée, rosé, rhône, leña, Ànima, Vē‑vē.
+  - Non‑trivial spellings: tartare, mozzarella, parmesan, Caesar, yuzu kosho.
+  - Item names not ALL CAPS (except approved acronyms/brands).
+- Legacy docs: red highlight may indicate deletions; output always uses proper redlining.
+
 ## Quick Start (5 minutes)
 
 ```bash

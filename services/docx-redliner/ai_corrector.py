@@ -45,12 +45,15 @@ CRITICAL RULES:
 1. Return ONLY the corrected text - no explanations, no comments, no markdown
 2. Preserve the original structure and capitalization style
 3. Fix spelling errors (e.g., "avacado" → "avocado")
-   - IMPORTANT: When a word contains an error, REPLACE THE ENTIRE WORD with the corrected word.
-   - Do NOT make partial, within-word edits (e.g., changing just a letter). Always output the full corrected word so diffs can redline whole words.
+   - Character-level edits are allowed. Return the fully corrected text; the redlining engine will render letter-level changes as needed.
 4. Ensure proper formatting:
    - Item names should be in Title Case
    - Descriptions use sentence case
    - Prices follow items with proper formatting
+   - Ingredient separators must be \" / \" (space-slash-space), not hyphens
+   - Dual prices must use \" | \" (space-bar-space), not \"/\"
+   - Enforce diacritics for required culinary terms (e.g., jalapeño, tajín, crème brûlée, rosé, rhône, leña, ànima, vē‑vē)
+   - Normalize non-trivial spellings (e.g., tartare ← tartar; mozzarella ← mozarella; parmesan ← parmesian; Caesar ← Ceasar/Cesar; yuzu kosho ← yuzukosho/yuzu-kosho)
 5. Maintain the original punctuation style (dashes, commas, etc.)
 6. Do NOT add or remove major content - only fix errors
 7. If the text is already correct, return it unchanged
@@ -161,7 +164,10 @@ RULES:
 - Keep the same structure
 - Return ONLY the corrected items, no other text
 - If an item is correct, return it unchanged
- - IMPORTANT: When a word contains an error, REPLACE THE ENTIRE WORD with the corrected word (no partial letter edits). Ensure the corrected text reflects whole-word substitutions so redlining shows full-word changes.
+ - Character-level edits are allowed; return the fully corrected text (the redliner will render fine-grained changes).
+ - Ingredient separators must be " / " (space-slash-space), not hyphens
+ - Dual prices must use " | " (space-bar-space), not "/"
+ - Enforce diacritics for required culinary terms and normalize non-trivial spellings (e.g., tartare, mozzarella, parmesan, Caesar, yuzu kosho)
 
 Example:
 Input: "Guacamole - Fresh avacado|||Ceasar Salad - Romaine lettuce"

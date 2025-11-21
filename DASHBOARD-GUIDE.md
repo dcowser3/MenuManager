@@ -78,6 +78,17 @@ The dashboard is the web interface where internal reviewers approve or correct A
 
 ## The Two Approval Paths
 
+## Review Standards (What the AI enforces in drafts)
+
+- Ingredient separators: " / " (space‑slash‑space), not hyphens as separators.
+- Dual prices: " | " (space‑bar‑space), not "/".
+- Allergen/dietary markers: on the item line, uppercase, comma‑separated with no spaces, alphabetized; append "*" for raw/undercooked.
+- Diacritics and labels: enforce correct accents (e.g., jalapeño, tajín, crème brûlée, rosé, rhône, leña, Ànima, Vē‑vē).
+- Non‑trivial spellings: tartare, mozzarella, parmesan, Caesar, yuzu kosho.
+- Item names not ALL CAPS (except approved acronyms/brands).
+- Letter‑level edits allowed where precise (e.g., ñ), with tracked changes preserved.
+- Legacy docs: red highlight may indicate deletions; our outgoing drafts always use proper redlining visuals.
+
 ### Path 1: Quick Approve ✅
 
 **When to use**: AI draft is perfect, no changes needed
