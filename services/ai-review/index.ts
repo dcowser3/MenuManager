@@ -174,9 +174,16 @@ async function createRedlinePrompt(): Promise<string> {
         - Mark deletions with [DELETE]text to remove[/DELETE] (note the forward slash in closing tag)
         - Mark additions with [ADD]text to add[/ADD] (note the forward slash in closing tag)
         - IMPORTANT: Use [/DELETE] and [/ADD] with forward slashes for closing tags, NOT [DELETE] or [ADD]
+        - You may mark partial words or single letters inside a word if needed (tags can wrap individual characters)
         - Check for grammar, spelling, formatting consistency
         - Ensure menu items follow the SOP guidelines below
         - Verify pricing format is consistent
+        - Enforce ingredient separator: use " / " (space-slash-space) between ingredients; do not use hyphens as separators
+        - Dual prices: use " | " (space-bar-space) to separate two prices (e.g., glass | bottle); do not use "/"
+        - Allergen/dietary markers: keep on the item line, uppercase, comma-separated with no spaces, alphabetized (e.g., C,E,F,G,M,SY); append "*" for raw/undercooked
+        - Diacritics: ensure correct accents as per required spellings (e.g., jalapeño, tajín, crème brûlée, rosé, rhône, leña, ànima, vē‑vē)
+        - Item names must not be ALL CAPS (except approved acronyms/brands); follow template case standard
+        - Legacy interpretation: Some older submissions used red highlight to indicate removals. When interpreting legacy reviewed docs, treat red highlighted text as equivalent to a removal. For your output, ALWAYS use [DELETE]/[ADD] tags as specified above.
         
         EXAMPLE FORMAT:
         Original: "Guacamole - Fresh avacado, lime - $12"

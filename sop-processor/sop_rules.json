@@ -27,7 +27,9 @@
       "description": "Item removals must be marked with a strikethrough in red.",
       "details": {
         "change_type": "removal",
-        "required_format": "red_strikethrough"
+        "required_format": "red_strikethrough",
+        "legacy_alternative_formats": ["red_highlight"],
+        "legacy_note": "For legacy/older submissions only, red highlighted text may indicate removals. When interpreting such documents, treat red highlight as a removal equivalent. All new submissions must use red strikethrough."
       }
     },
     {
@@ -92,7 +94,8 @@
       "severity": "Medium",
       "description": "A vertical bar '|' must be used to separate two prices (e.g., glass/bottle).",
       "details": {
-        "dual_price_separator": "|"
+        "dual_price_separator": "|",
+        "disallowed_separators": ["/"]
       }
     },
     {
@@ -147,7 +150,10 @@
           "aioli": ["mayo"],
           "Caesar": ["cesar", "ceasar"],
           "chili": ["chile"],
-          "tartare": [],
+          "tartare": ["tartar"],
+          "mozzarella": ["mozarella"],
+          "parmesan": ["parmesian"],
+          "yuzu kosho": ["yuzukosho", "yuzu-kosho"],
           "passion fruit": ["passionfruit"]
         }
       }
@@ -199,13 +205,71 @@
       "description": "Specific words with accents and special characters must use the correct spelling and diacritical marks.",
       "details": {
         "required_spellings": [
-          "Açaí", "Ají", "Albariño", "Añejo", "Cachaça", "Camarón", "Café", 
-          "Chicharrón", "Chile de Árbol", "Cócteles", "Crème Brûlée", "Crème Fraîche", 
-          "Crêpes", "Flambéed", "Jalapeño", "Leña", "Más", "Patrón", "Pistú", 
-          "Purée", "Rhône", "Rosé", "Sautéed", "Tajín", "Tampiqueña"
+          "Açaí", "Ají", "Albariño", "Añejo", "Cachaça", "Camarón", "Café",
+          "Chicharrón", "Chile de Árbol", "Cócteles", "Crème Brûlée", "Crème Fraîche",
+          "Crêpes", "Flambéed", "Jalapeño", "Leña", "Más", "Patrón", "Pistú",
+          "Purée", "Rhône", "Rosé", "Sautéed", "Tajín", "Tampiqueña", "Ànima", "Vē-vē"
         ]
       }
     },
+    {
+      "rule_id": "PUNC-001",
+      "category": "Punctuation",
+      "severity": "Medium",
+      "description": "Ingredient separators must use ' / ' (space-slash-space). Do not use hyphens as separators.",
+      "details": {
+        "ingredient_separator": "/",
+        "require_space_around": true,
+        "disallow_hyphen_as_separator": true,
+        "compound_exceptions": ["house-made"]
+      }
+    },
+    {
+      "rule_id": "FMT-008",
+      "category": "Formatting",
+      "severity": "Medium",
+      "description": "Item names must not be ALL CAPS except for approved acronyms/brands.",
+      "details": {
+        "target_element": "item_name",
+        "disallow_all_caps": true,
+        "allowed_acronyms": ["RSH", "TT"]
+      }
+    },
+    {
+      "rule_id": "ALG-005",
+      "category": "Allergens",
+      "severity": "Medium",
+      "description": "Suggest allergen codes based on ingredient keywords; final codes must be alphabetized and formatted per ALG-002.",
+      "details": {
+        "keyword_to_code": {
+          "milk": "D",
+          "cheese": "D",
+          "cream": "D",
+          "butter": "D",
+          "almond": "N",
+          "peanut": "N",
+          "walnut": "N",
+          "pistachio": "N",
+          "shrimp": "C",
+          "prawn": "C",
+          "crab": "C",
+          "lobster": "C",
+          "tuna": "F",
+          "salmon": "F",
+          "cod": "F",
+          "egg": "E",
+          "panko": "G",
+          "bread": "G",
+          "flour": "G",
+          "crumb": "G",
+          "wheat": "G",
+          "soy": "SY",
+          "sesame": "SE",
+          "mustard": "M"
+        },
+        "note": "These mappings are heuristics to assist reviewers; do not override explicit chef-provided allergen info."
+      }
+    }
     {
       "rule_id": "FMT-004",
       "category": "Formatting",

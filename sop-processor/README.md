@@ -22,3 +22,15 @@ This directory contains the scripts and data for processing the company's Standa
 4.  **Curate Rules**: Open `sop_raw_text.txt` and the placeholder `sop_rules.json`. Manually transfer the rules from the text file into the structured JSON format. This is a crucial step that requires careful interpretation of the SOP.
 
 5.  **Build Examples**: Based on historical data (old menus and their corrections), populate the `training_examples.json` file with "before" and "after" examples.
+
+## Prompts and Usage
+
+- **QA Pre‑Check (Chef‑Facing, SOP‑Only)**  
+  File: `qa_prompt.txt`  
+  Purpose: Provide a generic quality check aligned with the SOP prompt given to chefs.  
+  Notes: Do not add custom house rules here; this must match what any chef can run with standard ChatGPT.
+
+- **Redlining (Internal, House Rules Applied)**  
+  Rules source: `sop_rules.json`  
+  Consumers: Tier‑2 redline prompt in `services/ai-review/index.ts` and AI corrector in `services/docx-redliner/ai_corrector.py`.  
+  Notes: Enforces separators, dual‑price formatting, diacritics, non‑trivial spellings, allergen formatting, non‑ALL‑CAPS item names, and legacy red‑highlight interpretation (read‑only).
