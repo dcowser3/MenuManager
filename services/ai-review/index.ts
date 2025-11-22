@@ -24,6 +24,50 @@ const openai = new OpenAIApi(configuration);
 
 app.use(express.json());
 
+/**
+ * QA Check Endpoint - Used by parser to run pre-check validation
+ * This runs the same QA prompt that chefs should use before submitting
+ */
+app.post('/run-qa-check', async (req, res) => {
+    const { text, prompt } = req.body;
+
+    if (!text || !prompt) {
+        return res.status(400).send('Missing text or prompt for QA check.');
+    }
+
+    try {
+        const hasOpenAIKey = !!process.env.OPENAI_API_KEY && 
+                            process.env.OPENAI_API_KEY !== 'your-openai-api-key-here';
+
+        if (!hasOpenAIKey) {
+            return res.status(503).json({ 
+                error: 'OpenAI API key not configured',
+                feedback: 'QA check unavailable - API key not set'
+            });
+        }
+
+        console.log('Running QA check...');
+        const qaResponse = await openai.createChatCompletion({
+            model: 'gpt-4o',
+            messages: [
+                { role: 'system', content: prompt },
+                { role: 'user', content: `Here is the menu text to review:\n\n---\n\n${text}` }
+            ],
+        });
+
+        const feedback = qaResponse.data.choices[0].message?.content || "No feedback generated.";
+        
+        res.status(200).json({ feedback });
+
+    } catch (error: any) {
+        console.error('Error during QA check:', error);
+        res.status(500).json({ 
+            error: 'Error performing QA check',
+            message: error.message 
+        });
+    }
+});
+
 app.post('/ai-review', async (req, res) => {
     // We'll now expect more metadata from the parser service
     const { text, submission_id, submitter_email, filename, original_path } = req.body;

@@ -1,0 +1,520 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title><%= title %></title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        header {
+            background: white;
+            border-radius: 16px;
+            padding: 30px;
+            margin-bottom: 30px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+        }
+
+        h1 {
+            color: #333;
+            font-size: 2em;
+            margin-bottom: 10px;
+        }
+
+        .nav-links {
+            margin-top: 20px;
+            display: flex;
+            gap: 15px;
+        }
+
+        .nav-links a {
+            color: #667eea;
+            text-decoration: none;
+            padding: 8px 16px;
+            border-radius: 8px;
+            transition: background-color 0.2s;
+        }
+
+        .nav-links a:hover {
+            background-color: #f0f0f0;
+        }
+
+        .section {
+            background: white;
+            border-radius: 16px;
+            padding: 30px;
+            margin-bottom: 30px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+        }
+
+        .section h2 {
+            color: #333;
+            margin-bottom: 20px;
+            font-size: 1.5em;
+        }
+
+        .upload-area {
+            border: 2px dashed #667eea;
+            border-radius: 12px;
+            padding: 30px;
+            text-align: center;
+            margin-bottom: 20px;
+        }
+
+        .upload-form {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            max-width: 600px;
+            margin: 0 auto;
+        }
+
+        .file-input-group {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            text-align: left;
+        }
+
+        .file-input-group label {
+            font-weight: 600;
+            color: #555;
+        }
+
+        input[type="text"],
+        input[type="number"] {
+            padding: 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 14px;
+            transition: border-color 0.2s;
+        }
+
+        input[type="text"]:focus,
+        input[type="number"]:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        input[type="file"] {
+            padding: 10px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            cursor: pointer;
+        }
+
+        .btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 14px 28px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: 600;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .btn-secondary {
+            background: #6c757d;
+        }
+
+        .training-controls {
+            display: flex;
+            gap: 15px;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        .training-controls input {
+            width: 100px;
+        }
+
+        .sessions-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+            gap: 20px;
+        }
+
+        .session-card {
+            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+            border-radius: 12px;
+            padding: 20px;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        .session-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 8px 20px rgba(0, 0, 0, 0.15);
+        }
+
+        .session-card h3 {
+            color: #333;
+            margin-bottom: 15px;
+            font-size: 1.1em;
+        }
+
+        .session-stats {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+
+        .stat {
+            background: white;
+            padding: 10px;
+            border-radius: 8px;
+            text-align: center;
+        }
+
+        .stat-value {
+            font-size: 24px;
+            font-weight: bold;
+            color: #667eea;
+        }
+
+        .stat-label {
+            font-size: 12px;
+            color: #666;
+            margin-top: 4px;
+        }
+
+        .session-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+        }
+
+        .session-actions button {
+            flex: 1;
+            padding: 8px;
+            font-size: 14px;
+        }
+
+        .alert {
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+
+        .alert-success {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+
+        .alert-error {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+
+        .alert-info {
+            background-color: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #666;
+        }
+
+        .empty-state-icon {
+            font-size: 64px;
+            margin-bottom: 20px;
+            opacity: 0.3;
+        }
+
+        .loading {
+            display: none;
+            text-align: center;
+            padding: 20px;
+        }
+
+        .loading.active {
+            display: block;
+        }
+
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #667eea;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🎓 <%= title %></h1>
+            <p style="color: #666; margin-top: 10px;">
+                Train your AI model with historical menu reviews
+            </p>
+            <div class="nav-links">
+                <a href="/">← Back to Reviews</a>
+            </div>
+        </header>
+
+        <div id="alertContainer"></div>
+
+        <!-- Upload Training Pair -->
+        <div class="section">
+            <h2>📤 Upload Training Pair</h2>
+            <div class="upload-area">
+                <p style="color: #666; margin-bottom: 20px;">
+                    Upload a pair of documents: original menu and human-redlined version
+                </p>
+                <form id="uploadPairForm" class="upload-form">
+                    <div class="file-input-group">
+                        <label>Pair Name (optional):</label>
+                        <input 
+                            type="text" 
+                            name="pairName" 
+                            placeholder="e.g., casa_chi_nov_2024"
+                        />
+                    </div>
+                    
+                    <div class="file-input-group">
+                        <label>Original Document:</label>
+                        <input 
+                            type="file" 
+                            name="original" 
+                            accept=".docx"
+                            required
+                        />
+                    </div>
+                    
+                    <div class="file-input-group">
+                        <label>Human-Redlined Version:</label>
+                        <input 
+                            type="file" 
+                            name="redlined" 
+                            accept=".docx"
+                            required
+                        />
+                    </div>
+                    
+                    <button type="submit" class="btn">Upload Pair</button>
+                </form>
+            </div>
+        </div>
+
+        <!-- Run Training -->
+        <div class="section">
+            <h2>🚀 Run Training</h2>
+            <p style="color: #666; margin-bottom: 20px;">
+                Process all uploaded pairs to generate new rules and optimize the AI prompt
+            </p>
+            
+            <div class="training-controls">
+                <label style="color: #555; font-weight: 600;">
+                    Minimum Occurrences:
+                </label>
+                <input 
+                    type="number" 
+                    id="minOccurrences" 
+                    value="2" 
+                    min="1" 
+                    max="10"
+                    style="width: 80px;"
+                />
+                <button id="runTrainingBtn" class="btn">Start Training</button>
+            </div>
+
+            <div class="alert alert-info">
+                <strong>💡 Tip:</strong> Higher minimum occurrences (3-5) creates more confident but fewer rules. 
+                Lower values (1-2) learn from every example.
+            </div>
+
+            <div id="trainingLoading" class="loading">
+                <div class="spinner"></div>
+                <p style="margin-top: 15px; color: #666;">Training in progress... This may take a few minutes.</p>
+            </div>
+        </div>
+
+        <!-- Training Sessions -->
+        <div class="section">
+            <h2>📊 Training Sessions</h2>
+            
+            <% if (sessions.length === 0) { %>
+                <div class="empty-state">
+                    <div class="empty-state-icon">📚</div>
+                    <h3>No Training Sessions Yet</h3>
+                    <p style="margin-top: 10px;">
+                        Upload document pairs and run training to see results here
+                    </p>
+                </div>
+            <% } else { %>
+                <div class="sessions-grid">
+                    <% sessions.forEach(session => { %>
+                        <div class="session-card">
+                            <h3>Session <%= session.session_id %></h3>
+                            
+                            <div class="session-stats">
+                                <div class="stat">
+                                    <div class="stat-value"><%= session.pairs_processed %></div>
+                                    <div class="stat-label">Pairs</div>
+                                </div>
+                                <div class="stat">
+                                    <div class="stat-value"><%= session.corrections_found %></div>
+                                    <div class="stat-label">Corrections</div>
+                                </div>
+                                <div class="stat">
+                                    <div class="stat-value"><%= session.rules_generated %></div>
+                                    <div class="stat-label">Rules</div>
+                                </div>
+                                <div class="stat">
+                                    <div class="stat-value">
+                                        <%= session.corrections_found > 0 ? 
+                                            Math.round((session.rules_generated / session.corrections_found) * 100) : 0 %>%
+                                    </div>
+                                    <div class="stat-label">Efficiency</div>
+                                </div>
+                            </div>
+
+                            <div class="session-actions">
+                                <button 
+                                    class="btn btn-secondary" 
+                                    onclick="downloadRules('<%= session.session_id %>')"
+                                >
+                                    📥 Rules
+                                </button>
+                                <button 
+                                    class="btn btn-secondary" 
+                                    onclick="downloadPrompt('<%= session.session_id %>')"
+                                >
+                                    📝 Prompt
+                                </button>
+                            </div>
+                        </div>
+                    <% }) %>
+                </div>
+            <% } %>
+        </div>
+    </div>
+
+    <script>
+        // Alert helper
+        function showAlert(message, type = 'info') {
+            const alertContainer = document.getElementById('alertContainer');
+            const alertDiv = document.createElement('div');
+            alertDiv.className = `alert alert-${type}`;
+            alertDiv.innerHTML = `<strong>${type === 'error' ? '❌' : type === 'success' ? '✓' : 'ℹ️'}</strong> ${message}`;
+            alertContainer.appendChild(alertDiv);
+            
+            setTimeout(() => {
+                alertDiv.remove();
+            }, 5000);
+        }
+
+        // Upload pair form
+        document.getElementById('uploadPairForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const formData = new FormData(e.target);
+            
+            try {
+                const response = await fetch('/training/upload-pair', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    showAlert(`Training pair "${result.pairName}" uploaded successfully!`, 'success');
+                    e.target.reset();
+                } else {
+                    showAlert(result.error || 'Upload failed', 'error');
+                }
+            } catch (error) {
+                showAlert('Error uploading pair: ' + error.message, 'error');
+            }
+        });
+
+        // Run training
+        document.getElementById('runTrainingBtn').addEventListener('click', async () => {
+            const minOccurrences = document.getElementById('minOccurrences').value;
+            const loading = document.getElementById('trainingLoading');
+            const btn = document.getElementById('runTrainingBtn');
+            
+            btn.disabled = true;
+            loading.classList.add('active');
+            
+            try {
+                const response = await fetch('/training/run', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ minOccurrences: parseInt(minOccurrences) })
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    showAlert('Training completed successfully! Refresh to see results.', 'success');
+                    
+                    // Refresh page after 2 seconds
+                    setTimeout(() => {
+                        window.location.reload();
+                    }, 2000);
+                } else {
+                    showAlert(result.error || 'Training failed', 'error');
+                }
+            } catch (error) {
+                showAlert('Error running training: ' + error.message, 'error');
+            } finally {
+                btn.disabled = false;
+                loading.classList.remove('active');
+            }
+        });
+
+        // Download rules
+        function downloadRules(sessionId) {
+            window.location.href = `/training/download-rules/${sessionId}`;
+        }
+
+        // Download prompt
+        function downloadPrompt(sessionId) {
+            window.location.href = `/training/download-prompt/${sessionId}`;
+        }
+    </script>
+</body>
+</html>
+
