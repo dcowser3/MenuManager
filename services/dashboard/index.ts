@@ -377,7 +377,207 @@ app.get('/download/redlined/:submissionId', async (req, res) => {
     }
 });
 
+/**
+ * Training Dashboard - Manage training data and sessions
+ */
+app.get('/training', async (req, res) => {
+    try {
+        // Read training sessions from tmp/training directory
+        const trainingDir = path.join(__dirname, '..', '..', '..', 'tmp', 'training');
+        await fs.mkdir(trainingDir, { recursive: true });
+
+        const files = await fs.readdir(trainingDir);
+        const sessionFiles = files.filter(f => f.startsWith('session_') && f.endsWith('.json'));
+
+        const sessions = await Promise.all(
+            sessionFiles.map(async (file) => {
+                const content = await fs.readFile(path.join(trainingDir, file), 'utf-8');
+                return JSON.parse(content);
+            })
+        );
+
+        // Sort by session ID (timestamp) descending
+        sessions.sort((a, b) => b.session_id.localeCompare(a.session_id));
+
+        res.render('training', {
+            title: 'Training Dashboard',
+            sessions: sessions
+        });
+    } catch (error) {
+        console.error('Error loading training dashboard:', error);
+        res.status(500).render('error', {
+            message: 'Failed to load training dashboard'
+        });
+    }
+});
+
+/**
+ * Upload Training Pair - Add new document pair for training
+ */
+app.post('/training/upload-pair', upload.fields([
+    { name: 'original', maxCount: 1 },
+    { name: 'redlined', maxCount: 1 }
+]) as any, async (req, res) => {
+    try {
+        const files = req.files as { [fieldname: string]: Express.Multer.File[] };
+        
+        if (!files.original || !files.redlined) {
+            return res.status(400).json({ 
+                error: 'Both original and redlined documents are required' 
+            });
+        }
+
+        const originalFile = files.original[0];
+        const redlinedFile = files.redlined[0];
+
+        // Create pairs directory if it doesn't exist
+        const pairsDir = path.join(__dirname, '..', '..', '..', 'tmp', 'training', 'pairs');
+        await fs.mkdir(pairsDir, { recursive: true });
+
+        // Generate pair name
+        const timestamp = Date.now();
+        const pairName = req.body.pairName || `pair_${timestamp}`;
+
+        // Move files to pairs directory with standard naming
+        const originalDest = path.join(pairsDir, `${pairName}_original.docx`);
+        const redlinedDest = path.join(pairsDir, `${pairName}_redlined.docx`);
+
+        await fs.rename(originalFile.path, originalDest);
+        await fs.rename(redlinedFile.path, redlinedDest);
+
+        console.log(`Training pair added: ${pairName}`);
+
+        res.json({
+            success: true,
+            message: 'Training pair uploaded successfully',
+            pairName: pairName
+        });
+
+    } catch (error) {
+        console.error('Error uploading training pair:', error);
+        res.status(500).json({ error: 'Failed to upload training pair' });
+    }
+});
+
+/**
+ * Run Training - Execute training pipeline on accumulated pairs
+ */
+app.post('/training/run', async (req, res) => {
+    try {
+        const minOccurrences = req.body.minOccurrences || 2;
+        
+        console.log(`Starting training pipeline with minOccurrences=${minOccurrences}`);
+
+        // Path to training script
+        const pairsDir = path.join(__dirname, '..', '..', '..', 'tmp', 'training', 'pairs');
+        const pythonScript = path.resolve(__dirname, '..', '..', 'docx-redliner', 'training_pipeline.py');
+        const venvPython = path.resolve(__dirname, '..', '..', 'docx-redliner', 'venv', 'bin', 'python');
+        const sopRulesPath = path.resolve(__dirname, '..', '..', '..', 'sop-processor', 'sop_rules.json');
+
+        // Check if pairs directory exists and has files
+        try {
+            const files = await fs.readdir(pairsDir);
+            const pairCount = files.filter(f => f.endsWith('_original.docx')).length;
+            
+            if (pairCount === 0) {
+                return res.status(400).json({ 
+                    error: 'No training pairs found. Upload some pairs first.' 
+                });
+            }
+        } catch (err) {
+            return res.status(400).json({ 
+                error: 'No training pairs directory found. Upload some pairs first.' 
+            });
+        }
+
+        // Build command
+        let command = `"${venvPython}" "${pythonScript}" --directory "${pairsDir}" --min-occurrences ${minOccurrences} --merge-rules "${sopRulesPath}" --optimize-prompt`;
+        
+        // Check if venv python exists
+        const venvCheck = await execAsync(`[ -x "${venvPython}" ] && echo OK || echo NO`).catch(() => ({ stdout: 'NO' }));
+        if (venvCheck.stdout.trim() === 'NO') {
+            command = `python3 "${pythonScript}" --directory "${pairsDir}" --min-occurrences ${minOccurrences} --merge-rules "${sopRulesPath}" --optimize-prompt`;
+        }
+
+        console.log(`Executing: ${command}`);
+
+        // Execute training pipeline
+        const { stdout, stderr } = await execAsync(command, {
+            env: { ...process.env },
+            timeout: 300000 // 5 minute timeout
+        });
+
+        console.log('Training output:', stdout);
+        if (stderr) console.error('Training stderr:', stderr);
+
+        res.json({
+            success: true,
+            message: 'Training completed successfully',
+            output: stdout
+        });
+
+    } catch (error: any) {
+        console.error('Error running training:', error);
+        res.status(500).json({
+            error: 'Failed to run training',
+            details: error.message
+        });
+    }
+});
+
+/**
+ * Get Training Session Details
+ */
+app.get('/training/session/:sessionId', async (req, res) => {
+    try {
+        const { sessionId } = req.params;
+        const trainingDir = path.join(__dirname, '..', '..', '..', 'tmp', 'training');
+        const sessionFile = path.join(trainingDir, `session_${sessionId}.json`);
+
+        const content = await fs.readFile(sessionFile, 'utf-8');
+        const session = JSON.parse(content);
+
+        res.json(session);
+    } catch (error) {
+        console.error('Error loading session:', error);
+        res.status(404).json({ error: 'Session not found' });
+    }
+});
+
+/**
+ * Download Training Rules
+ */
+app.get('/training/download-rules/:sessionId', async (req, res) => {
+    try {
+        const { sessionId } = req.params;
+        const trainingDir = path.join(__dirname, '..', '..', '..', 'tmp', 'training');
+        const rulesFile = path.join(trainingDir, `learned_rules_${sessionId}.json`);
+
+        res.download(rulesFile, `learned_rules_${sessionId}.json`);
+    } catch (error) {
+        console.error('Error downloading rules:', error);
+        res.status(404).send('Rules file not found');
+    }
+});
+
+/**
+ * Download Optimized Prompt
+ */
+app.get('/training/download-prompt/:sessionId', async (req, res) => {
+    try {
+        const { sessionId } = req.params;
+        const trainingDir = path.join(__dirname, '..', '..', '..', 'tmp', 'training');
+        const promptFile = path.join(trainingDir, `optimized_prompt_${sessionId}.txt`);
+
+        res.download(promptFile, `optimized_prompt_${sessionId}.txt`);
+    } catch (error) {
+        console.error('Error downloading prompt:', error);
+        res.status(404).send('Prompt file not found');
+    }
+});
+
 app.listen(port, () => {
     console.log(`📊 Dashboard service listening at http://localhost:${port}`);
     console.log(`   Access dashboard: http://localhost:${port}`);
+    console.log(`   Training dashboard: http://localhost:${port}/training`);
 });
