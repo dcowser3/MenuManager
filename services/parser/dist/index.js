@@ -38,6 +38,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = __importDefault(require("express"));
 const multer_1 = __importDefault(require("multer"));
+const fs_1 = require("fs");
 const validator_1 = require("./src/validator");
 const axios_1 = __importDefault(require("axios"));
 const path = __importStar(require("path"));
@@ -45,7 +46,10 @@ const child_process_1 = require("child_process");
 const util_1 = require("util");
 const app = (0, express_1.default)();
 const port = 3001;
-const upload = (0, multer_1.default)({ dest: '../../../tmp/uploads/' });
+// Use absolute path for uploads to avoid path resolution issues
+// __dirname in compiled code is services/parser/dist, so we need ../../../tmp/uploads to get to workspace root
+const uploadsDir = path.resolve(__dirname, '../../../tmp/uploads');
+const upload = (0, multer_1.default)({ dest: uploadsDir });
 const execAsync = (0, util_1.promisify)(child_process_1.exec);
 app.post('/parser', upload.single('file'), async (req, res) => {
     if (!req.file) {
@@ -77,16 +81,20 @@ app.post('/parser', upload.single('file'), async (req, res) => {
                 errors: validationResult.errors
             });
         }
-        // Light-weight “prompt/vibe” check: reject obviously placeholder/unfinished content
-        const needsPromptFix = shouldRequestPromptFix(validationResult.text);
-        if (needsPromptFix) {
+        // QA Pre-check: Run the SOP QA prompt to see if they pre-cleaned their menu
+        // If there are too many errors, it means they didn't use the QA prompt before submitting
+        const qaCheckResult = await runQAPreCheck(validationResult.text, submission.id);
+        if (!qaCheckResult.passed) {
             await axios_1.default.put(`http://localhost:3004/submissions/${submission.id}`, {
                 status: 'needs_prompt_fix',
-                prompt_fix_reason: 'Document contains placeholder or incomplete content.'
+                qa_feedback: qaCheckResult.feedback,
+                error_count: qaCheckResult.errorCount
             });
             return res.status(202).json({
-                message: 'Document appears incomplete. Ask the submitter to finalize content before review.',
-                status: 'needs_prompt_fix'
+                message: 'Your menu has too many errors. Please run the SOP QA prompt (ChatGPT) to clean it up before resubmitting.',
+                status: 'needs_prompt_fix',
+                error_count: qaCheckResult.errorCount,
+                feedback_preview: qaCheckResult.feedback.substring(0, 500) + '...'
             });
         }
         // SOP FORMAT LINT (center alignment, font size 12, Calibri)
@@ -150,10 +158,65 @@ app.listen(port, () => {
     console.log(`parser service listening at http://localhost:${port}`);
 });
 /**
- * Check for placeholder/unfinished content. Intentionally simple, no mocks.
+ * Run the actual QA prompt (from SOP) to check if the menu was pre-cleaned
+ * This is the SAME prompt chefs are supposed to run before submitting
+ * If it finds too many errors, we reject and tell them to run the prompt first
  */
-function shouldRequestPromptFix(text) {
+async function runQAPreCheck(text, submissionId) {
+    try {
+        // Check if OpenAI is configured
+        const hasOpenAIKey = process.env.OPENAI_API_KEY &&
+            process.env.OPENAI_API_KEY !== 'your-openai-api-key-here' &&
+            process.env.OPENAI_API_KEY.trim() !== '';
+        if (!hasOpenAIKey) {
+            console.log(`⚠️  No OpenAI API key - skipping QA pre-check for submission ${submissionId}`);
+            // In demo/test mode without OpenAI, we'll do a basic check
+            return runBasicPreCheck(text);
+        }
+        // Load the QA prompt (same one chefs should use)
+        const qaPromptPath = path.join(__dirname, '..', '..', '..', 'sop-processor', 'qa_prompt.txt');
+        const qaPrompt = await fs_1.promises.readFile(qaPromptPath, 'utf-8');
+        console.log(`Running QA pre-check for submission ${submissionId}...`);
+        // Call OpenAI with the QA prompt
+        const response = await axios_1.default.post('http://localhost:3002/run-qa-check', {
+            text,
+            prompt: qaPrompt
+        });
+        const feedback = response.data.feedback || '';
+        // Count how many issues were found
+        // The QA prompt outputs issues with "Description of Issue:" prefix
+        const errorCount = (feedback.match(/Description of Issue:/g) || []).length;
+        console.log(`QA pre-check found ${errorCount} issues`);
+        // Threshold: If more than 10 errors, reject and tell them to run the prompt
+        // This means their menu is too messy and they didn't pre-clean it
+        const ERROR_THRESHOLD = 10;
+        const passed = errorCount <= ERROR_THRESHOLD;
+        if (!passed) {
+            console.log(`❌ Submission ${submissionId} failed QA pre-check (${errorCount} errors > ${ERROR_THRESHOLD} threshold)`);
+        }
+        else {
+            console.log(`✅ Submission ${submissionId} passed QA pre-check (${errorCount} errors <= ${ERROR_THRESHOLD} threshold)`);
+        }
+        return {
+            passed,
+            errorCount,
+            feedback
+        };
+    }
+    catch (error) {
+        console.error('Error running QA pre-check:', error.message);
+        // If QA check fails, fall back to basic check
+        return runBasicPreCheck(text);
+    }
+}
+/**
+ * Fallback basic check when OpenAI is not available
+ * Checks for obvious placeholder content or too-short submissions
+ */
+function runBasicPreCheck(text) {
     const lower = text.toLowerCase();
+    const issues = [];
+    // Check for placeholder phrases
     const placeholderPhrases = [
         'lorem ipsum',
         'tbd',
@@ -161,10 +224,37 @@ function shouldRequestPromptFix(text) {
         'insert here',
         'placeholder',
         'sample text',
-        'draft only'
+        'draft only',
+        'xxx',
+        '[fill in]',
+        'coming soon'
     ];
-    const hasPlaceholder = placeholderPhrases.some(p => lower.includes(p));
-    // Require some reasonable amount of menu text after boundary
-    const wordCount = lower.split(/\s+/).filter(Boolean).length;
-    return hasPlaceholder || wordCount < 60; // too short → likely not ready
+    for (const phrase of placeholderPhrases) {
+        if (lower.includes(phrase)) {
+            issues.push(`Found placeholder text: "${phrase}"`);
+        }
+    }
+    // Check word count
+    const wordCount = text.split(/\s+/).filter(Boolean).length;
+    if (wordCount < 100) {
+        issues.push('Menu content is too short (less than 100 words)');
+    }
+    // Check for menu content after boundary
+    const boundaryMarker = 'Please drop the menu content below on page 2';
+    if (text.includes(boundaryMarker)) {
+        const boundaryIndex = text.indexOf(boundaryMarker);
+        const contentAfter = text.substring(boundaryIndex + boundaryMarker.length).trim();
+        if (contentAfter.length < 50) {
+            issues.push('No substantial menu content found after the boundary marker');
+        }
+    }
+    const passed = issues.length === 0;
+    const feedback = issues.length > 0
+        ? 'Basic validation issues:\n' + issues.map(i => `- ${i}`).join('\n')
+        : 'Basic validation passed';
+    return {
+        passed,
+        errorCount: issues.length,
+        feedback
+    };
 }

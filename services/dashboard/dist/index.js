@@ -129,22 +129,85 @@ app.get('/download/original/:submissionId', async (req, res) => {
     }
 });
 /**
- * Download AI Draft
+ * Helper function to generate redlined version
+ */
+async function generateRedlinedVersion(submissionId, submission) {
+    try {
+        // Determine the input file path
+        let inputPath = submission.ai_draft_path || submission.original_path;
+        if (inputPath.startsWith('../')) {
+            inputPath = path.resolve(__dirname, inputPath);
+        }
+        if (!inputPath.endsWith('.docx')) {
+            console.log('Redlining only works with .docx files');
+            return null;
+        }
+        // Define output path for redlined version
+        const redlinedPath = path.join(__dirname, '..', '..', '..', 'tmp', 'redlined', `${submissionId}-redlined.docx`);
+        await fs_1.promises.mkdir(path.dirname(redlinedPath), { recursive: true });
+        // Call the Python redliner
+        const pythonScript = path.resolve(__dirname, '..', '..', 'docx-redliner', 'process_menu.py');
+        const venvPython = path.resolve(__dirname, '..', '..', 'docx-redliner', 'venv', 'bin', 'python');
+        let command = `"${venvPython}" "${pythonScript}" "${inputPath}" "${redlinedPath}"`;
+        const venvCheck = await execAsync(`[ -x "${venvPython}" ] && echo OK || echo NO`).catch(() => ({ stdout: 'NO' }));
+        if (venvCheck.stdout.trim() === 'NO') {
+            command = `python3 "${pythonScript}" "${inputPath}" "${redlinedPath}"`;
+        }
+        console.log(`Generating redlined version: ${command}`);
+        await execAsync(command, { timeout: 120000 });
+        // Update DB with redlined path
+        await axios_1.default.put(`http://localhost:3004/submissions/${submissionId}`, {
+            redlined_path: redlinedPath,
+            redlined_at: new Date().toISOString()
+        });
+        return redlinedPath;
+    }
+    catch (error) {
+        console.error('Error generating redlined version:', error.message);
+        return null;
+    }
+}
+/**
+ * Download AI Draft (Redlined Version)
+ * The redlined version is automatically generated during AI review.
+ * If for some reason it doesn't exist, generate it on-the-fly.
  */
 app.get('/download/draft/:submissionId', async (req, res) => {
     try {
         const { submissionId } = req.params;
         const dbResponse = await axios_1.default.get(`http://localhost:3004/submissions/${submissionId}`);
         const submission = dbResponse.data;
-        if (!submission || !submission.ai_draft_path) {
-            return res.status(404).send('Draft not found');
+        if (!submission) {
+            return res.status(404).send('Submission not found');
         }
-        // Get the proper filename with extension from the draft path
-        const draftExt = path.extname(submission.ai_draft_path);
-        const baseFilename = path.basename(submission.filename, path.extname(submission.filename));
-        const draftFilename = `DRAFT_${baseFilename}${draftExt}`;
-        console.log(`Downloading draft from: ${submission.ai_draft_path}`);
-        res.download(submission.ai_draft_path, draftFilename);
+        // Try to serve redlined version first (should always exist)
+        if (submission.redlined_path) {
+            try {
+                await fs_1.promises.stat(submission.redlined_path);
+                const baseFilename = path.basename(submission.filename, path.extname(submission.filename));
+                const finalFilename = `REDLINED_${baseFilename}.docx`;
+                console.log(`Downloading redlined version: ${submission.redlined_path}`);
+                return res.download(submission.redlined_path, finalFilename);
+            }
+            catch (err) {
+                console.warn(`Redlined file not found at ${submission.redlined_path}, will try to generate`);
+            }
+        }
+        // Fallback: Generate redlined version if it doesn't exist
+        console.log(`Generating redlined version on-demand for ${submissionId}...`);
+        const redlinedPath = await generateRedlinedVersion(submissionId, submission);
+        if (redlinedPath) {
+            const baseFilename = path.basename(submission.filename, path.extname(submission.filename));
+            const finalFilename = `REDLINED_${baseFilename}.docx`;
+            return res.download(redlinedPath, finalFilename);
+        }
+        // Last resort: serve the draft (which is just a copy of original)
+        if (submission.ai_draft_path) {
+            console.warn(`Serving unredlined draft as fallback`);
+            const baseFilename = path.basename(submission.filename, path.extname(submission.filename));
+            return res.download(submission.ai_draft_path, `DRAFT_${baseFilename}.docx`);
+        }
+        res.status(404).send('No draft available');
     }
     catch (error) {
         console.error('Error downloading draft:', error);
@@ -358,7 +421,179 @@ app.get('/download/redlined/:submissionId', async (req, res) => {
         res.status(500).send('Error downloading redlined file');
     }
 });
+/**
+ * Training Dashboard - Manage training data and sessions
+ */
+app.get('/training', async (req, res) => {
+    try {
+        // Read training sessions from tmp/training directory
+        const trainingDir = path.join(__dirname, '..', '..', '..', 'tmp', 'training');
+        await fs_1.promises.mkdir(trainingDir, { recursive: true });
+        const files = await fs_1.promises.readdir(trainingDir);
+        const sessionFiles = files.filter(f => f.startsWith('session_') && f.endsWith('.json'));
+        const sessions = await Promise.all(sessionFiles.map(async (file) => {
+            const content = await fs_1.promises.readFile(path.join(trainingDir, file), 'utf-8');
+            return JSON.parse(content);
+        }));
+        // Sort by session ID (timestamp) descending
+        sessions.sort((a, b) => b.session_id.localeCompare(a.session_id));
+        res.render('training', {
+            title: 'Training Dashboard',
+            sessions: sessions
+        });
+    }
+    catch (error) {
+        console.error('Error loading training dashboard:', error);
+        res.status(500).render('error', {
+            message: 'Failed to load training dashboard'
+        });
+    }
+});
+/**
+ * Upload Training Pair - Add new document pair for training
+ */
+app.post('/training/upload-pair', upload.fields([
+    { name: 'original', maxCount: 1 },
+    { name: 'redlined', maxCount: 1 }
+]), async (req, res) => {
+    try {
+        const files = req.files;
+        if (!files.original || !files.redlined) {
+            return res.status(400).json({
+                error: 'Both original and redlined documents are required'
+            });
+        }
+        const originalFile = files.original[0];
+        const redlinedFile = files.redlined[0];
+        // Create pairs directory if it doesn't exist
+        const pairsDir = path.join(__dirname, '..', '..', '..', 'tmp', 'training', 'pairs');
+        await fs_1.promises.mkdir(pairsDir, { recursive: true });
+        // Generate pair name
+        const timestamp = Date.now();
+        const pairName = req.body.pairName || `pair_${timestamp}`;
+        // Move files to pairs directory with standard naming
+        const originalDest = path.join(pairsDir, `${pairName}_original.docx`);
+        const redlinedDest = path.join(pairsDir, `${pairName}_redlined.docx`);
+        await fs_1.promises.rename(originalFile.path, originalDest);
+        await fs_1.promises.rename(redlinedFile.path, redlinedDest);
+        console.log(`Training pair added: ${pairName}`);
+        res.json({
+            success: true,
+            message: 'Training pair uploaded successfully',
+            pairName: pairName
+        });
+    }
+    catch (error) {
+        console.error('Error uploading training pair:', error);
+        res.status(500).json({ error: 'Failed to upload training pair' });
+    }
+});
+/**
+ * Run Training - Execute training pipeline on accumulated pairs
+ */
+app.post('/training/run', async (req, res) => {
+    try {
+        const minOccurrences = req.body.minOccurrences || 2;
+        console.log(`Starting training pipeline with minOccurrences=${minOccurrences}`);
+        // Path to training script
+        const pairsDir = path.join(__dirname, '..', '..', '..', 'tmp', 'training', 'pairs');
+        const pythonScript = path.resolve(__dirname, '..', '..', 'docx-redliner', 'training_pipeline.py');
+        const venvPython = path.resolve(__dirname, '..', '..', 'docx-redliner', 'venv', 'bin', 'python');
+        const sopRulesPath = path.resolve(__dirname, '..', '..', '..', 'sop-processor', 'sop_rules.json');
+        // Check if pairs directory exists and has files
+        try {
+            const files = await fs_1.promises.readdir(pairsDir);
+            const pairCount = files.filter(f => f.endsWith('_original.docx')).length;
+            if (pairCount === 0) {
+                return res.status(400).json({
+                    error: 'No training pairs found. Upload some pairs first.'
+                });
+            }
+        }
+        catch (err) {
+            return res.status(400).json({
+                error: 'No training pairs directory found. Upload some pairs first.'
+            });
+        }
+        // Build command
+        let command = `"${venvPython}" "${pythonScript}" --directory "${pairsDir}" --min-occurrences ${minOccurrences} --merge-rules "${sopRulesPath}" --optimize-prompt`;
+        // Check if venv python exists
+        const venvCheck = await execAsync(`[ -x "${venvPython}" ] && echo OK || echo NO`).catch(() => ({ stdout: 'NO' }));
+        if (venvCheck.stdout.trim() === 'NO') {
+            command = `python3 "${pythonScript}" --directory "${pairsDir}" --min-occurrences ${minOccurrences} --merge-rules "${sopRulesPath}" --optimize-prompt`;
+        }
+        console.log(`Executing: ${command}`);
+        // Execute training pipeline
+        const { stdout, stderr } = await execAsync(command, {
+            env: { ...process.env },
+            timeout: 300000 // 5 minute timeout
+        });
+        console.log('Training output:', stdout);
+        if (stderr)
+            console.error('Training stderr:', stderr);
+        res.json({
+            success: true,
+            message: 'Training completed successfully',
+            output: stdout
+        });
+    }
+    catch (error) {
+        console.error('Error running training:', error);
+        res.status(500).json({
+            error: 'Failed to run training',
+            details: error.message
+        });
+    }
+});
+/**
+ * Get Training Session Details
+ */
+app.get('/training/session/:sessionId', async (req, res) => {
+    try {
+        const { sessionId } = req.params;
+        const trainingDir = path.join(__dirname, '..', '..', '..', 'tmp', 'training');
+        const sessionFile = path.join(trainingDir, `session_${sessionId}.json`);
+        const content = await fs_1.promises.readFile(sessionFile, 'utf-8');
+        const session = JSON.parse(content);
+        res.json(session);
+    }
+    catch (error) {
+        console.error('Error loading session:', error);
+        res.status(404).json({ error: 'Session not found' });
+    }
+});
+/**
+ * Download Training Rules
+ */
+app.get('/training/download-rules/:sessionId', async (req, res) => {
+    try {
+        const { sessionId } = req.params;
+        const trainingDir = path.join(__dirname, '..', '..', '..', 'tmp', 'training');
+        const rulesFile = path.join(trainingDir, `learned_rules_${sessionId}.json`);
+        res.download(rulesFile, `learned_rules_${sessionId}.json`);
+    }
+    catch (error) {
+        console.error('Error downloading rules:', error);
+        res.status(404).send('Rules file not found');
+    }
+});
+/**
+ * Download Optimized Prompt
+ */
+app.get('/training/download-prompt/:sessionId', async (req, res) => {
+    try {
+        const { sessionId } = req.params;
+        const trainingDir = path.join(__dirname, '..', '..', '..', 'tmp', 'training');
+        const promptFile = path.join(trainingDir, `optimized_prompt_${sessionId}.txt`);
+        res.download(promptFile, `optimized_prompt_${sessionId}.txt`);
+    }
+    catch (error) {
+        console.error('Error downloading prompt:', error);
+        res.status(404).send('Prompt file not found');
+    }
+});
 app.listen(port, () => {
     console.log(`📊 Dashboard service listening at http://localhost:${port}`);
     console.log(`   Access dashboard: http://localhost:${port}`);
+    console.log(`   Training dashboard: http://localhost:${port}/training`);
 });

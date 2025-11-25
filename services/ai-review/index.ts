@@ -151,25 +151,15 @@ Configure OPENAI_API_KEY in .env for real AI reviews.
             return res.status(200).send({ status: 'rejected_tier1', message: 'Submission failed Tier 1 review.' });
         }
 
-        // --- Tier 2: Passed Tier 1, proceed to red-lining ---
-        console.log(`Submission ${submission_id} passed Tier 1. Generating red-lined draft.`);
+        // --- Tier 2: Passed Tier 1, generate redlined version for human review ---
+        console.log(`Submission ${submission_id} passed Tier 1. Generating redlined version for review.`);
         
-        if (hasOpenAIKey) {
-            const redlinePrompt = await createRedlinePrompt();
-            const redlineResponse = await openai.createChatCompletion({
-                model: 'gpt-4o',
-                messages: [
-                    { role: 'system', content: redlinePrompt },
-                    { role: 'user', content: `Here is the menu text to correct:\n\n---\n\n${text}` }
-                ],
-            });
-            redlinedContent = redlineResponse.data.choices[0].message?.content || "Could not generate red-lined content.";
-        }
-        // else: redlinedContent already set in mock mode above
-
-        // Save the AI draft as a proper Word document with red-lining
-        // Pass the original document path so we can modify it directly (preserving all formatting)
-        const draftPath = await saveAiDraft(submission_id, redlinedContent, text, original_path);
+        // Save the AI draft by copying the original document (preserving template)
+        const draftPath = await saveAiDraft(submission_id, '', text, original_path, hasOpenAIKey);
+        
+        // Automatically generate the redlined version using Python redliner
+        // This ensures it's ready when the reviewer opens the dashboard
+        const redlinedPath = await generateRedlinedDocument(submission_id, draftPath);
 
         // Update submission in DB with new status and draft path
         await axios.put(`http://localhost:3004/submissions/${submission_id}`, {
@@ -242,26 +232,93 @@ async function createRedlinePrompt(): Promise<string> {
     `;
 }
 
-async function saveAiDraft(submissionId: string, content: string, originalText: string = '', originalPath: string = ''): Promise<string> {
+/**
+ * Generate redlined document using Python redliner
+ * This applies AI corrections with visual track changes (red strikethrough, yellow highlight)
+ */
+async function generateRedlinedDocument(submissionId: string, draftPath: string): Promise<string | null> {
+    try {
+        const REDLINED_DIR = path.join(__dirname, '..', '..', '..', 'tmp', 'redlined');
+        if (!fsSync.existsSync(REDLINED_DIR)) {
+            await fs.mkdir(REDLINED_DIR, { recursive: true });
+        }
+        
+        const redlinedPath = path.join(REDLINED_DIR, `${submissionId}-redlined.docx`);
+        
+        // Call Python redliner script
+        const pythonScript = path.resolve(__dirname, '..', '..', 'docx-redliner', 'process_menu.py');
+        const venvPython = path.resolve(__dirname, '..', '..', 'docx-redliner', 'venv', 'bin', 'python');
+        
+        let command = `"${venvPython}" "${pythonScript}" "${draftPath}" "${redlinedPath}"`;
+        
+        // Check if venv python exists
+        try {
+            await fs.access(venvPython);
+        } catch {
+            command = `python3 "${pythonScript}" "${draftPath}" "${redlinedPath}"`;
+        }
+        
+        console.log(`🔍 Generating redlined version for ${submissionId}...`);
+        console.log(`   Command: ${command}`);
+        
+        const { exec } = require('child_process');
+        const { promisify } = require('util');
+        const execAsync = promisify(exec);
+        
+        const { stdout, stderr } = await execAsync(command, { timeout: 120000 });
+        
+        if (stdout) console.log(`   Redliner output: ${stdout.substring(0, 200)}`);
+        if (stderr) console.warn(`   Redliner warnings: ${stderr.substring(0, 200)}`);
+        
+        // Update database with redlined path
+        await axios.put(`http://localhost:3004/submissions/${submissionId}`, {
+            redlined_path: redlinedPath,
+            redlined_at: new Date().toISOString()
+        });
+        
+        console.log(`✅ Redlined version ready: ${redlinedPath}`);
+        return redlinedPath;
+        
+    } catch (error: any) {
+        console.error(`❌ Error generating redlined version: ${error.message}`);
+        // Don't fail the whole process if redlining fails
+        return null;
+    }
+}
+
+async function saveAiDraft(submissionId: string, content: string, originalText: string = '', originalPath: string = '', hasOpenAIKey: boolean = false): Promise<string> {
     const DRAFTS_DIR = path.join(__dirname, '..', '..', '..', 'tmp', 'ai-drafts');
     if (!fsSync.existsSync(DRAFTS_DIR)) {
         await fs.mkdir(DRAFTS_DIR, { recursive: true });
     }
     
-    // Save as proper Word document with red-lining and yellow highlights
+    // Save as proper Word document - PRESERVE THE TEMPLATE
     const filePath = path.join(DRAFTS_DIR, `${submissionId}-draft.docx`);
     
     try {
-        // Parse AI corrections to get clean corrected text
-        const correctedText = parseAICorrectedText(content);
-        
-        // Build a clean Word document from scratch with track changes
-        console.log(`📝 Building red-lined Word document from scratch...`);
-        await buildRedlinedDocx(originalText, correctedText, filePath);
-        console.log(`✓ AI draft Word document saved to ${filePath}`);
+        if (originalPath && fsSync.existsSync(originalPath)) {
+            // IMPORTANT: Copy the original document to preserve the template
+            // The template form (page 1) must remain completely untouched
+            console.log(`📝 Copying original document to preserve template...`);
+            await fs.copyFile(originalPath, filePath);
+            console.log(`✓ Draft created (original document copied, template preserved): ${filePath}`);
+            
+            // Note: AI corrections are applied later when the reviewer clicks
+            // "Generate Redlined Version" in the dashboard. The Python redliner will:
+            // 1. Load this document (with template intact)
+            // 2. Find the boundary marker
+            // 3. Send ONLY menu content (after marker) to AI
+            // 4. Apply redlines ONLY to menu content section
+            // This ensures the template is NEVER modified.
+        } else {
+            console.warn('⚠️  Original path not found, creating text file instead');
+            const textPath = path.join(DRAFTS_DIR, `${submissionId}-draft.txt`);
+            await fs.writeFile(textPath, content);
+            return textPath;
+        }
     } catch (error) {
-        console.error('Error generating Word document, falling back to text:', error);
-        // Fallback to text file if Word generation fails
+        console.error('Error creating AI draft:', error);
+        // Fallback to text file
         const textPath = path.join(DRAFTS_DIR, `${submissionId}-draft.txt`);
         await fs.writeFile(textPath, content);
         console.log(`⚠️  Saved as text file instead: ${textPath}`);

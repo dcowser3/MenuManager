@@ -74,7 +74,7 @@ export async function processNotification(notification: any, client: Client) {
                     console.log(`💾 Attachment saved to ${filePath}`);
 
                     // POST the file to the parser service
-                    await sendToParser(filePath, attachment.name, submitterEmail, message.id);
+                    await sendToParser(filePath, attachment.name, submitterEmail, message.id, client);
                     
                     // Mark this message as processed after successful submission
                     markAsProcessed(message.id);
@@ -87,7 +87,7 @@ export async function processNotification(notification: any, client: Client) {
     }
 }
 
-async function sendToParser(filePath: string, originalFilename: string, submitterEmail: string, messageId: string) {
+async function sendToParser(filePath: string, originalFilename: string, submitterEmail: string, messageId: string, client: Client) {
     try {
         const formData = new FormData();
         formData.append('file', fs.createReadStream(filePath));
@@ -101,6 +101,13 @@ async function sendToParser(filePath: string, originalFilename: string, submitte
         console.log(`📤 File ${originalFilename} sent to parser successfully:`, response.data);
     } catch (error: any) {
         console.error(`❌ Error sending file to parser:`, error.response?.data || error.message);
+        
+        // Send reply email explaining the rejection
+        const errorData = error.response?.data;
+        if (errorData && client) {
+            await sendRejectionEmail(client, messageId, submitterEmail, originalFilename, errorData);
+        }
+        
         throw error; // Re-throw to prevent marking as processed if it failed
     } finally {
         // Clean up the temporary file after sending
@@ -128,4 +135,205 @@ function meetsCriteria(message: any): boolean {
     const hasAttachments = message.hasAttachments;
 
     return subjectMatch && senderMatch && hasAttachments;
+}
+
+/**
+ * Send a reply email to the chef explaining why their submission was rejected
+ */
+async function sendRejectionEmail(client: Client, messageId: string, toEmail: string, filename: string, errorData: any) {
+    try {
+        console.log(`📧 Sending rejection email to ${toEmail} for ${filename}...`);
+        
+        let subject = '';
+        let htmlBody = '';
+        
+        // Determine rejection type and generate appropriate email
+        if (errorData.errors && Array.isArray(errorData.errors)) {
+            // Template validation failure
+            subject = `❌ Menu Submission Rejected - Wrong Template`;
+            htmlBody = buildTemplateFailureEmail(filename, errorData.errors);
+        } else if (errorData.status === 'needs_prompt_fix' && errorData.error_count) {
+            // Pre-check failure
+            subject = `⚠️ Menu Submission Needs Corrections - Please Use QA Prompt`;
+            htmlBody = buildPrecheckFailureEmail(filename, errorData);
+        } else if (errorData.status === 'needs_prompt_fix' && errorData.reasons) {
+            // Format failure
+            subject = `⚠️ Menu Submission - Formatting Issues`;
+            htmlBody = buildFormatFailureEmail(filename, errorData);
+        } else {
+            // Generic error
+            subject = `❌ Menu Submission Error`;
+            htmlBody = buildGenericErrorEmail(filename, errorData.message || 'Unknown error');
+        }
+
+        // Create and send reply using Microsoft Graph API
+        const mailboxAddress = process.env.GRAPH_MAILBOX_ADDRESS;
+        
+        const replyMessage = {
+            subject: subject,
+            body: {
+                contentType: 'HTML',
+                content: htmlBody
+            },
+            toRecipients: [
+                {
+                    emailAddress: {
+                        address: toEmail
+                    }
+                }
+            ]
+        };
+
+        // Send as a new message (reply functionality requires different approach)
+        await client.api(`/users/${mailboxAddress}/sendMail`).post({
+            message: replyMessage,
+            saveToSentItems: true
+        });
+
+        console.log(`✅ Rejection email sent to ${toEmail}`);
+    } catch (error: any) {
+        console.error(`❌ Error sending reply email:`, error.message);
+        // Don't throw - rejection email is nice-to-have, shouldn't break workflow
+    }
+}
+
+function buildTemplateFailureEmail(filename: string, errors: string[]): string {
+    const errorList = errors.map(err => `<div style="color: #c53030; margin: 10px 0;">• ${err}</div>`).join('');
+    return `
+<!DOCTYPE html>
+<html>
+<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; margin: 0; padding: 20px;">
+    <div style="max-width: 600px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden;">
+        <div style="background: #e53e3e; color: white; padding: 30px; text-align: center;">
+            <h1 style="margin: 0; font-size: 24px;">❌ Template Validation Failed</h1>
+        </div>
+        <div style="background: #fff5f5; padding: 30px;">
+            <p>Hello,</p>
+            <p>Your menu submission <strong>"${filename}"</strong> could not be processed because it does not match the required RSH Design Brief template.</p>
+            
+            <div style="background: white; padding: 20px; border-radius: 6px; margin: 20px 0; border-left: 4px solid #e53e3e;">
+                <h3 style="margin-top: 0; color: #c53030;">Issues Found:</h3>
+                ${errorList}
+            </div>
+            
+            <div style="background: #edf2f7; padding: 20px; border-radius: 6px; margin: 20px 0;">
+                <h3 style="margin-top: 0;">📋 What You Need To Do:</h3>
+                <ol>
+                    <li><strong>Download the official template:</strong>
+                        <ul>
+                            <li>Food Menu: RSH_DESIGN BRIEF_FOOD_Menu_Template.docx</li>
+                            <li>Beverage Menu: RSH Design Brief Beverage Template.docx</li>
+                        </ul>
+                    </li>
+                    <li><strong>Fill out ALL required fields</strong> in the template form (page 1)</li>
+                    <li><strong>Add your menu content</strong> after "Please drop the menu content below on page 2"</li>
+                    <li><strong>Resubmit</strong> your completed menu</li>
+                </ol>
+            </div>
+            
+            <p><strong>Important:</strong> Do not create your own template. Use the official template exactly as provided.</p>
+            <p>Thank you,<br>RSH Menu Review System</p>
+        </div>
+    </div>
+</body>
+</html>`;
+}
+
+function buildPrecheckFailureEmail(filename: string, errorData: any): string {
+    const feedback = (errorData.feedback_preview || errorData.feedback || '').substring(0, 1500);
+    return `
+<!DOCTYPE html>
+<html>
+<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; margin: 0; padding: 20px;">
+    <div style="max-width: 600px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden;">
+        <div style="background: #ed8936; color: white; padding: 30px; text-align: center;">
+            <h1 style="margin: 0; font-size: 24px;">⚠️ Pre-Check Failed</h1>
+        </div>
+        <div style="background: #fffaf0; padding: 30px;">
+            <p>Hello,</p>
+            <p>Your menu submission <strong>"${filename}"</strong> has <strong>${errorData.error_count} issues</strong> that need to be corrected.</p>
+            
+            <div style="background: white; padding: 20px; border-radius: 6px; margin: 20px 0; border-left: 4px solid #ed8936;">
+                <h3 style="margin-top: 0; color: #c05621;">Why was my submission rejected?</h3>
+                <p>Our pre-check found too many errors (${errorData.error_count} issues). This indicates the menu wasn't cleaned using the required SOP QA prompt before submission.</p>
+                <p><strong>All menus must be run through the QA prompt BEFORE submission.</strong></p>
+            </div>
+            
+            <div style="background: #f7fafc; padding: 15px; border-radius: 6px; margin: 15px 0; font-family: monospace; font-size: 13px; max-height: 300px; overflow-y: auto; white-space: pre-wrap;">${feedback}</div>
+            
+            <div style="background: #e6fffa; padding: 20px; border-radius: 6px; margin: 20px 0; border-left: 4px solid #38b2ac;">
+                <h3 style="margin-top: 0;">✅ Next Steps:</h3>
+                <ol>
+                    <li><strong>Open ChatGPT</strong> (or your AI assistant)</li>
+                    <li><strong>Copy the RSH Menu QA Prompt</strong> from guidelines</li>
+                    <li><strong>Paste your menu content</strong> and let AI check it</li>
+                    <li><strong>Fix all issues</strong> identified</li>
+                    <li><strong>Run the prompt again</strong> to confirm fixes</li>
+                    <li><strong>Resubmit your cleaned menu</strong></li>
+                </ol>
+            </div>
+            
+            <p>Thank you,<br>RSH Menu Review System</p>
+        </div>
+    </div>
+</body>
+</html>`;
+}
+
+function buildFormatFailureEmail(filename: string, errorData: any): string {
+    const reasons = errorData.reasons || [];
+    const reasonList = reasons.map((r: string) => `<div style="margin: 10px 0; padding: 10px; background: #f7fafc; border-radius: 4px;">${r}</div>`).join('');
+    return `
+<!DOCTYPE html>
+<html>
+<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; margin: 0; padding: 20px;">
+    <div style="max-width: 600px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden;">
+        <div style="background: #ed8936; color: white; padding: 30px; text-align: center;">
+            <h1 style="margin: 0; font-size: 24px;">⚠️ Formatting Issues</h1>
+        </div>
+        <div style="background: #fffaf0; padding: 30px;">
+            <p>Hello,</p>
+            <p>Your menu submission <strong>"${filename}"</strong> does not meet required formatting standards.</p>
+            
+            <div style="background: white; padding: 20px; border-radius: 6px; margin: 20px 0; border-left: 4px solid #ed8936;">
+                <h3 style="margin-top: 0; color: #c05621;">Formatting Issues Found:</h3>
+                ${reasonList}
+            </div>
+            
+            <div style="background: #e6fffa; padding: 20px; border-radius: 6px; margin: 20px 0; border-left: 4px solid #38b2ac;">
+                <h3 style="margin-top: 0;">📐 Required Format (Page 2 Content):</h3>
+                <ul>
+                    <li><strong>Font:</strong> Calibri</li>
+                    <li><strong>Font Size:</strong> 12pt</li>
+                    <li><strong>Alignment:</strong> Center aligned</li>
+                </ul>
+            </div>
+            
+            <p><strong>To Fix:</strong> Select all content on page 2, set to Calibri/12pt/centered, then resubmit.</p>
+            <p>Thank you,<br>RSH Menu Review System</p>
+        </div>
+    </div>
+</body>
+</html>`;
+}
+
+function buildGenericErrorEmail(filename: string, errorMessage: string): string {
+    return `
+<!DOCTYPE html>
+<html>
+<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; margin: 0; padding: 20px;">
+    <div style="max-width: 600px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden;">
+        <div style="background: #e53e3e; color: white; padding: 30px; text-align: center;">
+            <h1 style="margin: 0; font-size: 24px;">❌ Submission Error</h1>
+        </div>
+        <div style="background: #fff5f5; padding: 30px;">
+            <p>Hello,</p>
+            <p>Your menu submission <strong>"${filename}"</strong> could not be processed.</p>
+            <p><strong>Error:</strong> ${errorMessage}</p>
+            <p>Please review and resubmit. Contact the design team if issues persist.</p>
+            <p>Thank you,<br>RSH Menu Review System</p>
+        </div>
+    </div>
+</body>
+</html>`;
 }
