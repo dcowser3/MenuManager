@@ -10,7 +10,10 @@ import { promisify } from 'util';
 const app = express();
 const port = 3001;
 
-const upload = multer({ dest: '../../../tmp/uploads/' });
+// Use absolute path for uploads to avoid path resolution issues
+// __dirname in compiled code is services/parser/dist, so we need ../../../tmp/uploads to get to workspace root
+const uploadsDir = path.resolve(__dirname, '../../../tmp/uploads');
+const upload = multer({ dest: uploadsDir });
 const execAsync = promisify(exec);
 
 app.post('/parser', upload.single('file') as any, async (req, res) => {

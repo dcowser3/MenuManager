@@ -308,6 +308,16 @@
         let selectedFile = null;
         const submissionId = '<%= submission.id %>';
         
+        // Check if redlined version already exists on page load
+        window.addEventListener('DOMContentLoaded', function() {
+            <% if (submission.redlined_path) { %>
+                // Redlined version already exists, show download button
+                document.getElementById('redlineBtn').style.display = 'none';
+                document.getElementById('redlineDownload').style.display = 'block';
+                document.getElementById('redlineDownloadLink').href = '/download/redlined/<%= submission.id %>';
+            <% } %>
+        });
+        
         function showAlert(message, type) {
             const alert = document.getElementById('alert');
             alert.className = 'alert alert-' + type;

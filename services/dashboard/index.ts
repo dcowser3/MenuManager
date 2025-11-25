@@ -104,7 +104,60 @@ app.get('/download/original/:submissionId', async (req, res) => {
 });
 
 /**
- * Download AI Draft
+ * Helper function to generate redlined version
+ */
+async function generateRedlinedVersion(submissionId: string, submission: any): Promise<string | null> {
+    try {
+        // Determine the input file path
+        let inputPath = submission.ai_draft_path || submission.original_path;
+        
+        if (inputPath.startsWith('../')) {
+            inputPath = path.resolve(__dirname, inputPath);
+        }
+
+        if (!inputPath.endsWith('.docx')) {
+            console.log('Redlining only works with .docx files');
+            return null;
+        }
+
+        // Define output path for redlined version
+        const redlinedPath = path.join(
+            __dirname, '..', '..', '..', 'tmp', 'redlined',
+            `${submissionId}-redlined.docx`
+        );
+        await fs.mkdir(path.dirname(redlinedPath), { recursive: true });
+
+        // Call the Python redliner
+        const pythonScript = path.resolve(__dirname, '..', '..', 'docx-redliner', 'process_menu.py');
+        const venvPython = path.resolve(__dirname, '..', '..', 'docx-redliner', 'venv', 'bin', 'python');
+        
+        let command = `"${venvPython}" "${pythonScript}" "${inputPath}" "${redlinedPath}"`;
+        
+        const venvCheck = await execAsync(`[ -x "${venvPython}" ] && echo OK || echo NO`).catch(() => ({ stdout: 'NO' }));
+        if (venvCheck.stdout.trim() === 'NO') {
+            command = `python3 "${pythonScript}" "${inputPath}" "${redlinedPath}"`;
+        }
+        
+        console.log(`Generating redlined version: ${command}`);
+        await execAsync(command, { timeout: 120000 });
+
+        // Update DB with redlined path
+        await axios.put(`http://localhost:3004/submissions/${submissionId}`, {
+            redlined_path: redlinedPath,
+            redlined_at: new Date().toISOString()
+        });
+
+        return redlinedPath;
+    } catch (error: any) {
+        console.error('Error generating redlined version:', error.message);
+        return null;
+    }
+}
+
+/**
+ * Download AI Draft (Redlined Version)
+ * The redlined version is automatically generated during AI review.
+ * If for some reason it doesn't exist, generate it on-the-fly.
  */
 app.get('/download/draft/:submissionId', async (req, res) => {
     try {
@@ -112,17 +165,41 @@ app.get('/download/draft/:submissionId', async (req, res) => {
         const dbResponse = await axios.get(`http://localhost:3004/submissions/${submissionId}`);
         const submission = dbResponse.data;
 
-        if (!submission || !submission.ai_draft_path) {
-            return res.status(404).send('Draft not found');
+        if (!submission) {
+            return res.status(404).send('Submission not found');
         }
 
-        // Get the proper filename with extension from the draft path
-        const draftExt = path.extname(submission.ai_draft_path);
-        const baseFilename = path.basename(submission.filename, path.extname(submission.filename));
-        const draftFilename = `DRAFT_${baseFilename}${draftExt}`;
-
-        console.log(`Downloading draft from: ${submission.ai_draft_path}`);
-        res.download(submission.ai_draft_path, draftFilename);
+        // Try to serve redlined version first (should always exist)
+        if (submission.redlined_path) {
+            try {
+                await fs.stat(submission.redlined_path);
+                const baseFilename = path.basename(submission.filename, path.extname(submission.filename));
+                const finalFilename = `REDLINED_${baseFilename}.docx`;
+                console.log(`Downloading redlined version: ${submission.redlined_path}`);
+                return res.download(submission.redlined_path, finalFilename);
+            } catch (err) {
+                console.warn(`Redlined file not found at ${submission.redlined_path}, will try to generate`);
+            }
+        }
+        
+        // Fallback: Generate redlined version if it doesn't exist
+        console.log(`Generating redlined version on-demand for ${submissionId}...`);
+        const redlinedPath = await generateRedlinedVersion(submissionId, submission);
+        
+        if (redlinedPath) {
+            const baseFilename = path.basename(submission.filename, path.extname(submission.filename));
+            const finalFilename = `REDLINED_${baseFilename}.docx`;
+            return res.download(redlinedPath, finalFilename);
+        }
+        
+        // Last resort: serve the draft (which is just a copy of original)
+        if (submission.ai_draft_path) {
+            console.warn(`Serving unredlined draft as fallback`);
+            const baseFilename = path.basename(submission.filename, path.extname(submission.filename));
+            return res.download(submission.ai_draft_path, `DRAFT_${baseFilename}.docx`);
+        }
+        
+        res.status(404).send('No draft available');
     } catch (error) {
         console.error('Error downloading draft:', error);
         res.status(500).send('Error downloading draft');

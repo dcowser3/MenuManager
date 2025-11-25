@@ -53,13 +53,11 @@ export async function validateTemplate(filePath: string): Promise<ValidationResu
 
             // 2. Form fields that MUST be present
             const requiredFormFields = [
-                { text: 'RESTAURANT NAME', name: 'Restaurant Name Field' },
-                { text: 'LOCATION', name: 'Location Field' },
-                { text: 'MENU NAME', name: 'Menu Name Field' },
-                { text: 'MENU TYPE', name: 'Menu Type Field' },
-                { text: 'EFFECTIVE DATE', name: 'Effective Date Field' },
-                { text: 'SUBMITTED BY', name: 'Submitted By Field' },
-                { text: 'SUBMISSION DATE', name: 'Submission Date Field' }
+                { text: 'PROJECT NAME', name: 'Project Name Field' },
+                { text: 'PROPERTY', name: 'Property Field' },
+                { text: 'SIZE', name: 'Size Field' },
+                { text: 'ORIENTATION', name: 'Orientation Field' },
+                { text: 'DATE NEEDED', name: 'Date Needed Field' }
             ];
 
             // 3. SOP section (the instructions)

@@ -1,0 +1,161 @@
+=================================================================
+DEMO SAMPLE FILES - CONTENT TO COPY INTO WORD
+=================================================================
+
+This file contains the exact content for each demo sample.
+Follow the instructions to create each .docx file.
+
+=================================================================
+SAMPLE 2: Wrong Template (demo-wrong-template.docx)
+=================================================================
+
+INSTRUCTIONS:
+1. Open Microsoft Word
+2. Create a BLANK document (don't use any template)
+3. Copy the content below
+4. Save as: demo-wrong-template.docx
+
+CONTENT TO PASTE:
+---
+DINNER MENU
+
+Appetizers
+Guacamole - Fresh avocado, lime, cilantro - $12
+Tacos - Corn tortillas, salsa - $15
+
+Main Courses
+Enchiladas - Cheese, red sauce - $18
+Burrito - Beans, rice, cheese - $16
+---
+
+
+=================================================================
+SAMPLE 3: Messy Menu (demo-messy-menu.docx)
+=================================================================
+
+INSTRUCTIONS:
+1. Open: samples/RSH_DESIGN BRIEF_FOOD_Menu_Template .docx
+2. Fill out page 1 form fields (any values)
+3. On page 2, AFTER the boundary marker, paste content below
+4. Keep Calibri, 12pt, centered formatting
+5. Save as: demo-messy-menu.docx
+
+CONTENT TO PASTE (with intentional errors):
+---
+DINNER MENU
+
+STARTERS
+
+Guacamol - Fresh avacado-lime-cilantro - $12
+
+Queso Fundido - Melted cheese-chorizo-jalapeno - $14
+
+Tacos al Pastor - Pork-pineapple-onion-cilantro - $16
+
+ENTREES
+
+Enchiladas Verdes - Chicken enchiladas-green salsa-crema $22
+
+Carne Asada - Grilled steak / rice-beans-tortillas | $28
+
+Chile Relleno - Poblano pepper, queso fresco, rice, beans - 24
+
+Mole Poblano - Chicken-traditional mole sauce-sesame $26
+
+DESSERTS
+
+Flan - Traditional creme brulee style - $8
+
+Churros - Cinnamon sugar, chocolate $7
+---
+
+
+=================================================================
+SAMPLE 4: Bad Format (demo-bad-format.docx)
+=================================================================
+
+INSTRUCTIONS:
+1. Open: samples/RSH_DESIGN BRIEF_FOOD_Menu_Template .docx
+2. Fill out page 1 form fields (any values)
+3. On page 2, AFTER the boundary marker, paste content below
+4. Select all content on page 2 and change to:
+   - Font: Arial (not Calibri)
+   - Alignment: Left (not Center)
+   - Size: 11pt (not 12pt)
+5. Save as: demo-bad-format.docx
+
+CONTENT TO PASTE (clean content, but wrong formatting):
+---
+DINNER MENU
+
+STARTERS
+
+Guacamole - Fresh avocado / lime / cilantro - $12
+Queso Fundido - Melted cheese / chorizo / jalapeño - $14
+Tacos al Pastor - Pork / pineapple / onion / cilantro - $16
+
+ENTRÉES
+
+Enchiladas Verdes - Chicken / green salsa / crema - $22
+Carne Asada - Grilled steak / rice / beans / tortillas - $28
+Chile Relleno - Poblano pepper / queso fresco / rice / beans - $24
+
+DESSERTS
+
+Flan - Traditional caramel custard - $8
+Churros - Cinnamon sugar / chocolate dipping sauce - $7
+---
+
+
+=================================================================
+SAMPLE 5: Minor Issues (demo-minor-issues.docx)
+=================================================================
+
+INSTRUCTIONS:
+1. Open: samples/RSH_DESIGN BRIEF_FOOD_Menu_Template .docx
+2. Fill out page 1 form fields (any values)
+3. On page 2, AFTER the boundary marker, paste content below
+4. Keep Calibri, 12pt, centered (proper formatting)
+5. Save as: demo-minor-issues.docx
+
+CONTENT TO PASTE (nearly perfect, just 2 typos):
+---
+DINNER MENU
+
+STARTERS
+
+Guacamole - Fresh avocado / lime / cilantro - $12
+Queso Fundido - Melted cheese / chorizo / jalapeño - $14
+Tacos al Pastor - Pork / pineapple / onion / cilatro - $16
+
+ENTRÉES
+
+Enchiladas Verdes - Chicken / green salsa / crema - $22
+Carne Asada - Grilled steak / rice / beans / tortillas - $28
+Chile Relleno - Poblano pepper / queso fresco / rice / beans - $24
+Mole Poblano - Chicken / traditional mole sauce / sesame seeds - $26
+
+DESSERTS
+
+Flan - Traditional caramel custard - $8
+Tres Leches Cake - Vanilla cake / three milk mixture / whipped crème - $9
+---
+
+NOTE: There are 2 intentional typos:
+- "cilatro" should be "cilantro"
+- "crème" should be "cream"
+
+
+=================================================================
+QUICK CHECKLIST
+=================================================================
+
+Create these 4 files (15 minutes total):
+[ ] demo-wrong-template.docx (blank doc)
+[ ] demo-messy-menu.docx (template + errors)
+[ ] demo-bad-format.docx (template + wrong formatting)
+[ ] demo-minor-issues.docx (template + 2 typos)
+
+Save all files in: samples/
+
+=================================================================

@@ -269,7 +269,7 @@
         },
         "note": "These mappings are heuristics to assist reviewers; do not override explicit chef-provided allergen info."
       }
-    },
+    }
     {
       "rule_id": "FMT-004",
       "category": "Formatting",
