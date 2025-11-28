@@ -43,30 +43,56 @@ class AICorrector:
 
 CRITICAL RULES:
 1. Return ONLY the corrected text - no explanations, no comments, no markdown
-2. Preserve the original structure and capitalization style
-3. Fix spelling errors (e.g., "avacado" → "avocado")
-   - Character-level edits are allowed. Return the fully corrected text; the redlining engine will render letter-level changes as needed.
-4. Ensure proper formatting:
-   - Item names should be in Title Case
-   - Descriptions use sentence case
-   - Prices follow items with proper formatting
-   - Ingredient separators must be \" / \" (space-slash-space), not hyphens
-   - Dual prices must use \" | \" (space-bar-space), not \"/\"
-   - Enforce diacritics for required culinary terms (e.g., jalapeño, tajín, crème brûlée, rosé, rhône, leña, ànima, vē‑vē)
-   - Normalize non-trivial spellings (e.g., tartare ← tartar; mozzarella ← mozarella; parmesan ← parmesian; Caesar ← Ceasar/Cesar; yuzu kosho ← yuzukosho/yuzu-kosho)
-5. Maintain the original punctuation style (dashes, commas, etc.)
-6. Do NOT add or remove major content - only fix errors
-7. If the text is already correct, return it unchanged
+
+2. PRESERVE EXISTING CAPITALIZATION - BE VERY CONSERVATIVE:
+   - DO NOT change the capitalization of dish names, section headers, or titles
+   - DO NOT lowercase words that are already capitalized (they are intentional)
+   - DO NOT change "The Spark", "El Primer Encuentro", "Chilean Sea Bass", etc.
+   - Only change capitalization if something is ALL CAPS that shouldn't be
+   - Keep descriptions after the dish name in their original case
+
+3. Fix ONLY clear spelling errors:
+   - "tartar" → "tartare" (for raw fish/meat preparations)
+   - "pre-fix" or "prefix" → "prix fixe" (French term for fixed-price menu)
+   - "avacado" → "avocado"
+   - "mozarella" → "mozzarella"
+   - "parmesian" → "parmesan"
+   - "Ceasar/Cesar" → "Caesar"
+
+4. Formatting rules:
+   - DO NOT change ingredient separators - keep commas as commas, keep hyphens as hyphens
+   - DO NOT split compound words (yuzu-lime, cacao-ancho, cucumber-cilantro, huitlacoche-stuffed)
+   - Dual prices: use " | " (space-bar-space) to separate two prices, not "/"
+   - Enforce diacritics: jalapeño, crème brûlée, purée, soufflé, flambéed, etc.
+   - Add asterisk (*) after items containing raw or undercooked ingredients (raw fish, tartare, carpaccio, caviar, oysters, raw egg)
+
+5. DO NOT CHANGE:
+   - Section headers like "The Spark – "El Primer Encuentro""
+   - Dish names like "Chilean Sea Bass en Pipián Verde", "Tuna Tartare Tostada"
+   - Title capitalization like "A Love Story", "Chocolate, Rose & Raspberry"
+   - Words like "one" in "Choose one"
+   - Compound words with hyphens (yuzu-lime, cacao-ancho, huitlacoche-stuffed)
+
+6. If the text is already correct, return it UNCHANGED
 
 EXAMPLES:
-Input: "Guacamole - Fresh avacado, lime, cilantro - $12"
-Output: "Guacamole - Fresh avocado, lime, cilantro - $12"
+Input: "Tuna Tartar Tostada, avocado mousse, hibiscus ponzu D,G"
+Output: "Tuna Tartare Tostada, avocado mousse, hibiscus ponzu * D,G"
 
-Input: "Ceasar Salad - Romaine lettuce, parmesian cheese - $14"
-Output: "Caesar Salad - Romaine lettuce, parmesan cheese - $14"
+Input: "Filete de Wagyu, australian Wagyu tenderloin, soft quail egg"
+Output: "Filete de Wagyu, australian Wagyu tenderloin, soft quail egg *"
 
-Input: "Margherita Pizza - tomato sauce, mozarella, basil"
-Output: "Margherita Pizza - Tomato sauce, mozzarella, basil"
+Input: "The Spark – "El Primer Encuentro""
+Output: "The Spark – "El Primer Encuentro""
+
+Input: "Chilean Sea Bass en Pipián Verde, seared chilean sea bass"
+Output: "Chilean Sea Bass en Pipián Verde, seared chilean sea bass"
+
+Input: "Chocolate, Rose & Raspberry, dark chocolate tart"
+Output: "Chocolate, Rose & Raspberry, dark chocolate tart"
+
+Input: "roasted plantain purée, shaved truffle D,N"
+Output: "roasted plantain purée, shaved truffle D,N"
 """
     
     def correct_text(self, text: str) -> str:
@@ -159,19 +185,18 @@ class BatchAICorrector:
 Return the corrected items in the SAME ORDER, also separated by "|||".
 
 RULES:
-- Fix spelling errors
-- Maintain original capitalization style
-- Keep the same structure
+- PRESERVE EXISTING CAPITALIZATION - do not change dish names, section headers, or titles
+- Fix only clear spelling errors: tartar→tartare, avacado→avocado, mozarella→mozzarella, parmesian→parmesan, Ceasar→Caesar, pre-fix→prix fixe
+- DO NOT change ingredient separators - keep commas and hyphens as they are
+- Dual prices: use " | " (space-bar-space), not "/"
+- Enforce diacritics: jalapeño, crème brûlée, purée, soufflé, flambéed
+- Add asterisk (*) for raw/undercooked items (tartare, carpaccio, raw fish, caviar, raw egg)
+- If an item is correct, return it UNCHANGED
 - Return ONLY the corrected items, no other text
-- If an item is correct, return it unchanged
- - Character-level edits are allowed; return the fully corrected text (the redliner will render fine-grained changes).
- - Ingredient separators must be " / " (space-slash-space), not hyphens
- - Dual prices must use " | " (space-bar-space), not "/"
- - Enforce diacritics for required culinary terms and normalize non-trivial spellings (e.g., tartare, mozzarella, parmesan, Caesar, yuzu kosho)
 
 Example:
-Input: "Guacamole - Fresh avacado|||Ceasar Salad - Romaine lettuce"
-Output: "Guacamole - Fresh avocado|||Caesar Salad - Romaine lettuce"
+Input: "Tuna Tartar Tostada, avocado mousse D,G|||The Spark – "El Primer Encuentro""
+Output: "Tuna Tartare Tostada, avocado mousse * D,G|||The Spark – "El Primer Encuentro""
 """
     
     def correct_batch(self, texts: list[str]) -> list[str]:
