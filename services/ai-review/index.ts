@@ -204,24 +204,38 @@ async function createRedlinePrompt(): Promise<string> {
         ONLY review and correct the MENU CONTENT that appears AFTER that line (page 2 onwards).
         This is the actual menu items, descriptions, and prices submitted by the chef.
         
-        When making corrections to the menu content:
-        - Mark deletions with [DELETE]text to remove[/DELETE] (note the forward slash in closing tag)
-        - Mark additions with [ADD]text to add[/ADD] (note the forward slash in closing tag)
-        - IMPORTANT: Use [/DELETE] and [/ADD] with forward slashes for closing tags, NOT [DELETE] or [ADD]
-        - You may mark partial words or single letters inside a word if needed (tags can wrap individual characters)
-        - Check for grammar, spelling, formatting consistency
-        - Ensure menu items follow the SOP guidelines below
-        - Verify pricing format is consistent
-        - Enforce ingredient separator: use " / " (space-slash-space) between ingredients; do not use hyphens as separators
-        - Dual prices: use " | " (space-bar-space) to separate two prices (e.g., glass | bottle); do not use "/"
-        - Allergen/dietary markers: keep on the item line, uppercase, comma-separated with no spaces, alphabetized (e.g., C,E,F,G,M,SY); append "*" for raw/undercooked
-        - Diacritics: ensure correct accents as per required spellings (e.g., jalapeño, tajín, crème brûlée, rosé, rhône, leña, ànima, vē‑vē)
-        - Item names must not be ALL CAPS (except approved acronyms/brands); follow template case standard
-        - Legacy interpretation: Some older submissions used red highlight to indicate removals. When interpreting legacy reviewed docs, treat red highlighted text as equivalent to a removal. For your output, ALWAYS use [DELETE]/[ADD] tags as specified above.
+        CAPITALIZATION - PRESERVE EXISTING:
+        - DO NOT change existing capitalization of dish names, section headers, or titles
+        - DO NOT lowercase or capitalize words that are already styled intentionally
+        - Only fix ALL CAPS that shouldn't be (except approved acronyms/brands)
+        
+        SPELLING CORRECTIONS (only fix clear errors):
+        - "tartar" → "tartare" (for raw preparations)
+        - "pre-fix" or "prefix" → "prix fixe"
+        - "avacado" → "avocado"
+        - "mozarella" → "mozzarella"
+        - "parmesian" → "parmesan"
+        - "Ceasar/Cesar" → "Caesar"
+        
+        FORMATTING:
+        - Mark deletions with [DELETE]text[/DELETE]
+        - Mark additions with [ADD]text[/ADD]
+        - DO NOT change ingredient separators - keep commas and hyphens as they are
+        - DO NOT split compound words (yuzu-lime, cucumber-cilantro, huitlacoche-stuffed)
+        - Dual prices: use " | " (space-bar-space), not "/"
+        - Allergen markers: uppercase, comma-separated, no spaces (e.g., D,G,N)
+        - Raw/undercooked items: append asterisk (*) for tartare, carpaccio, raw fish, caviar, raw egg
+        - Diacritics: jalapeño, crème brûlée, purée, soufflé, flambéed
         
         EXAMPLE FORMAT:
-        Original: "Guacamole - Fresh avacado, lime - $12"
-        Corrected: "Guacamole - Fresh [DELETE]avacado[/DELETE][ADD]avocado[/ADD], lime - $12"
+        Original: "Tuna Tartar Tostada, avocado mousse, hibiscus ponzu D,G"
+        Corrected: "Tuna [DELETE]Tartar[/DELETE][ADD]Tartare[/ADD] Tostada, avocado mousse, hibiscus ponzu[ADD] *[/ADD] D,G"
+        
+        DO NOT CHANGE:
+        - Section headers like "The Spark – "El Primer Encuentro""
+        - Dish names like "Chilean Sea Bass en Pipián Verde"
+        - Compound words like "cucumber-cilantro", "yuzu-lime"
+        - Existing capitalization choices
         
         Here are the RSH menu guidelines:
         ---
@@ -229,6 +243,7 @@ async function createRedlinePrompt(): Promise<string> {
         ---
         
         Remember: Leave the template (page 1) completely untouched. Only correct the menu content on page 2+.
+        Be CONSERVATIVE - only fix clear errors. Do not change stylistic choices or capitalize descriptions.
     `;
 }
 

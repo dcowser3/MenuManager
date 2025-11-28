@@ -165,12 +165,23 @@ Even with folder-based processing, we have **multiple layers of safety**:
 
 ### Tier 2: Redlining (Internal, Custom Rules Applied)
 - After Tier 1 passes, we generate a red‑lined draft using enhanced house rules from `sop-processor/sop_rules.json`.
+- **CAPITALIZATION IS CONSERVATIVE**:
+  - Do NOT capitalize lowercase adjectives in descriptions (australian, roasted, grilled, seared, shaved, stuffed, chilean, serrano, mezcal, etc.)
+  - Ingredient descriptions MUST stay lowercase per RSH style
+  - Only fix obvious errors (ALL CAPS that shouldn't be, proper nouns that should be capitalized)
+  - Do NOT change "Choose one" to "Choose One" or similar
+- **PRIX FIXE / TASTING MENU HANDLING**:
+  - Automatically detects prix fixe menus by keywords (prix fixe, tasting menu, degustation, etc.)
+  - Adds course numbers (1, 2, 3, 4...) before each course section header
+  - Course headers are identified by patterns like "The Spark – 'El Primer Encuentro'"
 - Enforced items include:
-  - Ingredient separators: use " / " (space‑slash‑space), do not use hyphens as separators.
-  - Dual prices: use " | " (space‑bar‑space), disallow "/".
-  - Allergen/dietary markers: on the item line, uppercase, comma‑separated with no spaces, alphabetized; append "*" for raw/undercooked.
+  - DO NOT change ingredient separators - keep commas and hyphens as they are
+  - DO NOT split compound words (yuzu-lime, cucumber-cilantro, huitlacoche-stuffed)
+  - Dual prices: use " | " (space‑bar‑space) to separate two prices, disallow "/".
+  - Allergen/dietary markers: on the item line, uppercase, comma‑separated with no spaces, alphabetized.
+  - Raw/undercooked items: append asterisk (*) after items with raw fish, tartare, carpaccio, raw egg, caviar, oysters.
   - Diacritics: enforce correct accents (e.g., jalapeño, tajín, crème brûlée, rosé, rhône, leña, Ànima, Vē‑vē).
-  - Non‑trivial spellings: tartare, mozzarella, parmesan, Caesar, yuzu kosho.
+  - Non‑trivial spellings: tartare (not tartar), mozzarella, parmesan, Caesar, yuzu kosho, prix fixe (not pre-fix/prefix).
   - Item names not ALL CAPS (except approved acronyms/brands).
 - Legacy interpretation: When reviewing older documents, red highlight may indicate deletions. For output going forward, we always use proper redlining (red strikethrough for deletions, yellow highlight for insertions).
 - Letter‑level edits are allowed when they reflect the true change (e.g., adding "ñ" in jalapeño). The redliner preserves run‑level formatting.

@@ -54,7 +54,9 @@
         "target_element": "item_description",
         "font": "Calibri (Body)",
         "size": 12,
-        "case": "lowercase"
+        "case": "lowercase",
+        "do_not_capitalize": ["australian", "roasted", "grilled", "seared", "shaved", "stuffed", "chilean", "serrano", "mezcal", "braised", "smoked", "fried", "baked", "steamed", "poached", "charred", "pickled", "candied", "whipped", "toasted", "infused"],
+        "note": "Adjectives and ingredient modifiers in descriptions must remain lowercase. Do not force capitalization on these words even if they appear at the start of a continuation line."
       }
     },
     {
@@ -215,13 +217,12 @@
     {
       "rule_id": "PUNC-001",
       "category": "Punctuation",
-      "severity": "Medium",
-      "description": "Ingredient separators must use ' / ' (space-slash-space). Do not use hyphens as separators.",
+      "severity": "Low",
+      "description": "Preserve existing ingredient separators. Do not change commas to slashes or split compound words.",
       "details": {
-        "ingredient_separator": "/",
-        "require_space_around": true,
-        "disallow_hyphen_as_separator": true,
-        "compound_exceptions": ["house-made"]
+        "preserve_existing_separators": true,
+        "do_not_split_compound_words": ["yuzu-lime", "cacao-ancho", "cucumber-cilantro", "huitlacoche-stuffed", "rose-petal", "house-made"],
+        "note": "The redliner should NOT automatically change ingredient separators. Compound words with hyphens should be preserved."
       }
     },
     {
@@ -327,6 +328,17 @@
       "details": {
         "required_text": "*CONSUMING RAW OR UNDERCOOKED MEATS, POULTRY, SEAFOOD, OR EGGS MAY INCREASE YOUR RISK OF FOODBORNE ILLNESS",
         "location": "footer"
+      }
+    },
+    {
+      "rule_id": "STR-004",
+      "category": "Structure",
+      "severity": "Medium",
+      "description": "Prix fixe and tasting menus must have numbered courses. Each course section should be preceded by its course number (1, 2, 3, etc.).",
+      "details": {
+        "applies_to": ["prix fixe", "pre-fix", "tasting menu", "degustation", "chef's menu", "multi-course"],
+        "format": "Course number on its own line before each course section header",
+        "example": "1\nThe Spark – "El Primer Encuentro"\n...\n2\nThe Connection – "El Abrazo""
       }
     }
   ]

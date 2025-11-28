@@ -8,10 +8,14 @@ highlight for additions) while preserving all original formatting.
 The document is expected to have a boundary marker that separates the
 template content from the menu content. Only content after the boundary
 marker is processed.
+
+Special handling for Prix Fixe menus:
+- Detects prix fixe/tasting menus by keywords
+- Automatically adds course numbers (1, 2, 3, 4...) before section headers
 """
 
 from docx import Document
-from docx.shared import RGBColor
+from docx.shared import RGBColor, Pt
 from docx.enum.text import WD_COLOR_INDEX
 import diff_match_patch as dmp_module
 from typing import List, Tuple, Optional
@@ -22,6 +26,26 @@ from pathlib import Path
 
 # The text that separates the template from the menu
 BOUNDARY_MARKER = "Please drop the menu content below on page 2."
+
+# Keywords that indicate a prix fixe / tasting menu
+PRIX_FIXE_KEYWORDS = [
+    "prix fixe", "pre-fix", "prefix", "prix-fixe",
+    "tasting menu", "tasting experience",
+    "course menu", "multi-course", "multicourse",
+    "degustation", "chef's menu", "chef's table"
+]
+
+# Patterns for course section headers (creative names with subtitles)
+# Examples: "The Spark – "El Primer Encuentro"", "The Connection – "El Abrazo""
+# Note: Use explicit Unicode escapes to ensure proper matching
+COURSE_HEADER_PATTERNS = [
+    # Pattern: "The X – "Spanish Subtitle"" (using en-dash U+2013 and curly quotes U+201C/U+201D)
+    r'^The\s+\w+\s*[\u2013\u2014-]\s*[\u201c\u201d"][^\u201c\u201d"]+[\u201c\u201d"]',
+    # Pattern: "Course Name – Subtitle" with curly or straight quotes
+    r'^[A-Z][a-z]+(?:\s+[A-Z]?[a-z]+)*\s*[\u2013\u2014-]\s*[\u201c\u201d"][^\u201c\u201d"]+[\u201c\u201d"]',
+    # Pattern: "COURSE X" or "Course X" followed by name
+    r'^(?:COURSE|Course)\s+(?:One|Two|Three|Four|Five|Six|Seven|Eight|\d+)',
+]
 
 
 class MenuRedliner:
@@ -39,6 +63,122 @@ class MenuRedliner:
         """
         self.boundary_marker = boundary_marker
         self.dmp = dmp_module.diff_match_patch()
+    
+    def is_prix_fixe_menu(self, paragraphs: List) -> bool:
+        """
+        Detect if the menu is a prix fixe / tasting menu by scanning
+        for keywords in the first several paragraphs.
+        
+        Args:
+            paragraphs: List of paragraph objects to scan
+            
+        Returns:
+            True if this appears to be a prix fixe menu
+        """
+        # Check the first 10 paragraphs for prix fixe keywords
+        text_to_check = " ".join(p.text.lower() for p in paragraphs[:10])
+        
+        for keyword in PRIX_FIXE_KEYWORDS:
+            if keyword in text_to_check:
+                print(f"  Detected prix fixe menu (keyword: '{keyword}')")
+                return True
+        
+        return False
+    
+    def is_course_header(self, text: str) -> bool:
+        """
+        Check if a paragraph text matches a course section header pattern.
+        
+        Args:
+            text: The paragraph text to check
+            
+        Returns:
+            True if this looks like a course section header
+        """
+        text = text.strip()
+        if not text:
+            return False
+        
+        for pattern in COURSE_HEADER_PATTERNS:
+            if re.match(pattern, text, re.IGNORECASE):
+                return True
+        
+        return False
+    
+    def add_course_numbers(self, doc, paragraphs_to_process: List) -> int:
+        """
+        Add course numbers before section headers in a prix fixe menu.
+        Inserts new paragraphs with just the course number.
+        
+        Args:
+            doc: The Document object
+            paragraphs_to_process: List of menu paragraphs
+            
+        Returns:
+            Number of course numbers added
+        """
+        course_number = 0
+        paragraphs_with_numbers = []
+        
+        # First pass: identify which paragraphs are course headers
+        for para in paragraphs_to_process:
+            if self.is_course_header(para.text):
+                course_number += 1
+                paragraphs_with_numbers.append((para, course_number))
+        
+        if course_number == 0:
+            print("  No course headers found to number")
+            return 0
+        
+        print(f"  Found {course_number} course sections to number")
+        
+        # Second pass: insert course numbers
+        # We need to insert from bottom to top to preserve indices
+        for para, num in reversed(paragraphs_with_numbers):
+            # Find the paragraph's position in the document body
+            body = doc._body._body
+            para_element = para._element
+            
+            # Create a new paragraph for the course number
+            from docx.oxml.ns import qn
+            from docx.oxml import OxmlElement
+            
+            # Create new paragraph element
+            new_p = OxmlElement('w:p')
+            
+            # Create paragraph properties for centering (matching the style)
+            pPr = OxmlElement('w:pPr')
+            jc = OxmlElement('w:jc')
+            jc.set(qn('w:val'), 'center')
+            pPr.append(jc)
+            new_p.append(pPr)
+            
+            # Create run with the number
+            run = OxmlElement('w:r')
+            
+            # Run properties (bold, same font)
+            rPr = OxmlElement('w:rPr')
+            bold = OxmlElement('w:b')
+            rPr.append(bold)
+            run.append(rPr)
+            
+            # Text content
+            text_elem = OxmlElement('w:t')
+            text_elem.text = str(num)
+            run.append(text_elem)
+            
+            new_p.append(run)
+            
+            # Insert the new paragraph before the course header
+            para_element.addprevious(new_p)
+            
+            # Also add yellow highlight to mark it as an addition
+            from docx.oxml.ns import nsmap
+            highlight = OxmlElement('w:highlight')
+            highlight.set(qn('w:val'), 'yellow')
+            rPr.append(highlight)
+        
+        return course_number
     
     def find_run_at_index(self, original_runs: List, original_text_len: int, target_index: int):
         """
@@ -261,7 +401,13 @@ class MenuRedliner:
             print("Processing all paragraphs instead.")
             paragraphs_to_process = list(doc.paragraphs)
         
-        # Process each menu paragraph
+        # Check if this is a prix fixe menu and add course numbers if needed
+        if self.is_prix_fixe_menu(paragraphs_to_process):
+            courses_added = self.add_course_numbers(doc, paragraphs_to_process)
+            if courses_added > 0:
+                print(f"  Added {courses_added} course numbers")
+        
+        # Process each menu paragraph with AI corrections
         modified_count = 0
         for para in paragraphs_to_process:
             if self.process_paragraph(para, ai_correction_func):
