@@ -7,7 +7,13 @@
       "description": "Menu submissions must be in Microsoft Word (.docx) format using the official template.",
       "details": {
         "allowed_format": "docx",
-        "disallowed_formats": ["xlsx", "pdf", "jpg", "png", "txt"]
+        "disallowed_formats": [
+          "xlsx",
+          "pdf",
+          "jpg",
+          "png",
+          "txt"
+        ]
       }
     },
     {
@@ -28,7 +34,9 @@
       "details": {
         "change_type": "removal",
         "required_format": "red_strikethrough",
-        "legacy_alternative_formats": ["red_highlight"],
+        "legacy_alternative_formats": [
+          "red_highlight"
+        ],
         "legacy_note": "For legacy/older submissions only, red highlighted text may indicate removals. When interpreting such documents, treat red highlight as a removal equivalent. All new submissions must use red strikethrough."
       }
     },
@@ -55,7 +63,29 @@
         "font": "Calibri (Body)",
         "size": 12,
         "case": "lowercase",
-        "do_not_capitalize": ["australian", "roasted", "grilled", "seared", "shaved", "stuffed", "chilean", "serrano", "mezcal", "braised", "smoked", "fried", "baked", "steamed", "poached", "charred", "pickled", "candied", "whipped", "toasted", "infused"],
+        "do_not_capitalize": [
+          "australian",
+          "roasted",
+          "grilled",
+          "seared",
+          "shaved",
+          "stuffed",
+          "chilean",
+          "serrano",
+          "mezcal",
+          "braised",
+          "smoked",
+          "fried",
+          "baked",
+          "steamed",
+          "poached",
+          "charred",
+          "pickled",
+          "candied",
+          "whipped",
+          "toasted",
+          "infused"
+        ],
         "note": "Adjectives and ingredient modifiers in descriptions must remain lowercase. Do not force capitalization on these words even if they appear at the start of a continuation line."
       }
     },
@@ -87,7 +117,10 @@
       "description": "Prices must be whole numbers. Dollar signs ($) and cents (.00) are not allowed.",
       "details": {
         "format": "integer",
-        "disallowed_characters": ["$", "."]
+        "disallowed_characters": [
+          "$",
+          "."
+        ]
       }
     },
     {
@@ -97,7 +130,9 @@
       "description": "A vertical bar '|' must be used to separate two prices (e.g., glass/bottle).",
       "details": {
         "dual_price_separator": "|",
-        "disallowed_separators": ["/"]
+        "disallowed_separators": [
+          "/"
+        ]
       }
     },
     {
@@ -148,15 +183,35 @@
       "description": "Specific spelling and vocabulary must be used (e.g., 'barbeque' not 'BBQ', 'aioli' not 'mayo').",
       "details": {
         "spellings": {
-          "barbeque": ["bbq"],
-          "aioli": ["mayo"],
-          "Caesar": ["cesar", "ceasar"],
-          "chili": ["chile"],
-          "tartare": ["tartar"],
-          "mozzarella": ["mozarella"],
-          "parmesan": ["parmesian"],
-          "yuzu kosho": ["yuzukosho", "yuzu-kosho"],
-          "passion fruit": ["passionfruit"]
+          "barbeque": [
+            "bbq"
+          ],
+          "aioli": [
+            "mayo"
+          ],
+          "Caesar": [
+            "cesar",
+            "ceasar"
+          ],
+          "chili": [
+            "chile"
+          ],
+          "tartare": [
+            "tartar"
+          ],
+          "mozzarella": [
+            "mozarella"
+          ],
+          "parmesan": [
+            "parmesian"
+          ],
+          "yuzu kosho": [
+            "yuzukosho",
+            "yuzu-kosho"
+          ],
+          "passion fruit": [
+            "passionfruit"
+          ]
         }
       }
     },
@@ -166,14 +221,24 @@
       "severity": "Low",
       "description": "Redundant words like 'fresh', 'creamy', 'warm', 'juice', 'syrup' should be avoided in descriptions.",
       "details": {
-        "avoid_words": ["creamy", "warm", "fresh", "pepper", "garnish", "mesclun", "juice", "purée", "syrup"]
+        "avoid_words": [
+          "creamy",
+          "warm",
+          "fresh",
+          "pepper",
+          "garnish",
+          "mesclun",
+          "juice",
+          "pur\u00e9e",
+          "syrup"
+        ]
       }
     },
     {
       "rule_id": "STR-001",
       "category": "Structure",
       "severity": "Medium",
-      "description": "Menu categories (e.g., Appetizers, Entrées) must be plural.",
+      "description": "Menu categories (e.g., Appetizers, Entr\u00e9es) must be plural.",
       "details": {
         "target": "category_headings",
         "form": "plural"
@@ -187,7 +252,20 @@
       "details": {
         "target": "ingredient_descriptors",
         "form": "singular",
-        "exceptions": ["beans", "chips", "greens", "berries", "fries", "seeds", "herbs", "noodles", "sprouts", "diced vegetables", "mixed cheeses", "mixed mushrooms"]
+        "exceptions": [
+          "beans",
+          "chips",
+          "greens",
+          "berries",
+          "fries",
+          "seeds",
+          "herbs",
+          "noodles",
+          "sprouts",
+          "diced vegetables",
+          "mixed cheeses",
+          "mixed mushrooms"
+        ]
       }
     },
     {
@@ -197,7 +275,14 @@
       "description": "Latin concepts must use specified Spanish category names.",
       "details": {
         "condition": "latin_concept",
-        "required_categories": ["PARA LA MESA", "ANTOJITOS", "SOPAS", "ESPECIALIDADES", "POSTRES", "CÓCTELES"]
+        "required_categories": [
+          "PARA LA MESA",
+          "ANTOJITOS",
+          "SOPAS",
+          "ESPECIALIDADES",
+          "POSTRES",
+          "C\u00d3CTELES"
+        ]
       }
     },
     {
@@ -207,10 +292,33 @@
       "description": "Specific words with accents and special characters must use the correct spelling and diacritical marks.",
       "details": {
         "required_spellings": [
-          "Açaí", "Ají", "Albariño", "Añejo", "Cachaça", "Camarón", "Café",
-          "Chicharrón", "Chile de Árbol", "Cócteles", "Crème Brûlée", "Crème Fraîche",
-          "Crêpes", "Flambéed", "Jalapeño", "Leña", "Más", "Patrón", "Pistú",
-          "Purée", "Rhône", "Rosé", "Sautéed", "Tajín", "Tampiqueña", "Ànima", "Vē-vē"
+          "A\u00e7a\u00ed",
+          "Aj\u00ed",
+          "Albari\u00f1o",
+          "A\u00f1ejo",
+          "Cacha\u00e7a",
+          "Camar\u00f3n",
+          "Caf\u00e9",
+          "Chicharr\u00f3n",
+          "Chile de \u00c1rbol",
+          "C\u00f3cteles",
+          "Cr\u00e8me Br\u00fbl\u00e9e",
+          "Cr\u00e8me Fra\u00eeche",
+          "Cr\u00eapes",
+          "Flamb\u00e9ed",
+          "Jalape\u00f1o",
+          "Le\u00f1a",
+          "M\u00e1s",
+          "Patr\u00f3n",
+          "Pist\u00fa",
+          "Pur\u00e9e",
+          "Rh\u00f4ne",
+          "Ros\u00e9",
+          "Saut\u00e9ed",
+          "Taj\u00edn",
+          "Tampique\u00f1a",
+          "\u00c0nima",
+          "V\u0113-v\u0113"
         ]
       }
     },
@@ -221,7 +329,14 @@
       "description": "Preserve existing ingredient separators. Do not change commas to slashes or split compound words.",
       "details": {
         "preserve_existing_separators": true,
-        "do_not_split_compound_words": ["yuzu-lime", "cacao-ancho", "cucumber-cilantro", "huitlacoche-stuffed", "rose-petal", "house-made"],
+        "do_not_split_compound_words": [
+          "yuzu-lime",
+          "cacao-ancho",
+          "cucumber-cilantro",
+          "huitlacoche-stuffed",
+          "rose-petal",
+          "house-made"
+        ],
         "note": "The redliner should NOT automatically change ingredient separators. Compound words with hyphens should be preserved."
       }
     },
@@ -233,7 +348,10 @@
       "details": {
         "target_element": "item_name",
         "disallow_all_caps": true,
-        "allowed_acronyms": ["RSH", "TT"]
+        "allowed_acronyms": [
+          "RSH",
+          "TT"
+        ]
       }
     },
     {
@@ -336,9 +454,72 @@
       "severity": "Medium",
       "description": "Prix fixe and tasting menus must have numbered courses. Each course section should be preceded by its course number (1, 2, 3, etc.).",
       "details": {
-        "applies_to": ["prix fixe", "pre-fix", "tasting menu", "degustation", "chef's menu", "multi-course"],
+        "applies_to": [
+          "prix fixe",
+          "pre-fix",
+          "tasting menu",
+          "degustation",
+          "chef's menu",
+          "multi-course"
+        ],
         "format": "Course number on its own line before each course section header",
-        "example": "1\nThe Spark – "El Primer Encuentro"\n...\n2\nThe Connection – "El Abrazo""
+        "example": "1\nThe Spark \u2013 'El Primer Encuentro'\n...\n2\nThe Connection \u2013 'El Abrazo'"
+      }
+    },
+    {
+      "rule_id": "LEARNED-ALLERGEN-4474",
+      "category": "Allergen",
+      "severity": "Medium",
+      "description": "Missing allergen/dietary code: \"d,n\" should include \"d,n,v\" - verify dish ingredients match allergen markers",
+      "details": {
+        "pattern_type": "allergen",
+        "original_text": "d,n",
+        "corrected_text": "d,n,v",
+        "occurrences": 1,
+        "learned_from": "training_data",
+        "confidence": 0.1
+      }
+    },
+    {
+      "rule_id": "LEARNED-ALLERGEN-5250",
+      "category": "Allergen",
+      "severity": "Medium",
+      "description": "Missing allergen/dietary code: \"s\" should include \"s*\" - verify dish ingredients match allergen markers",
+      "details": {
+        "pattern_type": "allergen",
+        "original_text": "s",
+        "corrected_text": "s*",
+        "occurrences": 1,
+        "learned_from": "training_data",
+        "confidence": 0.1
+      }
+    },
+    {
+      "rule_id": "LEARNED-GENERAL-6414",
+      "category": "General",
+      "severity": "Medium",
+      "description": "Fix: \"ribeye prime,\" \u2192 \"prime ribeye,\"",
+      "details": {
+        "pattern_type": "general",
+        "original_text": "ribeye prime,",
+        "corrected_text": "prime ribeye,",
+        "occurrences": 1,
+        "learned_from": "training_data",
+        "confidence": 0.1
+      }
+    },
+    {
+      "rule_id": "LEARNED-SPELLING-7481",
+      "category": "Spelling",
+      "severity": "Medium",
+      "description": "Correct spelling: \"sorbete\" \u2192 \"sorbet\"",
+      "details": {
+        "pattern_type": "spelling",
+        "original_text": "sorbete",
+        "corrected_text": "sorbet",
+        "occurrences": 1,
+        "learned_from": "training_data",
+        "confidence": 0.1
       }
     }
   ]
