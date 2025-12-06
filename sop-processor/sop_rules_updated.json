@@ -1,0 +1,1044 @@
+{
+  "rules": [
+    {
+      "rule_id": "SUB-001",
+      "category": "Submission",
+      "severity": "High",
+      "description": "Menu submissions must be in Microsoft Word (.docx) format using the official template.",
+      "details": {
+        "allowed_format": "docx",
+        "disallowed_formats": [
+          "xlsx",
+          "pdf",
+          "jpg",
+          "png",
+          "txt"
+        ]
+      }
+    },
+    {
+      "rule_id": "SUB-002",
+      "category": "Submission",
+      "severity": "High",
+      "description": "Proposed edits must be highlighted in yellow.",
+      "details": {
+        "change_type": "edit",
+        "required_format": "yellow_highlight"
+      }
+    },
+    {
+      "rule_id": "SUB-003",
+      "category": "Submission",
+      "severity": "High",
+      "description": "Item removals must be marked with a strikethrough in red.",
+      "details": {
+        "change_type": "removal",
+        "required_format": "red_strikethrough",
+        "legacy_alternative_formats": [
+          "red_highlight"
+        ],
+        "legacy_note": "For legacy/older submissions only, red highlighted text may indicate removals. When interpreting such documents, treat red highlight as a removal equivalent. All new submissions must use red strikethrough."
+      }
+    },
+    {
+      "rule_id": "FMT-001",
+      "category": "Formatting",
+      "severity": "High",
+      "description": "The 'DISH NAME' or 'DRINK NAME' must be in Calibri (Body), 12pt, Bold, and Sentence Case.",
+      "details": {
+        "target_element": "item_name",
+        "font": "Calibri (Body)",
+        "size": 12,
+        "style": "Bold",
+        "case": "Sentence"
+      }
+    },
+    {
+      "rule_id": "FMT-002",
+      "category": "Formatting",
+      "severity": "Medium",
+      "description": "The item 'DESCRIPTION' text must be in Calibri (Body), 12pt, and always lowercase.",
+      "details": {
+        "target_element": "item_description",
+        "font": "Calibri (Body)",
+        "size": 12,
+        "case": "lowercase",
+        "do_not_capitalize": [
+          "australian",
+          "roasted",
+          "grilled",
+          "seared",
+          "shaved",
+          "stuffed",
+          "chilean",
+          "serrano",
+          "mezcal",
+          "braised",
+          "smoked",
+          "fried",
+          "baked",
+          "steamed",
+          "poached",
+          "charred",
+          "pickled",
+          "candied",
+          "whipped",
+          "toasted",
+          "infused"
+        ],
+        "note": "Adjectives and ingredient modifiers in descriptions must remain lowercase. Do not force capitalization on these words even if they appear at the start of a continuation line."
+      }
+    },
+    {
+      "rule_id": "FMT-003",
+      "category": "Formatting",
+      "severity": "Medium",
+      "description": "The 'PRICE' must be in Calibri (Body), 12pt.",
+      "details": {
+        "target_element": "price",
+        "font": "Calibri (Body)",
+        "size": 12
+      }
+    },
+    {
+      "rule_id": "CNT-001",
+      "category": "Content",
+      "severity": "High",
+      "description": "The official RSH Logo must be present on the first page.",
+      "details": {
+        "required_element": "rsh_logo_image",
+        "location": "page_1"
+      }
+    },
+    {
+      "rule_id": "PRC-001",
+      "category": "Pricing",
+      "severity": "High",
+      "description": "Prices must be whole numbers. Dollar signs ($) and cents (.00) are not allowed.",
+      "details": {
+        "format": "integer",
+        "disallowed_characters": [
+          "$",
+          "."
+        ]
+      }
+    },
+    {
+      "rule_id": "PRC-002",
+      "category": "Pricing",
+      "severity": "Medium",
+      "description": "A vertical bar '|' must be used to separate two prices (e.g., glass/bottle).",
+      "details": {
+        "dual_price_separator": "|",
+        "disallowed_separators": [
+          "/"
+        ]
+      }
+    },
+    {
+      "rule_id": "ALG-001",
+      "category": "Allergens",
+      "severity": "High",
+      "description": "Allergen notations must be placed on the same line as the dish name, in superscript.",
+      "details": {
+        "placement": "item_name_line",
+        "style": "superscript"
+      }
+    },
+    {
+      "rule_id": "ALG-002",
+      "category": "Allergens",
+      "severity": "High",
+      "description": "Multiple allergen codes must be listed in alphabetical order, comma-separated with no spaces (e.g., D,G,N).",
+      "details": {
+        "order": "alphabetical",
+        "separator": ",",
+        "spacing": "none"
+      }
+    },
+    {
+      "rule_id": "ALG-003",
+      "category": "Allergens",
+      "severity": "High",
+      "description": "A raw/undercooked food warning must be present at the bottom of culinary pages.",
+      "details": {
+        "required_text": "CONSUMING RAW OR UNDERCOOKED MEATS, POULTRY, SEAFOOD, OR EGGS MAY INCREASE YOUR RISK OF FOODBORNE ILLNESS",
+        "location": "footer"
+      }
+    },
+    {
+      "rule_id": "ALG-004",
+      "category": "Allergens",
+      "severity": "Medium",
+      "description": "Raw or undercooked items must be marked with a trailing asterisk (*).",
+      "details": {
+        "marker": "*",
+        "placement": "suffix"
+      }
+    },
+    {
+      "rule_id": "VOC-001",
+      "category": "Vocabulary",
+      "severity": "Low",
+      "description": "Specific spelling and vocabulary must be used (e.g., 'barbeque' not 'BBQ', 'aioli' not 'mayo').",
+      "details": {
+        "spellings": {
+          "barbeque": [
+            "bbq"
+          ],
+          "aioli": [
+            "mayo"
+          ],
+          "Caesar": [
+            "cesar",
+            "ceasar"
+          ],
+          "chili": [
+            "chile"
+          ],
+          "tartare": [
+            "tartar"
+          ],
+          "mozzarella": [
+            "mozarella"
+          ],
+          "parmesan": [
+            "parmesian"
+          ],
+          "yuzu kosho": [
+            "yuzukosho",
+            "yuzu-kosho"
+          ],
+          "passion fruit": [
+            "passionfruit"
+          ]
+        }
+      }
+    },
+    {
+      "rule_id": "VOC-002",
+      "category": "Vocabulary",
+      "severity": "Low",
+      "description": "Redundant words like 'fresh', 'creamy', 'warm', 'juice', 'syrup' should be avoided in descriptions.",
+      "details": {
+        "avoid_words": [
+          "creamy",
+          "warm",
+          "fresh",
+          "pepper",
+          "garnish",
+          "mesclun",
+          "juice",
+          "pur\u00e9e",
+          "syrup"
+        ]
+      }
+    },
+    {
+      "rule_id": "STR-001",
+      "category": "Structure",
+      "severity": "Medium",
+      "description": "Menu categories (e.g., Appetizers, Entr\u00e9es) must be plural.",
+      "details": {
+        "target": "category_headings",
+        "form": "plural"
+      }
+    },
+    {
+      "rule_id": "STR-002",
+      "category": "Structure",
+      "severity": "Medium",
+      "description": "Ingredient descriptions must be singular, with specific exceptions.",
+      "details": {
+        "target": "ingredient_descriptors",
+        "form": "singular",
+        "exceptions": [
+          "beans",
+          "chips",
+          "greens",
+          "berries",
+          "fries",
+          "seeds",
+          "herbs",
+          "noodles",
+          "sprouts",
+          "diced vegetables",
+          "mixed cheeses",
+          "mixed mushrooms"
+        ]
+      }
+    },
+    {
+      "rule_id": "STR-003",
+      "category": "Structure",
+      "severity": "Medium",
+      "description": "Latin concepts must use specified Spanish category names.",
+      "details": {
+        "condition": "latin_concept",
+        "required_categories": [
+          "PARA LA MESA",
+          "ANTOJITOS",
+          "SOPAS",
+          "ESPECIALIDADES",
+          "POSTRES",
+          "C\u00d3CTELES"
+        ]
+      }
+    },
+    {
+      "rule_id": "VOC-003",
+      "category": "Vocabulary",
+      "severity": "Low",
+      "description": "Specific words with accents and special characters must use the correct spelling and diacritical marks.",
+      "details": {
+        "required_spellings": [
+          "A\u00e7a\u00ed",
+          "Aj\u00ed",
+          "Albari\u00f1o",
+          "A\u00f1ejo",
+          "Cacha\u00e7a",
+          "Camar\u00f3n",
+          "Caf\u00e9",
+          "Chicharr\u00f3n",
+          "Chile de \u00c1rbol",
+          "C\u00f3cteles",
+          "Cr\u00e8me Br\u00fbl\u00e9e",
+          "Cr\u00e8me Fra\u00eeche",
+          "Cr\u00eapes",
+          "Flamb\u00e9ed",
+          "Jalape\u00f1o",
+          "Le\u00f1a",
+          "M\u00e1s",
+          "Patr\u00f3n",
+          "Pist\u00fa",
+          "Pur\u00e9e",
+          "Rh\u00f4ne",
+          "Ros\u00e9",
+          "Saut\u00e9ed",
+          "Taj\u00edn",
+          "Tampique\u00f1a",
+          "\u00c0nima",
+          "V\u0113-v\u0113"
+        ]
+      }
+    },
+    {
+      "rule_id": "PUNC-001",
+      "category": "Punctuation",
+      "severity": "Low",
+      "description": "Preserve existing ingredient separators. Do not change commas to slashes or split compound words.",
+      "details": {
+        "preserve_existing_separators": true,
+        "do_not_split_compound_words": [
+          "yuzu-lime",
+          "cacao-ancho",
+          "cucumber-cilantro",
+          "huitlacoche-stuffed",
+          "rose-petal",
+          "house-made"
+        ],
+        "note": "The redliner should NOT automatically change ingredient separators. Compound words with hyphens should be preserved."
+      }
+    },
+    {
+      "rule_id": "FMT-008",
+      "category": "Formatting",
+      "severity": "Medium",
+      "description": "Item names must not be ALL CAPS except for approved acronyms/brands.",
+      "details": {
+        "target_element": "item_name",
+        "disallow_all_caps": true,
+        "allowed_acronyms": [
+          "RSH",
+          "TT"
+        ]
+      }
+    },
+    {
+      "rule_id": "ALG-005",
+      "category": "Allergens",
+      "severity": "Medium",
+      "description": "Suggest allergen codes based on ingredient keywords; final codes must be alphabetized and formatted per ALG-002.",
+      "details": {
+        "keyword_to_code": {
+          "milk": "D",
+          "cheese": "D",
+          "cream": "D",
+          "butter": "D",
+          "almond": "N",
+          "peanut": "N",
+          "walnut": "N",
+          "pistachio": "N",
+          "shrimp": "C",
+          "prawn": "C",
+          "crab": "C",
+          "lobster": "C",
+          "tuna": "F",
+          "salmon": "F",
+          "cod": "F",
+          "egg": "E",
+          "panko": "G",
+          "bread": "G",
+          "flour": "G",
+          "crumb": "G",
+          "wheat": "G",
+          "soy": "SY",
+          "sesame": "SE",
+          "mustard": "M"
+        },
+        "note": "These mappings are heuristics to assist reviewers; do not override explicit chef-provided allergen info."
+      }
+    },
+    {
+      "rule_id": "FMT-004",
+      "category": "Formatting",
+      "severity": "High",
+      "description": "Page 1 Header 'TYPE OF MENU' must be Calibri (Body), 12pt, Bold.",
+      "details": {
+        "target_element": "header_type_of_menu",
+        "location": "page_1",
+        "font": "Calibri (Body)",
+        "size": 12,
+        "style": "Bold"
+      }
+    },
+    {
+      "rule_id": "FMT-005",
+      "category": "Formatting",
+      "severity": "High",
+      "description": "Page 1 Header 'VENUE / CITY / STATE' must be Calibri (Body), 12pt, Bold.",
+      "details": {
+        "target_element": "header_venue",
+        "location": "page_1",
+        "font": "Calibri (Body)",
+        "size": 12,
+        "style": "Bold"
+      }
+    },
+    {
+      "rule_id": "FMT-006",
+      "category": "Formatting",
+      "severity": "High",
+      "description": "Page 1 Header 'SIZE & ORIENTATION' must be Calibri (Body), 12pt, Bold, Italic.",
+      "details": {
+        "target_element": "header_size_orientation",
+        "location": "page_1",
+        "font": "Calibri (Body)",
+        "size": 12,
+        "style": "Bold, Italic"
+      }
+    },
+    {
+      "rule_id": "FMT-007",
+      "category": "Formatting",
+      "severity": "Medium",
+      "description": "All main menu text (sections, items, descriptions) on Page 2 onwards must be centered.",
+      "details": {
+        "target_element": "menu_body_text",
+        "alignment": "center"
+      }
+    },
+    {
+      "rule_id": "LGL-002",
+      "category": "Legal",
+      "severity": "High",
+      "description": "The mandatory foodborne illness warning must be present on culinary menus.",
+      "details": {
+        "required_text": "*CONSUMING RAW OR UNDERCOOKED MEATS, POULTRY, SEAFOOD, OR EGGS MAY INCREASE YOUR RISK OF FOODBORNE ILLNESS",
+        "location": "footer"
+      }
+    },
+    {
+      "rule_id": "STR-004",
+      "category": "Structure",
+      "severity": "Medium",
+      "description": "Prix fixe and tasting menus must have numbered courses. Each course section should be preceded by its course number (1, 2, 3, etc.).",
+      "details": {
+        "applies_to": [
+          "prix fixe",
+          "pre-fix",
+          "tasting menu",
+          "degustation",
+          "chef's menu",
+          "multi-course"
+        ],
+        "format": "Course number on its own line before each course section header",
+        "example": "1\nThe Spark \u2013 'El Primer Encuentro'\n...\n2\nThe Connection \u2013 'El Abrazo'"
+      }
+    },
+    {
+      "rule_id": "LEARNED-ALLERGEN-4474",
+      "category": "Allergen",
+      "severity": "Medium",
+      "description": "Missing allergen/dietary code: \"d,n\" should include \"d,n,v\" - verify dish ingredients match allergen markers",
+      "details": {
+        "pattern_type": "allergen",
+        "original_text": "d,n",
+        "corrected_text": "d,n,v",
+        "occurrences": 1,
+        "learned_from": "training_data",
+        "confidence": 0.1
+      }
+    },
+    {
+      "rule_id": "LEARNED-ALLERGEN-5250",
+      "category": "Allergen",
+      "severity": "Medium",
+      "description": "Missing allergen/dietary code: \"s\" should include \"s*\" - verify dish ingredients match allergen markers",
+      "details": {
+        "pattern_type": "allergen",
+        "original_text": "s",
+        "corrected_text": "s*",
+        "occurrences": 1,
+        "learned_from": "training_data",
+        "confidence": 0.1
+      }
+    },
+    {
+      "rule_id": "LEARNED-ALLERGEN-9816",
+      "category": "Allergen",
+      "severity": "Medium",
+      "description": "Missing allergen/dietary code: \"crab cake benedict, poached egg, avocado, aj\u00ed amarillo hollandaise, croissant, spring greens, heirloom cherry tomato\" should include \"mushroom okonomiyaki or mushroom pancake, mushroom oyster, cabbage, green onion, smoked cream cheese, crispy sweet potato, chipotle aioli mayo, honey barbeque sauce bbq, sesame seeds. d,\" - verify dish ingredients match allergen markers",
+      "details": {
+        "pattern_type": "allergen",
+        "original_text": "crab cake benedict, poached egg, avocado, aj\u00ed amarillo hollandaise, croissant, spring greens, heirloom cherry tomato",
+        "corrected_text": "mushroom okonomiyaki or mushroom pancake, mushroom oyster, cabbage, green onion, smoked cream cheese, crispy sweet potato, chipotle aioli mayo, honey barbeque sauce bbq, sesame seeds. d,",
+        "occurrences": 1,
+        "learned_from": "training_data",
+        "confidence": 0.1
+      }
+    },
+    {
+      "rule_id": "LEARNED-ALLERGEN-9456",
+      "category": "Allergen",
+      "severity": "Medium",
+      "description": "Missing allergen/dietary code: \"s\" should include \"v\" - verify dish ingredients match allergen markers",
+      "details": {
+        "pattern_type": "allergen",
+        "original_text": "s",
+        "corrected_text": "v",
+        "occurrences": 1,
+        "learned_from": "training_data",
+        "confidence": 0.1
+      }
+    },
+    {
+      "rule_id": "LEARNED-ALLERGEN-4012",
+      "category": "Allergen",
+      "severity": "Medium",
+      "description": "Missing allergen/dietary code: \"mushroom okonomiyaki or mushroom pancake, mushroom oyster, cabbage, green onion, smoked cream cheese, crispy sweet potato, chipotle mayo, honey bbq, sesame seeds. d,\" should include \"crab cake benedict, poached egg, avocado, aj\u00ed amarillo hollandaise, croissant, spring greens, heirloom cherry tomato\" - verify dish ingredients match allergen markers",
+      "details": {
+        "pattern_type": "allergen",
+        "original_text": "mushroom okonomiyaki or mushroom pancake, mushroom oyster, cabbage, green onion, smoked cream cheese, crispy sweet potato, chipotle mayo, honey bbq, sesame seeds. d,",
+        "corrected_text": "crab cake benedict, poached egg, avocado, aj\u00ed amarillo hollandaise, croissant, spring greens, heirloom cherry tomato",
+        "occurrences": 1,
+        "learned_from": "training_data",
+        "confidence": 0.1
+      }
+    },
+    {
+      "rule_id": "LEARNED-ALLERGEN-5399",
+      "category": "Allergen",
+      "severity": "Medium",
+      "description": "Missing allergen/dietary code: \"v\" should include \"s*\" - verify dish ingredients match allergen markers",
+      "details": {
+        "pattern_type": "allergen",
+        "original_text": "v",
+        "corrected_text": "s*",
+        "occurrences": 1,
+        "learned_from": "training_data",
+        "confidence": 0.1
+      }
+    },
+    {
+      "rule_id": "LEARNED-GENERAL-6414",
+      "category": "General",
+      "severity": "Medium",
+      "description": "Fix: \"ribeye prime,\" \u2192 \"prime ribeye,\"",
+      "details": {
+        "pattern_type": "general",
+        "original_text": "ribeye prime,",
+        "corrected_text": "prime ribeye,",
+        "occurrences": 1,
+        "learned_from": "training_data",
+        "confidence": 0.1
+      }
+    },
+    {
+      "rule_id": "LEARNED-SPELLING-7481",
+      "category": "Spelling",
+      "severity": "Medium",
+      "description": "Correct spelling: \"sorbete\" \u2192 \"sorbet\"",
+      "details": {
+        "pattern_type": "spelling",
+        "original_text": "sorbete",
+        "corrected_text": "sorbet",
+        "occurrences": 1,
+        "learned_from": "training_data",
+        "confidence": 0.1
+      }
+    },
+    {
+      "rule_id": "LEARNED-ALLERGEN-9298",
+      "category": "Allergen",
+      "severity": "Medium",
+      "description": "Missing allergen/dietary code: \"d,n\" should include \"d,n,v\" - verify dish ingredients match allergen markers",
+      "details": {
+        "pattern_type": "allergen",
+        "original_text": "d,n",
+        "corrected_text": "d,n,v",
+        "occurrences": 1,
+        "learned_from": "training_data",
+        "confidence": 0.1
+      }
+    },
+    {
+      "rule_id": "LEARNED-ALLERGEN-4293",
+      "category": "Allergen",
+      "severity": "Medium",
+      "description": "Missing allergen/dietary code: \"s\" should include \"s*\" - verify dish ingredients match allergen markers",
+      "details": {
+        "pattern_type": "allergen",
+        "original_text": "s",
+        "corrected_text": "s*",
+        "occurrences": 1,
+        "learned_from": "training_data",
+        "confidence": 0.1
+      }
+    },
+    {
+      "rule_id": "LEARNED-ALLERGEN-6389",
+      "category": "Allergen",
+      "severity": "Medium",
+      "description": "Missing allergen/dietary code: \"crab cake benedict, poached egg, avocado, aj\u00ed amarillo hollandaise, croissant, spring greens, heirloom cherry tomato\" should include \"mushroom okonomiyaki or mushroom pancake, mushroom oyster, cabbage, green onion, smoked cream cheese, crispy sweet potato, chipotle aioli mayo, honey barbeque sauce bbq, sesame seeds. d,\" - verify dish ingredients match allergen markers",
+      "details": {
+        "pattern_type": "allergen",
+        "original_text": "crab cake benedict, poached egg, avocado, aj\u00ed amarillo hollandaise, croissant, spring greens, heirloom cherry tomato",
+        "corrected_text": "mushroom okonomiyaki or mushroom pancake, mushroom oyster, cabbage, green onion, smoked cream cheese, crispy sweet potato, chipotle aioli mayo, honey barbeque sauce bbq, sesame seeds. d,",
+        "occurrences": 1,
+        "learned_from": "training_data",
+        "confidence": 0.1
+      }
+    },
+    {
+      "rule_id": "LEARNED-ALLERGEN-5777",
+      "category": "Allergen",
+      "severity": "Medium",
+      "description": "Missing allergen/dietary code: \"s\" should include \"v\" - verify dish ingredients match allergen markers",
+      "details": {
+        "pattern_type": "allergen",
+        "original_text": "s",
+        "corrected_text": "v",
+        "occurrences": 1,
+        "learned_from": "training_data",
+        "confidence": 0.1
+      }
+    },
+    {
+      "rule_id": "LEARNED-ALLERGEN-4118",
+      "category": "Allergen",
+      "severity": "Medium",
+      "description": "Missing allergen/dietary code: \"mushroom okonomiyaki or mushroom pancake, mushroom oyster, cabbage, green onion, smoked cream cheese, crispy sweet potato, chipotle mayo, honey bbq, sesame seeds. d,\" should include \"crab cake benedict, poached egg, avocado, aj\u00ed amarillo hollandaise, croissant, spring greens, heirloom cherry tomato\" - verify dish ingredients match allergen markers",
+      "details": {
+        "pattern_type": "allergen",
+        "original_text": "mushroom okonomiyaki or mushroom pancake, mushroom oyster, cabbage, green onion, smoked cream cheese, crispy sweet potato, chipotle mayo, honey bbq, sesame seeds. d,",
+        "corrected_text": "crab cake benedict, poached egg, avocado, aj\u00ed amarillo hollandaise, croissant, spring greens, heirloom cherry tomato",
+        "occurrences": 1,
+        "learned_from": "training_data",
+        "confidence": 0.1
+      }
+    },
+    {
+      "rule_id": "LEARNED-ALLERGEN-1340",
+      "category": "Allergen",
+      "severity": "Medium",
+      "description": "Missing allergen/dietary code: \"v\" should include \"s*\" - verify dish ingredients match allergen markers",
+      "details": {
+        "pattern_type": "allergen",
+        "original_text": "v",
+        "corrected_text": "s*",
+        "occurrences": 1,
+        "learned_from": "training_data",
+        "confidence": 0.1
+      }
+    },
+    {
+      "rule_id": "LEARNED-ALLERGEN-3165",
+      "category": "Allergen",
+      "severity": "Medium",
+      "description": "Missing allergen/dietary code: \"cesar\" should include \"caesar\" - verify dish ingredients match allergen markers",
+      "details": {
+        "pattern_type": "allergen",
+        "original_text": "cesar",
+        "corrected_text": "caesar",
+        "occurrences": 1,
+        "learned_from": "training_data",
+        "confidence": 0.1
+      }
+    },
+    {
+      "rule_id": "LEARNED-ALLERGEN-3548",
+      "category": "Allergen",
+      "severity": "Medium",
+      "description": "Missing allergen/dietary code: \"d,g\" should include \"*d,g\" - verify dish ingredients match allergen markers",
+      "details": {
+        "pattern_type": "allergen",
+        "original_text": "d,g",
+        "corrected_text": "*d,g",
+        "occurrences": 1,
+        "learned_from": "training_data",
+        "confidence": 0.1
+      }
+    },
+    {
+      "rule_id": "LEARNED-ALLERGEN-4011",
+      "category": "Allergen",
+      "severity": "Medium",
+      "description": "Missing allergen/dietary code: \"d\" should include \"d,v\" - verify dish ingredients match allergen markers",
+      "details": {
+        "pattern_type": "allergen",
+        "original_text": "d",
+        "corrected_text": "d,v",
+        "occurrences": 1,
+        "learned_from": "training_data",
+        "confidence": 0.1
+      }
+    },
+    {
+      "rule_id": "LEARNED-GENERAL-8789",
+      "category": "General",
+      "severity": "Medium",
+      "description": "Fix: \"ribeye prime,\" \u2192 \"prime ribeye,\"",
+      "details": {
+        "pattern_type": "general",
+        "original_text": "ribeye prime,",
+        "corrected_text": "prime ribeye,",
+        "occurrences": 1,
+        "learned_from": "training_data",
+        "confidence": 0.1
+      }
+    },
+    {
+      "rule_id": "LEARNED-GENERAL-2344",
+      "category": "General",
+      "severity": "Medium",
+      "description": "Fix: \"chilies,\" \u2192 \"chili,\"",
+      "details": {
+        "pattern_type": "general",
+        "original_text": "chilies,",
+        "corrected_text": "chili,",
+        "occurrences": 1,
+        "learned_from": "training_data",
+        "confidence": 0.1
+      }
+    },
+    {
+      "rule_id": "LEARNED-GENERAL-3843",
+      "category": "General",
+      "severity": "Medium",
+      "description": "Fix: \"tortilla\" \u2192 \"tortillas\"",
+      "details": {
+        "pattern_type": "general",
+        "original_text": "tortilla",
+        "corrected_text": "tortillas",
+        "occurrences": 1,
+        "learned_from": "training_data",
+        "confidence": 0.1
+      }
+    },
+    {
+      "rule_id": "LEARNED-GENERAL-6990",
+      "category": "General",
+      "severity": "Medium",
+      "description": "Fix: \"puree,\" \u2192 \"pur\u00e9e,\"",
+      "details": {
+        "pattern_type": "general",
+        "original_text": "puree,",
+        "corrected_text": "pur\u00e9e,",
+        "occurrences": 1,
+        "learned_from": "training_data",
+        "confidence": 0.1
+      }
+    },
+    {
+      "rule_id": "LEARNED-GENERAL-5041",
+      "category": "General",
+      "severity": "Medium",
+      "description": "Fix: \"fresca\" \u2192 \"fresca*\"",
+      "details": {
+        "pattern_type": "general",
+        "original_text": "fresca",
+        "corrected_text": "fresca*",
+        "occurrences": 1,
+        "learned_from": "training_data",
+        "confidence": 0.1
+      }
+    },
+    {
+      "rule_id": "LEARNED-GENERAL-5034",
+      "category": "General",
+      "severity": "Medium",
+      "description": "Fix: \"add two\" \u2192 \"cazuela , creamy guajillo sauce, potato hash,\"",
+      "details": {
+        "pattern_type": "general",
+        "original_text": "add two",
+        "corrected_text": "cazuela , creamy guajillo sauce, potato hash,",
+        "occurrences": 1,
+        "learned_from": "training_data",
+        "confidence": 0.1
+      }
+    },
+    {
+      "rule_id": "LEARNED-GENERAL-7762",
+      "category": "General",
+      "severity": "Medium",
+      "description": "Fix: \"eggs 8\" \u2192 \"egg, queso fresco, pickled onions, avocado* d\"",
+      "details": {
+        "pattern_type": "general",
+        "original_text": "eggs 8",
+        "corrected_text": "egg, queso fresco, pickled onions, avocado* d",
+        "occurrences": 1,
+        "learned_from": "training_data",
+        "confidence": 0.1
+      }
+    },
+    {
+      "rule_id": "LEARNED-GENERAL-1786",
+      "category": "General",
+      "severity": "Medium",
+      "description": "Fix: \"cazuela , creamy guajillo sauce, potato hash,\" \u2192 \"add two\"",
+      "details": {
+        "pattern_type": "general",
+        "original_text": "cazuela , creamy guajillo sauce, potato hash,",
+        "corrected_text": "add two",
+        "occurrences": 1,
+        "learned_from": "training_data",
+        "confidence": 0.1
+      }
+    },
+    {
+      "rule_id": "LEARNED-GENERAL-2157",
+      "category": "General",
+      "severity": "Medium",
+      "description": "Fix: \"egg, queso fresco, pickled onions, avocado d\" \u2192 \"eggs* 8\"",
+      "details": {
+        "pattern_type": "general",
+        "original_text": "egg, queso fresco, pickled onions, avocado d",
+        "corrected_text": "eggs* 8",
+        "occurrences": 1,
+        "learned_from": "training_data",
+        "confidence": 0.1
+      }
+    },
+    {
+      "rule_id": "LEARNED-GENERAL-4814",
+      "category": "General",
+      "severity": "Medium",
+      "description": "Fix: \"nappa\" \u2192 \"napa\"",
+      "details": {
+        "pattern_type": "general",
+        "original_text": "nappa",
+        "corrected_text": "napa",
+        "occurrences": 1,
+        "learned_from": "training_data",
+        "confidence": 0.1
+      }
+    },
+    {
+      "rule_id": "LEARNED-GENERAL-9022",
+      "category": "General",
+      "severity": "Medium",
+      "description": "Fix: \"spicy\" \u2192 \"chili\"",
+      "details": {
+        "pattern_type": "general",
+        "original_text": "spicy",
+        "corrected_text": "chili",
+        "occurrences": 1,
+        "learned_from": "training_data",
+        "confidence": 0.1
+      }
+    },
+    {
+      "rule_id": "LEARNED-GENERAL-4187",
+      "category": "General",
+      "severity": "Medium",
+      "description": "Fix: \"zarandeado salmon, citrus nappa cabbage,\" \u2192 \"grilled street corn, bacon, cotija cheese,\"",
+      "details": {
+        "pattern_type": "general",
+        "original_text": "zarandeado salmon, citrus nappa cabbage,",
+        "corrected_text": "grilled street corn, bacon, cotija cheese,",
+        "occurrences": 1,
+        "learned_from": "training_data",
+        "confidence": 0.1
+      }
+    },
+    {
+      "rule_id": "LEARNED-GENERAL-8560",
+      "category": "General",
+      "severity": "Medium",
+      "description": "Fix: \"spicy aioli , corn pico de gallo* g,s 28\" \u2192 \"aioli, taj\u00edn d,v 10\"",
+      "details": {
+        "pattern_type": "general",
+        "original_text": "spicy aioli , corn pico de gallo* g,s 28",
+        "corrected_text": "aioli, taj\u00edn d,v 10",
+        "occurrences": 1,
+        "learned_from": "training_data",
+        "confidence": 0.1
+      }
+    },
+    {
+      "rule_id": "LEARNED-GENERAL-1442",
+      "category": "General",
+      "severity": "Medium",
+      "description": "Fix: \"grilled street corn, bacon, cotija cheese,\" \u2192 \"zarandeado salmon, citrus napa cabbage,\"",
+      "details": {
+        "pattern_type": "general",
+        "original_text": "grilled street corn, bacon, cotija cheese,",
+        "corrected_text": "zarandeado salmon, citrus napa cabbage,",
+        "occurrences": 1,
+        "learned_from": "training_data",
+        "confidence": 0.1
+      }
+    },
+    {
+      "rule_id": "LEARNED-GENERAL-7164",
+      "category": "General",
+      "severity": "Medium",
+      "description": "Fix: \"mayo, tajin d,v 10\" \u2192 \"mayo chili aioli , corn pico de gallo* g,s 28\"",
+      "details": {
+        "pattern_type": "general",
+        "original_text": "mayo, tajin d,v 10",
+        "corrected_text": "mayo chili aioli , corn pico de gallo* g,s 28",
+        "occurrences": 1,
+        "learned_from": "training_data",
+        "confidence": 0.1
+      }
+    },
+    {
+      "rule_id": "LEARNED-GENERAL-6542",
+      "category": "General",
+      "severity": "Medium",
+      "description": "Fix: \"mayo, tajin\" \u2192 \"mayo aioli, taj\u00edn\"",
+      "details": {
+        "pattern_type": "general",
+        "original_text": "mayo, tajin",
+        "corrected_text": "mayo aioli, taj\u00edn",
+        "occurrences": 1,
+        "learned_from": "training_data",
+        "confidence": 0.1
+      }
+    },
+    {
+      "rule_id": "LEARNED-GENERAL-0284",
+      "category": "General",
+      "severity": "Medium",
+      "description": "Fix: \"jalapeno\" \u2192 \"jalape\u00f1o\"",
+      "details": {
+        "pattern_type": "general",
+        "original_text": "jalapeno",
+        "corrected_text": "jalape\u00f1o",
+        "occurrences": 1,
+        "learned_from": "training_data",
+        "confidence": 0.1
+      }
+    },
+    {
+      "rule_id": "LEARNED-GENERAL-2420",
+      "category": "General",
+      "severity": "Medium",
+      "description": "Fix: \"crab guacamole, smoked jumbo crab,\" \u2192 \"queso fundido, melted cheese, tomatillo salsa cruda, caramelized onion,\"",
+      "details": {
+        "pattern_type": "general",
+        "original_text": "crab guacamole, smoked jumbo crab,",
+        "corrected_text": "queso fundido, melted cheese, tomatillo salsa cruda, caramelized onion,",
+        "occurrences": 1,
+        "learned_from": "training_data",
+        "confidence": 0.1
+      }
+    },
+    {
+      "rule_id": "LEARNED-GENERAL-6789",
+      "category": "General",
+      "severity": "Medium",
+      "description": "Fix: \"esquites, old bay mayo, jalapeno g,s 22\" \u2192 \"tortillas d,v 21\"",
+      "details": {
+        "pattern_type": "general",
+        "original_text": "esquites, old bay mayo, jalapeno g,s 22",
+        "corrected_text": "tortillas d,v 21",
+        "occurrences": 1,
+        "learned_from": "training_data",
+        "confidence": 0.1
+      }
+    },
+    {
+      "rule_id": "LEARNED-GENERAL-8373",
+      "category": "General",
+      "severity": "Medium",
+      "description": "Fix: \"queso fundido, melted cheese, tomatillo salsa cruda, caramelized onion,\" \u2192 \"crab guacamole, smoked jumbo crab,\"",
+      "details": {
+        "pattern_type": "general",
+        "original_text": "queso fundido, melted cheese, tomatillo salsa cruda, caramelized onion,",
+        "corrected_text": "crab guacamole, smoked jumbo crab,",
+        "occurrences": 1,
+        "learned_from": "training_data",
+        "confidence": 0.1
+      }
+    },
+    {
+      "rule_id": "LEARNED-GENERAL-3785",
+      "category": "General",
+      "severity": "Medium",
+      "description": "Fix: \"tortillas d 21\" \u2192 \"esquites, old bay aioli mayo, jalape\u00f1o g,s 22\"",
+      "details": {
+        "pattern_type": "general",
+        "original_text": "tortillas d 21",
+        "corrected_text": "esquites, old bay aioli mayo, jalape\u00f1o g,s 22",
+        "occurrences": 1,
+        "learned_from": "training_data",
+        "confidence": 0.1
+      }
+    },
+    {
+      "rule_id": "LEARNED-SPELLING-9390",
+      "category": "Spelling",
+      "severity": "Medium",
+      "description": "Correct spelling: \"sorbete\" \u2192 \"sorbet\"",
+      "details": {
+        "pattern_type": "spelling",
+        "original_text": "sorbete",
+        "corrected_text": "sorbet",
+        "occurrences": 1,
+        "learned_from": "training_data",
+        "confidence": 0.1
+      }
+    },
+    {
+      "rule_id": "LEARNED-SPELLING-2066",
+      "category": "Spelling",
+      "severity": "Medium",
+      "description": "Correct spelling: \"eggs\" \u2192 \"eggs*\"",
+      "details": {
+        "pattern_type": "spelling",
+        "original_text": "eggs",
+        "corrected_text": "eggs*",
+        "occurrences": 1,
+        "learned_from": "training_data",
+        "confidence": 0.1
+      }
+    },
+    {
+      "rule_id": "LEARNED-SPELLING-2868",
+      "category": "Spelling",
+      "severity": "Medium",
+      "description": "Correct spelling: \"avocado\" \u2192 \"avocado*\"",
+      "details": {
+        "pattern_type": "spelling",
+        "original_text": "avocado",
+        "corrected_text": "avocado*",
+        "occurrences": 1,
+        "learned_from": "training_data",
+        "confidence": 0.1
+      }
+    }
+  ]
+}

@@ -240,7 +240,7 @@ Output: "roasted plantain purée, shaved truffle D,N"
             # Check database first
             known = lookup_dish(dish_name, restaurant)
             if known and known['confidence'] > 0.7:
-                return known['allergens']
+                return sorted(known['allergens'])
             
             # Infer from ingredients
             inferred = infer_allergens_from_ingredients(f"{dish_name} {description}")

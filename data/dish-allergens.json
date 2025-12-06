@@ -1,0 +1,213 @@
+{
+  "version": "1.0.0",
+  "last_updated": "2025-12-06T16:13:35.774053",
+  "entries": [
+    {
+      "id": "dish_1765052535_0060",
+      "dish_name": "Guacamole",
+      "dish_name_normalized": "guacamole",
+      "restaurant": "toro_chicago",
+      "allergens": [
+        "D",
+        "N",
+        "V"
+      ],
+      "ingredients": [],
+      "description": null,
+      "source": "manual",
+      "confidence": 0.5,
+      "created_at": "2025-12-06T15:22:15.634974",
+      "updated_at": "2025-12-06T15:22:15.634976",
+      "correction_count": 1,
+      "notes": null
+    },
+    {
+      "id": "dish_1765052535_2749",
+      "dish_name": "Tuna Tartare",
+      "dish_name_normalized": "tuna tartare",
+      "restaurant": "toro_chicago",
+      "allergens": [
+        "F",
+        "G"
+      ],
+      "ingredients": [],
+      "description": null,
+      "source": "manual",
+      "confidence": 0.5,
+      "created_at": "2025-12-06T15:22:15.661416",
+      "updated_at": "2025-12-06T15:22:15.661418",
+      "correction_count": 1,
+      "notes": null
+    },
+    {
+      "id": "dish_1765053057_8952",
+      "dish_name": "Kale Salad",
+      "dish_name_normalized": "kale salad",
+      "restaurant": "aquimero_mothers_day_brunch_original",
+      "allergens": [
+        "D",
+        "N",
+        "V"
+      ],
+      "ingredients": [
+        "N",
+        "D"
+      ],
+      "description": "local berries, goat cheese, toasted walnut, golden beet, orange balsamic vinaigrette",
+      "source": "training",
+      "confidence": 0.6,
+      "created_at": "2025-12-06T15:30:57.816624",
+      "updated_at": "2025-12-06T15:53:28.191896",
+      "correction_count": 2,
+      "notes": "Learned: D,N \u2192 D,N,V"
+    },
+    {
+      "id": "dish_1765053057_1815",
+      "dish_name": "Crab Cake Benedict",
+      "dish_name_normalized": "crab cake benedict",
+      "restaurant": "aquimero_mothers_day_brunch_original",
+      "allergens": [
+        "V"
+      ],
+      "ingredients": [
+        "G",
+        "E"
+      ],
+      "description": "poached egg, avocado, aj\u00ed amarillo hollandaise, croissant, spring greens, heirloom cherry tomato G",
+      "source": "training",
+      "confidence": 0.7999999999999999,
+      "created_at": "2025-12-06T15:30:57.817022",
+      "updated_at": "2025-12-06T15:53:28.193209",
+      "correction_count": 4,
+      "notes": "Learned: S \u2192 V"
+    },
+    {
+      "id": "dish_1765053057_4916",
+      "dish_name": "Mushroom okonomiyaki or mushroom pancake",
+      "dish_name_normalized": "mushroom okonomiyaki or mushroom pancake",
+      "restaurant": "aquimero_mothers_day_brunch_original",
+      "allergens": [
+        "S"
+      ],
+      "ingredients": [
+        "D",
+        "SE"
+      ],
+      "description": "mushroom oyster, cabbage, green onion, smoked cream cheese, crispy sweet potato, chipotle mayo, honey bbq, sesame seeds. D, G",
+      "source": "training",
+      "confidence": 0.6,
+      "created_at": "2025-12-06T15:30:57.817537",
+      "updated_at": "2025-12-06T15:53:28.193678",
+      "correction_count": 2,
+      "notes": "Learned: V \u2192 S*"
+    },
+    {
+      "id": "dish_1765054408_2475",
+      "dish_name": "D\u2019le\u00f1a Cesar Salad",
+      "dish_name_normalized": "dle\u00f1a cesar salad",
+      "restaurant": "dlena_brunch",
+      "allergens": [
+        "G"
+      ],
+      "ingredients": [
+        "D",
+        "E"
+      ],
+      "description": "romaine, cotija cheese, heirloom cherry tomatoes, grilled croutons, smoked egg, charred Caesar dressing D,G 16",
+      "source": "training",
+      "confidence": 0.5,
+      "created_at": "2025-12-06T15:53:28.687090",
+      "updated_at": "2025-12-06T15:53:28.687116",
+      "correction_count": 1,
+      "notes": "Learned: D,G \u2192 *D,G"
+    },
+    {
+      "id": "dish_1765054408_7471",
+      "dish_name": "Queso Fundido",
+      "dish_name_normalized": "queso fundido",
+      "restaurant": "dlena_brunch",
+      "allergens": [
+        "D",
+        "V"
+      ],
+      "ingredients": [
+        "D",
+        "G"
+      ],
+      "description": "melted cheese, tomatillo salsa cruda, caramelized onion, corn tortillas D 21",
+      "source": "training",
+      "confidence": 0.5,
+      "created_at": "2025-12-06T15:53:28.687968",
+      "updated_at": "2025-12-06T15:53:28.687970",
+      "correction_count": 1,
+      "notes": "Learned: D \u2192 D,V"
+    },
+    {
+      "id": "dish_1765055135_5797",
+      "dish_name": "Enfrijochiladas",
+      "dish_name_normalized": "enfrijochiladas",
+      "restaurant": "aquimero",
+      "full_line": "Enfrijochiladas, black bean sauce, scrambled eggs, bacon, pico de gallo, guajillo crema, cotija cheese D,G 15",
+      "allergens": [
+        "D",
+        "G"
+      ],
+      "ingredients": [
+        "black bean sauce",
+        "scrambled eggs",
+        "bacon",
+        "pico de gallo",
+        "guajillo crema",
+        "cotija cheese"
+      ],
+      "description": "black bean sauce, scrambled eggs, bacon, pico de gallo, guajillo crema, cotija cheese",
+      "price": "15",
+      "source": "manual",
+      "confidence": 0.5,
+      "created_at": "2025-12-06T16:05:35.102529",
+      "updated_at": "2025-12-06T16:05:35.102531",
+      "correction_count": 1,
+      "notes": null
+    },
+    {
+      "id": "dish_1765055615_1392",
+      "dish_name": "Guacamole",
+      "dish_name_normalized": "guacamole",
+      "restaurant": "test_restaurant",
+      "full_line": null,
+      "allergens": [
+        "D",
+        "N"
+      ],
+      "ingredients": [
+        "avocado",
+        "tomato",
+        "onion",
+        "cilantro",
+        "lime"
+      ],
+      "description": "avocado, tomato, onion, cilantro, lime",
+      "price": null,
+      "source": "training",
+      "confidence": 0.5,
+      "created_at": "2025-12-06T16:13:35.774027",
+      "updated_at": "2025-12-06T16:13:35.774029",
+      "correction_count": 1,
+      "notes": "Learned: D \u2192 D,N"
+    }
+  ],
+  "statistics": {
+    "total_dishes": 9,
+    "by_restaurant": {
+      "toro_chicago": 2,
+      "aquimero_mothers_day_brunch_original": 3,
+      "dlena_brunch": 2,
+      "aquimero": 1,
+      "test_restaurant": 1
+    },
+    "by_source": {
+      "manual": 3,
+      "training": 6
+    }
+  }
+}
