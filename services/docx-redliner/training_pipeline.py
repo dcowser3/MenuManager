@@ -22,6 +22,19 @@ import difflib
 from datetime import datetime
 import re
 
+# Import dish database for storing learned dish information
+try:
+    from dish_allergen_db import (
+        store_allergen_correction,
+        learn_dish_from_correction,
+        extract_restaurant,
+        get_statistics as get_dish_db_stats
+    )
+    DISH_DB_AVAILABLE = True
+except ImportError:
+    DISH_DB_AVAILABLE = False
+    print("Note: dish_allergen_db not available, dish learning disabled")
+
 
 class TrainingPairAnalyzer:
     """
@@ -167,22 +180,88 @@ class TrainingPairAnalyzer:
         if original == corrected:
             return None
         
-        # Categorize the type of correction
+        # Get word-level diffs first (needed for allergen detection)
+        word_diffs = self._get_word_level_diffs(original, corrected)
+        
+        # Check if any word diff is an allergen correction
+        category = self._categorize_correction_with_diffs(original, corrected, word_diffs)
+        
         correction = {
             'type': 'replacement',
             'original': original,
             'corrected': corrected,
-            'category': self._categorize_correction(original, corrected),
-            'word_diffs': self._get_word_level_diffs(original, corrected)
+            'category': category,
+            'word_diffs': word_diffs
         }
         
         return correction
+    
+    def _categorize_correction_with_diffs(self, original: str, corrected: str, word_diffs: List[Dict]) -> str:
+        """
+        Categorize correction using both full text and word-level diffs.
+        Word diffs help catch allergen codes that are part of larger lines.
+        """
+        # First check if this looks like a "swapped menu item" (completely different content)
+        # These are NOT corrections - they're just items in different order between documents
+        if self._is_swapped_menu_item(original, corrected):
+            return 'swapped_item'  # Will be filtered out later
+        
+        # Check word-level diffs for allergen patterns
+        for wd in word_diffs:
+            orig_words = wd.get('original_words', '')
+            corr_words = wd.get('corrected_words', '')
+            if self._is_allergen_correction(orig_words, corr_words):
+                return 'allergen'
+        
+        # Fall back to full-text categorization
+        return self._categorize_correction(original, corrected)
+    
+    def _is_swapped_menu_item(self, original: str, corrected: str) -> bool:
+        """
+        Detect if this is a swapped menu item (completely different dish) rather than a correction.
+        
+        Signs of a swapped item:
+        - Very different lengths
+        - Very low word overlap
+        - Both are long strings (full menu item descriptions)
+        """
+        # Short strings are likely actual corrections
+        if len(original) < 20 or len(corrected) < 20:
+            return False
+        
+        # Get words (ignore case and punctuation)
+        orig_words = set(re.sub(r'[^\w\s]', '', original.lower()).split())
+        corr_words = set(re.sub(r'[^\w\s]', '', corrected.lower()).split())
+        
+        # Remove common filler words
+        filler = {'the', 'a', 'an', 'and', 'or', 'with', 'of', 'in', 'on', 'for'}
+        orig_words -= filler
+        corr_words -= filler
+        
+        if not orig_words or not corr_words:
+            return False
+        
+        # Calculate overlap
+        overlap = orig_words & corr_words
+        total_words = orig_words | corr_words
+        
+        overlap_ratio = len(overlap) / len(total_words) if total_words else 0
+        
+        # If less than 30% word overlap on long strings, it's probably a swapped item
+        if overlap_ratio < 0.3:
+            return True
+        
+        return False
     
     def _categorize_correction(self, original: str, corrected: str) -> str:
         """
         Automatically categorize the type of correction.
         """
         # Check for common patterns
+        
+        # Allergen code correction (check FIRST - these look like spelling but aren't)
+        if self._is_allergen_correction(original, corrected):
+            return 'allergen'
         
         # Spelling correction
         if self._is_spelling_correction(original, corrected):
@@ -209,6 +288,61 @@ class TrainingPairAnalyzer:
             return 'separator'
         
         return 'general'
+    
+    def _is_allergen_correction(self, original: str, corrected: str) -> bool:
+        """
+        Check if this is an allergen/dietary code correction.
+        
+        Allergen codes are comma-separated letters at the end of menu items:
+        - D = Dairy
+        - N = Nuts  
+        - G = Gluten
+        - V = Vegetarian
+        - S = Vegan (or S* for special)
+        - E = Eggs
+        - F = Fish
+        - C = Crustaceans
+        - SE = Sesame
+        - SY = Soy
+        - M = Mustard
+        
+        Examples:
+        - "d,n" → "d,n,v" (missing vegetarian marker)
+        - "s" → "s*" (adding asterisk for raw/undercooked)
+        - "v" → "d,v" (missing dairy marker)
+        """
+        # Valid allergen codes (single letters and two-letter codes)
+        allergen_codes = {'d', 'n', 'g', 'v', 's', 'e', 'f', 'c', 'm', 'se', 'sy', 's*'}
+        
+        # Pattern for allergen strings: comma-separated codes, possibly with asterisks
+        allergen_pattern = r'^[a-z,\*]+$'
+        
+        orig_clean = original.lower().strip()
+        corr_clean = corrected.lower().strip()
+        
+        # Check if both strings look like allergen codes
+        if re.match(allergen_pattern, orig_clean) and re.match(allergen_pattern, corr_clean):
+            # Split by comma and check if they're valid codes
+            orig_codes = set(orig_clean.replace('*', '').split(','))
+            corr_codes = set(corr_clean.replace('*', '').split(','))
+            
+            # Remove empty strings
+            orig_codes.discard('')
+            corr_codes.discard('')
+            
+            # If most codes are valid allergen codes, it's an allergen correction
+            all_codes = orig_codes | corr_codes
+            valid_count = sum(1 for code in all_codes if code in allergen_codes)
+            
+            if valid_count >= len(all_codes) * 0.5:  # At least half are valid codes
+                return True
+        
+        # Also check for single letter changes that are allergen codes
+        if len(orig_clean) <= 3 and len(corr_clean) <= 3:
+            if orig_clean in allergen_codes or corr_clean in allergen_codes:
+                return True
+        
+        return False
     
     def _is_spelling_correction(self, original: str, corrected: str) -> bool:
         """Check if this is a spelling correction."""
@@ -305,6 +439,7 @@ class RuleGenerator:
     
     def __init__(self):
         self.rule_templates = {
+            'allergen': 'Missing allergen/dietary code: "{original}" should include "{corrected}" - verify dish ingredients match allergen markers',
             'spelling': 'Correct spelling: "{original}" → "{corrected}"',
             'diacritics': 'Use proper diacritics: "{original}" → "{corrected}"',
             'punctuation': 'Fix punctuation: "{original}" → "{corrected}"',
@@ -316,7 +451,8 @@ class RuleGenerator:
     def generate_rules_from_corrections(
         self, 
         corrections: List[Dict],
-        min_occurrences: int = 2
+        min_occurrences: int = 2,
+        existing_rules: List[Dict] = None
     ) -> List[Dict]:
         """
         Generate rules from a list of corrections.
@@ -324,15 +460,30 @@ class RuleGenerator:
         Args:
             corrections: List of correction dictionaries
             min_occurrences: Minimum times a pattern must appear to become a rule
+            existing_rules: Optional list of existing rules to avoid duplicates
             
         Returns:
-            List of generated rules
+            List of generated rules (only NEW rules, not duplicates)
         """
+        # Categories to skip (these are not real corrections)
+        skip_categories = {'swapped_item', 'content_removal', 'content_addition'}
+        
+        # Build set of existing patterns to avoid duplicates
+        existing_patterns = set()
+        if existing_rules:
+            for rule in existing_rules:
+                if rule.get('rule_id', '').startswith('LEARNED'):
+                    orig = rule.get('details', {}).get('original_text', '').lower()
+                    corr = rule.get('details', {}).get('corrected_text', '').lower()
+                    existing_patterns.add((orig, corr))
+        
         # Group corrections by category
         by_category = defaultdict(list)
         for corr in corrections:
             if corr.get('type') == 'replacement':
-                by_category[corr['category']].append(corr)
+                category = corr.get('category', 'unknown')
+                if category not in skip_categories:
+                    by_category[category].append(corr)
         
         generated_rules = []
         
@@ -342,6 +493,20 @@ class RuleGenerator:
             
             for pattern, occurrences in patterns.items():
                 if occurrences >= min_occurrences:
+                    # Skip if this pattern already exists
+                    if pattern in existing_patterns:
+                        continue
+                    
+                    # Skip patterns that look like swapped items (long strings with low similarity)
+                    orig, corr = pattern
+                    if len(orig) > 30 and len(corr) > 30:
+                        # Check word overlap
+                        orig_words = set(orig.split())
+                        corr_words = set(corr.split())
+                        overlap = len(orig_words & corr_words) / max(len(orig_words | corr_words), 1)
+                        if overlap < 0.3:
+                            continue  # Skip - likely swapped item
+                    
                     rule = self._create_rule(category, pattern, occurrences)
                     generated_rules.append(rule)
         
@@ -426,7 +591,7 @@ class PromptOptimizer:
         examples_text = "\n\nLEARNED EXAMPLES FROM TRAINING DATA:\n"
         
         example_count = 0
-        for category in ['spelling', 'diacritics', 'separator', 'punctuation', 'price_format']:
+        for category in ['allergen', 'spelling', 'diacritics', 'separator', 'punctuation', 'price_format']:
             if category in by_category and example_count < max_examples:
                 examples_text += f"\n{category.replace('_', ' ').title()}:\n"
                 
@@ -500,6 +665,52 @@ class TrainingPipeline:
         # Store all corrections
         self.session_data['all_corrections'].extend(analysis['text_corrections'])
         
+        # Store corrections in dish database (both allergens AND full descriptions)
+        if DISH_DB_AVAILABLE:
+            restaurant = extract_restaurant(original_path)
+            dishes_stored = 0
+            
+            for correction in analysis['text_corrections']:
+                category = correction.get('category', '')
+                
+                # Skip swapped items - these are not real corrections
+                if category == 'swapped_item':
+                    continue
+                
+                original_line = correction.get('original', '')
+                corrected_line = correction.get('corrected', '')
+                
+                # Store allergen corrections
+                if category == 'allergen':
+                    for word_diff in correction.get('word_diffs', []):
+                        orig_codes = word_diff.get('original_words', '')
+                        corr_codes = word_diff.get('corrected_words', '')
+                        
+                        result = store_allergen_correction(
+                            dish_line=original_line,
+                            original_codes=orig_codes,
+                            corrected_codes=corr_codes,
+                            restaurant=restaurant
+                        )
+                        if result:
+                            dishes_stored += 1
+                
+                # Store COMPLETE dish descriptions for spelling/general corrections
+                # This captures ingredient changes like "pork chorizo" → "bacon"
+                elif category in ('spelling', 'general', 'diacritics'):
+                    # Only store if it looks like a menu item (has commas = has ingredients)
+                    if ', ' in corrected_line and len(corrected_line) > 20:
+                        result = learn_dish_from_correction(
+                            original_line=original_line,
+                            corrected_line=corrected_line,
+                            restaurant=restaurant
+                        )
+                        if result:
+                            dishes_stored += 1
+            
+            if dishes_stored > 0:
+                print(f"  Stored {dishes_stored} dish descriptions in database")
+        
         print(f"  Found {len(analysis['text_corrections'])} text corrections")
         print(f"  Found {len(analysis['formatting_corrections'])} formatting corrections")
         
@@ -541,24 +752,52 @@ class TrainingPipeline:
             # Process the pair
             self.ingest_document_pair(str(orig_file), str(redlined_file))
     
-    def generate_rules(self, min_occurrences: int = 2) -> List[Dict]:
+    def generate_rules(self, min_occurrences: int = 2, existing_rules_path: str = None) -> List[Dict]:
         """
         Generate rules from all accumulated corrections.
+        
+        Args:
+            min_occurrences: Minimum times a pattern must appear to become a rule
+            existing_rules_path: Path to existing rules file to avoid duplicates
         """
         print(f"\n{'='*60}")
         print("GENERATING RULES FROM TRAINING DATA")
         print(f"{'='*60}")
-        print(f"Total corrections analyzed: {len(self.session_data['all_corrections'])}")
+        
+        # Filter out swapped items from corrections before counting
+        valid_corrections = [
+            c for c in self.session_data['all_corrections']
+            if c.get('category') != 'swapped_item'
+        ]
+        swapped_count = len(self.session_data['all_corrections']) - len(valid_corrections)
+        
+        print(f"Total corrections analyzed: {len(valid_corrections)}")
+        if swapped_count > 0:
+            print(f"Filtered out {swapped_count} swapped menu items (not real corrections)")
+        
+        # Load existing rules to avoid duplicates
+        existing_rules = []
+        if existing_rules_path and os.path.exists(existing_rules_path):
+            try:
+                with open(existing_rules_path, 'r') as f:
+                    data = json.load(f)
+                    existing_rules = data.get('rules', [])
+                    existing_learned = [r for r in existing_rules if r.get('rule_id', '').startswith('LEARNED')]
+                    if existing_learned:
+                        print(f"Found {len(existing_learned)} existing learned rules (will skip duplicates)")
+            except Exception as e:
+                print(f"Note: Could not load existing rules: {e}")
         
         rules = self.rule_generator.generate_rules_from_corrections(
-            self.session_data['all_corrections'],
-            min_occurrences=min_occurrences
+            valid_corrections,
+            min_occurrences=min_occurrences,
+            existing_rules=existing_rules
         )
         
         self.session_data['generated_rules'] = rules
         self.session_data['rules_generated'] = len(rules)
         
-        print(f"Generated {len(rules)} new rules")
+        print(f"Generated {len(rules)} NEW rules (not counting duplicates)")
         
         return rules
     
@@ -647,6 +886,20 @@ class TrainingPipeline:
             for category, count in categories.most_common():
                 print(f"  {category}: {count}")
         
+        # Dish allergen database stats
+        if DISH_DB_AVAILABLE:
+            try:
+                dish_stats = get_dish_db_stats()
+                if dish_stats.get('total_dishes', 0) > 0:
+                    print("\nDish Allergen Database:")
+                    print(f"  Total dishes: {dish_stats['total_dishes']}")
+                    if dish_stats.get('by_restaurant'):
+                        print("  By restaurant:")
+                        for restaurant, count in dish_stats['by_restaurant'].items():
+                            print(f"    {restaurant}: {count}")
+            except Exception as e:
+                print(f"\nNote: Could not load dish database stats: {e}")
+        
         print(f"\n{'='*60}\n")
 
 
@@ -693,8 +946,11 @@ if __name__ == "__main__":
     # Ingest document pairs
     pipeline.ingest_directory_pairs(args.directory)
     
-    # Generate rules
-    pipeline.generate_rules(min_occurrences=args.min_occurrences)
+    # Generate rules (pass existing rules path to avoid duplicates)
+    pipeline.generate_rules(
+        min_occurrences=args.min_occurrences,
+        existing_rules_path=args.merge_rules
+    )
     
     # Save rules
     rules_file = pipeline.save_rules_to_file()

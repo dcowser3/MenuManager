@@ -3,15 +3,30 @@ AI Corrector Integration
 =========================
 Integrates with OpenAI GPT-4 to provide intelligent menu corrections
 based on SOP rules and best practices.
+
+Now includes dish allergen database integration for intelligent allergen suggestions.
 """
 
 import os
-from typing import Optional
+from typing import Optional, List
 from openai import OpenAI
 from dotenv import load_dotenv
 
 # Load environment variables
 load_dotenv()
+
+# Import dish allergen database
+try:
+    from dish_allergen_db import (
+        lookup_dish,
+        search_dishes,
+        export_for_ai_prompt,
+        infer_allergens_from_ingredients,
+        ALLERGEN_CODES
+    )
+    DISH_DB_AVAILABLE = True
+except ImportError:
+    DISH_DB_AVAILABLE = False
 
 
 class AICorrector:
@@ -127,13 +142,14 @@ Output: "roasted plantain purée, shaved truffle D,N"
             # Return original text if correction fails
             return text
     
-    def correct_with_context(self, text: str, sop_rules: Optional[str] = None) -> str:
+    def correct_with_context(self, text: str, sop_rules: Optional[str] = None, restaurant: Optional[str] = None) -> str:
         """
-        Correct text with additional SOP context.
+        Correct text with additional SOP context and dish database knowledge.
         
         Args:
             text: The original menu text
             sop_rules: Optional additional SOP rules to include
+            restaurant: Optional restaurant identifier for dish lookups
             
         Returns:
             The corrected text
@@ -143,8 +159,17 @@ Output: "roasted plantain purée, shaved truffle D,N"
         
         # Build context-aware prompt
         user_message = text
-        if sop_rules:
-            user_message = f"SOP Context:\n{sop_rules}\n\nMenu Item:\n{text}"
+        
+        # Add dish database context if available
+        dish_context = self._get_dish_context(text, restaurant)
+        
+        if sop_rules or dish_context:
+            context_parts = []
+            if sop_rules:
+                context_parts.append(f"SOP Context:\n{sop_rules}")
+            if dish_context:
+                context_parts.append(f"Known Dish Allergens:\n{dish_context}")
+            user_message = f"{chr(10).join(context_parts)}\n\nMenu Item:\n{text}"
         
         try:
             response = self.client.chat.completions.create(
@@ -163,6 +188,93 @@ Output: "roasted plantain purée, shaved truffle D,N"
         except Exception as e:
             print(f"Error correcting text: {e}")
             return text
+    
+    def _get_dish_context(self, text: str, restaurant: Optional[str] = None) -> str:
+        """
+        Get dish database context for allergen suggestions.
+        
+        Args:
+            text: The menu item text
+            restaurant: Optional restaurant identifier
+            
+        Returns:
+            Context string with known allergen information
+        """
+        if not DISH_DB_AVAILABLE:
+            return ""
+        
+        context_parts = []
+        
+        # Try to extract dish name (usually first part before comma or dash)
+        dish_name = text.split(',')[0].split(' - ')[0].strip()
+        
+        # Look up in database
+        known_dish = lookup_dish(dish_name, restaurant)
+        if known_dish:
+            allergens = ','.join(known_dish['allergens'])
+            context_parts.append(f"Known: {dish_name} = {allergens} (confidence: {known_dish['confidence']:.0%})")
+        
+        # Also infer from ingredients
+        inferred = infer_allergens_from_ingredients(text)
+        if inferred:
+            inferred_str = ','.join(inferred)
+            context_parts.append(f"Inferred from ingredients: {inferred_str}")
+        
+        return '\n'.join(context_parts)
+    
+    def suggest_allergens(self, dish_name: str, description: str, restaurant: Optional[str] = None) -> List[str]:
+        """
+        Suggest allergens for a dish based on database + AI inference.
+        
+        Args:
+            dish_name: Name of the dish
+            description: Dish description/ingredients
+            restaurant: Optional restaurant identifier
+            
+        Returns:
+            List of suggested allergen codes
+        """
+        suggested = set()
+        
+        if DISH_DB_AVAILABLE:
+            # Check database first
+            known = lookup_dish(dish_name, restaurant)
+            if known and known['confidence'] > 0.7:
+                return known['allergens']
+            
+            # Infer from ingredients
+            inferred = infer_allergens_from_ingredients(f"{dish_name} {description}")
+            suggested.update(inferred)
+        
+        # Use AI for additional suggestions if needed
+        if not suggested:
+            try:
+                response = self.client.chat.completions.create(
+                    model=self.model,
+                    messages=[
+                        {"role": "system", "content": """You are an allergen expert. Given a dish name and description, identify likely allergens.
+Return ONLY comma-separated allergen codes:
+D=Dairy, N=Nuts, G=Gluten, V=Vegetarian, S=Vegan, E=Eggs, F=Fish, C=Crustaceans, SE=Sesame, SY=Soy, M=Mustard
+
+Example: D,N,G"""},
+                        {"role": "user", "content": f"Dish: {dish_name}\nDescription: {description}"}
+                    ],
+                    temperature=0.1,
+                    max_tokens=50
+                )
+                
+                ai_codes = response.choices[0].message.content.strip().upper().split(',')
+                for code in ai_codes:
+                    code = code.strip()
+                    if DISH_DB_AVAILABLE and code in ALLERGEN_CODES:
+                        suggested.add(code)
+                    elif code in ['D', 'N', 'G', 'V', 'S', 'E', 'F', 'C', 'SE', 'SY', 'M']:
+                        suggested.add(code)
+                        
+            except Exception as e:
+                print(f"Error getting AI allergen suggestions: {e}")
+        
+        return sorted(suggested)
 
 
 class BatchAICorrector:
