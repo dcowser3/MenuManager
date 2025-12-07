@@ -467,49 +467,49 @@
       }
     },
     {
-      "rule_id": "LEARNED-ALLERGEN-4474",
-      "category": "Allergen",
+      "rule_id": "LEARNED-SPELLING-0001",
+      "category": "Spelling",
       "severity": "Medium",
-      "description": "Missing allergen/dietary code: \"d,n\" should include \"d,n,v\" - verify dish ingredients match allergen markers",
+      "description": "Correct spelling: \"mayo\" \u2192 \"aioli\"",
       "details": {
-        "pattern_type": "allergen",
-        "original_text": "d,n",
-        "corrected_text": "d,n,v",
-        "occurrences": 1,
+        "pattern_type": "spelling",
+        "original_text": "mayo",
+        "corrected_text": "aioli",
+        "occurrences": 6,
         "learned_from": "training_data",
-        "confidence": 0.1
+        "confidence": 0.6
       }
     },
     {
-      "rule_id": "LEARNED-ALLERGEN-5250",
-      "category": "Allergen",
-      "severity": "Medium",
-      "description": "Missing allergen/dietary code: \"s\" should include \"s*\" - verify dish ingredients match allergen markers",
-      "details": {
-        "pattern_type": "allergen",
-        "original_text": "s",
-        "corrected_text": "s*",
-        "occurrences": 1,
-        "learned_from": "training_data",
-        "confidence": 0.1
-      }
-    },
-    {
-      "rule_id": "LEARNED-GENERAL-6414",
+      "rule_id": "LEARNED-GENERAL-0002",
       "category": "General",
       "severity": "Medium",
-      "description": "Fix: \"ribeye prime,\" \u2192 \"prime ribeye,\"",
+      "description": "Fix: \"sea food\" \u2192 \"seafood\"",
       "details": {
         "pattern_type": "general",
-        "original_text": "ribeye prime,",
-        "corrected_text": "prime ribeye,",
+        "original_text": "sea food",
+        "corrected_text": "seafood",
         "occurrences": 1,
         "learned_from": "training_data",
         "confidence": 0.1
       }
     },
     {
-      "rule_id": "LEARNED-SPELLING-7481",
+      "rule_id": "LEARNED-GENERAL-0003",
+      "category": "General",
+      "severity": "Medium",
+      "description": "Fix: \"bbq\" \u2192 \"barbeque sauce\"",
+      "details": {
+        "pattern_type": "general",
+        "original_text": "bbq",
+        "corrected_text": "barbeque sauce",
+        "occurrences": 1,
+        "learned_from": "training_data",
+        "confidence": 0.1
+      }
+    },
+    {
+      "rule_id": "LEARNED-SPELLING-0004",
       "category": "Spelling",
       "severity": "Medium",
       "description": "Correct spelling: \"sorbete\" \u2192 \"sorbet\"",

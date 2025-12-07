@@ -35,6 +35,17 @@ except ImportError:
     DISH_DB_AVAILABLE = False
     print("Note: dish_allergen_db not available, dish learning disabled")
 
+# Import known correction pairs
+# ADD NEW PAIRS TO: known_corrections.py (single location!)
+try:
+    from known_corrections import KNOWN_PAIRS, KNOWN_ABBREVIATIONS, is_known_pair
+    KNOWN_CORRECTIONS_AVAILABLE = True
+except ImportError:
+    KNOWN_PAIRS = set()
+    KNOWN_ABBREVIATIONS = {}
+    KNOWN_CORRECTIONS_AVAILABLE = False
+    print("Note: known_corrections.py not found, using inline pairs")
+
 
 class TrainingPairAnalyzer:
     """
@@ -75,15 +86,30 @@ class TrainingPairAnalyzer:
             'timestamp': datetime.now().isoformat(),
             'text_corrections': [],
             'formatting_corrections': [],
+            'tracked_changes': [],
             'metadata': {
                 'original_paras': len(original_paras),
                 'redlined_paras': len(redlined_paras)
             }
         }
         
-        # Analyze text differences
-        text_diffs = self._analyze_text_differences(original_paras, redlined_paras)
-        pair_analysis['text_corrections'] = text_diffs
+        # Build set of text that was already highlighted in the original document
+        # (these are menu edits by the chef, not reviewer corrections)
+        original_highlighted_text = self._get_highlighted_text(original_formatted)
+        
+        # FIRST: Try to extract tracked changes from redlined doc formatting
+        # (strikethrough = deleted, highlight = added)
+        tracked_corrections = self._extract_tracked_changes(
+            redlined_formatted, 
+            original_highlighted_text
+        )
+        if tracked_corrections:
+            pair_analysis['text_corrections'] = tracked_corrections
+            pair_analysis['tracked_changes'] = tracked_corrections
+        else:
+            # Fallback: Analyze text differences between docs
+            text_diffs = self._analyze_text_differences(original_paras, redlined_paras)
+            pair_analysis['text_corrections'] = text_diffs
         
         # Analyze formatting differences
         format_diffs = self._analyze_formatting_differences(
@@ -93,6 +119,279 @@ class TrainingPairAnalyzer:
         pair_analysis['formatting_corrections'] = format_diffs
         
         return pair_analysis
+    
+    def _is_likely_correction(self, original: str, corrected: str) -> bool:
+        """
+        Check if this looks like a systematic correction (vs a random menu change).
+        
+        Returns True for patterns that look like corrections:
+        - Abbreviation expansions (bbq → barbeque sauce)
+        - Spacing fixes (sea food → seafood)
+        - Diacritic additions (jalapeno → jalapeño)
+        - Similar character patterns (high edit similarity)
+        - Known terminology pairs
+        
+        Returns False for patterns that look like menu changes:
+        - Completely different words with no similarity
+        - Different food categories
+        """
+        if not original or not corrected:
+            return True  # Can't determine, let it through
+        
+        orig_lower = original.lower().strip()
+        corr_lower = corrected.lower().strip()
+        
+        # 1. Spacing fix: removing/adding spaces
+        if orig_lower.replace(' ', '') == corr_lower.replace(' ', ''):
+            return True
+        
+        # 2. Diacritic addition: same base letters
+        import unicodedata
+        def remove_diacritics(s):
+            return ''.join(c for c in unicodedata.normalize('NFD', s) 
+                          if unicodedata.category(c) != 'Mn')
+        if remove_diacritics(orig_lower) == remove_diacritics(corr_lower):
+            return True
+        
+        # 3. Abbreviation expansion: original is much shorter and starts similarly
+        if orig_lower and len(orig_lower) <= 5 and len(corr_lower) > len(orig_lower):
+            # Check if it's an abbreviation (first letters match)
+            if corr_lower.startswith(orig_lower[0]):
+                return True
+            # Check common abbreviations (defined in known_corrections.py)
+            if orig_lower in KNOWN_ABBREVIATIONS:
+                return True
+        
+        # 4. Known terminology pairs (same concept, different term)
+        # These are defined in known_corrections.py - edit that file to add new pairs!
+        if (orig_lower, corr_lower) in KNOWN_PAIRS:
+            return True
+        
+        # 5. High character similarity (edit distance)
+        # Using simple ratio: shared characters / total characters
+        orig_set = set(orig_lower.replace(' ', ''))
+        corr_set = set(corr_lower.replace(' ', ''))
+        if orig_set and corr_set:
+            shared = len(orig_set & corr_set)
+            total = len(orig_set | corr_set)
+            similarity = shared / total
+            # If more than 60% character overlap, likely a correction
+            if similarity > 0.6:
+                return True
+        
+        # 6. One contains the other (partial match)
+        if orig_lower in corr_lower or corr_lower in orig_lower:
+            return True
+        
+        # 7. Single word changes are often terminology preferences
+        orig_words = orig_lower.split()
+        corr_words = corr_lower.split()
+        if len(orig_words) == 1 and len(corr_words) == 1:
+            # Single word to single word - often a valid correction
+            return True
+        
+        # If none of the above, it might be a menu change
+        # Return False to let the occurrence filter handle it
+        return False
+    
+    def _is_price_change(self, original: str, corrected: str) -> bool:
+        """
+        Check if this is a price change (should be ignored).
+        
+        Price changes are when both original and corrected are purely numeric,
+        or contain only numbers and common price symbols ($, €, etc.)
+        """
+        # Strip common price-related characters
+        price_chars = '$€£¥,.| '
+        orig_clean = original.strip()
+        corr_clean = corrected.strip()
+        
+        for char in price_chars:
+            orig_clean = orig_clean.replace(char, '')
+            corr_clean = corr_clean.replace(char, '')
+        
+        # If both are purely numeric after cleaning, it's a price change
+        if orig_clean.isdigit() and corr_clean.isdigit():
+            return True
+        
+        # Also check if either is empty and the other is numeric (price removal/addition)
+        if (orig_clean.isdigit() and not corr_clean) or (corr_clean.isdigit() and not orig_clean):
+            return True
+        
+        return False
+    
+    
+    def _get_highlighted_text(self, formatted_content: List[Dict]) -> set:
+        """
+        Extract all text that is highlighted (yellow) in a document.
+        
+        This is used to identify text that was already highlighted in the original
+        document before review - these are menu edits, not corrections we want to learn.
+        """
+        highlighted = set()
+        
+        for para_info in formatted_content:
+            for run in para_info.get('runs', []):
+                highlight = run.get('highlight')
+                if highlight and highlight != 'None' and 'YELLOW' in str(highlight).upper():
+                    text = run.get('text', '').strip().lower()
+                    if text:
+                        highlighted.add(text)
+        
+        return highlighted
+    
+    def _extract_tracked_changes(self, formatted_content: List[Dict], original_highlighted_text: set = None) -> List[Dict]:
+        """
+        Extract corrections from tracked changes in a redlined document.
+        
+        Looks for patterns like:
+        - [highlighted text][strikethrough text] = replacement (new before old)
+        - [strikethrough text][highlighted text] = replacement (old before new)
+        - [strikethrough text] alone = deletion
+        - [highlighted text] alone = addition
+        
+        Filters out:
+        - Price changes (numeric values)
+        - Text that was already highlighted in the original (chef's menu edits)
+        
+        Note: Use --min-occurrences to filter out one-off menu changes vs systematic corrections
+        
+        Returns list of corrections found.
+        """
+        corrections = []
+        original_highlighted_text = original_highlighted_text or set()
+        
+        for para_info in formatted_content:
+            runs = para_info.get('runs', [])
+            if not runs:
+                continue
+            
+            # Track which runs we've already processed
+            processed = set()
+            
+            # First pass: find highlight + strikethrough pairs
+            for i, run in enumerate(runs):
+                if i in processed:
+                    continue
+                    
+                run_text = run.get('text', '').strip()
+                if not run_text:
+                    continue
+                
+                highlight = run.get('highlight')
+                is_highlighted = highlight and highlight != 'None' and 'YELLOW' in str(highlight).upper()
+                is_strikethrough = run.get('strike')
+                
+                # Pattern 1: Highlighted text followed by strikethrough (replacement: new → old)
+                if is_highlighted:
+                    added_text = run_text
+                    deleted_text = ''
+                    
+                    # Look for following strikethrough
+                    for j in range(i + 1, min(i + 4, len(runs))):  # Check next few runs
+                        if j in processed:
+                            continue
+                        next_run = runs[j]
+                        next_text = next_run.get('text', '').strip()
+                        
+                        if not next_text:
+                            continue
+                        
+                        if next_run.get('strike'):
+                            deleted_text = next_text
+                            processed.add(j)
+                            break
+                        # Stop if we hit regular text
+                        elif not (next_run.get('highlight') and 'YELLOW' in str(next_run.get('highlight', '')).upper()):
+                            break
+                    
+                    if deleted_text:
+                        # Skip price changes
+                        if self._is_price_change(deleted_text, added_text):
+                            processed.add(i)
+                            continue
+                        
+                        # Skip if the "new" text was already highlighted in the original
+                        # (this is a menu edit by the chef, not a reviewer correction)
+                        if added_text.lower() in original_highlighted_text:
+                            processed.add(i)
+                            continue
+                        
+                        # This is a replacement: old text was deleted, new text was added
+                        category = self._categorize_correction(deleted_text, added_text)
+                        correction = {
+                            'type': 'replacement',
+                            'original': deleted_text,
+                            'corrected': added_text,
+                            'category': category,
+                            'source': 'tracked_changes',
+                            'word_diffs': [{
+                                'operation': 'replace',
+                                'original_words': deleted_text,
+                                'corrected_words': added_text
+                            }]
+                        }
+                        corrections.append(correction)
+                        processed.add(i)
+                        print(f"    Found tracked change: '{deleted_text}' → '{added_text}'")
+                
+                # Pattern 2: Strikethrough text followed by highlighted (replacement: old → new)
+                elif is_strikethrough:
+                    deleted_text = run_text
+                    added_text = ''
+                    
+                    # Look for following highlighted text
+                    for j in range(i + 1, min(i + 4, len(runs))):
+                        if j in processed:
+                            continue
+                        next_run = runs[j]
+                        next_text = next_run.get('text', '').strip()
+                        
+                        if not next_text:
+                            continue
+                        
+                        next_highlight = next_run.get('highlight')
+                        if next_highlight and next_highlight != 'None' and 'YELLOW' in str(next_highlight).upper():
+                            added_text = next_text
+                            processed.add(j)
+                            break
+                        # Stop if we hit regular non-strikethrough text
+                        elif not next_run.get('strike'):
+                            break
+                    
+                    if i not in processed:  # Not already processed as part of a highlight pair
+                        # Skip price changes
+                        if self._is_price_change(deleted_text, added_text):
+                            processed.add(i)
+                            continue
+                        
+                        # Skip if the "new" text was already highlighted in the original
+                        if added_text and added_text.lower() in original_highlighted_text:
+                            processed.add(i)
+                            continue
+                        
+                        if added_text:
+                            category = self._categorize_correction(deleted_text, added_text)
+                        else:
+                            category = 'deletion'
+                        
+                        correction = {
+                            'type': 'replacement' if added_text else 'deletion',
+                            'original': deleted_text,
+                            'corrected': added_text,
+                            'category': category,
+                            'source': 'tracked_changes',
+                            'word_diffs': [{
+                                'operation': 'replace' if added_text else 'delete',
+                                'original_words': deleted_text,
+                                'corrected_words': added_text
+                            }]
+                        }
+                        corrections.append(correction)
+                        processed.add(i)
+                        print(f"    Found tracked change: '{deleted_text}' → '{added_text}'")
+        
+        return corrections
     
     def _extract_formatted_content(self, doc: Document) -> List[Dict]:
         """
@@ -448,6 +747,68 @@ class RuleGenerator:
             'price_format': 'Format price correctly: "{original}" → "{corrected}"'
         }
     
+    def _is_likely_correction(self, original: str, corrected: str) -> bool:
+        """
+        Check if this looks like a systematic correction (vs a random menu change).
+        
+        Returns True for patterns that look like corrections:
+        - Abbreviation expansions (bbq → barbeque sauce)
+        - Spacing fixes (sea food → seafood)
+        - Diacritic additions (jalapeno → jalapeño)
+        - Similar character patterns
+        - Known terminology pairs
+        - Single word to single word changes
+        """
+        if not original or not corrected:
+            return True  # Can't determine, let it through
+        
+        orig_lower = original.lower().strip()
+        corr_lower = corrected.lower().strip()
+        
+        # 1. Spacing fix: removing/adding spaces
+        if orig_lower.replace(' ', '') == corr_lower.replace(' ', ''):
+            return True
+        
+        # 2. Diacritic addition: same base letters
+        import unicodedata
+        def remove_diacritics(s):
+            return ''.join(c for c in unicodedata.normalize('NFD', s) 
+                          if unicodedata.category(c) != 'Mn')
+        if remove_diacritics(orig_lower) == remove_diacritics(corr_lower):
+            return True
+        
+        # 3. Abbreviation expansion: original is short, corrected is longer
+        if orig_lower and len(orig_lower) <= 5 and len(corr_lower) > len(orig_lower):
+            if corr_lower.startswith(orig_lower[0]):
+                return True
+            # Check common abbreviations (defined in known_corrections.py)
+            if orig_lower in KNOWN_ABBREVIATIONS:
+                return True
+        
+        # 4. Known terminology pairs
+        # These are defined in known_corrections.py - edit that file to add new pairs!
+        if (orig_lower, corr_lower) in KNOWN_PAIRS:
+            return True
+        
+        # 5. High character similarity
+        orig_set = set(orig_lower.replace(' ', ''))
+        corr_set = set(corr_lower.replace(' ', ''))
+        if orig_set and corr_set:
+            shared = len(orig_set & corr_set)
+            total = len(orig_set | corr_set)
+            if shared / total > 0.6:
+                return True
+        
+        # 6. One contains the other
+        if orig_lower in corr_lower or corr_lower in orig_lower:
+            return True
+        
+        # 7. Single word to single word - often terminology preferences
+        if len(orig_lower.split()) == 1 and len(corr_lower.split()) == 1:
+            return True
+        
+        return False
+    
     def generate_rules_from_corrections(
         self, 
         corrections: List[Dict],
@@ -492,23 +853,32 @@ class RuleGenerator:
             patterns = self._find_patterns(corr_list)
             
             for pattern, occurrences in patterns.items():
+                orig, corr = pattern
+                
+                # Skip if this pattern already exists
+                if pattern in existing_patterns:
+                    continue
+                
+                # Skip patterns that look like swapped items (long strings with low similarity)
+                if len(orig) > 30 and len(corr) > 30:
+                    # Check word overlap
+                    orig_words = set(orig.split())
+                    corr_words = set(corr.split())
+                    overlap = len(orig_words & corr_words) / max(len(orig_words | corr_words), 1)
+                    if overlap < 0.3:
+                        continue  # Skip - likely swapped item
+                
+                # Include rule if:
+                # 1. It meets the minimum occurrence threshold, OR
+                # 2. It looks like a systematic correction (passes heuristics)
                 if occurrences >= min_occurrences:
-                    # Skip if this pattern already exists
-                    if pattern in existing_patterns:
-                        continue
-                    
-                    # Skip patterns that look like swapped items (long strings with low similarity)
-                    orig, corr = pattern
-                    if len(orig) > 30 and len(corr) > 30:
-                        # Check word overlap
-                        orig_words = set(orig.split())
-                        corr_words = set(corr.split())
-                        overlap = len(orig_words & corr_words) / max(len(orig_words | corr_words), 1)
-                        if overlap < 0.3:
-                            continue  # Skip - likely swapped item
-                    
                     rule = self._create_rule(category, pattern, occurrences)
                     generated_rules.append(rule)
+                elif self._is_likely_correction(orig, corr):
+                    # Single occurrence but looks like a real correction
+                    rule = self._create_rule(category, pattern, occurrences)
+                    generated_rules.append(rule)
+                # Otherwise skip - likely a one-off menu change
         
         return generated_rules
     
