@@ -5,9 +5,12 @@ Integrates with OpenAI GPT-4 to provide intelligent menu corrections
 based on SOP rules and best practices.
 
 Now includes dish allergen database integration for intelligent allergen suggestions.
+Includes learned terminology corrections from training.
 """
 
 import os
+import json
+from pathlib import Path
 from typing import Optional, List
 from openai import OpenAI
 from dotenv import load_dotenv
@@ -22,11 +25,26 @@ try:
         search_dishes,
         export_for_ai_prompt,
         infer_allergens_from_ingredients,
+        get_dish_corrections,
         ALLERGEN_CODES
     )
     DISH_DB_AVAILABLE = True
 except ImportError:
     DISH_DB_AVAILABLE = False
+
+# Import known corrections/terminology
+try:
+    from known_corrections import (
+        TERMINOLOGY_CORRECTIONS,
+        CONTEXT_HINTS,
+        KNOWN_PAIRS
+    )
+    CORRECTIONS_AVAILABLE = True
+except ImportError:
+    TERMINOLOGY_CORRECTIONS = {}
+    CONTEXT_HINTS = {}
+    KNOWN_PAIRS = set()
+    CORRECTIONS_AVAILABLE = False
 
 
 class AICorrector:
@@ -53,20 +71,46 @@ class AICorrector:
     def _build_system_prompt(self) -> str:
         """
         Build the system prompt for menu corrections.
+        Includes learned terminology rules from training.
         """
-        return """You are an expert menu editor for RSH Design. Your task is to correct menu item text according to strict formatting guidelines.
+        # Build terminology corrections section
+        terminology_section = self._build_terminology_section()
+        
+        # Build dish-specific corrections if database available
+        dish_corrections_section = ""
+        if DISH_DB_AVAILABLE:
+            dish_corrections_section = self._build_dish_corrections_section()
+        
+        return f"""You are an expert menu editor for RSH Design. Your task is to correct menu item text according to strict formatting guidelines.
 
 CRITICAL RULES:
 1. Return ONLY the corrected text - no explanations, no comments, no markdown
 
-2. PRESERVE EXISTING CAPITALIZATION - BE VERY CONSERVATIVE:
+2. PRESERVE ALL EXISTING FORMATTING:
+   - DO NOT add or remove bold, italic, or any text formatting
+   - Return plain text only - no markdown, no ** for bold, no formatting changes
+   - Keep existing asterisks (*) in their positions
+
+3. ALLERGEN CODES - VERY IMPORTANT:
+   - KEEP all existing allergen codes exactly as they are
+   - INFER missing allergen codes based on ingredients you can identify:
+     * D (Dairy): cheese, cream, butter, milk, crema, queso, burrata, yogurt
+     * G (Gluten): bread, flour, panko, tortilla, pasta, noodles, brioche
+     * N (Nuts): almond, peanut, walnut, pistachio, cashew, hazelnut, pine nut
+     * S (Shellfish): shrimp, prawn, crab, lobster, crawfish
+     * V (Vegetarian): dishes without meat/fish (use your judgment)
+     * VG (Vegan): dishes without any animal products (no dairy, eggs, honey)
+   - Format: Place allergen codes at the very END of the line
+   - Only ADD codes if you're confident based on visible ingredients
+   - When in doubt, leave existing codes unchanged
+
+4. PRESERVE EXISTING CAPITALIZATION - BE VERY CONSERVATIVE:
    - DO NOT change the capitalization of dish names, section headers, or titles
    - DO NOT lowercase words that are already capitalized (they are intentional)
    - DO NOT change "The Spark", "El Primer Encuentro", "Chilean Sea Bass", etc.
    - Only change capitalization if something is ALL CAPS that shouldn't be
-   - Keep descriptions after the dish name in their original case
 
-3. Fix ONLY clear spelling errors:
+5. Fix ONLY clear spelling errors:
    - "tartar" → "tartare" (for raw fish/meat preparations)
    - "pre-fix" or "prefix" → "prix fixe" (French term for fixed-price menu)
    - "avacado" → "avocado"
@@ -74,41 +118,105 @@ CRITICAL RULES:
    - "parmesian" → "parmesan"
    - "Ceasar/Cesar" → "Caesar"
 
-4. Formatting rules:
+6. RSH TERMINOLOGY CORRECTIONS (APPLY THESE):
+{terminology_section}
+
+7. RAW ITEM ASTERISK PLACEMENT:
+   - Add asterisk (*) for items containing raw/undercooked ingredients
+   - IMPORTANT: Place the asterisk at the END of the description, BEFORE any allergen codes
+   - Format: "dish name, ingredients * ALLERGEN_CODES"
+   - Example: "Tuna Tartare, avocado, ponzu * D,G" (asterisk BEFORE D,G)
+   - If there are no allergen codes, put asterisk at the very end
+   - Raw items include: tartare, carpaccio, raw fish, sushi, sashimi, caviar, oysters, raw egg, ceviche
+
+8. Formatting rules:
    - DO NOT change ingredient separators - keep commas as commas, keep hyphens as hyphens
-   - DO NOT split compound words (yuzu-lime, cacao-ancho, cucumber-cilantro, huitlacoche-stuffed)
+   - DO NOT split compound words (yuzu-lime, cacao-ancho, cucumber-cilantro)
    - Dual prices: use " | " (space-bar-space) to separate two prices, not "/"
    - Enforce diacritics: jalapeño, crème brûlée, purée, soufflé, flambéed, etc.
-   - Add asterisk (*) after items containing raw or undercooked ingredients (raw fish, tartare, carpaccio, caviar, oysters, raw egg)
 
-5. DO NOT CHANGE:
+9. DO NOT CHANGE:
    - Section headers like "The Spark – "El Primer Encuentro""
-   - Dish names like "Chilean Sea Bass en Pipián Verde", "Tuna Tartare Tostada"
-   - Title capitalization like "A Love Story", "Chocolate, Rose & Raspberry"
-   - Words like "one" in "Choose one"
-   - Compound words with hyphens (yuzu-lime, cacao-ancho, huitlacoche-stuffed)
+   - Dish names like "Chilean Sea Bass en Pipián Verde"
+   - Title capitalization like "A Love Story"
+   - Compound words with hyphens
 
-6. If the text is already correct, return it UNCHANGED
+10. If the text is already correct, return it UNCHANGED
+{dish_corrections_section}
 
 EXAMPLES:
 Input: "Tuna Tartar Tostada, avocado mousse, hibiscus ponzu D,G"
 Output: "Tuna Tartare Tostada, avocado mousse, hibiscus ponzu * D,G"
 
-Input: "Filete de Wagyu, australian Wagyu tenderloin, soft quail egg"
-Output: "Filete de Wagyu, australian Wagyu tenderloin, soft quail egg *"
+Input: "Sushi Tamaki Hand Roll, avocado, cucumber, sriracha aioli, masago, bubu arare"
+Output: "Sushi Tamaki Hand Roll, avocado, cucumber, sriracha aioli, masago, bubu arare *"
+(Note: asterisk added for raw fish - masago is fish roe)
 
-Input: "The Spark – "El Primer Encuentro""
-Output: "The Spark – "El Primer Encuentro""
+Input: "Filete de Wagyu, australian Wagyu tenderloin, soft quail egg D,E"
+Output: "Filete de Wagyu, australian Wagyu tenderloin, soft quail egg * D,E"
 
-Input: "Chilean Sea Bass en Pipián Verde, seared chilean sea bass"
-Output: "Chilean Sea Bass en Pipián Verde, seared chilean sea bass"
+Input: "Red Paloma, tequila, grapefruit, lime, salt crust"
+Output: "Red Paloma, tequila, grapefruit, lime, salt rim"
 
-Input: "Chocolate, Rose & Raspberry, dark chocolate tart"
-Output: "Chocolate, Rose & Raspberry, dark chocolate tart"
+Input: "hibiscus infused blanco tequila, lime, ginger beer, tortilla crust"
+Output: "hibiscus infused blanco tequila, lime, ginger beer, tortilla rim"
 
 Input: "roasted plantain purée, shaved truffle D,N"
 Output: "roasted plantain purée, shaved truffle D,N"
 """
+
+    def _build_terminology_section(self) -> str:
+        """
+        Build the terminology corrections section from learned rules.
+        """
+        lines = []
+        
+        # Add terminology corrections
+        if CORRECTIONS_AVAILABLE and TERMINOLOGY_CORRECTIONS:
+            for original, corrected in TERMINOLOGY_CORRECTIONS.items():
+                hint = CONTEXT_HINTS.get((original, corrected), {})
+                note = hint.get('note', '')
+                context = hint.get('item_types', [])
+                
+                if context:
+                    context_str = f" (especially for {', '.join(context)})"
+                else:
+                    context_str = ""
+                
+                lines.append(f'   - "{original}" → "{corrected}"{context_str}')
+                if note:
+                    lines.append(f'     Note: {note}')
+        
+        # Add some key known pairs that are one-directional preferences
+        if not lines:
+            # Fallback if corrections not loaded
+            lines = [
+                '   - "crust" → "rim" (for cocktails/drinks with glass rims)',
+                '   - "mayo" → "aioli" (RSH prefers aioli terminology)',
+                '   - "bbq" → "barbeque sauce"',
+            ]
+        
+        return '\n'.join(lines)
+    
+    def _build_dish_corrections_section(self) -> str:
+        """
+        Build dish-specific corrections from the database.
+        
+        NOTE: We no longer include the full dish database in the prompt.
+        This was causing timeouts/failures due to prompt size.
+        
+        Instead, we rely on:
+        1. The AI's built-in knowledge to infer allergens from ingredients
+        2. The terminology corrections from known_corrections.py
+        3. The allergen code definitions in the main prompt
+        
+        The dish database is still used for:
+        - Training (storing learned corrections)
+        - Future: per-paragraph lookups for specific dish matches
+        """
+        # Return empty - AI can infer allergens from ingredients
+        # Terminology corrections are handled by _build_terminology_section()
+        return ""
     
     def correct_text(self, text: str) -> str:
         """
@@ -293,22 +401,43 @@ class BatchAICorrector:
         self.system_prompt = self._build_system_prompt()
     
     def _build_system_prompt(self) -> str:
-        return """You are an expert menu editor. You will receive multiple menu items separated by "|||".
+        # Build terminology section
+        terminology_lines = []
+        if CORRECTIONS_AVAILABLE and TERMINOLOGY_CORRECTIONS:
+            for original, corrected in TERMINOLOGY_CORRECTIONS.items():
+                terminology_lines.append(f'- "{original}" → "{corrected}"')
+        else:
+            terminology_lines = [
+                '- "crust" → "rim" (for cocktails with glass rims)',
+                '- "mayo" → "aioli"',
+            ]
+        terminology_section = '\n'.join(terminology_lines)
+        
+        return f"""You are an expert menu editor. You will receive multiple menu items separated by "|||".
 Return the corrected items in the SAME ORDER, also separated by "|||".
 
 RULES:
+- PRESERVE ALL EXISTING FORMATTING - no bold, no markdown, plain text only
 - PRESERVE EXISTING CAPITALIZATION - do not change dish names, section headers, or titles
+- KEEP ALL EXISTING ALLERGEN CODES (D, G, N, V, VG, etc.) - do not remove them
 - Fix only clear spelling errors: tartar→tartare, avacado→avocado, mozarella→mozzarella, parmesian→parmesan, Ceasar→Caesar, pre-fix→prix fixe
 - DO NOT change ingredient separators - keep commas and hyphens as they are
 - Dual prices: use " | " (space-bar-space), not "/"
 - Enforce diacritics: jalapeño, crème brûlée, purée, soufflé, flambéed
-- Add asterisk (*) for raw/undercooked items (tartare, carpaccio, raw fish, caviar, raw egg)
+- RAW ITEM ASTERISK: Place asterisk (*) at END of description, BEFORE allergen codes
+  Example: "Tuna Tartare, avocado * D,G" (asterisk before allergens)
 - If an item is correct, return it UNCHANGED
 - Return ONLY the corrected items, no other text
 
-Example:
+RSH TERMINOLOGY CORRECTIONS (ALWAYS APPLY):
+{terminology_section}
+
+Examples:
 Input: "Tuna Tartar Tostada, avocado mousse D,G|||The Spark – "El Primer Encuentro""
 Output: "Tuna Tartare Tostada, avocado mousse * D,G|||The Spark – "El Primer Encuentro""
+
+Input: "Sushi Hand Roll, avocado, masago, bubu arare VG|||Red Paloma, tequila, salt crust"
+Output: "Sushi Hand Roll, avocado, masago, bubu arare * VG|||Red Paloma, tequila, salt rim"
 """
     
     def correct_batch(self, texts: list[str]) -> list[str]:

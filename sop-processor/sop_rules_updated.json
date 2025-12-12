@@ -521,6 +521,38 @@
         "learned_from": "training_data",
         "confidence": 0.1
       }
+    },
+    {
+      "rule_id": "LEARNED-TERMINOLOGY-9242",
+      "category": "Terminology",
+      "severity": "Medium",
+      "description": "Use preferred terminology: \"crust\" \u2192 \"rim\"",
+      "details": {
+        "pattern_type": "terminology",
+        "original_text": "crust",
+        "corrected_text": "rim",
+        "occurrences": 1,
+        "learned_from": "training_data",
+        "confidence": 0.2,
+        "seen_on_dishes": [
+          "Hibiscus-infused blanco tequila"
+        ],
+        "applies_to": [
+          "cocktail",
+          "drink",
+          "beverage"
+        ],
+        "context_keywords": [
+          "paloma",
+          "margarita",
+          "martini",
+          "rim",
+          "salt",
+          "sugar",
+          "chili"
+        ],
+        "note": "Glass rim terminology - use \"rim\" for cocktail glasses, not \"crust\""
+      }
     }
   ]
 }

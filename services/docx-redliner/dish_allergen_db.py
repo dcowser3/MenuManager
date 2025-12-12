@@ -29,19 +29,14 @@ from typing import Dict, List, Optional, Tuple
 from datetime import datetime
 import re
 
-# Allergen code definitions
+# Allergen code definitions (from RSH SOP)
 ALLERGEN_CODES = {
     'D': 'Dairy',
-    'N': 'Nuts',
     'G': 'Gluten',
+    'N': 'Nuts',
+    'S': 'Shellfish',
     'V': 'Vegetarian',
-    'S': 'Vegan',
-    'E': 'Eggs',
-    'F': 'Fish',
-    'C': 'Crustaceans',
-    'SE': 'Sesame',
-    'SY': 'Soy',
-    'M': 'Mustard',
+    'VG': 'Vegan',
 }
 
 # Common ingredient → allergen mappings for AI inference
@@ -186,6 +181,103 @@ def lookup_dish(dish_name: str, restaurant: Optional[str] = None) -> Optional[Di
     return None
 
 
+def extract_menu_date(filename: str) -> Optional[str]:
+    """
+    Extract menu date from filename.
+    
+    Common patterns:
+    - "menu 1.NOV.2025.docx" → "2025-11-01"
+    - "menu_07112025.docx" → "2025-11-07"
+    - "menu 11.18.25.docx" → "2025-11-18"
+    - "menu_2025-11-18.docx" → "2025-11-18"
+    - "menu nov 2025.docx" → "2025-11-01"
+    - "casa chi crw menu nov 2025.docx" → "2025-11-01"
+    """
+    name = Path(filename).stem.lower()
+    
+    month_map = {
+        'jan': '01', 'january': '01',
+        'feb': '02', 'february': '02',
+        'mar': '03', 'march': '03',
+        'apr': '04', 'april': '04',
+        'may': '05',
+        'jun': '06', 'june': '06',
+        'jul': '07', 'july': '07',
+        'aug': '08', 'august': '08',
+        'sep': '09', 'september': '09',
+        'oct': '10', 'october': '10',
+        'nov': '11', 'november': '11',
+        'dec': '12', 'december': '12'
+    }
+    
+    # Pattern 1: D.MON.YYYY (e.g., 1.NOV.2025 or 1 NOV 2025)
+    match = re.search(r'(\d{1,2})[\.\s]?(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*[\.\s]?(\d{4})', name)
+    if match:
+        day_int = int(match.group(1))
+        if 1 <= day_int <= 31:
+            day = match.group(1).zfill(2)
+            month = month_map.get(match.group(2)[:3], '01')
+            year = match.group(3)
+            return f"{year}-{month}-{day}"
+    
+    # Pattern 2: MON YYYY or MON.YYYY (e.g., "nov 2025" or "november 2025")
+    match = re.search(r'(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*[\.\s]+(\d{4})', name)
+    if match:
+        month = month_map.get(match.group(1)[:3], '01')
+        year = match.group(2)
+        return f"{year}-{month}-01"  # Default to 1st of month
+    
+    # Pattern 3: DDMMYYYY (e.g., 07112025)
+    match = re.search(r'(\d{2})(\d{2})(\d{4})', name)
+    if match:
+        day, month, year = match.groups()
+        if 1 <= int(month) <= 12 and 1 <= int(day) <= 31:
+            return f"{year}-{month}-{day}"
+    
+    # Pattern 4: MM.DD.YY (e.g., 11.18.25)
+    match = re.search(r'(\d{1,2})\.(\d{1,2})\.(\d{2})(?!\d)', name)
+    if match:
+        month = match.group(1).zfill(2)
+        day = match.group(2).zfill(2)
+        year = '20' + match.group(3)
+        if 1 <= int(month) <= 12 and 1 <= int(day) <= 31:
+            return f"{year}-{month}-{day}"
+    
+    # Pattern 5: YYYY-MM-DD (standard ISO)
+    match = re.search(r'(\d{4})-(\d{2})-(\d{2})', name)
+    if match:
+        year, month, day = match.groups()
+        if 1 <= int(month) <= 12 and 1 <= int(day) <= 31:
+            return match.group(0)
+    
+    return None
+
+
+def extract_menu_type(filename: str) -> Optional[str]:
+    """
+    Extract menu type from filename.
+    
+    Examples:
+    - "dlena brunch menu.docx" → "brunch"
+    - "dinner menu.docx" → "dinner"
+    - "cocktails.docx" → "cocktails"
+    """
+    name = Path(filename).stem.lower()
+    
+    menu_types = [
+        'brunch', 'breakfast', 'lunch', 'dinner', 'supper',
+        'cocktails', 'cocktail', 'drinks', 'beverage', 'beverages',
+        'dessert', 'desserts', 'appetizer', 'appetizers',
+        'happy hour', 'late night', 'tasting', 'prix fixe'
+    ]
+    
+    for menu_type in menu_types:
+        if menu_type in name:
+            return menu_type
+    
+    return None
+
+
 def upsert_dish(
     dish_name: str,
     allergens: List[str] = None,
@@ -196,7 +288,9 @@ def upsert_dish(
     price: Optional[str] = None,
     source: str = 'training',
     confidence: float = 0.5,
-    notes: Optional[str] = None
+    notes: Optional[str] = None,
+    menu_date: Optional[str] = None,
+    menu_type: Optional[str] = None
 ) -> Dict:
     """
     Add or update a dish in the database.
@@ -212,6 +306,8 @@ def upsert_dish(
         source: How this was learned
         confidence: Confidence score
         notes: Additional notes
+        menu_date: Date of the menu (YYYY-MM-DD)
+        menu_type: Type of menu (brunch, dinner, etc.)
     """
     db = load_database()
     
@@ -250,6 +346,10 @@ def upsert_dish(
             entry['description'] = description
         if notes:
             entry['notes'] = notes
+        if menu_date:
+            entry['menu_date'] = menu_date
+        if menu_type:
+            entry['menu_type'] = menu_type
     else:
         # Create new entry
         entry = {
@@ -268,6 +368,8 @@ def upsert_dish(
             'updated_at': datetime.now().isoformat(),
             'correction_count': 1,
             'notes': notes,
+            'menu_date': menu_date,
+            'menu_type': menu_type,
         }
         db['entries'].append(entry)
     
@@ -524,6 +626,237 @@ def search_dishes(query: str, restaurant: Optional[str] = None, limit: int = 10)
     return results[:limit]
 
 
+def store_approved_dish(
+    dish_line: str,
+    restaurant: str,
+    menu_date: str = None,
+    menu_type: str = None,
+    source_file: str = None
+) -> Optional[Dict]:
+    """
+    Store a dish from an approved (redlined) document.
+    
+    This is the PRIMARY way to build the master catalog - every dish
+    from an approved menu gets stored here.
+    
+    Args:
+        dish_line: The full menu line (e.g., "Tuna Tartare, avocado, ponzu D,G 18")
+        restaurant: Restaurant identifier
+        menu_date: Date of the menu (YYYY-MM-DD or extracted from filename)
+        menu_type: Type of menu (dinner, brunch, cocktails, etc.)
+        source_file: The filename this was learned from
+        
+    Returns:
+        The created/updated database entry, or None if couldn't parse
+    """
+    if not dish_line or len(dish_line.strip()) < 5:
+        return None
+    
+    line_lower = dish_line.lower().strip()
+    
+    # Skip lines that are clearly not menu items
+    skip_patterns = [
+        'consuming raw', 'foodborne illness', 'allergen key', 
+        'vegetarian', 'vegan', 'gluten free', 'dairy free',
+        'step 1', 'step 2', 'step 3', 'obtain', 'design request',
+        'page ', 'menu submission', 'restaurant name', 'venue',
+        'template', 'brief', 'guidelines', 'rsh design'
+    ]
+    if any(pattern in line_lower for pattern in skip_patterns):
+        return None
+    
+    # Skip lines that are ALL CAPS (headers/sections)
+    if dish_line.isupper():
+        return None
+    
+    # Skip very short lines (likely headers or single words)
+    if len(dish_line.split()) < 2:
+        return None
+    
+    # Parse the line to extract components
+    # Format variations:
+    # - "Dish Name, ingredient, ingredient... D,G 18"
+    # - "Dish Name, ingredient (D, E, F)"
+    # - "Dish Name, ingredient (V) 15"
+    
+    # Extract price (number at the end, possibly after allergens)
+    price_match = re.search(r'\s+(\d+(?:\|\d+)?)\s*$', dish_line)
+    price = price_match.group(1) if price_match else None
+    
+    # Remove price from line
+    line_no_price = re.sub(r'\s+\d+(?:\|\d+)?\s*$', '', dish_line).strip()
+    
+    # Extract allergen codes - two patterns:
+    # 1. At end without parens: "... D,G" or "... *D,G"
+    # 2. In parentheses: "... (D, E, F)" or "... (V)"
+    allergens = []
+    
+    # Pattern 1: Parens at end like (D, E, F) or (V)
+    paren_match = re.search(r'\(([A-Z,\s\*]+)\)\s*$', line_no_price)
+    if paren_match:
+        allergen_str = paren_match.group(1).replace(' ', '')
+        allergens = parse_allergen_codes(allergen_str)
+        line_no_allergens = re.sub(r'\s*\([A-Z,\s\*]+\)\s*$', '', line_no_price).strip()
+    else:
+        # Pattern 2: No parens like "... D,G" or "... *D,G"
+        allergen_match = re.search(r'\s+\*?([A-Z,\*]+)\s*$', line_no_price)
+        if allergen_match:
+            allergens = parse_allergen_codes(allergen_match.group(1))
+            line_no_allergens = re.sub(r'\s+\*?[A-Z,\*]+\s*$', '', line_no_price).strip()
+        else:
+            line_no_allergens = line_no_price
+    
+    # Extract dish name and description
+    if ', ' in line_no_allergens:
+        parts = line_no_allergens.split(', ')
+        dish_name = parts[0].strip()
+        description = ', '.join(parts[1:]).strip()
+        ingredients = [ing.strip() for ing in parts[1:] if ing.strip()]
+    else:
+        dish_name = line_no_allergens
+        description = None
+        ingredients = []
+    
+    # Skip if dish name is too short or looks invalid
+    if not dish_name or len(dish_name) < 2:
+        return None
+    
+    # Skip if dish name is a section header (ALL CAPS and short)
+    if dish_name.isupper() and len(dish_name.split()) <= 3:
+        return None
+    
+    # Skip if dish name starts with numbers (likely not a real dish)
+    if dish_name[0].isdigit():
+        return None
+    
+    # Store in database
+    return upsert_dish(
+        dish_name=dish_name,
+        allergens=allergens,
+        restaurant=restaurant,
+        ingredients=ingredients,
+        description=description,
+        full_line=dish_line,
+        price=price,
+        source='approved_menu',
+        confidence=0.8,  # High confidence - from approved document
+        notes=f"From approved menu{f' ({menu_date})' if menu_date else ''}{f' - {menu_type}' if menu_type else ''}",
+        menu_date=menu_date,
+        menu_type=menu_type
+    )
+
+
+def store_dish_terminology_correction(
+    dish_name: str,
+    original_term: str,
+    corrected_term: str,
+    restaurant: str = 'global',
+    context_paragraph: str = None
+) -> Dict:
+    """
+    Store a terminology correction associated with a specific dish.
+    
+    This is for word preference corrections like:
+    - "Red Paloma" with "crust" → "rim"
+    - Any dish with "mayo" → "aioli"
+    
+    Next time the AI sees this dish, it will know to apply this correction
+    with higher confidence.
+    
+    Args:
+        dish_name: Name of the dish (e.g., "Red Paloma")
+        original_term: The word that was changed (e.g., "crust")
+        corrected_term: The preferred word (e.g., "rim")
+        restaurant: Restaurant identifier
+        context_paragraph: The full paragraph for reference
+        
+    Returns:
+        The created/updated database entry
+    """
+    db = load_database()
+    normalized = normalize_dish_name(dish_name)
+    
+    # Look for existing entry
+    entry = None
+    for e in db['entries']:
+        if e['dish_name_normalized'] == normalized and e['restaurant'] == restaurant:
+            entry = e
+            break
+    
+    if entry:
+        # Update existing entry
+        entry['updated_at'] = datetime.now().isoformat()
+        entry['correction_count'] = entry.get('correction_count', 0) + 1
+        entry['confidence'] = min(1.0, entry.get('confidence', 0.5) + 0.15)
+        
+        # Add to terminology corrections list
+        corrections = entry.get('terminology_corrections', [])
+        correction_pair = {'from': original_term, 'to': corrected_term}
+        if correction_pair not in corrections:
+            corrections.append(correction_pair)
+        entry['terminology_corrections'] = corrections
+        
+    else:
+        # Create new entry focused on terminology
+        entry = {
+            'id': f"dish_{int(datetime.now().timestamp())}_{hash(dish_name) % 10000:04d}",
+            'dish_name': dish_name,
+            'dish_name_normalized': normalized,
+            'restaurant': restaurant,
+            'full_line': context_paragraph,
+            'allergens': [],
+            'ingredients': [],
+            'description': None,
+            'price': None,
+            'source': 'terminology_training',
+            'confidence': 0.6,  # Higher initial confidence for terminology
+            'created_at': datetime.now().isoformat(),
+            'updated_at': datetime.now().isoformat(),
+            'correction_count': 1,
+            'terminology_corrections': [
+                {'from': original_term, 'to': corrected_term}
+            ],
+            'notes': f"Learned terminology: '{original_term}' → '{corrected_term}'"
+        }
+        db['entries'].append(entry)
+    
+    save_database(db)
+    return entry
+
+
+def get_dish_corrections(dish_name: str, restaurant: str = None) -> Dict:
+    """
+    Get all known corrections for a dish.
+    
+    Returns a dict with:
+    - allergens: Known allergen codes
+    - terminology: List of {from, to} terminology corrections
+    - full_line: The approved full line if known
+    - confidence: How confident we are in this data
+    
+    Args:
+        dish_name: The dish to look up
+        restaurant: Optional restaurant filter
+        
+    Returns:
+        Dict with correction info, or empty dict if dish unknown
+    """
+    entry = lookup_dish(dish_name, restaurant)
+    
+    if not entry:
+        return {}
+    
+    return {
+        'dish_name': entry.get('dish_name'),
+        'allergens': entry.get('allergens', []),
+        'terminology': entry.get('terminology_corrections', []),
+        'full_line': entry.get('full_line'),
+        'description': entry.get('description'),
+        'confidence': entry.get('confidence', 0),
+        'correction_count': entry.get('correction_count', 0),
+    }
+
+
 def export_for_ai_prompt() -> str:
     """
     Export database as text for inclusion in AI prompts.
@@ -538,6 +871,9 @@ def export_for_ai_prompt() -> str:
     lines.append("Use these approved descriptions when reviewing menus.")
     lines.append("NOTE: Prices may vary - do NOT flag price differences as errors.\n")
     
+    # Collect terminology corrections across all dishes
+    terminology_by_dish = {}
+    
     # Group by restaurant
     by_restaurant = {}
     for entry in db['entries']:
@@ -545,6 +881,14 @@ def export_for_ai_prompt() -> str:
         if restaurant not in by_restaurant:
             by_restaurant[restaurant] = []
         by_restaurant[restaurant].append(entry)
+        
+        # Track terminology corrections
+        if entry.get('terminology_corrections'):
+            dish_name = entry['dish_name']
+            for tc in entry['terminology_corrections']:
+                if dish_name not in terminology_by_dish:
+                    terminology_by_dish[dish_name] = []
+                terminology_by_dish[dish_name].append(tc)
     
     for restaurant, dishes in by_restaurant.items():
         lines.append(f"\n{restaurant.replace('_', ' ').title()}:")
@@ -561,6 +905,19 @@ def export_for_ai_prompt() -> str:
                     lines.append(f"  - {dish['dish_name']}, {desc} {codes}")
                 else:
                     lines.append(f"  - {dish['dish_name']}: {codes}")
+            
+            # Show terminology corrections for this dish
+            if dish.get('terminology_corrections'):
+                for tc in dish['terminology_corrections']:
+                    lines.append(f"      ⚠ Use \"{tc['to']}\" not \"{tc['from']}\"")
+    
+    # Summary of dish-specific terminology corrections
+    if terminology_by_dish:
+        lines.append("\n\nDISH-SPECIFIC TERMINOLOGY:")
+        lines.append("When reviewing these dishes, apply these corrections with HIGH confidence:\n")
+        for dish_name, corrections in sorted(terminology_by_dish.items()):
+            for tc in corrections:
+                lines.append(f"  • {dish_name}: \"{tc['from']}\" → \"{tc['to']}\"")
     
     return '\n'.join(lines)
 

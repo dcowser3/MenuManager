@@ -1,6 +1,6 @@
 {
   "version": "1.0.0",
-  "last_updated": "2025-12-06T16:26:50.442541",
+  "last_updated": "2025-12-07T16:38:12.150679",
   "entries": [
     {
       "id": "dish_1765052535_0060",
@@ -40,141 +40,6 @@
       "notes": null
     },
     {
-      "id": "dish_1765053057_8952",
-      "dish_name": "Kale Salad",
-      "dish_name_normalized": "kale salad",
-      "restaurant": "aquimero_mothers_day_brunch_original",
-      "allergens": [
-        "D",
-        "N",
-        "V"
-      ],
-      "ingredients": [
-        "N",
-        "goat cheese",
-        "local berries",
-        "toasted walnut",
-        "golden beet",
-        "D",
-        "orange balsamic vinaigrette"
-      ],
-      "description": "local berries, goat cheese, toasted walnut, golden beet, orange balsamic vinaigrette",
-      "source": "training",
-      "confidence": 0.7,
-      "created_at": "2025-12-06T15:30:57.816624",
-      "updated_at": "2025-12-06T16:23:41.545989",
-      "correction_count": 3,
-      "notes": "Learned: D,N \u2192 D,N,V"
-    },
-    {
-      "id": "dish_1765053057_1815",
-      "dish_name": "Crab Cake Benedict",
-      "dish_name_normalized": "crab cake benedict",
-      "restaurant": "aquimero_mothers_day_brunch_original",
-      "allergens": [
-        "S"
-      ],
-      "ingredients": [
-        "avocado",
-        "aj\u00ed amarillo hollandaise",
-        "E",
-        "G",
-        "heirloom cherry tomato G",
-        "croissant",
-        "spring greens",
-        "poached egg"
-      ],
-      "description": "poached egg, avocado, aj\u00ed amarillo hollandaise, croissant, spring greens, heirloom cherry tomato G",
-      "source": "training",
-      "confidence": 0.8999999999999999,
-      "created_at": "2025-12-06T15:30:57.817022",
-      "updated_at": "2025-12-06T16:23:41.546817",
-      "correction_count": 5,
-      "notes": "Learned: S \u2192 S*"
-    },
-    {
-      "id": "dish_1765053057_4916",
-      "dish_name": "Mushroom okonomiyaki or mushroom pancake",
-      "dish_name_normalized": "mushroom okonomiyaki or mushroom pancake",
-      "restaurant": "aquimero_mothers_day_brunch_original",
-      "allergens": [
-        "V"
-      ],
-      "ingredients": [
-        "crispy sweet potato",
-        "smoked cream cheese",
-        "SE",
-        "honey barbeque sauce bbq",
-        "cabbage",
-        "G",
-        "sesame seeds. D",
-        "chipotle aioli mayo",
-        "green onion",
-        "D",
-        "mushroom oyster"
-      ],
-      "description": "mushroom oyster, cabbage, green onion, smoked cream cheese, crispy sweet potato, chipotle aioli mayo, honey barbeque sauce bbq, sesame seeds. D, G,",
-      "source": "training",
-      "confidence": 0.7,
-      "created_at": "2025-12-06T15:30:57.817537",
-      "updated_at": "2025-12-06T16:23:41.547765",
-      "correction_count": 3,
-      "notes": "Learned from correction. Original had different description.",
-      "full_line": "Mushroom okonomiyaki or mushroom pancake, mushroom oyster, cabbage, green onion, smoked cream cheese, crispy sweet potato, chipotle aioli mayo, honey barbeque sauce bbq, sesame seeds. D, G, V"
-    },
-    {
-      "id": "dish_1765054408_2475",
-      "dish_name": "D\u2019le\u00f1a Cesar Salad",
-      "dish_name_normalized": "dle\u00f1a cesar salad",
-      "restaurant": "dlena_brunch",
-      "allergens": [
-        "G"
-      ],
-      "ingredients": [
-        "cotija cheese",
-        "romaine",
-        "G 16",
-        "E",
-        "charred Caesar dressing D",
-        "smoked egg",
-        "grilled croutons",
-        "D",
-        "heirloom cherry tomatoes"
-      ],
-      "description": "romaine, cotija cheese, heirloom cherry tomatoes, grilled croutons, smoked egg, charred Caesar dressing D,G 16",
-      "source": "training",
-      "confidence": 0.6,
-      "created_at": "2025-12-06T15:53:28.687090",
-      "updated_at": "2025-12-06T16:23:41.815232",
-      "correction_count": 2,
-      "notes": "Learned: D,G \u2192 *D,G"
-    },
-    {
-      "id": "dish_1765054408_7471",
-      "dish_name": "Queso Fundido",
-      "dish_name_normalized": "queso fundido",
-      "restaurant": "dlena_brunch",
-      "allergens": [
-        "D",
-        "V"
-      ],
-      "ingredients": [
-        "caramelized onion",
-        "corn tortillas D 21",
-        "tomatillo salsa cruda",
-        "G",
-        "D",
-        "melted cheese"
-      ],
-      "description": "melted cheese, tomatillo salsa cruda, caramelized onion, corn tortillas D 21",
-      "source": "training",
-      "confidence": 0.6,
-      "created_at": "2025-12-06T15:53:28.687968",
-      "updated_at": "2025-12-06T16:23:41.821686",
-      "correction_count": 2,
-      "notes": "Learned: D \u2192 D,V"
-    },
-    {
       "id": "dish_1765055135_5797",
       "dish_name": "Enfrijochiladas",
       "dish_name_normalized": "enfrijochiladas",
@@ -202,160 +67,624 @@
       "notes": null
     },
     {
-      "id": "dish_1765055615_1392",
-      "dish_name": "Guacamole",
-      "dish_name_normalized": "guacamole",
-      "restaurant": "test_restaurant",
-      "full_line": null,
-      "allergens": [
-        "D",
-        "N"
-      ],
-      "ingredients": [
-        "avocado",
-        "tomato",
-        "onion",
-        "cilantro",
-        "lime"
-      ],
-      "description": "avocado, tomato, onion, cilantro, lime",
-      "price": null,
-      "source": "training",
-      "confidence": 0.5,
-      "created_at": "2025-12-06T16:13:35.774027",
-      "updated_at": "2025-12-06T16:13:35.774029",
-      "correction_count": 1,
-      "notes": "Learned: D \u2192 D,N"
-    },
-    {
-      "id": "dish_1765056221_8839",
-      "dish_name": "Sea Food Seafood Ceviche",
-      "dish_name_normalized": "sea food seafood ceviche",
-      "restaurant": "sushi",
-      "full_line": "Sea Food Seafood Ceviche, shrimp, octopus, scallop, calamari, homemade sriracha, citrus nitro(S)",
-      "allergens": [],
-      "ingredients": [
-        "homemade sriracha",
-        "scallop",
-        "citrus nitro(S)",
-        "shrimp",
-        "calamari",
-        "octopus"
-      ],
-      "description": "shrimp, octopus, scallop, calamari, homemade sriracha, citrus nitro(S)",
-      "price": null,
-      "source": "training",
-      "confidence": 0.6,
-      "created_at": "2025-12-06T16:23:41.422231",
-      "updated_at": "2025-12-06T16:26:50.439000",
-      "correction_count": 2,
-      "notes": "Learned from correction. Original had different description."
-    },
-    {
-      "id": "dish_1765056221_2334",
-      "dish_name": "California",
-      "dish_name_normalized": "california",
-      "restaurant": "sushi",
-      "full_line": "California, lump crab crab lump, avocado, tobiko (E, F, G, SS, SY)",
-      "allergens": [],
-      "ingredients": [
-        "F",
-        "SY)",
-        "tobiko (E",
-        "SS",
-        "G",
-        "lump crab crab lump",
-        "avocado"
-      ],
-      "description": "lump crab crab lump, avocado, tobiko (E, F, G, SS, SY)",
-      "price": null,
-      "source": "training",
-      "confidence": 0.6,
-      "created_at": "2025-12-06T16:23:41.422985",
-      "updated_at": "2025-12-06T16:26:50.440504",
-      "correction_count": 2,
-      "notes": "Learned from correction. Original had different description."
-    },
-    {
-      "id": "dish_1765056221_7043",
+      "id": "dish_1765143491_1679",
       "dish_name": "Yuzu Prawn",
       "dish_name_normalized": "yuzu prawn",
       "restaurant": "sushi",
       "full_line": "Yuzu Prawn, tempura prawn, yuzu chili aioli mayo (E, G, S, SS, SY)",
-      "allergens": [],
+      "allergens": [
+        "E",
+        "G",
+        "S",
+        "SY"
+      ],
       "ingredients": [
         "tempura prawn",
-        "SY)",
-        "yuzu chili aioli mayo (E",
-        "SS",
-        "G",
-        "S"
+        "yuzu chili aioli mayo"
       ],
-      "description": "tempura prawn, yuzu chili aioli mayo (E, G, S, SS, SY)",
+      "description": "tempura prawn, yuzu chili aioli mayo",
       "price": null,
-      "source": "training",
-      "confidence": 0.6,
-      "created_at": "2025-12-06T16:23:41.423333",
-      "updated_at": "2025-12-06T16:26:50.441293",
+      "source": "terminology_training",
+      "confidence": 0.7,
+      "created_at": "2025-12-07T16:38:11.544270",
+      "updated_at": "2025-12-07T16:38:11.552725",
       "correction_count": 2,
-      "notes": "Learned from correction. Original had different description."
+      "terminology_corrections": [
+        {
+          "from": "mayo",
+          "to": "aioli"
+        }
+      ],
+      "notes": "From approved menu"
     },
     {
-      "id": "dish_1765056221_4616",
+      "id": "dish_1765143491_9938",
       "dish_name": "Flamed Salmon",
       "dish_name_normalized": "flamed salmon",
       "restaurant": "sushi",
       "full_line": "Flamed Salmon, chipothle aioli mayo, unagi sauce, avocado (D, E, F, G, S, SY)",
-      "allergens": [],
-      "ingredients": [
-        "F",
-        "chipothle aioli mayo",
-        "unagi sauce",
-        "SY)",
+      "allergens": [
+        "D",
         "E",
+        "F",
         "G",
-        "avocado (D",
-        "S"
+        "S",
+        "SY"
       ],
-      "description": "chipothle aioli mayo, unagi sauce, avocado (D, E, F, G, S, SY)",
+      "ingredients": [
+        "unagi sauce",
+        "chipothle aioli mayo",
+        "avocado"
+      ],
+      "description": "chipothle aioli mayo, unagi sauce, avocado",
       "price": null,
-      "source": "training",
-      "confidence": 0.6,
-      "created_at": "2025-12-06T16:23:41.423741",
-      "updated_at": "2025-12-06T16:26:50.441901",
+      "source": "terminology_training",
+      "confidence": 0.7,
+      "created_at": "2025-12-07T16:38:11.544630",
+      "updated_at": "2025-12-07T16:38:11.553489",
       "correction_count": 2,
-      "notes": "Learned from correction. Original had different description."
+      "terminology_corrections": [
+        {
+          "from": "mayo",
+          "to": "aioli"
+        }
+      ],
+      "notes": "From approved menu"
     },
     {
-      "id": "dish_1765056221_7672",
+      "id": "dish_1765143491_7507",
       "dish_name": "Cayao",
       "dish_name_normalized": "cayao",
       "restaurant": "sushi",
-      "full_line": "Cayao, spicy tuna, avocado, lemon, yuzu kosho aioli mayo (F,G,SS,SY) ",
-      "allergens": [],
-      "ingredients": [
-        "spicy tuna",
-        "yuzu kosho aioli mayo (F",
-        "SY)",
-        "SS",
+      "full_line": "Cayao, spicy tuna, avocado, lemon, yuzu kosho aioli mayo (F,G,SS,SY)",
+      "allergens": [
+        "F",
         "G",
+        "SY"
+      ],
+      "ingredients": [
         "lemon",
+        "spicy tuna",
+        "yuzu kosho aioli mayo",
         "avocado"
       ],
-      "description": "spicy tuna, avocado, lemon, yuzu kosho aioli mayo (F,G,SS,SY)",
+      "description": "spicy tuna, avocado, lemon, yuzu kosho aioli mayo",
       "price": null,
-      "source": "training",
-      "confidence": 0.6,
-      "created_at": "2025-12-06T16:23:41.424197",
-      "updated_at": "2025-12-06T16:26:50.442517",
+      "source": "terminology_training",
+      "confidence": 0.7,
+      "created_at": "2025-12-07T16:38:11.544895",
+      "updated_at": "2025-12-07T16:38:11.554863",
       "correction_count": 2,
-      "notes": "Learned from correction. Original had different description."
+      "terminology_corrections": [
+        {
+          "from": "mayo",
+          "to": "aioli"
+        }
+      ],
+      "notes": "From approved menu"
     },
     {
-      "id": "dish_1765056221_7389",
+      "id": "dish_1765143491_3369",
+      "dish_name": "Edamame",
+      "dish_name_normalized": "edamame",
+      "restaurant": "sushi",
+      "full_line": "Edamame, salt or chili garlic (V)",
+      "allergens": [
+        "V"
+      ],
+      "ingredients": [
+        "salt or chili garlic"
+      ],
+      "description": "salt or chili garlic",
+      "price": null,
+      "source": "approved_menu",
+      "confidence": 0.8,
+      "created_at": "2025-12-07T16:38:11.549395",
+      "updated_at": "2025-12-07T16:38:11.549396",
+      "correction_count": 1,
+      "notes": "From approved menu",
+      "menu_date": null,
+      "menu_type": null
+    },
+    {
+      "id": "dish_1765143491_4411",
+      "dish_name": "Sea Food Seafood Ceviche",
+      "dish_name_normalized": "sea food seafood ceviche",
+      "restaurant": "sushi",
+      "full_line": "Sea Food Seafood Ceviche, shrimp, octopus, scallop, calamari, homemade sriracha, citrus nitro(S)",
+      "allergens": [
+        "S"
+      ],
+      "ingredients": [
+        "shrimp",
+        "octopus",
+        "scallop",
+        "calamari",
+        "homemade sriracha",
+        "citrus nitro"
+      ],
+      "description": "shrimp, octopus, scallop, calamari, homemade sriracha, citrus nitro",
+      "price": null,
+      "source": "approved_menu",
+      "confidence": 0.8,
+      "created_at": "2025-12-07T16:38:11.549927",
+      "updated_at": "2025-12-07T16:38:11.549929",
+      "correction_count": 1,
+      "notes": "From approved menu",
+      "menu_date": null,
+      "menu_type": null
+    },
+    {
+      "id": "dish_1765143491_6309",
+      "dish_name": "Miso soup",
+      "dish_name_normalized": "miso soup",
+      "restaurant": "sushi",
+      "full_line": "Miso soup, tofu, enoki mushroom, seaweed (F, G, SY)",
+      "allergens": [
+        "F",
+        "G",
+        "SY"
+      ],
+      "ingredients": [
+        "tofu",
+        "enoki mushroom",
+        "seaweed"
+      ],
+      "description": "tofu, enoki mushroom, seaweed",
+      "price": null,
+      "source": "approved_menu",
+      "confidence": 0.8,
+      "created_at": "2025-12-07T16:38:11.550300",
+      "updated_at": "2025-12-07T16:38:11.550302",
+      "correction_count": 1,
+      "notes": "From approved menu",
+      "menu_date": null,
+      "menu_type": null
+    },
+    {
+      "id": "dish_1765143491_1477",
+      "dish_name": "Ebi (S) / Salmon / Maguro / Tamagoyaki",
+      "dish_name_normalized": "ebi s salmon maguro tamagoyaki",
+      "restaurant": "sushi",
+      "full_line": "Ebi (S) / Salmon / Maguro / Tamagoyaki (E, F, SY)",
+      "allergens": [
+        "E",
+        "F",
+        "SY"
+      ],
+      "ingredients": [],
+      "description": null,
+      "price": null,
+      "source": "approved_menu",
+      "confidence": 0.8,
+      "created_at": "2025-12-07T16:38:11.550934",
+      "updated_at": "2025-12-07T16:38:11.550935",
+      "correction_count": 1,
+      "notes": "From approved menu",
+      "menu_date": null,
+      "menu_type": null
+    },
+    {
+      "id": "dish_1765143491_1460",
+      "dish_name": "California",
+      "dish_name_normalized": "california",
+      "restaurant": "sushi",
+      "full_line": "California, lump crab crab lump, avocado, tobiko (E, F, G, SS, SY)",
+      "allergens": [
+        "E",
+        "F",
+        "G",
+        "SY"
+      ],
+      "ingredients": [
+        "lump crab crab lump",
+        "avocado",
+        "tobiko"
+      ],
+      "description": "lump crab crab lump, avocado, tobiko",
+      "price": null,
+      "source": "approved_menu",
+      "confidence": 0.8,
+      "created_at": "2025-12-07T16:38:11.551766",
+      "updated_at": "2025-12-07T16:38:11.551769",
+      "correction_count": 1,
+      "notes": "From approved menu",
+      "menu_date": null,
+      "menu_type": null
+    },
+    {
+      "id": "dish_1765143491_9114",
+      "dish_name": "Truffle Dynamite",
+      "dish_name_normalized": "truffle dynamite",
+      "restaurant": "sushi",
+      "full_line": "Truffle Dynamite, spicy acevichada truffle, tuna, cancha furikake(F)",
+      "allergens": [
+        "F"
+      ],
+      "ingredients": [
+        "spicy acevichada truffle",
+        "tuna",
+        "cancha furikake"
+      ],
+      "description": "spicy acevichada truffle, tuna, cancha furikake",
+      "price": null,
+      "source": "approved_menu",
+      "confidence": 0.8,
+      "created_at": "2025-12-07T16:38:11.554164",
+      "updated_at": "2025-12-07T16:38:11.554166",
+      "correction_count": 1,
+      "notes": "From approved menu",
+      "menu_date": null,
+      "menu_type": null
+    },
+    {
+      "id": "dish_1765143491_6173",
+      "dish_name": "Mushroom okonomiyaki or mushroom pancake",
+      "dish_name_normalized": "mushroom okonomiyaki or mushroom pancake",
+      "restaurant": "aquimero_mothers_day_brunch_run_after_bug_fix_original",
+      "full_line": "Mushroom okonomiyaki or mushroom pancake, mushroom oyster, cabbage, green onion, smoked cream cheese, crispy sweet potato, chipotle aioli mayo, honey barbeque sauce bbq, sesame seeds. D, G, V",
+      "allergens": [
+        "V"
+      ],
+      "ingredients": [
+        "sesame seeds. D",
+        "mushroom oyster",
+        "honey barbeque sauce bbq",
+        "cabbage",
+        "crispy sweet potato",
+        "G,",
+        "chipotle aioli mayo",
+        "smoked cream cheese",
+        "green onion"
+      ],
+      "description": "mushroom oyster, cabbage, green onion, smoked cream cheese, crispy sweet potato, chipotle aioli mayo, honey barbeque sauce bbq, sesame seeds. D, G,",
+      "price": null,
+      "source": "terminology_training",
+      "confidence": 0.85,
+      "created_at": "2025-12-07T16:38:11.682213",
+      "updated_at": "2025-12-07T16:38:11.694444",
+      "correction_count": 3,
+      "terminology_corrections": [
+        {
+          "from": "mayo",
+          "to": "aioli"
+        },
+        {
+          "from": "bbq",
+          "to": "barbeque sauce"
+        }
+      ],
+      "notes": "From approved menu - brunch",
+      "menu_type": "brunch"
+    },
+    {
+      "id": "dish_1765143491_5497",
+      "dish_name": "Coconut Tuna Ceviche",
+      "dish_name_normalized": "coconut tuna ceviche",
+      "restaurant": "aquimero_mothers_day_brunch_run_after_bug_fix_original",
+      "full_line": "Coconut Tuna Ceviche, red onion, mint, radish, cucumber, avocado, fresno chili",
+      "allergens": [],
+      "ingredients": [
+        "red onion",
+        "mint",
+        "radish",
+        "cucumber",
+        "avocado",
+        "fresno chili"
+      ],
+      "description": "red onion, mint, radish, cucumber, avocado, fresno chili",
+      "price": null,
+      "source": "approved_menu",
+      "confidence": 0.8,
+      "created_at": "2025-12-07T16:38:11.686917",
+      "updated_at": "2025-12-07T16:38:11.686920",
+      "correction_count": 1,
+      "notes": "From approved menu - brunch",
+      "menu_date": null,
+      "menu_type": "brunch"
+    },
+    {
+      "id": "dish_1765143491_9351",
+      "dish_name": "Shrimp Cocktail",
+      "dish_name_normalized": "shrimp cocktail",
+      "restaurant": "aquimero_mothers_day_brunch_run_after_bug_fix_original",
+      "full_line": "Shrimp Cocktail, mezcal lime cocktail sauce S",
+      "allergens": [
+        "S"
+      ],
+      "ingredients": [
+        "mezcal lime cocktail sauce"
+      ],
+      "description": "mezcal lime cocktail sauce",
+      "price": null,
+      "source": "approved_menu",
+      "confidence": 0.8,
+      "created_at": "2025-12-07T16:38:11.687863",
+      "updated_at": "2025-12-07T16:38:11.687866",
+      "correction_count": 1,
+      "notes": "From approved menu - brunch",
+      "menu_date": null,
+      "menu_type": "brunch"
+    },
+    {
+      "id": "dish_1765143491_2833",
+      "dish_name": "Oysters on the Half Shell",
+      "dish_name_normalized": "oysters on the half shell",
+      "restaurant": "aquimero_mothers_day_brunch_run_after_bug_fix_original",
+      "full_line": "Oysters on the Half Shell, honey chipotle mignonette* S",
+      "allergens": [
+        "S"
+      ],
+      "ingredients": [
+        "honey chipotle mignonette*"
+      ],
+      "description": "honey chipotle mignonette*",
+      "price": null,
+      "source": "approved_menu",
+      "confidence": 0.8,
+      "created_at": "2025-12-07T16:38:11.688535",
+      "updated_at": "2025-12-07T16:38:11.688537",
+      "correction_count": 1,
+      "notes": "From approved menu - brunch",
+      "menu_date": null,
+      "menu_type": "brunch"
+    },
+    {
+      "id": "dish_1765143491_9211",
+      "dish_name": "Mushroom Toast",
+      "dish_name_normalized": "mushroom toast",
+      "restaurant": "aquimero_mothers_day_brunch_run_after_bug_fix_original",
+      "full_line": "Mushroom Toast, saut\u00e9ed mushrooms, garlic crema, caramelized onions, goat cheese",
+      "allergens": [],
+      "ingredients": [
+        "saut\u00e9ed mushrooms",
+        "garlic crema",
+        "caramelized onions",
+        "goat cheese"
+      ],
+      "description": "saut\u00e9ed mushrooms, garlic crema, caramelized onions, goat cheese",
+      "price": null,
+      "source": "approved_menu",
+      "confidence": 0.8,
+      "created_at": "2025-12-07T16:38:11.689154",
+      "updated_at": "2025-12-07T16:38:11.689156",
+      "correction_count": 1,
+      "notes": "From approved menu - brunch",
+      "menu_date": null,
+      "menu_type": "brunch"
+    },
+    {
+      "id": "dish_1765143491_2846",
+      "dish_name": "truffle oil",
+      "dish_name_normalized": "truffle oil",
+      "restaurant": "aquimero_mothers_day_brunch_run_after_bug_fix_original",
+      "full_line": "truffle oil, arugula D,G,V",
+      "allergens": [
+        "D",
+        "G",
+        "V"
+      ],
+      "ingredients": [
+        "arugula"
+      ],
+      "description": "arugula",
+      "price": null,
+      "source": "approved_menu",
+      "confidence": 0.8,
+      "created_at": "2025-12-07T16:38:11.689676",
+      "updated_at": "2025-12-07T16:38:11.689677",
+      "correction_count": 1,
+      "notes": "From approved menu - brunch",
+      "menu_date": null,
+      "menu_type": "brunch"
+    },
+    {
+      "id": "dish_1765143491_9002",
+      "dish_name": "Crab & Avocado Toast",
+      "dish_name_normalized": "crab avocado toast",
+      "restaurant": "aquimero_mothers_day_brunch_run_after_bug_fix_original",
+      "full_line": "Crab & Avocado Toast, guacamole, chili flakes, cilantro G, S",
+      "allergens": [
+        "S"
+      ],
+      "ingredients": [
+        "guacamole",
+        "chili flakes",
+        "cilantro G,"
+      ],
+      "description": "guacamole, chili flakes, cilantro G,",
+      "price": null,
+      "source": "approved_menu",
+      "confidence": 0.8,
+      "created_at": "2025-12-07T16:38:11.690245",
+      "updated_at": "2025-12-07T16:38:11.690246",
+      "correction_count": 1,
+      "notes": "From approved menu - brunch",
+      "menu_date": null,
+      "menu_type": "brunch"
+    },
+    {
+      "id": "dish_1765143491_0093",
+      "dish_name": "Philadelphia Toast",
+      "dish_name_normalized": "philadelphia toast",
+      "restaurant": "aquimero_mothers_day_brunch_run_after_bug_fix_original",
+      "full_line": "Philadelphia Toast, smoked salmon, herbed cream cheese, capers, red onion,",
+      "allergens": [],
+      "ingredients": [
+        "smoked salmon",
+        "herbed cream cheese",
+        "capers",
+        "red onion,"
+      ],
+      "description": "smoked salmon, herbed cream cheese, capers, red onion,",
+      "price": null,
+      "source": "approved_menu",
+      "confidence": 0.8,
+      "created_at": "2025-12-07T16:38:11.690813",
+      "updated_at": "2025-12-07T16:38:11.690814",
+      "correction_count": 1,
+      "notes": "From approved menu - brunch",
+      "menu_date": null,
+      "menu_type": "brunch"
+    },
+    {
+      "id": "dish_1765143491_0899",
+      "dish_name": "chopped egg*",
+      "dish_name_normalized": "chopped egg",
+      "restaurant": "aquimero_mothers_day_brunch_run_after_bug_fix_original",
+      "full_line": "chopped egg* D,G",
+      "allergens": [
+        "D",
+        "G"
+      ],
+      "ingredients": [],
+      "description": null,
+      "price": null,
+      "source": "approved_menu",
+      "confidence": 0.8,
+      "created_at": "2025-12-07T16:38:11.691371",
+      "updated_at": "2025-12-07T16:38:11.691373",
+      "correction_count": 1,
+      "notes": "From approved menu - brunch",
+      "menu_date": null,
+      "menu_type": "brunch"
+    },
+    {
+      "id": "dish_1765143491_4692",
+      "dish_name": "Kale Salad",
+      "dish_name_normalized": "kale salad",
+      "restaurant": "aquimero_mothers_day_brunch_run_after_bug_fix_original",
+      "full_line": "Kale Salad, local berries, goat cheese, toasted walnut, golden beet, orange balsamic vinaigrette D,N,V",
+      "allergens": [
+        "D",
+        "N",
+        "V"
+      ],
+      "ingredients": [
+        "local berries",
+        "goat cheese",
+        "toasted walnut",
+        "golden beet",
+        "orange balsamic vinaigrette"
+      ],
+      "description": "local berries, goat cheese, toasted walnut, golden beet, orange balsamic vinaigrette",
+      "price": null,
+      "source": "approved_menu",
+      "confidence": 0.8,
+      "created_at": "2025-12-07T16:38:11.692176",
+      "updated_at": "2025-12-07T16:38:11.692177",
+      "correction_count": 1,
+      "notes": "From approved menu - brunch",
+      "menu_date": null,
+      "menu_type": "brunch"
+    },
+    {
+      "id": "dish_1765143491_0371",
+      "dish_name": "Tres Leches French Toast",
+      "dish_name_normalized": "tres leches french toast",
+      "restaurant": "aquimero_mothers_day_brunch_run_after_bug_fix_original",
+      "full_line": "Tres Leches French Toast, berry whipped cream, maple syrup D, G, V",
+      "allergens": [
+        "V"
+      ],
+      "ingredients": [
+        "berry whipped cream",
+        "maple syrup D",
+        "G,"
+      ],
+      "description": "berry whipped cream, maple syrup D, G,",
+      "price": null,
+      "source": "approved_menu",
+      "confidence": 0.8,
+      "created_at": "2025-12-07T16:38:11.692918",
+      "updated_at": "2025-12-07T16:38:11.692919",
+      "correction_count": 1,
+      "notes": "From approved menu - brunch",
+      "menu_date": null,
+      "menu_type": "brunch"
+    },
+    {
+      "id": "dish_1765143491_9862",
+      "dish_name": "Crab Cake Benedict",
+      "dish_name_normalized": "crab cake benedict",
+      "restaurant": "aquimero_mothers_day_brunch_run_after_bug_fix_original",
+      "full_line": "Crab Cake Benedict, poached egg, avocado, aj\u00ed amarillo hollandaise, croissant, spring greens, heirloom cherry tomato G, S*",
+      "allergens": [
+        "S"
+      ],
+      "ingredients": [
+        "poached egg",
+        "avocado",
+        "aj\u00ed amarillo hollandaise",
+        "croissant",
+        "spring greens",
+        "heirloom cherry tomato G,"
+      ],
+      "description": "poached egg, avocado, aj\u00ed amarillo hollandaise, croissant, spring greens, heirloom cherry tomato G,",
+      "price": null,
+      "source": "approved_menu",
+      "confidence": 0.8,
+      "created_at": "2025-12-07T16:38:11.693646",
+      "updated_at": "2025-12-07T16:38:11.693647",
+      "correction_count": 1,
+      "notes": "From approved menu - brunch",
+      "menu_date": null,
+      "menu_type": "brunch"
+    },
+    {
+      "id": "dish_1765143491_4268",
+      "dish_name": "Grilled Shrimp",
+      "dish_name_normalized": "grilled shrimp",
+      "restaurant": "aquimero_mothers_day_brunch_run_after_bug_fix_original",
+      "full_line": "Grilled Shrimp, zarandeado marinade, mole amarillito S",
+      "allergens": [
+        "S"
+      ],
+      "ingredients": [
+        "zarandeado marinade",
+        "mole amarillito"
+      ],
+      "description": "zarandeado marinade, mole amarillito",
+      "price": null,
+      "source": "approved_menu",
+      "confidence": 0.8,
+      "created_at": "2025-12-07T16:38:11.695134",
+      "updated_at": "2025-12-07T16:38:11.695135",
+      "correction_count": 1,
+      "notes": "From approved menu - brunch",
+      "menu_date": null,
+      "menu_type": "brunch"
+    },
+    {
+      "id": "dish_1765143491_2493",
+      "dish_name": "Lamb Chop",
+      "dish_name_normalized": "lamb chop",
+      "restaurant": "aquimero_mothers_day_brunch_run_after_bug_fix_original",
+      "full_line": "Lamb Chop, carrot pur\u00e9e, spring mushrooms, pepper sauce D*",
+      "allergens": [
+        "D"
+      ],
+      "ingredients": [
+        "carrot pur\u00e9e",
+        "spring mushrooms",
+        "pepper sauce"
+      ],
+      "description": "carrot pur\u00e9e, spring mushrooms, pepper sauce",
+      "price": null,
+      "source": "approved_menu",
+      "confidence": 0.8,
+      "created_at": "2025-12-07T16:38:11.699016",
+      "updated_at": "2025-12-07T16:38:11.699017",
+      "correction_count": 1,
+      "notes": "From approved menu - brunch",
+      "menu_date": null,
+      "menu_type": "brunch"
+    },
+    {
+      "id": "dish_1765143491_5625",
       "dish_name": "Steak and Risotto",
       "dish_name_normalized": "steak and risotto",
-      "restaurant": "aquimero_mothers_day_brunch_original",
+      "restaurant": "aquimero_mothers_day_brunch_run_after_bug_fix_original",
       "full_line": "Steak and Risotto, prime ribeye, aji amarillo risotto, purslane, green peas D*",
       "allergens": [
         "D"
@@ -368,39 +697,93 @@
       ],
       "description": "prime ribeye, aji amarillo risotto, purslane, green peas",
       "price": null,
-      "source": "training",
-      "confidence": 0.5,
-      "created_at": "2025-12-06T16:23:41.548177",
-      "updated_at": "2025-12-06T16:23:41.548179",
+      "source": "approved_menu",
+      "confidence": 0.8,
+      "created_at": "2025-12-07T16:38:11.699697",
+      "updated_at": "2025-12-07T16:38:11.699698",
       "correction_count": 1,
-      "notes": "Learned from correction. Original had different description."
+      "notes": "From approved menu - brunch",
+      "menu_date": null,
+      "menu_type": "brunch"
     },
     {
-      "id": "dish_1765056221_3007",
+      "id": "dish_1765143491_9287",
+      "dish_name": "Tableside Tomahawk Flamb\u00e9",
+      "dish_name_normalized": "tableside tomahawk flamb\u00e9",
+      "restaurant": "aquimero_mothers_day_brunch_run_after_bug_fix_original",
+      "full_line": "Tableside Tomahawk Flamb\u00e9, 32oz tomahawk steak, agave herb butter, mezcal flamb\u00e9 D*",
+      "allergens": [
+        "D"
+      ],
+      "ingredients": [
+        "32oz tomahawk steak",
+        "agave herb butter",
+        "mezcal flamb\u00e9"
+      ],
+      "description": "32oz tomahawk steak, agave herb butter, mezcal flamb\u00e9",
+      "price": null,
+      "source": "approved_menu",
+      "confidence": 0.8,
+      "created_at": "2025-12-07T16:38:11.700496",
+      "updated_at": "2025-12-07T16:38:11.700497",
+      "correction_count": 1,
+      "notes": "From approved menu - brunch",
+      "menu_date": null,
+      "menu_type": "brunch"
+    },
+    {
+      "id": "dish_1765143491_1421",
       "dish_name": "Dinner Rolls",
       "dish_name_normalized": "dinner rolls",
-      "restaurant": "aquimero_mothers_day_brunch_original",
+      "restaurant": "aquimero_mothers_day_brunch_run_after_bug_fix_original",
       "full_line": "Dinner Rolls, whipped agave butter D, G",
       "allergens": [
         "G"
       ],
       "ingredients": [
-        "whipped agave butter D"
+        "whipped agave butter D,"
       ],
       "description": "whipped agave butter D,",
       "price": null,
-      "source": "training",
-      "confidence": 0.5,
-      "created_at": "2025-12-06T16:23:41.548604",
-      "updated_at": "2025-12-06T16:23:41.548605",
+      "source": "approved_menu",
+      "confidence": 0.8,
+      "created_at": "2025-12-07T16:38:11.701200",
+      "updated_at": "2025-12-07T16:38:11.701201",
       "correction_count": 1,
-      "notes": "Learned from correction. Original had different description."
+      "notes": "From approved menu - brunch",
+      "menu_date": null,
+      "menu_type": "brunch"
     },
     {
-      "id": "dish_1765056221_3356",
+      "id": "dish_1765143491_6351",
+      "dish_name": "Orange Cheesecake",
+      "dish_name_normalized": "orange cheesecake",
+      "restaurant": "aquimero_mothers_day_brunch_run_after_bug_fix_original",
+      "full_line": "Orange Cheesecake, mango sorbet, honey crumble D,G",
+      "allergens": [
+        "D",
+        "G"
+      ],
+      "ingredients": [
+        "mango sorbet",
+        "honey crumble"
+      ],
+      "description": "mango sorbet, honey crumble",
+      "price": null,
+      "source": "approved_menu",
+      "confidence": 0.8,
+      "created_at": "2025-12-07T16:38:11.702029",
+      "updated_at": "2025-12-07T16:38:11.702031",
+      "correction_count": 1,
+      "notes": "From approved menu - brunch",
+      "menu_date": null,
+      "menu_type": "brunch"
+    },
+    {
+      "id": "dish_1765143491_9523",
       "dish_name": "Chocolate Millefeuille",
       "dish_name_normalized": "chocolate millefeuille",
-      "restaurant": "aquimero_mothers_day_brunch_original",
+      "restaurant": "aquimero_mothers_day_brunch_run_after_bug_fix_original",
       "full_line": "Chocolate Millefeuille, cocoa cream, hazelnut crumble, hibiscus sorbet D,G,N",
       "allergens": [
         "D",
@@ -414,15 +797,607 @@
       ],
       "description": "cocoa cream, hazelnut crumble, hibiscus sorbet",
       "price": null,
-      "source": "training",
-      "confidence": 0.5,
-      "created_at": "2025-12-06T16:23:41.549203",
-      "updated_at": "2025-12-06T16:23:41.549204",
+      "source": "approved_menu",
+      "confidence": 0.8,
+      "created_at": "2025-12-07T16:38:11.703065",
+      "updated_at": "2025-12-07T16:38:11.703068",
       "correction_count": 1,
-      "notes": "Learned from correction. Original had different description."
+      "notes": "From approved menu - brunch",
+      "menu_date": null,
+      "menu_type": "brunch"
     },
     {
-      "id": "dish_1765056221_4364",
+      "id": "dish_1765143491_1320",
+      "dish_name": "Picarones",
+      "dish_name_normalized": "picarones",
+      "restaurant": "aquimero_mothers_day_brunch_run_after_bug_fix_original",
+      "full_line": "Picarones, sweet potatoes dough, honey blossom syrup, quinoa icecream D",
+      "allergens": [
+        "D"
+      ],
+      "ingredients": [
+        "sweet potatoes dough",
+        "honey blossom syrup",
+        "quinoa icecream"
+      ],
+      "description": "sweet potatoes dough, honey blossom syrup, quinoa icecream",
+      "price": null,
+      "source": "approved_menu",
+      "confidence": 0.8,
+      "created_at": "2025-12-07T16:38:11.704041",
+      "updated_at": "2025-12-07T16:38:11.704042",
+      "correction_count": 1,
+      "notes": "From approved menu - brunch",
+      "menu_date": null,
+      "menu_type": "brunch"
+    },
+    {
+      "id": "dish_1765143491_8059",
+      "dish_name": "Hibiscus-infused blanco tequila",
+      "dish_name_normalized": "hibiscusinfused blanco tequila",
+      "restaurant": "casa_chi_crw",
+      "full_line": "Hibiscus-infused blanco tequila, lime, ginger beer, tortilla rim crust",
+      "allergens": [],
+      "ingredients": [
+        "ginger beer",
+        "tortilla rim crust",
+        "lime"
+      ],
+      "description": "lime, ginger beer, tortilla rim crust",
+      "price": null,
+      "source": "terminology_training",
+      "confidence": 0.7,
+      "created_at": "2025-12-07T16:38:11.808634",
+      "updated_at": "2025-12-07T16:38:11.831665",
+      "correction_count": 2,
+      "terminology_corrections": [
+        {
+          "from": "crust",
+          "to": "rim"
+        }
+      ],
+      "notes": "From approved menu (2025-11-01)",
+      "menu_date": "2025-11-01"
+    },
+    {
+      "id": "dish_1765143491_7773",
+      "dish_name": "Smoked swordfish",
+      "dish_name_normalized": "smoked swordfish",
+      "restaurant": "casa_chi_crw",
+      "full_line": "Smoked swordfish, smoked mesquite, pickled chili, radish, lemon aioli,",
+      "allergens": [],
+      "ingredients": [
+        "smoked mesquite",
+        "pickled chili",
+        "radish",
+        "lemon aioli,"
+      ],
+      "description": "smoked mesquite, pickled chili, radish, lemon aioli,",
+      "price": null,
+      "source": "approved_menu",
+      "confidence": 0.8,
+      "created_at": "2025-12-07T16:38:11.812521",
+      "updated_at": "2025-12-07T16:38:11.812523",
+      "correction_count": 1,
+      "notes": "From approved menu (2025-11-01)",
+      "menu_date": "2025-11-01",
+      "menu_type": null
+    },
+    {
+      "id": "dish_1765143491_8131",
+      "dish_name": "cherry tomato",
+      "dish_name_normalized": "cherry tomato",
+      "restaurant": "casa_chi_crw",
+      "full_line": "cherry tomato, plantain chips",
+      "allergens": [],
+      "ingredients": [
+        "plantain chips"
+      ],
+      "description": "plantain chips",
+      "price": null,
+      "source": "approved_menu",
+      "confidence": 0.8,
+      "created_at": "2025-12-07T16:38:11.813333",
+      "updated_at": "2025-12-07T16:38:11.813335",
+      "correction_count": 1,
+      "notes": "From approved menu (2025-11-01)",
+      "menu_date": "2025-11-01",
+      "menu_type": null
+    },
+    {
+      "id": "dish_1765143491_3176",
+      "dish_name": "Guacamole",
+      "dish_name_normalized": "guacamole",
+      "restaurant": "casa_chi_crw",
+      "full_line": "Guacamole, jalape\u00f1o, chipotle aioli, lime, chips, add tuna +6",
+      "allergens": [],
+      "ingredients": [
+        "jalape\u00f1o",
+        "chipotle aioli",
+        "lime",
+        "chips",
+        "add tuna +6"
+      ],
+      "description": "jalape\u00f1o, chipotle aioli, lime, chips, add tuna +6",
+      "price": null,
+      "source": "approved_menu",
+      "confidence": 0.8,
+      "created_at": "2025-12-07T16:38:11.814182",
+      "updated_at": "2025-12-07T16:38:11.814184",
+      "correction_count": 1,
+      "notes": "From approved menu (2025-11-01)",
+      "menu_date": "2025-11-01",
+      "menu_type": null
+    },
+    {
+      "id": "dish_1765143491_4692",
+      "dish_name": "Kale Salad",
+      "dish_name_normalized": "kale salad",
+      "restaurant": "casa_chi_crw",
+      "full_line": "Kale Salad, heirloom cherry tomato, grapes, candied cancha corn, orange-white balsamic vinaigrette *D,V",
+      "allergens": [
+        "D",
+        "V"
+      ],
+      "ingredients": [
+        "heirloom cherry tomato",
+        "grapes",
+        "candied cancha corn",
+        "orange-white balsamic vinaigrette"
+      ],
+      "description": "heirloom cherry tomato, grapes, candied cancha corn, orange-white balsamic vinaigrette",
+      "price": null,
+      "source": "approved_menu",
+      "confidence": 0.8,
+      "created_at": "2025-12-07T16:38:11.815003",
+      "updated_at": "2025-12-07T16:38:11.815004",
+      "correction_count": 1,
+      "notes": "From approved menu (2025-11-01)",
+      "menu_date": "2025-11-01",
+      "menu_type": null
+    },
+    {
+      "id": "dish_1765143491_9545",
+      "dish_name": "Angry tuna roll",
+      "dish_name_normalized": "angry tuna roll",
+      "restaurant": "casa_chi_crw",
+      "full_line": "Angry tuna roll, spicy tuna, avocado, lemon, yuzu kosho aioli*",
+      "allergens": [],
+      "ingredients": [
+        "spicy tuna",
+        "avocado",
+        "lemon",
+        "yuzu kosho aioli*"
+      ],
+      "description": "spicy tuna, avocado, lemon, yuzu kosho aioli*",
+      "price": null,
+      "source": "approved_menu",
+      "confidence": 0.8,
+      "created_at": "2025-12-07T16:38:11.815949",
+      "updated_at": "2025-12-07T16:38:11.815951",
+      "correction_count": 1,
+      "notes": "From approved menu (2025-11-01)",
+      "menu_date": "2025-11-01",
+      "menu_type": null
+    },
+    {
+      "id": "dish_1765143491_1106",
+      "dish_name": "California roll",
+      "dish_name_normalized": "california roll",
+      "restaurant": "casa_chi_crw",
+      "full_line": "California roll, salmon, avocado, cucumber*",
+      "allergens": [],
+      "ingredients": [
+        "salmon",
+        "avocado",
+        "cucumber*"
+      ],
+      "description": "salmon, avocado, cucumber*",
+      "price": null,
+      "source": "approved_menu",
+      "confidence": 0.8,
+      "created_at": "2025-12-07T16:38:11.816770",
+      "updated_at": "2025-12-07T16:38:11.816771",
+      "correction_count": 1,
+      "notes": "From approved menu (2025-11-01)",
+      "menu_date": "2025-11-01",
+      "menu_type": null
+    },
+    {
+      "id": "dish_1765143491_4341",
+      "dish_name": "Salmon & Pork Belly Nigiri",
+      "dish_name_normalized": "salmon pork belly nigiri",
+      "restaurant": "casa_chi_crw",
+      "full_line": "Salmon & Pork Belly Nigiri, torched, kabayaki G*\nPrime Beef Nigiri, truffle honey pearls, chimi-yuzu kosho*",
+      "allergens": [],
+      "ingredients": [
+        "torched",
+        "kabayaki G*\nPrime Beef Nigiri",
+        "truffle honey pearls",
+        "chimi-yuzu kosho*"
+      ],
+      "description": "torched, kabayaki G*\nPrime Beef Nigiri, truffle honey pearls, chimi-yuzu kosho*",
+      "price": null,
+      "source": "approved_menu",
+      "confidence": 0.8,
+      "created_at": "2025-12-07T16:38:11.817764",
+      "updated_at": "2025-12-07T16:38:11.817766",
+      "correction_count": 1,
+      "notes": "From approved menu (2025-11-01)",
+      "menu_date": "2025-11-01",
+      "menu_type": null
+    },
+    {
+      "id": "dish_1765143491_3093",
+      "dish_name": "Sushi Tamaki Hand Roll",
+      "dish_name_normalized": "sushi tamaki hand roll",
+      "restaurant": "casa_chi_crw",
+      "full_line": "Sushi Tamaki Hand Roll, avocado, cucumber, sriracha aioli, masago, bubu arare VG",
+      "allergens": [
+        "VG"
+      ],
+      "ingredients": [
+        "avocado",
+        "cucumber",
+        "sriracha aioli",
+        "masago",
+        "bubu arare"
+      ],
+      "description": "avocado, cucumber, sriracha aioli, masago, bubu arare",
+      "price": null,
+      "source": "approved_menu",
+      "confidence": 0.8,
+      "created_at": "2025-12-07T16:38:11.819228",
+      "updated_at": "2025-12-07T16:38:11.819232",
+      "correction_count": 1,
+      "notes": "From approved menu (2025-11-01)",
+      "menu_date": "2025-11-01",
+      "menu_type": null
+    },
+    {
+      "id": "dish_1765143491_0606",
+      "dish_name": "sushi rice",
+      "dish_name_normalized": "sushi rice",
+      "restaurant": "casa_chi_crw",
+      "full_line": "sushi rice, avocado, cucumber, radish, pickled mushroom, edamame, onion, mango, chipotle aioli, ponzu, furikake, tuna or pork belly, add lobster + 8",
+      "allergens": [],
+      "ingredients": [
+        "avocado",
+        "cucumber",
+        "radish",
+        "pickled mushroom",
+        "edamame",
+        "onion",
+        "mango",
+        "chipotle aioli",
+        "ponzu",
+        "furikake",
+        "tuna or pork belly",
+        "add lobster +"
+      ],
+      "description": "avocado, cucumber, radish, pickled mushroom, edamame, onion, mango, chipotle aioli, ponzu, furikake, tuna or pork belly, add lobster +",
+      "price": "8",
+      "source": "approved_menu",
+      "confidence": 0.8,
+      "created_at": "2025-12-07T16:38:11.820781",
+      "updated_at": "2025-12-07T16:38:11.820784",
+      "correction_count": 1,
+      "notes": "From approved menu (2025-11-01)",
+      "menu_date": "2025-11-01",
+      "menu_type": null
+    },
+    {
+      "id": "dish_1765143491_2449",
+      "dish_name": "Casa Style",
+      "dish_name_normalized": "casa style",
+      "restaurant": "casa_chi_crw",
+      "full_line": "Casa Style, served with roasted fajita vegetables, pico de gallo, guacamole, salsa, flour tortillas",
+      "allergens": [],
+      "ingredients": [
+        "served with roasted fajita vegetables",
+        "pico de gallo",
+        "guacamole",
+        "salsa",
+        "flour tortillas"
+      ],
+      "description": "served with roasted fajita vegetables, pico de gallo, guacamole, salsa, flour tortillas",
+      "price": null,
+      "source": "approved_menu",
+      "confidence": 0.8,
+      "created_at": "2025-12-07T16:38:11.822018",
+      "updated_at": "2025-12-07T16:38:11.822019",
+      "correction_count": 1,
+      "notes": "From approved menu (2025-11-01)",
+      "menu_date": "2025-11-01",
+      "menu_type": null
+    },
+    {
+      "id": "dish_1765143491_2636",
+      "dish_name": "Provoleta Cheese",
+      "dish_name_normalized": "provoleta cheese",
+      "restaurant": "casa_chi_crw",
+      "full_line": "Provoleta Cheese D,V",
+      "allergens": [
+        "D",
+        "V"
+      ],
+      "ingredients": [],
+      "description": null,
+      "price": null,
+      "source": "approved_menu",
+      "confidence": 0.8,
+      "created_at": "2025-12-07T16:38:11.822996",
+      "updated_at": "2025-12-07T16:38:11.822997",
+      "correction_count": 1,
+      "notes": "From approved menu (2025-11-01)",
+      "menu_date": "2025-11-01",
+      "menu_type": null
+    },
+    {
+      "id": "dish_1765143491_3057",
+      "dish_name": "The Yuzu",
+      "dish_name_normalized": "the yuzu",
+      "restaurant": "casa_chi_crw",
+      "full_line": "The Yuzu, yuzu cheesecake, almond crumble, white chocolate N",
+      "allergens": [
+        "N"
+      ],
+      "ingredients": [
+        "yuzu cheesecake",
+        "almond crumble",
+        "white chocolate"
+      ],
+      "description": "yuzu cheesecake, almond crumble, white chocolate",
+      "price": null,
+      "source": "approved_menu",
+      "confidence": 0.8,
+      "created_at": "2025-12-07T16:38:11.824093",
+      "updated_at": "2025-12-07T16:38:11.824095",
+      "correction_count": 1,
+      "notes": "From approved menu (2025-11-01)",
+      "menu_date": "2025-11-01",
+      "menu_type": null
+    },
+    {
+      "id": "dish_1765143491_2325",
+      "dish_name": "Hot Stone +",
+      "dish_name_normalized": "hot stone ",
+      "restaurant": "casa_chi_crw",
+      "full_line": "Hot Stone + 25",
+      "allergens": [],
+      "ingredients": [],
+      "description": null,
+      "price": "25",
+      "source": "approved_menu",
+      "confidence": 0.8,
+      "created_at": "2025-12-07T16:38:11.825152",
+      "updated_at": "2025-12-07T16:38:11.825153",
+      "correction_count": 1,
+      "notes": "From approved menu (2025-11-01)",
+      "menu_date": "2025-11-01",
+      "menu_type": null
+    },
+    {
+      "id": "dish_1765143491_6192",
+      "dish_name": "Casa Style served with roasted fajita vegetables",
+      "dish_name_normalized": "casa style served with roasted fajita vegetables",
+      "restaurant": "casa_chi_crw",
+      "full_line": "Casa Style served with roasted fajita vegetables, pico de gallo, guacamole, salsa, flour tortillas",
+      "allergens": [],
+      "ingredients": [
+        "pico de gallo",
+        "guacamole",
+        "salsa",
+        "flour tortillas"
+      ],
+      "description": "pico de gallo, guacamole, salsa, flour tortillas",
+      "price": null,
+      "source": "approved_menu",
+      "confidence": 0.8,
+      "created_at": "2025-12-07T16:38:11.826184",
+      "updated_at": "2025-12-07T16:38:11.826185",
+      "correction_count": 1,
+      "notes": "From approved menu (2025-11-01)",
+      "menu_date": "2025-11-01",
+      "menu_type": null
+    },
+    {
+      "id": "dish_1765143491_5352",
+      "dish_name": "shrimp",
+      "dish_name_normalized": "shrimp",
+      "restaurant": "casa_chi_crw",
+      "full_line": "shrimp S",
+      "allergens": [
+        "S"
+      ],
+      "ingredients": [],
+      "description": null,
+      "price": null,
+      "source": "approved_menu",
+      "confidence": 0.8,
+      "created_at": "2025-12-07T16:38:11.827202",
+      "updated_at": "2025-12-07T16:38:11.827203",
+      "correction_count": 1,
+      "notes": "From approved menu (2025-11-01)",
+      "menu_date": "2025-11-01",
+      "menu_type": null
+    },
+    {
+      "id": "dish_1765143491_5465",
+      "dish_name": "Suntory",
+      "dish_name_normalized": "suntory",
+      "restaurant": "casa_chi_crw",
+      "full_line": "Suntory, Hibiki, Yamazaki",
+      "allergens": [],
+      "ingredients": [
+        "Hibiki",
+        "Yamazaki"
+      ],
+      "description": "Hibiki, Yamazaki",
+      "price": null,
+      "source": "approved_menu",
+      "confidence": 0.8,
+      "created_at": "2025-12-07T16:38:11.828321",
+      "updated_at": "2025-12-07T16:38:11.828323",
+      "correction_count": 1,
+      "notes": "From approved menu (2025-11-01)",
+      "menu_date": "2025-11-01",
+      "menu_type": null
+    },
+    {
+      "id": "dish_1765143491_7739",
+      "dish_name": "Lime",
+      "dish_name_normalized": "lime",
+      "restaurant": "casa_chi_crw",
+      "full_line": "Lime, Mango, Spicy, Hibiscus $24",
+      "allergens": [],
+      "ingredients": [
+        "Mango",
+        "Spicy",
+        "Hibiscus $24"
+      ],
+      "description": "Mango, Spicy, Hibiscus $24",
+      "price": null,
+      "source": "approved_menu",
+      "confidence": 0.8,
+      "created_at": "2025-12-07T16:38:11.829343",
+      "updated_at": "2025-12-07T16:38:11.829345",
+      "correction_count": 1,
+      "notes": "From approved menu (2025-11-01)",
+      "menu_date": "2025-11-01",
+      "menu_type": null
+    },
+    {
+      "id": "dish_1765143491_6064",
+      "dish_name": "coconut fat-washed rosaluna mezcal",
+      "dish_name_normalized": "coconut fatwashed rosaluna mezcal",
+      "restaurant": "casa_chi_crw",
+      "full_line": "coconut fat-washed rosaluna mezcal, vermouth, lacto-fermented cucumber",
+      "allergens": [],
+      "ingredients": [
+        "vermouth",
+        "lacto-fermented cucumber"
+      ],
+      "description": "vermouth, lacto-fermented cucumber",
+      "price": null,
+      "source": "approved_menu",
+      "confidence": 0.8,
+      "created_at": "2025-12-07T16:38:11.830477",
+      "updated_at": "2025-12-07T16:38:11.830478",
+      "correction_count": 1,
+      "notes": "From approved menu (2025-11-01)",
+      "menu_date": "2025-11-01",
+      "menu_type": null
+    },
+    {
+      "id": "dish_1765143491_6694",
+      "dish_name": "bourbon",
+      "dish_name_normalized": "bourbon",
+      "restaurant": "casa_chi_crw",
+      "full_line": "bourbon, mezcal, agave, mole bitters, orange bitters",
+      "allergens": [],
+      "ingredients": [
+        "mezcal",
+        "agave",
+        "mole bitters",
+        "orange bitters"
+      ],
+      "description": "mezcal, agave, mole bitters, orange bitters",
+      "price": null,
+      "source": "approved_menu",
+      "confidence": 0.8,
+      "created_at": "2025-12-07T16:38:11.832751",
+      "updated_at": "2025-12-07T16:38:11.832753",
+      "correction_count": 1,
+      "notes": "From approved menu (2025-11-01)",
+      "menu_date": "2025-11-01",
+      "menu_type": null
+    },
+    {
+      "id": "dish_1765143492_3365",
+      "dish_name": "Seasonal Fruit Cocktail",
+      "dish_name_normalized": "seasonal fruit cocktail",
+      "restaurant": "dlena_brunch",
+      "full_line": "Seasonal Fruit Cocktail, orange juice, berries, fruit espuma, agave honey, bee pollen V 10",
+      "allergens": [
+        "V"
+      ],
+      "ingredients": [
+        "orange juice",
+        "berries",
+        "fruit espuma",
+        "agave honey",
+        "bee pollen"
+      ],
+      "description": "orange juice, berries, fruit espuma, agave honey, bee pollen",
+      "price": "10",
+      "source": "approved_menu",
+      "confidence": 0.8,
+      "created_at": "2025-12-07T16:38:12.106684",
+      "updated_at": "2025-12-07T16:38:12.106688",
+      "correction_count": 1,
+      "notes": "From approved menu - brunch",
+      "menu_date": null,
+      "menu_type": "brunch"
+    },
+    {
+      "id": "dish_1765143492_5869",
+      "dish_name": "D\u2019le\u00f1a Caesar Salad",
+      "dish_name_normalized": "dle\u00f1a caesar salad",
+      "restaurant": "dlena_brunch",
+      "full_line": "D\u2019le\u00f1a Caesar Salad, romaine, cotija cheese, heirloom cherry tomatoes, grilled croutons, smoked egg, charred Caesar dressing *D,G 16",
+      "allergens": [
+        "D",
+        "G"
+      ],
+      "ingredients": [
+        "romaine",
+        "cotija cheese",
+        "heirloom cherry tomatoes",
+        "grilled croutons",
+        "smoked egg",
+        "charred Caesar dressing"
+      ],
+      "description": "romaine, cotija cheese, heirloom cherry tomatoes, grilled croutons, smoked egg, charred Caesar dressing",
+      "price": "16",
+      "source": "approved_menu",
+      "confidence": 0.8,
+      "created_at": "2025-12-07T16:38:12.108057",
+      "updated_at": "2025-12-07T16:38:12.108059",
+      "correction_count": 1,
+      "notes": "From approved menu - brunch",
+      "menu_date": null,
+      "menu_type": "brunch"
+    },
+    {
+      "id": "dish_1765143492_4278",
+      "dish_name": "Shrimp Aguachile",
+      "dish_name_normalized": "shrimp aguachile",
+      "restaurant": "dlena_brunch",
+      "full_line": "Shrimp Aguachile, habanero citrus broth, mango, onions, tomato* G,S 17",
+      "allergens": [
+        "G",
+        "S"
+      ],
+      "ingredients": [
+        "habanero citrus broth",
+        "mango",
+        "onions",
+        "tomato*"
+      ],
+      "description": "habanero citrus broth, mango, onions, tomato*",
+      "price": "17",
+      "source": "approved_menu",
+      "confidence": 0.8,
+      "created_at": "2025-12-07T16:38:12.109254",
+      "updated_at": "2025-12-07T16:38:12.109255",
+      "correction_count": 1,
+      "notes": "From approved menu - brunch",
+      "menu_date": null,
+      "menu_type": "brunch"
+    },
+    {
+      "id": "dish_1765143492_4986",
       "dish_name": "Tuna Coconut Ceviche",
       "dish_name_normalized": "tuna coconut ceviche",
       "restaurant": "dlena_brunch",
@@ -439,15 +1414,125 @@
       ],
       "description": "leche de tigre, red onion, cucumber, orange blossom honey, toasted coconut *",
       "price": "19",
-      "source": "training",
-      "confidence": 0.5,
-      "created_at": "2025-12-06T16:23:41.816549",
-      "updated_at": "2025-12-06T16:23:41.816551",
+      "source": "approved_menu",
+      "confidence": 0.8,
+      "created_at": "2025-12-07T16:38:12.110396",
+      "updated_at": "2025-12-07T16:38:12.110397",
       "correction_count": 1,
-      "notes": "Learned from correction. Original had different description."
+      "notes": "From approved menu - brunch",
+      "menu_date": null,
+      "menu_type": "brunch"
     },
     {
-      "id": "dish_1765056221_1922",
+      "id": "dish_1765143492_6378",
+      "dish_name": "Mahi Mahi Ceviche",
+      "dish_name_normalized": "mahi mahi ceviche",
+      "restaurant": "dlena_brunch",
+      "full_line": "Mahi Mahi Ceviche, mango, cucumber, cilantro, lichye citrus broth G S 18",
+      "allergens": [
+        "S"
+      ],
+      "ingredients": [
+        "mango",
+        "cucumber",
+        "cilantro",
+        "lichye citrus broth G"
+      ],
+      "description": "mango, cucumber, cilantro, lichye citrus broth G",
+      "price": "18",
+      "source": "approved_menu",
+      "confidence": 0.8,
+      "created_at": "2025-12-07T16:38:12.111491",
+      "updated_at": "2025-12-07T16:38:12.111492",
+      "correction_count": 1,
+      "notes": "From approved menu - brunch",
+      "menu_date": null,
+      "menu_type": "brunch"
+    },
+    {
+      "id": "dish_1765143492_0989",
+      "dish_name": "Birria Beef Tacos",
+      "dish_name_normalized": "birria beef tacos",
+      "restaurant": "dlena_brunch",
+      "full_line": "Birria Beef Tacos, chile de \u00e1rbol peanut sauce, pico de gallo, cilantro, green tomatillo salsa, radish G,N 19",
+      "allergens": [
+        "G",
+        "N"
+      ],
+      "ingredients": [
+        "chile de \u00e1rbol peanut sauce",
+        "pico de gallo",
+        "cilantro",
+        "green tomatillo salsa",
+        "radish"
+      ],
+      "description": "chile de \u00e1rbol peanut sauce, pico de gallo, cilantro, green tomatillo salsa, radish",
+      "price": "19",
+      "source": "approved_menu",
+      "confidence": 0.8,
+      "created_at": "2025-12-07T16:38:12.112656",
+      "updated_at": "2025-12-07T16:38:12.112657",
+      "correction_count": 1,
+      "notes": "From approved menu - brunch",
+      "menu_date": null,
+      "menu_type": "brunch"
+    },
+    {
+      "id": "dish_1765143492_3278",
+      "dish_name": "Taco Campechanos",
+      "dish_name_normalized": "taco campechanos",
+      "restaurant": "dlena_brunch",
+      "full_line": "Taco Campechanos, suadero beef, pork chorizo, salsa borracha, onions, cilantro 18",
+      "allergens": [],
+      "ingredients": [
+        "suadero beef",
+        "pork chorizo",
+        "salsa borracha",
+        "onions",
+        "cilantro"
+      ],
+      "description": "suadero beef, pork chorizo, salsa borracha, onions, cilantro",
+      "price": "18",
+      "source": "approved_menu",
+      "confidence": 0.8,
+      "created_at": "2025-12-07T16:38:12.113830",
+      "updated_at": "2025-12-07T16:38:12.113831",
+      "correction_count": 1,
+      "notes": "From approved menu - brunch",
+      "menu_date": null,
+      "menu_type": "brunch"
+    },
+    {
+      "id": "dish_1765143492_0056",
+      "dish_name": "Tacos de Champi\u00f1\u00f3n",
+      "dish_name_normalized": "tacos de champi\u00f1\u00f3n",
+      "restaurant": "dlena_brunch",
+      "full_line": "Tacos de Champi\u00f1\u00f3n, braised adobo mushroom, black bean pur\u00e9e, pico de gallo, molcajete salsa, cotija cheese D,G,V 17",
+      "allergens": [
+        "D",
+        "G",
+        "V"
+      ],
+      "ingredients": [
+        "braised adobo mushroom",
+        "black bean pur\u00e9e",
+        "pico de gallo",
+        "molcajete salsa",
+        "cotija cheese"
+      ],
+      "description": "braised adobo mushroom, black bean pur\u00e9e, pico de gallo, molcajete salsa, cotija cheese",
+      "price": "17",
+      "source": "approved_menu",
+      "confidence": 0.8,
+      "created_at": "2025-12-07T16:38:12.115014",
+      "updated_at": "2025-12-07T16:38:12.115015",
+      "correction_count": 1,
+      "notes": "From approved menu - brunch",
+      "menu_date": null,
+      "menu_type": "brunch"
+    },
+    {
+      "id": "dish_1765143492_6062",
       "dish_name": "La Baja Fish Taco",
       "dish_name_normalized": "la baja fish taco",
       "restaurant": "dlena_brunch",
@@ -466,15 +1551,73 @@
       ],
       "description": "aji amarillo slaw, pico de gallo, salsa verde cruda, pickled chili, flour tortillas",
       "price": "21",
-      "source": "training",
-      "confidence": 0.5,
-      "created_at": "2025-12-06T16:23:41.817025",
-      "updated_at": "2025-12-06T16:23:41.817026",
+      "source": "approved_menu",
+      "confidence": 0.8,
+      "created_at": "2025-12-07T16:38:12.116301",
+      "updated_at": "2025-12-07T16:38:12.116302",
       "correction_count": 1,
-      "notes": "Learned from correction. Original had different description."
+      "notes": "From approved menu - brunch",
+      "menu_date": null,
+      "menu_type": "brunch"
     },
     {
-      "id": "dish_1765056221_7096",
+      "id": "dish_1765143492_2085",
+      "dish_name": "Enfrijochiladas",
+      "dish_name_normalized": "enfrijochiladas",
+      "restaurant": "dlena_brunch",
+      "full_line": "Enfrijochiladas, black bean sauce, scrambled eggs, bacon pork chorizo, pico de gallo, guajillo crema, cotija cheese D,G 15",
+      "allergens": [
+        "D",
+        "G"
+      ],
+      "ingredients": [
+        "black bean sauce",
+        "scrambled eggs",
+        "bacon pork chorizo",
+        "pico de gallo",
+        "guajillo crema",
+        "cotija cheese"
+      ],
+      "description": "black bean sauce, scrambled eggs, bacon pork chorizo, pico de gallo, guajillo crema, cotija cheese",
+      "price": "15",
+      "source": "approved_menu",
+      "confidence": 0.8,
+      "created_at": "2025-12-07T16:38:12.117621",
+      "updated_at": "2025-12-07T16:38:12.117622",
+      "correction_count": 1,
+      "notes": "From approved menu - brunch",
+      "menu_date": null,
+      "menu_type": "brunch"
+    },
+    {
+      "id": "dish_1765143492_9782",
+      "dish_name": "Steak And Eggs",
+      "dish_name_normalized": "steak and eggs",
+      "restaurant": "dlena_brunch",
+      "full_line": "Steak And Eggs, fried egg, creamy potato, poblano rajas, charred tomato salsa, chimichurri* D 28",
+      "allergens": [
+        "D"
+      ],
+      "ingredients": [
+        "fried egg",
+        "creamy potato",
+        "poblano rajas",
+        "charred tomato salsa",
+        "chimichurri*"
+      ],
+      "description": "fried egg, creamy potato, poblano rajas, charred tomato salsa, chimichurri*",
+      "price": "28",
+      "source": "approved_menu",
+      "confidence": 0.8,
+      "created_at": "2025-12-07T16:38:12.119078",
+      "updated_at": "2025-12-07T16:38:12.119080",
+      "correction_count": 1,
+      "notes": "From approved menu - brunch",
+      "menu_date": null,
+      "menu_type": "brunch"
+    },
+    {
+      "id": "dish_1765143492_8676",
       "dish_name": "Rancheros Divorciados",
       "dish_name_normalized": "rancheros divorciados",
       "restaurant": "dlena_brunch",
@@ -494,15 +1637,45 @@
       ],
       "description": "fried egg, pork chorizo, poached corn tortilla, spicy bean pur\u00e9e, chili morita sauce, salsa verde, charred panela cheese, crema fresca*",
       "price": "18",
-      "source": "training",
-      "confidence": 0.5,
-      "created_at": "2025-12-06T16:23:41.817506",
-      "updated_at": "2025-12-06T16:23:41.817507",
+      "source": "approved_menu",
+      "confidence": 0.8,
+      "created_at": "2025-12-07T16:38:12.120541",
+      "updated_at": "2025-12-07T16:38:12.120542",
       "correction_count": 1,
-      "notes": "Learned from correction. Original had different description."
+      "notes": "From approved menu - brunch",
+      "menu_date": null,
+      "menu_type": "brunch"
     },
     {
-      "id": "dish_1765056221_2711",
+      "id": "dish_1765143492_9173",
+      "dish_name": "Huevos Rancheros",
+      "dish_name_normalized": "huevos rancheros",
+      "restaurant": "dlena_brunch",
+      "full_line": "Huevos Rancheros, scrambled egg, ranchera sauce, crispy corn tortilla, potatoes, crema, queso fresco D V 16",
+      "allergens": [
+        "V"
+      ],
+      "ingredients": [
+        "scrambled egg",
+        "ranchera sauce",
+        "crispy corn tortilla",
+        "potatoes",
+        "crema",
+        "queso fresco D"
+      ],
+      "description": "scrambled egg, ranchera sauce, crispy corn tortilla, potatoes, crema, queso fresco D",
+      "price": "16",
+      "source": "approved_menu",
+      "confidence": 0.8,
+      "created_at": "2025-12-07T16:38:12.121817",
+      "updated_at": "2025-12-07T16:38:12.121819",
+      "correction_count": 1,
+      "notes": "From approved menu - brunch",
+      "menu_date": null,
+      "menu_type": "brunch"
+    },
+    {
+      "id": "dish_1765143492_8753",
       "dish_name": "D\u00b4le\u00f1a Crispy Chicken Waffles",
       "dish_name_normalized": "dle\u00f1a crispy chicken waffles",
       "restaurant": "dlena_brunch",
@@ -521,41 +1694,128 @@
       ],
       "description": "crispy chicken tenders, chipotle glaze, pickled chili, maple syrup salted caramel sauce, agave syrup",
       "price": "18",
-      "source": "training",
-      "confidence": 0.5,
-      "created_at": "2025-12-06T16:23:41.817991",
-      "updated_at": "2025-12-06T16:23:41.817992",
+      "source": "approved_menu",
+      "confidence": 0.8,
+      "created_at": "2025-12-07T16:38:12.123493",
+      "updated_at": "2025-12-07T16:38:12.123495",
       "correction_count": 1,
-      "notes": "Learned from correction. Original had different description."
+      "notes": "From approved menu - brunch",
+      "menu_date": null,
+      "menu_type": "brunch"
     },
     {
-      "id": "dish_1765056221_0313",
-      "dish_name": "Cazuela",
-      "dish_name_normalized": "cazuela",
+      "id": "dish_1765143492_9691",
+      "dish_name": "Carnitas Skillet",
+      "dish_name_normalized": "carnitas skillet",
       "restaurant": "dlena_brunch",
-      "full_line": "Cazuela , creamy guajillo sauce, potato hash, fried egg, queso fresco, pickled onions, avocado* D",
+      "full_line": "Carnitas skillet, salsa macha , pickled chilies, melted chihuahua cheese, cilantro D 20",
       "allergens": [
         "D"
       ],
       "ingredients": [
-        "creamy guajillo sauce",
-        "potato hash",
-        "fried egg",
-        "queso fresco",
-        "pickled onions",
-        "avocado*"
+        "cilantro",
+        "celery root pur\u00e9e",
+        "salsa macha",
+        "pickled chilies",
+        "melted chihuahua cheese",
+        "shredded pork shank",
+        "pickled chili",
+        "sun-dried chili sauce"
       ],
-      "description": "creamy guajillo sauce, potato hash, fried egg, queso fresco, pickled onions, avocado*",
-      "price": null,
-      "source": "training",
-      "confidence": 0.5,
-      "created_at": "2025-12-06T16:23:41.818493",
-      "updated_at": "2025-12-06T16:23:41.818495",
-      "correction_count": 1,
-      "notes": "Learned from correction. Original had different description."
+      "description": "salsa macha , pickled chilies, melted chihuahua cheese, cilantro",
+      "price": "20",
+      "source": "approved_menu",
+      "confidence": 0.9,
+      "created_at": "2025-12-07T16:38:12.124967",
+      "updated_at": "2025-12-07T16:38:12.126286",
+      "correction_count": 2,
+      "notes": "From approved menu - brunch",
+      "menu_date": null,
+      "menu_type": "brunch"
     },
     {
-      "id": "dish_1765056221_0246",
+      "id": "dish_1765143492_3934",
+      "dish_name": "Chilaquiles & Cecina",
+      "dish_name_normalized": "chilaquiles cecina",
+      "restaurant": "dlena_brunch",
+      "full_line": "Chilaquiles & Cecina, sundried beef, tomatillo sauce, black bean pur\u00e9e, crema fresca, cotija cheese, onion, peppers D,G 17",
+      "allergens": [
+        "D",
+        "G"
+      ],
+      "ingredients": [
+        "sundried beef",
+        "tomatillo sauce",
+        "black bean pur\u00e9e",
+        "crema fresca",
+        "cotija cheese",
+        "onion",
+        "peppers"
+      ],
+      "description": "sundried beef, tomatillo sauce, black bean pur\u00e9e, crema fresca, cotija cheese, onion, peppers",
+      "price": "17",
+      "source": "approved_menu",
+      "confidence": 0.8,
+      "created_at": "2025-12-07T16:38:12.127684",
+      "updated_at": "2025-12-07T16:38:12.127685",
+      "correction_count": 1,
+      "notes": "From approved menu - brunch",
+      "menu_date": null,
+      "menu_type": "brunch"
+    },
+    {
+      "id": "dish_1765143492_3550",
+      "dish_name": "add two fried eggs*",
+      "dish_name_normalized": "add two fried eggs",
+      "restaurant": "dlena_brunch",
+      "full_line": "add two fried eggs* 8",
+      "allergens": [],
+      "ingredients": [],
+      "description": null,
+      "price": "8",
+      "source": "approved_menu",
+      "confidence": 0.8,
+      "created_at": "2025-12-07T16:38:12.129036",
+      "updated_at": "2025-12-07T16:38:12.129038",
+      "correction_count": 1,
+      "notes": "From approved menu - brunch",
+      "menu_date": null,
+      "menu_type": "brunch"
+    },
+    {
+      "id": "dish_1765143492_1663",
+      "dish_name": "Cazuela",
+      "dish_name_normalized": "cazuela",
+      "restaurant": "dlena_brunch",
+      "full_line": "Cazuela, smoked egg, charred tomato salsa, potato hash, panela cheese D,V 15",
+      "allergens": [
+        "D",
+        "V"
+      ],
+      "ingredients": [
+        "fried egg",
+        "pickled onions",
+        "smoked egg",
+        "avocado*",
+        "potato hash",
+        "creamy guajillo sauce",
+        "charred tomato salsa",
+        "panela cheese",
+        "queso fresco"
+      ],
+      "description": "smoked egg, charred tomato salsa, potato hash, panela cheese",
+      "price": "15",
+      "source": "approved_menu",
+      "confidence": 0.9,
+      "created_at": "2025-12-07T16:38:12.130397",
+      "updated_at": "2025-12-07T16:38:12.131778",
+      "correction_count": 2,
+      "notes": "From approved menu - brunch",
+      "menu_date": null,
+      "menu_type": "brunch"
+    },
+    {
+      "id": "dish_1765143492_5494",
       "dish_name": "Zarandeado Salmon",
       "dish_name_normalized": "zarandeado salmon",
       "restaurant": "dlena_brunch",
@@ -571,15 +1831,17 @@
       ],
       "description": "citrus napa cabbage, chipotle mayo chili aioli , corn pico de gallo*",
       "price": "28",
-      "source": "training",
-      "confidence": 0.5,
-      "created_at": "2025-12-06T16:23:41.818984",
-      "updated_at": "2025-12-06T16:23:41.818985",
+      "source": "approved_menu",
+      "confidence": 0.8,
+      "created_at": "2025-12-07T16:38:12.133366",
+      "updated_at": "2025-12-07T16:38:12.133367",
       "correction_count": 1,
-      "notes": "Learned from correction. Original had different description."
+      "notes": "From approved menu - brunch",
+      "menu_date": null,
+      "menu_type": "brunch"
     },
     {
-      "id": "dish_1765056221_8384",
+      "id": "dish_1765143492_3121",
       "dish_name": "Grilled Street Corn",
       "dish_name_normalized": "grilled street corn",
       "restaurant": "dlena_brunch",
@@ -596,15 +1858,100 @@
       ],
       "description": "bacon, cotija cheese, chipotle mayo aioli, taj\u00edn",
       "price": "10",
-      "source": "training",
-      "confidence": 0.5,
-      "created_at": "2025-12-06T16:23:41.820074",
-      "updated_at": "2025-12-06T16:23:41.820076",
+      "source": "approved_menu",
+      "confidence": 0.8,
+      "created_at": "2025-12-07T16:38:12.134858",
+      "updated_at": "2025-12-07T16:38:12.134859",
       "correction_count": 1,
-      "notes": "Learned from correction. Original had different description."
+      "notes": "From approved menu - brunch",
+      "menu_date": null,
+      "menu_type": "brunch"
     },
     {
-      "id": "dish_1765056221_2128",
+      "id": "dish_1765143492_6379",
+      "dish_name": "Churros",
+      "dish_name_normalized": "churros",
+      "restaurant": "dlena_brunch",
+      "full_line": "Churros, cajeta caramel sauce, chocolate sauce D,G,N,V 10",
+      "allergens": [
+        "D",
+        "G",
+        "N",
+        "V"
+      ],
+      "ingredients": [
+        "cajeta caramel sauce",
+        "chocolate sauce"
+      ],
+      "description": "cajeta caramel sauce, chocolate sauce",
+      "price": "10",
+      "source": "approved_menu",
+      "confidence": 0.8,
+      "created_at": "2025-12-07T16:38:12.136478",
+      "updated_at": "2025-12-07T16:38:12.136479",
+      "correction_count": 1,
+      "notes": "From approved menu - brunch",
+      "menu_date": null,
+      "menu_type": "brunch"
+    },
+    {
+      "id": "dish_1765143492_3176",
+      "dish_name": "Guacamole",
+      "dish_name_normalized": "guacamole",
+      "restaurant": "dlena_brunch",
+      "full_line": "Guacamole, avocado, tomato, onion, cilantro, lime G,S,VG 15",
+      "allergens": [
+        "G",
+        "S"
+      ],
+      "ingredients": [
+        "avocado",
+        "tomato",
+        "onion",
+        "cilantro",
+        "lime"
+      ],
+      "description": "avocado, tomato, onion, cilantro, lime",
+      "price": "15",
+      "source": "approved_menu",
+      "confidence": 0.8,
+      "created_at": "2025-12-07T16:38:12.138038",
+      "updated_at": "2025-12-07T16:38:12.138039",
+      "correction_count": 1,
+      "notes": "From approved menu - brunch",
+      "menu_date": null,
+      "menu_type": "brunch"
+    },
+    {
+      "id": "dish_1765143492_6400",
+      "dish_name": "Pork Belly Guacamole",
+      "dish_name_normalized": "pork belly guacamole",
+      "restaurant": "dlena_brunch",
+      "full_line": "Pork Belly Guacamole, avocado, bacon, cotija cheese, pickled chilies D,G,S 18",
+      "allergens": [
+        "D",
+        "G",
+        "S"
+      ],
+      "ingredients": [
+        "avocado",
+        "bacon",
+        "cotija cheese",
+        "pickled chilies"
+      ],
+      "description": "avocado, bacon, cotija cheese, pickled chilies",
+      "price": "18",
+      "source": "approved_menu",
+      "confidence": 0.8,
+      "created_at": "2025-12-07T16:38:12.139537",
+      "updated_at": "2025-12-07T16:38:12.139538",
+      "correction_count": 1,
+      "notes": "From approved menu - brunch",
+      "menu_date": null,
+      "menu_type": "brunch"
+    },
+    {
+      "id": "dish_1765143492_2620",
       "dish_name": "Crab Guacamole",
       "dish_name_normalized": "crab guacamole",
       "restaurant": "dlena_brunch",
@@ -621,15 +1968,67 @@
       ],
       "description": "smoked jumbo crab, corn esquites, old bay aioli mayo, jalape\u00f1o",
       "price": "22",
-      "source": "training",
-      "confidence": 0.5,
-      "created_at": "2025-12-06T16:23:41.821082",
-      "updated_at": "2025-12-06T16:23:41.821083",
+      "source": "approved_menu",
+      "confidence": 0.8,
+      "created_at": "2025-12-07T16:38:12.141128",
+      "updated_at": "2025-12-07T16:38:12.141130",
       "correction_count": 1,
-      "notes": "Learned from correction. Original had different description."
+      "notes": "From approved menu - brunch",
+      "menu_date": null,
+      "menu_type": "brunch"
     },
     {
-      "id": "dish_1765056221_4355",
+      "id": "dish_1765143492_0003",
+      "dish_name": "Queso Fundido",
+      "dish_name_normalized": "queso fundido",
+      "restaurant": "dlena_brunch",
+      "full_line": "Queso Fundido, melted cheese, tomatillo salsa cruda, caramelized onion, corn tortillas D,V 21",
+      "allergens": [
+        "D",
+        "V"
+      ],
+      "ingredients": [
+        "melted cheese",
+        "tomatillo salsa cruda",
+        "caramelized onion",
+        "corn tortillas"
+      ],
+      "description": "melted cheese, tomatillo salsa cruda, caramelized onion, corn tortillas",
+      "price": "21",
+      "source": "approved_menu",
+      "confidence": 0.8,
+      "created_at": "2025-12-07T16:38:12.142696",
+      "updated_at": "2025-12-07T16:38:12.142698",
+      "correction_count": 1,
+      "notes": "From approved menu - brunch",
+      "menu_date": null,
+      "menu_type": "brunch"
+    },
+    {
+      "id": "dish_1765143492_8420",
+      "dish_name": "Choice of: cecina",
+      "dish_name_normalized": "choice of cecina",
+      "restaurant": "dlena_brunch",
+      "full_line": "Choice of: cecina, chorizo or mushrooms V",
+      "allergens": [
+        "V"
+      ],
+      "ingredients": [
+        "chorizo or mushrooms"
+      ],
+      "description": "chorizo or mushrooms",
+      "price": null,
+      "source": "approved_menu",
+      "confidence": 0.8,
+      "created_at": "2025-12-07T16:38:12.144238",
+      "updated_at": "2025-12-07T16:38:12.144239",
+      "correction_count": 1,
+      "notes": "From approved menu - brunch",
+      "menu_date": null,
+      "menu_type": "brunch"
+    },
+    {
+      "id": "dish_1765143492_5606",
       "dish_name": "Tomahawk & Eggs",
       "dish_name_normalized": "tomahawk eggs",
       "restaurant": "dlena_brunch",
@@ -644,27 +2043,110 @@
       ],
       "description": "mezcal flamb\u00e9ed tableside, four fried eggs, potato hash, bone marrow butter, street corn cazuela * D  160",
       "price": "150",
-      "source": "training",
-      "confidence": 0.5,
-      "created_at": "2025-12-06T16:23:41.822256",
-      "updated_at": "2025-12-06T16:23:41.822257",
+      "source": "approved_menu",
+      "confidence": 0.8,
+      "created_at": "2025-12-07T16:38:12.145973",
+      "updated_at": "2025-12-07T16:38:12.145974",
       "correction_count": 1,
-      "notes": "Learned from correction. Original had different description."
+      "notes": "From approved menu - brunch",
+      "menu_date": null,
+      "menu_type": "brunch"
+    },
+    {
+      "id": "dish_1765143492_5356",
+      "dish_name": "Carajillo Cr\u00eame brul\u00e9e",
+      "dish_name_normalized": "carajillo cr\u00eame brul\u00e9e",
+      "restaurant": "dlena_brunch",
+      "full_line": "Carajillo Cr\u00eame brul\u00e9e, licor 43, espresso, served table side D,V 14",
+      "allergens": [
+        "D",
+        "V"
+      ],
+      "ingredients": [
+        "licor 43",
+        "espresso",
+        "served table side"
+      ],
+      "description": "licor 43, espresso, served table side",
+      "price": "14",
+      "source": "approved_menu",
+      "confidence": 0.8,
+      "created_at": "2025-12-07T16:38:12.147524",
+      "updated_at": "2025-12-07T16:38:12.147525",
+      "correction_count": 1,
+      "notes": "From approved menu - brunch",
+      "menu_date": null,
+      "menu_type": "brunch"
+    },
+    {
+      "id": "dish_1765143492_0793",
+      "dish_name": "Mil Hojas Pancake Argentino",
+      "dish_name_normalized": "mil hojas pancake argentino",
+      "restaurant": "dlena_brunch",
+      "full_line": "Mil Hojas Pancake Argentino, cr\u00eapes, warm cajeta caramel, whipped cream, strawberry, salted caramel ice cream D,G,V 14",
+      "allergens": [
+        "D",
+        "G",
+        "V"
+      ],
+      "ingredients": [
+        "cr\u00eapes",
+        "warm cajeta caramel",
+        "whipped cream",
+        "strawberry",
+        "salted caramel ice cream"
+      ],
+      "description": "cr\u00eapes, warm cajeta caramel, whipped cream, strawberry, salted caramel ice cream",
+      "price": "14",
+      "source": "approved_menu",
+      "confidence": 0.8,
+      "created_at": "2025-12-07T16:38:12.149102",
+      "updated_at": "2025-12-07T16:38:12.149103",
+      "correction_count": 1,
+      "notes": "From approved menu - brunch",
+      "menu_date": null,
+      "menu_type": "brunch"
+    },
+    {
+      "id": "dish_1765143492_2454",
+      "dish_name": "Sorbets & Gelatos",
+      "dish_name_normalized": "sorbets gelatos",
+      "restaurant": "dlena_brunch",
+      "full_line": "Sorbets & Gelatos, seasonal flavors D,G,V 9",
+      "allergens": [
+        "D",
+        "G",
+        "V"
+      ],
+      "ingredients": [
+        "seasonal flavors"
+      ],
+      "description": "seasonal flavors",
+      "price": "9",
+      "source": "approved_menu",
+      "confidence": 0.8,
+      "created_at": "2025-12-07T16:38:12.150647",
+      "updated_at": "2025-12-07T16:38:12.150649",
+      "correction_count": 1,
+      "notes": "From approved menu - brunch",
+      "menu_date": null,
+      "menu_type": "brunch"
     }
   ],
   "statistics": {
-    "total_dishes": 26,
+    "total_dishes": 82,
     "by_restaurant": {
       "toro_chicago": 2,
-      "aquimero_mothers_day_brunch_original": 6,
-      "dlena_brunch": 11,
       "aquimero": 1,
-      "test_restaurant": 1,
-      "sushi": 5
+      "sushi": 9,
+      "aquimero_mothers_day_brunch_run_after_bug_fix_original": 20,
+      "casa_chi_crw": 20,
+      "dlena_brunch": 30
     },
     "by_source": {
       "manual": 3,
-      "training": 23
+      "terminology_training": 5,
+      "approved_menu": 74
     }
   }
 }

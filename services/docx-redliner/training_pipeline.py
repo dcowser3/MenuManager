@@ -27,7 +27,12 @@ try:
     from dish_allergen_db import (
         store_allergen_correction,
         learn_dish_from_correction,
+        store_dish_terminology_correction,
+        store_approved_dish,
+        get_dish_corrections,
         extract_restaurant,
+        extract_menu_date,
+        extract_menu_type,
         get_statistics as get_dish_db_stats
     )
     DISH_DB_AVAILABLE = True
@@ -38,13 +43,21 @@ except ImportError:
 # Import known correction pairs
 # ADD NEW PAIRS TO: known_corrections.py (single location!)
 try:
-    from known_corrections import KNOWN_PAIRS, KNOWN_ABBREVIATIONS, is_known_pair
+    from known_corrections import (
+        KNOWN_PAIRS, KNOWN_ABBREVIATIONS, TERMINOLOGY_CORRECTIONS, CONTEXT_HINTS,
+        is_known_pair, is_terminology_correction, get_context_hints
+    )
     KNOWN_CORRECTIONS_AVAILABLE = True
 except ImportError:
     KNOWN_PAIRS = set()
     KNOWN_ABBREVIATIONS = {}
+    TERMINOLOGY_CORRECTIONS = {}
+    CONTEXT_HINTS = {}
     KNOWN_CORRECTIONS_AVAILABLE = False
     print("Note: known_corrections.py not found, using inline pairs")
+    
+    def is_terminology_correction(x): return False
+    def get_context_hints(x, y): return {}
 
 
 class TrainingPairAnalyzer:
@@ -319,12 +332,21 @@ class TrainingPairAnalyzer:
                         
                         # This is a replacement: old text was deleted, new text was added
                         category = self._categorize_correction(deleted_text, added_text)
+                        
+                        # Capture paragraph context (contains dish name)
+                        para_text = para_info.get('text', '')
+                        dish_name = self._extract_dish_name_from_para(para_text)
+                        
                         correction = {
                             'type': 'replacement',
                             'original': deleted_text,
                             'corrected': added_text,
                             'category': category,
                             'source': 'tracked_changes',
+                            'context': {
+                                'paragraph': para_text[:100],  # First 100 chars for context
+                                'dish_name': dish_name,
+                            },
                             'word_diffs': [{
                                 'operation': 'replace',
                                 'original_words': deleted_text,
@@ -375,12 +397,20 @@ class TrainingPairAnalyzer:
                         else:
                             category = 'deletion'
                         
+                        # Capture paragraph context (contains dish name)
+                        para_text = para_info.get('text', '')
+                        dish_name = self._extract_dish_name_from_para(para_text)
+                        
                         correction = {
                             'type': 'replacement' if added_text else 'deletion',
                             'original': deleted_text,
                             'corrected': added_text,
                             'category': category,
                             'source': 'tracked_changes',
+                            'context': {
+                                'paragraph': para_text[:100],
+                                'dish_name': dish_name,
+                            },
                             'word_diffs': [{
                                 'operation': 'replace' if added_text else 'delete',
                                 'original_words': deleted_text,
@@ -557,10 +587,17 @@ class TrainingPairAnalyzer:
         Automatically categorize the type of correction.
         """
         # Check for common patterns
+        orig_lower = original.lower().strip()
+        corr_lower = corrected.lower().strip()
         
         # Allergen code correction (check FIRST - these look like spelling but aren't)
         if self._is_allergen_correction(original, corrected):
             return 'allergen'
+        
+        # Terminology/word preference (check BEFORE spelling)
+        # These are word substitutions, not misspellings: mayo→aioli, crust→rim
+        if self._is_terminology_preference(orig_lower, corr_lower):
+            return 'terminology'
         
         # Spelling correction
         if self._is_spelling_correction(original, corrected):
@@ -587,6 +624,54 @@ class TrainingPairAnalyzer:
             return 'separator'
         
         return 'general'
+    
+    def _is_terminology_preference(self, original: str, corrected: str) -> bool:
+        """
+        Check if this is a terminology/word preference correction.
+        
+        Terminology corrections are word substitutions where neither word is
+        "wrong" per se, but RSH prefers one over the other:
+        - mayo → aioli (RSH prefers "aioli")
+        - crust → rim (for cocktail glasses)
+        - sorbete → sorbet
+        
+        These are different from spelling corrections because:
+        - Both words are valid English/Spanish
+        - The "original" isn't misspelled
+        - It's a style/preference choice
+        """
+        # Check if it's in our known terminology corrections
+        if original in TERMINOLOGY_CORRECTIONS:
+            return True
+        
+        # Check if it's a known pair that's terminology (not spelling)
+        if (original, corrected) in KNOWN_PAIRS:
+            # Pairs that are terminology preferences, not misspellings
+            terminology_pairs = {
+                ('mayo', 'aioli'), ('aioli', 'mayo'),
+                ('crust', 'rim'),
+                ('shrimp', 'prawn'), ('prawn', 'shrimp'),
+                ('tartare', 'tartar'), ('tartar', 'tartare'),
+            }
+            if (original, corrected) in terminology_pairs:
+                return True
+        
+        # Single word to single word with low character similarity
+        # but both are real words = likely terminology preference
+        if len(original.split()) == 1 and len(corrected.split()) == 1:
+            # Calculate character similarity
+            orig_set = set(original)
+            corr_set = set(corrected)
+            if orig_set and corr_set:
+                shared = len(orig_set & corr_set)
+                total = len(orig_set | corr_set)
+                similarity = shared / total
+                
+                # Low similarity + both short = different words, not typo
+                if similarity < 0.4 and len(original) <= 6 and len(corrected) <= 6:
+                    return True
+        
+        return False
     
     def _is_allergen_correction(self, original: str, corrected: str) -> bool:
         """
@@ -701,6 +786,55 @@ class TrainingPairAnalyzer:
         
         return diffs
     
+    def _extract_dish_name_from_para(self, paragraph_text: str) -> Optional[str]:
+        """
+        Extract the dish/item name from a menu paragraph.
+        
+        Menu items typically follow formats like:
+        - "Dish Name, ingredient, ingredient, allergens PRICE"
+        - "Dish Name - description"
+        - "Red Paloma, tequila, grapefruit, lime, salt rim 15"
+        
+        Returns the dish name or None if can't parse.
+        """
+        if not paragraph_text or not paragraph_text.strip():
+            return None
+        
+        text = paragraph_text.strip()
+        
+        # Try comma-separated format first (most common)
+        if ', ' in text:
+            dish_name = text.split(', ')[0].strip()
+            # Clean up any leading formatting markers
+            dish_name = re.sub(r'^[\d\.\)\-\s]+', '', dish_name)
+            if dish_name and len(dish_name) > 1:
+                return dish_name
+        
+        # Try dash-separated format
+        if ' - ' in text:
+            dish_name = text.split(' - ')[0].strip()
+            dish_name = re.sub(r'^[\d\.\)\-\s]+', '', dish_name)
+            if dish_name and len(dish_name) > 1:
+                return dish_name
+        
+        # Fall back to first few words (before any numbers or special chars)
+        words = text.split()
+        if words:
+            # Take words until we hit a price or allergen code
+            name_parts = []
+            for word in words:
+                # Stop at numbers (prices) or single-letter allergen codes
+                if word.isdigit() or (len(word) <= 2 and word.isupper()):
+                    break
+                name_parts.append(word)
+                if len(name_parts) >= 4:  # Max 4 words for dish name
+                    break
+            
+            if name_parts:
+                return ' '.join(name_parts)
+        
+        return None
+    
     def _analyze_formatting_differences(
         self, 
         original: List[Dict], 
@@ -739,6 +873,7 @@ class RuleGenerator:
     def __init__(self):
         self.rule_templates = {
             'allergen': 'Missing allergen/dietary code: "{original}" should include "{corrected}" - verify dish ingredients match allergen markers',
+            'terminology': 'Use preferred terminology: "{original}" → "{corrected}"',
             'spelling': 'Correct spelling: "{original}" → "{corrected}"',
             'diacritics': 'Use proper diacritics: "{original}" → "{corrected}"',
             'punctuation': 'Fix punctuation: "{original}" → "{corrected}"',
@@ -850,9 +985,9 @@ class RuleGenerator:
         
         # Find patterns within each category
         for category, corr_list in by_category.items():
-            patterns = self._find_patterns(corr_list)
+            pattern_counts, pattern_contexts = self._find_patterns(corr_list)
             
-            for pattern, occurrences in patterns.items():
+            for pattern, occurrences in pattern_counts.items():
                 orig, corr = pattern
                 
                 # Skip if this pattern already exists
@@ -868,43 +1003,81 @@ class RuleGenerator:
                     if overlap < 0.3:
                         continue  # Skip - likely swapped item
                 
+                # Get contexts for this pattern
+                contexts = pattern_contexts.get(pattern, [])
+                
                 # Include rule if:
                 # 1. It meets the minimum occurrence threshold, OR
                 # 2. It looks like a systematic correction (passes heuristics)
                 if occurrences >= min_occurrences:
-                    rule = self._create_rule(category, pattern, occurrences)
+                    rule = self._create_rule(category, pattern, occurrences, contexts)
                     generated_rules.append(rule)
                 elif self._is_likely_correction(orig, corr):
                     # Single occurrence but looks like a real correction
-                    rule = self._create_rule(category, pattern, occurrences)
+                    rule = self._create_rule(category, pattern, occurrences, contexts)
                     generated_rules.append(rule)
                 # Otherwise skip - likely a one-off menu change
         
         return generated_rules
     
-    def _find_patterns(self, corrections: List[Dict]) -> Dict[Tuple[str, str], int]:
+    def _find_patterns(self, corrections: List[Dict]) -> Tuple[Dict[Tuple[str, str], int], Dict[Tuple[str, str], List[Dict]]]:
         """
         Find recurring patterns in corrections.
+        
+        Returns:
+            Tuple of (pattern_count, pattern_contexts)
+            - pattern_count: Dict mapping pattern to occurrence count
+            - pattern_contexts: Dict mapping pattern to list of context dicts
         """
         pattern_count = Counter()
+        pattern_contexts = defaultdict(list)
         
         for corr in corrections:
+            # Get context info
+            context = corr.get('context', {})
+            
             # Extract word-level changes
             for word_diff in corr.get('word_diffs', []):
                 if word_diff['operation'] == 'replace':
                     orig = word_diff['original_words'].lower()
                     corr_text = word_diff['corrected_words'].lower()
                     
-                    # Store the pattern
-                    pattern_count[(orig, corr_text)] += 1
+                    # Store the pattern and its context
+                    pattern = (orig, corr_text)
+                    pattern_count[pattern] += 1
+                    if context:
+                        pattern_contexts[pattern].append(context)
         
-        return pattern_count
+        return pattern_count, pattern_contexts
     
-    def _create_rule(self, category: str, pattern: Tuple[str, str], occurrences: int) -> Dict:
+    def _create_rule(
+        self, 
+        category: str, 
+        pattern: Tuple[str, str], 
+        occurrences: int,
+        contexts: List[Dict] = None
+    ) -> Dict:
         """
         Create a rule from a pattern.
+        
+        Args:
+            category: The correction category (terminology, spelling, etc.)
+            pattern: Tuple of (original, corrected) text
+            occurrences: Number of times this pattern was seen
+            contexts: List of context dicts with dish_name, paragraph info
         """
         original, corrected = pattern
+        contexts = contexts or []
+        
+        # Extract dish names from contexts
+        dish_names = []
+        for ctx in contexts:
+            if ctx.get('dish_name'):
+                dish_names.append(ctx['dish_name'])
+        dish_names = list(set(dish_names))  # Unique names
+        
+        # Get context hints if available (from known_corrections.py)
+        hints = get_context_hints(original, corrected) if KNOWN_CORRECTIONS_AVAILABLE else {}
         
         rule = {
             'rule_id': f'LEARNED-{category.upper()}-{abs(hash(pattern)) % 10000:04d}',
@@ -923,6 +1096,18 @@ class RuleGenerator:
                 'confidence': min(occurrences / 10.0, 1.0)  # Confidence based on occurrences
             }
         }
+        
+        # Add context information if available
+        if dish_names:
+            rule['details']['seen_on_dishes'] = dish_names
+            # Increase confidence if we have dish context
+            rule['details']['confidence'] = min(rule['details']['confidence'] + 0.1, 1.0)
+        
+        # Add context hints (item types, keywords) if available
+        if hints:
+            rule['details']['applies_to'] = hints.get('item_types', [])
+            rule['details']['context_keywords'] = hints.get('keywords', [])
+            rule['details']['note'] = hints.get('note', '')
         
         return rule
 
@@ -1004,6 +1189,7 @@ class TrainingPipeline:
             'pairs_processed': 0,
             'corrections_found': 0,
             'rules_generated': 0,
+            'approved_dishes_stored': 0,
             'pairs': [],
             'all_corrections': [],
             'generated_rules': []
@@ -1077,14 +1263,128 @@ class TrainingPipeline:
                         )
                         if result:
                             dishes_stored += 1
+                
+                # Store terminology corrections with dish context
+                # So next time we see "Red Paloma", we know "crust" → "rim"
+                elif category == 'terminology':
+                    context = correction.get('context', {})
+                    dish_name = context.get('dish_name')
+                    
+                    if dish_name:
+                        for word_diff in correction.get('word_diffs', []):
+                            orig_term = word_diff.get('original_words', '')
+                            corr_term = word_diff.get('corrected_words', '')
+                            
+                            if orig_term and corr_term:
+                                result = store_dish_terminology_correction(
+                                    dish_name=dish_name,
+                                    original_term=orig_term,
+                                    corrected_term=corr_term,
+                                    restaurant=restaurant,
+                                    context_paragraph=context.get('paragraph')
+                                )
+                                if result:
+                                    dishes_stored += 1
+                                    print(f"    Stored terminology '{orig_term}' → '{corr_term}' for dish: {dish_name}")
             
             if dishes_stored > 0:
-                print(f"  Stored {dishes_stored} dish descriptions in database")
+                print(f"  Stored {dishes_stored} corrections to dish database")
+            
+            # NEW: Store ALL dishes from the approved (redlined) document
+            # This builds the master catalog of approved dishes
+            approved_dishes_stored = self._store_all_approved_dishes(
+                redlined_path, 
+                restaurant
+            )
+            if approved_dishes_stored > 0:
+                print(f"  Stored {approved_dishes_stored} approved dishes to master catalog")
+                self.session_data['approved_dishes_stored'] += approved_dishes_stored
         
         print(f"  Found {len(analysis['text_corrections'])} text corrections")
         print(f"  Found {len(analysis['formatting_corrections'])} formatting corrections")
         
         return analysis
+    
+    def _store_all_approved_dishes(
+        self, 
+        redlined_path: str, 
+        restaurant: str
+    ) -> int:
+        """
+        Extract and store ALL dishes from an approved (redlined) document.
+        
+        This builds the master catalog of approved dishes with their:
+        - Names
+        - Full descriptions (ingredients)
+        - Allergen codes
+        - Prices
+        - Restaurant
+        - Menu date
+        - Menu type
+        
+        Args:
+            redlined_path: Path to the approved document
+            restaurant: Restaurant identifier
+            
+        Returns:
+            Number of dishes stored
+        """
+        if not DISH_DB_AVAILABLE:
+            return 0
+        
+        doc = Document(redlined_path)
+        
+        # Extract menu date and type from filename
+        menu_date = extract_menu_date(redlined_path)
+        menu_type = extract_menu_type(redlined_path)
+        
+        dishes_stored = 0
+        
+        for para in doc.paragraphs:
+            text = para.text.strip()
+            
+            # Skip empty lines
+            if not text or len(text) < 5:
+                continue
+            
+            # Skip lines that don't look like menu items
+            # Menu items typically have: comma-separated ingredients, or are short dish names
+            
+            # Skip headers (usually ALL CAPS or very short)
+            if text.isupper() and len(text.split()) <= 3:
+                continue
+            
+            # Skip warning text
+            if 'consuming raw' in text.lower() or 'foodborne' in text.lower():
+                continue
+            
+            # Skip page numbers, template headers, etc.
+            if text.lower().startswith(('page', 'menu', 'restaurant', 'venue')):
+                continue
+            
+            # Only process lines that look like menu items
+            # They typically have commas (ingredients) or a price at the end
+            has_comma = ', ' in text
+            has_price = bool(re.search(r'\s+\d+(?:\|\d+)?\s*$', text))
+            has_allergens = bool(re.search(r'\s+[A-Z,]+\s*$', text))
+            
+            # Must have at least one indicator of being a menu item
+            if not (has_comma or has_price or has_allergens):
+                continue
+            
+            # Store this dish
+            result = store_approved_dish(
+                dish_line=text,
+                restaurant=restaurant,
+                menu_date=menu_date,
+                menu_type=menu_type,
+                source_file=os.path.basename(redlined_path)
+            )
+            
+            if result:
+                dishes_stored += 1
+        
+        return dishes_stored
     
     def ingest_directory_pairs(
         self, 
@@ -1246,6 +1546,7 @@ class TrainingPipeline:
         print(f"Document pairs processed: {self.session_data['pairs_processed']}")
         print(f"Total corrections found: {self.session_data['corrections_found']}")
         print(f"Rules generated: {self.session_data['rules_generated']}")
+        print(f"Approved dishes added to catalog: {self.session_data['approved_dishes_stored']}")
         
         # Category breakdown
         if self.session_data['all_corrections']:

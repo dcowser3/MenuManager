@@ -24,6 +24,11 @@ KNOWN_PAIRS = {
     # Raw preparations
     ('tartare', 'tartar'), ('tartar', 'tartare'),
     
+    # Cocktail/drink terminology
+    ('crust', 'rim'),  # Glass rim, not "crust" (e.g., "salt rim" not "salt crust")
+    ('garnished', 'topped'),
+    ('garnish', 'top'),
+    
     # Diacritics - French terms
     ('puree', 'purée'), ('purée', 'puree'),
     ('flambe', 'flambé'), ('flambé', 'flambe'),
@@ -59,6 +64,30 @@ KNOWN_PAIRS = {
     ('shrimp', 'prawn'), ('prawn', 'shrimp'),
 }
 
+# Terminology pairs that are NOT bidirectional (one-way corrections)
+# These are RSH-specific word preferences: always use the corrected term
+TERMINOLOGY_CORRECTIONS = {
+    'crust': 'rim',           # For cocktails: "salt rim" not "salt crust"
+    'mayo': 'aioli',          # Always use "aioli" instead of "mayo"
+    'bbq': 'barbeque sauce',  # Expand abbreviation
+    'sorbete': 'sorbet',      # Spanish to English/French
+}
+
+# Context hints: what type of item a correction typically applies to
+# This helps the AI be more confident when it sees the dish again
+CONTEXT_HINTS = {
+    ('crust', 'rim'): {
+        'item_types': ['cocktail', 'drink', 'beverage'],
+        'keywords': ['paloma', 'margarita', 'martini', 'rim', 'salt', 'sugar', 'chili'],
+        'note': 'Glass rim terminology - use "rim" for cocktail glasses, not "crust"'
+    },
+    ('mayo', 'aioli'): {
+        'item_types': ['food', 'appetizer', 'entree', 'sandwich'],
+        'keywords': ['aioli', 'mayo', 'sauce', 'dip', 'spread'],
+        'note': 'RSH prefers "aioli" over "mayo" for menu descriptions'
+    },
+}
+
 # Common abbreviations that should be expanded
 KNOWN_ABBREVIATIONS = {
     'bbq': 'barbeque',
@@ -82,4 +111,27 @@ def is_known_pair(original: str, corrected: str) -> bool:
 def is_known_abbreviation(text: str) -> bool:
     """Check if this is a known abbreviation."""
     return text.lower().strip() in KNOWN_ABBREVIATIONS
+
+
+def is_terminology_correction(original: str) -> bool:
+    """Check if this is a known terminology correction (one-way)."""
+    return original.lower().strip() in TERMINOLOGY_CORRECTIONS
+
+
+def get_terminology_correction(original: str) -> str:
+    """Get the correct terminology for a word."""
+    return TERMINOLOGY_CORRECTIONS.get(original.lower().strip(), original)
+
+
+def get_context_hints(original: str, corrected: str) -> dict:
+    """
+    Get context hints for a correction pair.
+    
+    Returns dict with:
+    - item_types: List of item types this applies to (cocktail, food, etc.)
+    - keywords: Keywords that increase confidence
+    - note: Explanation of the correction
+    """
+    key = (original.lower().strip(), corrected.lower().strip())
+    return CONTEXT_HINTS.get(key, {})
 

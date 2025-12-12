@@ -278,6 +278,10 @@ class MenuRedliner:
             elif op == dmp_module.diff_match_patch.DIFF_INSERT:
                 # Yellow highlight for additions
                 new_run.font.highlight_color = WD_COLOR_INDEX.YELLOW
+                # Reset bold/italic for inserted text to avoid inheriting
+                # unwanted formatting from adjacent styled text
+                new_run.font.bold = False
+                new_run.font.italic = False
                 
             # (op == DIFF_EQUAL needs no extra formatting)
             
