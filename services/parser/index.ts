@@ -26,6 +26,12 @@ app.post('/parser', upload.single('file') as any, async (req, res) => {
         return res.status(400).send('Invalid file type. Only .docx files are accepted.');
     }
 
+    // Check for skip_validation flag (for testing purposes)
+    const skipValidation = req.body.skip_validation === 'true' || req.body.skip_validation === true;
+    if (skipValidation) {
+        console.log('⚠️  SKIP_VALIDATION flag set - bypassing template and QA checks');
+    }
+
     try {
         // Create initial record in the database
         const dbResponse = await axios.post('http://localhost:3004/submissions', {
@@ -37,7 +43,8 @@ app.post('/parser', upload.single('file') as any, async (req, res) => {
 
         const validationResult = await validateTemplate(req.file.path);
 
-        if (!validationResult.isValid) {
+        // Skip template validation if flag is set
+        if (!skipValidation && !validationResult.isValid) {
             // Mark DB status as rejected due to template issues
             await axios.put(`http://localhost:3004/submissions/${submission.id}`, {
                 status: 'rejected_template',
@@ -51,55 +58,58 @@ app.post('/parser', upload.single('file') as any, async (req, res) => {
             });
         }
 
-        // QA Pre-check: Run the SOP QA prompt to see if they pre-cleaned their menu
-        // If there are too many errors, it means they didn't use the QA prompt before submitting
-        const qaCheckResult = await runQAPreCheck(validationResult.text, submission.id);
-        if (!qaCheckResult.passed) {
-            await axios.put(`http://localhost:3004/submissions/${submission.id}`, {
-                status: 'needs_prompt_fix',
-                qa_feedback: qaCheckResult.feedback,
-                error_count: qaCheckResult.errorCount
-            });
-            return res.status(202).json({
-                message: 'Your menu has too many errors. Please run the SOP QA prompt (ChatGPT) to clean it up before resubmitting.',
-                status: 'needs_prompt_fix',
-                error_count: qaCheckResult.errorCount,
-                feedback_preview: qaCheckResult.feedback.substring(0, 500) + '...'
-            });
-        }
-
-        // SOP FORMAT LINT (center alignment, font size 12, Calibri)
-        try {
-            const pythonScript = path.resolve(__dirname, '..', '..', 'docx-redliner', 'format_lint.py');
-            const venvPython = path.resolve(__dirname, '..', '..', 'docx-redliner', 'venv', 'bin', 'python');
-            let command = `"${venvPython}" "${pythonScript}" "${req.file.path}"`;
-            // fallback to system python if venv not present
-            try {
-                const { stdout } = await execAsync(`[ -x "${venvPython}" ] && echo OK || echo NO`);
-                if (stdout.trim() === 'NO') {
-                    command = `python3 "${pythonScript}" "${req.file.path}"`;
-                }
-            } catch { /* ignore */ }
-            const { stdout } = await execAsync(command, { timeout: 60000 });
-            const lint = JSON.parse(stdout);
-            if (!lint.passed) {
+        // Skip QA pre-check if flag is set
+        if (!skipValidation) {
+            // QA Pre-check: Run the SOP QA prompt to see if they pre-cleaned their menu
+            // If there are too many errors, it means they didn't use the QA prompt before submitting
+            const qaCheckResult = await runQAPreCheck(validationResult.text, submission.id);
+            if (!qaCheckResult.passed) {
                 await axios.put(`http://localhost:3004/submissions/${submission.id}`, {
                     status: 'needs_prompt_fix',
-                    sop_format_issues: lint.reasons,
-                    sop_format_samples: lint.samples
+                    qa_feedback: qaCheckResult.feedback,
+                    error_count: qaCheckResult.errorCount
                 });
                 return res.status(202).json({
-                    message: 'Document failed SOP format check (center alignment / Calibri / 12pt).',
-                    reasons: lint.reasons,
-                    status: 'needs_prompt_fix'
+                    message: 'Your menu has too many errors. Please run the SOP QA prompt (ChatGPT) to clean it up before resubmitting.',
+                    status: 'needs_prompt_fix',
+                    error_count: qaCheckResult.errorCount,
+                    feedback_preview: qaCheckResult.feedback.substring(0, 500) + '...'
                 });
             }
-        } catch (lintError: any) {
-            console.warn('SOP format lint error (continuing to AI review):', lintError.message);
+
+            // SOP FORMAT LINT (center alignment, font size 12, Calibri)
+            try {
+                const pythonScript = path.resolve(__dirname, '..', '..', 'docx-redliner', 'format_lint.py');
+                const venvPython = path.resolve(__dirname, '..', '..', 'docx-redliner', 'venv', 'bin', 'python');
+                let command = `"${venvPython}" "${pythonScript}" "${req.file.path}"`;
+                // fallback to system python if venv not present
+                try {
+                    const { stdout } = await execAsync(`[ -x "${venvPython}" ] && echo OK || echo NO`);
+                    if (stdout.trim() === 'NO') {
+                        command = `python3 "${pythonScript}" "${req.file.path}"`;
+                    }
+                } catch { /* ignore */ }
+                const { stdout } = await execAsync(command, { timeout: 60000 });
+                const lint = JSON.parse(stdout);
+                if (!lint.passed) {
+                    await axios.put(`http://localhost:3004/submissions/${submission.id}`, {
+                        status: 'needs_prompt_fix',
+                        sop_format_issues: lint.reasons,
+                        sop_format_samples: lint.samples
+                    });
+                    return res.status(202).json({
+                        message: 'Document failed SOP format check (center alignment / Calibri / 12pt).',
+                        reasons: lint.reasons,
+                        status: 'needs_prompt_fix'
+                    });
+                }
+            } catch (lintError: any) {
+                console.warn('SOP format lint error (continuing to AI review):', lintError.message);
+            }
         }
 
-        // If validation passes, POST parsed payload to /ai-review
-        console.log(`Validation passed for submission ${submission.id}. Posting to ai-review.`);
+        // If validation passes (or skipped), POST parsed payload to /ai-review
+        console.log(`${skipValidation ? 'Validation skipped' : 'Validation passed'} for submission ${submission.id}. Posting to ai-review.`);
         await axios.post('http://localhost:3002/ai-review', {
             text: validationResult.text,
             submission_id: submission.id,
@@ -109,7 +119,9 @@ app.post('/parser', upload.single('file') as any, async (req, res) => {
         });
         
         res.status(200).json({ 
-            message: 'File passed validation and was sent for AI review.',
+            message: skipValidation 
+                ? 'File sent for AI review (validation bypassed).'
+                : 'File passed validation and was sent for AI review.',
             submission_id: submission.id
         });
 
