@@ -117,6 +117,8 @@ CRITICAL RULES:
    - "mozarella" → "mozzarella"
    - "parmesian" → "parmesan"
    - "Ceasar/Cesar" → "Caesar"
+   - "biters" → "bitters" (cocktail bitters)
+   - "expresso" → "espresso"
 
 6. RSH TERMINOLOGY CORRECTIONS (APPLY THESE):
 {terminology_section}

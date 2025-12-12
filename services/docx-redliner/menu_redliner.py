@@ -278,10 +278,9 @@ class MenuRedliner:
             elif op == dmp_module.diff_match_patch.DIFF_INSERT:
                 # Yellow highlight for additions
                 new_run.font.highlight_color = WD_COLOR_INDEX.YELLOW
-                # Reset bold/italic for inserted text to avoid inheriting
-                # unwanted formatting from adjacent styled text
-                new_run.font.bold = False
-                new_run.font.italic = False
+                # PRESERVE the original bold/italic formatting from the source run
+                # This keeps dish names bold when correcting typos like jalapeño
+                # The style_run already has the correct formatting from the original position
                 
             # (op == DIFF_EQUAL needs no extra formatting)
             
@@ -332,6 +331,9 @@ class MenuRedliner:
         """
         Produce diffs at word/token level using difflib, then map to
         diff_match_patch-style tuples. This forces whole-word replacements.
+        
+        IMPORTANT: Whitespace-only changes are ignored to avoid cluttering the
+        redlines with insignificant spacing differences.
         """
         DIFF_EQUAL = dmp_module.diff_match_patch.DIFF_EQUAL
         DIFF_DELETE = dmp_module.diff_match_patch.DIFF_DELETE
@@ -351,18 +353,32 @@ class MenuRedliner:
             elif tag == 'replace':
                 del_text = ''.join(orig_tokens[i1:i2])
                 ins_text = ''.join(corr_tokens[j1:j2])
-                if del_text:
-                    diffs.append((DIFF_DELETE, del_text))
-                if ins_text:
-                    diffs.append((DIFF_INSERT, ins_text))
+                # Skip whitespace-only replacements (avoid redlining space changes)
+                if del_text.strip() == '' and ins_text.strip() == '':
+                    # Both are whitespace-only - just keep the original as equal
+                    if del_text:
+                        diffs.append((DIFF_EQUAL, del_text))
+                else:
+                    if del_text:
+                        diffs.append((DIFF_DELETE, del_text))
+                    if ins_text:
+                        diffs.append((DIFF_INSERT, ins_text))
             elif tag == 'delete':
                 del_text = ''.join(orig_tokens[i1:i2])
-                if del_text:
+                # Skip whitespace-only deletions
+                if del_text and del_text.strip() != '':
                     diffs.append((DIFF_DELETE, del_text))
+                elif del_text:
+                    # Whitespace-only - keep as equal to preserve spacing
+                    diffs.append((DIFF_EQUAL, del_text))
             elif tag == 'insert':
                 ins_text = ''.join(corr_tokens[j1:j2])
-                if ins_text:
+                # Skip whitespace-only insertions from redlining, but preserve the spacing
+                if ins_text and ins_text.strip() != '':
                     diffs.append((DIFF_INSERT, ins_text))
+                elif ins_text:
+                    # Whitespace-only - keep as equal to preserve spacing
+                    diffs.append((DIFF_EQUAL, ins_text))
 
         # Optional: merge adjacent same-op segments
         merged: List[Tuple[int, str]] = []

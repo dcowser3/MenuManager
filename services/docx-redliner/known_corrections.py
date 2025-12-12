@@ -54,6 +54,7 @@ KNOWN_PAIRS = {
     ('mozarella', 'mozzarella'), ('mozzarella', 'mozarella'),
     ('cappucino', 'cappuccino'), ('cappuccino', 'cappucino'),
     ('expresso', 'espresso'), ('espresso', 'expresso'),
+    ('biters', 'bitters'), ('bitters', 'biters'),  # cocktail bitters
     
     # Spelling variations
     ('yogurt', 'yoghurt'), ('yoghurt', 'yogurt'),
