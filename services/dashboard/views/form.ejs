@@ -1,0 +1,639 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title><%= title %></title>
+    <!-- Quill Rich Text Editor -->
+    <link href="https://cdn.quilljs.com/1.3.6/quill.snow.css" rel="stylesheet">
+    <script src="https://cdn.quilljs.com/1.3.6/quill.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f5f7fa;
+            color: #2d3748;
+        }
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 1rem;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .header h1 { font-size: 1.5rem; font-weight: 600; }
+        .header p { opacity: 0.9; margin-top: 0.25rem; font-size: 0.875rem; }
+        .container { max-width: 1600px; margin: 0 auto; padding: 1rem; }
+        .card {
+            background: white;
+            border-radius: 8px;
+            padding: 1rem;
+            margin-bottom: 0.75rem;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+
+        /* Form Fields Section */
+        .form-section {
+            margin-bottom: 0.75rem;
+        }
+        .form-section h2 {
+            font-size: 1.125rem;
+            margin-bottom: 0.75rem;
+            color: #2d3748;
+        }
+        .form-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 0.75rem;
+            margin-bottom: 0.5rem;
+        }
+        .form-group {
+            display: flex;
+            flex-direction: column;
+        }
+        .form-group label {
+            font-weight: 500;
+            margin-bottom: 0.25rem;
+            color: #4a5568;
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .form-group input,
+        .form-group select {
+            padding: 0.5rem;
+            border: 1px solid #e2e8f0;
+            border-radius: 4px;
+            font-size: 0.875rem;
+            transition: border-color 0.2s;
+        }
+        .form-group input:focus,
+        .form-group select:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+
+        /* Split View Section */
+        .split-container {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 0.75rem;
+            flex: 1;
+            overflow: hidden;
+        }
+        .split-panel {
+            background: white;
+            border-radius: 8px;
+            padding: 0.75rem;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        /* Main content wrapper to control layout flow */
+        .form-content-wrapper {
+            display: flex;
+            flex-direction: column;
+            height: calc(100vh - 200px);
+            min-height: 600px;
+        }
+        .split-panel h3 {
+            font-size: 1rem;
+            margin-bottom: 0.5rem;
+            color: #2d3748;
+            text-align: center;
+        }
+        .panel-subtitle {
+            text-align: center;
+            color: #718096;
+            font-size: 0.75rem;
+            margin-bottom: 0.5rem;
+        }
+
+        /* Example Format Panel */
+        .example-content {
+            flex: 1;
+            background: #f9fafb;
+            border: 2px dashed #cbd5e0;
+            border-radius: 4px;
+            padding: 0.75rem;
+            text-align: center;
+            font-family: Calibri, sans-serif;
+            font-size: 10pt;
+            line-height: 1.15;
+            overflow-y: auto;
+        }
+        .example-content p {
+            margin: 0;
+            padding: 0;
+        }
+        .example-content br {
+            content: "";
+            display: block;
+            margin: 0.15rem 0;
+        }
+        .example-section-header {
+            font-weight: bold;
+            margin-top: 1rem;
+            margin-bottom: 0;
+        }
+        .example-section-header:first-child {
+            margin-top: 0;
+        }
+
+        /* Menu Input Panel - Quill Editor */
+        .menu-input-container {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            border: 1px solid #e2e8f0;
+            border-radius: 4px;
+            background: white;
+            overflow: hidden;
+            min-height: 0;
+        }
+        .menu-input-container .ql-toolbar {
+            border: none;
+            border-bottom: 1px solid #e2e8f0;
+            background: #f9fafb;
+            padding: 0.5rem;
+            flex-shrink: 0;
+        }
+        .menu-input-container .ql-container {
+            border: none;
+            flex: 1;
+            font-family: Calibri, sans-serif;
+            font-size: 10pt;
+            overflow-y: auto;
+            min-height: 0;
+        }
+        .menu-input-container .ql-editor {
+            text-align: center;
+            padding: 0.75rem;
+            line-height: 1.15;
+            min-height: 100%;
+            overflow-y: visible;
+        }
+        .menu-input-container .ql-editor p {
+            margin: 0;
+            padding: 0;
+        }
+        .menu-input-container .ql-editor.ql-blank::before {
+            text-align: center;
+            font-style: normal;
+            color: #a0aec0;
+        }
+
+        /* AI Suggestions Panel */
+        .suggestions-list {
+            flex: 1;
+            background: #fffbeb;
+            border: 1px solid #fbbf24;
+            border-radius: 4px;
+            padding: 0.75rem;
+            overflow-y: auto;
+        }
+        .suggestion-item {
+            background: white;
+            border-left: 3px solid #f59e0b;
+            padding: 0.5rem;
+            margin-bottom: 0.5rem;
+            border-radius: 3px;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+        }
+        .suggestion-item:last-child {
+            margin-bottom: 0;
+        }
+        .suggestion-type {
+            font-weight: 600;
+            color: #92400e;
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            margin-bottom: 0.25rem;
+        }
+        .suggestion-detail {
+            color: #4a5568;
+            font-size: 0.8rem;
+        }
+        .suggestion-change {
+            font-family: monospace;
+            background: #fef3c7;
+            padding: 0.2rem 0.4rem;
+            border-radius: 3px;
+            margin: 0.2rem 0;
+            display: inline-block;
+            font-size: 0.75rem;
+        }
+
+        /* Buttons */
+        .btn {
+            display: inline-block;
+            padding: 0.5rem 1rem;
+            border-radius: 4px;
+            text-decoration: none;
+            font-weight: 500;
+            transition: all 0.2s;
+            border: none;
+            cursor: pointer;
+            font-size: 0.875rem;
+            text-align: center;
+        }
+        .btn-primary {
+            background: #667eea;
+            color: white;
+        }
+        .btn-primary:hover:not(:disabled) {
+            background: #5a67d8;
+            transform: translateY(-1px);
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        .btn-success {
+            background: #48bb78;
+            color: white;
+        }
+        .btn-success:hover:not(:disabled) {
+            background: #38a169;
+            transform: translateY(-1px);
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        .btn-container {
+            text-align: center;
+            padding: 0.75rem 0;
+            background: white;
+            border-radius: 4px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+
+        /* Alert Messages */
+        .alert {
+            padding: 0.5rem;
+            border-radius: 4px;
+            margin-bottom: 0.75rem;
+            display: none;
+            font-size: 0.875rem;
+        }
+        .alert.show {
+            display: block;
+        }
+        .alert-success {
+            background: #c6f6d5;
+            color: #22543d;
+            border-left: 4px solid #48bb78;
+        }
+        .alert-error {
+            background: #fed7d7;
+            color: #742a2a;
+            border-left: 4px solid #f56565;
+        }
+        .alert-info {
+            background: #bee3f8;
+            color: #2c5282;
+            border-left: 4px solid #4299e1;
+        }
+
+        /* Loading Spinner */
+        .spinner {
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #667eea;
+            border-radius: 50%;
+            width: 20px;
+            height: 20px;
+            animation: spin 1s linear infinite;
+            display: inline-block;
+            margin-right: 0.5rem;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        /* Hidden class */
+        .hidden {
+            display: none !important;
+        }
+
+        /* Navigation */
+        .nav {
+            margin-bottom: 0.5rem;
+        }
+        .nav a {
+            color: #667eea;
+            text-decoration: none;
+            font-weight: 500;
+            font-size: 0.875rem;
+        }
+        .nav a:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="container">
+            <h1>📝 Submit New Menu</h1>
+            <p>Design Brief Form Submission</p>
+        </div>
+    </div>
+
+    <div class="container">
+        <div class="nav">
+            <a href="/">← Back to Dashboard</a>
+        </div>
+
+        <div id="alertContainer"></div>
+
+        <!-- Step 1: Form Fields -->
+        <div id="step1" class="form-section">
+            <div class="card">
+                <h2>Project Details</h2>
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label for="projectName">Project Name *</label>
+                        <input type="text" id="projectName" required placeholder="Enter project name">
+                    </div>
+                    <div class="form-group">
+                        <label for="property">Property *</label>
+                        <input type="text" id="property" required placeholder="Enter property name">
+                    </div>
+                    <div class="form-group">
+                        <label for="size">Size *</label>
+                        <input type="text" id="size" required placeholder="e.g., 8.5 x 11 inches">
+                    </div>
+                    <div class="form-group">
+                        <label for="orientation">Orientation *</label>
+                        <select id="orientation" required>
+                            <option value="">Select orientation</option>
+                            <option value="Portrait">Portrait</option>
+                            <option value="Landscape">Landscape</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="dateNeeded">Date Needed *</label>
+                        <input type="date" id="dateNeeded" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="submitterEmail">Your Email *</label>
+                        <input type="email" id="submitterEmail" required placeholder="chef@example.com">
+                    </div>
+                </div>
+            </div>
+
+            <!-- Split View: Example + Menu Input -->
+            <div class="form-content-wrapper">
+                <div class="split-container">
+                    <div class="split-panel">
+                        <h3>Example Format</h3>
+                        <p class="panel-subtitle">Your menu should follow this centered format</p>
+                        <div class="example-content">
+                        <p class="example-section-header">For the table</p>
+                        <p>Makimono & Dips</p>
+                        <p><strong>Smoked swordfish</strong>, smoked mesquite, pickled chili, radish, lemon aioli, cherry tomato, plantain chips</p>
+                        <p><strong>Guacamole</strong>, jalapeño, chipotle aioli, lime, chips, add tuna +6</p>
+                        <p><strong>Kale Salad</strong>, heirloom cherry tomato, grapes, candied cancha corn, orange-white balsamic vinaigrette *D,V</p>
+                        <p>&nbsp;</p>
+                        <p class="example-section-header">Entrée</p>
+                        <p>(select one)</p>
+                        <p><strong>Omakase</strong></p>
+                        <p><strong>Angry tuna roll</strong>, spicy tuna, avocado, lemon, yuzu kosho aioli*</p>
+                        <p><strong>California roll</strong>, salmon, avocado, cucumber*</p>
+                        <p><strong>Salmon & Pork Belly Nigiri</strong>, torched, kabayaki G*</p>
+                        <p><strong>Prime Beef Nigiri</strong>, truffle honey pearls, chimi-yuzu kosho*</p>
+                        <p><strong>Sushi Tamaki Hand Roll</strong>, avocado, cucumber, sriracha aioli, masago, bubu arare VG</p>
+                        <p>~</p>
+                        <p><strong>Poke Bowl</strong></p>
+                        <p>sushi rice, avocado, cucumber, radish, pickled mushroom, edamame, onion, mango, chipotle aioli, ponzu, furikake, tuna or pork belly, add lobster + 8</p>
+                        <p>~</p>
+                        <p><strong>Hot Stone</strong></p>
+                        <p><strong>Casa Style</strong>, served with roasted fajita vegetables, pico de gallo, guacamole, salsa, flour tortillas</p>
+                        <p><strong>Provoleta Cheese</strong> D,V</p>
+                        <p>&nbsp;</p>
+                        <p class="example-section-header">Dessert</p>
+                        <p><strong>The Yuzu</strong>, yuzu cheesecake, almond crumble, white chocolate N</p>
+                    </div>
+                </div>
+
+                <div class="split-panel">
+                    <h3>Your Menu Content</h3>
+                    <p class="panel-subtitle">Paste your menu here (formatting preserved)</p>
+                    <div class="menu-input-container">
+                        <div id="menuEditor"></div>
+                    </div>
+                    </div>
+                </div>
+
+                <div class="btn-container">
+                    <button id="runCheckBtn" class="btn btn-primary" onclick="runBasicCheck()">
+                        Run Basic AI Check
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Step 2: AI Check Results (Hidden initially) -->
+        <div id="step2" class="hidden">
+            <div class="form-content-wrapper">
+                <div class="split-container">
+                    <div class="split-panel">
+                        <h3>Your Menu</h3>
+                        <p class="panel-subtitle">Original content</p>
+                        <div id="originalMenuDisplay" class="example-content"></div>
+                    </div>
+
+                    <div class="split-panel">
+                        <h3>AI Suggestions</h3>
+                        <p class="panel-subtitle">Recommended corrections</p>
+                        <div id="suggestionsDisplay" class="suggestions-list"></div>
+                    </div>
+                </div>
+
+                <div class="btn-container">
+                    <button id="submitBtn" class="btn btn-success" onclick="submitMenu()">
+                        Submit Menu for Review
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let aiCheckResults = null;
+        let quill = null;
+
+        // Initialize Quill editor after DOM loads
+        document.addEventListener('DOMContentLoaded', function() {
+            quill = new Quill('#menuEditor', {
+                theme: 'snow',
+                modules: {
+                    toolbar: [
+                        ['bold', 'italic', 'underline'],
+                        [{ 'align': [] }],
+                        [{ 'list': 'ordered'}, { 'list': 'bullet' }],
+                        ['clean']
+                    ]
+                },
+                placeholder: 'Paste your menu content here...\n\nExample:\nFor the table\nMakimono & Dips\n\nSmoked swordfish...'
+            });
+        });
+
+        function showAlert(message, type = 'info') {
+            const container = document.getElementById('alertContainer');
+            const alert = document.createElement('div');
+            alert.className = `alert alert-${type} show`;
+            alert.textContent = message;
+            container.appendChild(alert);
+
+            setTimeout(() => {
+                alert.remove();
+            }, 5000);
+        }
+
+        function validateStep1() {
+            const projectName = document.getElementById('projectName').value.trim();
+            const property = document.getElementById('property').value.trim();
+            const size = document.getElementById('size').value.trim();
+            const orientation = document.getElementById('orientation').value;
+            const dateNeeded = document.getElementById('dateNeeded').value;
+            const submitterEmail = document.getElementById('submitterEmail').value.trim();
+            const menuContent = quill.getText().trim();
+
+            if (!projectName || !property || !size || !orientation || !dateNeeded || !submitterEmail || !menuContent) {
+                showAlert('Please fill in all required fields', 'error');
+                return false;
+            }
+
+            if (!submitterEmail.includes('@')) {
+                showAlert('Please enter a valid email address', 'error');
+                return false;
+            }
+
+            return true;
+        }
+
+        async function runBasicCheck() {
+            if (!validateStep1()) return;
+
+            const btn = document.getElementById('runCheckBtn');
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner"></span>Running AI Check...';
+
+            // Get text content from Quill (strips formatting for AI check)
+            const menuContent = quill.getText().trim();
+
+            try {
+                const response = await fetch('/api/form/basic-check', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ menuContent })
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || 'Failed to run AI check');
+                }
+
+                aiCheckResults = data;
+                showStep2(data);
+                showAlert('AI check complete! Review the suggestions below.', 'success');
+
+            } catch (error) {
+                console.error('Error:', error);
+                showAlert('Error running AI check: ' + error.message, 'error');
+                btn.disabled = false;
+                btn.textContent = 'Run Basic AI Check';
+            }
+        }
+
+        function showStep2(results) {
+            // Hide step 1
+            document.getElementById('step1').classList.add('hidden');
+
+            // Show step 2
+            document.getElementById('step2').classList.remove('hidden');
+
+            // Display original menu with formatting preserved
+            const originalDisplay = document.getElementById('originalMenuDisplay');
+            const menuHtml = quill.root.innerHTML;
+            originalDisplay.innerHTML = menuHtml;
+
+            // Display suggestions
+            const suggestionsDisplay = document.getElementById('suggestionsDisplay');
+            if (results.suggestions && results.suggestions.length > 0) {
+                suggestionsDisplay.innerHTML = results.suggestions.map(suggestion => `
+                    <div class="suggestion-item">
+                        <div class="suggestion-type">${escapeHtml(suggestion.type)}</div>
+                        <div class="suggestion-detail">${escapeHtml(suggestion.description)}</div>
+                        ${suggestion.change ? `<div class="suggestion-change">${escapeHtml(suggestion.change)}</div>` : ''}
+                    </div>
+                `).join('');
+            } else {
+                suggestionsDisplay.innerHTML = `
+                    <div class="suggestion-item">
+                        <div class="suggestion-type">✓ All Clear</div>
+                        <div class="suggestion-detail">No major issues found. Your menu looks good!</div>
+                    </div>
+                `;
+            }
+        }
+
+        async function submitMenu() {
+            const btn = document.getElementById('submitBtn');
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner"></span>Submitting...';
+
+            // Get HTML content from Quill to preserve formatting
+            const menuContentHtml = quill.root.innerHTML;
+            const menuContentText = quill.getText().trim();
+
+            const formData = {
+                projectName: document.getElementById('projectName').value.trim(),
+                property: document.getElementById('property').value.trim(),
+                size: document.getElementById('size').value.trim(),
+                orientation: document.getElementById('orientation').value,
+                dateNeeded: document.getElementById('dateNeeded').value,
+                submitterEmail: document.getElementById('submitterEmail').value.trim(),
+                menuContent: menuContentText,
+                menuContentHtml: menuContentHtml
+            };
+
+            try {
+                const response = await fetch('/api/form/submit', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(formData)
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || 'Failed to submit menu');
+                }
+
+                showAlert('Menu submitted successfully! Redirecting to review page...', 'success');
+
+                // Redirect to review page after 2 seconds
+                setTimeout(() => {
+                    window.location.href = `/review/${data.submissionId}`;
+                }, 2000);
+
+            } catch (error) {
+                console.error('Error:', error);
+                showAlert('Error submitting menu: ' + error.message, 'error');
+                btn.disabled = false;
+                btn.textContent = 'Submit Menu for Review';
+            }
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+    </script>
+</body>
+</html>

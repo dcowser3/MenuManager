@@ -29,16 +29,25 @@ app.get('/', async (req, res) => {
         const dbResponse = await axios.get('http://localhost:3004/submissions/pending');
         const pendingReviews = dbResponse.data;
 
-        res.render('index', { 
+        res.render('index', {
             reviews: pendingReviews,
-            title: 'Menu Review Dashboard' 
+            title: 'Menu Review Dashboard'
         });
     } catch (error) {
         console.error('Error loading dashboard:', error);
-        res.status(500).render('error', { 
-            message: 'Failed to load pending reviews' 
+        res.status(500).render('error', {
+            message: 'Failed to load pending reviews'
         });
     }
+});
+
+/**
+ * Form Submission Page - New menu submission via form
+ */
+app.get('/form', (req, res) => {
+    res.render('form', {
+        title: 'Submit New Menu'
+    });
 });
 
 /**
@@ -653,8 +662,231 @@ app.get('/training/download-prompt/:sessionId', async (req, res) => {
     }
 });
 
+/**
+ * Form API: Basic AI Check - Run QA check on menu content
+ */
+app.post('/api/form/basic-check', async (req, res) => {
+    try {
+        const { menuContent } = req.body;
+
+        if (!menuContent || !menuContent.trim()) {
+            return res.status(400).json({ error: 'Menu content is required' });
+        }
+
+        // Load QA prompt
+        const qaPromptPath = path.join(__dirname, '..', '..', '..', 'sop-processor', 'qa_prompt.txt');
+        const qaPrompt = await fs.readFile(qaPromptPath, 'utf-8');
+
+        // Call AI Review service's QA endpoint
+        const qaResponse = await axios.post('http://localhost:3002/run-qa-check', {
+            text: menuContent,
+            prompt: qaPrompt
+        });
+
+        const feedback = qaResponse.data.feedback;
+
+        // Parse feedback to extract suggestions
+        const suggestions = parseFeedbackToSuggestions(feedback);
+
+        res.json({
+            success: true,
+            menuContent: menuContent,
+            feedback: feedback,
+            suggestions: suggestions
+        });
+
+    } catch (error: any) {
+        console.error('Error running basic check:', error);
+        res.status(500).json({
+            error: 'Failed to run basic AI check',
+            details: error.message
+        });
+    }
+});
+
+/**
+ * Form API: Submit Menu - Create docx from form and trigger review workflow
+ */
+app.post('/api/form/submit', async (req, res) => {
+    try {
+        const { projectName, property, size, orientation, dateNeeded, submitterEmail, menuContent } = req.body;
+
+        // Validate required fields
+        if (!projectName || !property || !size || !orientation || !dateNeeded || !submitterEmail || !menuContent) {
+            return res.status(400).json({ error: 'All fields are required' });
+        }
+
+        // Generate unique submission ID
+        const submissionId = `form-${Date.now()}`;
+
+        // Create Word document from template and form data
+        const docxPath = await generateDocxFromForm(submissionId, {
+            projectName,
+            property,
+            size,
+            orientation,
+            dateNeeded,
+            menuContent
+        });
+
+        console.log(`📝 Generated document for submission ${submissionId}: ${docxPath}`);
+
+        // Create submission in database
+        const dbResponse = await axios.post('http://localhost:3004/submissions', {
+            id: submissionId,
+            submitter_email: submitterEmail,
+            filename: `${projectName}_Menu.docx`,
+            original_path: docxPath,
+            status: 'processing',
+            created_at: new Date().toISOString(),
+            source: 'form' // Mark as form submission
+        });
+
+        console.log(`✓ Submission created in database: ${submissionId}`);
+
+        // Trigger AI review process (same as email workflow)
+        // This will:
+        // 1. Copy to ai-drafts
+        // 2. Generate redlined version
+        // 3. Set status to 'pending_human_review'
+        try {
+            // Extract text from the document for AI review
+            const mammoth = require('mammoth');
+            const result = await mammoth.extractRawText({ path: docxPath });
+            const text = result.value;
+
+            await axios.post('http://localhost:3002/ai-review', {
+                text: text,
+                submission_id: submissionId,
+                submitter_email: submitterEmail,
+                filename: `${projectName}_Menu.docx`,
+                original_path: docxPath
+            });
+
+            console.log(`✓ AI review triggered for ${submissionId}`);
+        } catch (aiError: any) {
+            console.error('Error triggering AI review:', aiError.message);
+            // Update status to indicate manual review needed
+            await axios.put(`http://localhost:3004/submissions/${submissionId}`, {
+                status: 'pending_human_review'
+            });
+        }
+
+        res.json({
+            success: true,
+            submissionId: submissionId,
+            message: 'Menu submitted successfully'
+        });
+
+    } catch (error: any) {
+        console.error('Error submitting form:', error);
+        res.status(500).json({
+            error: 'Failed to submit menu',
+            details: error.message
+        });
+    }
+});
+
+/**
+ * Helper: Parse AI feedback into structured suggestions
+ */
+function parseFeedbackToSuggestions(feedback: string): Array<{type: string, description: string, change?: string}> {
+    const suggestions: Array<{type: string, description: string, change?: string}> = [];
+
+    // Look for "Description of Issue:" pattern
+    const issuePattern = /Description of Issue:\s*(.+?)(?=\n|$)/gi;
+    let match;
+
+    while ((match = issuePattern.exec(feedback)) !== null) {
+        const description = match[1].trim();
+
+        // Try to identify the type based on content
+        let type = 'General';
+        if (description.toLowerCase().includes('diacritic') || description.toLowerCase().includes('accent')) {
+            type = 'Diacritics';
+        } else if (description.toLowerCase().includes('allergen')) {
+            type = 'Allergen Code';
+        } else if (description.toLowerCase().includes('spelling')) {
+            type = 'Spelling';
+        } else if (description.toLowerCase().includes('format')) {
+            type = 'Formatting';
+        } else if (description.toLowerCase().includes('raw') || description.toLowerCase().includes('asterisk')) {
+            type = 'Raw Item Marker';
+        }
+
+        suggestions.push({
+            type: type,
+            description: description
+        });
+    }
+
+    // If no structured issues found, create general feedback
+    if (suggestions.length === 0 && feedback && !feedback.includes('No feedback generated')) {
+        // Split by lines and take meaningful ones
+        const lines = feedback.split('\n').filter(line =>
+            line.trim() &&
+            !line.includes('---') &&
+            !line.startsWith('Here is') &&
+            line.length > 20
+        );
+
+        lines.slice(0, 5).forEach(line => {
+            suggestions.push({
+                type: 'Suggestion',
+                description: line.trim()
+            });
+        });
+    }
+
+    return suggestions;
+}
+
+/**
+ * Helper: Generate Word document from form data using Python
+ */
+async function generateDocxFromForm(submissionId: string, formData: any): Promise<string> {
+    const UPLOADS_DIR = path.join(__dirname, '..', '..', '..', 'tmp', 'uploads');
+    await fs.mkdir(UPLOADS_DIR, { recursive: true });
+
+    const outputPath = path.join(UPLOADS_DIR, `${submissionId}.docx`);
+
+    // Create Python script to generate docx
+    const pythonScript = path.resolve(__dirname, '..', '..', 'docx-redliner', 'generate_from_form.py');
+    const templatePath = path.resolve(__dirname, '..', '..', '..', 'samples', 'RSH_DESIGN BRIEF_FOOD_Menu_Template .docx');
+    const venvPython = path.resolve(__dirname, '..', '..', 'docx-redliner', 'venv', 'bin', 'python');
+
+    // Create a temp JSON file with form data
+    const formDataPath = path.join(UPLOADS_DIR, `${submissionId}_formdata.json`);
+    await fs.writeFile(formDataPath, JSON.stringify(formData, null, 2));
+
+    // Try venv python first, fallback to system python3
+    let command = `"${venvPython}" "${pythonScript}" "${templatePath}" "${formDataPath}" "${outputPath}"`;
+
+    try {
+        await fs.access(venvPython);
+    } catch {
+        command = `python3 "${pythonScript}" "${templatePath}" "${formDataPath}" "${outputPath}"`;
+    }
+
+    console.log(`Executing: ${command}`);
+
+    const { stdout, stderr } = await execAsync(command, {
+        env: { ...process.env },
+        timeout: 60000
+    });
+
+    if (stdout) console.log('Document generation output:', stdout);
+    if (stderr) console.error('Document generation stderr:', stderr);
+
+    // Clean up temp file
+    await fs.unlink(formDataPath).catch(() => {});
+
+    return outputPath;
+}
+
 app.listen(port, () => {
     console.log(`📊 Dashboard service listening at http://localhost:${port}`);
     console.log(`   Access dashboard: http://localhost:${port}`);
+    console.log(`   Form submission: http://localhost:${port}/form`);
     console.log(`   Training dashboard: http://localhost:${port}/training`);
 });
