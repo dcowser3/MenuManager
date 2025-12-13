@@ -64,13 +64,13 @@ app.get('/review/:submissionId', async (req, res) => {
         if (!submission) {
             return res.status(404).render('error', { 
                 message: 'Submission not found' 
-            });
+        });
         }
 
         if (submission.status !== 'pending_human_review') {
             return res.render('error', { 
                 message: 'This submission has already been reviewed' 
-            });
+        });
         }
 
         res.render('review', { 
@@ -186,9 +186,9 @@ app.get('/download/draft/:submissionId', async (req, res) => {
                 const finalFilename = `REDLINED_${baseFilename}.docx`;
                 console.log(`Downloading redlined version: ${submission.redlined_path}`);
                 return res.download(submission.redlined_path, finalFilename);
-            } catch (err) {
+        } catch (err) {
                 console.warn(`Redlined file not found at ${submission.redlined_path}, will try to generate`);
-            }
+        }
         }
         
         // Fallback: Generate redlined version if it doesn't exist
@@ -196,15 +196,15 @@ app.get('/download/draft/:submissionId', async (req, res) => {
         const redlinedPath = await generateRedlinedVersion(submissionId, submission);
         
         if (redlinedPath) {
-            const baseFilename = path.basename(submission.filename, path.extname(submission.filename));
-            const finalFilename = `REDLINED_${baseFilename}.docx`;
+        const baseFilename = path.basename(submission.filename, path.extname(submission.filename));
+        const finalFilename = `REDLINED_${baseFilename}.docx`;
             return res.download(redlinedPath, finalFilename);
         }
         
         // Last resort: serve the draft (which is just a copy of original)
         if (submission.ai_draft_path) {
             console.warn(`Serving unredlined draft as fallback`);
-            const baseFilename = path.basename(submission.filename, path.extname(submission.filename));
+        const baseFilename = path.basename(submission.filename, path.extname(submission.filename));
             return res.download(submission.ai_draft_path, `DRAFT_${baseFilename}.docx`);
         }
         
@@ -258,7 +258,7 @@ app.post('/approve/:submissionId', async (req, res) => {
                 submitter_email: submission.submitter_email,
                 filename: submission.filename,
                 final_path: finalPath
-            }
+        }
         });
 
         res.json({ 
@@ -323,7 +323,7 @@ app.post('/upload/:submissionId', upload.single('finalDocument') as any, async (
                 submitter_email: submission.submitter_email,
                 filename: submission.filename,
                 final_path: finalPath
-            }
+        }
         });
 
         res.json({ 
@@ -379,7 +379,7 @@ app.post('/redline/:submissionId', async (req, res) => {
         if (!inputPath.endsWith('.docx')) {
             return res.status(400).json({ 
                 error: 'Redlining only works with .docx files' 
-            });
+        });
         }
 
         // Define output path for redlined version
@@ -479,7 +479,7 @@ app.get('/training', async (req, res) => {
             sessionFiles.map(async (file) => {
                 const content = await fs.readFile(path.join(trainingDir, file), 'utf-8');
                 return JSON.parse(content);
-            })
+        })
         );
 
         // Sort by session ID (timestamp) descending
@@ -510,7 +510,7 @@ app.post('/training/upload-pair', upload.fields([
         if (!files.original || !files.redlined) {
             return res.status(400).json({ 
                 error: 'Both original and redlined documents are required' 
-            });
+        });
         }
 
         const originalFile = files.original[0];
@@ -562,18 +562,18 @@ app.post('/training/run', async (req, res) => {
 
         // Check if pairs directory exists and has files
         try {
-            const files = await fs.readdir(pairsDir);
-            const pairCount = files.filter(f => f.endsWith('_original.docx')).length;
+        const files = await fs.readdir(pairsDir);
+        const pairCount = files.filter(f => f.endsWith('_original.docx')).length;
             
-            if (pairCount === 0) {
+        if (pairCount === 0) {
                 return res.status(400).json({ 
                     error: 'No training pairs found. Upload some pairs first.' 
                 });
-            }
+        }
         } catch (err) {
             return res.status(400).json({ 
                 error: 'No training pairs directory found. Upload some pairs first.' 
-            });
+        });
         }
 
         // Build command
@@ -673,6 +673,12 @@ app.post('/api/form/basic-check', async (req, res) => {
             return res.status(400).json({ error: 'Menu content is required' });
         }
 
+        // Debug logging
+        console.log('=== BASIC CHECK REQUEST ===');
+        console.log('Menu content length:', menuContent.length);
+        console.log('First 200 chars:', menuContent.substring(0, 200));
+        console.log('===========================');
+
         // Load QA prompt
         const qaPromptPath = path.join(__dirname, '..', '..', '..', 'sop-processor', 'qa_prompt.txt');
         const qaPrompt = await fs.readFile(qaPromptPath, 'utf-8');
@@ -685,14 +691,26 @@ app.post('/api/form/basic-check', async (req, res) => {
 
         const feedback = qaResponse.data.feedback;
 
-        // Parse feedback to extract suggestions
-        const suggestions = parseFeedbackToSuggestions(feedback);
+        // Debug: Log raw feedback to see format
+        console.log('=== RAW AI FEEDBACK ===');
+        console.log(feedback);
+        console.log('=== END RAW FEEDBACK ===');
+
+        // Parse the new format: corrected menu + suggestions
+        const parsed = parseAIResponse(feedback, menuContent);
+
+        console.log('=== PARSED RESPONSE ===');
+        console.log('Corrected menu length:', parsed.correctedMenu.length);
+        console.log('Suggestions count:', parsed.suggestions.length);
+        console.log('Has changes:', parsed.correctedMenu !== menuContent);
+        console.log('===========================');
 
         res.json({
             success: true,
-            menuContent: menuContent,
-            feedback: feedback,
-            suggestions: suggestions
+            originalMenu: menuContent,
+            correctedMenu: parsed.correctedMenu,
+            suggestions: parsed.suggestions,
+            hasChanges: parsed.correctedMenu !== menuContent
         });
 
     } catch (error: any) {
@@ -751,9 +769,9 @@ app.post('/api/form/submit', async (req, res) => {
         // 3. Set status to 'pending_human_review'
         try {
             // Extract text from the document for AI review
-            const mammoth = require('mammoth');
-            const result = await mammoth.extractRawText({ path: docxPath });
-            const text = result.value;
+        const mammoth = require('mammoth');
+        const result = await mammoth.extractRawText({ path: docxPath });
+        const text = result.value;
 
             await axios.post('http://localhost:3002/ai-review', {
                 text: text,
@@ -761,7 +779,7 @@ app.post('/api/form/submit', async (req, res) => {
                 submitter_email: submitterEmail,
                 filename: `${projectName}_Menu.docx`,
                 original_path: docxPath
-            });
+        });
 
             console.log(`✓ AI review triggered for ${submissionId}`);
         } catch (aiError: any) {
@@ -769,7 +787,7 @@ app.post('/api/form/submit', async (req, res) => {
             // Update status to indicate manual review needed
             await axios.put(`http://localhost:3004/submissions/${submissionId}`, {
                 status: 'pending_human_review'
-            });
+        });
         }
 
         res.json({
@@ -788,41 +806,236 @@ app.post('/api/form/submit', async (req, res) => {
 });
 
 /**
- * Helper: Parse AI feedback into structured suggestions
+ * NEW: Parse AI response that contains corrected menu + suggestions
  */
-function parseFeedbackToSuggestions(feedback: string): Array<{type: string, description: string, change?: string}> {
-    const suggestions: Array<{type: string, description: string, change?: string}> = [];
+function parseAIResponse(feedback: string, originalMenu: string): {
+    correctedMenu: string,
+    suggestions: Array<{
+        type: string,
+        confidence: string,
+        menuItem: string,
+        description: string,
+        recommendation: string
+    }>
+} {
+    // Extract corrected menu between markers
+    const correctedMenuMatch = feedback.match(/=== CORRECTED MENU ===\s*\n([\s\S]*?)\n=== END CORRECTED MENU ===/);
+    const correctedMenu = correctedMenuMatch ? correctedMenuMatch[1].trim() : originalMenu;
 
-    // Look for "Description of Issue:" pattern
-    const issuePattern = /Description of Issue:\s*(.+?)(?=\n|$)/gi;
-    let match;
+    // Extract suggestions JSON between markers
+    const suggestionsMatch = feedback.match(/=== SUGGESTIONS ===\s*\n([\s\S]*?)\n=== END SUGGESTIONS ===/);
+    let suggestions: Array<any> = [];
 
-    while ((match = issuePattern.exec(feedback)) !== null) {
-        const description = match[1].trim();
+    if (suggestionsMatch) {
+        try {
+            const jsonStr = suggestionsMatch[1].trim();
+            suggestions = JSON.parse(jsonStr);
+            console.log(`Parsed ${suggestions.length} suggestions from JSON`);
+        } catch (e) {
+            console.error('Failed to parse suggestions JSON:', e);
+            console.log('Raw suggestions text:', suggestionsMatch[1]);
+        }
+    }
 
-        // Try to identify the type based on content
+    return {
+        correctedMenu,
+        suggestions
+    };
+}
+
+/**
+ * OLD: Parse AI feedback into structured suggestions with confidence levels (DEPRECATED - keeping for fallback)
+ */
+function parseFeedbackToSuggestions(feedback: string): Array<{
+    type: string,
+    description: string,
+    change?: string,
+    confidence?: 'high' | 'medium' | 'low',
+    menuItem?: string,
+    recommendation?: string,
+    originalText?: string,
+    correctedText?: string
+}> {
+    const suggestions: Array<any> = [];
+
+    // Extract each item block that has Menu Item + Description + Recommendation
+    // Pattern: look for "- **Menu Item:" or "- **Menu Item:**" followed by description and recommendation
+    // Match until we hit another Menu Item, Menu Category, or end of feedback
+    const itemBlocks = feedback.match(/- \*\*Menu Item:?\*\*[^]*?(?=(?:\n\s*- \*\*Menu (?:Item|Category):?|$))/gi);
+
+    if (!itemBlocks || itemBlocks.length === 0) {
+        console.log('⚠️  No structured suggestions found in feedback');
+        console.log('First 500 chars of feedback:', feedback.substring(0, 500));
+        return [];
+    }
+
+    console.log(`Found ${itemBlocks.length} suggestion blocks`);
+
+    itemBlocks.forEach((block, blockIdx) => {
+        console.log(`\nParsing block ${blockIdx + 1}:`);
+        console.log(block.substring(0, 200));
+
+        // Extract components from each block (handle both "Item:" and "Item:**" formats)
+        const menuItemMatch = block.match(/- \*\*Menu Item:?\*\*\s*(.+?)(?=\n|$)/i);
+        const descriptionMatch = block.match(/- \*\*Description of Issue:?\*\*\s*(.+?)(?=\n\s*- \*\*Recommendation:|$)/is);
+        const recommendationMatch = block.match(/- \*\*Recommendation:?\*\*\s*(.+?)(?=\n\s*(?:-|\n)|$)/is);
+
+        const menuItem = menuItemMatch ? menuItemMatch[1].trim() : '';
+
+        if (!descriptionMatch) {
+            console.log('⚠️  No description found in block');
+            return;
+        }
+
+        const description = descriptionMatch[1].trim();
+        const recommendation = recommendationMatch ? recommendationMatch[1].trim() : '';
+
+        // Determine confidence level based on keywords
+        let confidence: 'high' | 'medium' | 'low' = 'medium';
+
+        // High confidence: spelling errors, typos, missing commas, clear factual errors
+        if (description.match(/spelling|misspell|typo|incorrect spelling|correct spelling/i)) {
+            confidence = 'high';
+        } else if (description.match(/missing comma|missing punctuation/i)) {
+            confidence = 'high';
+        } else if (recommendation.match(/correct\s+(?:spelling\s+)?to/i) && description.match(/should\s+(?:be|likely be)/i)) {
+            confidence = 'high';
+        }
+        // Low confidence: suggestions, could, might, consider
+        else if (description.match(/consider|could|might|suggest|may want|unclear|ensure/i)) {
+            confidence = 'low';
+        }
+
+        // Try to extract original and corrected text from recommendation and description
+        let originalText = '';
+        let correctedText = '';
+
+        // Pattern 1: Correct to "X"  or Correct spelling to "X"
+        const correctToPattern = recommendation.match(/correct(?:\s+(?:to|spelling\s+to))?\s+["']([^"']+)["']/i);
+        if (correctToPattern) {
+                correctedText = correctToPattern[1];
+                // Try to find the incorrect word in the description
+                const incorrectMatch = description.match(/["']([^"']+)["']\s+(?:is|should be|appears)/i);
+                if (incorrectMatch) {
+                    originalText = incorrectMatch[1];
+                }
+        }
+
+        // Pattern 2: "X" should be "Y"
+        if (!correctedText) {
+                const shouldBePattern = recommendation.match(/["']([^"']+)["']\s+should be\s+["']([^"']+)["']/i);
+                if (shouldBePattern) {
+                    originalText = shouldBePattern[1];
+                    correctedText = shouldBePattern[2];
+                }
+        }
+
+        // Pattern 3: Look in description for misspelling patterns
+        if (!correctedText && description.match(/misspell/i)) {
+                // "Hibik" is a likely misspelling of "Hibiki"
+                const misspellPattern = description.match(/["']([^"']+)["']\s+is\s+a\s+(?:likely\s+)?misspelling/i);
+                if (misspellPattern) {
+                    originalText = misspellPattern[1];
+                }
+                // Look for correct spelling in recommendation
+                const correctPattern = recommendation.match(/correct\s+(?:to|spelling\s+to)?\s*["']([^"']+)["']/i);
+                if (correctPattern) {
+                    correctedText = correctPattern[1];
+                }
+        }
+
+        // Pattern 4: Correct spelling to "X" (extract from description)
+        if (!correctedText) {
+                const correctSpellingPattern = recommendation.match(/correct\s+spelling\s+to\s+["']([^"']+)["']/i);
+                if (correctSpellingPattern) {
+                    correctedText = correctSpellingPattern[1];
+                    // Extract the misspelled word from description
+                    // Look for quoted words that appear multiple times or standalone
+                    const quotedWords = description.match(/["']([^"']+)["']/g);
+                    if (quotedWords && quotedWords.length > 0) {
+                        // Get the first quoted word (usually the incorrect one)
+                        const firstWord = quotedWords[0].replace(/["']/g, '');
+                        // Check if it's similar to the correction (edit distance)
+                        if (firstWord.toLowerCase().replace(/s$/, '') === correctedText.toLowerCase().replace(/s$/, '').replace(/\.$/, '')) {
+                            originalText = firstWord.split(',')[0].trim(); // Handle "biters" in "biters, orange biters"
+                        }
+                    }
+                }
+        }
+
+        // Pattern 5: "X" is likely a typo for "Y"
+        if (!originalText || !correctedText) {
+                const typoPattern = description.match(/["']([^"']+)["']\s+is\s+likely\s+a\s+typo\s+for\s+["']([^"']+)["']/i);
+                if (typoPattern) {
+                    originalText = typoPattern[1];
+                    correctedText = typoPattern[2];
+                }
+        }
+
+        // Pattern 6: "X" should be "Y" in description
+        if (!originalText || !correctedText) {
+                const descShouldBePattern = description.match(/["']([^"']+)["']\s+should\s+(?:be|likely be)\s+["']([^"']+)["']/i);
+                if (descShouldBePattern) {
+                    originalText = descShouldBePattern[1];
+                    correctedText = descShouldBePattern[2];
+                }
+        }
+
+        // Pattern 7: Extract word pairs when correctedText is a phrase like "mole bitters, orange bitters"
+        // and description mentions the incorrect version
+        if (correctedText && !originalText && correctedText.includes(',')) {
+                // Try to find common misspelling in description
+                const descQuoted = description.match(/["']([^"']+)["']/);
+                if (descQuoted) {
+                    const descText = descQuoted[1];
+                    // Extract the repeated incorrect word (e.g., "biters" from "mole biters, orange biters")
+                    const correctedWords = correctedText.split(/,\s*/);
+                    const descWords = descText.split(/,\s*/);
+                    // Find the differing word between original and corrected
+                    if (correctedWords[0] && descWords[0]) {
+                        const corrParts = correctedWords[0].split(' ');
+                        const descParts = descWords[0].split(' ');
+                        // Find the word that differs (e.g., "biters" vs "bitters")
+                        for (let i = 0; i < Math.min(corrParts.length, descParts.length); i++) {
+                            if (corrParts[i] !== descParts[i]) {
+                                originalText = descParts[i];
+                                correctedText = corrParts[i];
+                                break;
+                            }
+                        }
+                    }
+                }
+        }
+
+            // Try to identify the type based on content
         let type = 'General';
         if (description.toLowerCase().includes('diacritic') || description.toLowerCase().includes('accent')) {
-            type = 'Diacritics';
+                type = 'Diacritics';
         } else if (description.toLowerCase().includes('allergen')) {
-            type = 'Allergen Code';
+                type = 'Allergen Code';
         } else if (description.toLowerCase().includes('spelling')) {
-            type = 'Spelling';
+                type = 'Spelling';
         } else if (description.toLowerCase().includes('format')) {
-            type = 'Formatting';
+                type = 'Formatting';
         } else if (description.toLowerCase().includes('raw') || description.toLowerCase().includes('asterisk')) {
-            type = 'Raw Item Marker';
+                type = 'Raw Item Marker';
+        } else if (description.toLowerCase().includes('comma') || description.toLowerCase().includes('punctuation')) {
+                type = 'Punctuation';
         }
 
         suggestions.push({
-            type: type,
-            description: description
+                type: type,
+                description: description,
+                recommendation: recommendation,
+                confidence: confidence,
+                menuItem: menuItem,
+                originalText: originalText || undefined,
+                correctedText: correctedText || undefined
         });
-    }
+    });
 
     // If no structured issues found, create general feedback
     if (suggestions.length === 0 && feedback && !feedback.includes('No feedback generated')) {
-        // Split by lines and take meaningful ones
         const lines = feedback.split('\n').filter(line =>
             line.trim() &&
             !line.includes('---') &&
@@ -831,10 +1044,11 @@ function parseFeedbackToSuggestions(feedback: string): Array<{type: string, desc
         );
 
         lines.slice(0, 5).forEach(line => {
-            suggestions.push({
+        suggestions.push({
                 type: 'Suggestion',
-                description: line.trim()
-            });
+                description: line.trim(),
+                confidence: 'low'
+        });
         });
     }
 

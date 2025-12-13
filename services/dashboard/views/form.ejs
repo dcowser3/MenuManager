@@ -226,6 +226,77 @@
             font-size: 0.75rem;
         }
 
+        /* Confidence badges */
+        .confidence-badge {
+            display: inline-block;
+            padding: 0.15rem 0.4rem;
+            border-radius: 3px;
+            font-size: 0.7rem;
+            font-weight: 600;
+            margin-left: 0.5rem;
+            text-transform: uppercase;
+        }
+        .confidence-high {
+            background: #dcfce7;
+            color: #166534;
+        }
+        .confidence-medium {
+            background: #fef3c7;
+            color: #92400e;
+        }
+        .confidence-low {
+            background: #e0e7ff;
+            color: #3730a3;
+        }
+
+        /* Auto-correction indicator */
+        .auto-corrected {
+            background: #d1fae5 !important;
+            color: #065f46;
+            padding: 0.15rem 0.3rem;
+            border-radius: 2px;
+        }
+
+        /* Text highlighting for issues */
+        .issue-highlight {
+            background: transparent;
+            text-decoration: underline;
+            text-decoration-color: #ef4444;
+            text-decoration-thickness: 2px;
+            text-underline-offset: 2px;
+            cursor: pointer;
+            position: relative;
+        }
+        .issue-highlight:hover {
+            background: #fee2e2;
+        }
+
+        /* Applied correction styling in editor */
+        .ql-editor .corrected {
+            background-color: #d1fae5;
+            padding: 2px 0;
+        }
+
+        /* Pulse animation for highlighting */
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.05); background: #fca5a5; }
+        }
+
+        /* Highlight animations for different confidence levels */
+        @keyframes highlightHigh {
+            0%, 100% { background: transparent; }
+            50% { background: #dcfce7; transform: scale(1.02); }
+        }
+        @keyframes highlightMedium {
+            0%, 100% { background: transparent; }
+            50% { background: #fef3c7; transform: scale(1.02); }
+        }
+        @keyframes highlightLow {
+            0%, 100% { background: transparent; }
+            50% { background: #e0e7ff; transform: scale(1.02); }
+        }
+
         /* Buttons */
         .btn {
             display: inline-block;
@@ -503,11 +574,15 @@
 
             if (!projectName || !property || !size || !orientation || !dateNeeded || !submitterEmail || !menuContent) {
                 showAlert('Please fill in all required fields', 'error');
+                // Scroll to top to show the error and form fields
+                window.scrollTo({ top: 0, behavior: 'smooth' });
                 return false;
             }
 
             if (!submitterEmail.includes('@')) {
                 showAlert('Please enter a valid email address', 'error');
+                // Scroll to top to show the error and email field
+                window.scrollTo({ top: 0, behavior: 'smooth' });
                 return false;
             }
 
@@ -521,8 +596,21 @@
             btn.disabled = true;
             btn.innerHTML = '<span class="spinner"></span>Running AI Check...';
 
-            // Get text content from Quill (strips formatting for AI check)
-            const menuContent = quill.getText().trim();
+            // Convert Quill content to plain text with proper line breaks
+            // Get the HTML and convert it to text while preserving structure
+            const delta = quill.getContents();
+            let menuContent = '';
+
+            delta.ops.forEach((op) => {
+                if (typeof op.insert === 'string') {
+                    menuContent += op.insert;
+                }
+            });
+
+            // Clean up the text (trim and normalize line breaks)
+            menuContent = menuContent.trim();
+
+            console.log('Sending to AI:', menuContent); // Debug logging
 
             try {
                 const response = await fetch('/api/form/basic-check', {
@@ -556,26 +644,111 @@
             // Show step 2
             document.getElementById('step2').classList.remove('hidden');
 
-            // Display original menu with formatting preserved
-            const originalDisplay = document.getElementById('originalMenuDisplay');
-            const menuHtml = quill.root.innerHTML;
-            originalDisplay.innerHTML = menuHtml;
+            // NEW APPROACH: Use the corrected menu from AI and diff to find changes
+            const originalText = results.originalMenu;
+            const correctedText = results.correctedMenu;
+            const hasChanges = results.hasChanges;
 
-            // Display suggestions
+            console.log('Has changes:', hasChanges);
+            console.log('Original length:', originalText.length);
+            console.log('Corrected length:', correctedText.length);
+
+            // Simple word-level diff to find changes
+            const originalWords = originalText.split(/(\s+)/);
+            const correctedWords = correctedText.split(/(\s+)/);
+
+            // Replace Quill content with corrected text
+            quill.setText(correctedText);
+
+            // Find and highlight changes by comparing word-by-word
+            if (hasChanges) {
+                let currentIndex = 0;
+                const corrections = [];
+
+                for (let i = 0; i < Math.max(originalWords.length, correctedWords.length); i++) {
+                    const origWord = originalWords[i] || '';
+                    const corrWord = correctedWords[i] || '';
+
+                    if (origWord !== corrWord && corrWord.trim()) {
+                        // Found a change - highlight in green
+                        quill.formatText(currentIndex, corrWord.length, {
+                            background: '#d1fae5'
+                        });
+                        corrections.push({
+                            original: origWord,
+                            corrected: corrWord,
+                            index: currentIndex
+                        });
+                    }
+
+                    currentIndex += corrWord.length;
+                }
+
+                console.log(`Applied ${corrections.length} corrections`);
+            }
+
+            // Display corrected menu in left panel
+            const originalDisplay = document.getElementById('originalMenuDisplay');
+            originalDisplay.innerHTML = quill.root.innerHTML;
+
+            // Display remaining suggestions in right panel
             const suggestionsDisplay = document.getElementById('suggestionsDisplay');
-            if (results.suggestions && results.suggestions.length > 0) {
-                suggestionsDisplay.innerHTML = results.suggestions.map(suggestion => `
-                    <div class="suggestion-item">
-                        <div class="suggestion-type">${escapeHtml(suggestion.type)}</div>
-                        <div class="suggestion-detail">${escapeHtml(suggestion.description)}</div>
-                        ${suggestion.change ? `<div class="suggestion-change">${escapeHtml(suggestion.change)}</div>` : ''}
+
+            if (hasChanges) {
+                // Show auto-correction summary
+                let html = `
+                    <div class="suggestion-item" style="border-left: 3px solid #10b981; background: #ecfdf5;">
+                        <div class="suggestion-type" style="color: #065f46;">✓ AUTO-CORRECTED</div>
+                        <div class="suggestion-detail" style="color: #065f46;">
+                            High-confidence spelling and grammar corrections have been automatically applied.
+                            Green highlights show the changes.
+                        </div>
                     </div>
-                `).join('');
+                `;
+
+                // Add remaining suggestions
+                if (results.suggestions && results.suggestions.length > 0) {
+                    html += results.suggestions.map((suggestion, idx) => {
+                        const confidenceClass = `confidence-${suggestion.confidence}`;
+                        return `
+                            <div class="suggestion-item" data-suggestion-index="${idx}">
+                                <div class="suggestion-type">
+                                    ${escapeHtml(suggestion.type)}
+                                    <span class="confidence-badge ${confidenceClass}">${suggestion.confidence.toUpperCase()}</span>
+                                </div>
+                                ${suggestion.menuItem ? `<div style="font-weight: 600; color: #2d3748; font-size: 0.75rem; margin: 0.25rem 0;">Item: ${escapeHtml(suggestion.menuItem)}</div>` : ''}
+                                <div class="suggestion-detail">${escapeHtml(suggestion.description)}</div>
+                                <div style="color: #059669; font-size: 0.75rem; margin-top: 0.25rem;"><strong>Recommendation:</strong> ${escapeHtml(suggestion.recommendation)}</div>
+                            </div>
+                        `;
+                    }).join('');
+                }
+
+                suggestionsDisplay.innerHTML = html;
+                showAlert('Auto-corrections applied! Green highlights show the changes.', 'success');
+            } else if (results.suggestions && results.suggestions.length > 0) {
+                // No auto-corrections but have suggestions
+                const html = results.suggestions.map((suggestion, idx) => {
+                    const confidenceClass = `confidence-${suggestion.confidence}`;
+                    return `
+                        <div class="suggestion-item" data-suggestion-index="${idx}">
+                            <div class="suggestion-type">
+                                ${escapeHtml(suggestion.type)}
+                                <span class="confidence-badge ${confidenceClass}">${suggestion.confidence.toUpperCase()}</span>
+                            </div>
+                            ${suggestion.menuItem ? `<div style="font-weight: 600; color: #2d3748; font-size: 0.75rem; margin: 0.25rem 0;">Item: ${escapeHtml(suggestion.menuItem)}</div>` : ''}
+                            <div class="suggestion-detail">${escapeHtml(suggestion.description)}</div>
+                            <div style="color: #059669; font-size: 0.75rem; margin-top: 0.25rem;"><strong>Recommendation:</strong> ${escapeHtml(suggestion.recommendation)}</div>
+                        </div>
+                    `;
+                }).join('');
+                suggestionsDisplay.innerHTML = html;
             } else {
+                // No changes and no suggestions
                 suggestionsDisplay.innerHTML = `
                     <div class="suggestion-item">
                         <div class="suggestion-type">✓ All Clear</div>
-                        <div class="suggestion-detail">No major issues found. Your menu looks good!</div>
+                        <div class="suggestion-detail">No issues found. Your menu looks perfect!</div>
                     </div>
                 `;
             }

@@ -14,3 +14,7 @@ node_modules/
 # Ignore python cache
 __pycache__/
 *.pyc
+
+# Ignore Microsoft Word temporary files
+~$*.docx
+~$*.doc
