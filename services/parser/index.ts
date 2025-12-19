@@ -6,6 +6,12 @@ import axios from 'axios';
 import * as path from 'path';
 import { exec } from 'child_process';
 import { promisify } from 'util';
+import dotenv from 'dotenv';
+
+// Load .env from project root (works whether running from src or dist)
+const envPath = path.resolve(__dirname, '../../../.env');
+console.log(`Loading .env from: ${envPath}`);
+dotenv.config({ path: envPath });
 
 const app = express();
 const port = 3001;
@@ -58,26 +64,10 @@ app.post('/parser', upload.single('file') as any, async (req, res) => {
             });
         }
 
-        // Skip QA pre-check if flag is set
+        // Skip validation checks if flag is set
         if (!skipValidation) {
-            // QA Pre-check: Run the SOP QA prompt to see if they pre-cleaned their menu
-            // If there are too many errors, it means they didn't use the QA prompt before submitting
-            const qaCheckResult = await runQAPreCheck(validationResult.text, submission.id);
-            if (!qaCheckResult.passed) {
-                await axios.put(`http://localhost:3004/submissions/${submission.id}`, {
-                    status: 'needs_prompt_fix',
-                    qa_feedback: qaCheckResult.feedback,
-                    error_count: qaCheckResult.errorCount
-                });
-                return res.status(202).json({
-                    message: 'Your menu has too many errors. Please run the SOP QA prompt (ChatGPT) to clean it up before resubmitting.',
-                    status: 'needs_prompt_fix',
-                    error_count: qaCheckResult.errorCount,
-                    feedback_preview: qaCheckResult.feedback.substring(0, 500) + '...'
-                });
-            }
-
             // SOP FORMAT LINT (center alignment, font size 12, Calibri)
+            // Check format FIRST - it's faster and more specific than QA check
             try {
                 const pythonScript = path.resolve(__dirname, '..', '..', 'docx-redliner', 'format_lint.py');
                 const venvPython = path.resolve(__dirname, '..', '..', 'docx-redliner', 'venv', 'bin', 'python');
@@ -104,7 +94,24 @@ app.post('/parser', upload.single('file') as any, async (req, res) => {
                     });
                 }
             } catch (lintError: any) {
-                console.warn('SOP format lint error (continuing to AI review):', lintError.message);
+                console.warn('SOP format lint error (continuing to QA check):', lintError.message);
+            }
+
+            // QA Pre-check: Run the SOP QA prompt to see if they pre-cleaned their menu
+            // If there are too many errors, it means they didn't use the QA prompt before submitting
+            const qaCheckResult = await runQAPreCheck(validationResult.text, submission.id);
+            if (!qaCheckResult.passed) {
+                await axios.put(`http://localhost:3004/submissions/${submission.id}`, {
+                    status: 'needs_prompt_fix',
+                    qa_feedback: qaCheckResult.feedback,
+                    error_count: qaCheckResult.errorCount
+                });
+                return res.status(202).json({
+                    message: 'Your menu has too many errors. Please run the SOP QA prompt (ChatGPT) to clean it up before resubmitting.',
+                    status: 'needs_prompt_fix',
+                    error_count: qaCheckResult.errorCount,
+                    feedback_preview: qaCheckResult.feedback.substring(0, 500) + '...'
+                });
             }
         }
 
@@ -153,7 +160,11 @@ async function runQAPreCheck(text: string, submissionId: string): Promise<{
 }> {
     try {
         // Check if OpenAI is configured
-        const hasOpenAIKey = process.env.OPENAI_API_KEY && 
+        console.log(`[DEBUG] OPENAI_API_KEY present: ${!!process.env.OPENAI_API_KEY}`);
+        console.log(`[DEBUG] OPENAI_API_KEY length: ${process.env.OPENAI_API_KEY?.length || 0}`);
+        console.log(`[DEBUG] OPENAI_API_KEY starts with: ${process.env.OPENAI_API_KEY?.substring(0, 10) || 'N/A'}`);
+
+        const hasOpenAIKey = process.env.OPENAI_API_KEY &&
                             process.env.OPENAI_API_KEY !== 'your-openai-api-key-here' &&
                             process.env.OPENAI_API_KEY.trim() !== '';
 
@@ -176,22 +187,39 @@ async function runQAPreCheck(text: string, submissionId: string): Promise<{
         });
 
         const feedback = response.data.feedback || '';
-        
+
         // Count how many issues were found
-        // The QA prompt outputs issues with "Description of Issue:" prefix
-        const errorCount = (feedback.match(/Description of Issue:/g) || []).length;
+        // The QA prompt returns JSON suggestions - count how many items are in the array
+        // Also count corrections made in the corrected menu section
+        let errorCount = 0;
+
+        // Try to parse suggestions JSON
+        const suggestionsMatch = feedback.match(/=== SUGGESTIONS ===\s*(\[[\s\S]*?\])\s*=== END SUGGESTIONS ===/);
+        if (suggestionsMatch) {
+            try {
+                const suggestions = JSON.parse(suggestionsMatch[1]);
+                errorCount = suggestions.length;
+            } catch (e) {
+                console.warn('Could not parse suggestions JSON, trying fallback counting');
+                // Fallback: count "description": occurrences
+                errorCount = (feedback.match(/"description":/g) || []).length;
+            }
+        } else {
+            // Fallback: count "description": occurrences
+            errorCount = (feedback.match(/"description":/g) || []).length;
+        }
 
         console.log(`QA pre-check found ${errorCount} issues`);
 
-        // Threshold: If more than 10 errors, reject and tell them to run the prompt
+        // Threshold: If 2 or more errors, reject and tell them to run the prompt
         // This means their menu is too messy and they didn't pre-clean it
-        const ERROR_THRESHOLD = 10;
-        const passed = errorCount <= ERROR_THRESHOLD;
+        const ERROR_THRESHOLD = 2;
+        const passed = errorCount < ERROR_THRESHOLD;
 
         if (!passed) {
-            console.log(`❌ Submission ${submissionId} failed QA pre-check (${errorCount} errors > ${ERROR_THRESHOLD} threshold)`);
+            console.log(`❌ Submission ${submissionId} failed QA pre-check (${errorCount} errors >= ${ERROR_THRESHOLD} threshold)`);
         } else {
-            console.log(`✅ Submission ${submissionId} passed QA pre-check (${errorCount} errors <= ${ERROR_THRESHOLD} threshold)`);
+            console.log(`✅ Submission ${submissionId} passed QA pre-check (${errorCount} errors < ${ERROR_THRESHOLD} threshold)`);
         }
 
         return {
