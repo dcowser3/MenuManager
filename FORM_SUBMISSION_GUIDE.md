@@ -176,7 +176,7 @@ Submits the complete menu for review.
 ### Manual Test
 1. Start all services:
    ```bash
-   npm run start:all
+   ./start-services.sh
    ```
 
 2. Access form:
