@@ -40,21 +40,17 @@
 
 ---
 
-## Demo Assets You Can Re-Use
+## Demo Assets
 
-1. **Sample Word docs** (already checked in):
-   - `samples/demo-docs/demo_wrong_template.docx`
-   - `samples/demo-docs/demo_empty_template.docx`
-   - `samples/demo-docs/demo_messy_menu.docx`
-   - `samples/demo-docs/demo_clean_menu.docx`
-2. **Command helper:** `./demo-validation-scenarios.sh`
-   - `./demo-validation-scenarios.sh wrong`
-   - `./demo-validation-scenarios.sh empty`
-   - `./demo-validation-scenarios.sh messy`
-   - `./demo-validation-scenarios.sh clean`
-   - `./demo-validation-scenarios.sh all` (runs everything back-to-back)
+**Sample Word docs** (in `samples/` folder):
+- `samples/demo-wrong-template.docx` - Plain doc without RSH template
+- `samples/demo-messy-menu.docx` - Template with 10+ errors
+- `samples/demo-bad-format.docx` - Template with wrong font/alignment
+- `samples/demo-minor-issues.docx` - Template with 1-2 small typos
 
-Each run prints the HTTP status, pretty-prints the JSON response, and highlights what the reviewer sees. Start services with `./start-services.sh` first.
+**Run demo:** `./demo-scenarios.sh` (interactive menu to test each scenario)
+
+Start services with `./start-services.sh` first.
 
 ---
 
@@ -65,9 +61,9 @@ Each run prints the HTTP status, pretty-prints the JSON response, and highlights
 
 ```bash
 # Test with a non-template document
-curl -X POST http://localhost:3001/parser \
-  -F "file=@samples/demo-docs/demo_wrong_template.docx" \
-  -F "submitter_email=chef.demo@example.com" -i
+curl -X POST http://localhost:3000/simulate-email \
+  -F "file=@samples/demo-wrong-template.docx" \
+  -F "from=chef@test.com"
 
 # Expected Response:
 # HTTP/400
@@ -83,71 +79,60 @@ curl -X POST http://localhost:3001/parser \
 # }
 ```
 
-**Shortcut:** `./demo-validation-scenarios.sh wrong`
+**Or use:** `./demo-scenarios.sh` and select option 1
 
 **Demo talking point:** "The system immediately rejects documents that don't use our official template, saving time and preventing confusion."
 
 ---
 
-### Scenario 2: Empty Template (Pre-Check Reject)
-**What happens:** Chef downloads template but doesn't fill in menu content
+### Scenario 2: Too Many Errors (QA Pre-Check Reject)
+**What happens:** Chef fills in menu but has lots of errors (didn't run QA prompt)
 
 ```bash
-# Test with empty official template
-curl -X POST http://localhost:3001/parser \
-  -F "file=@samples/demo-docs/demo_empty_template.docx" \
-  -F "submitter_email=chef.demo@example.com" -i
-
+curl -X POST http://localhost:3000/simulate-email \
+  -F "file=@samples/demo-messy-menu.docx" \
+  -F "from=chef@test.com"
 ```
 
-**Shortcut:** `./demo-validation-scenarios.sh empty`
+**Or use:** `./demo-scenarios.sh` and select option 2
 
+**Expected Response:**
 ```json
-# Expected Response:
-# HTTP/202 (Accepted but needs work)
-# {
-#   "message": "Your menu has too many errors. Please run the SOP QA prompt...",
-#   "status": "needs_prompt_fix",
-#   "error_count": 15,
-#   "feedback_preview": "Basic validation issues:\n- No substantial menu content..."
-# }
+{
+  "message": "Your menu has too many errors. Please run the SOP QA prompt...",
+  "status": "needs_prompt_fix",
+  "error_count": 12
+}
 ```
-**Demo talking point:** "If they submit an empty or incomplete template, the system catches it and asks them to add content first."
+
+**Demo talking point:** "The system runs the SAME quality check that chefs should run before submitting. If it finds too many errors (>10), it rejects and tells them to use ChatGPT to clean it up first."
 
 ---
 
-### Scenario 3: Messy Menu (QA Prompt Reject)
-**What happens:** Chef fills in menu but has lots of errors (didn't run QA prompt)
-
-Create a test file with intentional errors:
-```
-GUACAMOLE - avacado lime cilantro onion - 12 dollars
-AL PASTOR TACOS - Pork, pinapple, salsa verde - $16
-chicken mole - sesame chocolate rice - 22.00
-CEASAR SALAD - romaine parmesian croutons - $10
-```
+### Scenario 3: Format Issues
+**What happens:** Chef uses correct template but wrong font/alignment
 
 ```bash
-# Submit menu with many errors
-curl -X POST http://localhost:3001/parser \
-  -F "file=@samples/demo-docs/demo_messy_menu.docx" \
-  -F "submitter_email=chef.demo@example.com" -i
+curl -X POST http://localhost:3000/simulate-email \
+  -F "file=@samples/demo-bad-format.docx" \
+  -F "from=chef@test.com"
 ```
 
-**Shortcut:** `./demo-validation-scenarios.sh messy`
+**Or use:** `./demo-scenarios.sh` and select option 3
 
+**Expected Response:**
 ```json
-# Expected Response (if OpenAI configured):
-# HTTP/202
-# {
-#   "message": "Your menu has too many errors. Please run the SOP QA prompt (ChatGPT)...",
-#   "status": "needs_prompt_fix",
-#   "error_count": 12,
-#   "feedback_preview": "Menu Category: Appetizers\nMenu Item: GUACAMOLE\n..."
-# }
+{
+  "message": "Menu doesn't meet formatting standards.",
+  "errors": [
+    "Font is Arial (should be Calibri)",
+    "Text is left-aligned (should be centered)",
+    "Font size is 11pt (should be 12pt)"
+  ]
+}
 ```
 
-**Demo talking point:** "The system runs the SAME quality check that chefs should run before submitting. If it finds too many errors (>10), it rejects and tells them to use ChatGPT to clean it up first. This ensures we only process high-quality submissions."
+**Demo talking point:** "Format issues are caught automatically. Chef gets specific instructions instead of vague feedback."
 
 ---
 
@@ -155,24 +140,22 @@ curl -X POST http://localhost:3001/parser \
 **What happens:** Chef properly filled template and ran QA prompt
 
 ```bash
-# Submit a clean, well-formatted menu
-curl -X POST http://localhost:3001/parser \
-  -F "file=@samples/demo-docs/demo_clean_menu.docx" \
-  -F "submitter_email=chef.demo@example.com" -i
+curl -X POST http://localhost:3000/simulate-email \
+  -F "file=@samples/demo-minor-issues.docx" \
+  -F "from=chef@test.com"
 ```
 
-**Shortcut:** `./demo-validation-scenarios.sh clean`
+**Or use:** `./demo-scenarios.sh` and select option 4
 
+**Expected Response:**
 ```json
-# Expected Response:
-# HTTP/200
-# {
-#   "message": "File passed validation and was sent for AI review.",
-#   "submission_id": "sub_1234567890"
-# }
+{
+  "message": "File passed validation and was sent for AI review.",
+  "submission_id": "sub_1234567890"
+}
 ```
 
-**Demo talking point:** "When a menu is properly formatted and has been pre-cleaned with the QA prompt, it passes all checks and goes straight to AI review for red-lining."
+**Demo talking point:** "When a menu is properly formatted, it passes all checks and goes straight to AI review. Open the dashboard to see the submission and AI corrections."
 
 ---
 
