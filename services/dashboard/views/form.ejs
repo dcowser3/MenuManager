@@ -637,6 +637,99 @@
             }
         }
 
+        // Simple diff algorithm for highlighting changes
+        function computeLineDiff(original, corrected) {
+            const origLines = original.split('\n');
+            const corrLines = corrected.split('\n');
+            const changes = [];
+
+            // For each line in the corrected text, find if it changed
+            let corrOffset = 0;
+            for (let i = 0; i < corrLines.length; i++) {
+                const corrLine = corrLines[i];
+                const origLine = origLines[i] || '';
+
+                if (corrLine !== origLine && corrLine.trim()) {
+                    // This line changed - find the specific word differences
+                    const wordChanges = findWordChanges(origLine, corrLine, corrOffset);
+                    changes.push(...wordChanges);
+                }
+
+                corrOffset += corrLine.length + 1; // +1 for newline
+            }
+
+            return changes;
+        }
+
+        // Find specific word changes within a line using character comparison
+        function findWordChanges(origLine, corrLine, lineOffset) {
+            const changes = [];
+            const origWords = origLine.split(/(\s+)/);
+            const corrWords = corrLine.split(/(\s+)/);
+
+            // Use longest common subsequence approach for better alignment
+            const lcs = longestCommonSubsequence(origWords, corrWords);
+
+            let corrIdx = 0;
+            let charOffset = lineOffset;
+
+            for (let i = 0; i < corrWords.length; i++) {
+                const word = corrWords[i];
+
+                // Check if this word is part of the common subsequence
+                const isCommon = lcs.includes(i);
+
+                if (!isCommon && word.trim()) {
+                    // This word was added or changed
+                    changes.push({
+                        start: charOffset,
+                        length: word.length,
+                        word: word
+                    });
+                }
+
+                charOffset += word.length;
+            }
+
+            return changes;
+        }
+
+        // Find indices of words in corrected that match original (LCS)
+        function longestCommonSubsequence(origWords, corrWords) {
+            const m = origWords.length;
+            const n = corrWords.length;
+
+            // Build LCS table
+            const dp = Array(m + 1).fill(null).map(() => Array(n + 1).fill(0));
+
+            for (let i = 1; i <= m; i++) {
+                for (let j = 1; j <= n; j++) {
+                    if (origWords[i - 1] === corrWords[j - 1]) {
+                        dp[i][j] = dp[i - 1][j - 1] + 1;
+                    } else {
+                        dp[i][j] = Math.max(dp[i - 1][j], dp[i][j - 1]);
+                    }
+                }
+            }
+
+            // Backtrack to find which corrected indices are part of LCS
+            const commonIndices = [];
+            let i = m, j = n;
+            while (i > 0 && j > 0) {
+                if (origWords[i - 1] === corrWords[j - 1]) {
+                    commonIndices.unshift(j - 1);
+                    i--;
+                    j--;
+                } else if (dp[i - 1][j] > dp[i][j - 1]) {
+                    i--;
+                } else {
+                    j--;
+                }
+            }
+
+            return commonIndices;
+        }
+
         function showStep2(results) {
             // Hide step 1
             document.getElementById('step1').classList.add('hidden');
@@ -644,7 +737,7 @@
             // Show step 2
             document.getElementById('step2').classList.remove('hidden');
 
-            // NEW APPROACH: Use the corrected menu from AI and diff to find changes
+            // Use the corrected menu from AI and diff to find changes
             const originalText = results.originalMenu;
             const correctedText = results.correctedMenu;
             const hasChanges = results.hasChanges;
@@ -653,38 +746,21 @@
             console.log('Original length:', originalText.length);
             console.log('Corrected length:', correctedText.length);
 
-            // Simple word-level diff to find changes
-            const originalWords = originalText.split(/(\s+)/);
-            const correctedWords = correctedText.split(/(\s+)/);
-
             // Replace Quill content with corrected text
             quill.setText(correctedText);
 
-            // Find and highlight changes by comparing word-by-word
+            // Find and highlight actual changes using proper diff algorithm
             if (hasChanges) {
-                let currentIndex = 0;
-                const corrections = [];
+                const changes = computeLineDiff(originalText, correctedText);
 
-                for (let i = 0; i < Math.max(originalWords.length, correctedWords.length); i++) {
-                    const origWord = originalWords[i] || '';
-                    const corrWord = correctedWords[i] || '';
+                // Apply highlighting to changed words
+                changes.forEach(change => {
+                    quill.formatText(change.start, change.length, {
+                        background: '#d1fae5'
+                    });
+                });
 
-                    if (origWord !== corrWord && corrWord.trim()) {
-                        // Found a change - highlight in green
-                        quill.formatText(currentIndex, corrWord.length, {
-                            background: '#d1fae5'
-                        });
-                        corrections.push({
-                            original: origWord,
-                            corrected: corrWord,
-                            index: currentIndex
-                        });
-                    }
-
-                    currentIndex += corrWord.length;
-                }
-
-                console.log(`Applied ${corrections.length} corrections`);
+                console.log(`Applied ${changes.length} corrections`);
             }
 
             // Display corrected menu in left panel

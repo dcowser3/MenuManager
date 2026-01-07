@@ -214,3 +214,47 @@ tail -f logs/inbound-email.log  # Check email service
 ---
 
 **Ready to demo! Print this page for quick reference. 📄**
+
+
+
+🎯 Demo Flow (5-10 Minutes)
+Opening:
+"I'll demonstrate 5 scenarios that happen when chefs submit menus. The system automatically validates and routes based on quality."
+Run Each Scenario:
+Perfect Submission:
+
+curl -X POST http://localhost:3000/simulate-email \
+  -F "file=@samples/example_pairs/TT_DXB_Brief_Half board_07112025.docx" \
+  -F "from=chef@test.com"
+Show in dashboard
+Click "Review Now"
+Download redlined version
+Wrong Template:
+
+curl -X POST http://localhost:3000/simulate-email \
+  -F "file=@samples/demo-wrong-template.docx" \
+  -F "from=chef@test.com"
+Check status: rejected_template
+Explain: Chef gets email with template link
+Too Many Errors (NEW - NOW WORKING!):
+
+curl -X POST http://localhost:3000/simulate-email \
+  -F "file=@samples/demo-messy-menu.docx" \
+  -F "from=chef@test.com"
+Check status: needs_prompt_fix
+Show error_count in database
+Explain: Chef must run QA prompt first
+Format Issues:
+
+curl -X POST http://localhost:3000/simulate-email \
+  -F "file=@samples/demo-bad-format.docx" \
+  -F "from=chef@test.com"
+Check status: needs_prompt_fix
+Explain: Wrong font/alignment detected
+Minor Issues:
+
+curl -X POST http://localhost:3000/simulate-email \
+  -F "file=@samples/demo-minor-issues.docx" \
+  -F "from=chef@test.com"
+Show in dashboard
+View AI corrections
