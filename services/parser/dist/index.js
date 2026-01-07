@@ -204,30 +204,33 @@ async function runQAPreCheck(text, submissionId) {
         });
         const feedback = response.data.feedback || '';
         // Count how many issues were found
-        // The QA prompt returns JSON suggestions - count how many items are in the array
-        // Also count corrections made in the corrected menu section
-        let errorCount = 0;
-        // Try to parse suggestions JSON
+        // We count BOTH: corrections made in CORRECTED MENU + items in SUGGESTIONS
+        let suggestionsCount = 0;
+        let correctionsCount = 0;
+        // 1. Count suggestions in JSON array
         const suggestionsMatch = feedback.match(/=== SUGGESTIONS ===\s*(\[[\s\S]*?\])\s*=== END SUGGESTIONS ===/);
         if (suggestionsMatch) {
             try {
                 const suggestions = JSON.parse(suggestionsMatch[1]);
-                errorCount = suggestions.length;
+                suggestionsCount = suggestions.length;
             }
             catch (e) {
-                console.warn('Could not parse suggestions JSON, trying fallback counting');
                 // Fallback: count "description": occurrences
-                errorCount = (feedback.match(/"description":/g) || []).length;
+                suggestionsCount = (feedback.match(/"description":/g) || []).length;
             }
         }
-        else {
-            // Fallback: count "description": occurrences
-            errorCount = (feedback.match(/"description":/g) || []).length;
+        // 2. Count corrections by comparing original to corrected menu
+        const correctedMatch = feedback.match(/=== CORRECTED MENU ===\s*([\s\S]*?)\s*=== END CORRECTED MENU ===/);
+        if (correctedMatch) {
+            const correctedMenu = correctedMatch[1].trim();
+            correctionsCount = countDifferences(text, correctedMenu);
+            console.log(`Found ${correctionsCount} auto-corrections in CORRECTED MENU`);
         }
-        console.log(`QA pre-check found ${errorCount} issues`);
-        // Threshold: If 2 or more errors, reject and tell them to run the prompt
+        const errorCount = suggestionsCount + correctionsCount;
+        console.log(`QA pre-check found ${errorCount} total issues (${correctionsCount} corrections + ${suggestionsCount} suggestions)`);
+        // Threshold: If 5 or more errors, reject and tell them to run the prompt
         // This means their menu is too messy and they didn't pre-clean it
-        const ERROR_THRESHOLD = 2;
+        const ERROR_THRESHOLD = 5;
         const passed = errorCount < ERROR_THRESHOLD;
         if (!passed) {
             console.log(`❌ Submission ${submissionId} failed QA pre-check (${errorCount} errors >= ${ERROR_THRESHOLD} threshold)`);
@@ -295,4 +298,30 @@ function runBasicPreCheck(text) {
         errorCount: issues.length,
         feedback
     };
+}
+/**
+ * Count word-level differences between original and corrected text
+ * Returns the number of words that were changed/corrected
+ */
+function countDifferences(original, corrected) {
+    // Normalize both texts - lowercase, remove extra whitespace
+    const normalizeWord = (w) => w.toLowerCase().replace(/[^\w\u00C0-\u017F]/g, '');
+    const originalWords = original.split(/\s+/).map(normalizeWord).filter(Boolean);
+    const correctedWords = corrected.split(/\s+/).map(normalizeWord).filter(Boolean);
+    let differences = 0;
+    const maxLen = Math.max(originalWords.length, correctedWords.length);
+    // Simple word-by-word comparison
+    // This catches spelling corrections like "avacado" -> "avocado"
+    for (let i = 0; i < maxLen; i++) {
+        const orig = originalWords[i] || '';
+        const corr = correctedWords[i] || '';
+        if (orig !== corr) {
+            // Check if it's a meaningful difference (not just formatting)
+            // Skip if both are empty or one is a subset of the other (partial match)
+            if (orig && corr && orig !== corr) {
+                differences++;
+            }
+        }
+    }
+    return differences;
 }
