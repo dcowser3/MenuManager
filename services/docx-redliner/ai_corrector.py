@@ -51,36 +51,67 @@ class AICorrector:
     """
     Handles AI-powered text correction using OpenAI's API.
     """
-    
-    def __init__(self, api_key: Optional[str] = None, model: str = "gpt-4o"):
+
+    # Default allergen codes (from RSH SOP)
+    DEFAULT_ALLERGEN_CODES = {
+        'D': 'Dairy',
+        'G': 'Gluten',
+        'N': 'Nuts',
+        'S': 'Shellfish',
+        'V': 'Vegetarian',
+        'VG': 'Vegan',
+    }
+
+    def __init__(self, api_key: Optional[str] = None, model: str = "gpt-4o", allergen_codes: Optional[dict] = None):
         """
         Initialize the AI corrector.
-        
+
         Args:
             api_key: OpenAI API key. If None, reads from OPENAI_API_KEY env var
             model: The model to use (default: gpt-4o)
+            allergen_codes: Optional dict of allergen codes to use. If None, uses defaults.
+                           This allows documents with their own allergen legend to override.
         """
         self.api_key = api_key or os.getenv("OPENAI_API_KEY")
         if not self.api_key:
             raise ValueError("OpenAI API key not found. Set OPENAI_API_KEY environment variable.")
-        
+
         self.client = OpenAI(api_key=self.api_key)
         self.model = model
+        self.allergen_codes = allergen_codes or self.DEFAULT_ALLERGEN_CODES.copy()
+        self.system_prompt = self._build_system_prompt()
+
+    def set_allergen_codes(self, allergen_codes: dict):
+        """
+        Update the allergen codes used for corrections.
+
+        Use this when a document has its own allergen legend that should
+        override the default SOP codes.
+
+        Args:
+            allergen_codes: Dict mapping codes to their meanings (e.g., {'D': 'Dairy', 'S': 'Soya'})
+        """
+        self.allergen_codes = allergen_codes
+        # Rebuild the system prompt with new allergen codes
         self.system_prompt = self._build_system_prompt()
     
     def _build_system_prompt(self) -> str:
         """
         Build the system prompt for menu corrections.
         Includes learned terminology rules from training.
+        Uses document-specific allergen codes if set.
         """
         # Build terminology corrections section
         terminology_section = self._build_terminology_section()
-        
+
         # Build dish-specific corrections if database available
         dish_corrections_section = ""
         if DISH_DB_AVAILABLE:
             dish_corrections_section = self._build_dish_corrections_section()
-        
+
+        # Build allergen codes list from current document's codes
+        allergen_list = ", ".join(f"{code} ({name})" for code, name in sorted(self.allergen_codes.items()))
+
         return f"""You are an expert menu editor for RSH Design. Your task is to correct menu item text according to strict formatting guidelines.
 
 CRITICAL RULES:
@@ -91,18 +122,14 @@ CRITICAL RULES:
    - Return plain text only - no markdown, no ** for bold, no formatting changes
    - Keep existing asterisks (*) in their positions
 
-3. ALLERGEN CODES - VERY IMPORTANT:
-   - KEEP all existing allergen codes exactly as they are
-   - INFER missing allergen codes based on ingredients you can identify:
-     * D (Dairy): cheese, cream, butter, milk, crema, queso, burrata, yogurt
-     * G (Gluten): bread, flour, panko, tortilla, pasta, noodles, brioche
-     * N (Nuts): almond, peanut, walnut, pistachio, cashew, hazelnut, pine nut
-     * S (Shellfish): shrimp, prawn, crab, lobster, crawfish
-     * V (Vegetarian): dishes without meat/fish (use your judgment)
-     * VG (Vegan): dishes without any animal products (no dairy, eggs, honey)
-   - Format: Place allergen codes at the very END of the line
-   - Only ADD codes if you're confident based on visible ingredients
-   - When in doubt, leave existing codes unchanged
+3. ALLERGEN CODES - CRITICAL:
+   - NEVER REMOVE any existing allergen codes - the chef knows their ingredients
+   - You may only ADD allergen codes, never delete or change existing ones
+   - If a dish has "D,E,F,SE" keep ALL of those codes exactly as written
+   - Valid allergen codes for THIS document: {allergen_list}
+   - Only ADD codes if you're very confident based on visible ingredients
+   - Format: Place allergen codes at the very END of the line, after any price
+   - When in doubt, leave allergen codes completely unchanged
 
 4. PRESERVE EXISTING CAPITALIZATION - BE VERY CONSERVATIVE:
    - DO NOT change the capitalization of dish names, section headers, or titles
@@ -124,8 +151,9 @@ CRITICAL RULES:
 {terminology_section}
 
 7. RAW ITEM ASTERISK PLACEMENT:
-   - Add asterisk (*) for items containing raw/undercooked ingredients
-   - IMPORTANT: Place the asterisk at the END of the description, BEFORE any allergen codes
+   - NEVER REMOVE existing asterisks (*) - the chef knows their dishes
+   - You may only ADD asterisks for raw/undercooked items, never delete existing ones
+   - IMPORTANT: Place new asterisks at the END of the description, BEFORE any allergen codes
    - Format: "dish name, ingredients * ALLERGEN_CODES"
    - Example: "Tuna Tartare, avocado, ponzu * D,G" (asterisk BEFORE D,G)
    - If there are no allergen codes, put asterisk at the very end
@@ -137,13 +165,21 @@ CRITICAL RULES:
    - Dual prices: use " | " (space-bar-space) to separate two prices, not "/"
    - Enforce diacritics: jalapeño, crème brûlée, purée, soufflé, flambéed, etc.
 
-9. DO NOT CHANGE:
+9. NEVER CHANGE PRICES OR NUMBERS - ABSOLUTE RULE:
+   - NEVER modify any numbers in the text - prices, quantities, counts
+   - If you see "295" keep it as "295" - do NOT change to 299 or any other number
+   - If you see "20 pcs" keep it as "20 pcs" exactly
+   - Prices and numbers are NEVER spelling errors - leave them alone
+   - This includes: prices, portion sizes, piece counts, temperatures, years
+
+10. DO NOT CHANGE:
    - Section headers like "The Spark – "El Primer Encuentro""
    - Dish names like "Chilean Sea Bass en Pipián Verde"
    - Title capitalization like "A Love Story"
    - Compound words with hyphens
+   - Prices and numbers
 
-10. If the text is already correct, return it UNCHANGED
+11. If the text is already correct, return it UNCHANGED
 {dish_corrections_section}
 
 EXAMPLES:
@@ -194,7 +230,6 @@ Output: "roasted plantain purée, shaved truffle D,N"
             # Fallback if corrections not loaded
             lines = [
                 '   - "crust" → "rim" (for cocktails/drinks with glass rims)',
-                '   - "mayo" → "aioli" (RSH prefers aioli terminology)',
                 '   - "bbq" → "barbeque sauce"',
             ]
         
@@ -411,17 +446,18 @@ class BatchAICorrector:
         else:
             terminology_lines = [
                 '- "crust" → "rim" (for cocktails with glass rims)',
-                '- "mayo" → "aioli"',
             ]
         terminology_section = '\n'.join(terminology_lines)
         
         return f"""You are an expert menu editor. You will receive multiple menu items separated by "|||".
 Return the corrected items in the SAME ORDER, also separated by "|||".
 
-RULES:
+CRITICAL RULES:
+- NEVER CHANGE PRICES OR NUMBERS - if you see "295" keep it as "295", not 299
+- NEVER REMOVE ALLERGEN CODES - you may only ADD allergens, never delete existing ones
+- NEVER REMOVE ASTERISKS (*) - you may only ADD asterisks for raw items, never delete existing ones
 - PRESERVE ALL EXISTING FORMATTING - no bold, no markdown, plain text only
 - PRESERVE EXISTING CAPITALIZATION - do not change dish names, section headers, or titles
-- KEEP ALL EXISTING ALLERGEN CODES (D, G, N, V, VG, etc.) - do not remove them
 - Fix only clear spelling errors: tartar→tartare, avacado→avocado, mozarella→mozzarella, parmesian→parmesan, Ceasar→Caesar, pre-fix→prix fixe
 - DO NOT change ingredient separators - keep commas and hyphens as they are
 - Dual prices: use " | " (space-bar-space), not "/"
