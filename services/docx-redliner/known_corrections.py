@@ -14,9 +14,8 @@ Format: (original, corrected)
 
 # Terminology preferences (bidirectional)
 KNOWN_PAIRS = {
-    # Sauce/condiment terms
-    ('mayo', 'aioli'), ('aioli', 'mayo'),
-    
+    # NOTE: mayo/aioli removed - not an absolute rule, clients may prefer either
+
     # Abbreviations
     ('bbq', 'barbeque'), ('barbeque', 'bbq'),
     ('bbq', 'barbecue'), ('barbecue', 'bbq'),
@@ -69,7 +68,7 @@ KNOWN_PAIRS = {
 # These are RSH-specific word preferences: always use the corrected term
 TERMINOLOGY_CORRECTIONS = {
     'crust': 'rim',           # For cocktails: "salt rim" not "salt crust"
-    'mayo': 'aioli',          # Always use "aioli" instead of "mayo"
+    # NOTE: mayo/aioli removed - not an absolute rule, clients may prefer either
     'bbq': 'barbeque sauce',  # Expand abbreviation
     'sorbete': 'sorbet',      # Spanish to English/French
 }
@@ -82,11 +81,7 @@ CONTEXT_HINTS = {
         'keywords': ['paloma', 'margarita', 'martini', 'rim', 'salt', 'sugar', 'chili'],
         'note': 'Glass rim terminology - use "rim" for cocktail glasses, not "crust"'
     },
-    ('mayo', 'aioli'): {
-        'item_types': ['food', 'appetizer', 'entree', 'sandwich'],
-        'keywords': ['aioli', 'mayo', 'sauce', 'dip', 'spread'],
-        'note': 'RSH prefers "aioli" over "mayo" for menu descriptions'
-    },
+    # NOTE: mayo/aioli context hints removed - not an absolute rule
 }
 
 # Common abbreviations that should be expanded
