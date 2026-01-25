@@ -1,4 +1,5 @@
 {
+  "_deprecated": "DEPRECATED: This JSON file is superseded by sop_rules.md which contains comprehensive rules optimized for AI consumption. Use sop_rules.md as the primary rule source.",
   "rules": [
     {
       "rule_id": "SUB-001",

@@ -4,171 +4,239 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title><%= title || 'Menu Review Dashboard' %></title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=Montserrat:wght@300;400;500;600&display=swap" rel="stylesheet">
     <style>
+        :root {
+            --color-primary: #2c2c2c;
+            --color-secondary: #8b7355;
+            --color-accent: #6b5344;
+            --color-text: #333333;
+            --color-text-light: #666666;
+            --color-text-muted: #999999;
+            --color-background: #ffffff;
+            --color-background-alt: #fafaf8;
+            --color-border: #e8e4de;
+            --color-border-light: #f0ece6;
+            --color-success: #4a7c59;
+            --color-warning: #b8860b;
+            --color-error: #8b3a3a;
+            --font-heading: 'Cormorant Garamond', Georgia, serif;
+            --font-body: 'Montserrat', -apple-system, BlinkMacSystemFont, sans-serif;
+        }
+
         * {
             margin: 0;
             padding: 0;
             box-sizing: border-box;
         }
-        
+
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-            background: #f5f7fa;
-            color: #2d3748;
-            line-height: 1.6;
+            font-family: var(--font-body);
+            background: var(--color-background);
+            color: var(--color-text);
+            line-height: 1.7;
+            font-weight: 400;
+            font-size: 15px;
+            letter-spacing: 0.02em;
         }
-        
+
         .header {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            padding: 2rem 0;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            background: var(--color-background);
+            color: var(--color-primary);
+            padding: 2.5rem 0;
+            border-bottom: 1px solid var(--color-border);
         }
-        
+
         .header .container {
-            max-width: 1200px;
+            max-width: 1400px;
             margin: 0 auto;
-            padding: 0 2rem;
+            padding: 0 4vw;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
         }
-        
+
         .header h1 {
-            font-size: 2rem;
-            font-weight: 600;
+            font-family: var(--font-heading);
+            font-size: 2.2rem;
+            font-weight: 500;
+            letter-spacing: 0.05em;
+            color: var(--color-primary);
         }
-        
+
         .header p {
-            opacity: 0.9;
-            margin-top: 0.5rem;
+            color: var(--color-text-light);
+            margin-top: 0.25rem;
+            font-size: 0.8rem;
+            text-transform: uppercase;
+            letter-spacing: 0.15em;
+            font-weight: 400;
         }
-        
+
         .container {
-            max-width: 1200px;
+            max-width: 1400px;
             margin: 0 auto;
-            padding: 2rem;
+            padding: 3rem 4vw;
         }
-        
+
         .card {
-            background: white;
-            border-radius: 8px;
-            padding: 2rem;
-            margin-bottom: 1.5rem;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            background: var(--color-background);
+            border: 1px solid var(--color-border);
+            padding: 2.5rem;
+            margin-bottom: 2rem;
         }
-        
+
         .btn {
             display: inline-block;
-            padding: 0.75rem 1.5rem;
-            border-radius: 6px;
+            padding: 1rem 2.5rem;
             text-decoration: none;
             font-weight: 500;
-            transition: all 0.2s;
+            transition: all 0.3s ease;
             border: none;
             cursor: pointer;
-            font-size: 1rem;
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.2em;
+            font-family: var(--font-body);
         }
-        
+
         .btn-primary {
-            background: #667eea;
-            color: white;
+            background: var(--color-primary);
+            color: var(--color-background);
+            border: 2px solid var(--color-primary);
         }
-        
+
         .btn-primary:hover {
-            background: #5a67d8;
-            transform: translateY(-1px);
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            background: transparent;
+            color: var(--color-primary);
         }
-        
+
         .btn-success {
-            background: #48bb78;
-            color: white;
+            background: var(--color-success);
+            color: var(--color-background);
+            border: 2px solid var(--color-success);
         }
-        
+
         .btn-success:hover {
-            background: #38a169;
+            background: transparent;
+            color: var(--color-success);
         }
-        
+
         .btn-secondary {
-            background: #718096;
-            color: white;
+            background: transparent;
+            color: var(--color-text);
+            border: 2px solid var(--color-border);
         }
-        
+
         .btn-secondary:hover {
-            background: #4a5568;
+            border-color: var(--color-primary);
+            color: var(--color-primary);
         }
-        
+
         .btn-danger {
-            background: #f56565;
-            color: white;
+            background: var(--color-error);
+            color: var(--color-background);
+            border: 2px solid var(--color-error);
         }
-        
+
         .alert {
-            padding: 1rem;
-            border-radius: 6px;
-            margin-bottom: 1.5rem;
+            padding: 1.25rem 1.5rem;
+            margin-bottom: 2rem;
+            border: 1px solid;
+            font-size: 0.9rem;
         }
-        
+
         .alert-success {
-            background: #c6f6d5;
-            color: #22543d;
-            border-left: 4px solid #48bb78;
+            background: rgba(74, 124, 89, 0.08);
+            color: var(--color-success);
+            border-color: rgba(74, 124, 89, 0.2);
         }
-        
+
         .alert-error {
-            background: #fed7d7;
-            color: #742a2a;
-            border-left: 4px solid #f56565;
+            background: rgba(139, 58, 58, 0.08);
+            color: var(--color-error);
+            border-color: rgba(139, 58, 58, 0.2);
         }
-        
+
         .badge {
             display: inline-block;
-            padding: 0.25rem 0.75rem;
-            border-radius: 12px;
-            font-size: 0.875rem;
+            padding: 0.35rem 1rem;
+            font-size: 0.65rem;
             font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.15em;
         }
-        
+
         .badge-pending {
-            background: #fef3c7;
-            color: #92400e;
+            background: rgba(184, 134, 11, 0.1);
+            color: var(--color-warning);
+            border: 1px solid rgba(184, 134, 11, 0.2);
         }
-        
+
         .badge-approved {
-            background: #d1fae5;
-            color: #065f46;
+            background: rgba(74, 124, 89, 0.1);
+            color: var(--color-success);
+            border: 1px solid rgba(74, 124, 89, 0.2);
         }
-        
+
         .badge-food {
-            background: #dbeafe;
-            color: #1e40af;
+            background: rgba(107, 83, 68, 0.1);
+            color: var(--color-accent);
+            border: 1px solid rgba(107, 83, 68, 0.2);
         }
-        
+
         .badge-beverage {
-            background: #fce7f3;
-            color: #9f1239;
+            background: rgba(139, 115, 85, 0.1);
+            color: var(--color-secondary);
+            border: 1px solid rgba(139, 115, 85, 0.2);
         }
-        
+
         .footer {
             text-align: center;
-            padding: 2rem;
-            color: #718096;
-            font-size: 0.875rem;
+            padding: 3rem 4vw;
+            color: var(--color-text-muted);
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.15em;
+            border-top: 1px solid var(--color-border);
+            margin-top: 2rem;
+        }
+
+        h2, h3, h4 {
+            font-family: var(--font-heading);
+            font-weight: 500;
+            letter-spacing: 0.03em;
+        }
+
+        a {
+            color: var(--color-secondary);
+            text-decoration: none;
+            transition: color 0.2s ease;
+        }
+
+        a:hover {
+            color: var(--color-accent);
         }
     </style>
 </head>
 <body>
     <div class="header">
-        <div class="container">
-            <h1>🍽️ Menu Review Dashboard</h1>
-            <p>RSH Menu Management System</p>
+        <div class="container" style="padding-top: 0; padding-bottom: 0;">
+            <div>
+                <h1>Richard Sandoval Hospitality</h1>
+                <p>Menu Management System</p>
+            </div>
         </div>
     </div>
-    
+
     <div class="container">
         <%- body %>
     </div>
-    
+
     <div class="footer">
-        <p>&copy; <%= new Date().getFullYear() %> Richard Sandoval Hospitality. AI-Powered Menu Review System.</p>
+        <p>&copy; <%= new Date().getFullYear() %> Richard Sandoval Hospitality</p>
     </div>
 </body>
 </html>

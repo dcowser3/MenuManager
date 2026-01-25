@@ -4,422 +4,799 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title><%= title %></title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=Montserrat:wght@300;400;500;600&display=swap" rel="stylesheet">
     <!-- Quill Rich Text Editor -->
     <link href="https://cdn.quilljs.com/1.3.6/quill.snow.css" rel="stylesheet">
     <script src="https://cdn.quilljs.com/1.3.6/quill.js"></script>
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: #f5f7fa;
-            color: #2d3748;
-        }
-        .header {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            padding: 1rem;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }
-        .header h1 { font-size: 1.5rem; font-weight: 600; }
-        .header p { opacity: 0.9; margin-top: 0.25rem; font-size: 0.875rem; }
-        .container { max-width: 1600px; margin: 0 auto; padding: 1rem; }
-        .card {
-            background: white;
-            border-radius: 8px;
-            padding: 1rem;
-            margin-bottom: 0.75rem;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        :root {
+            --color-primary: #2c2c2c;
+            --color-secondary: #8b7355;
+            --color-accent: #6b5344;
+            --color-text: #333333;
+            --color-text-light: #666666;
+            --color-text-muted: #999999;
+            --color-background: #ffffff;
+            --color-background-alt: #fafaf8;
+            --color-border: #e8e4de;
+            --color-border-light: #f0ece6;
+            --color-success: #4a7c59;
+            --color-warning: #b8860b;
+            --color-error: #8b3a3a;
+            --font-heading: 'Cormorant Garamond', Georgia, serif;
+            --font-body: 'Montserrat', -apple-system, BlinkMacSystemFont, sans-serif;
         }
 
-        /* Form Fields Section */
-        .form-section {
-            margin-bottom: 0.75rem;
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: var(--font-body);
+            background: var(--color-background);
+            color: var(--color-text);
+            line-height: 1.7;
+            font-weight: 400;
+            font-size: 15px;
+            letter-spacing: 0.02em;
         }
-        .form-section h2 {
-            font-size: 1.125rem;
-            margin-bottom: 0.75rem;
-            color: #2d3748;
+
+        .header {
+            background: var(--color-background);
+            color: var(--color-primary);
+            padding: 1.5rem 4vw;
+            border-bottom: 1px solid var(--color-border);
         }
+
+        .header h1 {
+            font-family: var(--font-heading);
+            font-size: 1.75rem;
+            font-weight: 500;
+            letter-spacing: 0.05em;
+            color: var(--color-primary);
+        }
+
+        .header p {
+            color: var(--color-text-light);
+            margin-top: 0.15rem;
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            letter-spacing: 0.15em;
+            font-weight: 400;
+        }
+
+        .container {
+            max-width: 1600px;
+            margin: 0 auto;
+            padding: 1.5rem 4vw;
+        }
+
+        .nav {
+            margin-bottom: 1rem;
+        }
+
+        .nav a {
+            color: var(--color-secondary);
+            text-decoration: none;
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            font-weight: 500;
+            transition: color 0.2s ease;
+        }
+
+        .nav a:hover {
+            color: var(--color-accent);
+        }
+
+        .card {
+            background: var(--color-background);
+            border: 1px solid var(--color-border);
+            padding: 1.5rem;
+            margin-bottom: 1rem;
+        }
+
+        .card h2 {
+            font-family: var(--font-heading);
+            font-size: 1.25rem;
+            font-weight: 500;
+            letter-spacing: 0.03em;
+            color: var(--color-primary);
+            margin-bottom: 1rem;
+        }
+
+        /* Form Fields */
         .form-grid {
             display: grid;
             grid-template-columns: repeat(3, 1fr);
-            gap: 0.75rem;
-            margin-bottom: 0.5rem;
+            gap: 1rem;
         }
+
         .form-group {
             display: flex;
             flex-direction: column;
         }
+
         .form-group label {
+            font-size: 0.65rem;
             font-weight: 500;
-            margin-bottom: 0.25rem;
-            color: #4a5568;
-            font-size: 0.75rem;
+            color: var(--color-text-muted);
             text-transform: uppercase;
-            letter-spacing: 0.5px;
+            letter-spacing: 0.15em;
+            margin-bottom: 0.35rem;
         }
+
         .form-group input,
         .form-group select {
-            padding: 0.5rem;
-            border: 1px solid #e2e8f0;
-            border-radius: 4px;
-            font-size: 0.875rem;
-            transition: border-color 0.2s;
+            padding: 0.75rem;
+            border: 1px solid var(--color-border);
+            font-size: 0.9rem;
+            font-family: var(--font-body);
+            transition: border-color 0.2s ease;
+            background: var(--color-background);
         }
+
         .form-group input:focus,
         .form-group select:focus {
             outline: none;
-            border-color: #667eea;
-            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+            border-color: var(--color-secondary);
         }
 
-        /* Split View Section */
+        /* Split View */
         .split-container {
             display: grid;
             grid-template-columns: 1fr 1fr;
-            gap: 0.75rem;
-            flex: 1;
-            overflow: hidden;
-        }
-        .split-panel {
-            background: white;
-            border-radius: 8px;
-            padding: 0.75rem;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-            display: flex;
-            flex-direction: column;
-            overflow: hidden;
+            gap: 1rem;
+            margin-top: 1rem;
         }
 
-        /* Main content wrapper to control layout flow */
-        .form-content-wrapper {
+        .split-panel {
+            background: var(--color-background);
+            border: 1px solid var(--color-border);
+            padding: 1rem;
             display: flex;
             flex-direction: column;
-            height: calc(100vh - 200px);
-            min-height: 600px;
         }
+
         .split-panel h3 {
-            font-size: 1rem;
-            margin-bottom: 0.5rem;
-            color: #2d3748;
+            font-family: var(--font-heading);
+            font-size: 1.1rem;
+            font-weight: 500;
+            color: var(--color-primary);
             text-align: center;
+            margin-bottom: 0.5rem;
         }
+
         .panel-subtitle {
             text-align: center;
-            color: #718096;
-            font-size: 0.75rem;
-            margin-bottom: 0.5rem;
+            color: var(--color-text-muted);
+            font-size: 0.7rem;
+            margin-bottom: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
         }
 
         /* Example Format Panel */
         .example-content {
             flex: 1;
-            background: #f9fafb;
-            border: 2px dashed #cbd5e0;
-            border-radius: 4px;
-            padding: 0.75rem;
+            background: var(--color-background-alt);
+            border: 1px dashed var(--color-border);
+            padding: 1rem;
             text-align: center;
             font-family: Calibri, sans-serif;
             font-size: 10pt;
             line-height: 1.15;
             overflow-y: auto;
+            min-height: 350px;
         }
+
         .example-content p {
             margin: 0;
             padding: 0;
         }
-        .example-content br {
-            content: "";
-            display: block;
-            margin: 0.15rem 0;
-        }
+
         .example-section-header {
             font-weight: bold;
             margin-top: 1rem;
             margin-bottom: 0;
         }
+
         .example-section-header:first-child {
             margin-top: 0;
         }
 
-        /* Menu Input Panel - Quill Editor */
+        /* Menu Input - Quill Editor */
         .menu-input-container {
-            flex: 1;
             display: flex;
             flex-direction: column;
-            border: 1px solid #e2e8f0;
-            border-radius: 4px;
-            background: white;
+            border: 1px solid var(--color-border);
+            background: var(--color-background);
+            height: 350px;
+            min-height: 200px;
+            max-height: 800px;
             overflow: hidden;
-            min-height: 0;
+            resize: vertical;
+            position: relative;
         }
+
         .menu-input-container .ql-toolbar {
             border: none;
-            border-bottom: 1px solid #e2e8f0;
-            background: #f9fafb;
+            border-bottom: 1px solid var(--color-border);
+            background: var(--color-background-alt);
             padding: 0.5rem;
             flex-shrink: 0;
         }
+
         .menu-input-container .ql-container {
             border: none;
             flex: 1;
             font-family: Calibri, sans-serif;
             font-size: 10pt;
-            overflow-y: auto;
-            min-height: 0;
+            overflow-y: auto !important;
         }
+
         .menu-input-container .ql-editor {
             text-align: center;
-            padding: 0.75rem;
+            padding: 1rem;
             line-height: 1.15;
-            min-height: 100%;
-            overflow-y: visible;
         }
+
         .menu-input-container .ql-editor p {
             margin: 0;
             padding: 0;
         }
+
         .menu-input-container .ql-editor.ql-blank::before {
             text-align: center;
             font-style: normal;
-            color: #a0aec0;
+            color: var(--color-text-muted);
         }
 
-        /* AI Suggestions Panel */
-        .suggestions-list {
-            flex: 1;
-            background: #fffbeb;
-            border: 1px solid #fbbf24;
-            border-radius: 4px;
-            padding: 0.75rem;
-            overflow-y: auto;
+        /* Allergens Section */
+        .allergens-section {
+            margin-top: 0.75rem;
+            padding-top: 0.75rem;
+            border-top: 1px solid var(--color-border);
         }
-        .suggestion-item {
-            background: white;
-            border-left: 3px solid #f59e0b;
+
+        .allergens-section label {
+            font-size: 0.65rem;
+            font-weight: 500;
+            color: var(--color-text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.15em;
+            display: block;
+            margin-bottom: 0.35rem;
+        }
+
+        .allergens-input {
+            width: 100%;
             padding: 0.5rem;
-            margin-bottom: 0.5rem;
-            border-radius: 3px;
-            box-shadow: 0 1px 2px rgba(0,0,0,0.05);
-        }
-        .suggestion-item:last-child {
-            margin-bottom: 0;
-        }
-        .suggestion-type {
-            font-weight: 600;
-            color: #92400e;
-            font-size: 0.75rem;
-            text-transform: uppercase;
-            margin-bottom: 0.25rem;
-        }
-        .suggestion-detail {
-            color: #4a5568;
+            border: 1px solid var(--color-border);
             font-size: 0.8rem;
-        }
-        .suggestion-change {
             font-family: monospace;
-            background: #fef3c7;
-            padding: 0.2rem 0.4rem;
-            border-radius: 3px;
-            margin: 0.2rem 0;
-            display: inline-block;
-            font-size: 0.75rem;
+            resize: vertical;
+            min-height: 50px;
         }
 
-        /* Confidence badges */
-        .confidence-badge {
-            display: inline-block;
-            padding: 0.15rem 0.4rem;
-            border-radius: 3px;
-            font-size: 0.7rem;
-            font-weight: 600;
-            margin-left: 0.5rem;
-            text-transform: uppercase;
-        }
-        .confidence-high {
-            background: #dcfce7;
-            color: #166534;
-        }
-        .confidence-medium {
-            background: #fef3c7;
-            color: #92400e;
-        }
-        .confidence-low {
-            background: #e0e7ff;
-            color: #3730a3;
+        .allergens-input:focus {
+            outline: none;
+            border-color: var(--color-secondary);
         }
 
-        /* Auto-correction indicator */
-        .auto-corrected {
-            background: #d1fae5 !important;
-            color: #065f46;
-            padding: 0.15rem 0.3rem;
-            border-radius: 2px;
+        .allergens-hint {
+            font-size: 0.65rem;
+            color: var(--color-text-muted);
+            margin-top: 0.25rem;
         }
 
-        /* Text highlighting for issues */
-        .issue-highlight {
-            background: transparent;
-            text-decoration: underline;
-            text-decoration-color: #ef4444;
-            text-decoration-thickness: 2px;
-            text-underline-offset: 2px;
+        /* Expand Button */
+        .expand-btn {
+            position: absolute;
+            bottom: 8px;
+            right: 8px;
+            background: rgba(139, 115, 85, 0.1);
+            border: 1px solid var(--color-border);
+            padding: 6px 10px;
             cursor: pointer;
-            position: relative;
-        }
-        .issue-highlight:hover {
-            background: #fee2e2;
-        }
-
-        /* Applied correction styling in editor */
-        .ql-editor .corrected {
-            background-color: #d1fae5;
-            padding: 2px 0;
-        }
-
-        /* Pulse animation for highlighting */
-        @keyframes pulse {
-            0%, 100% { transform: scale(1); }
-            50% { transform: scale(1.05); background: #fca5a5; }
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 0.65rem;
+            color: var(--color-secondary);
+            transition: all 0.2s;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            font-family: var(--font-body);
         }
 
-        /* Highlight animations for different confidence levels */
-        @keyframes highlightHigh {
-            0%, 100% { background: transparent; }
-            50% { background: #dcfce7; transform: scale(1.02); }
+        .expand-btn:hover {
+            background: rgba(139, 115, 85, 0.2);
+            border-color: var(--color-secondary);
         }
-        @keyframes highlightMedium {
-            0%, 100% { background: transparent; }
-            50% { background: #fef3c7; transform: scale(1.02); }
-        }
-        @keyframes highlightLow {
-            0%, 100% { background: transparent; }
-            50% { background: #e0e7ff; transform: scale(1.02); }
+
+        .expand-btn svg {
+            width: 14px;
+            height: 14px;
         }
 
         /* Buttons */
         .btn {
             display: inline-block;
-            padding: 0.5rem 1rem;
-            border-radius: 4px;
+            padding: 1rem 2rem;
             text-decoration: none;
             font-weight: 500;
-            transition: all 0.2s;
-            border: none;
+            transition: all 0.3s ease;
+            border: 2px solid;
             cursor: pointer;
-            font-size: 0.875rem;
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            letter-spacing: 0.2em;
+            font-family: var(--font-body);
             text-align: center;
         }
+
         .btn-primary {
-            background: #667eea;
-            color: white;
+            background: var(--color-primary);
+            color: var(--color-background);
+            border-color: var(--color-primary);
         }
+
         .btn-primary:hover:not(:disabled) {
-            background: #5a67d8;
-            transform: translateY(-1px);
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            background: transparent;
+            color: var(--color-primary);
         }
+
         .btn-success {
-            background: #48bb78;
-            color: white;
+            background: var(--color-success);
+            color: var(--color-background);
+            border-color: var(--color-success);
         }
+
         .btn-success:hover:not(:disabled) {
-            background: #38a169;
-            transform: translateY(-1px);
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            background: transparent;
+            color: var(--color-success);
         }
+
         .btn:disabled {
             opacity: 0.5;
             cursor: not-allowed;
         }
+
         .btn-container {
             text-align: center;
-            padding: 0.75rem 0;
-            background: white;
-            border-radius: 4px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            padding: 1rem;
+            background: var(--color-background);
+            border: 1px solid var(--color-border);
+            margin-top: 1rem;
         }
 
-        /* Alert Messages */
+        /* Alerts */
         .alert {
-            padding: 0.5rem;
-            border-radius: 4px;
-            margin-bottom: 0.75rem;
+            padding: 1rem 1.5rem;
+            margin-bottom: 1rem;
+            border: 1px solid;
+            font-size: 0.9rem;
             display: none;
-            font-size: 0.875rem;
         }
+
         .alert.show {
             display: block;
         }
+
         .alert-success {
-            background: #c6f6d5;
-            color: #22543d;
-            border-left: 4px solid #48bb78;
-        }
-        .alert-error {
-            background: #fed7d7;
-            color: #742a2a;
-            border-left: 4px solid #f56565;
-        }
-        .alert-info {
-            background: #bee3f8;
-            color: #2c5282;
-            border-left: 4px solid #4299e1;
+            background: rgba(74, 124, 89, 0.08);
+            color: var(--color-success);
+            border-color: rgba(74, 124, 89, 0.2);
         }
 
-        /* Loading Spinner */
+        .alert-error {
+            background: rgba(139, 58, 58, 0.08);
+            color: var(--color-error);
+            border-color: rgba(139, 58, 58, 0.2);
+        }
+
+        .alert-info {
+            background: rgba(139, 115, 85, 0.08);
+            color: var(--color-secondary);
+            border-color: rgba(139, 115, 85, 0.2);
+        }
+
+        /* Spinner */
         .spinner {
-            border: 3px solid #f3f3f3;
-            border-top: 3px solid #667eea;
+            border: 2px solid var(--color-border);
+            border-top: 2px solid var(--color-secondary);
             border-radius: 50%;
-            width: 20px;
-            height: 20px;
+            width: 18px;
+            height: 18px;
             animation: spin 1s linear infinite;
             display: inline-block;
             margin-right: 0.5rem;
+            vertical-align: middle;
         }
+
         @keyframes spin {
             0% { transform: rotate(0deg); }
             100% { transform: rotate(360deg); }
         }
 
-        /* Hidden class */
         .hidden {
             display: none !important;
         }
 
-        /* Navigation */
-        .nav {
-            margin-bottom: 0.5rem;
+        /* Step 2 Layout */
+        .step2-container {
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            gap: 1rem;
+            margin-top: 1rem;
         }
-        .nav a {
-            color: #667eea;
-            text-decoration: none;
+
+        .step2-left-panel,
+        .step2-right-panel {
+            background: var(--color-background);
+            border: 1px solid var(--color-border);
+            padding: 1rem;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* Panel Header */
+        .panel-header {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            margin-bottom: 0.75rem;
+        }
+
+        .panel-header h3 {
+            margin-bottom: 0.25rem;
+        }
+
+        /* Edit Toggle */
+        .edit-toggle-container {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+            margin-top: 0.5rem;
+        }
+
+        .edit-toggle {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.5rem 1rem;
+            background: var(--color-background-alt);
+            border: 1px solid var(--color-border);
+            cursor: pointer;
+            font-size: 0.65rem;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            font-family: var(--font-body);
+            transition: all 0.2s;
+        }
+
+        .edit-toggle:hover {
+            border-color: var(--color-secondary);
+        }
+
+        .edit-toggle.active {
+            background: var(--color-primary);
+            color: var(--color-background);
+            border-color: var(--color-primary);
+        }
+
+        .edit-mode-notice {
+            display: none;
+            background: rgba(184, 134, 11, 0.1);
+            border: 1px solid rgba(184, 134, 11, 0.2);
+            padding: 0.75rem;
+            margin-bottom: 0.75rem;
+            font-size: 0.8rem;
+            color: var(--color-warning);
+            text-align: center;
+        }
+
+        .edit-mode-notice.show {
+            display: block;
+        }
+
+        /* Reviewed Menu Content Area */
+        .reviewed-content-container {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            border: 1px solid var(--color-border);
+            background: var(--color-background);
+            min-height: 400px;
+            max-height: 600px;
+        }
+
+        .reviewed-content-area {
+            flex: 1;
+            padding: 1.5rem;
+            font-family: Calibri, sans-serif;
+            font-size: 10pt;
+            line-height: 1.15;
+            text-align: center;
+            overflow-y: auto;
+            background: var(--color-background);
+        }
+
+        .reviewed-content-area p {
+            margin: 0;
+            padding: 0;
+        }
+
+        .reviewed-content-area.editable {
+            cursor: text;
+            border: 2px solid var(--color-secondary);
+        }
+
+        .reviewed-content-area.editable:focus {
+            outline: none;
+            box-shadow: 0 0 0 3px rgba(139, 115, 85, 0.3) inset;
+        }
+
+        /* Read-only form fields in step 2 */
+        .form-fields-readonly {
+            margin-bottom: 1rem;
+        }
+
+        .form-fields-readonly .card {
+            background: var(--color-background-alt);
+        }
+
+        .form-fields-readonly .form-group input,
+        .form-fields-readonly .form-group select {
+            background: var(--color-background-alt);
+            color: var(--color-text);
+            cursor: default;
+            border-color: var(--color-border-light);
+        }
+
+        .form-fields-readonly .form-group input:focus,
+        .form-fields-readonly .form-group select:focus {
+            border-color: var(--color-border-light);
+        }
+
+        /* AI Suggestions Panel */
+        .suggestions-list {
+            flex: 1;
+            background: rgba(184, 134, 11, 0.05);
+            border: 1px solid rgba(184, 134, 11, 0.2);
+            padding: 1rem;
+            overflow-y: auto;
+        }
+
+        .suggestion-item {
+            background: var(--color-background);
+            border-left: 3px solid var(--color-warning);
+            padding: 0.75rem;
+            margin-bottom: 0.75rem;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+        }
+
+        .suggestion-item:last-child {
+            margin-bottom: 0;
+        }
+
+        .suggestion-type {
+            font-weight: 600;
+            color: var(--color-warning);
+            font-size: 0.65rem;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            margin-bottom: 0.35rem;
+        }
+
+        .suggestion-detail {
+            color: var(--color-text-light);
+            font-size: 0.85rem;
+        }
+
+        .suggestion-change {
+            font-family: monospace;
+            background: rgba(184, 134, 11, 0.1);
+            padding: 0.2rem 0.4rem;
+            margin: 0.2rem 0;
+            display: inline-block;
+            font-size: 0.75rem;
+        }
+
+        /* Confidence Badges */
+        .confidence-badge {
+            display: inline-block;
+            padding: 0.2rem 0.5rem;
+            font-size: 0.6rem;
+            font-weight: 600;
+            margin-left: 0.5rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .confidence-high {
+            background: rgba(74, 124, 89, 0.1);
+            color: var(--color-success);
+            border: 1px solid rgba(74, 124, 89, 0.2);
+        }
+
+        .confidence-medium {
+            background: rgba(184, 134, 11, 0.1);
+            color: var(--color-warning);
+            border: 1px solid rgba(184, 134, 11, 0.2);
+        }
+
+        .confidence-low {
+            background: rgba(139, 115, 85, 0.1);
+            color: var(--color-secondary);
+            border: 1px solid rgba(139, 115, 85, 0.2);
+        }
+
+        /* Corrected text highlighting */
+        .ql-editor .corrected,
+        .auto-corrected {
+            background: rgba(74, 124, 89, 0.15) !important;
+        }
+
+        /* Fullscreen Modal */
+        .fullscreen-modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background: rgba(44, 44, 44, 0.95);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+            padding: 1.5rem;
+        }
+
+        .fullscreen-modal.show {
+            display: flex;
+        }
+
+        .fullscreen-content {
+            background: #e5e7eb;
+            width: 100%;
+            max-width: 1800px;
+            height: 90vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            box-shadow: 0 25px 50px rgba(0, 0, 0, 0.4);
+        }
+
+        .fullscreen-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 1rem 1.5rem;
+            border-bottom: 1px solid var(--color-border);
+            background: var(--color-background);
+        }
+
+        .fullscreen-header h3 {
+            margin: 0;
+            font-family: var(--font-heading);
+            font-size: 1.1rem;
             font-weight: 500;
-            font-size: 0.875rem;
+            color: var(--color-primary);
         }
-        .nav a:hover {
-            text-decoration: underline;
+
+        .fullscreen-close {
+            background: none;
+            border: none;
+            font-size: 1.5rem;
+            cursor: pointer;
+            color: var(--color-text-muted);
+            padding: 0.25rem;
+            line-height: 1;
+            transition: color 0.2s;
+        }
+
+        .fullscreen-close:hover {
+            color: var(--color-primary);
+        }
+
+        .fullscreen-body {
+            flex: 1;
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+            gap: 2.5rem;
+            padding: 1.5rem;
+            overflow: hidden;
+            background: #e5e7eb;
+        }
+
+        .fullscreen-page {
+            background: white;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            width: 520px;
+            min-width: 520px;
+            height: calc(100% - 30px);
+            padding: 24px 32px 40px 32px;
+            font-family: Calibri, sans-serif;
+            font-size: 7.5pt;
+            line-height: 1.25;
+            text-align: center;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .fullscreen-page p {
+            margin: 0.15rem 0;
+        }
+
+        .fullscreen-page-number {
+            position: absolute;
+            bottom: 12px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 8pt;
+            color: var(--color-text-muted);
+        }
+
+        .fullscreen-footer {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 1.5rem;
+            padding: 1rem;
+            border-top: 1px solid var(--color-border);
+            background: var(--color-background);
+        }
+
+        .page-btn {
+            background: var(--color-primary);
+            color: var(--color-background);
+            border: 2px solid var(--color-primary);
+            padding: 0.75rem 1.5rem;
+            cursor: pointer;
+            font-size: 0.7rem;
+            font-family: var(--font-body);
+            text-transform: uppercase;
+            letter-spacing: 0.15em;
+            transition: all 0.2s;
+        }
+
+        .page-btn:hover:not(:disabled) {
+            background: transparent;
+            color: var(--color-primary);
+        }
+
+        .page-btn:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+
+        .page-indicator {
+            font-size: 0.8rem;
+            color: var(--color-text-light);
         }
     </style>
 </head>
 <body>
     <div class="header">
-        <div class="container">
-            <h1>📝 Submit New Menu</h1>
-            <p>Design Brief Form Submission</p>
+        <div class="container" style="padding-top: 0; padding-bottom: 0;">
+            <h1>Richard Sandoval Hospitality</h1>
+            <p>Submit New Menu</p>
         </div>
     </div>
 
     <div class="container">
         <div class="nav">
-            <a href="/">← Back to Dashboard</a>
+            <a href="/">Back to Dashboard</a>
         </div>
 
         <div id="alertContainer"></div>
 
         <!-- Step 1: Form Fields -->
-        <div id="step1" class="form-section">
+        <div id="step1">
             <div class="card">
                 <h2>Project Details</h2>
                 <div class="form-grid">
@@ -444,6 +821,13 @@
                         </select>
                     </div>
                     <div class="form-group">
+                        <label for="menuType">Menu Type *</label>
+                        <select id="menuType" required>
+                            <option value="standard">Standard Menu</option>
+                            <option value="prix_fixe">Prix Fixe / Pre-Fix</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
                         <label for="dateNeeded">Date Needed *</label>
                         <input type="date" id="dateNeeded" required>
                     </div>
@@ -455,19 +839,18 @@
             </div>
 
             <!-- Split View: Example + Menu Input -->
-            <div class="form-content-wrapper">
-                <div class="split-container">
-                    <div class="split-panel">
-                        <h3>Example Format</h3>
-                        <p class="panel-subtitle">Your menu should follow this centered format</p>
-                        <div class="example-content">
+            <div class="split-container">
+                <div class="split-panel">
+                    <h3>Example Format</h3>
+                    <p class="panel-subtitle">Your menu should follow this centered format</p>
+                    <div class="example-content">
                         <p class="example-section-header">For the table</p>
                         <p>Makimono & Dips</p>
                         <p><strong>Smoked swordfish</strong>, smoked mesquite, pickled chili, radish, lemon aioli, cherry tomato, plantain chips</p>
-                        <p><strong>Guacamole</strong>, jalapeño, chipotle aioli, lime, chips, add tuna +6</p>
+                        <p><strong>Guacamole</strong>, jalapeno, chipotle aioli, lime, chips, add tuna +6</p>
                         <p><strong>Kale Salad</strong>, heirloom cherry tomato, grapes, candied cancha corn, orange-white balsamic vinaigrette *D,V</p>
                         <p>&nbsp;</p>
-                        <p class="example-section-header">Entrée</p>
+                        <p class="example-section-header">Entree</p>
                         <p>(select one)</p>
                         <p><strong>Omakase</strong></p>
                         <p><strong>Angry tuna roll</strong>, spicy tuna, avocado, lemon, yuzu kosho aioli*</p>
@@ -493,40 +876,118 @@
                     <p class="panel-subtitle">Paste your menu here (formatting preserved)</p>
                     <div class="menu-input-container">
                         <div id="menuEditor"></div>
+                        <button class="expand-btn" onclick="openFullscreenView()" title="View full menu">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
+                            </svg>
+                            Full View
+                        </button>
                     </div>
+                    <div class="allergens-section">
+                        <label for="allergensInput">Allergen Key (Optional)</label>
+                        <textarea id="allergensInput" class="allergens-input" placeholder="Paste your allergen key here, e.g.: C crustaceans | D dairy | E egg | F fish | G gluten | N nuts | V vegetarian | VG vegan"></textarea>
+                        <p class="allergens-hint">If left blank, the default RSH allergen codes will be used for review.</p>
                     </div>
                 </div>
+            </div>
 
-                <div class="btn-container">
-                    <button id="runCheckBtn" class="btn btn-primary" onclick="runBasicCheck()">
-                        Run Basic AI Check
-                    </button>
-                </div>
+            <div class="btn-container">
+                <button id="runCheckBtn" class="btn btn-primary" onclick="runBasicCheck()">
+                    Run Basic AI Check
+                </button>
             </div>
         </div>
 
         <!-- Step 2: AI Check Results (Hidden initially) -->
         <div id="step2" class="hidden">
-            <div class="form-content-wrapper">
-                <div class="split-container">
-                    <div class="split-panel">
+            <!-- Read-only form fields showing what user selected -->
+            <div id="step2FormFields" class="form-fields-readonly">
+                <div class="card">
+                    <h2>Project Details <span style="font-size: 0.7rem; font-weight: 400; color: var(--color-text-muted); text-transform: uppercase; letter-spacing: 0.1em;">(Read Only)</span></h2>
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label>Project Name</label>
+                            <input type="text" id="step2ProjectName" readonly>
+                        </div>
+                        <div class="form-group">
+                            <label>Property</label>
+                            <input type="text" id="step2Property" readonly>
+                        </div>
+                        <div class="form-group">
+                            <label>Size</label>
+                            <input type="text" id="step2Size" readonly>
+                        </div>
+                        <div class="form-group">
+                            <label>Orientation</label>
+                            <input type="text" id="step2Orientation" readonly>
+                        </div>
+                        <div class="form-group">
+                            <label>Menu Type</label>
+                            <input type="text" id="step2MenuType" readonly>
+                        </div>
+                        <div class="form-group">
+                            <label>Date Needed</label>
+                            <input type="text" id="step2DateNeeded" readonly>
+                        </div>
+                        <div class="form-group">
+                            <label>Your Email</label>
+                            <input type="text" id="step2Email" readonly>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="step2-container">
+                <div class="step2-left-panel">
+                    <div class="panel-header">
                         <h3>Your Menu</h3>
-                        <p class="panel-subtitle">Original content</p>
-                        <div id="originalMenuDisplay" class="example-content"></div>
+                        <p class="panel-subtitle">AI-corrected content (green = AI changes)</p>
+                        <div class="edit-toggle-container">
+                            <button id="editToggleBtn" class="edit-toggle" onclick="toggleEditMode()">
+                                <span class="edit-toggle-icon">Edit</span>
+                            </button>
+                        </div>
                     </div>
-
-                    <div class="split-panel">
-                        <h3>AI Suggestions</h3>
-                        <p class="panel-subtitle">Recommended corrections</p>
-                        <div id="suggestionsDisplay" class="suggestions-list"></div>
+                    <div id="editModeNotice" class="edit-mode-notice">
+                        Editing mode active. Make your changes directly in the text below. Green highlights will be recalculated when you finish.
                     </div>
+                    <div class="reviewed-content-container">
+                        <div id="reviewedContentArea" class="reviewed-content-area">
+                            <!-- AI-corrected content with highlights will appear here -->
+                        </div>
+                    </div>
+                    <div id="originalMenuDisplay" style="display: none;"></div>
                 </div>
 
-                <div class="btn-container">
-                    <button id="submitBtn" class="btn btn-success" onclick="submitMenu()">
-                        Submit Menu for Review
-                    </button>
+                <div class="step2-right-panel">
+                    <h3 style="text-align: center; margin-bottom: 0.25rem; font-family: var(--font-heading); font-size: 1.1rem; font-weight: 500;">AI Suggestions</h3>
+                    <p class="panel-subtitle">Recommended corrections</p>
+                    <div id="suggestionsDisplay" class="suggestions-list"></div>
                 </div>
+            </div>
+
+            <div class="btn-container">
+                <button id="submitBtn" class="btn btn-success" onclick="submitMenu()">
+                    Submit Menu for Review
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Fullscreen Menu View Modal -->
+    <div id="fullscreenModal" class="fullscreen-modal" onclick="closeFullscreenIfBackdrop(event)">
+        <div class="fullscreen-content" onclick="event.stopPropagation()">
+            <div class="fullscreen-header">
+                <h3>Full Menu View</h3>
+                <button class="fullscreen-close" onclick="closeFullscreenView()">&times;</button>
+            </div>
+            <div class="fullscreen-body" id="fullscreenBody">
+                <!-- Pages will be inserted here dynamically -->
+            </div>
+            <div class="fullscreen-footer">
+                <button class="page-btn" id="prevPageBtn" onclick="changePageGroup(-1)">Previous</button>
+                <span class="page-indicator" id="pageIndicator">Pages 1-3 of 3</span>
+                <button class="page-btn" id="nextPageBtn" onclick="changePageGroup(1)">Next</button>
             </div>
         </div>
     </div>
@@ -534,8 +995,10 @@
     <script>
         let aiCheckResults = null;
         let quill = null;
+        let isEditMode = false;
+        let aiChanges = [];
+        let originalAiCorrectedText = '';
 
-        // Initialize Quill editor after DOM loads
         document.addEventListener('DOMContentLoaded', function() {
             quill = new Quill('#menuEditor', {
                 theme: 'snow',
@@ -547,8 +1010,182 @@
                         ['clean']
                     ]
                 },
-                placeholder: 'Paste your menu content here...\n\nExample:\nFor the table\nMakimono & Dips\n\nSmoked swordfish...'
+                placeholder: 'Paste your menu content here...'
             });
+
+            const menuContainer = document.querySelector('.menu-input-container');
+            const exampleContent = document.querySelector('.example-content');
+
+            if (menuContainer && exampleContent) {
+                const resizeObserver = new ResizeObserver(entries => {
+                    for (let entry of entries) {
+                        const menuHeight = entry.contentRect.height;
+                        const allergensSection = document.querySelector('.allergens-section');
+                        const allergensHeight = allergensSection ? allergensSection.offsetHeight : 80;
+                        exampleContent.style.minHeight = (menuHeight + allergensHeight) + 'px';
+                    }
+                });
+                resizeObserver.observe(menuContainer);
+            }
+        });
+
+        let fullscreenPages = [];
+        let fsCurrentGroup = 0;
+        const FULLSCREEN_PAGES_PER_VIEW = 2;
+
+        function openFullscreenView() {
+            const menuContent = quill.root.innerHTML;
+            if (!menuContent || quill.getText().trim() === '') {
+                showAlert('Please enter menu content first', 'error');
+                return;
+            }
+
+            document.getElementById('fullscreenModal').classList.add('show');
+            document.body.style.overflow = 'hidden';
+
+            const lines = quill.getText().split('\n');
+            fullscreenPages = paginateByMeasurement(lines);
+
+            if (fullscreenPages.length === 0) {
+                fullscreenPages = [quill.getText()];
+            }
+
+            fsCurrentGroup = 0;
+            renderFullscreenPages();
+            updateFullscreenControls();
+        }
+
+        function paginateByMeasurement(lines) {
+            const body = document.getElementById('fullscreenBody');
+            const pages = [];
+
+            const measurePage = document.createElement('div');
+            measurePage.style.cssText = `
+                position: absolute;
+                visibility: hidden;
+                background: white;
+                width: 520px;
+                padding: 24px 32px 40px 32px;
+                font-family: Calibri, sans-serif;
+                font-size: 7.5pt;
+                line-height: 1.25;
+                text-align: center;
+            `;
+            body.appendChild(measurePage);
+
+            const pageHeight = body.clientHeight - 30;
+            const paddingTop = 24;
+            const paddingBottom = 40;
+            const pageNumberSpace = 25;
+            const maxContentHeight = pageHeight - paddingTop - paddingBottom - pageNumberSpace;
+
+            let currentPageLines = [];
+            let lineIndex = 0;
+
+            while (lineIndex < lines.length) {
+                currentPageLines.push(lines[lineIndex]);
+
+                measurePage.innerHTML = currentPageLines
+                    .map(line => {
+                        if (!line.trim()) return '<p>&nbsp;</p>';
+                        return `<p>${escapeHtml(line)}</p>`;
+                    })
+                    .join('');
+
+                const contentHeight = measurePage.scrollHeight;
+
+                if (contentHeight > maxContentHeight && currentPageLines.length > 1) {
+                    currentPageLines.pop();
+                    pages.push(currentPageLines.join('\n'));
+                    currentPageLines = [];
+                } else {
+                    lineIndex++;
+                }
+            }
+
+            if (currentPageLines.length > 0) {
+                pages.push(currentPageLines.join('\n'));
+            }
+
+            body.removeChild(measurePage);
+            return pages;
+        }
+
+        function closeFullscreenView() {
+            document.getElementById('fullscreenModal').classList.remove('show');
+            document.body.style.overflow = '';
+        }
+
+        function closeFullscreenIfBackdrop(event) {
+            if (event.target.id === 'fullscreenModal') {
+                closeFullscreenView();
+            }
+        }
+
+        function renderFullscreenPages() {
+            const body = document.getElementById('fullscreenBody');
+            body.innerHTML = '';
+
+            const startIdx = fsCurrentGroup * FULLSCREEN_PAGES_PER_VIEW;
+            const endIdx = Math.min(startIdx + FULLSCREEN_PAGES_PER_VIEW, fullscreenPages.length);
+
+            for (let i = startIdx; i < endIdx; i++) {
+                const pageDiv = document.createElement('div');
+                pageDiv.className = 'fullscreen-page';
+
+                const content = fullscreenPages[i] || '';
+                const formattedContent = content
+                    .split('\n')
+                    .map(line => {
+                        if (!line.trim()) return '<p>&nbsp;</p>';
+                        if (line.trim().toUpperCase() === line.trim() && line.trim().length < 30) {
+                            return `<p><strong>${escapeHtml(line)}</strong></p>`;
+                        }
+                        return `<p>${escapeHtml(line)}</p>`;
+                    })
+                    .join('');
+
+                pageDiv.innerHTML = formattedContent;
+
+                const pageNum = document.createElement('div');
+                pageNum.className = 'fullscreen-page-number';
+                pageNum.textContent = `Page ${i + 1}`;
+                pageDiv.appendChild(pageNum);
+
+                body.appendChild(pageDiv);
+            }
+        }
+
+        function updateFullscreenControls() {
+            const totalPages = fullscreenPages.length;
+            const totalGroups = Math.ceil(totalPages / FULLSCREEN_PAGES_PER_VIEW);
+            const prevBtn = document.getElementById('prevPageBtn');
+            const nextBtn = document.getElementById('nextPageBtn');
+            const indicator = document.getElementById('pageIndicator');
+
+            const startPage = fsCurrentGroup * FULLSCREEN_PAGES_PER_VIEW + 1;
+            const endPage = Math.min(startPage + FULLSCREEN_PAGES_PER_VIEW - 1, totalPages);
+
+            prevBtn.disabled = fsCurrentGroup === 0;
+            nextBtn.disabled = fsCurrentGroup >= totalGroups - 1;
+
+            indicator.textContent = `Pages ${startPage}-${endPage} of ${totalPages}`;
+        }
+
+        function changePageGroup(delta) {
+            const totalGroups = Math.ceil(fullscreenPages.length / FULLSCREEN_PAGES_PER_VIEW);
+            const newGroup = fsCurrentGroup + delta;
+            if (newGroup >= 0 && newGroup < totalGroups) {
+                fsCurrentGroup = newGroup;
+                renderFullscreenPages();
+                updateFullscreenControls();
+            }
+        }
+
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape') {
+                closeFullscreenView();
+            }
         });
 
         function showAlert(message, type = 'info') {
@@ -568,20 +1205,19 @@
             const property = document.getElementById('property').value.trim();
             const size = document.getElementById('size').value.trim();
             const orientation = document.getElementById('orientation').value;
+            const menuType = document.getElementById('menuType').value;
             const dateNeeded = document.getElementById('dateNeeded').value;
             const submitterEmail = document.getElementById('submitterEmail').value.trim();
             const menuContent = quill.getText().trim();
 
-            if (!projectName || !property || !size || !orientation || !dateNeeded || !submitterEmail || !menuContent) {
+            if (!projectName || !property || !size || !orientation || !menuType || !dateNeeded || !submitterEmail || !menuContent) {
                 showAlert('Please fill in all required fields', 'error');
-                // Scroll to top to show the error and form fields
                 window.scrollTo({ top: 0, behavior: 'smooth' });
                 return false;
             }
 
             if (!submitterEmail.includes('@')) {
                 showAlert('Please enter a valid email address', 'error');
-                // Scroll to top to show the error and email field
                 window.scrollTo({ top: 0, behavior: 'smooth' });
                 return false;
             }
@@ -596,8 +1232,6 @@
             btn.disabled = true;
             btn.innerHTML = '<span class="spinner"></span>Running AI Check...';
 
-            // Convert Quill content to plain text with proper line breaks
-            // Get the HTML and convert it to text while preserving structure
             const delta = quill.getContents();
             let menuContent = '';
 
@@ -607,16 +1241,15 @@
                 }
             });
 
-            // Clean up the text (trim and normalize line breaks)
             menuContent = menuContent.trim();
-
-            console.log('Sending to AI:', menuContent); // Debug logging
+            const allergens = document.getElementById('allergensInput').value.trim();
+            const menuType = document.getElementById('menuType').value;
 
             try {
                 const response = await fetch('/api/form/basic-check', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ menuContent })
+                    body: JSON.stringify({ menuContent, allergens, menuType })
                 });
 
                 const data = await response.json();
@@ -637,50 +1270,103 @@
             }
         }
 
-        // Simple diff algorithm for highlighting changes
         function computeLineDiff(original, corrected) {
-            const origLines = original.split('\n');
-            const corrLines = corrected.split('\n');
             const changes = [];
+            const origLines = original.split('\n').map(l => l.trim()).filter(l => l);
+            const corrLines = corrected.split('\n').map(l => l.trim()).filter(l => l);
+            const origLineSet = new Set(origLines.map(l => normalizeWord(l)));
+            const origLineMap = new Map();
 
-            // For each line in the corrected text, find if it changed
+            origLines.forEach((line, idx) => {
+                const norm = normalizeWord(line);
+                if (!origLineMap.has(norm)) {
+                    origLineMap.set(norm, []);
+                }
+                origLineMap.get(norm).push({ line, idx });
+            });
+
             let corrOffset = 0;
-            for (let i = 0; i < corrLines.length; i++) {
-                const corrLine = corrLines[i];
-                const origLine = origLines[i] || '';
+            const corrFullLines = corrected.split('\n');
 
-                if (corrLine !== origLine && corrLine.trim()) {
-                    // This line changed - find the specific word differences
-                    const wordChanges = findWordChanges(origLine, corrLine, corrOffset);
-                    changes.push(...wordChanges);
+            for (let i = 0; i < corrFullLines.length; i++) {
+                const corrLine = corrFullLines[i];
+                const corrLineTrimmed = corrLine.trim();
+
+                if (corrLineTrimmed) {
+                    const corrNorm = normalizeWord(corrLineTrimmed);
+
+                    if (origLineSet.has(corrNorm)) {
+                        const origMatches = origLineMap.get(corrNorm);
+                        if (origMatches && origMatches.length > 0) {
+                            const bestMatch = origMatches[0].line;
+                            const wordChanges = findWordChanges(bestMatch, corrLineTrimmed, corrOffset + (corrLine.length - corrLine.trimStart().length));
+                            changes.push(...wordChanges);
+                        }
+                    } else {
+                        let bestMatch = null;
+                        let bestScore = 0;
+
+                        for (const origLine of origLines) {
+                            const score = similarityScore(origLine, corrLineTrimmed);
+                            if (score > bestScore) {
+                                bestScore = score;
+                                bestMatch = origLine;
+                            }
+                        }
+
+                        if (bestMatch && bestScore > 0.5) {
+                            const lineStart = corrOffset + (corrLine.length - corrLine.trimStart().length);
+                            const wordChanges = findWordChanges(bestMatch, corrLineTrimmed, lineStart);
+                            changes.push(...wordChanges);
+                        } else if (bestScore <= 0.5) {
+                            const lineStart = corrOffset + (corrLine.length - corrLine.trimStart().length);
+                            changes.push({
+                                start: lineStart,
+                                length: corrLineTrimmed.length,
+                                word: corrLineTrimmed
+                            });
+                        }
+                    }
                 }
 
-                corrOffset += corrLine.length + 1; // +1 for newline
+                corrOffset += corrLine.length + 1;
             }
 
             return changes;
         }
 
-        // Find specific word changes within a line using character comparison
+        function similarityScore(str1, str2) {
+            const words1 = str1.toLowerCase().split(/\s+/).filter(w => w);
+            const words2 = str2.toLowerCase().split(/\s+/).filter(w => w);
+
+            if (words1.length === 0 || words2.length === 0) return 0;
+
+            let matches = 0;
+            for (const w1 of words1) {
+                for (const w2 of words2) {
+                    if (wordsAreSimilar(w1, w2)) {
+                        matches++;
+                        break;
+                    }
+                }
+            }
+
+            return matches / Math.max(words1.length, words2.length);
+        }
+
         function findWordChanges(origLine, corrLine, lineOffset) {
             const changes = [];
             const origWords = origLine.split(/(\s+)/);
             const corrWords = corrLine.split(/(\s+)/);
-
-            // Use longest common subsequence approach for better alignment
             const lcs = longestCommonSubsequence(origWords, corrWords);
 
-            let corrIdx = 0;
             let charOffset = lineOffset;
 
             for (let i = 0; i < corrWords.length; i++) {
                 const word = corrWords[i];
-
-                // Check if this word is part of the common subsequence
                 const isCommon = lcs.includes(i);
 
                 if (!isCommon && word.trim()) {
-                    // This word was added or changed
                     changes.push({
                         start: charOffset,
                         length: word.length,
@@ -694,17 +1380,38 @@
             return changes;
         }
 
-        // Find indices of words in corrected that match original (LCS)
+        function normalizeWord(word) {
+            return word.toLowerCase()
+                .replace(/[$€£¥]/g, '')
+                .replace(/[.,;:!?'"()\[\]{}]/g, '')
+                .replace(/\s+/g, '');
+        }
+
+        function wordsAreSimilar(word1, word2) {
+            const norm1 = normalizeWord(word1);
+            const norm2 = normalizeWord(word2);
+
+            if (norm1 === norm2) return true;
+            if (norm1 + 's' === norm2 || norm2 + 's' === norm1) return true;
+            if (norm1 + 'es' === norm2 || norm2 + 'es' === norm1) return true;
+
+            if (Math.abs(norm1.length - norm2.length) === 1) {
+                const longer = norm1.length > norm2.length ? norm1 : norm2;
+                const shorter = norm1.length > norm2.length ? norm2 : norm1;
+                if (longer.startsWith(shorter) && longer.endsWith('s')) return true;
+            }
+
+            return false;
+        }
+
         function longestCommonSubsequence(origWords, corrWords) {
             const m = origWords.length;
             const n = corrWords.length;
-
-            // Build LCS table
             const dp = Array(m + 1).fill(null).map(() => Array(n + 1).fill(0));
 
             for (let i = 1; i <= m; i++) {
                 for (let j = 1; j <= n; j++) {
-                    if (origWords[i - 1] === corrWords[j - 1]) {
+                    if (wordsAreSimilar(origWords[i - 1], corrWords[j - 1])) {
                         dp[i][j] = dp[i - 1][j - 1] + 1;
                     } else {
                         dp[i][j] = Math.max(dp[i - 1][j], dp[i][j - 1]);
@@ -712,11 +1419,10 @@
                 }
             }
 
-            // Backtrack to find which corrected indices are part of LCS
             const commonIndices = [];
             let i = m, j = n;
             while (i > 0 && j > 0) {
-                if (origWords[i - 1] === corrWords[j - 1]) {
+                if (wordsAreSimilar(origWords[i - 1], corrWords[j - 1])) {
                     commonIndices.unshift(j - 1);
                     i--;
                     j--;
@@ -731,58 +1437,61 @@
         }
 
         function showStep2(results) {
-            // Hide step 1
             document.getElementById('step1').classList.add('hidden');
-
-            // Show step 2
             document.getElementById('step2').classList.remove('hidden');
 
-            // Use the corrected menu from AI and diff to find changes
+            // Populate read-only form fields
+            document.getElementById('step2ProjectName').value = document.getElementById('projectName').value;
+            document.getElementById('step2Property').value = document.getElementById('property').value;
+            document.getElementById('step2Size').value = document.getElementById('size').value;
+            document.getElementById('step2Orientation').value = document.getElementById('orientation').value;
+            const menuTypeSelect = document.getElementById('menuType');
+            document.getElementById('step2MenuType').value = menuTypeSelect.options[menuTypeSelect.selectedIndex].text;
+            document.getElementById('step2DateNeeded').value = document.getElementById('dateNeeded').value;
+            document.getElementById('step2Email').value = document.getElementById('submitterEmail').value;
+
             const originalText = results.originalMenu;
             const correctedText = results.correctedMenu;
             const hasChanges = results.hasChanges;
 
-            console.log('Has changes:', hasChanges);
-            console.log('Original length:', originalText.length);
-            console.log('Corrected length:', correctedText.length);
-
-            // Replace Quill content with corrected text
             quill.setText(correctedText);
 
-            // Find and highlight actual changes using proper diff algorithm
             if (hasChanges) {
                 const changes = computeLineDiff(originalText, correctedText);
 
-                // Apply highlighting to changed words
+                aiChanges = changes.map(change => ({
+                    start: change.start,
+                    length: change.length,
+                    word: change.word
+                }));
+                originalAiCorrectedText = correctedText;
+
                 changes.forEach(change => {
                     quill.formatText(change.start, change.length, {
-                        background: '#d1fae5'
+                        background: 'rgba(74, 124, 89, 0.2)'
                     });
                 });
-
-                console.log(`Applied ${changes.length} corrections`);
+            } else {
+                aiChanges = [];
+                originalAiCorrectedText = correctedText;
             }
 
-            // Display corrected menu in left panel
-            const originalDisplay = document.getElementById('originalMenuDisplay');
-            originalDisplay.innerHTML = quill.root.innerHTML;
+            // Display the reviewed content with highlights
+            displayReviewedContent(quill.root.innerHTML);
 
-            // Display remaining suggestions in right panel
             const suggestionsDisplay = document.getElementById('suggestionsDisplay');
 
             if (hasChanges) {
-                // Show auto-correction summary
                 let html = `
-                    <div class="suggestion-item" style="border-left: 3px solid #10b981; background: #ecfdf5;">
-                        <div class="suggestion-type" style="color: #065f46;">✓ AUTO-CORRECTED</div>
-                        <div class="suggestion-detail" style="color: #065f46;">
+                    <div class="suggestion-item" style="border-left: 3px solid var(--color-success); background: rgba(74, 124, 89, 0.05);">
+                        <div class="suggestion-type" style="color: var(--color-success);">Auto-Corrected</div>
+                        <div class="suggestion-detail" style="color: var(--color-success);">
                             High-confidence spelling and grammar corrections have been automatically applied.
                             Green highlights show the changes.
                         </div>
                     </div>
                 `;
 
-                // Add remaining suggestions
                 if (results.suggestions && results.suggestions.length > 0) {
                     html += results.suggestions.map((suggestion, idx) => {
                         const confidenceClass = `confidence-${suggestion.confidence}`;
@@ -792,9 +1501,9 @@
                                     ${escapeHtml(suggestion.type)}
                                     <span class="confidence-badge ${confidenceClass}">${suggestion.confidence.toUpperCase()}</span>
                                 </div>
-                                ${suggestion.menuItem ? `<div style="font-weight: 600; color: #2d3748; font-size: 0.75rem; margin: 0.25rem 0;">Item: ${escapeHtml(suggestion.menuItem)}</div>` : ''}
+                                ${suggestion.menuItem ? `<div style="font-weight: 600; color: var(--color-text); font-size: 0.75rem; margin: 0.25rem 0;">Item: ${escapeHtml(suggestion.menuItem)}</div>` : ''}
                                 <div class="suggestion-detail">${escapeHtml(suggestion.description)}</div>
-                                <div style="color: #059669; font-size: 0.75rem; margin-top: 0.25rem;"><strong>Recommendation:</strong> ${escapeHtml(suggestion.recommendation)}</div>
+                                <div style="color: var(--color-success); font-size: 0.75rem; margin-top: 0.25rem;"><strong>Recommendation:</strong> ${escapeHtml(suggestion.recommendation)}</div>
                             </div>
                         `;
                     }).join('');
@@ -803,7 +1512,6 @@
                 suggestionsDisplay.innerHTML = html;
                 showAlert('Auto-corrections applied! Green highlights show the changes.', 'success');
             } else if (results.suggestions && results.suggestions.length > 0) {
-                // No auto-corrections but have suggestions
                 const html = results.suggestions.map((suggestion, idx) => {
                     const confidenceClass = `confidence-${suggestion.confidence}`;
                     return `
@@ -812,18 +1520,17 @@
                                 ${escapeHtml(suggestion.type)}
                                 <span class="confidence-badge ${confidenceClass}">${suggestion.confidence.toUpperCase()}</span>
                             </div>
-                            ${suggestion.menuItem ? `<div style="font-weight: 600; color: #2d3748; font-size: 0.75rem; margin: 0.25rem 0;">Item: ${escapeHtml(suggestion.menuItem)}</div>` : ''}
+                            ${suggestion.menuItem ? `<div style="font-weight: 600; color: var(--color-text); font-size: 0.75rem; margin: 0.25rem 0;">Item: ${escapeHtml(suggestion.menuItem)}</div>` : ''}
                             <div class="suggestion-detail">${escapeHtml(suggestion.description)}</div>
-                            <div style="color: #059669; font-size: 0.75rem; margin-top: 0.25rem;"><strong>Recommendation:</strong> ${escapeHtml(suggestion.recommendation)}</div>
+                            <div style="color: var(--color-success); font-size: 0.75rem; margin-top: 0.25rem;"><strong>Recommendation:</strong> ${escapeHtml(suggestion.recommendation)}</div>
                         </div>
                     `;
                 }).join('');
                 suggestionsDisplay.innerHTML = html;
             } else {
-                // No changes and no suggestions
                 suggestionsDisplay.innerHTML = `
-                    <div class="suggestion-item">
-                        <div class="suggestion-type">✓ All Clear</div>
+                    <div class="suggestion-item" style="border-left: 3px solid var(--color-success);">
+                        <div class="suggestion-type" style="color: var(--color-success);">All Clear</div>
                         <div class="suggestion-detail">No issues found. Your menu looks perfect!</div>
                     </div>
                 `;
@@ -831,19 +1538,27 @@
         }
 
         async function submitMenu() {
+            if (isEditMode) {
+                toggleEditMode();
+            }
+
             const btn = document.getElementById('submitBtn');
             btn.disabled = true;
             btn.innerHTML = '<span class="spinner"></span>Submitting...';
 
-            // Get HTML content from Quill to preserve formatting
-            const menuContentHtml = quill.root.innerHTML;
-            const menuContentText = quill.getText().trim();
+            const reviewedArea = document.getElementById('reviewedContentArea');
+            const menuContentHtml = reviewedArea.innerHTML;
+            const menuContentText = (reviewedArea.innerText || reviewedArea.textContent).trim();
+
+            // Also update the hidden display
+            document.getElementById('originalMenuDisplay').innerHTML = menuContentHtml;
 
             const formData = {
                 projectName: document.getElementById('projectName').value.trim(),
                 property: document.getElementById('property').value.trim(),
                 size: document.getElementById('size').value.trim(),
                 orientation: document.getElementById('orientation').value,
+                menuType: document.getElementById('menuType').value,
                 dateNeeded: document.getElementById('dateNeeded').value,
                 submitterEmail: document.getElementById('submitterEmail').value.trim(),
                 menuContent: menuContentText,
@@ -865,7 +1580,6 @@
 
                 showAlert('Menu submitted successfully! Redirecting to review page...', 'success');
 
-                // Redirect to review page after 2 seconds
                 setTimeout(() => {
                     window.location.href = `/review/${data.submissionId}`;
                 }, 2000);
@@ -883,6 +1597,128 @@
             div.textContent = text;
             return div.innerHTML;
         }
+
+        function displayReviewedContent(htmlContent) {
+            const reviewedArea = document.getElementById('reviewedContentArea');
+
+            // Clean up excessive empty paragraphs that can accumulate
+            let cleanedHtml = htmlContent
+                // Remove multiple consecutive empty paragraphs
+                .replace(/(<p><br><\/p>\s*){2,}/gi, '<p><br></p>')
+                // Remove multiple consecutive &nbsp; paragraphs
+                .replace(/(<p>&nbsp;<\/p>\s*){2,}/gi, '<p><br></p>')
+                // Remove empty paragraphs with just whitespace
+                .replace(/<p>\s*<\/p>/gi, '<p><br></p>');
+
+            reviewedArea.innerHTML = cleanedHtml;
+            document.getElementById('originalMenuDisplay').innerHTML = cleanedHtml;
+        }
+
+        function toggleEditMode() {
+            const editBtn = document.getElementById('editToggleBtn');
+            const editNotice = document.getElementById('editModeNotice');
+            const reviewedArea = document.getElementById('reviewedContentArea');
+
+            isEditMode = !isEditMode;
+
+            if (isEditMode) {
+                editBtn.classList.add('active');
+                editBtn.innerHTML = '<span class="edit-toggle-icon">Done Editing</span>';
+                editNotice.classList.add('show');
+                reviewedArea.classList.add('editable');
+                reviewedArea.contentEditable = 'true';
+                reviewedArea.focus();
+            } else {
+                editBtn.classList.remove('active');
+                editBtn.innerHTML = '<span class="edit-toggle-icon">Edit</span>';
+                editNotice.classList.remove('show');
+                reviewedArea.classList.remove('editable');
+                reviewedArea.contentEditable = 'false';
+                recalculateHighlights();
+            }
+        }
+
+        function recalculateHighlights() {
+            const reviewedArea = document.getElementById('reviewedContentArea');
+
+            // Extract clean text from the edited content
+            // Get each <p> element's text, filter out empties, join with single newlines
+            const extractCleanText = (element) => {
+                const paragraphs = element.querySelectorAll('p');
+
+                if (paragraphs.length === 0) {
+                    // No paragraphs, get text content directly
+                    return element.textContent.trim()
+                        .split(/\n+/)
+                        .map(line => line.trim())
+                        .filter(line => line.length > 0)
+                        .join('\n');
+                }
+
+                const lines = [];
+                paragraphs.forEach(p => {
+                    const text = p.textContent.trim();
+                    // Only add non-empty lines (skip &nbsp; and empty paragraphs)
+                    if (text && text !== '\u00A0' && text.length > 0) {
+                        lines.push(text);
+                    }
+                });
+
+                return lines.join('\n');
+            };
+
+            const currentText = extractCleanText(reviewedArea);
+
+            quill.setText(currentText);
+
+            const currentChanges = computeLineDiff(aiCheckResults.originalMenu, currentText);
+            const preservedChanges = [];
+
+            aiChanges.forEach(aiChange => {
+                const changeStillPresent = currentChanges.some(currentChange => {
+                    return currentChange.word === aiChange.word &&
+                           Math.abs(currentChange.start - aiChange.start) < 5;
+                });
+
+                const textAtPosition = currentText.substring(
+                    Math.max(0, aiChange.start - 10),
+                    aiChange.start + aiChange.length + 10
+                );
+
+                if (changeStillPresent || textAtPosition.includes(aiChange.word)) {
+                    const newPosition = findWordPosition(currentText, aiChange.word, aiChange.start);
+                    if (newPosition !== -1) {
+                        preservedChanges.push({
+                            start: newPosition,
+                            length: aiChange.length,
+                            word: aiChange.word
+                        });
+                    }
+                }
+            });
+
+            preservedChanges.forEach(change => {
+                quill.formatText(change.start, change.length, {
+                    background: 'rgba(74, 124, 89, 0.2)'
+                });
+            });
+
+            displayReviewedContent(quill.root.innerHTML);
+        }
+
+        function findWordPosition(text, word, expectedPosition) {
+            const searchStart = Math.max(0, expectedPosition - 50);
+            const searchEnd = Math.min(text.length, expectedPosition + 50);
+            const searchArea = text.substring(searchStart, searchEnd);
+            const localIndex = searchArea.indexOf(word);
+
+            if (localIndex !== -1) {
+                return searchStart + localIndex;
+            }
+
+            return text.indexOf(word);
+        }
+
     </script>
 </body>
 </html>

@@ -100,11 +100,22 @@ def populate_template(template_path: str, form_data: dict, output_path: str):
                     print(f"  ✓ Set '{field_name}' = '{field_mapping[field_name]}'")
 
     # Find the boundary marker paragraph
-    boundary_marker = "Please drop the menu content below on page 2"
+    # Try different markers for food vs beverage templates
+    boundary_markers = [
+        "Please drop the menu content below on page 2",  # Food template
+        "MENU"  # Beverage template (just "MENU" on its own line)
+    ]
     boundary_index = None
 
     for i, paragraph in enumerate(doc.paragraphs):
-        if boundary_marker in paragraph.text:
+        para_text = paragraph.text.strip()
+        # Check for exact "MENU" match (beverage template)
+        if para_text == "MENU":
+            boundary_index = i
+            print(f"Found 'MENU' marker at paragraph {i}")
+            break
+        # Check for the food template marker
+        elif boundary_markers[0] in para_text:
             boundary_index = i
             print(f"Found boundary marker at paragraph {i}")
             break
