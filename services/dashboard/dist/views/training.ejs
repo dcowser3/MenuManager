@@ -4,7 +4,28 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title><%= title %></title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=Montserrat:wght@300;400;500;600&display=swap" rel="stylesheet">
     <style>
+        :root {
+            --color-primary: #2c2c2c;
+            --color-secondary: #8b7355;
+            --color-accent: #6b5344;
+            --color-text: #333333;
+            --color-text-light: #666666;
+            --color-text-muted: #999999;
+            --color-background: #ffffff;
+            --color-background-alt: #fafaf8;
+            --color-border: #e8e4de;
+            --color-border-light: #f0ece6;
+            --color-success: #4a7c59;
+            --color-warning: #b8860b;
+            --color-error: #8b3a3a;
+            --font-heading: 'Cormorant Garamond', Georgia, serif;
+            --font-body: 'Montserrat', -apple-system, BlinkMacSystemFont, sans-serif;
+        }
+
         * {
             margin: 0;
             padding: 0;
@@ -12,128 +33,170 @@
         }
 
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            font-family: var(--font-body);
+            background: var(--color-background);
+            color: var(--color-text);
+            line-height: 1.7;
+            font-weight: 400;
+            font-size: 15px;
+            letter-spacing: 0.02em;
             min-height: 100vh;
-            padding: 20px;
+        }
+
+        .header {
+            background: var(--color-background);
+            color: var(--color-primary);
+            padding: 2.5rem 4vw;
+            border-bottom: 1px solid var(--color-border);
+        }
+
+        .header-content {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        .header h1 {
+            font-family: var(--font-heading);
+            font-size: 2.2rem;
+            font-weight: 500;
+            letter-spacing: 0.05em;
+            color: var(--color-primary);
+        }
+
+        .header p {
+            color: var(--color-text-light);
+            margin-top: 0.25rem;
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.15em;
+            font-weight: 400;
+        }
+
+        .nav-links {
+            margin-top: 1.5rem;
+        }
+
+        .nav-links a {
+            color: var(--color-secondary);
+            text-decoration: none;
+            font-size: 0.8rem;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            font-weight: 500;
+            transition: color 0.2s ease;
+        }
+
+        .nav-links a:hover {
+            color: var(--color-accent);
         }
 
         .container {
             max-width: 1400px;
             margin: 0 auto;
-        }
-
-        header {
-            background: white;
-            border-radius: 16px;
-            padding: 30px;
-            margin-bottom: 30px;
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
-        }
-
-        h1 {
-            color: #333;
-            font-size: 2em;
-            margin-bottom: 10px;
-        }
-
-        .nav-links {
-            margin-top: 20px;
-            display: flex;
-            gap: 15px;
-        }
-
-        .nav-links a {
-            color: #667eea;
-            text-decoration: none;
-            padding: 8px 16px;
-            border-radius: 8px;
-            transition: background-color 0.2s;
-        }
-
-        .nav-links a:hover {
-            background-color: #f0f0f0;
+            padding: 3rem 4vw;
         }
 
         .section {
-            background: white;
-            border-radius: 16px;
-            padding: 30px;
-            margin-bottom: 30px;
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+            background: var(--color-background);
+            border: 1px solid var(--color-border);
+            padding: 2.5rem;
+            margin-bottom: 2rem;
         }
 
         .section h2 {
-            color: #333;
-            margin-bottom: 20px;
-            font-size: 1.5em;
+            font-family: var(--font-heading);
+            font-size: 1.5rem;
+            font-weight: 500;
+            letter-spacing: 0.03em;
+            color: var(--color-primary);
+            margin-bottom: 1.5rem;
+            padding-bottom: 1rem;
+            border-bottom: 1px solid var(--color-border);
         }
 
         .upload-area {
-            border: 2px dashed #667eea;
-            border-radius: 12px;
-            padding: 30px;
+            border: 1px dashed var(--color-border);
+            padding: 2.5rem;
             text-align: center;
-            margin-bottom: 20px;
+            margin-bottom: 2rem;
+            background: var(--color-background-alt);
+        }
+
+        .upload-area p {
+            color: var(--color-text-light);
+            margin-bottom: 2rem;
+            font-size: 0.9rem;
         }
 
         .upload-form {
             display: flex;
             flex-direction: column;
-            gap: 15px;
-            max-width: 600px;
+            gap: 1.5rem;
+            max-width: 500px;
             margin: 0 auto;
         }
 
         .file-input-group {
             display: flex;
             flex-direction: column;
-            gap: 8px;
+            gap: 0.5rem;
             text-align: left;
         }
 
         .file-input-group label {
-            font-weight: 600;
-            color: #555;
+            font-size: 0.7rem;
+            font-weight: 500;
+            color: var(--color-text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.15em;
         }
 
         input[type="text"],
         input[type="number"] {
-            padding: 12px;
-            border: 2px solid #e0e0e0;
-            border-radius: 8px;
-            font-size: 14px;
-            transition: border-color 0.2s;
+            padding: 1rem;
+            border: 1px solid var(--color-border);
+            font-size: 0.9rem;
+            font-family: var(--font-body);
+            transition: border-color 0.2s ease;
+            background: var(--color-background);
         }
 
         input[type="text"]:focus,
         input[type="number"]:focus {
             outline: none;
-            border-color: #667eea;
+            border-color: var(--color-secondary);
         }
 
         input[type="file"] {
-            padding: 10px;
-            border: 2px solid #e0e0e0;
-            border-radius: 8px;
+            padding: 1rem;
+            border: 1px solid var(--color-border);
             cursor: pointer;
+            background: var(--color-background);
+            font-family: var(--font-body);
+            font-size: 0.85rem;
         }
 
         .btn {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            padding: 14px 28px;
-            border: none;
-            border-radius: 8px;
+            display: inline-block;
+            padding: 1rem 2rem;
+            text-decoration: none;
+            font-weight: 500;
+            transition: all 0.3s ease;
+            border: 2px solid;
             cursor: pointer;
-            font-size: 16px;
-            font-weight: 600;
-            transition: transform 0.2s, box-shadow 0.2s;
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            letter-spacing: 0.2em;
+            font-family: var(--font-body);
+            text-align: center;
+            background: var(--color-primary);
+            color: var(--color-background);
+            border-color: var(--color-primary);
         }
 
         .btn:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+            background: transparent;
+            color: var(--color-primary);
         }
 
         .btn:disabled {
@@ -142,122 +205,136 @@
         }
 
         .btn-secondary {
-            background: #6c757d;
+            background: transparent;
+            color: var(--color-text);
+            border-color: var(--color-border);
         }
 
-        .training-controls {
-            display: flex;
-            gap: 15px;
-            align-items: center;
-            margin-bottom: 20px;
-        }
-
-        .training-controls input {
-            width: 100px;
+        .btn-secondary:hover {
+            border-color: var(--color-primary);
+            color: var(--color-primary);
         }
 
         .sessions-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
-            gap: 20px;
+            grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+            gap: 2rem;
         }
 
         .session-card {
-            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
-            border-radius: 12px;
-            padding: 20px;
-            transition: transform 0.2s, box-shadow 0.2s;
+            background: var(--color-background-alt);
+            border: 1px solid var(--color-border);
+            padding: 2rem;
+            transition: all 0.3s ease;
         }
 
         .session-card:hover {
-            transform: translateY(-4px);
-            box-shadow: 0 8px 20px rgba(0, 0, 0, 0.15);
+            border-color: var(--color-secondary);
         }
 
         .session-card h3 {
-            color: #333;
-            margin-bottom: 15px;
-            font-size: 1.1em;
+            font-family: var(--font-heading);
+            font-size: 1.25rem;
+            font-weight: 500;
+            color: var(--color-primary);
+            margin-bottom: 1.5rem;
         }
 
         .session-stats {
             display: grid;
             grid-template-columns: 1fr 1fr;
-            gap: 10px;
-            margin-bottom: 15px;
+            gap: 1rem;
+            margin-bottom: 1.5rem;
         }
 
         .stat {
-            background: white;
-            padding: 10px;
-            border-radius: 8px;
+            background: var(--color-background);
+            border: 1px solid var(--color-border);
+            padding: 1rem;
             text-align: center;
         }
 
         .stat-value {
-            font-size: 24px;
-            font-weight: bold;
-            color: #667eea;
+            font-family: var(--font-heading);
+            font-size: 2rem;
+            font-weight: 500;
+            color: var(--color-secondary);
         }
 
         .stat-label {
-            font-size: 12px;
-            color: #666;
-            margin-top: 4px;
+            font-size: 0.65rem;
+            color: var(--color-text-muted);
+            margin-top: 0.25rem;
+            text-transform: uppercase;
+            letter-spacing: 0.15em;
         }
 
         .session-actions {
             display: flex;
-            gap: 10px;
-            margin-top: 15px;
+            gap: 1rem;
+            margin-top: 1.5rem;
         }
 
         .session-actions button {
             flex: 1;
-            padding: 8px;
-            font-size: 14px;
+            padding: 0.75rem 1rem;
+            font-size: 0.65rem;
         }
 
         .alert {
-            padding: 15px;
-            border-radius: 8px;
-            margin-bottom: 20px;
+            padding: 1.25rem 1.5rem;
+            margin-bottom: 2rem;
+            border: 1px solid;
+            font-size: 0.9rem;
         }
 
         .alert-success {
-            background-color: #d4edda;
-            color: #155724;
-            border: 1px solid #c3e6cb;
+            background: rgba(74, 124, 89, 0.08);
+            color: var(--color-success);
+            border-color: rgba(74, 124, 89, 0.2);
         }
 
         .alert-error {
-            background-color: #f8d7da;
-            color: #721c24;
-            border: 1px solid #f5c6cb;
+            background: rgba(139, 58, 58, 0.08);
+            color: var(--color-error);
+            border-color: rgba(139, 58, 58, 0.2);
         }
 
         .alert-info {
-            background-color: #d1ecf1;
-            color: #0c5460;
-            border: 1px solid #bee5eb;
+            background: rgba(139, 115, 85, 0.08);
+            color: var(--color-secondary);
+            border-color: rgba(139, 115, 85, 0.2);
         }
 
         .empty-state {
             text-align: center;
-            padding: 60px 20px;
-            color: #666;
+            padding: 5rem 2rem;
+            color: var(--color-text-muted);
+            border: 1px solid var(--color-border);
         }
 
         .empty-state-icon {
-            font-size: 64px;
-            margin-bottom: 20px;
+            font-size: 3rem;
+            margin-bottom: 1.5rem;
             opacity: 0.3;
+        }
+
+        .empty-state h3 {
+            font-family: var(--font-heading);
+            font-size: 1.5rem;
+            font-weight: 500;
+            color: var(--color-text-light);
+            margin-bottom: 0.5rem;
+        }
+
+        .empty-state p {
+            font-size: 0.9rem;
         }
 
         .loading {
             display: none;
             text-align: center;
-            padding: 20px;
+            padding: 2rem;
         }
 
         .loading.active {
@@ -265,11 +342,11 @@
         }
 
         .spinner {
-            border: 4px solid #f3f3f3;
-            border-top: 4px solid #667eea;
+            border: 2px solid var(--color-border);
+            border-top: 2px solid var(--color-secondary);
             border-radius: 50%;
-            width: 40px;
-            height: 40px;
+            width: 32px;
+            height: 32px;
             animation: spin 1s linear infinite;
             margin: 0 auto;
         }
@@ -278,115 +355,100 @@
             0% { transform: rotate(0deg); }
             100% { transform: rotate(360deg); }
         }
+
+        .footer {
+            text-align: center;
+            padding: 3rem 4vw;
+            color: var(--color-text-muted);
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            letter-spacing: 0.15em;
+            border-top: 1px solid var(--color-border);
+            margin-top: 2rem;
+        }
     </style>
 </head>
 <body>
-    <div class="container">
-        <header>
-            <h1>🎓 <%= title %></h1>
-            <p style="color: #666; margin-top: 10px;">
-                Train your AI model with historical menu reviews
-            </p>
+    <div class="header">
+        <div class="header-content">
+            <h1>Richard Sandoval Hospitality</h1>
+            <p>Training Dashboard</p>
             <div class="nav-links">
-                <a href="/">← Back to Reviews</a>
+                <a href="/">Back to Reviews</a>
             </div>
-        </header>
+        </div>
+    </div>
 
+    <div class="container">
         <div id="alertContainer"></div>
 
         <!-- Upload Training Pair -->
         <div class="section">
-            <h2>📤 Upload Training Pair</h2>
+            <h2>Upload Training Pair</h2>
             <div class="upload-area">
-                <p style="color: #666; margin-bottom: 20px;">
+                <p>
                     Upload a pair of documents: original menu and human-redlined version
                 </p>
                 <form id="uploadPairForm" class="upload-form">
                     <div class="file-input-group">
-                        <label>Pair Name (optional):</label>
-                        <input 
-                            type="text" 
-                            name="pairName" 
+                        <label>Pair Name (optional)</label>
+                        <input
+                            type="text"
+                            name="pairName"
                             placeholder="e.g., casa_chi_nov_2024"
                         />
                     </div>
-                    
+
                     <div class="file-input-group">
-                        <label>Original Document:</label>
-                        <input 
-                            type="file" 
-                            name="original" 
+                        <label>Original Document</label>
+                        <input
+                            type="file"
+                            name="original"
                             accept=".docx"
                             required
                         />
                     </div>
-                    
+
                     <div class="file-input-group">
-                        <label>Human-Redlined Version:</label>
-                        <input 
-                            type="file" 
-                            name="redlined" 
+                        <label>Human-Redlined Version</label>
+                        <input
+                            type="file"
+                            name="redlined"
                             accept=".docx"
                             required
                         />
                     </div>
-                    
+
                     <button type="submit" class="btn">Upload Pair</button>
                 </form>
             </div>
         </div>
 
-        <!-- Run Training -->
+        <!-- Training Note -->
         <div class="section">
-            <h2>🚀 Run Training</h2>
-            <p style="color: #666; margin-bottom: 20px;">
-                Process all uploaded pairs to generate new rules and optimize the AI prompt
-            </p>
-            
-            <div class="training-controls">
-                <label style="color: #555; font-weight: 600;">
-                    Minimum Occurrences:
-                </label>
-                <input 
-                    type="number" 
-                    id="minOccurrences" 
-                    value="2" 
-                    min="1" 
-                    max="10"
-                    style="width: 80px;"
-                />
-                <button id="runTrainingBtn" class="btn">Start Training</button>
-            </div>
-
+            <h2>Training</h2>
             <div class="alert alert-info">
-                <strong>💡 Tip:</strong> Higher minimum occurrences (3-5) creates more confident but fewer rules. 
-                Lower values (1-2) learn from every example.
-            </div>
-
-            <div id="trainingLoading" class="loading">
-                <div class="spinner"></div>
-                <p style="margin-top: 15px; color: #666;">Training in progress... This may take a few minutes.</p>
+                <strong>Note:</strong> The automated training pipeline has been deprecated.
+                Training data is collected from uploaded pairs for future use.
             </div>
         </div>
 
         <!-- Training Sessions -->
         <div class="section">
-            <h2>📊 Training Sessions</h2>
-            
+            <h2>Training Sessions</h2>
+
             <% if (sessions.length === 0) { %>
                 <div class="empty-state">
-                    <div class="empty-state-icon">📚</div>
+                    <div class="empty-state-icon">&#128218;</div>
                     <h3>No Training Sessions Yet</h3>
-                    <p style="margin-top: 10px;">
-                        Upload document pairs and run training to see results here
-                    </p>
+                    <p>Upload document pairs and run training to see results here</p>
                 </div>
             <% } else { %>
                 <div class="sessions-grid">
                     <% sessions.forEach(session => { %>
                         <div class="session-card">
                             <h3>Session <%= session.session_id %></h3>
-                            
+
                             <div class="session-stats">
                                 <div class="stat">
                                     <div class="stat-value"><%= session.pairs_processed %></div>
@@ -402,7 +464,7 @@
                                 </div>
                                 <div class="stat">
                                     <div class="stat-value">
-                                        <%= session.corrections_found > 0 ? 
+                                        <%= session.corrections_found > 0 ?
                                             Math.round((session.rules_generated / session.corrections_found) * 100) : 0 %>%
                                     </div>
                                     <div class="stat-label">Efficiency</div>
@@ -410,17 +472,17 @@
                             </div>
 
                             <div class="session-actions">
-                                <button 
-                                    class="btn btn-secondary" 
+                                <button
+                                    class="btn btn-secondary"
                                     onclick="downloadRules('<%= session.session_id %>')"
                                 >
-                                    📥 Rules
+                                    Download Rules
                                 </button>
-                                <button 
-                                    class="btn btn-secondary" 
+                                <button
+                                    class="btn btn-secondary"
                                     onclick="downloadPrompt('<%= session.session_id %>')"
                                 >
-                                    📝 Prompt
+                                    Download Prompt
                                 </button>
                             </div>
                         </div>
@@ -430,34 +492,36 @@
         </div>
     </div>
 
+    <div class="footer">
+        <p>&copy; <%= new Date().getFullYear() %> Richard Sandoval Hospitality</p>
+    </div>
+
     <script>
-        // Alert helper
         function showAlert(message, type = 'info') {
             const alertContainer = document.getElementById('alertContainer');
             const alertDiv = document.createElement('div');
             alertDiv.className = `alert alert-${type}`;
-            alertDiv.innerHTML = `<strong>${type === 'error' ? '❌' : type === 'success' ? '✓' : 'ℹ️'}</strong> ${message}`;
+            alertDiv.innerHTML = `${message}`;
             alertContainer.appendChild(alertDiv);
-            
+
             setTimeout(() => {
                 alertDiv.remove();
             }, 5000);
         }
 
-        // Upload pair form
         document.getElementById('uploadPairForm').addEventListener('submit', async (e) => {
             e.preventDefault();
-            
+
             const formData = new FormData(e.target);
-            
+
             try {
                 const response = await fetch('/training/upload-pair', {
                     method: 'POST',
                     body: formData
                 });
-                
+
                 const result = await response.json();
-                
+
                 if (result.success) {
                     showAlert(`Training pair "${result.pairName}" uploaded successfully!`, 'success');
                     e.target.reset();
@@ -469,52 +533,13 @@
             }
         });
 
-        // Run training
-        document.getElementById('runTrainingBtn').addEventListener('click', async () => {
-            const minOccurrences = document.getElementById('minOccurrences').value;
-            const loading = document.getElementById('trainingLoading');
-            const btn = document.getElementById('runTrainingBtn');
-            
-            btn.disabled = true;
-            loading.classList.add('active');
-            
-            try {
-                const response = await fetch('/training/run', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ minOccurrences: parseInt(minOccurrences) })
-                });
-                
-                const result = await response.json();
-                
-                if (result.success) {
-                    showAlert('Training completed successfully! Refresh to see results.', 'success');
-                    
-                    // Refresh page after 2 seconds
-                    setTimeout(() => {
-                        window.location.reload();
-                    }, 2000);
-                } else {
-                    showAlert(result.error || 'Training failed', 'error');
-                }
-            } catch (error) {
-                showAlert('Error running training: ' + error.message, 'error');
-            } finally {
-                btn.disabled = false;
-                loading.classList.remove('active');
-            }
-        });
-
-        // Download rules
         function downloadRules(sessionId) {
             window.location.href = `/training/download-rules/${sessionId}`;
         }
 
-        // Download prompt
         function downloadPrompt(sessionId) {
             window.location.href = `/training/download-prompt/${sessionId}`;
         }
     </script>
 </body>
 </html>
-

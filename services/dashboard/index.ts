@@ -113,109 +113,6 @@ app.get('/download/original/:submissionId', async (req, res) => {
 });
 
 /**
- * Helper function to generate redlined version
- */
-async function generateRedlinedVersion(submissionId: string, submission: any): Promise<string | null> {
-    try {
-        // Determine the input file path
-        let inputPath = submission.ai_draft_path || submission.original_path;
-        
-        if (inputPath.startsWith('../')) {
-            inputPath = path.resolve(__dirname, inputPath);
-        }
-
-        if (!inputPath.endsWith('.docx')) {
-            console.log('Redlining only works with .docx files');
-            return null;
-        }
-
-        // Define output path for redlined version
-        const redlinedPath = path.join(
-            __dirname, '..', '..', '..', 'tmp', 'redlined',
-            `${submissionId}-redlined.docx`
-        );
-        await fs.mkdir(path.dirname(redlinedPath), { recursive: true });
-
-        // Call the Python redliner
-        const pythonScript = path.resolve(__dirname, '..', '..', 'docx-redliner', 'process_menu.py');
-        const venvPython = path.resolve(__dirname, '..', '..', 'docx-redliner', 'venv', 'bin', 'python');
-        
-        let command = `"${venvPython}" "${pythonScript}" "${inputPath}" "${redlinedPath}"`;
-        
-        const venvCheck = await execAsync(`[ -x "${venvPython}" ] && echo OK || echo NO`).catch(() => ({ stdout: 'NO' }));
-        if (venvCheck.stdout.trim() === 'NO') {
-            command = `python3 "${pythonScript}" "${inputPath}" "${redlinedPath}"`;
-        }
-        
-        console.log(`Generating redlined version: ${command}`);
-        await execAsync(command, { timeout: 120000 });
-
-        // Update DB with redlined path
-        await axios.put(`http://localhost:3004/submissions/${submissionId}`, {
-            redlined_path: redlinedPath,
-            redlined_at: new Date().toISOString()
-        });
-
-        return redlinedPath;
-    } catch (error: any) {
-        console.error('Error generating redlined version:', error.message);
-        return null;
-    }
-}
-
-/**
- * Download AI Draft (Redlined Version)
- * The redlined version is automatically generated during AI review.
- * If for some reason it doesn't exist, generate it on-the-fly.
- */
-app.get('/download/draft/:submissionId', async (req, res) => {
-    try {
-        const { submissionId } = req.params;
-        const dbResponse = await axios.get(`http://localhost:3004/submissions/${submissionId}`);
-        const submission = dbResponse.data;
-
-        if (!submission) {
-            return res.status(404).send('Submission not found');
-        }
-
-        // Try to serve redlined version first (should always exist)
-        if (submission.redlined_path) {
-            try {
-                await fs.stat(submission.redlined_path);
-                const baseFilename = path.basename(submission.filename, path.extname(submission.filename));
-                const finalFilename = `REDLINED_${baseFilename}.docx`;
-                console.log(`Downloading redlined version: ${submission.redlined_path}`);
-                return res.download(submission.redlined_path, finalFilename);
-        } catch (err) {
-                console.warn(`Redlined file not found at ${submission.redlined_path}, will try to generate`);
-        }
-        }
-        
-        // Fallback: Generate redlined version if it doesn't exist
-        console.log(`Generating redlined version on-demand for ${submissionId}...`);
-        const redlinedPath = await generateRedlinedVersion(submissionId, submission);
-        
-        if (redlinedPath) {
-        const baseFilename = path.basename(submission.filename, path.extname(submission.filename));
-        const finalFilename = `REDLINED_${baseFilename}.docx`;
-            return res.download(redlinedPath, finalFilename);
-        }
-        
-        // Last resort: serve the draft (which is just a copy of original)
-        if (submission.ai_draft_path) {
-            console.warn(`Serving unredlined draft as fallback`);
-        const baseFilename = path.basename(submission.filename, path.extname(submission.filename));
-            return res.download(submission.ai_draft_path, `DRAFT_${baseFilename}.docx`);
-        }
-        
-        res.status(404).send('No draft available');
-    } catch (error) {
-        console.error('Error downloading draft:', error);
-        res.status(500).send('Error downloading draft');
-    }
-});
-
-/**
  * Quick Approve - AI draft is perfect, no changes needed
  */
 app.post('/approve/:submissionId', async (req, res) => {
@@ -351,119 +248,6 @@ app.get('/api/submission/:submissionId/status', async (req, res) => {
 });
 
 /**
- * Generate Redlined Version - Apply AI corrections with tracked changes
- */
-app.post('/redline/:submissionId', async (req, res) => {
-    try {
-        const { submissionId } = req.params;
-        
-        console.log(`Generating redlined version for submission ${submissionId}`);
-
-        // Get submission details
-        const dbResponse = await axios.get(`http://localhost:3004/submissions/${submissionId}`);
-        const submission = dbResponse.data;
-
-        if (!submission) {
-            return res.status(404).json({ error: 'Submission not found' });
-        }
-
-        // Determine the input file path (use AI draft if available, otherwise original)
-        let inputPath = submission.ai_draft_path || submission.original_path;
-        
-        // Handle relative paths
-        if (inputPath.startsWith('../')) {
-            inputPath = path.resolve(__dirname, inputPath);
-        }
-
-        // Check if file exists and is a .docx
-        if (!inputPath.endsWith('.docx')) {
-            return res.status(400).json({ 
-                error: 'Redlining only works with .docx files' 
-        });
-        }
-
-        // Define output path for redlined version
-        const redlinedPath = path.join(
-            __dirname, '..', '..', '..', 'tmp', 'redlined',
-            `${submissionId}-redlined.docx`
-        );
-        await fs.mkdir(path.dirname(redlinedPath), { recursive: true });
-
-        // Call the Python redliner
-        // __dirname points to services/dashboard/dist when built
-        const pythonScript = path.resolve(__dirname, '..', '..', 'docx-redliner', 'process_menu.py');
-        const venvPython = path.resolve(__dirname, '..', '..', 'docx-redliner', 'venv', 'bin', 'python');
-        const pythonExec = venvPython; // fallback handled below
-        
-        // Fallback: if venv python doesn't exist, use system python3
-        let command = `"${pythonExec}" "${pythonScript}" "${inputPath}" "${redlinedPath}"`;
-        try {
-            // simple existence check by attempting to stat via shell 'test -x'
-            await execAsync(`[ -x "${venvPython}" ] || echo "NO_VENV"`);
-        } catch (_) {
-            // ignore
-        }
-        const venvCheck = await execAsync(`[ -x "${venvPython}" ] && echo OK || echo NO`);
-        if (venvCheck.stdout.trim() === 'NO') {
-            command = `python3 "${pythonScript}" "${inputPath}" "${redlinedPath}"`;
-        }
-        
-        console.log(`Executing: ${command}`);
-        
-        const { stdout, stderr } = await execAsync(command, {
-            env: { ...process.env },
-            timeout: 120000 // 2 minute timeout
-        });
-
-        console.log('Redliner output:', stdout);
-        if (stderr) console.error('Redliner stderr:', stderr);
-
-        // Update DB with redlined path
-        await axios.put(`http://localhost:3004/submissions/${submissionId}`, {
-            redlined_path: redlinedPath,
-            redlined_at: new Date().toISOString()
-        });
-
-        res.json({ 
-            success: true, 
-            message: 'Redlined version generated successfully',
-            download_url: `/download/redlined/${submissionId}`
-        });
-
-    } catch (error: any) {
-        console.error('Error generating redlined version:', error);
-        res.status(500).json({ 
-            error: 'Failed to generate redlined version',
-            details: error.message 
-        });
-    }
-});
-
-/**
- * Download Redlined Version
- */
-app.get('/download/redlined/:submissionId', async (req, res) => {
-    try {
-        const { submissionId } = req.params;
-        const dbResponse = await axios.get(`http://localhost:3004/submissions/${submissionId}`);
-        const submission = dbResponse.data;
-
-        if (!submission || !submission.redlined_path) {
-            return res.status(404).send('Redlined version not found');
-        }
-
-        const baseFilename = path.basename(submission.filename, path.extname(submission.filename));
-        const redlinedFilename = `REDLINED_${baseFilename}.docx`;
-
-        console.log(`Downloading redlined version from: ${submission.redlined_path}`);
-        res.download(submission.redlined_path, redlinedFilename);
-    } catch (error) {
-        console.error('Error downloading redlined version:', error);
-        res.status(500).send('Error downloading redlined file');
-    }
-});
-
-/**
  * Training Dashboard - Manage training data and sessions
  */
 app.get('/training', async (req, res) => {
@@ -546,72 +330,6 @@ app.post('/training/upload-pair', upload.fields([
 });
 
 /**
- * Run Training - Execute training pipeline on accumulated pairs
- */
-app.post('/training/run', async (req, res) => {
-    try {
-        const minOccurrences = req.body.minOccurrences || 2;
-        
-        console.log(`Starting training pipeline with minOccurrences=${minOccurrences}`);
-
-        // Path to training script
-        const pairsDir = path.join(__dirname, '..', '..', '..', 'tmp', 'training', 'pairs');
-        const pythonScript = path.resolve(__dirname, '..', '..', 'docx-redliner', 'training_pipeline.py');
-        const venvPython = path.resolve(__dirname, '..', '..', 'docx-redliner', 'venv', 'bin', 'python');
-        const sopRulesPath = path.resolve(__dirname, '..', '..', '..', 'sop-processor', 'sop_rules.json');
-
-        // Check if pairs directory exists and has files
-        try {
-        const files = await fs.readdir(pairsDir);
-        const pairCount = files.filter(f => f.endsWith('_original.docx')).length;
-            
-        if (pairCount === 0) {
-                return res.status(400).json({ 
-                    error: 'No training pairs found. Upload some pairs first.' 
-                });
-        }
-        } catch (err) {
-            return res.status(400).json({ 
-                error: 'No training pairs directory found. Upload some pairs first.' 
-        });
-        }
-
-        // Build command
-        let command = `"${venvPython}" "${pythonScript}" --directory "${pairsDir}" --min-occurrences ${minOccurrences} --merge-rules "${sopRulesPath}" --optimize-prompt`;
-        
-        // Check if venv python exists
-        const venvCheck = await execAsync(`[ -x "${venvPython}" ] && echo OK || echo NO`).catch(() => ({ stdout: 'NO' }));
-        if (venvCheck.stdout.trim() === 'NO') {
-            command = `python3 "${pythonScript}" --directory "${pairsDir}" --min-occurrences ${minOccurrences} --merge-rules "${sopRulesPath}" --optimize-prompt`;
-        }
-
-        console.log(`Executing: ${command}`);
-
-        // Execute training pipeline
-        const { stdout, stderr } = await execAsync(command, {
-            env: { ...process.env },
-            timeout: 300000 // 5 minute timeout
-        });
-
-        console.log('Training output:', stdout);
-        if (stderr) console.error('Training stderr:', stderr);
-
-        res.json({
-            success: true,
-            message: 'Training completed successfully',
-            output: stdout
-        });
-
-    } catch (error: any) {
-        console.error('Error running training:', error);
-        res.status(500).json({
-            error: 'Failed to run training',
-            details: error.message
-        });
-    }
-});
-
-/**
  * Get Training Session Details
  */
 app.get('/training/session/:sessionId', async (req, res) => {
@@ -667,7 +385,7 @@ app.get('/training/download-prompt/:sessionId', async (req, res) => {
  */
 app.post('/api/form/basic-check', async (req, res) => {
     try {
-        const { menuContent } = req.body;
+        const { menuContent, allergens, menuType } = req.body;
 
         if (!menuContent || !menuContent.trim()) {
             return res.status(400).json({ error: 'Menu content is required' });
@@ -677,11 +395,76 @@ app.post('/api/form/basic-check', async (req, res) => {
         console.log('=== BASIC CHECK REQUEST ===');
         console.log('Menu content length:', menuContent.length);
         console.log('First 200 chars:', menuContent.substring(0, 200));
+        console.log('Menu type:', menuType || 'standard');
+        console.log('Custom allergens:', allergens ? 'Yes' : 'No (using defaults)');
         console.log('===========================');
 
         // Load QA prompt
         const qaPromptPath = path.join(__dirname, '..', '..', '..', 'sop-processor', 'qa_prompt.txt');
-        const qaPrompt = await fs.readFile(qaPromptPath, 'utf-8');
+        let qaPrompt = await fs.readFile(qaPromptPath, 'utf-8');
+
+        // If prix fixe menu type, inject special rules
+        if (menuType === 'prix_fixe') {
+            const prixFixeSection = `
+**PRIX FIXE / PRE-FIX MENU RULES:**
+This is a PRIX FIXE (pre-fix) menu. Apply these special rules:
+
+1. **PRICING STRUCTURE**: Prix fixe menus should have:
+   - A single prix fixe price at the TOP of the menu (format: 00.00PP or just a whole number)
+   - Optional wine/alcohol pairing price listed alongside (e.g., "185 | 85 wine pairing")
+   - Individual dishes do NOT need their own prices - this is CORRECT for prix fixe menus
+   - Do NOT flag missing prices on individual courses/dishes
+
+2. **COURSE NUMBERING**: Prix fixe menus MUST have numbered courses:
+   - Each course should be preceded by its course number (1, 2, 3, etc.)
+   - Numbers can be on their own line above the course name
+   - Example format:
+     1
+     First Course
+     dish name, description
+
+     2
+     Second Course
+     dish name, description
+   - FLAG if course numbers are missing
+
+3. **COURSE STRUCTURE**: Look for proper course progression:
+   - Courses should flow logically (appetizer → main → dessert, or similar)
+   - Each course section should have clear separation
+
+4. **WHAT TO CHECK**:
+   - Prix fixe price present at top (FLAG if missing)
+   - Course numbers present (FLAG if missing)
+   - All other standard rules still apply (spelling, accents, allergens, etc.)
+
+5. **WHAT NOT TO FLAG**:
+   - Missing prices on individual dishes (this is normal for prix fixe)
+   - Individual items without their own pricing
+`;
+            // Insert at the beginning of the rules section
+            qaPrompt = qaPrompt.replace(
+                '## RSH MENU GUIDELINES - COMPREHENSIVE RULES',
+                `## RSH MENU GUIDELINES - COMPREHENSIVE RULES\n${prixFixeSection}`
+            );
+            console.log('Injected prix fixe rules into prompt');
+        }
+
+        // If custom allergens provided, inject them into the prompt
+        if (allergens && allergens.trim()) {
+            const allergenSection = `
+**CUSTOM ALLERGEN KEY FOR THIS MENU:**
+Use the following allergen codes for reviewing this menu:
+${allergens}
+
+Note: Use ONLY these allergen codes when checking allergen compliance. Do not use any other allergen codes not defined above.
+`;
+            // Insert after "### 7. ALLERGENS" section header
+            qaPrompt = qaPrompt.replace(
+                '### 7. ALLERGENS',
+                `### 7. ALLERGENS\n${allergenSection}`
+            );
+            console.log('Injected custom allergens into prompt');
+        }
 
         // Call AI Review service's QA endpoint
         const qaResponse = await axios.post('http://localhost:3002/run-qa-check', {
@@ -727,10 +510,10 @@ app.post('/api/form/basic-check', async (req, res) => {
  */
 app.post('/api/form/submit', async (req, res) => {
     try {
-        const { projectName, property, size, orientation, dateNeeded, submitterEmail, menuContent } = req.body;
+        const { projectName, property, size, orientation, menuType, templateType, dateNeeded, submitterEmail, menuContent } = req.body;
 
         // Validate required fields
-        if (!projectName || !property || !size || !orientation || !dateNeeded || !submitterEmail || !menuContent) {
+        if (!projectName || !property || !size || !orientation || !templateType || !dateNeeded || !submitterEmail || !menuContent) {
             return res.status(400).json({ error: 'All fields are required' });
         }
 
@@ -743,6 +526,8 @@ app.post('/api/form/submit', async (req, res) => {
             property,
             size,
             orientation,
+            menuType: menuType || 'standard',
+            templateType: templateType || 'food',
             dateNeeded,
             menuContent
         });
@@ -755,9 +540,11 @@ app.post('/api/form/submit', async (req, res) => {
             submitter_email: submitterEmail,
             filename: `${projectName}_Menu.docx`,
             original_path: docxPath,
-            status: 'processing',
+            status: 'pending_human_review', // Go directly to human review (no AI redlining for now)
             created_at: new Date().toISOString(),
-            source: 'form' // Mark as form submission
+            source: 'form', // Mark as form submission
+            menu_type: menuType || 'standard', // Track menu type (standard or prix_fixe)
+            template_type: templateType || 'food' // Track template type (food or beverage)
         });
 
         console.log(`✓ Submission created in database: ${submissionId}`);
@@ -1066,7 +853,15 @@ async function generateDocxFromForm(submissionId: string, formData: any): Promis
 
     // Create Python script to generate docx
     const pythonScript = path.resolve(__dirname, '..', '..', 'docx-redliner', 'generate_from_form.py');
-    const templatePath = path.resolve(__dirname, '..', '..', '..', 'samples', 'RSH_DESIGN BRIEF_FOOD_Menu_Template .docx');
+
+    // Select template based on templateType (food or beverage)
+    const templateType = formData.templateType || 'food';
+    const templatePath = templateType === 'beverage'
+        ? path.resolve(__dirname, '..', '..', '..', 'samples', 'RSH Design Brief Beverage Template.docx')
+        : path.resolve(__dirname, '..', '..', '..', 'samples', 'RSH_DESIGN BRIEF_FOOD_Menu_Template .docx');
+
+    console.log(`Using ${templateType} template: ${templatePath}`);
+
     const venvPython = path.resolve(__dirname, '..', '..', 'docx-redliner', 'venv', 'bin', 'python');
 
     // Create a temp JSON file with form data
