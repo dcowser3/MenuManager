@@ -1,48 +1,89 @@
 # Menu Manager
 
-Menu Manager is an AI-powered service designed to automate the review process for menu design submissions. It monitors an email inbox for new submissions, validates them against a template, uses AI to review the content, and sends notifications back to the submitter.
+Menu Manager is an AI-powered service designed to automate the review process for menu design submissions. Chefs worldwide submit their menus via a web form, select reviewers, and the system guides the submission through a multi-level approval workflow with AI-assisted corrections.
+
+## Vision
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                           CHEF SUBMISSION                                   │
+│  Chef → Web Form → Select Reviewer(s) → Upload Menu → Notification Sent     │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                    ↓
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         MULTI-LEVEL APPROVAL                                │
+│  Reviewer 1 Dashboard → Download → Review → Upload Corrections → Approve    │
+│         ↓ (if needed)                                                       │
+│  Reviewer 2 Dashboard → Final Review → Approve → ClickUp Task Created       │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                    ↓
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         APPROVED DISHES DATABASE                            │
+│  Extract dishes from approved menus → Store in searchable database          │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+## Features
+
+### Current (Phase 1)
+- AI-powered two-tier review (general QA + detailed corrections)
+- DOCX template validation and redlining
+- Email inbox monitoring for submissions
+- Basic reviewer dashboard
+- Notification system
+
+### Planned (Phase 2)
+- **Web Form Submission** - Chefs upload menus and select reviewers via web form
+- **Multi-Level Approval** - Configurable approval chains with email notifications
+- **ClickUp Integration** - Automatic task creation for reviewers and final handoff
+- **Approved Dishes Database** - Searchable database of all approved dishes
 
 ## Project Architecture
 
-This project is structured as a **monorepo** using npm workspaces, containing several independent microservices. This architecture was chosen to separate concerns, allowing each service to be developed, deployed, and scaled independently.
+This project is a **monorepo** using npm workspaces with independent microservices:
 
-### The Review Workflow
-The service operates on an intelligent, multi-tier review process that combines AI analysis with essential human oversight to ensure the highest quality feedback.
+```
+services/
+├── ai-review/       # Two-tier AI review (QA + corrections)
+├── dashboard/       # Web interface for reviewers
+├── db/              # Database service
+├── differ/          # AI vs human comparison for training
+├── docx-redliner/   # DOCX track changes
+├── inbound-email/   # Email monitoring (Microsoft Graph)
+├── notifier/        # Email notifications
+└── parser/          # DOCX validation and extraction
+```
 
-1.  **Template Validation**: The `parser` service first validates that the submission is a `.docx` file and conforms to the required template structure (e.g., correct headings). If it fails, the process stops, and the user is notified before any AI analysis is performed.
+### Planned Services
+```
+services/
+├── submission-form/      # Public chef submission form
+├── workflow-engine/      # Multi-level approval orchestration
+├── clickup-integration/  # ClickUp API integration
+└── approved-dishes/      # Dish extraction & database
+```
 
-2.  **Tier 1 AI Review (General QA)**: If the template is valid, the `ai-review` service performs a high-level check using a general prompt defined in the company SOP. It looks for common errors in spelling, grammar, clarity, and consistency.
+## The Review Workflow
 
-3.  **Decision Point**: The system analyzes the output of the Tier 1 review. If a significant number of high-level issues are found, the submission is considered not yet ready for detailed correction. The `notifier` service sends an email to the user with only this high-level feedback, asking them to resubmit a corrected version.
-
-4.  **Tier 2 AI Review (Draft Generation)**: If the submission passes the Tier 1 check, it proceeds to an intensive review. A second AI prompt instructs the model to correct the entire document based on the specific, structured rules in `sop_rules.json`. This process generates a draft version of the red-lined `.docx` document.
-
-5.  **Human-in-the-Loop (HITL) Approval**: This is a critical quality control step.
-    *   **Internal Notification**: Instead of being sent automatically to the chef, the AI-generated draft is held, and an internal notification is sent to a designated company reviewer.
-    *   **Review Dashboard**: The reviewer is directed to a dashboard where they can download both the original submission and the AI's red-lined draft.
-    *   **Final Edits**: The reviewer makes any final corrections or additions to the AI's work and uploads the final, human-approved version back to the system.
-
-6.  **Learning & Improvement**: After the human reviewer submits the final version, the system performs a comparison between the AI's draft and the human-approved document. The differences are logged to create a valuable dataset that will be used to fine-tune and improve the AI model over time, reducing the need for future corrections.
-
-7.  **Final Notification to Chef**: Once the final version is uploaded and approved by the human reviewer, the `notifier` service sends the notification email to the original chef, attaching the fully-vetted and approved red-lined `.docx` document.
-
-### Services
-
-The monorepo contains the following services located in the `services/` directory:
-
--   **`inbound-email`**: Monitors a Microsoft Outlook mailbox. When a valid email arrives, it downloads the `.docx` attachment and forwards it to the `parser` service.
--   **`parser`**: Validates the file type and template structure. If successful, it extracts the text and passes it to the `ai-review` service.
--   **`ai-review`**: Orchestrates the two-tier AI review. It runs a general QA check, and if the submission is high quality, proceeds to generate a red-lined draft for human review.
--   **`notifier`**: Handles all email communications. It sends Tier 1 feedback to chefs, internal notifications to reviewers, and the final, human-approved document back to the original chef.
--   **`db`**: Stores submission data, review status, and paths to the original, AI-drafted, and final approved documents.
--   **`dashboard`**: A web interface for internal reviewers to see pending reviews, download documents, and upload the final approved versions. Access at http://localhost:3005
--   **`differ`**: A service responsible for comparing the AI draft with the final human-approved version and logging the differences for future model training.
-
-## SOP Processing
-
-A separate directory, `sop-processor`, contains Python scripts and data files for converting the human-readable SOP document into machine-readable formats (`sop_rules.json`, `qa_prompt.txt`). See the `README.md` within that directory for more details.
+1. **Submission** - Chef uploads menu via web form, selects reviewer(s)
+2. **Template Validation** - System validates `.docx` structure
+3. **Tier 1 AI Review** - High-level QA check (spelling, grammar, clarity)
+4. **Decision Point** - If issues found, chef is notified to resubmit
+5. **Tier 2 AI Review** - Detailed corrections based on SOP rules
+6. **Human Review** - Reviewer downloads, reviews, uploads corrections
+7. **Multi-Level Approval** - Additional reviewers if required
+8. **ClickUp Integration** - Final approval creates task in ClickUp
+9. **Dishes Database** - Approved dishes extracted and stored
 
 ## Getting Started
+
+### Prerequisites
+
+- Node.js v18+
+- npm v7+ (for workspace support)
+- Microsoft Azure credentials (Graph API)
+- SMTP server credentials
+- OpenAI API key
 
 ### Quick Start
 
@@ -57,82 +98,93 @@ A separate directory, `sop-processor`, contains Python scripts and data files fo
    # Edit .env with your credentials
    ```
 
-3. **Follow the detailed setup guides:**
-   - **[GET-STARTED-NOW.md](./GET-STARTED-NOW.md)** - Step-by-step setup instructions
-   - **[DASHBOARD-GUIDE.md](./DASHBOARD-GUIDE.md)** - Dashboard & human review workflow
-   - **[WORKFLOW-GUIDE.md](./WORKFLOW-GUIDE.md)** - Complete email processing workflow
-   - **[BEVERAGE-SUPPORT.md](./BEVERAGE-SUPPORT.md)** - Food & beverage template support
-   - **[QUICK-START.md](./QUICK-START.md)** - Fast reference guide
+3. **Build all services:**
+   ```bash
+   npm run build --workspaces
+   ```
 
-### Prerequisites
-
--   Node.js (v18 or higher recommended)
--   npm (v7 or higher for workspace support)
--   Access to:
-    -   Microsoft Azure for Graph API credentials
-    -   An SMTP server for sending emails
-    -   An OpenAI API key
-    -   ngrok (for local testing)
-
+4. **Start services:**
+   ```bash
+   ./start-services.sh
+   ```
 
 ### Environment Variables
 
-To run this project, you will need to create a `.env` file in the root directory and add the following environment variables:
+Create a `.env` file with:
 
 ```
-GRAPH_CLIENT_ID=...
-GRAPH_CLIENT_SECRET=...
-GRAPH_TENANT_ID=...
-GRAPH_MAILBOX_ADDRESS=designapproval@richardsandoval.com
-APPROVED_SENDER_DOMAINS=example.com,anotherexample.com
-SMTP_HOST=...
-SMTP_USER=...
-SMTP_PASS=...
-STORAGE_BUCKET=...
-DATABASE_URL=...
-OPENAI_API_KEY=...
-SOP_DOC_PATH=samples/sop.txt
+# Microsoft Graph API (email monitoring)
+GRAPH_CLIENT_ID=
+GRAPH_CLIENT_SECRET=
+GRAPH_TENANT_ID=
+GRAPH_MAILBOX_ADDRESS=
+
+# Email sending
+SMTP_HOST=
+SMTP_USER=
+SMTP_PASS=
+
+# AI Review
+OPENAI_API_KEY=
+
+# Database (future)
+DATABASE_URL=
 ```
 
-### Building the Project
+## Running Services
 
-To compile the TypeScript code for all services, run the following command from the root directory:
+Start individual services:
+
 ```bash
-npm run build --workspaces
+npm start --workspace=@menumanager/dashboard      # Dashboard at http://localhost:3005
+npm start --workspace=@menumanager/inbound-email  # Email monitoring
+npm start --workspace=@menumanager/parser         # Template validation
+npm start --workspace=@menumanager/ai-review      # AI review
+npm start --workspace=@menumanager/notifier       # Notifications
+npm start --workspace=@menumanager/db             # Database
 ```
 
-### Running the Services
+Or use the helper scripts:
+```bash
+./start-services.sh   # Start all services
+./stop-services.sh    # Stop all services
+./verify-setup.sh     # Verify configuration
+```
 
-Each service can be started individually from the root directory.
+## Implementation Roadmap
 
--   **Start the inbound-email service:**
-    ```bash
-    npm start --workspace=@menumanager/inbound-email
-    ```
+| Phase | Task | Status |
+|-------|------|--------|
+| 1 | Set up PostgreSQL database schema (Supabase) | Pending |
+| 2 | Build chef submission form with reviewer selection | Pending |
+| 3 | Enhance reviewer dashboard (download/upload/approve) | Pending |
+| 4 | Implement multi-level approval workflow (Inngest) | Pending |
+| 5 | Add email notifications at each step (Resend) | Pending |
+| 6 | Build approved dishes extraction & database | Pending |
+| 7 | ClickUp integration for task creation | Pending |
+| 8 | Deploy to production (Railway) | Pending |
+| 9 | Add authentication & roles (Clerk) | Pending |
 
--   **Start the parser service:**
-    ```bash
-    npm start --workspace=@menumanager/parser
-    ```
+## Estimated Infrastructure Costs
 
--   **Start the ai-review service:**
-    ```bash
-    npm start --workspace=@menumanager/ai-review
-    ```
+**Starter Tier** (< 100 submissions/month): **~$5/month**
 
--   **Start the notifier service:**
-    ```bash
-    npm start --workspace=@menumanager/notifier
-    ```
+| Service | Provider | Cost |
+|---------|----------|------|
+| Hosting | Railway | $5/mo |
+| Database | Supabase | Free |
+| Auth | Clerk | Free |
+| Email | Resend | Free |
+| Workflows | Inngest | Free |
+| ClickUp | API | Free (existing subscription) |
 
--   **Start the db service:**
-    ```bash
-    npm start --workspace=@menumanager/db
-    ```
+## Documentation
 
-### Running Tests
+- `CLAUDE.md` - AI assistant context and project details
+- `archive/` - Historical documentation from Phase 1
 
-To run all the unit tests for the project, use the following command from the root directory:
+## Running Tests
+
 ```bash
 npm test
 ```
