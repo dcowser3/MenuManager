@@ -43,7 +43,44 @@ const fs_1 = require("fs");
 const path = __importStar(require("path"));
 const child_process_1 = require("child_process");
 const util_1 = require("util");
+// Supabase client for dish extraction (optional - gracefully handles if not configured)
+const supabase_client_1 = require("@menumanager/supabase-client");
 const execAsync = (0, util_1.promisify)(child_process_1.exec);
+/**
+ * Extract dishes from approved menu and store in database
+ * Fails silently if Supabase is not configured
+ */
+async function extractDishesAfterApproval(submissionId, menuContent, property, finalPath) {
+    if (!(0, supabase_client_1.isSupabaseConfigured)()) {
+        console.log('Supabase not configured - skipping dish extraction');
+        return;
+    }
+    try {
+        // If we don't have menu content, try to extract from the final document
+        let content = menuContent;
+        if (!content && finalPath) {
+            try {
+                const mammoth = require('mammoth');
+                const result = await mammoth.extractRawText({ path: finalPath });
+                content = result.value;
+            }
+            catch (err) {
+                console.error('Failed to extract text from final document:', err);
+                return;
+            }
+        }
+        if (!content) {
+            console.log('No menu content available for dish extraction');
+            return;
+        }
+        const result = await (0, supabase_client_1.extractAndStoreDishes)(content, property, submissionId);
+        console.log(`Dish extraction complete: ${result.added} added, ${result.skipped} skipped (duplicates)`);
+    }
+    catch (error) {
+        console.error('Error extracting dishes:', error);
+        // Don't throw - dish extraction is not critical to approval
+    }
+}
 const app = (0, express_1.default)();
 const port = 3005;
 // Configure multer for file uploads
@@ -174,6 +211,8 @@ app.post('/approve/:submissionId', async (req, res) => {
                 final_path: finalPath
             }
         });
+        // Extract dishes from approved menu (async, non-blocking)
+        extractDishesAfterApproval(submissionId, submission.menu_content, submission.property || 'Unknown', finalPath).catch(err => console.error('Background dish extraction failed:', err));
         res.json({
             success: true,
             message: 'Submission approved and sent to chef'
@@ -226,6 +265,8 @@ app.post('/upload/:submissionId', upload.single('finalDocument'), async (req, re
                 final_path: finalPath
             }
         });
+        // Extract dishes from approved menu (async, non-blocking)
+        extractDishesAfterApproval(submissionId, submission.menu_content, submission.property || 'Unknown', finalPath).catch(err => console.error('Background dish extraction failed:', err));
         res.json({
             success: true,
             message: 'Corrected version uploaded and sent to chef'
@@ -475,9 +516,9 @@ Note: Use ONLY these allergen codes when checking allergen compliance. Do not us
  */
 app.post('/api/form/submit', async (req, res) => {
     try {
-        const { projectName, property, size, orientation, menuType, dateNeeded, submitterEmail, menuContent } = req.body;
+        const { projectName, property, size, orientation, menuType, templateType, dateNeeded, submitterEmail, menuContent } = req.body;
         // Validate required fields
-        if (!projectName || !property || !size || !orientation || !dateNeeded || !submitterEmail || !menuContent) {
+        if (!projectName || !property || !size || !orientation || !templateType || !dateNeeded || !submitterEmail || !menuContent) {
             return res.status(400).json({ error: 'All fields are required' });
         }
         // Generate unique submission ID
@@ -489,6 +530,7 @@ app.post('/api/form/submit', async (req, res) => {
             size,
             orientation,
             menuType: menuType || 'standard',
+            templateType: templateType || 'food',
             dateNeeded,
             menuContent
         });
@@ -499,10 +541,11 @@ app.post('/api/form/submit', async (req, res) => {
             submitter_email: submitterEmail,
             filename: `${projectName}_Menu.docx`,
             original_path: docxPath,
-            status: 'processing',
+            status: 'pending_human_review', // Go directly to human review (no AI redlining for now)
             created_at: new Date().toISOString(),
             source: 'form', // Mark as form submission
-            menu_type: menuType || 'standard' // Track menu type (standard or prix_fixe)
+            menu_type: menuType || 'standard', // Track menu type (standard or prix_fixe)
+            template_type: templateType || 'food' // Track template type (food or beverage)
         });
         console.log(`✓ Submission created in database: ${submissionId}`);
         // Trigger AI review process (same as email workflow)
@@ -764,7 +807,12 @@ async function generateDocxFromForm(submissionId, formData) {
     const outputPath = path.join(UPLOADS_DIR, `${submissionId}.docx`);
     // Create Python script to generate docx
     const pythonScript = path.resolve(__dirname, '..', '..', 'docx-redliner', 'generate_from_form.py');
-    const templatePath = path.resolve(__dirname, '..', '..', '..', 'samples', 'RSH_DESIGN BRIEF_FOOD_Menu_Template .docx');
+    // Select template based on templateType (food or beverage)
+    const templateType = formData.templateType || 'food';
+    const templatePath = templateType === 'beverage'
+        ? path.resolve(__dirname, '..', '..', '..', 'samples', 'RSH Design Brief Beverage Template.docx')
+        : path.resolve(__dirname, '..', '..', '..', 'samples', 'RSH_DESIGN BRIEF_FOOD_Menu_Template .docx');
+    console.log(`Using ${templateType} template: ${templatePath}`);
     const venvPython = path.resolve(__dirname, '..', '..', 'docx-redliner', 'venv', 'bin', 'python');
     // Create a temp JSON file with form data
     const formDataPath = path.join(UPLOADS_DIR, `${submissionId}_formdata.json`);

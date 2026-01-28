@@ -8,18 +8,18 @@ Menu Manager is an AI-powered service for automating the review process for menu
 
 ## Current Status
 
-The project is transitioning from an **email-based submission system** to a **web-based form submission system** with enhanced workflow capabilities.
+The project uses a **web-based form submission system** with AI-assisted review and multi-level approval workflow.
 
 ### What Exists (Phase 1 - Complete)
 - Monorepo architecture with microservices in `services/`
-- Email inbox monitoring via Microsoft Graph API
+- Web form for chef submissions
 - AI-powered two-tier review (general QA + detailed corrections)
-- Basic dashboard for reviewers
+- Reviewer dashboard
 - DOCX parsing and redlining capabilities
 - Notification system via SMTP
+- Supabase database (PostgreSQL)
 
 ### What We're Building (Phase 2 - Planned)
-- Web form for chef submissions (replacing email)
 - Multi-level approval workflow with reviewer selection
 - ClickUp integration for task management
 - Approved dishes database (running list of all approved dishes)
@@ -30,14 +30,14 @@ The project is transitioning from an **email-based submission system** to a **we
 
 ```
 services/
-├── ai-review/       # Two-tier AI review (QA + corrections)
-├── dashboard/       # Web interface for reviewers (Express + EJS)
-├── db/              # Database service
-├── differ/          # Compares AI draft vs human-approved for training
-├── docx-redliner/   # DOCX redlining/track changes
-├── inbound-email/   # Email monitoring (Microsoft Graph)
-├── notifier/        # Email notifications (SMTP)
-└── parser/          # DOCX validation and text extraction
+├── ai-review/        # Two-tier AI review (QA + corrections)
+├── dashboard/        # Web interface + submission form (Express + EJS)
+├── db/               # Database service (JSON-based, migrating to Supabase)
+├── differ/           # Compares AI draft vs human-approved for training
+├── docx-redliner/    # DOCX redlining/track changes
+├── notifier/         # Email notifications (SMTP)
+├── parser/           # DOCX validation and text extraction
+└── supabase-client/  # Shared Supabase database client
 ```
 
 ## Tech Stack
@@ -46,7 +46,8 @@ services/
 - **Language:** TypeScript
 - **Backend:** Express.js microservices
 - **Templating:** EJS (dashboard)
-- **Email:** Microsoft Graph API (inbound), SMTP (outbound)
+- **Database:** Supabase (PostgreSQL)
+- **Email:** SMTP (outbound notifications)
 - **AI:** OpenAI API
 - **File Processing:** Mammoth (DOCX parsing)
 
@@ -115,21 +116,19 @@ Approved Dishes Database:
 
 Required in `.env`:
 ```
-GRAPH_CLIENT_ID=        # Microsoft Azure app
-GRAPH_CLIENT_SECRET=
-GRAPH_TENANT_ID=
-GRAPH_MAILBOX_ADDRESS=
 SMTP_HOST=              # Email sending
 SMTP_USER=
 SMTP_PASS=
 OPENAI_API_KEY=         # AI review
-DATABASE_URL=           # PostgreSQL (future)
+SUPABASE_URL=           # Supabase project URL
+SUPABASE_ANON_KEY=      # Supabase anon key
+SUPABASE_SERVICE_KEY=   # Supabase service role key
 ```
 
 ## Notes for Development
 
-- Old documentation archived in `archive/` directory
-- The email-based flow still works but web form is the future direction
+- Old documentation and legacy services archived in `archive/` directory
+- Web form is the only submission path (email-based flow is archived)
 - ClickUp integration uses their REST API (free with existing subscription)
 - Supabase provides both database and file storage
 - Inngest recommended for workflow orchestration (handles retries, timeouts)
