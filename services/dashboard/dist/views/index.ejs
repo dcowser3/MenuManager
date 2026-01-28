@@ -168,23 +168,99 @@
 
         .btn {
             display: inline-block;
-            padding: 1rem 2rem;
+            padding: 0.75rem 1.25rem;
             text-decoration: none;
             font-weight: 500;
             transition: all 0.3s ease;
             border: 2px solid var(--color-primary);
             cursor: pointer;
-            font-size: 0.7rem;
+            font-size: 0.65rem;
             text-transform: uppercase;
-            letter-spacing: 0.2em;
+            letter-spacing: 0.15em;
             font-family: var(--font-body);
             background: var(--color-primary);
             color: var(--color-background);
         }
 
-        .btn:hover {
+        .btn:hover:not(:disabled) {
             background: transparent;
             color: var(--color-primary);
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .btn-success {
+            background: var(--color-success);
+            border-color: var(--color-success);
+        }
+
+        .btn-success:hover:not(:disabled) {
+            background: transparent;
+            color: var(--color-success);
+        }
+
+        .btn-secondary {
+            background: transparent;
+            color: var(--color-primary);
+        }
+
+        .btn-secondary:hover:not(:disabled) {
+            background: var(--color-primary);
+            color: var(--color-background);
+        }
+
+        .btn-group {
+            display: flex;
+            gap: 0.75rem;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .upload-input {
+            display: none;
+        }
+
+        .spinner-small {
+            border: 2px solid var(--color-border);
+            border-top: 2px solid var(--color-secondary);
+            border-radius: 50%;
+            width: 14px;
+            height: 14px;
+            animation: spin 1s linear infinite;
+            display: inline-block;
+            margin-right: 0.5rem;
+            vertical-align: middle;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .alert {
+            padding: 1rem 1.5rem;
+            margin-bottom: 1.5rem;
+            border: 1px solid;
+            font-size: 0.85rem;
+        }
+
+        .alert-success {
+            background: rgba(74, 124, 89, 0.08);
+            color: var(--color-success);
+            border-color: rgba(74, 124, 89, 0.2);
+        }
+
+        .alert-error {
+            background: rgba(139, 58, 58, 0.08);
+            color: var(--color-error);
+            border-color: rgba(139, 58, 58, 0.2);
+        }
+
+        .hidden {
+            display: none !important;
         }
 
         .empty-state {
@@ -244,10 +320,12 @@
     <div class="container">
         <h2 class="section-title">Pending Reviews</h2>
 
+        <div id="alertContainer"></div>
+
         <% if (reviews && reviews.length > 0) { %>
             <div class="review-list">
                 <% reviews.forEach(function(review) { %>
-                    <div class="review-item">
+                    <div class="review-item" id="review-<%= review.id %>">
                         <div class="review-info">
                             <h3><%= review.filename %></h3>
                             <div class="review-meta">
@@ -256,8 +334,17 @@
                                 <span class="badge">Pending Review</span>
                             </div>
                         </div>
-                        <div>
-                            <a href="/review/<%= review.id %>" class="btn">Review Now</a>
+                        <div class="btn-group">
+                            <a href="/download/original/<%= review.id %>" class="btn btn-secondary" title="Download the generated Word document">
+                                Download
+                            </a>
+                            <label class="btn btn-secondary" title="Upload your corrected version">
+                                Upload Corrected
+                                <input type="file" class="upload-input" accept=".docx" onchange="uploadCorrected('<%= review.id %>', this)">
+                            </label>
+                            <button class="btn btn-success" onclick="markPerfect('<%= review.id %>')" title="Document is already perfect, no changes needed">
+                                Already Perfect
+                            </button>
                         </div>
                     </div>
                 <% }); %>
@@ -272,6 +359,128 @@
             </div>
         <% } %>
     </div>
+
+    <script>
+        function showAlert(message, type = 'success') {
+            const container = document.getElementById('alertContainer');
+            const alert = document.createElement('div');
+            alert.className = `alert alert-${type}`;
+            alert.textContent = message;
+            container.appendChild(alert);
+
+            setTimeout(() => {
+                alert.remove();
+            }, 5000);
+        }
+
+        async function markPerfect(submissionId) {
+            const reviewItem = document.getElementById(`review-${submissionId}`);
+            const btn = reviewItem.querySelector('.btn-success');
+            const originalText = btn.textContent;
+
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner-small"></span>Processing...';
+
+            try {
+                const response = await fetch(`/approve/${submissionId}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || 'Failed to approve');
+                }
+
+                showAlert('Menu approved successfully!', 'success');
+
+                // Remove the item from the list with animation
+                reviewItem.style.transition = 'opacity 0.3s, transform 0.3s';
+                reviewItem.style.opacity = '0';
+                reviewItem.style.transform = 'translateX(20px)';
+
+                setTimeout(() => {
+                    reviewItem.remove();
+
+                    // Check if list is now empty
+                    const remainingItems = document.querySelectorAll('.review-item');
+                    if (remainingItems.length === 0) {
+                        location.reload();
+                    }
+                }, 300);
+
+            } catch (error) {
+                console.error('Error:', error);
+                showAlert('Error: ' + error.message, 'error');
+                btn.disabled = false;
+                btn.textContent = originalText;
+            }
+        }
+
+        async function uploadCorrected(submissionId, input) {
+            if (!input.files || !input.files[0]) return;
+
+            const file = input.files[0];
+            const reviewItem = document.getElementById(`review-${submissionId}`);
+            const label = input.parentElement;
+            const originalText = label.textContent.trim();
+
+            // Disable all buttons in this row
+            const buttons = reviewItem.querySelectorAll('.btn, label.btn');
+            buttons.forEach(btn => {
+                btn.style.pointerEvents = 'none';
+                btn.style.opacity = '0.5';
+            });
+
+            label.innerHTML = '<span class="spinner-small"></span>Uploading...<input type="file" class="upload-input" accept=".docx">';
+
+            const formData = new FormData();
+            formData.append('finalDocument', file);
+
+            try {
+                const response = await fetch(`/upload/${submissionId}`, {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || 'Failed to upload');
+                }
+
+                showAlert('Corrected version uploaded successfully!', 'success');
+
+                // Remove the item from the list with animation
+                reviewItem.style.transition = 'opacity 0.3s, transform 0.3s';
+                reviewItem.style.opacity = '0';
+                reviewItem.style.transform = 'translateX(20px)';
+
+                setTimeout(() => {
+                    reviewItem.remove();
+
+                    // Check if list is now empty
+                    const remainingItems = document.querySelectorAll('.review-item');
+                    if (remainingItems.length === 0) {
+                        location.reload();
+                    }
+                }, 300);
+
+            } catch (error) {
+                console.error('Error:', error);
+                showAlert('Error: ' + error.message, 'error');
+
+                // Re-enable buttons
+                buttons.forEach(btn => {
+                    btn.style.pointerEvents = '';
+                    btn.style.opacity = '';
+                });
+
+                label.innerHTML = `Upload Corrected<input type="file" class="upload-input" accept=".docx" onchange="uploadCorrected('${submissionId}', this)">`;
+            }
+        }
+    </script>
 
     <div class="footer">
         <p>&copy; <%= new Date().getFullYear() %> Richard Sandoval Hospitality</p>

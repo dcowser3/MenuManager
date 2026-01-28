@@ -26,10 +26,10 @@ Menu Manager is an AI-powered service designed to automate the review process fo
 ## Features
 
 ### Current (Phase 1)
+- Web form for chef submissions
 - AI-powered two-tier review (general QA + detailed corrections)
 - DOCX template validation and redlining
-- Email inbox monitoring for submissions
-- Basic reviewer dashboard
+- Reviewer dashboard
 - Notification system
 
 ### Planned (Phase 2)
@@ -44,14 +44,14 @@ This project is a **monorepo** using npm workspaces with independent microservic
 
 ```
 services/
-├── ai-review/       # Two-tier AI review (QA + corrections)
-├── dashboard/       # Web interface for reviewers
-├── db/              # Database service
-├── differ/          # AI vs human comparison for training
-├── docx-redliner/   # DOCX track changes
-├── inbound-email/   # Email monitoring (Microsoft Graph)
-├── notifier/        # Email notifications
-└── parser/          # DOCX validation and extraction
+├── ai-review/        # Two-tier AI review (QA + corrections)
+├── dashboard/        # Web interface for reviewers + submission form
+├── db/               # Database service
+├── differ/           # AI vs human comparison for training
+├── docx-redliner/    # DOCX track changes
+├── notifier/         # Email notifications (SMTP)
+├── parser/           # DOCX validation and extraction
+└── supabase-client/  # Shared Supabase database client
 ```
 
 ### Planned Services
@@ -81,9 +81,9 @@ services/
 
 - Node.js v18+
 - npm v7+ (for workspace support)
-- Microsoft Azure credentials (Graph API)
 - SMTP server credentials
 - OpenAI API key
+- Supabase project (free tier)
 
 ### Quick Start
 
@@ -113,13 +113,7 @@ services/
 Create a `.env` file with:
 
 ```
-# Microsoft Graph API (email monitoring)
-GRAPH_CLIENT_ID=
-GRAPH_CLIENT_SECRET=
-GRAPH_TENANT_ID=
-GRAPH_MAILBOX_ADDRESS=
-
-# Email sending
+# Email sending (SMTP)
 SMTP_HOST=
 SMTP_USER=
 SMTP_PASS=
@@ -127,8 +121,10 @@ SMTP_PASS=
 # AI Review
 OPENAI_API_KEY=
 
-# Database (future)
-DATABASE_URL=
+# Supabase
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_ANON_KEY=your-anon-key
+SUPABASE_SERVICE_KEY=your-service-role-key
 ```
 
 ## Running Services
@@ -136,12 +132,11 @@ DATABASE_URL=
 Start individual services:
 
 ```bash
-npm start --workspace=@menumanager/dashboard      # Dashboard at http://localhost:3005
-npm start --workspace=@menumanager/inbound-email  # Email monitoring
-npm start --workspace=@menumanager/parser         # Template validation
-npm start --workspace=@menumanager/ai-review      # AI review
-npm start --workspace=@menumanager/notifier       # Notifications
-npm start --workspace=@menumanager/db             # Database
+npm start --workspace=@menumanager/dashboard   # Dashboard + Form at http://localhost:3005
+npm start --workspace=@menumanager/parser      # Template validation
+npm start --workspace=@menumanager/ai-review   # AI review
+npm start --workspace=@menumanager/notifier    # Notifications
+npm start --workspace=@menumanager/db          # Database
 ```
 
 Or use the helper scripts:

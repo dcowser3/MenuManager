@@ -823,8 +823,17 @@
                     <div class="form-group">
                         <label for="menuType">Menu Type *</label>
                         <select id="menuType" required>
+                            <option value="">Select menu type</option>
                             <option value="standard">Standard Menu</option>
                             <option value="prix_fixe">Prix Fixe / Pre-Fix</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="templateType">Template Type *</label>
+                        <select id="templateType" required>
+                            <option value="">Select template type</option>
+                            <option value="food">Food Menu</option>
+                            <option value="beverage">Beverage Menu</option>
                         </select>
                     </div>
                     <div class="form-group">
@@ -924,6 +933,10 @@
                         <div class="form-group">
                             <label>Menu Type</label>
                             <input type="text" id="step2MenuType" readonly>
+                        </div>
+                        <div class="form-group">
+                            <label>Template Type</label>
+                            <input type="text" id="step2TemplateType" readonly>
                         </div>
                         <div class="form-group">
                             <label>Date Needed</label>
@@ -1206,11 +1219,12 @@
             const size = document.getElementById('size').value.trim();
             const orientation = document.getElementById('orientation').value;
             const menuType = document.getElementById('menuType').value;
+            const templateType = document.getElementById('templateType').value;
             const dateNeeded = document.getElementById('dateNeeded').value;
             const submitterEmail = document.getElementById('submitterEmail').value.trim();
             const menuContent = quill.getText().trim();
 
-            if (!projectName || !property || !size || !orientation || !menuType || !dateNeeded || !submitterEmail || !menuContent) {
+            if (!projectName || !property || !size || !orientation || !menuType || !templateType || !dateNeeded || !submitterEmail || !menuContent) {
                 showAlert('Please fill in all required fields', 'error');
                 window.scrollTo({ top: 0, behavior: 'smooth' });
                 return false;
@@ -1447,6 +1461,8 @@
             document.getElementById('step2Orientation').value = document.getElementById('orientation').value;
             const menuTypeSelect = document.getElementById('menuType');
             document.getElementById('step2MenuType').value = menuTypeSelect.options[menuTypeSelect.selectedIndex].text;
+            const templateTypeSelect = document.getElementById('templateType');
+            document.getElementById('step2TemplateType').value = templateTypeSelect.options[templateTypeSelect.selectedIndex].text;
             document.getElementById('step2DateNeeded').value = document.getElementById('dateNeeded').value;
             document.getElementById('step2Email').value = document.getElementById('submitterEmail').value;
 
@@ -1559,6 +1575,7 @@
                 size: document.getElementById('size').value.trim(),
                 orientation: document.getElementById('orientation').value,
                 menuType: document.getElementById('menuType').value,
+                templateType: document.getElementById('templateType').value,
                 dateNeeded: document.getElementById('dateNeeded').value,
                 submitterEmail: document.getElementById('submitterEmail').value.trim(),
                 menuContent: menuContentText,

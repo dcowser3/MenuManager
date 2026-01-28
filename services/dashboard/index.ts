@@ -6,7 +6,55 @@ import * as path from 'path';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 
+// Supabase client for dish extraction (optional - gracefully handles if not configured)
+import {
+    isSupabaseConfigured,
+    extractAndStoreDishes
+} from '@menumanager/supabase-client';
+
 const execAsync = promisify(exec);
+
+/**
+ * Extract dishes from approved menu and store in database
+ * Fails silently if Supabase is not configured
+ */
+async function extractDishesAfterApproval(
+    submissionId: string,
+    menuContent: string | undefined,
+    property: string,
+    finalPath: string
+): Promise<void> {
+    if (!isSupabaseConfigured()) {
+        console.log('Supabase not configured - skipping dish extraction');
+        return;
+    }
+
+    try {
+        // If we don't have menu content, try to extract from the final document
+        let content = menuContent;
+        if (!content && finalPath) {
+            try {
+                const mammoth = require('mammoth');
+                const result = await mammoth.extractRawText({ path: finalPath });
+                content = result.value;
+            } catch (err) {
+                console.error('Failed to extract text from final document:', err);
+                return;
+            }
+        }
+
+        if (!content) {
+            console.log('No menu content available for dish extraction');
+            return;
+        }
+
+        const result = await extractAndStoreDishes(content, property, submissionId);
+        console.log(`Dish extraction complete: ${result.added} dishes added`);
+    } catch (error) {
+        console.error('Error extracting dishes:', error);
+        // Don't throw - dish extraction is not critical to approval
+    }
+}
 
 const app = express();
 const port = 3005;
@@ -158,9 +206,17 @@ app.post('/approve/:submissionId', async (req, res) => {
         }
         });
 
-        res.json({ 
-            success: true, 
-            message: 'Submission approved and sent to chef' 
+        // Extract dishes from approved menu (async, non-blocking)
+        extractDishesAfterApproval(
+            submissionId,
+            submission.menu_content,
+            submission.property || 'Unknown',
+            finalPath
+        ).catch(err => console.error('Background dish extraction failed:', err));
+
+        res.json({
+            success: true,
+            message: 'Submission approved and sent to chef'
         });
 
     } catch (error) {
@@ -223,9 +279,17 @@ app.post('/upload/:submissionId', upload.single('finalDocument') as any, async (
         }
         });
 
-        res.json({ 
-            success: true, 
-            message: 'Corrected version uploaded and sent to chef' 
+        // Extract dishes from approved menu (async, non-blocking)
+        extractDishesAfterApproval(
+            submissionId,
+            submission.menu_content,
+            submission.property || 'Unknown',
+            finalPath
+        ).catch(err => console.error('Background dish extraction failed:', err));
+
+        res.json({
+            success: true,
+            message: 'Corrected version uploaded and sent to chef'
         });
 
     } catch (error) {

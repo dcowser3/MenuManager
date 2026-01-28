@@ -18,10 +18,7 @@
     "typescript": "^5.9.2"
   },
   "dependencies": {
-    "@azure/msal-node": "^3.7.4",
-    "@microsoft/microsoft-graph-client": "^3.0.7",
     "dotenv": "^17.2.2",
-    "express": "^5.1.0",
-    "isomorphic-fetch": "^3.0.0"
+    "express": "^5.1.0"
   }
 }
