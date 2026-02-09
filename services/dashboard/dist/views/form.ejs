@@ -142,6 +142,129 @@
             border-color: var(--color-secondary);
         }
 
+        /* Required Approvals Section */
+        .approvals-intro {
+            font-size: 0.85rem;
+            color: var(--color-text-light);
+            margin-bottom: 1.25rem;
+            line-height: 1.5;
+        }
+
+        .approval-group {
+            border: 1px solid var(--color-border-light);
+            padding: 1rem;
+            margin-bottom: 1rem;
+            background: var(--color-background-alt);
+        }
+
+        .approval-group:last-child {
+            margin-bottom: 0;
+        }
+
+        .approval-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+            margin-bottom: 0.75rem;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+        }
+
+        .approval-title {
+            font-family: var(--font-heading);
+            font-size: 1rem;
+            font-weight: 500;
+            color: var(--color-primary);
+        }
+
+        .approval-hint {
+            font-size: 0.7rem;
+            color: var(--color-text-muted);
+            font-style: italic;
+        }
+
+        .approval-fields {
+            display: grid;
+            grid-template-columns: 120px 1fr 1fr;
+            gap: 1rem;
+            align-items: end;
+        }
+
+        .approval-field {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .approval-field label {
+            font-size: 0.65rem;
+            font-weight: 500;
+            color: var(--color-text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.15em;
+            margin-bottom: 0.35rem;
+        }
+
+        .approval-field input,
+        .approval-field select {
+            padding: 0.6rem;
+            border: 1px solid var(--color-border);
+            font-size: 0.85rem;
+            font-family: var(--font-body);
+            transition: border-color 0.2s ease;
+            background: var(--color-background);
+        }
+
+        .approval-field input:focus,
+        .approval-field select:focus {
+            outline: none;
+            border-color: var(--color-secondary);
+        }
+
+        .approval-field select[value="no"] {
+            border-color: var(--color-error);
+        }
+
+        .food-approval,
+        .beverage-approval {
+            transition: opacity 0.2s ease, max-height 0.3s ease;
+        }
+
+        .approval-group.hidden {
+            display: none;
+        }
+
+        .add-approval-btn {
+            background: none;
+            border: 1px dashed var(--color-border);
+            color: var(--color-text-muted);
+            padding: 0.6rem 1rem;
+            font-size: 0.8rem;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            width: 100%;
+            margin-top: 0.5rem;
+        }
+
+        .add-approval-btn:hover {
+            border-color: var(--color-secondary);
+            color: var(--color-secondary);
+        }
+
+        .add-approval-btn.hidden {
+            display: none;
+        }
+
+        @media (max-width: 768px) {
+            .approval-fields {
+                grid-template-columns: 1fr;
+            }
+
+            .approval-header {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+        }
+
         /* Split View */
         .split-container {
             display: grid;
@@ -634,6 +757,116 @@
             border: 1px solid rgba(139, 115, 85, 0.2);
         }
 
+        /* Critical Error Styles */
+        .suggestion-item.critical-error {
+            border-left: 3px solid #c0392b;
+            background: rgba(192, 57, 43, 0.06);
+        }
+
+        .suggestion-item.critical-error .suggestion-type {
+            color: #c0392b;
+        }
+
+        .severity-badge-critical {
+            display: inline-block;
+            padding: 0.2rem 0.5rem;
+            font-size: 0.6rem;
+            font-weight: 600;
+            margin-left: 0.5rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            background: rgba(192, 57, 43, 0.12);
+            color: #c0392b;
+            border: 1px solid rgba(192, 57, 43, 0.3);
+        }
+
+        .critical-override-btn {
+            margin-top: 0.5rem;
+            padding: 0.4rem 0.75rem;
+            font-size: 0.65rem;
+            font-family: var(--font-body);
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            background: transparent;
+            color: #c0392b;
+            border: 1px solid #c0392b;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .critical-override-btn:hover {
+            background: rgba(192, 57, 43, 0.08);
+        }
+
+        .critical-override-btn.overridden {
+            background: rgba(192, 57, 43, 0.05);
+            color: var(--color-text-muted);
+            border-color: var(--color-border);
+        }
+
+        .suggestion-item.critical-error.overridden {
+            opacity: 0.5;
+            border-left-color: var(--color-border);
+            background: var(--color-background-alt);
+        }
+
+        .suggestion-item.critical-error.overridden .suggestion-type,
+        .suggestion-item.critical-error.overridden .suggestion-detail {
+            text-decoration: line-through;
+        }
+
+        .critical-error-banner {
+            display: none;
+            background: rgba(192, 57, 43, 0.08);
+            border: 1px solid rgba(192, 57, 43, 0.3);
+            color: #c0392b;
+            padding: 0.75rem 1rem;
+            text-align: center;
+            font-size: 0.85rem;
+            margin-bottom: 0.75rem;
+        }
+
+        .critical-error-banner.show {
+            display: block;
+        }
+
+        .btn-success.blocked {
+            background: var(--color-text-muted);
+            border-color: var(--color-text-muted);
+            cursor: not-allowed;
+            opacity: 0.6;
+        }
+
+        .btn-success.blocked:hover {
+            background: var(--color-text-muted);
+            color: var(--color-background);
+        }
+
+        /* Re-run AI Check Button */
+        .rerun-btn {
+            display: none;
+            padding: 0.5rem 1rem;
+            background: var(--color-background-alt);
+            border: 1px solid var(--color-border);
+            cursor: pointer;
+            font-size: 0.65rem;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            font-family: var(--font-body);
+            transition: all 0.2s;
+        }
+
+        .rerun-btn:hover {
+            border-color: var(--color-secondary);
+            color: var(--color-secondary);
+        }
+
+        .rerun-btn.show {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
         /* Corrected text highlighting */
         .ql-editor .corrected,
         .auto-corrected {
@@ -847,6 +1080,67 @@
                 </div>
             </div>
 
+            <!-- Required Approval Section -->
+            <div class="card" id="approvalsCard">
+                <h2>Required Approval</h2>
+                <p class="approvals-intro">Confirm this menu has been reviewed and approved before submission.</p>
+
+                <div class="approval-group">
+                    <div class="approval-header">
+                        <span class="approval-title">Approver</span>
+                        <span class="approval-hint" id="approvalHint">e.g., Property GM, Director of F&B, Executive Chef, Chef de Cuisine</span>
+                    </div>
+                    <div class="approval-fields">
+                        <div class="approval-field">
+                            <label>Approved? *</label>
+                            <select id="approval1" required>
+                                <option value="">Select</option>
+                                <option value="yes">Yes</option>
+                                <option value="no">No</option>
+                            </select>
+                        </div>
+                        <div class="approval-field">
+                            <label>Approver Name *</label>
+                            <input type="text" id="approver1Name" required placeholder="First and Last Name">
+                        </div>
+                        <div class="approval-field">
+                            <label>Position *</label>
+                            <input type="text" id="approver1Position" required placeholder="e.g., Executive Chef">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Additional Approval (optional) -->
+                <div class="approval-group hidden" id="additionalApprovalGroup">
+                    <div class="approval-header">
+                        <span class="approval-title">Additional Approver</span>
+                        <span class="approval-hint">Optional second approver</span>
+                    </div>
+                    <div class="approval-fields">
+                        <div class="approval-field">
+                            <label>Approved?</label>
+                            <select id="approval2">
+                                <option value="">Select</option>
+                                <option value="yes">Yes</option>
+                                <option value="no">No</option>
+                            </select>
+                        </div>
+                        <div class="approval-field">
+                            <label>Approver Name</label>
+                            <input type="text" id="approver2Name" placeholder="First and Last Name">
+                        </div>
+                        <div class="approval-field">
+                            <label>Position</label>
+                            <input type="text" id="approver2Position" placeholder="Position">
+                        </div>
+                    </div>
+                </div>
+
+                <button type="button" class="add-approval-btn" id="addApprovalBtn" onclick="toggleAdditionalApproval()">
+                    + Add Additional Approver
+                </button>
+            </div>
+
             <!-- Split View: Example + Menu Input -->
             <div class="split-container">
                 <div class="split-panel">
@@ -959,6 +1253,9 @@
                             <button id="editToggleBtn" class="edit-toggle" onclick="toggleEditMode()">
                                 <span class="edit-toggle-icon">Edit</span>
                             </button>
+                            <button id="rerunCheckBtn" class="rerun-btn" onclick="rerunAICheck()">
+                                Re-run AI Check
+                            </button>
                         </div>
                     </div>
                     <div id="editModeNotice" class="edit-mode-notice">
@@ -980,6 +1277,9 @@
             </div>
 
             <div class="btn-container">
+                <div id="criticalErrorBanner" class="critical-error-banner">
+                    Resolve or override all critical errors before submitting.
+                </div>
                 <button id="submitBtn" class="btn btn-success" onclick="submitMenu()">
                     Submit Menu for Review
                 </button>
@@ -1011,6 +1311,7 @@
         let isEditMode = false;
         let aiChanges = [];
         let originalAiCorrectedText = '';
+        let criticalErrorOverrides = {};
 
         document.addEventListener('DOMContentLoaded', function() {
             quill = new Quill('#menuEditor', {
@@ -1040,7 +1341,43 @@
                 });
                 resizeObserver.observe(menuContainer);
             }
+
+            // Handle template type changes for approval hint text
+            const templateTypeSelect = document.getElementById('templateType');
+            if (templateTypeSelect) {
+                templateTypeSelect.addEventListener('change', updateApprovalHint);
+                // Initialize on load
+                updateApprovalHint();
+            }
         });
+
+        function updateApprovalHint() {
+            const templateType = document.getElementById('templateType').value;
+            const hintEl = document.getElementById('approvalHint');
+
+            if (templateType === 'beverage') {
+                hintEl.textContent = 'e.g., Head of Mixology, Bar Director, Regional Director of Operations';
+            } else {
+                hintEl.textContent = 'e.g., Property GM, Director of F&B, Executive Chef, Chef de Cuisine';
+            }
+        }
+
+        function toggleAdditionalApproval() {
+            const additionalGroup = document.getElementById('additionalApprovalGroup');
+            const addBtn = document.getElementById('addApprovalBtn');
+
+            if (additionalGroup.classList.contains('hidden')) {
+                additionalGroup.classList.remove('hidden');
+                addBtn.textContent = '- Remove Additional Approver';
+            } else {
+                additionalGroup.classList.add('hidden');
+                addBtn.textContent = '+ Add Additional Approver';
+                // Clear the additional fields
+                document.getElementById('approval2').value = '';
+                document.getElementById('approver2Name').value = '';
+                document.getElementById('approver2Position').value = '';
+            }
+        }
 
         let fullscreenPages = [];
         let fsCurrentGroup = 0;
@@ -1233,6 +1570,23 @@
             if (!submitterEmail.includes('@')) {
                 showAlert('Please enter a valid email address', 'error');
                 window.scrollTo({ top: 0, behavior: 'smooth' });
+                return false;
+            }
+
+            // Validate required approval
+            const approval1 = document.getElementById('approval1').value;
+            const approver1Name = document.getElementById('approver1Name').value.trim();
+            const approver1Position = document.getElementById('approver1Position').value.trim();
+
+            if (!approval1 || !approver1Name || !approver1Position) {
+                showAlert('Please complete the required approval fields', 'error');
+                document.getElementById('approvalsCard').scrollIntoView({ behavior: 'smooth' });
+                return false;
+            }
+
+            if (approval1 !== 'yes') {
+                showAlert('Approval is required before submission', 'error');
+                document.getElementById('approvalsCard').scrollIntoView({ behavior: 'smooth' });
                 return false;
             }
 
@@ -1450,9 +1804,126 @@
             return commonIndices;
         }
 
+        function renderSuggestionCard(suggestion, idx) {
+            const isCritical = suggestion.severity === 'critical';
+            const confidenceClass = `confidence-${suggestion.confidence}`;
+            const criticalClass = isCritical ? 'critical-error' : '';
+            const overriddenClass = criticalErrorOverrides[idx] ? 'overridden' : '';
+
+            let badgeHtml = '';
+            if (isCritical) {
+                badgeHtml = `<span class="severity-badge-critical">CRITICAL</span>`;
+            } else {
+                badgeHtml = `<span class="confidence-badge ${confidenceClass}">${(suggestion.confidence || 'medium').toUpperCase()}</span>`;
+            }
+
+            let overrideBtnHtml = '';
+            if (isCritical) {
+                const btnText = criticalErrorOverrides[idx] ? 'Undo Override' : 'Override — AI May Be Wrong';
+                const btnClass = criticalErrorOverrides[idx] ? 'critical-override-btn overridden' : 'critical-override-btn';
+                overrideBtnHtml = `<button class="${btnClass}" onclick="overrideCriticalError(${idx})">${btnText}</button>`;
+            }
+
+            return `
+                <div class="suggestion-item ${criticalClass} ${overriddenClass}" data-suggestion-index="${idx}">
+                    <div class="suggestion-type">
+                        ${escapeHtml(suggestion.type)}
+                        ${badgeHtml}
+                    </div>
+                    ${suggestion.menuItem ? `<div style="font-weight: 600; color: var(--color-text); font-size: 0.75rem; margin: 0.25rem 0;">Item: ${escapeHtml(suggestion.menuItem)}</div>` : ''}
+                    <div class="suggestion-detail">${escapeHtml(suggestion.description)}</div>
+                    <div style="color: var(--color-success); font-size: 0.75rem; margin-top: 0.25rem;"><strong>Recommendation:</strong> ${escapeHtml(suggestion.recommendation)}</div>
+                    ${overrideBtnHtml}
+                </div>
+            `;
+        }
+
+        function updateSubmitButtonState() {
+            const submitBtn = document.getElementById('submitBtn');
+            const banner = document.getElementById('criticalErrorBanner');
+
+            if (!aiCheckResults || !aiCheckResults.suggestions) {
+                submitBtn.disabled = false;
+                submitBtn.classList.remove('blocked');
+                banner.classList.remove('show');
+                return;
+            }
+
+            const unresolvedCritical = aiCheckResults.suggestions.some((s, idx) =>
+                s.severity === 'critical' && !criticalErrorOverrides[idx]
+            );
+
+            if (unresolvedCritical) {
+                submitBtn.disabled = true;
+                submitBtn.classList.add('blocked');
+                banner.classList.add('show');
+            } else {
+                submitBtn.disabled = false;
+                submitBtn.classList.remove('blocked');
+                banner.classList.remove('show');
+            }
+        }
+
+        function overrideCriticalError(idx) {
+            criticalErrorOverrides[idx] = !criticalErrorOverrides[idx];
+
+            // Re-render just the affected card
+            const card = document.querySelector(`.suggestion-item[data-suggestion-index="${idx}"]`);
+            if (card && aiCheckResults && aiCheckResults.suggestions[idx]) {
+                const newCard = document.createElement('div');
+                newCard.innerHTML = renderSuggestionCard(aiCheckResults.suggestions[idx], idx);
+                card.replaceWith(newCard.firstElementChild);
+            }
+
+            updateSubmitButtonState();
+        }
+
+        async function rerunAICheck() {
+            const rerunBtn = document.getElementById('rerunCheckBtn');
+            rerunBtn.disabled = true;
+            rerunBtn.textContent = 'Re-running...';
+
+            // Get current edited text from the reviewed content area
+            const reviewedArea = document.getElementById('reviewedContentArea');
+            const menuContent = (reviewedArea.innerText || reviewedArea.textContent).trim();
+            const allergens = document.getElementById('allergensInput').value.trim();
+            const menuType = document.getElementById('menuType').value;
+
+            try {
+                const response = await fetch('/api/form/basic-check', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ menuContent, allergens, menuType })
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || 'Failed to run AI check');
+                }
+
+                aiCheckResults = data;
+                criticalErrorOverrides = {};
+
+                // Re-render step 2 with new results
+                showStep2(data);
+                showAlert('AI check re-run complete! Review updated suggestions.', 'success');
+
+            } catch (error) {
+                console.error('Error re-running check:', error);
+                showAlert('Error re-running AI check: ' + error.message, 'error');
+            } finally {
+                rerunBtn.disabled = false;
+                rerunBtn.textContent = 'Re-run AI Check';
+            }
+        }
+
         function showStep2(results) {
             document.getElementById('step1').classList.add('hidden');
             document.getElementById('step2').classList.remove('hidden');
+
+            // Reset critical error overrides
+            criticalErrorOverrides = {};
 
             // Populate read-only form fields
             document.getElementById('step2ProjectName').value = document.getElementById('projectName').value;
@@ -1497,6 +1968,18 @@
 
             const suggestionsDisplay = document.getElementById('suggestionsDisplay');
 
+            // Sort suggestions: critical first, then normal
+            let sortedSuggestions = [];
+            if (results.suggestions && results.suggestions.length > 0) {
+                sortedSuggestions = [...results.suggestions].sort((a, b) => {
+                    if (a.severity === 'critical' && b.severity !== 'critical') return -1;
+                    if (a.severity !== 'critical' && b.severity === 'critical') return 1;
+                    return 0;
+                });
+                // Update the results.suggestions to match sorted order for index tracking
+                results.suggestions = sortedSuggestions;
+            }
+
             if (hasChanges) {
                 let html = `
                     <div class="suggestion-item" style="border-left: 3px solid var(--color-success); background: rgba(74, 124, 89, 0.05);">
@@ -1508,41 +1991,14 @@
                     </div>
                 `;
 
-                if (results.suggestions && results.suggestions.length > 0) {
-                    html += results.suggestions.map((suggestion, idx) => {
-                        const confidenceClass = `confidence-${suggestion.confidence}`;
-                        return `
-                            <div class="suggestion-item" data-suggestion-index="${idx}">
-                                <div class="suggestion-type">
-                                    ${escapeHtml(suggestion.type)}
-                                    <span class="confidence-badge ${confidenceClass}">${suggestion.confidence.toUpperCase()}</span>
-                                </div>
-                                ${suggestion.menuItem ? `<div style="font-weight: 600; color: var(--color-text); font-size: 0.75rem; margin: 0.25rem 0;">Item: ${escapeHtml(suggestion.menuItem)}</div>` : ''}
-                                <div class="suggestion-detail">${escapeHtml(suggestion.description)}</div>
-                                <div style="color: var(--color-success); font-size: 0.75rem; margin-top: 0.25rem;"><strong>Recommendation:</strong> ${escapeHtml(suggestion.recommendation)}</div>
-                            </div>
-                        `;
-                    }).join('');
+                if (sortedSuggestions.length > 0) {
+                    html += sortedSuggestions.map((suggestion, idx) => renderSuggestionCard(suggestion, idx)).join('');
                 }
 
                 suggestionsDisplay.innerHTML = html;
                 showAlert('Auto-corrections applied! Green highlights show the changes.', 'success');
-            } else if (results.suggestions && results.suggestions.length > 0) {
-                const html = results.suggestions.map((suggestion, idx) => {
-                    const confidenceClass = `confidence-${suggestion.confidence}`;
-                    return `
-                        <div class="suggestion-item" data-suggestion-index="${idx}">
-                            <div class="suggestion-type">
-                                ${escapeHtml(suggestion.type)}
-                                <span class="confidence-badge ${confidenceClass}">${suggestion.confidence.toUpperCase()}</span>
-                            </div>
-                            ${suggestion.menuItem ? `<div style="font-weight: 600; color: var(--color-text); font-size: 0.75rem; margin: 0.25rem 0;">Item: ${escapeHtml(suggestion.menuItem)}</div>` : ''}
-                            <div class="suggestion-detail">${escapeHtml(suggestion.description)}</div>
-                            <div style="color: var(--color-success); font-size: 0.75rem; margin-top: 0.25rem;"><strong>Recommendation:</strong> ${escapeHtml(suggestion.recommendation)}</div>
-                        </div>
-                    `;
-                }).join('');
-                suggestionsDisplay.innerHTML = html;
+            } else if (sortedSuggestions.length > 0) {
+                suggestionsDisplay.innerHTML = sortedSuggestions.map((suggestion, idx) => renderSuggestionCard(suggestion, idx)).join('');
             } else {
                 suggestionsDisplay.innerHTML = `
                     <div class="suggestion-item" style="border-left: 3px solid var(--color-success);">
@@ -1551,9 +2007,22 @@
                     </div>
                 `;
             }
+
+            updateSubmitButtonState();
         }
 
         async function submitMenu() {
+            // Block if unresolved critical errors exist
+            if (aiCheckResults && aiCheckResults.suggestions) {
+                const unresolvedCritical = aiCheckResults.suggestions.some((s, idx) =>
+                    s.severity === 'critical' && !criticalErrorOverrides[idx]
+                );
+                if (unresolvedCritical) {
+                    showAlert('Please resolve or override all critical errors before submitting.', 'error');
+                    return;
+                }
+            }
+
             if (isEditMode) {
                 toggleEditMode();
             }
@@ -1569,6 +2038,40 @@
             // Also update the hidden display
             document.getElementById('originalMenuDisplay').innerHTML = menuContentHtml;
 
+            // Collect approval data
+            const approvals = [{
+                approved: document.getElementById('approval1').value === 'yes',
+                name: document.getElementById('approver1Name').value.trim(),
+                position: document.getElementById('approver1Position').value.trim()
+            }];
+
+            // Check if additional approver was added
+            const approval2 = document.getElementById('approval2').value;
+            const approver2Name = document.getElementById('approver2Name').value.trim();
+            const approver2Position = document.getElementById('approver2Position').value.trim();
+
+            if (approval2 && approver2Name && approver2Position) {
+                approvals.push({
+                    approved: approval2 === 'yes',
+                    name: approver2Name,
+                    position: approver2Position
+                });
+            }
+
+            // Collect critical error overrides for audit trail
+            const criticalOverrides = [];
+            if (aiCheckResults && aiCheckResults.suggestions) {
+                aiCheckResults.suggestions.forEach((s, idx) => {
+                    if (s.severity === 'critical' && criticalErrorOverrides[idx]) {
+                        criticalOverrides.push({
+                            type: s.type,
+                            menuItem: s.menuItem,
+                            description: s.description
+                        });
+                    }
+                });
+            }
+
             const formData = {
                 projectName: document.getElementById('projectName').value.trim(),
                 property: document.getElementById('property').value.trim(),
@@ -1579,7 +2082,9 @@
                 dateNeeded: document.getElementById('dateNeeded').value,
                 submitterEmail: document.getElementById('submitterEmail').value.trim(),
                 menuContent: menuContentText,
-                menuContentHtml: menuContentHtml
+                menuContentHtml: menuContentHtml,
+                approvals: approvals,
+                criticalOverrides: criticalOverrides
             };
 
             try {
@@ -1645,6 +2150,8 @@
                 reviewedArea.classList.add('editable');
                 reviewedArea.contentEditable = 'true';
                 reviewedArea.focus();
+                // Hide re-run button while editing
+                document.getElementById('rerunCheckBtn').classList.remove('show');
             } else {
                 editBtn.classList.remove('active');
                 editBtn.innerHTML = '<span class="edit-toggle-icon">Edit</span>';
@@ -1652,6 +2159,8 @@
                 reviewedArea.classList.remove('editable');
                 reviewedArea.contentEditable = 'false';
                 recalculateHighlights();
+                // Show re-run button after editing
+                document.getElementById('rerunCheckBtn').classList.add('show');
             }
         }
 

@@ -1,0 +1,805 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title><%= title %></title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=Montserrat:wght@300;400;500;600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --color-primary: #2c2c2c;
+            --color-secondary: #8b7355;
+            --color-accent: #6b5344;
+            --color-text: #333333;
+            --color-text-light: #666666;
+            --color-text-muted: #999999;
+            --color-background: #ffffff;
+            --color-background-alt: #fafaf8;
+            --color-border: #e8e4de;
+            --color-border-light: #f0ece6;
+            --color-success: #4a7c59;
+            --color-warning: #b8860b;
+            --color-error: #8b3a3a;
+            --font-heading: 'Cormorant Garamond', Georgia, serif;
+            --font-body: 'Montserrat', -apple-system, BlinkMacSystemFont, sans-serif;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: var(--font-body);
+            background: var(--color-background);
+            color: var(--color-text);
+            line-height: 1.7;
+            font-weight: 400;
+            font-size: 15px;
+            letter-spacing: 0.02em;
+        }
+
+        .header {
+            background: var(--color-background);
+            color: var(--color-primary);
+            padding: 1.5rem 4vw;
+            border-bottom: 1px solid var(--color-border);
+        }
+
+        .header h1 {
+            font-family: var(--font-heading);
+            font-size: 1.75rem;
+            font-weight: 500;
+            letter-spacing: 0.05em;
+            color: var(--color-primary);
+        }
+
+        .header p {
+            color: var(--color-text-light);
+            margin-top: 0.15rem;
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            letter-spacing: 0.15em;
+            font-weight: 400;
+        }
+
+        .container {
+            max-width: 1600px;
+            margin: 0 auto;
+            padding: 1.5rem 4vw;
+        }
+
+        .nav {
+            margin-bottom: 1rem;
+        }
+
+        .nav a {
+            color: var(--color-secondary);
+            text-decoration: none;
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            font-weight: 500;
+            transition: color 0.2s ease;
+        }
+
+        .nav a:hover {
+            color: var(--color-accent);
+        }
+
+        .card {
+            background: var(--color-background);
+            border: 1px solid var(--color-border);
+            padding: 1.5rem;
+            margin-bottom: 1rem;
+        }
+
+        .card h2 {
+            font-family: var(--font-heading);
+            font-size: 1.25rem;
+            font-weight: 500;
+            letter-spacing: 0.03em;
+            color: var(--color-primary);
+            margin-bottom: 1rem;
+        }
+
+        /* Upload zones */
+        .upload-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1.5rem;
+        }
+
+        .upload-zone {
+            border: 2px dashed var(--color-border);
+            padding: 2rem 1.5rem;
+            text-align: center;
+            transition: all 0.3s ease;
+            cursor: pointer;
+            position: relative;
+            min-height: 180px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 0.75rem;
+        }
+
+        .upload-zone:hover {
+            border-color: var(--color-secondary);
+            background: rgba(139, 115, 85, 0.03);
+        }
+
+        .upload-zone.dragover {
+            border-color: var(--color-secondary);
+            background: rgba(139, 115, 85, 0.08);
+        }
+
+        .upload-zone.has-file {
+            border-style: solid;
+            border-color: var(--color-success);
+            background: rgba(74, 124, 89, 0.05);
+        }
+
+        .upload-zone input[type="file"] {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            opacity: 0;
+            cursor: pointer;
+        }
+
+        .upload-icon {
+            width: 36px;
+            height: 36px;
+            color: var(--color-text-muted);
+        }
+
+        .upload-zone.has-file .upload-icon {
+            color: var(--color-success);
+        }
+
+        .upload-label {
+            font-size: 0.65rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.15em;
+            color: var(--color-text-muted);
+        }
+
+        .upload-hint {
+            font-size: 0.75rem;
+            color: var(--color-text-muted);
+        }
+
+        .upload-filename {
+            font-size: 0.8rem;
+            color: var(--color-success);
+            font-weight: 500;
+            word-break: break-all;
+        }
+
+        /* Buttons */
+        .btn {
+            display: inline-block;
+            padding: 1rem 2rem;
+            text-decoration: none;
+            font-weight: 500;
+            transition: all 0.3s ease;
+            border: 2px solid;
+            cursor: pointer;
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            letter-spacing: 0.2em;
+            font-family: var(--font-body);
+            text-align: center;
+        }
+
+        .btn-primary {
+            background: var(--color-primary);
+            color: var(--color-background);
+            border-color: var(--color-primary);
+        }
+
+        .btn-primary:hover:not(:disabled) {
+            background: transparent;
+            color: var(--color-primary);
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .btn-container {
+            text-align: center;
+            padding: 1rem;
+            background: var(--color-background);
+            border: 1px solid var(--color-border);
+            margin-top: 1rem;
+        }
+
+        /* Spinner */
+        .spinner {
+            border: 2px solid var(--color-border);
+            border-top: 2px solid var(--color-secondary);
+            border-radius: 50%;
+            width: 18px;
+            height: 18px;
+            animation: spin 1s linear infinite;
+            display: inline-block;
+            margin-right: 0.5rem;
+            vertical-align: middle;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .hidden { display: none !important; }
+
+        /* Alerts */
+        .alert {
+            padding: 1rem 1.5rem;
+            margin-bottom: 1rem;
+            border: 1px solid;
+            font-size: 0.9rem;
+        }
+
+        .alert-error {
+            background: rgba(139, 58, 58, 0.08);
+            color: var(--color-error);
+            border-color: rgba(139, 58, 58, 0.2);
+        }
+
+        /* Results section */
+        .result-banner {
+            padding: 1.5rem 2rem;
+            margin-bottom: 1rem;
+            text-align: center;
+        }
+
+        .result-banner h3 {
+            font-family: var(--font-heading);
+            font-size: 1.35rem;
+            font-weight: 500;
+            margin-bottom: 0.25rem;
+        }
+
+        .result-banner p {
+            font-size: 0.85rem;
+        }
+
+        .result-pass {
+            background: rgba(74, 124, 89, 0.1);
+            border: 1px solid rgba(74, 124, 89, 0.3);
+        }
+
+        .result-pass h3 { color: var(--color-success); }
+        .result-pass p { color: var(--color-success); }
+
+        .result-fail {
+            background: rgba(139, 58, 58, 0.08);
+            border: 1px solid rgba(139, 58, 58, 0.25);
+        }
+
+        .result-fail h3 { color: var(--color-error); }
+        .result-fail p { color: var(--color-error); }
+
+        /* Project details card */
+        .details-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 0.75rem;
+        }
+
+        .detail-item label {
+            font-size: 0.6rem;
+            font-weight: 500;
+            color: var(--color-text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.15em;
+            display: block;
+            margin-bottom: 0.2rem;
+        }
+
+        .detail-item span {
+            font-size: 0.9rem;
+            color: var(--color-text);
+        }
+
+        /* Summary stats */
+        .summary-bar {
+            display: flex;
+            gap: 1.5rem;
+            flex-wrap: wrap;
+            margin-bottom: 1rem;
+            padding: 1rem;
+            background: var(--color-background-alt);
+            border: 1px solid var(--color-border);
+        }
+
+        .summary-stat {
+            text-align: center;
+        }
+
+        .summary-stat .number {
+            font-family: var(--font-heading);
+            font-size: 1.5rem;
+            font-weight: 600;
+            line-height: 1;
+        }
+
+        .summary-stat .label {
+            font-size: 0.6rem;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            color: var(--color-text-muted);
+            margin-top: 0.2rem;
+        }
+
+        .number-critical { color: var(--color-error); }
+        .number-warning { color: var(--color-warning); }
+        .number-info { color: var(--color-secondary); }
+
+        /* Split comparison view */
+        .split-compare {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1rem;
+            margin-bottom: 1rem;
+        }
+
+        .compare-panel {
+            background: var(--color-background);
+            border: 1px solid var(--color-border);
+            display: flex;
+            flex-direction: column;
+        }
+
+        .compare-panel-header {
+            padding: 0.75rem 1rem;
+            border-bottom: 1px solid var(--color-border);
+            background: var(--color-background-alt);
+            text-align: center;
+        }
+
+        .compare-panel-header h3 {
+            font-family: var(--font-heading);
+            font-size: 1rem;
+            font-weight: 500;
+            color: var(--color-primary);
+        }
+
+        .compare-panel-body {
+            flex: 1;
+            padding: 1rem;
+            font-family: Calibri, sans-serif;
+            font-size: 10pt;
+            line-height: 1.4;
+            overflow-y: auto;
+            max-height: 500px;
+            white-space: pre-wrap;
+        }
+
+        /* Diff highlighting */
+        .diff-line { padding: 1px 4px; }
+        .diff-missing { background: rgba(139, 58, 58, 0.12); }
+        .diff-extra { background: rgba(184, 134, 11, 0.12); }
+        .diff-changed { background: rgba(139, 115, 85, 0.1); }
+
+        .diff-word-removed {
+            background: rgba(139, 58, 58, 0.2);
+            text-decoration: line-through;
+            color: var(--color-error);
+        }
+
+        .diff-word-added {
+            background: rgba(74, 124, 89, 0.2);
+            color: var(--color-success);
+            font-weight: 500;
+        }
+
+        /* Difference list */
+        .diff-list {
+            list-style: none;
+        }
+
+        .diff-item {
+            padding: 0.75rem 1rem;
+            border-left: 3px solid var(--color-border);
+            margin-bottom: 0.5rem;
+            background: var(--color-background);
+            border: 1px solid var(--color-border);
+        }
+
+        .diff-item-header {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            margin-bottom: 0.35rem;
+            flex-wrap: wrap;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 0.15rem 0.5rem;
+            font-size: 0.55rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .badge-price { background: rgba(139, 58, 58, 0.12); color: var(--color-error); border: 1px solid rgba(139, 58, 58, 0.2); }
+        .badge-allergen { background: rgba(139, 58, 58, 0.12); color: var(--color-error); border: 1px solid rgba(139, 58, 58, 0.2); }
+        .badge-diacritical { background: rgba(184, 134, 11, 0.12); color: var(--color-warning); border: 1px solid rgba(184, 134, 11, 0.2); }
+        .badge-spelling { background: rgba(184, 134, 11, 0.12); color: var(--color-warning); border: 1px solid rgba(184, 134, 11, 0.2); }
+        .badge-missing { background: rgba(139, 58, 58, 0.12); color: var(--color-error); border: 1px solid rgba(139, 58, 58, 0.2); }
+        .badge-extra { background: rgba(139, 115, 85, 0.12); color: var(--color-secondary); border: 1px solid rgba(139, 115, 85, 0.2); }
+        .badge-formatting { background: rgba(139, 115, 85, 0.08); color: var(--color-text-muted); border: 1px solid var(--color-border); }
+
+        .badge-critical { background: rgba(139, 58, 58, 0.15); color: var(--color-error); border: 1px solid rgba(139, 58, 58, 0.3); }
+        .badge-warning { background: rgba(184, 134, 11, 0.15); color: var(--color-warning); border: 1px solid rgba(184, 134, 11, 0.3); }
+        .badge-info { background: rgba(139, 115, 85, 0.1); color: var(--color-text-muted); border: 1px solid var(--color-border); }
+
+        .diff-item-text {
+            font-size: 0.85rem;
+            color: var(--color-text-light);
+        }
+
+        .diff-item-text code {
+            background: var(--color-background-alt);
+            padding: 0.1rem 0.3rem;
+            font-size: 0.8rem;
+            border: 1px solid var(--color-border);
+        }
+
+        @media (max-width: 768px) {
+            .upload-grid, .split-compare {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="container" style="padding-top: 0; padding-bottom: 0;">
+            <h1>Richard Sandoval Hospitality</h1>
+            <p>Design Approval</p>
+        </div>
+    </div>
+
+    <div class="container">
+        <div class="nav">
+            <a href="/submit/link">Back to Menu</a>
+        </div>
+
+        <div id="alertContainer"></div>
+
+        <!-- Step 1: Upload -->
+        <div id="step1">
+            <div class="card">
+                <h2>Upload Documents</h2>
+                <p style="font-size: 0.85rem; color: var(--color-text-light); margin-bottom: 1.25rem;">
+                    Upload your approved Word document and the designer-created PDF to compare them for accuracy.
+                </p>
+                <div class="upload-grid">
+                    <div class="upload-zone" id="docxZone">
+                        <input type="file" id="docxFile" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" onchange="handleFileSelect(this, 'docx')">
+                        <svg class="upload-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
+                        </svg>
+                        <span class="upload-label">Approved Word Document</span>
+                        <span class="upload-hint">.docx file</span>
+                        <span class="upload-filename hidden" id="docxFilename"></span>
+                    </div>
+                    <div class="upload-zone" id="pdfZone">
+                        <input type="file" id="pdfFile" accept=".pdf,application/pdf" onchange="handleFileSelect(this, 'pdf')">
+                        <svg class="upload-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
+                        </svg>
+                        <span class="upload-label">Designer PDF</span>
+                        <span class="upload-hint">.pdf file</span>
+                        <span class="upload-filename hidden" id="pdfFilename"></span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="btn-container">
+                <button id="compareBtn" class="btn btn-primary" onclick="compareDocuments()" disabled>
+                    Compare Documents
+                </button>
+            </div>
+        </div>
+
+        <!-- Step 2: Results -->
+        <div id="step2" class="hidden">
+            <div id="resultBanner"></div>
+
+            <div id="projectDetailsCard" class="card">
+                <h2>Project Details <span style="font-size: 0.7rem; font-weight: 400; color: var(--color-text-muted); text-transform: uppercase; letter-spacing: 0.1em;">(Extracted from DOCX)</span></h2>
+                <div class="details-grid" id="projectDetailsGrid"></div>
+            </div>
+
+            <div id="summarySection" class="hidden">
+                <div class="summary-bar" id="summaryBar"></div>
+
+                <div class="split-compare">
+                    <div class="compare-panel">
+                        <div class="compare-panel-header">
+                            <h3>Word Document (Source)</h3>
+                        </div>
+                        <div class="compare-panel-body" id="docxTextPanel"></div>
+                    </div>
+                    <div class="compare-panel">
+                        <div class="compare-panel-header">
+                            <h3>Designer PDF</h3>
+                        </div>
+                        <div class="compare-panel-body" id="pdfTextPanel"></div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h2>Differences</h2>
+                    <div class="diff-list" id="diffList"></div>
+                </div>
+            </div>
+
+            <div class="btn-container">
+                <button class="btn btn-primary" onclick="resetForm()">
+                    Upload New Documents
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let docxFileSelected = false;
+        let pdfFileSelected = false;
+
+        // Drag and drop
+        ['docxZone', 'pdfZone'].forEach(zoneId => {
+            const zone = document.getElementById(zoneId);
+            zone.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                zone.classList.add('dragover');
+            });
+            zone.addEventListener('dragleave', () => {
+                zone.classList.remove('dragover');
+            });
+            zone.addEventListener('drop', (e) => {
+                e.preventDefault();
+                zone.classList.remove('dragover');
+                const input = zone.querySelector('input[type="file"]');
+                if (e.dataTransfer.files.length > 0) {
+                    input.files = e.dataTransfer.files;
+                    const type = zoneId === 'docxZone' ? 'docx' : 'pdf';
+                    handleFileSelect(input, type);
+                }
+            });
+        });
+
+        function handleFileSelect(input, type) {
+            const file = input.files[0];
+            if (!file) return;
+
+            const zone = document.getElementById(type === 'docx' ? 'docxZone' : 'pdfZone');
+            const filenameEl = document.getElementById(type === 'docx' ? 'docxFilename' : 'pdfFilename');
+
+            zone.classList.add('has-file');
+            filenameEl.textContent = file.name;
+            filenameEl.classList.remove('hidden');
+
+            if (type === 'docx') docxFileSelected = true;
+            else pdfFileSelected = true;
+
+            document.getElementById('compareBtn').disabled = !(docxFileSelected && pdfFileSelected);
+        }
+
+        async function compareDocuments() {
+            const docxInput = document.getElementById('docxFile');
+            const pdfInput = document.getElementById('pdfFile');
+
+            if (!docxInput.files[0] || !pdfInput.files[0]) {
+                showAlert('Please select both files', 'error');
+                return;
+            }
+
+            const btn = document.getElementById('compareBtn');
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner"></span>Comparing Documents...';
+
+            const formData = new FormData();
+            formData.append('docxFile', docxInput.files[0]);
+            formData.append('pdfFile', pdfInput.files[0]);
+
+            try {
+                const response = await fetch('/api/design-approval/compare', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || 'Comparison failed');
+                }
+
+                showResults(data);
+
+            } catch (error) {
+                showAlert(error.message, 'error');
+                btn.disabled = false;
+                btn.textContent = 'Compare Documents';
+            }
+        }
+
+        function showResults(data) {
+            document.getElementById('step1').classList.add('hidden');
+            document.getElementById('step2').classList.remove('hidden');
+
+            // Project details
+            const details = data.projectDetails || {};
+            const grid = document.getElementById('projectDetailsGrid');
+            grid.innerHTML = '';
+
+            const detailLabels = {
+                project_name: 'Project Name',
+                property: 'Property',
+                size: 'Size',
+                orientation: 'Orientation',
+                date_needed: 'Date Needed'
+            };
+
+            Object.entries(detailLabels).forEach(([key, label]) => {
+                const val = details[key] || '(not found)';
+                grid.innerHTML += `<div class="detail-item"><label>${escapeHtml(label)}</label><span>${escapeHtml(val)}</span></div>`;
+            });
+
+            // Banner
+            const banner = document.getElementById('resultBanner');
+            const isMatch = data.isMatch;
+
+            if (isMatch) {
+                banner.className = 'result-banner result-pass';
+                banner.innerHTML = `<h3>Documents Match</h3><p>Your designed PDF matches the approved menu. You may proceed.</p>`;
+            } else {
+                banner.className = 'result-banner result-fail';
+                banner.innerHTML = `<h3>Discrepancies Found</h3><p>Please correct your PDF and resubmit. See details below.</p>`;
+
+                document.getElementById('summarySection').classList.remove('hidden');
+                renderSummary(data);
+                renderSplitView(data);
+                renderDiffList(data);
+            }
+        }
+
+        function renderSummary(data) {
+            const diffs = data.differences || [];
+            const bar = document.getElementById('summaryBar');
+
+            const counts = { critical: 0, warning: 0, info: 0, total: diffs.length };
+            const typeCounts = {};
+
+            diffs.forEach(d => {
+                if (d.severity === 'critical') counts.critical++;
+                else if (d.severity === 'warning') counts.warning++;
+                else counts.info++;
+                typeCounts[d.type] = (typeCounts[d.type] || 0) + 1;
+            });
+
+            let html = `
+                <div class="summary-stat"><div class="number">${counts.total}</div><div class="label">Total</div></div>
+                <div class="summary-stat"><div class="number number-critical">${counts.critical}</div><div class="label">Critical</div></div>
+                <div class="summary-stat"><div class="number number-warning">${counts.warning}</div><div class="label">Warnings</div></div>
+                <div class="summary-stat"><div class="number number-info">${counts.info}</div><div class="label">Info</div></div>
+            `;
+
+            Object.entries(typeCounts).forEach(([type, count]) => {
+                html += `<div class="summary-stat"><div class="number">${count}</div><div class="label">${escapeHtml(type)}</div></div>`;
+            });
+
+            bar.innerHTML = html;
+        }
+
+        function renderSplitView(data) {
+            const docxPanel = document.getElementById('docxTextPanel');
+            const pdfPanel = document.getElementById('pdfTextPanel');
+
+            const docxLines = (data.docxText || '').split('\n');
+            const pdfLines = (data.pdfText || '').split('\n');
+            const diffs = data.differences || [];
+
+            // Build sets of line numbers that have issues
+            const docxIssueLines = new Set();
+            const pdfIssueLines = new Set();
+
+            diffs.forEach(d => {
+                if (d.docxLineNum !== undefined) docxIssueLines.add(d.docxLineNum);
+                if (d.pdfLineNum !== undefined) pdfIssueLines.add(d.pdfLineNum);
+            });
+
+            docxPanel.innerHTML = docxLines.map((line, i) => {
+                const cls = docxIssueLines.has(i) ? ' diff-changed' : '';
+                return `<div class="diff-line${cls}">${escapeHtml(line) || '&nbsp;'}</div>`;
+            }).join('');
+
+            pdfPanel.innerHTML = pdfLines.map((line, i) => {
+                const cls = pdfIssueLines.has(i) ? ' diff-changed' : '';
+                return `<div class="diff-line${cls}">${escapeHtml(line) || '&nbsp;'}</div>`;
+            }).join('');
+        }
+
+        function renderDiffList(data) {
+            const list = document.getElementById('diffList');
+            const diffs = data.differences || [];
+
+            if (diffs.length === 0) {
+                list.innerHTML = '<p style="color: var(--color-text-muted); text-align: center; padding: 1rem;">No differences found.</p>';
+                return;
+            }
+
+            list.innerHTML = diffs.map(d => {
+                const typeBadgeClass = 'badge-' + (d.type || 'formatting');
+                const sevBadgeClass = 'badge-' + (d.severity || 'info');
+
+                let detail = '';
+                if (d.docxValue && d.pdfValue) {
+                    detail = `DOCX: <code>${escapeHtml(d.docxValue)}</code> &rarr; PDF: <code>${escapeHtml(d.pdfValue)}</code>`;
+                } else if (d.docxValue) {
+                    detail = `Missing in PDF: <code>${escapeHtml(d.docxValue)}</code>`;
+                } else if (d.pdfValue) {
+                    detail = `Extra in PDF: <code>${escapeHtml(d.pdfValue)}</code>`;
+                }
+
+                return `
+                    <div class="diff-item">
+                        <div class="diff-item-header">
+                            <span class="badge ${typeBadgeClass}">${escapeHtml(d.type || 'other')}</span>
+                            <span class="badge ${sevBadgeClass}">${escapeHtml(d.severity || 'info')}</span>
+                        </div>
+                        <div class="diff-item-text">${d.description ? escapeHtml(d.description) : detail}</div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function resetForm() {
+            document.getElementById('step1').classList.remove('hidden');
+            document.getElementById('step2').classList.add('hidden');
+            document.getElementById('summarySection').classList.add('hidden');
+
+            // Reset file inputs
+            document.getElementById('docxFile').value = '';
+            document.getElementById('pdfFile').value = '';
+            document.getElementById('docxZone').classList.remove('has-file');
+            document.getElementById('pdfZone').classList.remove('has-file');
+            document.getElementById('docxFilename').classList.add('hidden');
+            document.getElementById('pdfFilename').classList.add('hidden');
+            docxFileSelected = false;
+            pdfFileSelected = false;
+
+            const btn = document.getElementById('compareBtn');
+            btn.disabled = true;
+            btn.textContent = 'Compare Documents';
+        }
+
+        function showAlert(message, type) {
+            const container = document.getElementById('alertContainer');
+            const alert = document.createElement('div');
+            alert.className = `alert alert-${type}`;
+            alert.textContent = message;
+            container.appendChild(alert);
+            setTimeout(() => alert.remove(), 6000);
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+    </script>
+</body>
+</html>
