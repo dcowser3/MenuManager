@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title><%= title %></title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=Montserrat:wght@300;400;500;600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --color-primary: #2c2c2c;
+            --color-secondary: #8b7355;
+            --color-accent: #6b5344;
+            --color-text: #333333;
+            --color-text-light: #666666;
+            --color-text-muted: #999999;
+            --color-background: #ffffff;
+            --color-background-alt: #fafaf8;
+            --color-border: #e8e4de;
+            --color-border-light: #f0ece6;
+            --font-heading: 'Cormorant Garamond', Georgia, serif;
+            --font-body: 'Montserrat', -apple-system, BlinkMacSystemFont, sans-serif;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: var(--font-body);
+            background: var(--color-background);
+            color: var(--color-text);
+            line-height: 1.7;
+            font-weight: 400;
+            font-size: 15px;
+            letter-spacing: 0.02em;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .header {
+            background: var(--color-background);
+            color: var(--color-primary);
+            padding: 1.5rem 4vw;
+            border-bottom: 1px solid var(--color-border);
+        }
+
+        .header h1 {
+            font-family: var(--font-heading);
+            font-size: 1.75rem;
+            font-weight: 500;
+            letter-spacing: 0.05em;
+            color: var(--color-primary);
+        }
+
+        .header p {
+            color: var(--color-text-light);
+            margin-top: 0.15rem;
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            letter-spacing: 0.15em;
+            font-weight: 400;
+        }
+
+        .welcome-container {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 3rem 2rem;
+        }
+
+        .welcome-title {
+            font-family: var(--font-heading);
+            font-size: 2rem;
+            font-weight: 500;
+            letter-spacing: 0.04em;
+            color: var(--color-primary);
+            margin-bottom: 0.5rem;
+            text-align: center;
+        }
+
+        .welcome-subtitle {
+            font-size: 0.8rem;
+            color: var(--color-text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.15em;
+            margin-bottom: 3rem;
+            text-align: center;
+        }
+
+        .cards-container {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 2rem;
+            max-width: 800px;
+            width: 100%;
+        }
+
+        .option-card {
+            background: var(--color-background);
+            border: 1px solid var(--color-border);
+            padding: 2.5rem 2rem;
+            text-align: center;
+            text-decoration: none;
+            color: var(--color-text);
+            transition: all 0.3s ease;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .option-card:hover {
+            border-color: var(--color-secondary);
+            box-shadow: 0 4px 16px rgba(139, 115, 85, 0.12);
+            transform: translateY(-2px);
+        }
+
+        .option-icon {
+            width: 48px;
+            height: 48px;
+            color: var(--color-secondary);
+        }
+
+        .option-card h2 {
+            font-family: var(--font-heading);
+            font-size: 1.35rem;
+            font-weight: 500;
+            letter-spacing: 0.03em;
+            color: var(--color-primary);
+        }
+
+        .option-card p {
+            font-size: 0.85rem;
+            color: var(--color-text-light);
+            line-height: 1.6;
+        }
+
+        .option-label {
+            font-size: 0.65rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.2em;
+            color: var(--color-secondary);
+            border: 1px solid var(--color-secondary);
+            padding: 0.4rem 1rem;
+            margin-top: 0.5rem;
+            transition: all 0.3s ease;
+        }
+
+        .option-card:hover .option-label {
+            background: var(--color-primary);
+            color: var(--color-background);
+            border-color: var(--color-primary);
+        }
+
+        @media (max-width: 640px) {
+            .cards-container {
+                grid-template-columns: 1fr;
+                gap: 1.5rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div style="max-width: 1600px; margin: 0 auto; padding: 0 4vw;">
+            <h1>Richard Sandoval Hospitality</h1>
+            <p>Menu Management</p>
+        </div>
+    </div>
+
+    <div class="welcome-container">
+        <h2 class="welcome-title">Welcome</h2>
+        <p class="welcome-subtitle">Select an option to get started</p>
+
+        <div class="cards-container">
+            <a href="/form" class="option-card">
+                <svg class="option-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 4.5v15m7.5-7.5h-15" />
+                </svg>
+                <h2>New Menu Submission</h2>
+                <p>Submit a new menu for AI-assisted review and approval workflow.</p>
+                <span class="option-label">Start Submission</span>
+            </a>
+
+            <a href="/design-approval" class="option-card">
+                <svg class="option-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <h2>Design Approval</h2>
+                <p>Compare your approved Word document against a designer-created PDF to verify accuracy.</p>
+                <span class="option-label">Compare Documents</span>
+            </a>
+        </div>
+    </div>
+</body>
+</html>

@@ -90,11 +90,29 @@ app.get('/', async (req, res) => {
 });
 
 /**
+ * Welcome / Landing Page - Magic link entry point
+ */
+app.get('/submit/:token', (req, res) => {
+    res.render('welcome', {
+        title: 'Welcome - RSH Menu Manager'
+    });
+});
+
+/**
  * Form Submission Page - New menu submission via form
  */
 app.get('/form', (req, res) => {
     res.render('form', {
         title: 'Submit New Menu'
+    });
+});
+
+/**
+ * Design Approval Page - Compare DOCX against PDF
+ */
+app.get('/design-approval', (req, res) => {
+    res.render('design-approval', {
+        title: 'Design Approval'
     });
 });
 
@@ -504,6 +522,7 @@ This is a PRIX FIXE (pre-fix) menu. Apply these special rules:
 5. **WHAT NOT TO FLAG**:
    - Missing prices on individual dishes (this is normal for prix fixe)
    - Individual items without their own pricing
+   - Do NOT set severity to "critical" for missing individual dish prices on prix fixe menus
 `;
             // Insert at the beginning of the rules section
             qaPrompt = qaPrompt.replace(
@@ -552,12 +571,15 @@ Note: Use ONLY these allergen codes when checking allergen compliance. Do not us
         console.log('Has changes:', parsed.correctedMenu !== menuContent);
         console.log('===========================');
 
+        const hasCriticalErrors = parsed.suggestions.some(s => s.severity === 'critical');
+
         res.json({
             success: true,
             originalMenu: menuContent,
             correctedMenu: parsed.correctedMenu,
             suggestions: parsed.suggestions,
-            hasChanges: parsed.correctedMenu !== menuContent
+            hasChanges: parsed.correctedMenu !== menuContent,
+            hasCriticalErrors
         });
 
     } catch (error: any) {
@@ -574,12 +596,15 @@ Note: Use ONLY these allergen codes when checking allergen compliance. Do not us
  */
 app.post('/api/form/submit', async (req, res) => {
     try {
-        const { projectName, property, size, orientation, menuType, templateType, dateNeeded, submitterEmail, menuContent } = req.body;
+        const { projectName, property, size, orientation, menuType, templateType, dateNeeded, submitterEmail, menuContent, approvals } = req.body;
 
         // Validate required fields
         if (!projectName || !property || !size || !orientation || !templateType || !dateNeeded || !submitterEmail || !menuContent) {
             return res.status(400).json({ error: 'All fields are required' });
         }
+
+        // Approvals are attestations from the submitter - we store them as-is
+        // Frontend enforces that all required approvals are marked "Yes" before submission
 
         // Generate unique submission ID
         const submissionId = `form-${Date.now()}`;
@@ -608,7 +633,8 @@ app.post('/api/form/submit', async (req, res) => {
             created_at: new Date().toISOString(),
             source: 'form', // Mark as form submission
             menu_type: menuType || 'standard', // Track menu type (standard or prix_fixe)
-            template_type: templateType || 'food' // Track template type (food or beverage)
+            template_type: templateType || 'food', // Track template type (food or beverage)
+            approvals: JSON.stringify(approvals) // Store approval attestations
         });
 
         console.log(`✓ Submission created in database: ${submissionId}`);
@@ -664,6 +690,7 @@ function parseAIResponse(feedback: string, originalMenu: string): {
     suggestions: Array<{
         type: string,
         confidence: string,
+        severity?: string,
         menuItem: string,
         description: string,
         recommendation: string
@@ -687,6 +714,33 @@ function parseAIResponse(feedback: string, originalMenu: string): {
             console.log('Raw suggestions text:', suggestionsMatch[1]);
         }
     }
+
+    // Normalize severity on all suggestions
+    suggestions = suggestions.map(s => {
+        // Default missing severity to "normal"
+        if (!s.severity) {
+            s.severity = 'normal';
+        }
+
+        // Force critical severity for known critical types (safety net)
+        if (s.type === 'Missing Price' || s.type === 'Incomplete Dish Name') {
+            s.severity = 'critical';
+        }
+
+        // Fallback regex: if description mentions missing price/dish name but type/severity wasn't set
+        if (s.severity !== 'critical') {
+            const descLower = (s.description || '').toLowerCase();
+            if (/missing\s+price|no\s+price|price\s+is\s+missing/.test(descLower) && s.type !== 'Missing Price') {
+                s.type = 'Missing Price';
+                s.severity = 'critical';
+            } else if (/missing\s+dish\s+name|incomplete\s+dish\s+name|no\s+dish\s+name/.test(descLower) && s.type !== 'Incomplete Dish Name') {
+                s.type = 'Incomplete Dish Name';
+                s.severity = 'critical';
+            }
+        }
+
+        return s;
+    });
 
     return {
         correctedMenu,
@@ -957,9 +1011,355 @@ async function generateDocxFromForm(submissionId: string, formData: any): Promis
     return outputPath;
 }
 
+/**
+ * Design Approval API: Compare DOCX against PDF
+ */
+app.post('/api/design-approval/compare', upload.fields([
+    { name: 'docxFile', maxCount: 1 },
+    { name: 'pdfFile', maxCount: 1 }
+]) as any, async (req, res) => {
+    const files = req.files as { [fieldname: string]: Express.Multer.File[] };
+    const tempFiles: string[] = [];
+
+    try {
+        if (!files.docxFile || !files.pdfFile) {
+            return res.status(400).json({ error: 'Both DOCX and PDF files are required' });
+        }
+
+        const docxFile = files.docxFile[0];
+        const pdfFile = files.pdfFile[0];
+        tempFiles.push(docxFile.path, pdfFile.path);
+
+        // Validate MIME types
+        const docxMime = docxFile.mimetype;
+        const pdfMime = pdfFile.mimetype;
+
+        if (!docxMime.includes('wordprocessingml') && !docxMime.includes('octet-stream')) {
+            return res.status(400).json({ error: 'First file must be a .docx document' });
+        }
+        if (pdfMime !== 'application/pdf' && !pdfMime.includes('octet-stream')) {
+            return res.status(400).json({ error: 'Second file must be a PDF' });
+        }
+
+        const venvPython = path.resolve(__dirname, '..', '..', 'docx-redliner', 'venv', 'bin', 'python');
+        let pythonCmd: string;
+        try {
+            await fs.access(venvPython);
+            pythonCmd = `"${venvPython}"`;
+        } catch {
+            pythonCmd = 'python3';
+        }
+
+        // Extract project details + menu content from DOCX
+        const extractDetailsScript = path.resolve(__dirname, '..', '..', 'docx-redliner', 'extract_project_details.py');
+        const detailsResult = await execAsync(
+            `${pythonCmd} "${extractDetailsScript}" "${docxFile.path}"`,
+            { timeout: 30000, maxBuffer: 10 * 1024 * 1024 }
+        );
+
+        const docxData = JSON.parse(detailsResult.stdout);
+        if (docxData.error) {
+            return res.status(400).json({ error: `DOCX extraction failed: ${docxData.error}` });
+        }
+
+        // Extract text from PDF
+        const extractPdfScript = path.resolve(__dirname, '..', '..', 'docx-redliner', 'extract_pdf_text.py');
+        const pdfResult = await execAsync(
+            `${pythonCmd} "${extractPdfScript}" "${pdfFile.path}"`,
+            { timeout: 30000, maxBuffer: 10 * 1024 * 1024 }
+        );
+
+        const pdfData = JSON.parse(pdfResult.stdout);
+        if (pdfData.error) {
+            return res.status(400).json({ error: `PDF extraction failed: ${pdfData.error}` });
+        }
+
+        if (!pdfData.has_text_layer) {
+            return res.status(400).json({
+                error: 'The PDF does not contain a text layer. It may be a scanned image. Please provide a PDF with selectable text.'
+            });
+        }
+
+        // Run comparison
+        const docxText = (docxData.menu_content || '').trim();
+        const pdfText = (pdfData.full_text || '').trim();
+        const differences = compareMenuTexts(docxText, pdfText);
+        const isMatch = differences.length === 0;
+
+        res.json({
+            isMatch,
+            projectDetails: docxData.project_details,
+            differences,
+            docxText,
+            pdfText
+        });
+
+    } catch (error: any) {
+        console.error('Error comparing documents:', error);
+        res.status(500).json({ error: error.message || 'Comparison failed' });
+    } finally {
+        // Clean up temp files
+        for (const f of tempFiles) {
+            fs.unlink(f).catch(() => {});
+        }
+    }
+});
+
+// ---- Design Approval comparison helpers ----
+
+interface Difference {
+    type: string;
+    severity: string;
+    description: string;
+    docxValue?: string;
+    pdfValue?: string;
+    docxLineNum?: number;
+    pdfLineNum?: number;
+}
+
+const PRICE_REGEX = /\$?\d+\.?\d*/g;
+const ALLERGEN_CODES = new Set(['GF', 'V', 'VG', 'DF', 'N', 'SF', 'S', 'G', 'C', 'D', 'E', 'F']);
+
+function stripAccents(str: string): string {
+    return str.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+}
+
+function classifyWordDiff(docxWord: string, pdfWord: string): { type: string; severity: string } {
+    // Price difference
+    if (PRICE_REGEX.test(docxWord) || PRICE_REGEX.test(pdfWord)) {
+        // Reset regex lastIndex
+        PRICE_REGEX.lastIndex = 0;
+        const docxPrices = docxWord.match(PRICE_REGEX) || [];
+        const pdfPrices = pdfWord.match(PRICE_REGEX) || [];
+        if (docxPrices.join() !== pdfPrices.join()) {
+            return { type: 'price', severity: 'critical' };
+        }
+    }
+    PRICE_REGEX.lastIndex = 0;
+
+    // Allergen code
+    const docxUpper = docxWord.replace(/[^A-Za-z]/g, '').toUpperCase();
+    const pdfUpper = pdfWord.replace(/[^A-Za-z]/g, '').toUpperCase();
+    if (ALLERGEN_CODES.has(docxUpper) || ALLERGEN_CODES.has(pdfUpper)) {
+        if (docxUpper !== pdfUpper) {
+            return { type: 'allergen', severity: 'critical' };
+        }
+    }
+
+    // Diacritical difference
+    if (stripAccents(docxWord).toLowerCase() === stripAccents(pdfWord).toLowerCase() &&
+        docxWord.toLowerCase() !== pdfWord.toLowerCase()) {
+        return { type: 'diacritical', severity: 'warning' };
+    }
+
+    // Spelling
+    return { type: 'spelling', severity: 'warning' };
+}
+
+function compareMenuTexts(docxText: string, pdfText: string): Difference[] {
+    const differences: Difference[] = [];
+
+    const docxLines = docxText.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+    const pdfLines = pdfText.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+
+    // Build LCS alignment between lines
+    const m = docxLines.length;
+    const n = pdfLines.length;
+    const dp: number[][] = Array(m + 1).fill(null).map(() => Array(n + 1).fill(0));
+
+    for (let i = 1; i <= m; i++) {
+        for (let j = 1; j <= n; j++) {
+            if (linesMatchFuzzy(docxLines[i - 1], pdfLines[j - 1])) {
+                dp[i][j] = dp[i - 1][j - 1] + 1;
+            } else {
+                dp[i][j] = Math.max(dp[i - 1][j], dp[i][j - 1]);
+            }
+        }
+    }
+
+    // Backtrack to find alignment
+    type Alignment = { type: 'match' | 'docx_only' | 'pdf_only'; docxIdx?: number; pdfIdx?: number };
+    const aligned: Alignment[] = [];
+    let i = m, j = n;
+
+    while (i > 0 && j > 0) {
+        if (linesMatchFuzzy(docxLines[i - 1], pdfLines[j - 1])) {
+            aligned.unshift({ type: 'match', docxIdx: i - 1, pdfIdx: j - 1 });
+            i--; j--;
+        } else if (dp[i - 1][j] > dp[i][j - 1]) {
+            aligned.unshift({ type: 'docx_only', docxIdx: i - 1 });
+            i--;
+        } else {
+            aligned.unshift({ type: 'pdf_only', pdfIdx: j - 1 });
+            j--;
+        }
+    }
+    while (i > 0) {
+        aligned.unshift({ type: 'docx_only', docxIdx: i - 1 });
+        i--;
+    }
+    while (j > 0) {
+        aligned.unshift({ type: 'pdf_only', pdfIdx: j - 1 });
+        j--;
+    }
+
+    // Process aligned pairs
+    for (const pair of aligned) {
+        if (pair.type === 'docx_only') {
+            differences.push({
+                type: 'missing',
+                severity: 'critical',
+                description: `Line missing in PDF`,
+                docxValue: docxLines[pair.docxIdx!],
+                docxLineNum: pair.docxIdx
+            });
+        } else if (pair.type === 'pdf_only') {
+            differences.push({
+                type: 'extra',
+                severity: 'warning',
+                description: `Extra line in PDF`,
+                pdfValue: pdfLines[pair.pdfIdx!],
+                pdfLineNum: pair.pdfIdx
+            });
+        } else if (pair.type === 'match') {
+            const docxLine = docxLines[pair.docxIdx!];
+            const pdfLine = pdfLines[pair.pdfIdx!];
+
+            // Even if lines "match" fuzzy, check word-by-word for differences
+            if (docxLine !== pdfLine) {
+                const wordDiffs = compareWords(docxLine, pdfLine);
+                for (const wd of wordDiffs) {
+                    differences.push({
+                        ...wd,
+                        docxLineNum: pair.docxIdx,
+                        pdfLineNum: pair.pdfIdx
+                    });
+                }
+            }
+        }
+    }
+
+    return differences;
+}
+
+function linesMatchFuzzy(a: string, b: string): boolean {
+    if (a === b) return true;
+    // Normalize: strip accents, lowercase, collapse whitespace
+    const normA = stripAccents(a).toLowerCase().replace(/\s+/g, ' ').trim();
+    const normB = stripAccents(b).toLowerCase().replace(/\s+/g, ' ').trim();
+    if (normA === normB) return true;
+
+    // Similarity based on common words
+    const wordsA = normA.split(/\s+/);
+    const wordsB = normB.split(/\s+/);
+    if (wordsA.length === 0 || wordsB.length === 0) return false;
+
+    let common = 0;
+    const setB = new Set(wordsB);
+    for (const w of wordsA) {
+        if (setB.has(w)) common++;
+    }
+
+    return common / Math.max(wordsA.length, wordsB.length) > 0.5;
+}
+
+function compareWords(docxLine: string, pdfLine: string): Difference[] {
+    const diffs: Difference[] = [];
+    const docxWords = docxLine.split(/\s+/);
+    const pdfWords = pdfLine.split(/\s+/);
+
+    // LCS on words
+    const m = docxWords.length;
+    const n = pdfWords.length;
+    const dp: number[][] = Array(m + 1).fill(null).map(() => Array(n + 1).fill(0));
+
+    for (let i = 1; i <= m; i++) {
+        for (let j = 1; j <= n; j++) {
+            if (docxWords[i - 1] === pdfWords[j - 1]) {
+                dp[i][j] = dp[i - 1][j - 1] + 1;
+            } else {
+                dp[i][j] = Math.max(dp[i - 1][j], dp[i][j - 1]);
+            }
+        }
+    }
+
+    // Backtrack
+    type WAlign = { type: 'same' | 'docx' | 'pdf' | 'changed'; dIdx?: number; pIdx?: number };
+    const waligned: WAlign[] = [];
+    let wi = m, wj = n;
+
+    while (wi > 0 && wj > 0) {
+        if (docxWords[wi - 1] === pdfWords[wj - 1]) {
+            waligned.unshift({ type: 'same', dIdx: wi - 1, pIdx: wj - 1 });
+            wi--; wj--;
+        } else if (dp[wi - 1][wj] > dp[wi][wj - 1]) {
+            waligned.unshift({ type: 'docx', dIdx: wi - 1 });
+            wi--;
+        } else {
+            waligned.unshift({ type: 'pdf', pIdx: wj - 1 });
+            wj--;
+        }
+    }
+    while (wi > 0) { waligned.unshift({ type: 'docx', dIdx: wi - 1 }); wi--; }
+    while (wj > 0) { waligned.unshift({ type: 'pdf', pIdx: wj - 1 }); wj--; }
+
+    // Pair up adjacent docx/pdf removals/additions as changes
+    let idx = 0;
+    while (idx < waligned.length) {
+        const cur = waligned[idx];
+        if (cur.type === 'docx' && idx + 1 < waligned.length && waligned[idx + 1].type === 'pdf') {
+            // This is a word change
+            const docxW = docxWords[cur.dIdx!];
+            const pdfW = pdfWords[waligned[idx + 1].pIdx!];
+            const classification = classifyWordDiff(docxW, pdfW);
+            diffs.push({
+                type: classification.type,
+                severity: classification.severity,
+                description: `"${docxW}" changed to "${pdfW}"`,
+                docxValue: docxW,
+                pdfValue: pdfW
+            });
+            idx += 2;
+        } else if (cur.type === 'pdf' && idx + 1 < waligned.length && waligned[idx + 1].type === 'docx') {
+            const docxW = docxWords[waligned[idx + 1].dIdx!];
+            const pdfW = pdfWords[cur.pIdx!];
+            const classification = classifyWordDiff(docxW, pdfW);
+            diffs.push({
+                type: classification.type,
+                severity: classification.severity,
+                description: `"${docxW}" changed to "${pdfW}"`,
+                docxValue: docxW,
+                pdfValue: pdfW
+            });
+            idx += 2;
+        } else if (cur.type === 'docx') {
+            diffs.push({
+                type: 'missing',
+                severity: 'critical',
+                description: `Word missing in PDF: "${docxWords[cur.dIdx!]}"`,
+                docxValue: docxWords[cur.dIdx!]
+            });
+            idx++;
+        } else if (cur.type === 'pdf') {
+            diffs.push({
+                type: 'extra',
+                severity: 'info',
+                description: `Extra word in PDF: "${pdfWords[cur.pIdx!]}"`,
+                pdfValue: pdfWords[cur.pIdx!]
+            });
+            idx++;
+        } else {
+            idx++;
+        }
+    }
+
+    return diffs;
+}
+
 app.listen(port, () => {
     console.log(`📊 Dashboard service listening at http://localhost:${port}`);
     console.log(`   Access dashboard: http://localhost:${port}`);
     console.log(`   Form submission: http://localhost:${port}/form`);
+    console.log(`   Design approval: http://localhost:${port}/design-approval`);
     console.log(`   Training dashboard: http://localhost:${port}/training`);
 });

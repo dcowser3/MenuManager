@@ -25,8 +25,9 @@ If the menu is perfect, return the original text unchanged.]
 [List remaining lower-confidence suggestions as JSON array. Each suggestion MUST have this exact structure:]
 [
   {
-    "type": "Spelling|Grammar|Formatting|Allergen Code|Diacritics|Redundant Word|Singular/Plural|Raw Item|General",
+    "type": "Spelling|Grammar|Formatting|Allergen Code|Diacritics|Redundant Word|Singular/Plural|Raw Item|Missing Price|Incomplete Dish Name|General",
     "confidence": "medium|low",
+    "severity": "critical|normal",
     "menuItem": "Name of the menu item this affects",
     "description": "Clear explanation of the issue",
     "recommendation": "Specific suggestion to fix it"
@@ -65,6 +66,24 @@ If the menu is perfect, return the original text unchanged.]
 - NO: Dollar signs ($), cents (.00), "USD"
 - Dual prices: Use vertical bar ` | ` to separate (e.g., "11 | 40" for glass/bottle)
 - Prix fixe: Use 00.00PP format
+
+#### 1.3.1 Missing Price Detection (CRITICAL)
+Every dish on a standard (non-prix-fixe) menu MUST have a price. If a dish entry has a name and description but no price, flag it as a suggestion with:
+- type: "Missing Price"
+- severity: "critical"
+- Do NOT auto-correct missing prices in the corrected menu — leave them in SUGGESTIONS only
+- For prix fixe menus, individual dishes do NOT need prices (only the overall prix fixe price is required). Do NOT flag missing individual dish prices on prix fixe menus.
+
+#### 1.3.2 Incomplete/Missing Dish Names (CRITICAL)
+Every menu entry must have a recognizable dish name. Flag entries that are:
+- Just a description without a dish name (e.g., "grilled, served with salsa 24")
+- Just a price with no dish name
+- Partial or truncated names that appear incomplete
+
+Flag these as a suggestion with:
+- type: "Incomplete Dish Name"
+- severity: "critical"
+- Do NOT auto-correct — leave in SUGGESTIONS only
 
 #### 1.4 Allergens
 - Format: Superscript, same line as dish/drink name
@@ -459,8 +478,9 @@ When reviewing menu text:
 7. **Fix hyphenation** per rules (Section 5.1) - MEDIUM CONFIDENCE
 8. **Flag duplicate menu items** - if same dish appears twice, flag for review - MEDIUM CONFIDENCE
 9. **Suggest "cheese" modifier** where missing (Section 5.3) - LOW CONFIDENCE
-10. **Validate pricing format** (Section 1.3) - LOW CONFIDENCE
+10. **Validate pricing**: Every dish must have a price (unless prix fixe) - CRITICAL SEVERITY, type "Missing Price"
 11. **Check category names** for proper pluralization (Section 2) - LOW CONFIDENCE
+12. **Validate dish names**: Every entry must have a recognizable dish name - CRITICAL SEVERITY, type "Incomplete Dish Name"
 
 **When uncertain**: Flag for human review rather than making incorrect changes.
 
@@ -478,3 +498,7 @@ When reviewing menu text:
 - ALWAYS return the corrected menu between the markers, even if no changes were made
 - Format suggestions as valid JSON array
 - Keep descriptions concise and actionable
+- The "severity" field is REQUIRED on every suggestion. Default to "normal" for most issues.
+- "Missing Price" suggestions MUST always have severity "critical"
+- "Incomplete Dish Name" suggestions MUST always have severity "critical"
+- All other suggestion types should have severity "normal" unless they represent a truly critical issue
