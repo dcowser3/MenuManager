@@ -25,6 +25,13 @@ CREATE TABLE submissions (
 
     -- Submitter info
     submitter_email VARCHAR(255) NOT NULL,
+    submitter_name VARCHAR(255),
+    submitter_job_title VARCHAR(255),
+
+    -- Additional project details
+    hotel_name VARCHAR(255),
+    city_country VARCHAR(255),
+    asset_type VARCHAR(50),  -- 'PRINT' or 'DIGITAL'
 
     -- Menu content (plain text for AI review)
     menu_content TEXT,
@@ -149,6 +156,22 @@ CREATE TABLE approval_workflow (
 CREATE INDEX idx_approval_workflow_submission ON approval_workflow(submission_id);
 CREATE INDEX idx_approval_workflow_reviewer ON approval_workflow(reviewer_id);
 CREATE INDEX idx_approval_workflow_status ON approval_workflow(status);
+
+-- ============================================================================
+-- 5. SUBMITTER_PROFILES
+-- Stores submitter info for autocomplete / autofill
+-- ============================================================================
+CREATE TABLE submitter_profiles (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name VARCHAR(255) NOT NULL,
+    name_normalized VARCHAR(255) NOT NULL UNIQUE,
+    email VARCHAR(255) NOT NULL,
+    job_title VARCHAR(255) NOT NULL,
+    last_used TIMESTAMPTZ DEFAULT NOW(),
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX idx_submitter_profiles_name ON submitter_profiles(name_normalized);
 
 -- ============================================================================
 -- HELPER FUNCTIONS

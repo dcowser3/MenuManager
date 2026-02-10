@@ -61,6 +61,29 @@ The AI review now enforces "hard stops" for critical issues that block submissio
 - Backend (`services/dashboard/index.ts`) normalizes severity as a safety net — defaults missing severity to `"normal"`, forces known critical types to `"critical"`, and uses fallback regex detection
 - Frontend (`services/dashboard/views/form.ejs`) sorts critical suggestions first, manages override state, and gates the submit button
 
+### Submitter Autofill & Recent Projects (Complete)
+Returning users can quickly fill forms using saved profiles and past project data:
+
+**Submitter Autocomplete** (both `/form` and `/design-approval`):
+- Type 2+ characters in the "Your Name" field to see matching profiles
+- Selecting a profile auto-fills name, email, and job title (fields remain editable)
+- Profiles are saved automatically on each form submission (fire-and-forget)
+- Keyboard navigation: ArrowUp/Down to highlight, Enter to select, Escape to dismiss
+
+**Recent Project Loader** (`/form` only):
+- "Load from Recent" dropdown appears in Project Details card when past projects exist
+- Populates all project fields except Date Needed (always fresh per submission)
+- Groups submissions by project name, shows most recent of each
+
+**Architecture:**
+- DB service (`services/db/index.ts`) stores profiles in `/tmp/db/submitter_profiles.json`, keyed by normalized name
+- DB service has `GET /submitter-profiles/search?q=`, `POST /submitter-profiles` (upsert), `GET /submissions/recent-projects`
+- Dashboard (`services/dashboard/index.ts`) proxies via `GET /api/submitter-profiles/search` and `GET /api/recent-projects`
+- Profile save triggered in both `POST /api/form/submit` and `POST /api/design-approval/compare`
+- Supabase schema includes `submitter_profiles` table for future migration
+
+**Important DB fix included:** `POST /submissions` now spreads `req.body` instead of only persisting 3 fields. All form data (project_name, property, submitter_name, etc.) is now stored correctly.
+
 ### Future Enhancements (Phase 3 - Planned)
 - **Extended menu content validation**: Additional critical error types beyond prices and dish names (e.g., missing allergen codes). The severity/blocking infrastructure is already in place.
 
@@ -70,7 +93,7 @@ The AI review now enforces "hard stops" for critical issues that block submissio
 services/
 ├── ai-review/        # Two-tier AI review (QA + corrections)
 ├── dashboard/        # Web interface + submission form (Express + EJS)
-├── db/               # Database service (JSON-based, migrating to Supabase)
+├── db/               # Database service (JSON-based, migrating to Supabase) + submitter profiles
 ├── differ/           # Compares AI draft vs human-approved for training
 ├── docx-redliner/    # DOCX redlining/track changes
 ├── notifier/         # Email notifications (SMTP)
@@ -115,7 +138,8 @@ Target: < 100 submissions/month (~$5/month total)
 | 7 | Deploy to production (Railway) | Pending |
 | 8 | Add authentication & roles (Clerk) | Pending |
 | 9 | Menu content validation (prices, dish names) | Complete |
-| 10 | Extended content validation (allergens, etc.) | Planned |
+| 10 | Submitter autofill & recent project loader | Complete |
+| 11 | Extended content validation (allergens, etc.) | Planned |
 
 ## Services
 
@@ -144,7 +168,7 @@ services/
 ```
 Chef Submission Flow:
   1. Chef opens web form
-  2. Fills project details (name, property, size, orientation, menu type, template type)
+  2. Fills submitter info (autocomplete from saved profiles) and project details (load from recent projects)
   3. Attests required approval (name, position of approver) - optional second approver
   4. Pastes menu content
   5. Runs AI check (QA validation)

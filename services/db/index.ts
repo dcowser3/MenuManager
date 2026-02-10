@@ -8,6 +8,7 @@ const port = 3004;
 const DB_DIR = path.join(__dirname, '..', '..', '..', 'tmp', 'db');
 const SUBMISSIONS_DB = path.join(DB_DIR, 'submissions.json');
 const REPORTS_DB = path.join(DB_DIR, 'reports.json');
+const PROFILES_DB = path.join(DB_DIR, 'submitter_profiles.json');
 
 // Ensure DB directory and files exist
 async function initDb() {
@@ -15,6 +16,7 @@ async function initDb() {
         await fs.mkdir(DB_DIR, { recursive: true });
         await fs.access(SUBMISSIONS_DB).catch(() => fs.writeFile(SUBMISSIONS_DB, '{}')); // Now an object
         await fs.access(REPORTS_DB).catch(() => fs.writeFile(REPORTS_DB, '[]'));
+        await fs.access(PROFILES_DB).catch(() => fs.writeFile(PROFILES_DB, '{}'));
     } catch (error) {
         console.error('Failed to initialize database:', error);
     }
@@ -25,18 +27,13 @@ app.use(express.json());
 // Endpoint to create a new submission
 app.post('/submissions', async (req, res) => {
     try {
-        const { submitter_email, filename, original_path } = req.body;
         const submissions = JSON.parse(await fs.readFile(SUBMISSIONS_DB, 'utf-8'));
-        const newId = `sub_${Date.now()}`;
+        const newId = req.body.id || `sub_${Date.now()}`;
         const newSubmission = {
+            ...req.body,
             id: newId,
-            submitter_email,
-            filename,
-            original_path,
-            status: 'processing', // Initial status
-            ai_draft_path: null,
-            final_path: null,
-            created_at: new Date().toISOString(),
+            status: req.body.status || 'processing',
+            created_at: req.body.created_at || new Date().toISOString(),
             updated_at: new Date().toISOString(),
         };
         submissions[newId] = newSubmission;
@@ -60,6 +57,98 @@ app.get('/submissions/pending', async (req, res) => {
     } catch (error) {
         console.error('Error getting pending submissions:', error);
         res.status(500).send('Error getting pending submissions.');
+    }
+});
+
+// Endpoint to get recent projects (grouped by project_name)
+// IMPORTANT: Must come BEFORE /submissions/:id
+app.get('/submissions/recent-projects', async (req, res) => {
+    try {
+        const limit = parseInt(req.query.limit as string) || 20;
+        const submissions = JSON.parse(await fs.readFile(SUBMISSIONS_DB, 'utf-8'));
+        const allSubs = Object.values(submissions) as any[];
+
+        // Filter to form submissions only
+        const formSubs = allSubs.filter(s => s.source === 'form' && s.project_name);
+
+        // Group by project_name (case-insensitive), keep most recent
+        const projectMap: Record<string, any> = {};
+        formSubs.forEach(s => {
+            const key = (s.project_name || '').toLowerCase().trim();
+            if (!key) return;
+            if (!projectMap[key] || new Date(s.created_at) > new Date(projectMap[key].created_at)) {
+                projectMap[key] = s;
+            }
+        });
+
+        // Sort by most recent, return top N
+        const projects = Object.values(projectMap)
+            .sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+            .slice(0, limit)
+            .map((s: any) => ({
+                projectName: s.project_name,
+                property: s.property || '',
+                size: s.size || '',
+                orientation: s.orientation || '',
+                menuType: s.menu_type || 'standard',
+                templateType: s.template_type || 'food',
+                hotelName: s.hotel_name || '',
+                cityCountry: s.city_country || '',
+                assetType: s.asset_type || '',
+            }));
+
+        res.json(projects);
+    } catch (error) {
+        console.error('Error getting recent projects:', error);
+        res.status(500).json([]);
+    }
+});
+
+// Submitter profile search
+app.get('/submitter-profiles/search', async (req, res) => {
+    try {
+        const q = (req.query.q as string || '').trim().toLowerCase();
+        if (q.length < 2) {
+            return res.json([]);
+        }
+
+        const profiles = JSON.parse(await fs.readFile(PROFILES_DB, 'utf-8'));
+        const matches = Object.values(profiles)
+            .filter((p: any) => p.name.toLowerCase().includes(q))
+            .sort((a: any, b: any) => new Date(b.lastUsed).getTime() - new Date(a.lastUsed).getTime())
+            .slice(0, 8);
+
+        res.json(matches);
+    } catch (error) {
+        console.error('Error searching submitter profiles:', error);
+        res.json([]);
+    }
+});
+
+// Submitter profile upsert
+app.post('/submitter-profiles', async (req, res) => {
+    try {
+        const { name, email, jobTitle } = req.body;
+        if (!name || !email) {
+            return res.status(400).json({ error: 'name and email are required' });
+        }
+
+        const key = name.toLowerCase().trim();
+        const profiles = JSON.parse(await fs.readFile(PROFILES_DB, 'utf-8'));
+        const now = new Date().toISOString();
+
+        profiles[key] = {
+            name: name.trim(),
+            email: email.trim(),
+            jobTitle: (jobTitle || '').trim(),
+            lastUsed: now,
+        };
+
+        await fs.writeFile(PROFILES_DB, JSON.stringify(profiles, null, 2));
+        res.json(profiles[key]);
+    } catch (error) {
+        console.error('Error saving submitter profile:', error);
+        res.status(500).json({ error: 'Failed to save profile' });
     }
 });
 
