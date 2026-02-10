@@ -102,6 +102,47 @@
             margin-bottom: 1rem;
         }
 
+        /* Form grid for submitter/project fields */
+        .form-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+            gap: 1rem;
+        }
+
+        .form-group label {
+            display: block;
+            font-size: 0.65rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.15em;
+            color: var(--color-text-muted);
+            margin-bottom: 0.35rem;
+        }
+
+        .form-group input,
+        .form-group select {
+            width: 100%;
+            padding: 0.65rem 0.75rem;
+            border: 1px solid var(--color-border);
+            font-family: var(--font-body);
+            font-size: 0.85rem;
+            color: var(--color-text);
+            background: var(--color-background);
+            transition: border-color 0.2s ease;
+        }
+
+        .form-group input:focus,
+        .form-group select:focus {
+            outline: none;
+            border-color: var(--color-secondary);
+        }
+
+        .form-group input[readonly] {
+            background: var(--color-background-alt);
+            color: var(--color-text-light);
+            cursor: default;
+        }
+
         /* Upload zones */
         .upload-grid {
             display: grid;
@@ -461,6 +502,63 @@
                 grid-template-columns: 1fr;
             }
         }
+
+        /* Autocomplete */
+        .autocomplete-wrapper {
+            position: relative;
+        }
+
+        .autocomplete-dropdown {
+            display: none;
+            position: absolute;
+            top: 100%;
+            left: 0;
+            right: 0;
+            background: var(--color-background);
+            border: 1px solid var(--color-border);
+            border-top: none;
+            max-height: 200px;
+            overflow-y: auto;
+            z-index: 100;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        }
+
+        .autocomplete-dropdown.show {
+            display: block;
+        }
+
+        .autocomplete-item {
+            padding: 0.6rem 0.75rem;
+            cursor: pointer;
+            font-size: 0.85rem;
+            border-bottom: 1px solid var(--color-border-light);
+            transition: background 0.15s ease;
+        }
+
+        .autocomplete-item:last-child {
+            border-bottom: none;
+        }
+
+        .autocomplete-item:hover,
+        .autocomplete-item.highlighted {
+            background: var(--color-background-alt);
+        }
+
+        .autocomplete-item .ac-name {
+            color: var(--color-text);
+            font-weight: 500;
+        }
+
+        .autocomplete-item .ac-detail {
+            color: var(--color-text-muted);
+            font-size: 0.75rem;
+            margin-top: 0.1rem;
+        }
+
+        .ac-match {
+            font-weight: 700;
+            color: var(--color-secondary);
+        }
     </style>
 </head>
 <body>
@@ -480,6 +578,25 @@
 
         <!-- Step 1: Upload -->
         <div id="step1">
+            <div class="card">
+                <h2>Submitter Information</h2>
+                <div class="form-grid">
+                    <div class="form-group autocomplete-wrapper">
+                        <label for="submitterName">Your Name *</label>
+                        <input type="text" id="submitterName" required placeholder="First and Last Name" autocomplete="off" oninput="onSubmitterNameInput(this.value)">
+                        <div class="autocomplete-dropdown" id="submitterDropdown"></div>
+                    </div>
+                    <div class="form-group">
+                        <label for="submitterEmail">Your Email *</label>
+                        <input type="email" id="submitterEmail" required placeholder="designer@example.com">
+                    </div>
+                    <div class="form-group">
+                        <label for="submitterJobTitle">Job Title *</label>
+                        <input type="text" id="submitterJobTitle" required placeholder="e.g., Graphic Designer">
+                    </div>
+                </div>
+            </div>
+
             <div class="card">
                 <h2>Upload Documents</h2>
                 <p style="font-size: 0.85rem; color: var(--color-text-light); margin-bottom: 1.25rem;">
@@ -517,6 +634,24 @@
         <!-- Step 2: Results -->
         <div id="step2" class="hidden">
             <div id="resultBanner"></div>
+
+            <div id="submitterDetailsCard" class="card">
+                <h2>Submitter Information <span style="font-size: 0.7rem; font-weight: 400; color: var(--color-text-muted); text-transform: uppercase; letter-spacing: 0.1em;">(Read Only)</span></h2>
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label>Your Name</label>
+                        <input type="text" id="step2SubmitterName" readonly>
+                    </div>
+                    <div class="form-group">
+                        <label>Your Email</label>
+                        <input type="text" id="step2SubmitterEmail" readonly>
+                    </div>
+                    <div class="form-group">
+                        <label>Job Title</label>
+                        <input type="text" id="step2SubmitterJobTitle" readonly>
+                    </div>
+                </div>
+            </div>
 
             <div id="projectDetailsCard" class="card">
                 <h2>Project Details <span style="font-size: 0.7rem; font-weight: 400; color: var(--color-text-muted); text-transform: uppercase; letter-spacing: 0.1em;">(Extracted from DOCX)</span></h2>
@@ -599,6 +734,23 @@
         }
 
         async function compareDocuments() {
+            // Validate submitter fields
+            const submitterName = document.getElementById('submitterName').value.trim();
+            const submitterEmail = document.getElementById('submitterEmail').value.trim();
+            const submitterJobTitle = document.getElementById('submitterJobTitle').value.trim();
+
+            if (!submitterName || !submitterEmail || !submitterJobTitle) {
+                showAlert('Please fill in all submitter information fields', 'error');
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+                return;
+            }
+
+            if (!submitterEmail.includes('@')) {
+                showAlert('Please enter a valid email address', 'error');
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+                return;
+            }
+
             const docxInput = document.getElementById('docxFile');
             const pdfInput = document.getElementById('pdfFile');
 
@@ -614,6 +766,9 @@
             const formData = new FormData();
             formData.append('docxFile', docxInput.files[0]);
             formData.append('pdfFile', pdfInput.files[0]);
+            formData.append('submitterName', submitterName);
+            formData.append('submitterEmail', submitterEmail);
+            formData.append('submitterJobTitle', submitterJobTitle);
 
             try {
                 const response = await fetch('/api/design-approval/compare', {
@@ -640,7 +795,12 @@
             document.getElementById('step1').classList.add('hidden');
             document.getElementById('step2').classList.remove('hidden');
 
-            // Project details
+            // Populate submitter info readonly fields
+            document.getElementById('step2SubmitterName').value = document.getElementById('submitterName').value;
+            document.getElementById('step2SubmitterEmail').value = document.getElementById('submitterEmail').value;
+            document.getElementById('step2SubmitterJobTitle').value = document.getElementById('submitterJobTitle').value;
+
+            // Project details (extracted from DOCX)
             const details = data.projectDetails || {};
             const grid = document.getElementById('projectDetailsGrid');
             grid.innerHTML = '';
@@ -781,6 +941,11 @@
             docxFileSelected = false;
             pdfFileSelected = false;
 
+            // Reset submitter fields
+            document.getElementById('submitterName').value = '';
+            document.getElementById('submitterEmail').value = '';
+            document.getElementById('submitterJobTitle').value = '';
+
             const btn = document.getElementById('compareBtn');
             btn.disabled = true;
             btn.textContent = 'Compare Documents';
@@ -800,6 +965,116 @@
             div.textContent = text;
             return div.innerHTML;
         }
+
+        // === Submitter Autocomplete ===
+        let submitterDebounceTimer = null;
+        let submitterResults = [];
+        let submitterHighlightIndex = -1;
+
+        function onSubmitterNameInput(value) {
+            clearTimeout(submitterDebounceTimer);
+            submitterDebounceTimer = setTimeout(() => {
+                if (value.trim().length < 2) {
+                    document.getElementById('submitterDropdown').classList.remove('show');
+                    submitterResults = [];
+                    return;
+                }
+                searchSubmitters(value.trim());
+            }, 250);
+        }
+
+        async function searchSubmitters(query) {
+            try {
+                const response = await fetch(`/api/submitter-profiles/search?q=${encodeURIComponent(query)}`);
+                const profiles = await response.json();
+                submitterResults = profiles;
+                submitterHighlightIndex = -1;
+                showSubmitterDropdown(profiles, query);
+            } catch (err) {
+                console.error('Submitter search error:', err);
+            }
+        }
+
+        function showSubmitterDropdown(profiles, query) {
+            const dropdown = document.getElementById('submitterDropdown');
+            if (!profiles || profiles.length === 0) {
+                dropdown.classList.remove('show');
+                return;
+            }
+
+            const queryLower = query.toLowerCase();
+            dropdown.innerHTML = profiles.map((p, i) => {
+                const nameHtml = highlightMatch(p.name, queryLower);
+                const detail = [p.email, p.jobTitle].filter(Boolean).join(' · ');
+                return `<div class="autocomplete-item" data-index="${i}" onmousedown="selectSubmitter(${i})">
+                    <div class="ac-name">${nameHtml}</div>
+                    ${detail ? `<div class="ac-detail">${escapeHtml(detail)}</div>` : ''}
+                </div>`;
+            }).join('');
+
+            dropdown.classList.add('show');
+        }
+
+        function highlightMatch(text, query) {
+            const escaped = escapeHtml(text);
+            const queryEscaped = escapeHtml(query);
+            const regex = new RegExp(`(${queryEscaped.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
+            return escaped.replace(regex, '<span class="ac-match">$1</span>');
+        }
+
+        function selectSubmitter(index) {
+            const profile = submitterResults[index];
+            if (!profile) return;
+
+            document.getElementById('submitterName').value = profile.name;
+            document.getElementById('submitterEmail').value = profile.email || '';
+            document.getElementById('submitterJobTitle').value = profile.jobTitle || '';
+            document.getElementById('submitterDropdown').classList.remove('show');
+            submitterResults = [];
+            submitterHighlightIndex = -1;
+        }
+
+        function handleSubmitterKeydown(e) {
+            const dropdown = document.getElementById('submitterDropdown');
+            if (!dropdown.classList.contains('show') || submitterResults.length === 0) return;
+
+            if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                submitterHighlightIndex = Math.min(submitterHighlightIndex + 1, submitterResults.length - 1);
+                updateSubmitterHighlight();
+            } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                submitterHighlightIndex = Math.max(submitterHighlightIndex - 1, 0);
+                updateSubmitterHighlight();
+            } else if (e.key === 'Enter' && submitterHighlightIndex >= 0) {
+                e.preventDefault();
+                selectSubmitter(submitterHighlightIndex);
+            } else if (e.key === 'Escape') {
+                dropdown.classList.remove('show');
+                submitterHighlightIndex = -1;
+            }
+        }
+
+        function updateSubmitterHighlight() {
+            const items = document.querySelectorAll('#submitterDropdown .autocomplete-item');
+            items.forEach((item, i) => {
+                item.classList.toggle('highlighted', i === submitterHighlightIndex);
+            });
+            if (items[submitterHighlightIndex]) {
+                items[submitterHighlightIndex].scrollIntoView({ block: 'nearest' });
+            }
+        }
+
+        // Init keyboard + blur handlers
+        document.addEventListener('DOMContentLoaded', function() {
+            const submitterNameInput = document.getElementById('submitterName');
+            submitterNameInput.addEventListener('keydown', handleSubmitterKeydown);
+            submitterNameInput.addEventListener('blur', function() {
+                setTimeout(() => {
+                    document.getElementById('submitterDropdown').classList.remove('show');
+                }, 150);
+            });
+        });
     </script>
 </body>
 </html>

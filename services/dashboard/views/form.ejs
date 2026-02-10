@@ -1011,6 +1011,98 @@
             font-size: 0.8rem;
             color: var(--color-text-light);
         }
+
+        /* Autocomplete */
+        .autocomplete-wrapper {
+            position: relative;
+        }
+
+        .autocomplete-dropdown {
+            display: none;
+            position: absolute;
+            top: 100%;
+            left: 0;
+            right: 0;
+            background: var(--color-background);
+            border: 1px solid var(--color-border);
+            border-top: none;
+            max-height: 200px;
+            overflow-y: auto;
+            z-index: 100;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        }
+
+        .autocomplete-dropdown.show {
+            display: block;
+        }
+
+        .autocomplete-item {
+            padding: 0.6rem 0.75rem;
+            cursor: pointer;
+            font-size: 0.85rem;
+            border-bottom: 1px solid var(--color-border-light);
+            transition: background 0.15s ease;
+        }
+
+        .autocomplete-item:last-child {
+            border-bottom: none;
+        }
+
+        .autocomplete-item:hover,
+        .autocomplete-item.highlighted {
+            background: var(--color-background-alt);
+        }
+
+        .autocomplete-item .ac-name {
+            color: var(--color-text);
+            font-weight: 500;
+        }
+
+        .autocomplete-item .ac-detail {
+            color: var(--color-text-muted);
+            font-size: 0.75rem;
+            margin-top: 0.1rem;
+        }
+
+        .ac-match {
+            font-weight: 700;
+            color: var(--color-secondary);
+        }
+
+        /* Recent Project Loader */
+        .recent-project-loader {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            padding: 0.6rem 0.75rem;
+            margin-bottom: 1rem;
+            background: var(--color-background-alt);
+            border: 1px solid var(--color-border-light);
+        }
+
+        .recent-project-loader label {
+            font-size: 0.65rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.15em;
+            color: var(--color-text-muted);
+            white-space: nowrap;
+        }
+
+        .recent-project-loader select {
+            flex: 1;
+            padding: 0.5rem 0.75rem;
+            border: 1px solid var(--color-border);
+            font-family: var(--font-body);
+            font-size: 0.85rem;
+            color: var(--color-text);
+            background: var(--color-background);
+        }
+
+        .recent-project-loader select:focus {
+            outline: none;
+            border-color: var(--color-secondary);
+        }
     </style>
 </head>
 <body>
@@ -1031,7 +1123,32 @@
         <!-- Step 1: Form Fields -->
         <div id="step1">
             <div class="card">
+                <h2>Submitter Information</h2>
+                <div class="form-grid">
+                    <div class="form-group autocomplete-wrapper">
+                        <label for="submitterName">Your Name *</label>
+                        <input type="text" id="submitterName" required placeholder="First and Last Name" autocomplete="off" oninput="onSubmitterNameInput(this.value)">
+                        <div class="autocomplete-dropdown" id="submitterDropdown"></div>
+                    </div>
+                    <div class="form-group">
+                        <label for="submitterEmail">Your Email *</label>
+                        <input type="email" id="submitterEmail" required placeholder="chef@example.com">
+                    </div>
+                    <div class="form-group">
+                        <label for="submitterJobTitle">Job Title *</label>
+                        <input type="text" id="submitterJobTitle" required placeholder="e.g., Executive Chef">
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
                 <h2>Project Details</h2>
+                <div class="recent-project-loader" id="recentProjectLoader" style="display: none;">
+                    <label for="recentProjectSelect">Load from Recent</label>
+                    <select id="recentProjectSelect" onchange="loadRecentProject(this.selectedIndex - 1)">
+                        <option value="">-- Select a recent project --</option>
+                    </select>
+                </div>
                 <div class="form-grid">
                     <div class="form-group">
                         <label for="projectName">Project Name *</label>
@@ -1074,8 +1191,20 @@
                         <input type="date" id="dateNeeded" required>
                     </div>
                     <div class="form-group">
-                        <label for="submitterEmail">Your Email *</label>
-                        <input type="email" id="submitterEmail" required placeholder="chef@example.com">
+                        <label for="hotelName">Hotel Name</label>
+                        <input type="text" id="hotelName" placeholder="Enter hotel name">
+                    </div>
+                    <div class="form-group">
+                        <label for="cityCountry">City / Country *</label>
+                        <input type="text" id="cityCountry" required placeholder="e.g., New York, USA">
+                    </div>
+                    <div class="form-group">
+                        <label for="assetType">Asset Type *</label>
+                        <select id="assetType" required>
+                            <option value="">Select asset type</option>
+                            <option value="PRINT">Print</option>
+                            <option value="DIGITAL">Digital</option>
+                        </select>
                     </div>
                 </div>
             </div>
@@ -1206,6 +1335,23 @@
             <!-- Read-only form fields showing what user selected -->
             <div id="step2FormFields" class="form-fields-readonly">
                 <div class="card">
+                    <h2>Submitter Information <span style="font-size: 0.7rem; font-weight: 400; color: var(--color-text-muted); text-transform: uppercase; letter-spacing: 0.1em;">(Read Only)</span></h2>
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label>Your Name</label>
+                            <input type="text" id="step2SubmitterName" readonly>
+                        </div>
+                        <div class="form-group">
+                            <label>Your Email</label>
+                            <input type="text" id="step2SubmitterEmail" readonly>
+                        </div>
+                        <div class="form-group">
+                            <label>Job Title</label>
+                            <input type="text" id="step2SubmitterJobTitle" readonly>
+                        </div>
+                    </div>
+                </div>
+                <div class="card">
                     <h2>Project Details <span style="font-size: 0.7rem; font-weight: 400; color: var(--color-text-muted); text-transform: uppercase; letter-spacing: 0.1em;">(Read Only)</span></h2>
                     <div class="form-grid">
                         <div class="form-group">
@@ -1237,8 +1383,16 @@
                             <input type="text" id="step2DateNeeded" readonly>
                         </div>
                         <div class="form-group">
-                            <label>Your Email</label>
-                            <input type="text" id="step2Email" readonly>
+                            <label>Hotel Name</label>
+                            <input type="text" id="step2HotelName" readonly>
+                        </div>
+                        <div class="form-group">
+                            <label>City / Country</label>
+                            <input type="text" id="step2CityCountry" readonly>
+                        </div>
+                        <div class="form-group">
+                            <label>Asset Type</label>
+                            <input type="text" id="step2AssetType" readonly>
                         </div>
                     </div>
                 </div>
@@ -1349,6 +1503,19 @@
                 // Initialize on load
                 updateApprovalHint();
             }
+
+            // Load recent projects
+            loadRecentProjects();
+
+            // Submitter name keyboard nav + blur dismiss
+            const submitterNameInput = document.getElementById('submitterName');
+            submitterNameInput.addEventListener('keydown', handleSubmitterKeydown);
+            submitterNameInput.addEventListener('blur', function() {
+                setTimeout(() => {
+                    const dropdown = document.getElementById('submitterDropdown');
+                    dropdown.classList.remove('show');
+                }, 150);
+            });
         });
 
         function updateApprovalHint() {
@@ -1359,6 +1526,171 @@
                 hintEl.textContent = 'e.g., Head of Mixology, Bar Director, Regional Director of Operations';
             } else {
                 hintEl.textContent = 'e.g., Property GM, Director of F&B, Executive Chef, Chef de Cuisine';
+            }
+        }
+
+        // === Submitter Autocomplete ===
+        let submitterDebounceTimer = null;
+        let submitterResults = [];
+        let submitterHighlightIndex = -1;
+
+        function onSubmitterNameInput(value) {
+            clearTimeout(submitterDebounceTimer);
+            submitterDebounceTimer = setTimeout(() => {
+                if (value.trim().length < 2) {
+                    document.getElementById('submitterDropdown').classList.remove('show');
+                    submitterResults = [];
+                    return;
+                }
+                searchSubmitters(value.trim());
+            }, 250);
+        }
+
+        async function searchSubmitters(query) {
+            try {
+                const response = await fetch(`/api/submitter-profiles/search?q=${encodeURIComponent(query)}`);
+                const profiles = await response.json();
+                submitterResults = profiles;
+                submitterHighlightIndex = -1;
+                showSubmitterDropdown(profiles, query);
+            } catch (err) {
+                console.error('Submitter search error:', err);
+            }
+        }
+
+        function showSubmitterDropdown(profiles, query) {
+            const dropdown = document.getElementById('submitterDropdown');
+            if (!profiles || profiles.length === 0) {
+                dropdown.classList.remove('show');
+                return;
+            }
+
+            const queryLower = query.toLowerCase();
+            dropdown.innerHTML = profiles.map((p, i) => {
+                const nameHtml = highlightMatch(p.name, queryLower);
+                const detail = [p.email, p.jobTitle].filter(Boolean).join(' · ');
+                return `<div class="autocomplete-item" data-index="${i}" onmousedown="selectSubmitter(${i})">
+                    <div class="ac-name">${nameHtml}</div>
+                    ${detail ? `<div class="ac-detail">${escapeHtml(detail)}</div>` : ''}
+                </div>`;
+            }).join('');
+
+            dropdown.classList.add('show');
+        }
+
+        function highlightMatch(text, query) {
+            const escaped = escapeHtml(text);
+            const queryEscaped = escapeHtml(query);
+            const regex = new RegExp(`(${queryEscaped.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
+            return escaped.replace(regex, '<span class="ac-match">$1</span>');
+        }
+
+        function selectSubmitter(index) {
+            const profile = submitterResults[index];
+            if (!profile) return;
+
+            document.getElementById('submitterName').value = profile.name;
+            document.getElementById('submitterEmail').value = profile.email || '';
+            document.getElementById('submitterJobTitle').value = profile.jobTitle || '';
+            document.getElementById('submitterDropdown').classList.remove('show');
+            submitterResults = [];
+            submitterHighlightIndex = -1;
+        }
+
+        function handleSubmitterKeydown(e) {
+            const dropdown = document.getElementById('submitterDropdown');
+            if (!dropdown.classList.contains('show') || submitterResults.length === 0) return;
+
+            if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                submitterHighlightIndex = Math.min(submitterHighlightIndex + 1, submitterResults.length - 1);
+                updateSubmitterHighlight();
+            } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                submitterHighlightIndex = Math.max(submitterHighlightIndex - 1, 0);
+                updateSubmitterHighlight();
+            } else if (e.key === 'Enter' && submitterHighlightIndex >= 0) {
+                e.preventDefault();
+                selectSubmitter(submitterHighlightIndex);
+            } else if (e.key === 'Escape') {
+                dropdown.classList.remove('show');
+                submitterHighlightIndex = -1;
+            }
+        }
+
+        function updateSubmitterHighlight() {
+            const items = document.querySelectorAll('#submitterDropdown .autocomplete-item');
+            items.forEach((item, i) => {
+                item.classList.toggle('highlighted', i === submitterHighlightIndex);
+            });
+            // Scroll highlighted item into view
+            if (items[submitterHighlightIndex]) {
+                items[submitterHighlightIndex].scrollIntoView({ block: 'nearest' });
+            }
+        }
+
+        // === Recent Project Loader ===
+        let recentProjectsData = [];
+
+        async function loadRecentProjects() {
+            try {
+                const response = await fetch('/api/recent-projects?limit=20');
+                const projects = await response.json();
+                recentProjectsData = projects;
+
+                if (projects.length === 0) return;
+
+                const select = document.getElementById('recentProjectSelect');
+                projects.forEach((p, i) => {
+                    const opt = document.createElement('option');
+                    opt.value = i;
+                    opt.textContent = `${p.projectName} — ${p.property}`;
+                    select.appendChild(opt);
+                });
+
+                document.getElementById('recentProjectLoader').style.display = 'flex';
+            } catch (err) {
+                console.error('Failed to load recent projects:', err);
+            }
+        }
+
+        function loadRecentProject(index) {
+            if (index < 0 || !recentProjectsData[index]) return;
+            const p = recentProjectsData[index];
+
+            document.getElementById('projectName').value = p.projectName || '';
+            document.getElementById('property').value = p.property || '';
+            document.getElementById('size').value = p.size || '';
+            document.getElementById('hotelName').value = p.hotelName || '';
+            document.getElementById('cityCountry').value = p.cityCountry || '';
+
+            setSelectValue('orientation', p.orientation);
+            setSelectValue('menuType', p.menuType);
+            setSelectValue('templateType', p.templateType);
+            setSelectValue('assetType', p.assetType);
+
+            // Dispatch change event on templateType to update approval hints
+            document.getElementById('templateType').dispatchEvent(new Event('change'));
+        }
+
+        function setSelectValue(id, value) {
+            const select = document.getElementById(id);
+            if (!select || !value) return;
+
+            // Try exact match first
+            for (let i = 0; i < select.options.length; i++) {
+                if (select.options[i].value === value) {
+                    select.selectedIndex = i;
+                    return;
+                }
+            }
+            // Case-insensitive fallback
+            const valueLower = value.toLowerCase();
+            for (let i = 0; i < select.options.length; i++) {
+                if (select.options[i].value.toLowerCase() === valueLower) {
+                    select.selectedIndex = i;
+                    return;
+                }
             }
         }
 
@@ -1551,6 +1883,9 @@
         }
 
         function validateStep1() {
+            const submitterName = document.getElementById('submitterName').value.trim();
+            const submitterEmail = document.getElementById('submitterEmail').value.trim();
+            const submitterJobTitle = document.getElementById('submitterJobTitle').value.trim();
             const projectName = document.getElementById('projectName').value.trim();
             const property = document.getElementById('property').value.trim();
             const size = document.getElementById('size').value.trim();
@@ -1558,17 +1893,24 @@
             const menuType = document.getElementById('menuType').value;
             const templateType = document.getElementById('templateType').value;
             const dateNeeded = document.getElementById('dateNeeded').value;
-            const submitterEmail = document.getElementById('submitterEmail').value.trim();
+            const cityCountry = document.getElementById('cityCountry').value.trim();
+            const assetType = document.getElementById('assetType').value;
             const menuContent = quill.getText().trim();
 
-            if (!projectName || !property || !size || !orientation || !menuType || !templateType || !dateNeeded || !submitterEmail || !menuContent) {
-                showAlert('Please fill in all required fields', 'error');
+            if (!submitterName || !submitterEmail || !submitterJobTitle) {
+                showAlert('Please fill in all submitter information fields', 'error');
                 window.scrollTo({ top: 0, behavior: 'smooth' });
                 return false;
             }
 
             if (!submitterEmail.includes('@')) {
                 showAlert('Please enter a valid email address', 'error');
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+                return false;
+            }
+
+            if (!projectName || !property || !size || !orientation || !menuType || !templateType || !dateNeeded || !cityCountry || !assetType || !menuContent) {
+                showAlert('Please fill in all required fields', 'error');
                 window.scrollTo({ top: 0, behavior: 'smooth' });
                 return false;
             }
@@ -1925,7 +2267,12 @@
             // Reset critical error overrides
             criticalErrorOverrides = {};
 
-            // Populate read-only form fields
+            // Populate read-only submitter fields
+            document.getElementById('step2SubmitterName').value = document.getElementById('submitterName').value;
+            document.getElementById('step2SubmitterEmail').value = document.getElementById('submitterEmail').value;
+            document.getElementById('step2SubmitterJobTitle').value = document.getElementById('submitterJobTitle').value;
+
+            // Populate read-only project detail fields
             document.getElementById('step2ProjectName').value = document.getElementById('projectName').value;
             document.getElementById('step2Property').value = document.getElementById('property').value;
             document.getElementById('step2Size').value = document.getElementById('size').value;
@@ -1935,7 +2282,10 @@
             const templateTypeSelect = document.getElementById('templateType');
             document.getElementById('step2TemplateType').value = templateTypeSelect.options[templateTypeSelect.selectedIndex].text;
             document.getElementById('step2DateNeeded').value = document.getElementById('dateNeeded').value;
-            document.getElementById('step2Email').value = document.getElementById('submitterEmail').value;
+            document.getElementById('step2HotelName').value = document.getElementById('hotelName').value || '(none)';
+            document.getElementById('step2CityCountry').value = document.getElementById('cityCountry').value;
+            const assetTypeSelect = document.getElementById('assetType');
+            document.getElementById('step2AssetType').value = assetTypeSelect.options[assetTypeSelect.selectedIndex].text;
 
             const originalText = results.originalMenu;
             const correctedText = results.correctedMenu;
@@ -2073,6 +2423,9 @@
             }
 
             const formData = {
+                submitterName: document.getElementById('submitterName').value.trim(),
+                submitterEmail: document.getElementById('submitterEmail').value.trim(),
+                submitterJobTitle: document.getElementById('submitterJobTitle').value.trim(),
                 projectName: document.getElementById('projectName').value.trim(),
                 property: document.getElementById('property').value.trim(),
                 size: document.getElementById('size').value.trim(),
@@ -2080,7 +2433,9 @@
                 menuType: document.getElementById('menuType').value,
                 templateType: document.getElementById('templateType').value,
                 dateNeeded: document.getElementById('dateNeeded').value,
-                submitterEmail: document.getElementById('submitterEmail').value.trim(),
+                hotelName: document.getElementById('hotelName').value.trim(),
+                cityCountry: document.getElementById('cityCountry').value.trim(),
+                assetType: document.getElementById('assetType').value,
                 menuContent: menuContentText,
                 menuContentHtml: menuContentHtml,
                 approvals: approvals,

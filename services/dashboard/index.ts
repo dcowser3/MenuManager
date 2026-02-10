@@ -463,6 +463,36 @@ app.get('/training/download-prompt/:sessionId', async (req, res) => {
 });
 
 /**
+ * Proxy: Submitter profile search
+ */
+app.get('/api/submitter-profiles/search', async (req, res) => {
+    try {
+        const q = req.query.q || '';
+        const dbResponse = await axios.get(`http://localhost:3004/submitter-profiles/search`, {
+            params: { q }
+        });
+        res.json(dbResponse.data);
+    } catch (error) {
+        res.json([]);
+    }
+});
+
+/**
+ * Proxy: Recent projects
+ */
+app.get('/api/recent-projects', async (req, res) => {
+    try {
+        const limit = req.query.limit || 20;
+        const dbResponse = await axios.get(`http://localhost:3004/submissions/recent-projects`, {
+            params: { limit }
+        });
+        res.json(dbResponse.data);
+    } catch (error) {
+        res.json([]);
+    }
+});
+
+/**
  * Form API: Basic AI Check - Run QA check on menu content
  */
 app.post('/api/form/basic-check', async (req, res) => {
@@ -596,10 +626,10 @@ Note: Use ONLY these allergen codes when checking allergen compliance. Do not us
  */
 app.post('/api/form/submit', async (req, res) => {
     try {
-        const { projectName, property, size, orientation, menuType, templateType, dateNeeded, submitterEmail, menuContent, approvals } = req.body;
+        const { submitterName, submitterEmail, submitterJobTitle, projectName, property, size, orientation, menuType, templateType, dateNeeded, hotelName, cityCountry, assetType, menuContent, approvals } = req.body;
 
         // Validate required fields
-        if (!projectName || !property || !size || !orientation || !templateType || !dateNeeded || !submitterEmail || !menuContent) {
+        if (!submitterName || !submitterEmail || !submitterJobTitle || !projectName || !property || !size || !orientation || !templateType || !dateNeeded || !cityCountry || !assetType || !menuContent) {
             return res.status(400).json({ error: 'All fields are required' });
         }
 
@@ -627,6 +657,8 @@ app.post('/api/form/submit', async (req, res) => {
         const dbResponse = await axios.post('http://localhost:3004/submissions', {
             id: submissionId,
             submitter_email: submitterEmail,
+            submitter_name: submitterName,
+            submitter_job_title: submitterJobTitle,
             filename: `${projectName}_Menu.docx`,
             original_path: docxPath,
             status: 'pending_human_review', // Go directly to human review (no AI redlining for now)
@@ -634,10 +666,20 @@ app.post('/api/form/submit', async (req, res) => {
             source: 'form', // Mark as form submission
             menu_type: menuType || 'standard', // Track menu type (standard or prix_fixe)
             template_type: templateType || 'food', // Track template type (food or beverage)
+            hotel_name: hotelName || null,
+            city_country: cityCountry,
+            asset_type: assetType,
             approvals: JSON.stringify(approvals) // Store approval attestations
         });
 
         console.log(`✓ Submission created in database: ${submissionId}`);
+
+        // Save submitter profile (fire-and-forget)
+        axios.post('http://localhost:3004/submitter-profiles', {
+            name: submitterName,
+            email: submitterEmail,
+            jobTitle: submitterJobTitle
+        }).catch(err => console.error('Failed to save submitter profile:', err.message));
 
         // Trigger AI review process (same as email workflow)
         // This will:
@@ -1021,6 +1063,11 @@ app.post('/api/design-approval/compare', upload.fields([
     const files = req.files as { [fieldname: string]: Express.Multer.File[] };
     const tempFiles: string[] = [];
 
+    // Extract submitter metadata from multipart form fields
+    const submitterName = req.body.submitterName || '';
+    const submitterEmail = req.body.submitterEmail || '';
+    const submitterJobTitle = req.body.submitterJobTitle || '';
+
     try {
         if (!files.docxFile || !files.pdfFile) {
             return res.status(400).json({ error: 'Both DOCX and PDF files are required' });
@@ -1086,12 +1133,48 @@ app.post('/api/design-approval/compare', upload.fields([
         const differences = compareMenuTexts(docxText, pdfText);
         const isMatch = differences.length === 0;
 
+        // Create submission record in database
+        const projectDetails = docxData.project_details || {};
+        const submissionId = `design-${Date.now()}`;
+        let dbSaved = false;
+
+        try {
+            await axios.post('http://localhost:3004/submissions', {
+                id: submissionId,
+                submitter_email: submitterEmail,
+                submitter_name: submitterName,
+                submitter_job_title: submitterJobTitle,
+                project_name: projectDetails.project_name || 'Design Approval',
+                property: projectDetails.property || '',
+                size: projectDetails.size || '',
+                orientation: projectDetails.orientation || '',
+                filename: docxFile.originalname || 'design-approval.docx',
+                status: isMatch ? 'approved' : 'needs_correction',
+                created_at: new Date().toISOString(),
+                source: 'design_approval'
+            });
+            dbSaved = true;
+            console.log(`Design approval submission saved: ${submissionId}`);
+        } catch (dbError: any) {
+            console.error('Failed to save design approval submission:', dbError.message);
+        }
+
+        // Save submitter profile (fire-and-forget)
+        if (submitterName && submitterEmail) {
+            axios.post('http://localhost:3004/submitter-profiles', {
+                name: submitterName,
+                email: submitterEmail,
+                jobTitle: submitterJobTitle
+            }).catch(err => console.error('Failed to save submitter profile:', err.message));
+        }
+
         res.json({
             isMatch,
             projectDetails: docxData.project_details,
             differences,
             docxText,
-            pdfText
+            pdfText,
+            submissionId: dbSaved ? submissionId : undefined
         });
 
     } catch (error: any) {
