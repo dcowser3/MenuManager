@@ -175,8 +175,10 @@ Or use the helper scripts:
 
 ## Documentation
 
-- `CLAUDE.md` - AI assistant context and project details
-- `archive/` - Historical documentation from Phase 1
+- `CLAUDE.md` — Project map and agent conventions (~66 lines)
+- `docs/` — Detailed documentation (architecture, design decisions, environment, roadmap)
+- `docs/design-docs/` — Feature design documents (ClickUp, critical errors, autofill, etc.)
+- `archive/` — Historical documentation from Phase 1
 
 ## Running Tests
 

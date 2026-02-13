@@ -58,6 +58,12 @@ DIFFER_PID=$!
 
 sleep 1
 
+echo "Starting ClickUp Integration Service (port 3007)..."
+npm start --workspace=@menumanager/clickup-integration > logs/clickup-integration.log 2>&1 &
+CLICKUP_PID=$!
+
+sleep 1
+
 echo "Starting Inbound Email Service (port 3000)..."
 npm start --workspace=@menumanager/inbound-email > logs/inbound-email.log 2>&1 &
 EMAIL_PID=$!
@@ -74,6 +80,7 @@ echo "  AI Review: $AI_PID"
 echo "  Notifier: $NOTIFIER_PID"
 echo "  Dashboard: $DASHBOARD_PID"
 echo "  Differ: $DIFFER_PID"
+echo "  ClickUp: $CLICKUP_PID"
 echo "  Inbound Email: $EMAIL_PID"
 echo ""
 echo "Service URLs:"
@@ -91,6 +98,7 @@ echo "$AI_PID" >> logs/services.pid
 echo "$NOTIFIER_PID" >> logs/services.pid
 echo "$DASHBOARD_PID" >> logs/services.pid
 echo "$DIFFER_PID" >> logs/services.pid
+echo "$CLICKUP_PID" >> logs/services.pid
 echo "$EMAIL_PID" >> logs/services.pid
 
 echo ""
@@ -101,5 +109,6 @@ echo "  tail -f logs/ai-review.log"
 echo "  tail -f logs/notifier.log"
 echo "  tail -f logs/dashboard.log"
 echo "  tail -f logs/differ.log"
+echo "  tail -f logs/clickup-integration.log"
 echo "  tail -f logs/inbound-email.log"
 

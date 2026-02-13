@@ -17,7 +17,13 @@ CREATE TABLE submissions (
     -- Form fields
     project_name VARCHAR(255) NOT NULL,
     property VARCHAR(255) NOT NULL,
-    size VARCHAR(100),
+    width VARCHAR(50),
+    height VARCHAR(50),
+    crop_marks BOOLEAN DEFAULT false,
+    bleed_marks BOOLEAN DEFAULT false,
+    file_size_limit BOOLEAN DEFAULT false,
+    file_size_limit_mb VARCHAR(20),
+    file_delivery_notes TEXT,
     orientation VARCHAR(50),
     menu_type VARCHAR(50) DEFAULT 'standard',        -- 'standard' or 'prix_fixe'
     template_type VARCHAR(50) DEFAULT 'food',        -- 'food' or 'beverage'
@@ -41,6 +47,7 @@ CREATE TABLE submissions (
     original_path TEXT,
     ai_draft_path TEXT,
     final_path TEXT,
+    clickup_task_id VARCHAR(100),
 
     -- Status tracking
     status VARCHAR(50) NOT NULL DEFAULT 'processing',
@@ -64,6 +71,7 @@ CREATE TABLE submissions (
 -- Index for faster status queries
 CREATE INDEX idx_submissions_status ON submissions(status);
 CREATE INDEX idx_submissions_created_at ON submissions(created_at DESC);
+CREATE INDEX idx_submissions_clickup_task_id ON submissions(clickup_task_id);
 
 -- ============================================================================
 -- 2. APPROVED_DISHES

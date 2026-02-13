@@ -1159,18 +1159,6 @@
                         <input type="text" id="property" required placeholder="Enter property name">
                     </div>
                     <div class="form-group">
-                        <label for="size">Size *</label>
-                        <input type="text" id="size" required placeholder="e.g., 8.5 x 11 inches">
-                    </div>
-                    <div class="form-group">
-                        <label for="orientation">Orientation *</label>
-                        <select id="orientation" required>
-                            <option value="">Select orientation</option>
-                            <option value="Portrait">Portrait</option>
-                            <option value="Landscape">Landscape</option>
-                        </select>
-                    </div>
-                    <div class="form-group">
                         <label for="menuType">Menu Type *</label>
                         <select id="menuType" required>
                             <option value="">Select menu type</option>
@@ -1187,10 +1175,6 @@
                         </select>
                     </div>
                     <div class="form-group">
-                        <label for="dateNeeded">Date Needed *</label>
-                        <input type="date" id="dateNeeded" required>
-                    </div>
-                    <div class="form-group">
                         <label for="hotelName">Hotel Name</label>
                         <input type="text" id="hotelName" placeholder="Enter hotel name">
                     </div>
@@ -1199,12 +1183,81 @@
                         <input type="text" id="cityCountry" required placeholder="e.g., New York, USA">
                     </div>
                     <div class="form-group">
+                        <label for="dateNeeded">Date Needed *</label>
+                        <input type="date" id="dateNeeded" required>
+                    </div>
+                    <div class="form-group">
                         <label for="assetType">Asset Type *</label>
-                        <select id="assetType" required>
+                        <select id="assetType" required onchange="toggleAssetFields()">
                             <option value="">Select asset type</option>
                             <option value="PRINT">Print</option>
                             <option value="DIGITAL">Digital</option>
                         </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="orientation">Orientation *</label>
+                        <select id="orientation" required>
+                            <option value="">Select orientation</option>
+                            <option value="Portrait">Portrait</option>
+                            <option value="Landscape">Landscape</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Print-specific fields -->
+                <div id="printFields" class="hidden">
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label for="widthPrint">Width (inches) *</label>
+                            <input type="number" id="widthPrint" step="0.01" min="0" placeholder="e.g., 8.5">
+                        </div>
+                        <div class="form-group">
+                            <label for="heightPrint">Height (inches) *</label>
+                            <input type="number" id="heightPrint" step="0.01" min="0" placeholder="e.g., 11">
+                        </div>
+                        <div class="form-group">
+                            <label for="cropMarks">Crop Marks *</label>
+                            <select id="cropMarks">
+                                <option value="no">No</option>
+                                <option value="yes">Yes</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="bleedMarks">Bleed Marks *</label>
+                            <select id="bleedMarks">
+                                <option value="no">No</option>
+                                <option value="yes">Yes</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="fileSizeLimit">File Size Limit *</label>
+                            <select id="fileSizeLimit" onchange="toggleFileSizeLimit()">
+                                <option value="no">No</option>
+                                <option value="yes">Yes</option>
+                            </select>
+                        </div>
+                        <div class="form-group hidden" id="fileSizeLimitMbGroup">
+                            <label for="fileSizeLimitMb">Max Size (MB) *</label>
+                            <input type="number" id="fileSizeLimitMb" step="0.1" min="0" placeholder="e.g., 10">
+                        </div>
+                    </div>
+                    <div class="form-group" style="margin-top: 0.5rem;">
+                        <label for="fileDeliveryNotes">File Delivery Notes</label>
+                        <textarea id="fileDeliveryNotes" rows="2" placeholder="Optional delivery instructions" style="width: 100%; padding: 0.5rem; border: 1px solid var(--color-border); font-family: var(--font-body); font-size: 0.85rem; resize: vertical;"></textarea>
+                    </div>
+                </div>
+
+                <!-- Digital-specific fields -->
+                <div id="digitalFields" class="hidden">
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label for="widthDigital">Width (pixels) *</label>
+                            <input type="number" id="widthDigital" step="1" min="0" placeholder="e.g., 1920">
+                        </div>
+                        <div class="form-group">
+                            <label for="heightDigital">Height (pixels) *</label>
+                            <input type="number" id="heightDigital" step="1" min="0" placeholder="e.g., 1080">
+                        </div>
                     </div>
                 </div>
             </div>
@@ -1363,24 +1416,12 @@
                             <input type="text" id="step2Property" readonly>
                         </div>
                         <div class="form-group">
-                            <label>Size</label>
-                            <input type="text" id="step2Size" readonly>
-                        </div>
-                        <div class="form-group">
-                            <label>Orientation</label>
-                            <input type="text" id="step2Orientation" readonly>
-                        </div>
-                        <div class="form-group">
                             <label>Menu Type</label>
                             <input type="text" id="step2MenuType" readonly>
                         </div>
                         <div class="form-group">
                             <label>Template Type</label>
                             <input type="text" id="step2TemplateType" readonly>
-                        </div>
-                        <div class="form-group">
-                            <label>Date Needed</label>
-                            <input type="text" id="step2DateNeeded" readonly>
                         </div>
                         <div class="form-group">
                             <label>Hotel Name</label>
@@ -1391,8 +1432,36 @@
                             <input type="text" id="step2CityCountry" readonly>
                         </div>
                         <div class="form-group">
+                            <label>Date Needed</label>
+                            <input type="text" id="step2DateNeeded" readonly>
+                        </div>
+                        <div class="form-group">
                             <label>Asset Type</label>
                             <input type="text" id="step2AssetType" readonly>
+                        </div>
+                        <div class="form-group">
+                            <label>Orientation</label>
+                            <input type="text" id="step2Orientation" readonly>
+                        </div>
+                        <div class="form-group">
+                            <label>Dimensions</label>
+                            <input type="text" id="step2Dimensions" readonly>
+                        </div>
+                        <div class="form-group hidden" id="step2CropMarksGroup">
+                            <label>Crop Marks</label>
+                            <input type="text" id="step2CropMarks" readonly>
+                        </div>
+                        <div class="form-group hidden" id="step2BleedMarksGroup">
+                            <label>Bleed Marks</label>
+                            <input type="text" id="step2BleedMarks" readonly>
+                        </div>
+                        <div class="form-group hidden" id="step2FileSizeLimitGroup">
+                            <label>File Size Limit</label>
+                            <input type="text" id="step2FileSizeLimit" readonly>
+                        </div>
+                        <div class="form-group hidden" id="step2FileDeliveryNotesGroup">
+                            <label>Delivery Notes</label>
+                            <input type="text" id="step2FileDeliveryNotes" readonly>
                         </div>
                     </div>
                 </div>
@@ -1660,7 +1729,6 @@
 
             document.getElementById('projectName').value = p.projectName || '';
             document.getElementById('property').value = p.property || '';
-            document.getElementById('size').value = p.size || '';
             document.getElementById('hotelName').value = p.hotelName || '';
             document.getElementById('cityCountry').value = p.cityCountry || '';
 
@@ -1669,8 +1737,66 @@
             setSelectValue('templateType', p.templateType);
             setSelectValue('assetType', p.assetType);
 
+            // Show the right conditional fields
+            toggleAssetFields();
+
+            // Populate dimension fields based on asset type
+            if (p.assetType === 'PRINT') {
+                document.getElementById('widthPrint').value = p.width || '';
+                document.getElementById('heightPrint').value = p.height || '';
+                setSelectValue('cropMarks', p.cropMarks || 'no');
+                setSelectValue('bleedMarks', p.bleedMarks || 'no');
+                setSelectValue('fileSizeLimit', p.fileSizeLimit || 'no');
+                toggleFileSizeLimit();
+                document.getElementById('fileSizeLimitMb').value = p.fileSizeLimitMb || '';
+                document.getElementById('fileDeliveryNotes').value = p.fileDeliveryNotes || '';
+            } else if (p.assetType === 'DIGITAL') {
+                document.getElementById('widthDigital').value = p.width || '';
+                document.getElementById('heightDigital').value = p.height || '';
+            }
+
             // Dispatch change event on templateType to update approval hints
             document.getElementById('templateType').dispatchEvent(new Event('change'));
+        }
+
+        function toggleAssetFields() {
+            const assetType = document.getElementById('assetType').value;
+            const printFields = document.getElementById('printFields');
+            const digitalFields = document.getElementById('digitalFields');
+
+            if (assetType === 'PRINT') {
+                printFields.classList.remove('hidden');
+                digitalFields.classList.add('hidden');
+                // Clear digital fields
+                document.getElementById('widthDigital').value = '';
+                document.getElementById('heightDigital').value = '';
+            } else if (assetType === 'DIGITAL') {
+                digitalFields.classList.remove('hidden');
+                printFields.classList.add('hidden');
+                // Clear print fields
+                document.getElementById('widthPrint').value = '';
+                document.getElementById('heightPrint').value = '';
+                document.getElementById('cropMarks').value = 'no';
+                document.getElementById('bleedMarks').value = 'no';
+                document.getElementById('fileSizeLimit').value = 'no';
+                document.getElementById('fileSizeLimitMb').value = '';
+                document.getElementById('fileDeliveryNotes').value = '';
+                document.getElementById('fileSizeLimitMbGroup').classList.add('hidden');
+            } else {
+                printFields.classList.add('hidden');
+                digitalFields.classList.add('hidden');
+            }
+        }
+
+        function toggleFileSizeLimit() {
+            const fileSizeLimit = document.getElementById('fileSizeLimit').value;
+            const mbGroup = document.getElementById('fileSizeLimitMbGroup');
+            if (fileSizeLimit === 'yes') {
+                mbGroup.classList.remove('hidden');
+            } else {
+                mbGroup.classList.add('hidden');
+                document.getElementById('fileSizeLimitMb').value = '';
+            }
         }
 
         function setSelectValue(id, value) {
@@ -2275,17 +2401,49 @@
             // Populate read-only project detail fields
             document.getElementById('step2ProjectName').value = document.getElementById('projectName').value;
             document.getElementById('step2Property').value = document.getElementById('property').value;
-            document.getElementById('step2Size').value = document.getElementById('size').value;
-            document.getElementById('step2Orientation').value = document.getElementById('orientation').value;
             const menuTypeSelect = document.getElementById('menuType');
             document.getElementById('step2MenuType').value = menuTypeSelect.options[menuTypeSelect.selectedIndex].text;
             const templateTypeSelect = document.getElementById('templateType');
             document.getElementById('step2TemplateType').value = templateTypeSelect.options[templateTypeSelect.selectedIndex].text;
-            document.getElementById('step2DateNeeded').value = document.getElementById('dateNeeded').value;
             document.getElementById('step2HotelName').value = document.getElementById('hotelName').value || '(none)';
             document.getElementById('step2CityCountry').value = document.getElementById('cityCountry').value;
+            document.getElementById('step2DateNeeded').value = document.getElementById('dateNeeded').value;
             const assetTypeSelect = document.getElementById('assetType');
             document.getElementById('step2AssetType').value = assetTypeSelect.options[assetTypeSelect.selectedIndex].text;
+            document.getElementById('step2Orientation').value = document.getElementById('orientation').value;
+
+            // Populate dimensions and print-specific fields
+            const assetTypeVal = document.getElementById('assetType').value;
+            if (assetTypeVal === 'PRINT') {
+                const w = document.getElementById('widthPrint').value;
+                const h = document.getElementById('heightPrint').value;
+                document.getElementById('step2Dimensions').value = `${w} x ${h} inches`;
+                // Show print-specific read-only fields
+                document.getElementById('step2CropMarksGroup').classList.remove('hidden');
+                document.getElementById('step2BleedMarksGroup').classList.remove('hidden');
+                document.getElementById('step2FileSizeLimitGroup').classList.remove('hidden');
+                document.getElementById('step2CropMarks').value = document.getElementById('cropMarks').value === 'yes' ? 'Yes' : 'No';
+                document.getElementById('step2BleedMarks').value = document.getElementById('bleedMarks').value === 'yes' ? 'Yes' : 'No';
+                const fsl = document.getElementById('fileSizeLimit').value;
+                const fslMb = document.getElementById('fileSizeLimitMb').value;
+                document.getElementById('step2FileSizeLimit').value = fsl === 'yes' ? `Yes (${fslMb} MB)` : 'No';
+                const deliveryNotes = document.getElementById('fileDeliveryNotes').value.trim();
+                if (deliveryNotes) {
+                    document.getElementById('step2FileDeliveryNotesGroup').classList.remove('hidden');
+                    document.getElementById('step2FileDeliveryNotes').value = deliveryNotes;
+                } else {
+                    document.getElementById('step2FileDeliveryNotesGroup').classList.add('hidden');
+                }
+            } else {
+                const w = document.getElementById('widthDigital').value;
+                const h = document.getElementById('heightDigital').value;
+                document.getElementById('step2Dimensions').value = `${w} x ${h} pixels`;
+                // Hide print-specific read-only fields
+                document.getElementById('step2CropMarksGroup').classList.add('hidden');
+                document.getElementById('step2BleedMarksGroup').classList.add('hidden');
+                document.getElementById('step2FileSizeLimitGroup').classList.add('hidden');
+                document.getElementById('step2FileDeliveryNotesGroup').classList.add('hidden');
+            }
 
             const originalText = results.originalMenu;
             const correctedText = results.correctedMenu;
@@ -2422,20 +2580,29 @@
                 });
             }
 
+            const assetTypeValue = document.getElementById('assetType').value;
+            const isPrint = assetTypeValue === 'PRINT';
+
             const formData = {
                 submitterName: document.getElementById('submitterName').value.trim(),
                 submitterEmail: document.getElementById('submitterEmail').value.trim(),
                 submitterJobTitle: document.getElementById('submitterJobTitle').value.trim(),
                 projectName: document.getElementById('projectName').value.trim(),
                 property: document.getElementById('property').value.trim(),
-                size: document.getElementById('size').value.trim(),
+                width: isPrint ? document.getElementById('widthPrint').value.trim() : document.getElementById('widthDigital').value.trim(),
+                height: isPrint ? document.getElementById('heightPrint').value.trim() : document.getElementById('heightDigital').value.trim(),
+                cropMarks: isPrint ? document.getElementById('cropMarks').value : 'no',
+                bleedMarks: isPrint ? document.getElementById('bleedMarks').value : 'no',
+                fileSizeLimit: isPrint ? document.getElementById('fileSizeLimit').value : 'no',
+                fileSizeLimitMb: isPrint ? document.getElementById('fileSizeLimitMb').value.trim() : '',
+                fileDeliveryNotes: isPrint ? document.getElementById('fileDeliveryNotes').value.trim() : '',
                 orientation: document.getElementById('orientation').value,
                 menuType: document.getElementById('menuType').value,
                 templateType: document.getElementById('templateType').value,
                 dateNeeded: document.getElementById('dateNeeded').value,
                 hotelName: document.getElementById('hotelName').value.trim(),
                 cityCountry: document.getElementById('cityCountry').value.trim(),
-                assetType: document.getElementById('assetType').value,
+                assetType: assetTypeValue,
                 menuContent: menuContentText,
                 menuContentHtml: menuContentHtml,
                 approvals: approvals,
