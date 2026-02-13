@@ -131,7 +131,7 @@
 
 13. **Design Approval (DOCX vs PDF comparison):** ✅ IMPLEMENTED
     - Stateless validation tool — chef uploads approved Word doc + designer PDF, system compares them
-    - Extracts project details from DOCX template table (project name, property, size, orientation, date needed)
+    - Extracts project details from DOCX template table (project name, property, dimensions, orientation, date needed)
     - Extracts menu text from DOCX (after boundary marker) and PDF (via PyMuPDF text layer)
     - Comparison algorithm: LCS line alignment, then word-by-word diffing within matched lines
     - Classifies differences by type: price, allergen, diacritical, spelling, missing, extra

@@ -1,6 +1,7 @@
 import express from 'express';
 import nodemailer from 'nodemailer';
 import dotenv from 'dotenv';
+import { promises as fsPromises } from 'fs';
 import { generateRedlinedDoc } from './src/doc-generator';
 
 dotenv.config({ path: '../../../.env' });
@@ -132,6 +133,28 @@ app.post('/notify', async (req, res) => {
                         {
                             filename: `final_${payload.filename}`,
                             content: docBuffer,
+                            contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                        },
+                    ],
+                };
+                break;
+
+            case 'corrections_ready':
+                const correctedBuffer = await fsPromises.readFile(payload.corrected_path);
+                mailOptions = {
+                    from: `"Menu Review Bot" <${process.env.GRAPH_MAILBOX_ADDRESS}>`,
+                    to: payload.submitter_email,
+                    subject: `Corrections Ready: ${payload.project_name || payload.filename}`,
+                    html: `
+                        <p>Hello ${payload.submitter_name || ''},</p>
+                        <p>The corrected version of your menu submission is ready. Please find it attached.</p>
+                        <p>Thank you,</p>
+                        <p>Menu Review Bot</p>
+                    `,
+                    attachments: [
+                        {
+                            filename: payload.filename || 'corrected-menu.docx',
+                            content: correctedBuffer,
                             contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
                         },
                     ],

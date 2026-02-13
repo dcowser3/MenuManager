@@ -1,214 +1,65 @@
-# Menu Manager - Project Context
+# Menu Manager
 
-> This file provides context for AI assistants working on this project.
-
-## Project Overview
-
-Menu Manager is an AI-powered service for automating the review process for menu design submissions from chefs worldwide. The system validates menus against templates, uses AI to review content, and manages a multi-level human approval workflow.
-
-## Current Status
-
-The project uses a **web-based form submission system** with AI-assisted review and multi-level approval workflow.
-
-### What Exists (Phase 1 - Complete)
-- Monorepo architecture with microservices in `services/`
-- Web form for chef submissions with required approval attestations
-- AI-powered two-tier review (general QA + detailed corrections)
-- Reviewer dashboard
-- DOCX parsing and redlining capabilities
-- Notification system via SMTP
-- Supabase database (PostgreSQL)
-
-### Required Approval System (Complete)
-Submitters must attest that the menu has been reviewed and approved before submission:
-- Select Yes/No for approval status
-- Enter approver's first and last name
-- Enter approver's position
-- Option to add an additional approver if needed
-
-The form displays hint text suggesting appropriate approver roles based on menu type:
-- **Food menus:** Property GM, Director of F&B, Executive Chef, Chef de Cuisine
-- **Beverage menus:** Head of Mixology, Bar Director, Regional Director of Operations
-
-Submission cannot proceed unless the approval is marked "Yes."
-
-Note: This is an attestation-based system. We do NOT maintain a database of managers/positions. Submitters self-report who approved the menu.
-
-### What We're Building (Phase 2 - Planned)
-- ClickUp integration for task management
-- Approved dishes database (running list of all approved dishes)
-- Email notifications at each workflow step
-- Role-based access (chef, reviewer, admin)
-
-### Critical Error Blocking (Complete)
-The AI review now enforces "hard stops" for critical issues that block submission:
-
-**How it works:**
-- Each AI suggestion has a `severity` field (`"critical"` or `"normal"`), independent of `confidence`
-- Two critical error types are currently enforced:
-  - **Missing Price** — Every dish on a standard menu must have a price. Flagged as critical.
-  - **Incomplete Dish Name** — Every menu entry must have a recognizable dish name. Flagged as critical.
-- Prix fixe menus are exempt from missing price errors (individual dishes don't need prices)
-
-**User flow:**
-- Critical errors appear as red cards with a "CRITICAL" badge in the suggestions panel
-- The submit button is disabled with a banner: "Resolve or override all critical errors before submitting"
-- Users can fix the issue (Edit → modify text → Re-run AI Check) or override it ("Override — AI May Be Wrong")
-- Override data is included in the submission payload (`criticalOverrides`) for audit trail
-
-**Architecture:**
-- `severity` is set by the AI prompt (`sop-processor/qa_prompt.txt`)
-- Backend (`services/dashboard/index.ts`) normalizes severity as a safety net — defaults missing severity to `"normal"`, forces known critical types to `"critical"`, and uses fallback regex detection
-- Frontend (`services/dashboard/views/form.ejs`) sorts critical suggestions first, manages override state, and gates the submit button
-
-### Submitter Autofill & Recent Projects (Complete)
-Returning users can quickly fill forms using saved profiles and past project data:
-
-**Submitter Autocomplete** (both `/form` and `/design-approval`):
-- Type 2+ characters in the "Your Name" field to see matching profiles
-- Selecting a profile auto-fills name, email, and job title (fields remain editable)
-- Profiles are saved automatically on each form submission (fire-and-forget)
-- Keyboard navigation: ArrowUp/Down to highlight, Enter to select, Escape to dismiss
-
-**Recent Project Loader** (`/form` only):
-- "Load from Recent" dropdown appears in Project Details card when past projects exist
-- Populates all project fields except Date Needed (always fresh per submission)
-- Groups submissions by project name, shows most recent of each
-
-**Architecture:**
-- DB service (`services/db/index.ts`) stores profiles in `/tmp/db/submitter_profiles.json`, keyed by normalized name
-- DB service has `GET /submitter-profiles/search?q=`, `POST /submitter-profiles` (upsert), `GET /submissions/recent-projects`
-- Dashboard (`services/dashboard/index.ts`) proxies via `GET /api/submitter-profiles/search` and `GET /api/recent-projects`
-- Profile save triggered in both `POST /api/form/submit` and `POST /api/design-approval/compare`
-- Supabase schema includes `submitter_profiles` table for future migration
-
-**Important DB fix included:** `POST /submissions` now spreads `req.body` instead of only persisting 3 fields. All form data (project_name, property, submitter_name, etc.) is now stored correctly.
-
-### Future Enhancements (Phase 3 - Planned)
-- **Extended menu content validation**: Additional critical error types beyond prices and dish names (e.g., missing allergen codes). The severity/blocking infrastructure is already in place.
-
-## Architecture
-
-```
-services/
-├── ai-review/        # Two-tier AI review (QA + corrections)
-├── dashboard/        # Web interface + submission form (Express + EJS)
-├── db/               # Database service (JSON-based, migrating to Supabase) + submitter profiles
-├── differ/           # Compares AI draft vs human-approved for training
-├── docx-redliner/    # DOCX redlining/track changes
-├── notifier/         # Email notifications (SMTP)
-├── parser/           # DOCX validation and text extraction
-└── supabase-client/  # Shared Supabase database client
-```
-
-## Tech Stack
-
-- **Runtime:** Node.js 18+
-- **Language:** TypeScript
-- **Backend:** Express.js microservices
-- **Templating:** EJS (dashboard)
-- **Database:** Supabase (PostgreSQL)
-- **Email:** SMTP (outbound notifications)
-- **AI:** OpenAI API
-- **File Processing:** Mammoth (DOCX parsing)
-
-## Planned Services & Costs (Starter Tier)
-
-Target: < 100 submissions/month (~$5/month total)
-
-| Service | Provider | Cost |
-|---------|----------|------|
-| Hosting | Railway (Hobby) | $5/mo |
-| Database | Supabase (Free) | $0 |
-| Auth | Clerk (Free tier) | $0 |
-| Email | Resend (Free tier) | $0 |
-| Workflows | Inngest (Free tier) | $0 |
-| ClickUp | API (existing subscription) | $0 |
-
-## Implementation Roadmap
-
-| Phase | Task | Status |
-|-------|------|--------|
-| 1 | Set up PostgreSQL database schema | Complete |
-| 2 | Build chef submission form with required approval attestations | Complete |
-| 3 | Create reviewer dashboard (download/upload/approve) | Complete |
-| 4 | Add email notifications at each step | Pending |
-| 5 | Build approved dishes extraction & database | Pending |
-| 6 | ClickUp integration for task creation | Pending |
-| 7 | Deploy to production (Railway) | Pending |
-| 8 | Add authentication & roles (Clerk) | Pending |
-| 9 | Menu content validation (prices, dish names) | Complete |
-| 10 | Submitter autofill & recent project loader | Complete |
-| 11 | Extended content validation (allergens, etc.) | Planned |
+> AI-powered menu submission review and approval system for chefs worldwide.
 
 ## Services
 
-```
-services/
-├── ai-review/           # Two-tier AI review (QA + corrections)
-├── dashboard/           # Web interface + submission form (Express + EJS)
-├── db/                  # Database service
-├── differ/              # Compares AI draft vs human-approved
-├── docx-redliner/       # DOCX redlining/track changes
-├── notifier/            # Email notifications (SMTP)
-├── parser/              # DOCX validation and text extraction
-└── supabase-client/     # Shared Supabase database client
-```
+| Service | Port | Description |
+|---------|------|-------------|
+| dashboard | 3005 | Web UI, submission form, design approval (Express/EJS) |
+| db | 3001 | Database service + submitter profiles (JSON-based, migrating to Supabase) |
+| ai-review | 3002 | Two-tier AI review: general QA + detailed corrections |
+| parser | 3003 | DOCX template validation and text extraction |
+| notifier | 3004 | Email notifications via SMTP |
+| docx-redliner | 3006 | DOCX redlining / track changes (Python) |
+| clickup-integration | 3007 | ClickUp task creation + webhook handler |
+| differ | 3008 | Compares AI draft vs human-approved corrections (training) |
+| supabase-client | — | Shared Supabase database client (library, no server) |
 
-## Planned Services
+## Tech Stack
 
-```
-services/
-├── clickup-integration/  # ClickUp API integration
-└── approved-dishes/      # Dish extraction & database service
-```
+- **Runtime:** Node.js 18+ / TypeScript
+- **Backend:** Express.js microservices
+- **Templating:** EJS (dashboard views)
+- **Database:** Supabase (PostgreSQL) — local JSON fallback in db service
+- **Email:** SMTP (outbound notifications)
+- **AI:** OpenAI API
+- **Task Management:** ClickUp API (REST v2)
+- **File Processing:** Mammoth (DOCX parsing), PyMuPDF (PDF text), python-docx
 
-## Workflow Overview
+## Documentation Map
 
-```
-Chef Submission Flow:
-  1. Chef opens web form
-  2. Fills submitter info (autocomplete from saved profiles) and project details (load from recent projects)
-  3. Attests required approval (name, position of approver) - optional second approver
-  4. Pastes menu content
-  5. Runs AI check (QA validation)
-  6. Reviews AI suggestions — critical errors (missing prices, incomplete dish names) block submission
-  7. Resolves critical errors by editing + re-running AI check, or overrides them
-  8. Submits menu for human review
+| Topic | File | Description |
+|-------|------|-------------|
+| Architecture | [docs/architecture.md](docs/architecture.md) | Service interactions, data flows, workflow diagrams |
+| Roadmap | [docs/roadmap.md](docs/roadmap.md) | Implementation phases, status, planned services, cost estimates |
+| Environment | [docs/environment.md](docs/environment.md) | All env vars (required + optional) with descriptions |
+| Design Decisions | [docs/design-docs/index.md](docs/design-docs/index.md) | Catalog of all design docs |
+| — ClickUp Integration | [docs/design-docs/clickup-integration.md](docs/design-docs/clickup-integration.md) | Outbound/inbound flows, webhook, architecture |
+| — Critical Error Blocking | [docs/design-docs/critical-error-blocking.md](docs/design-docs/critical-error-blocking.md) | Severity system, hard stops, override flow |
+| — Submitter Autofill | [docs/design-docs/submitter-autofill.md](docs/design-docs/submitter-autofill.md) | Autocomplete, recent projects, profile storage |
+| — Design Approval | [docs/design-docs/design-approval.md](docs/design-docs/design-approval.md) | DOCX vs PDF comparison tool |
+| — Approval Attestation | [docs/design-docs/approval-attestation.md](docs/design-docs/approval-attestation.md) | Required approval system, attestation model |
+| SOP Rules Reference | [docs/references/sop-rules.md](docs/references/sop-rules.md) | Pointer to SOP processing rules |
+| Meeting Prep | [docs/meeting-prep-2026-02.md](docs/meeting-prep-2026-02.md) | Feb 2026 meeting preparation notes |
 
-Review Flow:
-  Reviewer → Downloads menu → Reviews → Uploads corrections → Approves
+## Agent Conventions
 
-Future: Approved Dishes Database
-  Extract dishes from approved menus → Store in searchable database
-```
+- **Build check:** `npx tsc --noEmit --project services/<name>/tsconfig.json`
+- **Python venv:** `services/docx-redliner/venv/bin/python` (try first, fallback to `python3`)
+- **Templates:** `samples/` directory (food template has space in filename)
+- **Route ordering:** Named routes BEFORE `/:id` params to avoid Express param capture
+- **Cross-service calls:** Fire-and-forget with `.catch()` for non-critical side effects (e.g., profile save, ClickUp task creation)
+- **DOCX boundary markers:** `"MENU"` (exact match) or `"Please drop the menu content below on page 2"`
+- **DOCX template structure:** First table = project details; content starts after boundary marker
+- **Severity vs confidence:** `severity` ("critical"/"normal") controls blocking; `confidence` is separate
+- **Prix fixe exemption:** Prix fixe menus skip missing-price critical errors
+- **Archive:** Old docs and legacy services in `archive/` — web form is the only active submission path
 
-## Key Files
+## Key Directories
 
-- `README.md` - Project overview and setup instructions
-- `CLAUDE.md` - This file (AI context)
-- `services/` - All microservices
-- `sop-processor/` - SOP document processing scripts
-- `samples/` - Sample menus and test files
-- `archive/` - Old documentation (preserved for reference)
-
-## Environment Variables
-
-Required in `.env`:
-```
-SMTP_HOST=              # Email sending
-SMTP_USER=
-SMTP_PASS=
-OPENAI_API_KEY=         # AI review
-SUPABASE_URL=           # Supabase project URL
-SUPABASE_ANON_KEY=      # Supabase anon key
-SUPABASE_SERVICE_KEY=   # Supabase service role key
-```
-
-## Notes for Development
-
-- Old documentation and legacy services archived in `archive/` directory
-- Web form is the only submission path (email-based flow is archived)
-- ClickUp integration uses their REST API (free with existing subscription)
-- Supabase provides both database and file storage
-- Inngest recommended for workflow orchestration (handles retries, timeouts)
+- `services/` — All microservices
+- `sop-processor/` — SOP document processing scripts and prompts
+- `samples/` — Sample menus, templates, and test files
+- `archive/` — Historical documentation (preserved for reference)
+- `docs/` — Detailed documentation (this map points there)

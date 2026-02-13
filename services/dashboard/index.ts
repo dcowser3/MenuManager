@@ -626,12 +626,17 @@ Note: Use ONLY these allergen codes when checking allergen compliance. Do not us
  */
 app.post('/api/form/submit', async (req, res) => {
     try {
-        const { submitterName, submitterEmail, submitterJobTitle, projectName, property, size, orientation, menuType, templateType, dateNeeded, hotelName, cityCountry, assetType, menuContent, approvals } = req.body;
+        const { submitterName, submitterEmail, submitterJobTitle, projectName, property, width, height, cropMarks, bleedMarks, fileSizeLimit, fileSizeLimitMb, fileDeliveryNotes, orientation, menuType, templateType, dateNeeded, hotelName, cityCountry, assetType, menuContent, approvals } = req.body;
 
         // Validate required fields
-        if (!submitterName || !submitterEmail || !submitterJobTitle || !projectName || !property || !size || !orientation || !templateType || !dateNeeded || !cityCountry || !assetType || !menuContent) {
+        if (!submitterName || !submitterEmail || !submitterJobTitle || !projectName || !property || !width || !height || !orientation || !templateType || !dateNeeded || !cityCountry || !assetType || !menuContent) {
             return res.status(400).json({ error: 'All fields are required' });
         }
+
+        // Construct size string for DOCX template backward compatibility
+        const sizeForDocx = assetType === 'PRINT'
+            ? `${width} x ${height} inches`
+            : `${width} x ${height} pixels`;
 
         // Approvals are attestations from the submitter - we store them as-is
         // Frontend enforces that all required approvals are marked "Yes" before submission
@@ -643,7 +648,7 @@ app.post('/api/form/submit', async (req, res) => {
         const docxPath = await generateDocxFromForm(submissionId, {
             projectName,
             property,
-            size,
+            size: sizeForDocx,
             orientation,
             menuType: menuType || 'standard',
             templateType: templateType || 'food',
@@ -661,15 +666,22 @@ app.post('/api/form/submit', async (req, res) => {
             submitter_job_title: submitterJobTitle,
             filename: `${projectName}_Menu.docx`,
             original_path: docxPath,
-            status: 'pending_human_review', // Go directly to human review (no AI redlining for now)
+            status: 'pending_human_review',
             created_at: new Date().toISOString(),
-            source: 'form', // Mark as form submission
-            menu_type: menuType || 'standard', // Track menu type (standard or prix_fixe)
-            template_type: templateType || 'food', // Track template type (food or beverage)
+            source: 'form',
+            menu_type: menuType || 'standard',
+            template_type: templateType || 'food',
             hotel_name: hotelName || null,
             city_country: cityCountry,
             asset_type: assetType,
-            approvals: JSON.stringify(approvals) // Store approval attestations
+            width,
+            height,
+            crop_marks: cropMarks === 'yes',
+            bleed_marks: bleedMarks === 'yes',
+            file_size_limit: fileSizeLimit === 'yes',
+            file_size_limit_mb: fileSizeLimitMb || null,
+            file_delivery_notes: fileDeliveryNotes || null,
+            approvals: JSON.stringify(approvals)
         });
 
         console.log(`✓ Submission created in database: ${submissionId}`);
@@ -708,6 +720,31 @@ app.post('/api/form/submit', async (req, res) => {
                 status: 'pending_human_review'
         });
         }
+
+        // Create ClickUp task (fire-and-forget)
+        axios.post('http://localhost:3007/create-task', {
+            submissionId,
+            submitterName,
+            submitterEmail,
+            submitterJobTitle,
+            projectName,
+            property,
+            width,
+            height,
+            cropMarks,
+            bleedMarks,
+            fileSizeLimit,
+            fileSizeLimitMb,
+            fileDeliveryNotes,
+            orientation,
+            menuType,
+            templateType,
+            dateNeeded,
+            hotelName,
+            cityCountry,
+            assetType,
+            docxPath,
+        }).catch(err => console.error('Failed to create ClickUp task:', err.message));
 
         res.json({
             success: true,

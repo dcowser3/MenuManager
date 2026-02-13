@@ -88,7 +88,13 @@ app.get('/submissions/recent-projects', async (req, res) => {
             .map((s: any) => ({
                 projectName: s.project_name,
                 property: s.property || '',
-                size: s.size || '',
+                width: s.width || '',
+                height: s.height || '',
+                cropMarks: s.crop_marks || '',
+                bleedMarks: s.bleed_marks || '',
+                fileSizeLimit: s.file_size_limit || '',
+                fileSizeLimitMb: s.file_size_limit_mb || '',
+                fileDeliveryNotes: s.file_delivery_notes || '',
                 orientation: s.orientation || '',
                 menuType: s.menu_type || 'standard',
                 templateType: s.template_type || 'food',
@@ -149,6 +155,27 @@ app.post('/submitter-profiles', async (req, res) => {
     } catch (error) {
         console.error('Error saving submitter profile:', error);
         res.status(500).json({ error: 'Failed to save profile' });
+    }
+});
+
+// Lookup submission by ClickUp task ID
+// IMPORTANT: Must come BEFORE /submissions/:id
+app.get('/submissions/by-clickup-task/:taskId', async (req, res) => {
+    try {
+        const { taskId } = req.params;
+        const submissions = JSON.parse(await fs.readFile(SUBMISSIONS_DB, 'utf-8'));
+        const match = Object.values(submissions).find(
+            (sub: any) => sub.clickup_task_id === taskId
+        );
+
+        if (!match) {
+            return res.status(404).json({ error: 'No submission found for this ClickUp task' });
+        }
+
+        res.json(match);
+    } catch (error) {
+        console.error('Error looking up submission by ClickUp task:', error);
+        res.status(500).send('Error looking up submission.');
     }
 });
 
