@@ -68,6 +68,58 @@ app.use(express.json());
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
 
+export async function extractBaselineFromDocx(filePath: string): Promise<{
+    approvedMenuContent: string;
+    approvedMenuContentRaw: string;
+    extractedProject: {
+        projectName: string;
+        property: string;
+        orientation: string;
+        dateNeeded: string;
+        size: string;
+    };
+}> {
+    const venvPython = path.resolve(__dirname, '..', '..', 'docx-redliner', 'venv', 'bin', 'python');
+    const extractCleanScript = path.resolve(__dirname, '..', '..', 'docx-redliner', 'extract_clean_menu_text.py');
+    const extractDetailsScript = path.resolve(__dirname, '..', '..', 'docx-redliner', 'extract_project_details.py');
+
+    let pythonCmd = 'python3';
+    try {
+        await fs.access(venvPython);
+        pythonCmd = `"${venvPython}"`;
+    } catch {
+        // use system python
+    }
+
+    const cleanCommand = `${pythonCmd} "${extractCleanScript}" "${filePath}"`;
+    const detailsCommand = `${pythonCmd} "${extractDetailsScript}" "${filePath}"`;
+
+    const [{ stdout: cleanStdout }, { stdout: detailsStdout }] = await Promise.all([
+        execAsync(cleanCommand, { timeout: 30000 }),
+        execAsync(detailsCommand, { timeout: 30000 }),
+    ]);
+
+    const cleanData = JSON.parse((cleanStdout || '{}').trim() || '{}');
+    const detailsData = JSON.parse((detailsStdout || '{}').trim() || '{}');
+
+    if (cleanData.error) {
+        throw new Error(cleanData.error);
+    }
+
+    const projectDetails = detailsData.project_details || {};
+    return {
+        approvedMenuContent: cleanData.cleaned_menu_content || cleanData.menu_content || '',
+        approvedMenuContentRaw: cleanData.menu_content || '',
+        extractedProject: {
+            projectName: projectDetails.project_name || '',
+            property: projectDetails.property || '',
+            orientation: projectDetails.orientation || '',
+            dateNeeded: projectDetails.date_needed || '',
+            size: projectDetails.size || '',
+        },
+    };
+}
+
 /**
  * Dashboard Home - List all pending reviews
  */
@@ -493,6 +545,66 @@ app.get('/api/recent-projects', async (req, res) => {
 });
 
 /**
+ * Proxy: Search approved submissions for modification flow
+ */
+app.get('/api/submissions/search', async (req, res) => {
+    try {
+        const q = req.query.q || '';
+        const limit = req.query.limit || 20;
+        const dbResponse = await axios.get(`http://localhost:3004/submissions/search`, {
+            params: { q, limit }
+        });
+        res.json(dbResponse.data);
+    } catch (error) {
+        res.json([]);
+    }
+});
+
+/**
+ * Proxy: Get latest approved submission for a project/property pair
+ */
+app.get('/api/submissions/latest-approved', async (req, res) => {
+    try {
+        const { projectName, property } = req.query;
+        const dbResponse = await axios.get(`http://localhost:3004/submissions/latest-approved`, {
+            params: { projectName, property }
+        });
+        res.json(dbResponse.data);
+    } catch (error: any) {
+        res.status(error?.response?.status || 500).json(error?.response?.data || { error: 'Failed to fetch approved submission' });
+    }
+});
+
+/**
+ * Modification Flow: Upload approved baseline DOCX when no prior record exists in DB.
+ * Extracts cleaned menu text + project details to prefill the form.
+ */
+app.post('/api/modification/baseline-upload', upload.single('baselineDoc') as any, async (req, res) => {
+    try {
+        if (!req.file) {
+            return res.status(400).json({ error: 'No baseline document uploaded' });
+        }
+
+        if (req.file.mimetype !== 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
+            return res.status(400).json({ error: 'Only .docx files are accepted' });
+        }
+
+        const extracted = await extractBaselineFromDocx(req.file.path);
+        res.json({
+            success: true,
+            baselineDocPath: req.file.path,
+            baselineFileName: req.file.originalname,
+            approvedMenuContent: extracted.approvedMenuContent,
+            approvedMenuContentRaw: extracted.approvedMenuContentRaw,
+            extractedProject: extracted.extractedProject,
+        });
+    } catch (error: any) {
+        console.error('Error extracting baseline document:', error);
+        res.status(500).json({ error: 'Failed to process baseline document', details: error.message });
+    }
+});
+
+/**
  * Form API: Basic AI Check - Run QA check on menu content
  */
 app.post('/api/form/basic-check', async (req, res) => {
@@ -626,11 +738,46 @@ Note: Use ONLY these allergen codes when checking allergen compliance. Do not us
  */
 app.post('/api/form/submit', async (req, res) => {
     try {
-        const { submitterName, submitterEmail, submitterJobTitle, projectName, property, width, height, cropMarks, bleedMarks, fileSizeLimit, fileSizeLimitMb, fileDeliveryNotes, orientation, menuType, templateType, dateNeeded, hotelName, cityCountry, assetType, menuContent, approvals } = req.body;
+        const {
+            submitterName,
+            submitterEmail,
+            submitterJobTitle,
+            projectName,
+            property,
+            width,
+            height,
+            cropMarks,
+            bleedMarks,
+            fileSizeLimit,
+            fileSizeLimitMb,
+            fileDeliveryNotes,
+            orientation,
+            menuType,
+            templateType,
+            dateNeeded,
+            hotelName,
+            cityCountry,
+            assetType,
+            menuContent,
+            menuContentHtml,
+            approvals,
+            criticalOverrides,
+            submissionMode,
+            revisionBaseSubmissionId,
+            revisionSource,
+            revisionBaselineDocPath,
+            revisionBaselineFileName,
+            baseApprovedMenuContent,
+            chefPersistentDiff
+        } = req.body;
 
         // Validate required fields
         if (!submitterName || !submitterEmail || !submitterJobTitle || !projectName || !property || !width || !height || !orientation || !templateType || !dateNeeded || !cityCountry || !assetType || !menuContent) {
             return res.status(400).json({ error: 'All fields are required' });
+        }
+
+        if (submissionMode === 'modification' && !revisionBaseSubmissionId && !revisionBaselineDocPath) {
+            return res.status(400).json({ error: 'Modification flow requires a prior approved submission or uploaded approved baseline document' });
         }
 
         // Construct size string for DOCX template backward compatibility
@@ -664,6 +811,9 @@ app.post('/api/form/submit', async (req, res) => {
             submitter_email: submitterEmail,
             submitter_name: submitterName,
             submitter_job_title: submitterJobTitle,
+            project_name: projectName,
+            property,
+            date_needed: dateNeeded,
             filename: `${projectName}_Menu.docx`,
             original_path: docxPath,
             status: 'pending_human_review',
@@ -681,10 +831,41 @@ app.post('/api/form/submit', async (req, res) => {
             file_size_limit: fileSizeLimit === 'yes',
             file_size_limit_mb: fileSizeLimitMb || null,
             file_delivery_notes: fileDeliveryNotes || null,
-            approvals: JSON.stringify(approvals)
+            approvals: JSON.stringify(approvals),
+            critical_overrides: JSON.stringify(criticalOverrides || []),
+            menu_content: menuContent,
+            menu_content_html: menuContentHtml || null,
+            submission_mode: submissionMode || 'new',
+            revision_source: revisionSource || null,
+            revision_base_submission_id: revisionBaseSubmissionId || null,
+            revision_baseline_doc_path: revisionBaselineDocPath || null,
+            revision_baseline_file_name: revisionBaselineFileName || null,
+            base_approved_menu_content: baseApprovedMenuContent || null,
+            chef_persistent_diff: chefPersistentDiff ? JSON.stringify(chefPersistentDiff) : null,
         });
 
         console.log(`✓ Submission created in database: ${submissionId}`);
+
+        // Record original source document metadata (storage abstraction: local now, Teams later)
+        axios.post('http://localhost:3004/assets', {
+            submission_id: submissionId,
+            asset_type: 'original_docx',
+            source: 'chef_form',
+            storage_provider: 'local',
+            storage_path: docxPath,
+            file_name: `${projectName}_Menu.docx`
+        }).catch(err => console.error('Failed to save original_docx asset metadata:', err.message));
+
+        if (revisionBaselineDocPath) {
+            axios.post('http://localhost:3004/assets', {
+                submission_id: submissionId,
+                asset_type: 'baseline_approved_docx',
+                source: 'chef_modification_upload',
+                storage_provider: 'local',
+                storage_path: revisionBaselineDocPath,
+                file_name: revisionBaselineFileName || path.basename(revisionBaselineDocPath),
+            }).catch(err => console.error('Failed to save baseline_approved_docx asset metadata:', err.message));
+        }
 
         // Save submitter profile (fire-and-forget)
         axios.post('http://localhost:3004/submitter-profiles', {
@@ -744,6 +925,12 @@ app.post('/api/form/submit', async (req, res) => {
             cityCountry,
             assetType,
             docxPath,
+            submissionMode,
+            revisionSource,
+            revisionBaseSubmissionId,
+            revisionBaselineDocPath,
+            revisionBaselineFileName,
+            chefPersistentDiff,
         }).catch(err => console.error('Failed to create ClickUp task:', err.message));
 
         res.json({
@@ -1476,10 +1663,14 @@ function compareWords(docxLine: string, pdfLine: string): Difference[] {
     return diffs;
 }
 
-app.listen(port, () => {
-    console.log(`📊 Dashboard service listening at http://localhost:${port}`);
-    console.log(`   Access dashboard: http://localhost:${port}`);
-    console.log(`   Form submission: http://localhost:${port}/form`);
-    console.log(`   Design approval: http://localhost:${port}/design-approval`);
-    console.log(`   Training dashboard: http://localhost:${port}/training`);
-});
+if (require.main === module) {
+    app.listen(port, () => {
+        console.log(`📊 Dashboard service listening at http://localhost:${port}`);
+        console.log(`   Access dashboard: http://localhost:${port}`);
+        console.log(`   Form submission: http://localhost:${port}/form`);
+        console.log(`   Design approval: http://localhost:${port}/design-approval`);
+        console.log(`   Training dashboard: http://localhost:${port}/training`);
+    });
+}
+
+export default app;

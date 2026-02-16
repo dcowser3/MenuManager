@@ -40,6 +40,7 @@
 | — Submitter Autofill | [docs/design-docs/submitter-autofill.md](docs/design-docs/submitter-autofill.md) | Autocomplete, recent projects, profile storage |
 | — Design Approval | [docs/design-docs/design-approval.md](docs/design-docs/design-approval.md) | DOCX vs PDF comparison tool |
 | — Approval Attestation | [docs/design-docs/approval-attestation.md](docs/design-docs/approval-attestation.md) | Required approval system, attestation model |
+| — Revision / Modification Flow | [docs/design-docs/revision-modification-flow.md](docs/design-docs/revision-modification-flow.md) | New vs modification mode, baseline sourcing, persistent vs temporary change layers |
 | SOP Rules Reference | [docs/references/sop-rules.md](docs/references/sop-rules.md) | Pointer to SOP processing rules |
 | Meeting Prep | [docs/meeting-prep-2026-02.md](docs/meeting-prep-2026-02.md) | Feb 2026 meeting preparation notes |
 

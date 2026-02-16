@@ -9,3 +9,4 @@ Catalog of design decisions and feature documentation for Menu Manager.
 | [Submitter Autofill](submitter-autofill.md) | Complete | Autocomplete from saved profiles + recent project loader |
 | [Design Approval](design-approval.md) | Complete | DOCX vs PDF comparison tool for design proof validation |
 | [Approval Attestation](approval-attestation.md) | Complete | Required manager approval attestation before submission |
+| [Revision / Modification Flow](revision-modification-flow.md) | Complete | Dual-path revision workflow with DB search or uploaded approved baseline DOCX |

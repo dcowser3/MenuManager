@@ -9,6 +9,7 @@ const DB_DIR = path.join(__dirname, '..', '..', '..', 'tmp', 'db');
 const SUBMISSIONS_DB = path.join(DB_DIR, 'submissions.json');
 const REPORTS_DB = path.join(DB_DIR, 'reports.json');
 const PROFILES_DB = path.join(DB_DIR, 'submitter_profiles.json');
+const ASSETS_DB = path.join(DB_DIR, 'assets.json');
 
 // Ensure DB directory and files exist
 async function initDb() {
@@ -17,6 +18,7 @@ async function initDb() {
         await fs.access(SUBMISSIONS_DB).catch(() => fs.writeFile(SUBMISSIONS_DB, '{}')); // Now an object
         await fs.access(REPORTS_DB).catch(() => fs.writeFile(REPORTS_DB, '[]'));
         await fs.access(PROFILES_DB).catch(() => fs.writeFile(PROFILES_DB, '{}'));
+        await fs.access(ASSETS_DB).catch(() => fs.writeFile(ASSETS_DB, '[]'));
     } catch (error) {
         console.error('Failed to initialize database:', error);
     }
@@ -107,6 +109,87 @@ app.get('/submissions/recent-projects', async (req, res) => {
     } catch (error) {
         console.error('Error getting recent projects:', error);
         res.status(500).json([]);
+    }
+});
+
+// Search approved submissions for "modification" flow.
+// Query can match project/property/submitter and returns newest first.
+// IMPORTANT: Must come BEFORE /submissions/:id
+app.get('/submissions/search', async (req, res) => {
+    try {
+        const q = ((req.query.q as string) || '').trim().toLowerCase();
+        const limit = Math.min(parseInt((req.query.limit as string) || '20', 10), 50);
+        if (q.length < 2) {
+            return res.json([]);
+        }
+
+        const submissions = JSON.parse(await fs.readFile(SUBMISSIONS_DB, 'utf-8'));
+        const approvedStatuses = new Set(['approved']);
+
+        const results = (Object.values(submissions) as any[])
+            .filter((s) => approvedStatuses.has((s.status || '').toLowerCase()))
+            .filter((s) => {
+                const haystack = [
+                    s.project_name,
+                    s.property,
+                    s.submitter_name,
+                    s.submitter_email,
+                    s.hotel_name,
+                    s.city_country,
+                ]
+                    .filter(Boolean)
+                    .join(' ')
+                    .toLowerCase();
+                return haystack.includes(q);
+            })
+            .sort((a, b) => new Date(b.updated_at || b.created_at).getTime() - new Date(a.updated_at || a.created_at).getTime())
+            .slice(0, limit)
+            .map((s) => ({
+                id: s.id,
+                projectName: s.project_name || '',
+                property: s.property || '',
+                submitterName: s.submitter_name || '',
+                submitterEmail: s.submitter_email || '',
+                dateNeeded: s.date_needed || '',
+                updatedAt: s.updated_at || s.created_at,
+                approvedMenuContent: s.approved_menu_content || s.menu_content || '',
+                status: s.status,
+            }));
+
+        res.json(results);
+    } catch (error) {
+        console.error('Error searching submissions:', error);
+        res.status(500).json([]);
+    }
+});
+
+// Latest approved submission for a project/property pair.
+// IMPORTANT: Must come BEFORE /submissions/:id
+app.get('/submissions/latest-approved', async (req, res) => {
+    try {
+        const projectName = ((req.query.projectName as string) || '').trim().toLowerCase();
+        const property = ((req.query.property as string) || '').trim().toLowerCase();
+        if (!projectName || !property) {
+            return res.status(400).json({ error: 'projectName and property are required' });
+        }
+
+        const submissions = JSON.parse(await fs.readFile(SUBMISSIONS_DB, 'utf-8'));
+        const match = (Object.values(submissions) as any[])
+            .filter((s) => (s.status || '').toLowerCase() === 'approved')
+            .filter((s) =>
+                (s.project_name || '').trim().toLowerCase() === projectName &&
+                (s.property || '').trim().toLowerCase() === property
+            )
+            .sort((a, b) => new Date(b.updated_at || b.created_at).getTime() - new Date(a.updated_at || a.created_at).getTime())[0];
+
+        if (!match) {
+            return res.status(404).json({ error: 'No approved submission found' });
+        }
+
+        res.json(match);
+    } catch (error) {
+        console.error('Error finding latest approved submission:', error);
+        res.status(500).json({ error: 'Failed to find approved submission' });
     }
 });
 
@@ -215,6 +298,61 @@ app.put('/submissions/:id', async (req, res) => {
     } catch (error) {
         console.error('Error updating submission:', error);
         res.status(500).send('Error updating submission.');
+    }
+});
+
+// Asset metadata for storage abstraction (local now, Teams later)
+app.post('/assets', async (req, res) => {
+    try {
+        const {
+            submission_id,
+            revision_submission_id,
+            asset_type,
+            source,
+            storage_provider,
+            storage_path,
+            file_name,
+            meta
+        } = req.body;
+
+        if (!submission_id || !asset_type || !storage_path) {
+            return res.status(400).json({ error: 'submission_id, asset_type, and storage_path are required' });
+        }
+
+        const assets = JSON.parse(await fs.readFile(ASSETS_DB, 'utf-8'));
+        const newAsset = {
+            id: `asset_${Date.now()}`,
+            submission_id,
+            revision_submission_id: revision_submission_id || null,
+            asset_type,
+            source: source || 'system',
+            storage_provider: storage_provider || 'local',
+            storage_path,
+            file_name: file_name || null,
+            meta: meta || null,
+            created_at: new Date().toISOString(),
+        };
+        assets.push(newAsset);
+        await fs.writeFile(ASSETS_DB, JSON.stringify(assets, null, 2));
+        res.status(201).json(newAsset);
+    } catch (error) {
+        console.error('Error saving asset metadata:', error);
+        res.status(500).json({ error: 'Failed to save asset metadata' });
+    }
+});
+
+// IMPORTANT: Must come BEFORE /submissions/:id
+app.get('/assets/by-submission/:submissionId', async (req, res) => {
+    try {
+        const { submissionId } = req.params;
+        const assets = JSON.parse(await fs.readFile(ASSETS_DB, 'utf-8'));
+        const matches = (assets as any[])
+            .filter((a) => a.submission_id === submissionId)
+            .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+        res.json(matches);
+    } catch (error) {
+        console.error('Error getting submission assets:', error);
+        res.status(500).json([]);
     }
 });
 
