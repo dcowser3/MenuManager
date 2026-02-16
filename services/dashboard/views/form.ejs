@@ -1103,6 +1103,195 @@
             outline: none;
             border-color: var(--color-secondary);
         }
+
+        .submission-mode {
+            display: flex;
+            gap: 1rem;
+            margin-bottom: 1rem;
+            flex-wrap: wrap;
+        }
+
+        .submission-mode-option {
+            border: 1px solid var(--color-border);
+            background: var(--color-background-alt);
+            padding: 0.75rem 1rem;
+            min-width: 280px;
+            cursor: pointer;
+        }
+
+        .submission-mode-option input {
+            margin-right: 0.5rem;
+        }
+
+        .modification-search {
+            display: none;
+            margin-bottom: 1rem;
+            border: 1px solid var(--color-border-light);
+            background: var(--color-background-alt);
+            padding: 0.75rem;
+        }
+
+        .modification-search.show {
+            display: block;
+        }
+
+        .modification-search label {
+            display: block;
+            margin-bottom: 0.35rem;
+            font-size: 0.65rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.12em;
+            color: var(--color-text-muted);
+        }
+
+        .modification-search input {
+            width: 100%;
+            padding: 0.6rem 0.7rem;
+            border: 1px solid var(--color-border);
+            font-family: var(--font-body);
+            font-size: 0.85rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .search-results {
+            max-height: 220px;
+            overflow-y: auto;
+            border: 1px solid var(--color-border);
+            background: var(--color-background);
+        }
+
+        .search-result-item {
+            padding: 0.6rem 0.7rem;
+            border-bottom: 1px solid var(--color-border-light);
+            cursor: pointer;
+            font-size: 0.82rem;
+        }
+
+        .search-result-item:last-child {
+            border-bottom: none;
+        }
+
+        .search-result-item:hover {
+            background: var(--color-background-alt);
+        }
+
+        .revision-selected {
+            display: none;
+            margin-bottom: 0.75rem;
+            font-size: 0.78rem;
+            color: var(--color-success);
+        }
+
+        .revision-selected.show {
+            display: block;
+        }
+
+        .modification-source-options {
+            display: flex;
+            gap: 0.75rem;
+            flex-wrap: wrap;
+            margin-bottom: 0.5rem;
+        }
+
+        .modification-source-option {
+            border: 1px solid var(--color-border);
+            background: var(--color-background);
+            padding: 0.45rem 0.65rem;
+            font-size: 0.78rem;
+            cursor: pointer;
+        }
+
+        .modification-source-option input {
+            margin-right: 0.4rem;
+        }
+
+        .modification-source-panel {
+            display: none;
+        }
+
+        .modification-source-panel.show {
+            display: block;
+        }
+
+        .baseline-upload-row {
+            display: flex;
+            gap: 0.5rem;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .baseline-upload-row input[type="file"] {
+            flex: 1;
+            margin-bottom: 0;
+            background: var(--color-background);
+            border: 1px solid var(--color-border);
+        }
+
+        .baseline-upload-btn {
+            border: 1px solid var(--color-border);
+            background: var(--color-background);
+            color: var(--color-text);
+            font-family: var(--font-body);
+            font-size: 0.78rem;
+            padding: 0.55rem 0.8rem;
+            cursor: pointer;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+        }
+
+        .baseline-upload-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .persistent-preview {
+            display: none;
+            margin-top: 1rem;
+            border: 1px solid var(--color-border);
+            background: var(--color-background-alt);
+            padding: 0.75rem;
+        }
+
+        .persistent-preview.show {
+            display: block;
+        }
+
+        .persistent-preview h4 {
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            margin-bottom: 0.5rem;
+        }
+
+        .persistent-preview-body {
+            max-height: 240px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            font-size: 0.85rem;
+            line-height: 1.4;
+            background: var(--color-background);
+            padding: 0.75rem;
+            border: 1px solid var(--color-border-light);
+        }
+
+        .persistent-ins {
+            background: rgba(241, 196, 15, 0.25);
+        }
+
+        .persistent-del {
+            color: #b71c1c;
+            text-decoration: line-through;
+            background: rgba(183, 28, 28, 0.08);
+        }
+
+        .ai-temp-note {
+            margin-top: 0.5rem;
+            font-size: 0.72rem;
+            color: var(--color-text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+        }
     </style>
 </head>
 <body>
@@ -1143,6 +1332,46 @@
 
             <div class="card">
                 <h2>Project Details</h2>
+                <div class="submission-mode">
+                    <label class="submission-mode-option">
+                        <input type="radio" name="submissionMode" id="submissionModeNew" value="new" checked onchange="onSubmissionModeChange()">
+                        Brand New Menu Submission
+                    </label>
+                    <label class="submission-mode-option">
+                        <input type="radio" name="submissionMode" id="submissionModeModification" value="modification" onchange="onSubmissionModeChange()">
+                        Modification to Existing Menu
+                    </label>
+                </div>
+                <div id="modificationSearchSection" class="modification-search">
+                    <div class="modification-source-options">
+                        <label class="modification-source-option">
+                            <input type="radio" name="modificationSource" id="modSourceDatabase" value="database" checked onchange="onModificationSourceChange()">
+                            Find In Database
+                        </label>
+                        <label class="modification-source-option">
+                            <input type="radio" name="modificationSource" id="modSourceUpload" value="upload" onchange="onModificationSourceChange()">
+                            Upload Prior Approved DOCX
+                        </label>
+                    </div>
+                    <div id="modSourceDatabasePanel" class="modification-source-panel show">
+                        <label for="submissionSearchQuery">Find previous approved submission</label>
+                        <input
+                            type="text"
+                            id="submissionSearchQuery"
+                            placeholder="Search by project, property, submitter..."
+                            oninput="onSubmissionSearchInput(this.value)"
+                        >
+                        <div id="submissionSearchResults" class="search-results"></div>
+                    </div>
+                    <div id="modSourceUploadPanel" class="modification-source-panel">
+                        <label for="baselineDocUpload">Upload approved/redlined DOCX received from the team</label>
+                        <div class="baseline-upload-row">
+                            <input type="file" id="baselineDocUpload" accept=".docx">
+                            <button type="button" class="baseline-upload-btn" id="baselineUploadBtn" onclick="uploadBaselineDoc()">Extract Baseline</button>
+                        </div>
+                    </div>
+                    <div id="revisionSelectedNote" class="revision-selected"></div>
+                </div>
                 <div class="recent-project-loader" id="recentProjectLoader" style="display: none;">
                     <label for="recentProjectSelect">Load from Recent</label>
                     <select id="recentProjectSelect" onchange="loadRecentProject(this.selectedIndex - 1)">
@@ -1496,7 +1725,12 @@
                     <h3 style="text-align: center; margin-bottom: 0.25rem; font-family: var(--font-heading); font-size: 1.1rem; font-weight: 500;">AI Suggestions</h3>
                     <p class="panel-subtitle">Recommended corrections</p>
                     <div id="suggestionsDisplay" class="suggestions-list"></div>
+                    <div class="ai-temp-note">AI highlights are temporary. Chef revision redlines are persistent.</div>
                 </div>
+            </div>
+            <div id="persistentPreviewSection" class="persistent-preview">
+                <h4>Persistent Revision Preview (What Design Will Receive)</h4>
+                <div id="persistentPreviewBody" class="persistent-preview-body"></div>
             </div>
 
             <div class="btn-container">
@@ -1535,6 +1769,16 @@
         let aiChanges = [];
         let originalAiCorrectedText = '';
         let criticalErrorOverrides = {};
+        let submissionMode = 'new';
+        let revisionSearchDebounce = null;
+        let revisionSearchResults = [];
+        let revisionBaseSubmissionId = null;
+        let revisionSource = 'database';
+        let revisionBaselineDocPath = '';
+        let revisionBaselineFileName = '';
+        let baseApprovedMenuContent = '';
+        let persistentDiffSummary = { insertions: 0, deletions: 0 };
+        let persistentPreviewUpdateTimer = null;
 
         document.addEventListener('DOMContentLoaded', function() {
             quill = new Quill('#menuEditor', {
@@ -1575,6 +1819,7 @@
 
             // Load recent projects
             loadRecentProjects();
+            onSubmissionModeChange();
 
             // Submitter name keyboard nav + blur dismiss
             const submitterNameInput = document.getElementById('submitterName');
@@ -1595,6 +1840,175 @@
                 hintEl.textContent = 'e.g., Head of Mixology, Bar Director, Regional Director of Operations';
             } else {
                 hintEl.textContent = 'e.g., Property GM, Director of F&B, Executive Chef, Chef de Cuisine';
+            }
+        }
+
+        function onSubmissionModeChange() {
+            submissionMode = document.getElementById('submissionModeModification').checked ? 'modification' : 'new';
+            const modSection = document.getElementById('modificationSearchSection');
+            const recentLoader = document.getElementById('recentProjectLoader');
+            const previewSection = document.getElementById('persistentPreviewSection');
+
+            if (submissionMode === 'modification') {
+                modSection.classList.add('show');
+                recentLoader.style.display = 'none';
+                previewSection.classList.add('show');
+                onModificationSourceChange();
+            } else {
+                modSection.classList.remove('show');
+                if (recentProjectsData.length > 0) {
+                    recentLoader.style.display = 'flex';
+                }
+                previewSection.classList.remove('show');
+                revisionBaseSubmissionId = null;
+                revisionSource = 'database';
+                revisionBaselineDocPath = '';
+                revisionBaselineFileName = '';
+                baseApprovedMenuContent = '';
+                persistentDiffSummary = { insertions: 0, deletions: 0 };
+                const selectedNote = document.getElementById('revisionSelectedNote');
+                selectedNote.classList.remove('show');
+                selectedNote.textContent = '';
+                document.getElementById('submissionSearchResults').innerHTML = '';
+            }
+        }
+
+        function onModificationSourceChange() {
+            const useUpload = document.getElementById('modSourceUpload').checked;
+            const dbPanel = document.getElementById('modSourceDatabasePanel');
+            const uploadPanel = document.getElementById('modSourceUploadPanel');
+            const selectedNote = document.getElementById('revisionSelectedNote');
+            revisionSource = useUpload ? 'uploaded_baseline' : 'database';
+
+            if (useUpload) {
+                dbPanel.classList.remove('show');
+                uploadPanel.classList.add('show');
+                revisionBaseSubmissionId = null;
+                revisionSearchResults = [];
+                document.getElementById('submissionSearchResults').innerHTML = '';
+                selectedNote.classList.remove('show');
+                selectedNote.textContent = '';
+            } else {
+                uploadPanel.classList.remove('show');
+                dbPanel.classList.add('show');
+                revisionBaselineDocPath = '';
+                revisionBaselineFileName = '';
+                selectedNote.classList.remove('show');
+                selectedNote.textContent = '';
+            }
+        }
+
+        function onSubmissionSearchInput(value) {
+            clearTimeout(revisionSearchDebounce);
+            const query = value.trim();
+            if (query.length < 2) {
+                document.getElementById('submissionSearchResults').innerHTML = '';
+                revisionSearchResults = [];
+                return;
+            }
+            revisionSearchDebounce = setTimeout(() => searchApprovedSubmissions(query), 250);
+        }
+
+        async function searchApprovedSubmissions(query) {
+            try {
+                const response = await fetch(`/api/submissions/search?q=${encodeURIComponent(query)}&limit=20`);
+                const results = await response.json();
+                revisionSearchResults = results || [];
+                const resultsEl = document.getElementById('submissionSearchResults');
+
+                if (!revisionSearchResults.length) {
+                    resultsEl.innerHTML = '<div class="search-result-item">No approved submissions found.</div>';
+                    return;
+                }
+
+                resultsEl.innerHTML = revisionSearchResults.map((r, idx) => `
+                    <div class="search-result-item" onclick="selectRevisionResult(${idx})">
+                        <strong>${escapeHtml(r.projectName || '(Untitled)')}</strong> - ${escapeHtml(r.property || 'Unknown Property')}<br>
+                        <span style="color: var(--color-text-muted);">ID: ${escapeHtml(r.id)} | Updated: ${new Date(r.updatedAt).toLocaleString()}</span>
+                    </div>
+                `).join('');
+            } catch (error) {
+                console.error('Failed to search approved submissions:', error);
+                document.getElementById('submissionSearchResults').innerHTML = '<div class="search-result-item">Search failed.</div>';
+            }
+        }
+
+        function selectRevisionResult(index) {
+            const selected = revisionSearchResults[index];
+            if (!selected) return;
+
+            revisionBaseSubmissionId = selected.id;
+            revisionSource = 'database';
+            revisionBaselineDocPath = '';
+            revisionBaselineFileName = '';
+            baseApprovedMenuContent = selected.approvedMenuContent || '';
+            persistentDiffSummary = { insertions: 0, deletions: 0 };
+
+            document.getElementById('projectName').value = selected.projectName || '';
+            document.getElementById('property').value = selected.property || '';
+
+            quill.setText(baseApprovedMenuContent || '');
+            renderPersistentPreview(baseApprovedMenuContent, baseApprovedMenuContent);
+
+            const selectedNote = document.getElementById('revisionSelectedNote');
+            selectedNote.textContent = `Loaded approved baseline: ${selected.projectName || 'Untitled'} (${selected.id})`;
+            selectedNote.classList.add('show');
+            document.getElementById('submissionSearchResults').innerHTML = '';
+            showAlert('Approved baseline loaded. Make modifications and run AI check.', 'success');
+        }
+
+        async function uploadBaselineDoc() {
+            const input = document.getElementById('baselineDocUpload');
+            const btn = document.getElementById('baselineUploadBtn');
+            const file = input.files && input.files[0];
+            if (!file) {
+                showAlert('Choose a .docx baseline file first.', 'error');
+                return;
+            }
+
+            const form = new FormData();
+            form.append('baselineDoc', file);
+
+            btn.disabled = true;
+            btn.textContent = 'Extracting...';
+
+            try {
+                const response = await fetch('/api/modification/baseline-upload', {
+                    method: 'POST',
+                    body: form,
+                });
+                const data = await response.json();
+                if (!response.ok) {
+                    throw new Error(data.error || 'Failed to extract baseline document');
+                }
+
+                revisionSource = 'uploaded_baseline';
+                revisionBaseSubmissionId = null;
+                revisionBaselineDocPath = data.baselineDocPath || '';
+                revisionBaselineFileName = data.baselineFileName || file.name;
+                baseApprovedMenuContent = data.approvedMenuContent || '';
+                persistentDiffSummary = { insertions: 0, deletions: 0 };
+
+                if (data.extractedProject) {
+                    if (data.extractedProject.projectName) document.getElementById('projectName').value = data.extractedProject.projectName;
+                    if (data.extractedProject.property) document.getElementById('property').value = data.extractedProject.property;
+                    if (data.extractedProject.orientation) setSelectValue('orientation', data.extractedProject.orientation);
+                }
+
+                quill.setText(baseApprovedMenuContent || '');
+                renderPersistentPreview(baseApprovedMenuContent, baseApprovedMenuContent);
+
+                const selectedNote = document.getElementById('revisionSelectedNote');
+                selectedNote.textContent = `Loaded uploaded baseline: ${revisionBaselineFileName}`;
+                selectedNote.classList.add('show');
+
+                showAlert('Baseline extracted from uploaded approved DOCX.', 'success');
+            } catch (error) {
+                console.error(error);
+                showAlert('Failed to process baseline DOCX: ' + error.message, 'error');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Extract Baseline';
             }
         }
 
@@ -1717,7 +2131,9 @@
                     select.appendChild(opt);
                 });
 
-                document.getElementById('recentProjectLoader').style.display = 'flex';
+                if (submissionMode !== 'modification') {
+                    document.getElementById('recentProjectLoader').style.display = 'flex';
+                }
             } catch (err) {
                 console.error('Failed to load recent projects:', err);
             }
@@ -2014,7 +2430,6 @@
             const submitterJobTitle = document.getElementById('submitterJobTitle').value.trim();
             const projectName = document.getElementById('projectName').value.trim();
             const property = document.getElementById('property').value.trim();
-            const size = document.getElementById('size').value.trim();
             const orientation = document.getElementById('orientation').value;
             const menuType = document.getElementById('menuType').value;
             const templateType = document.getElementById('templateType').value;
@@ -2022,6 +2437,12 @@
             const cityCountry = document.getElementById('cityCountry').value.trim();
             const assetType = document.getElementById('assetType').value;
             const menuContent = quill.getText().trim();
+            const width = assetType === 'PRINT'
+                ? document.getElementById('widthPrint').value.trim()
+                : document.getElementById('widthDigital').value.trim();
+            const height = assetType === 'PRINT'
+                ? document.getElementById('heightPrint').value.trim()
+                : document.getElementById('heightDigital').value.trim();
 
             if (!submitterName || !submitterEmail || !submitterJobTitle) {
                 showAlert('Please fill in all submitter information fields', 'error');
@@ -2035,7 +2456,7 @@
                 return false;
             }
 
-            if (!projectName || !property || !size || !orientation || !menuType || !templateType || !dateNeeded || !cityCountry || !assetType || !menuContent) {
+            if (!projectName || !property || !width || !height || !orientation || !menuType || !templateType || !dateNeeded || !cityCountry || !assetType || !menuContent) {
                 showAlert('Please fill in all required fields', 'error');
                 window.scrollTo({ top: 0, behavior: 'smooth' });
                 return false;
@@ -2063,6 +2484,10 @@
 
         async function runBasicCheck() {
             if (!validateStep1()) return;
+            if (submissionMode === 'modification' && !revisionBaseSubmissionId && !revisionBaselineDocPath) {
+                showAlert('Select a previous approved submission or upload an approved baseline DOCX first.', 'error');
+                return;
+            }
 
             const btn = document.getElementById('runCheckBtn');
             btn.disabled = true;
@@ -2473,6 +2898,7 @@
 
             // Display the reviewed content with highlights
             displayReviewedContent(quill.root.innerHTML);
+            renderPersistentPreview(baseApprovedMenuContent || originalText, correctedText);
 
             const suggestionsDisplay = document.getElementById('suggestionsDisplay');
 
@@ -2529,6 +2955,11 @@
                     showAlert('Please resolve or override all critical errors before submitting.', 'error');
                     return;
                 }
+            }
+
+            if (submissionMode === 'modification' && !revisionBaseSubmissionId && !revisionBaselineDocPath) {
+                showAlert('Select a previous approved submission or upload an approved baseline DOCX before submitting.', 'error');
+                return;
             }
 
             if (isEditMode) {
@@ -2606,7 +3037,14 @@
                 menuContent: menuContentText,
                 menuContentHtml: menuContentHtml,
                 approvals: approvals,
-                criticalOverrides: criticalOverrides
+                criticalOverrides: criticalOverrides,
+                submissionMode: submissionMode,
+                revisionSource: submissionMode === 'modification' ? revisionSource : null,
+                revisionBaseSubmissionId: revisionBaseSubmissionId,
+                revisionBaselineDocPath: submissionMode === 'modification' ? revisionBaselineDocPath : '',
+                revisionBaselineFileName: submissionMode === 'modification' ? revisionBaselineFileName : '',
+                baseApprovedMenuContent: submissionMode === 'modification' ? baseApprovedMenuContent : '',
+                chefPersistentDiff: submissionMode === 'modification' ? persistentDiffSummary : null
             };
 
             try {
@@ -2672,6 +3110,7 @@
                 reviewedArea.classList.add('editable');
                 reviewedArea.contentEditable = 'true';
                 reviewedArea.focus();
+                reviewedArea.addEventListener('input', handleReviewedAreaInput);
                 // Hide re-run button while editing
                 document.getElementById('rerunCheckBtn').classList.remove('show');
             } else {
@@ -2680,42 +3119,135 @@
                 editNotice.classList.remove('show');
                 reviewedArea.classList.remove('editable');
                 reviewedArea.contentEditable = 'false';
+                reviewedArea.removeEventListener('input', handleReviewedAreaInput);
                 recalculateHighlights();
                 // Show re-run button after editing
                 document.getElementById('rerunCheckBtn').classList.add('show');
             }
         }
 
+        function extractCleanTextFromReviewedArea(element) {
+            const paragraphs = element.querySelectorAll('p');
+
+            if (paragraphs.length === 0) {
+                return (element.textContent || '').trim()
+                    .split(/\n+/)
+                    .map(line => line.trim())
+                    .filter(line => line.length > 0)
+                    .join('\n');
+            }
+
+            const lines = [];
+            paragraphs.forEach(p => {
+                const text = (p.textContent || '').trim();
+                if (text && text !== '\u00A0' && text.length > 0) {
+                    lines.push(text);
+                }
+            });
+            return lines.join('\n');
+        }
+
+        function handleReviewedAreaInput() {
+            if (submissionMode !== 'modification') return;
+            const reviewedArea = document.getElementById('reviewedContentArea');
+            clearTimeout(persistentPreviewUpdateTimer);
+            persistentPreviewUpdateTimer = setTimeout(() => {
+                const currentText = extractCleanTextFromReviewedArea(reviewedArea);
+                renderPersistentPreview(baseApprovedMenuContent || (aiCheckResults?.originalMenu || ''), currentText);
+            }, 120);
+        }
+
+        function tokenizeForDiff(text) {
+            return (text || '').split(/(\s+)/).filter(token => token.length > 0);
+        }
+
+        function normalizeToken(token) {
+            return token.toLowerCase().replace(/[^\p{L}\p{N}$€£¥|.-]/gu, '');
+        }
+
+        function buildTokenLcs(baseTokens, revisedTokens) {
+            const m = baseTokens.length;
+            const n = revisedTokens.length;
+            const dp = Array(m + 1).fill(null).map(() => Array(n + 1).fill(0));
+
+            for (let i = 1; i <= m; i++) {
+                for (let j = 1; j <= n; j++) {
+                    if (normalizeToken(baseTokens[i - 1]) === normalizeToken(revisedTokens[j - 1])) {
+                        dp[i][j] = dp[i - 1][j - 1] + 1;
+                    } else {
+                        dp[i][j] = Math.max(dp[i - 1][j], dp[i][j - 1]);
+                    }
+                }
+            }
+
+            const commonBase = new Set();
+            const commonRev = new Set();
+            let i = m;
+            let j = n;
+            while (i > 0 && j > 0) {
+                if (normalizeToken(baseTokens[i - 1]) === normalizeToken(revisedTokens[j - 1])) {
+                    commonBase.add(i - 1);
+                    commonRev.add(j - 1);
+                    i--;
+                    j--;
+                } else if (dp[i - 1][j] >= dp[i][j - 1]) {
+                    i--;
+                } else {
+                    j--;
+                }
+            }
+
+            return { commonBase, commonRev };
+        }
+
+        function renderPersistentPreview(baseText, revisedText) {
+            const previewSection = document.getElementById('persistentPreviewSection');
+            const previewBody = document.getElementById('persistentPreviewBody');
+
+            if (submissionMode !== 'modification') {
+                previewSection.classList.remove('show');
+                previewBody.innerHTML = '';
+                return;
+            }
+
+            previewSection.classList.add('show');
+            const baseTokens = tokenizeForDiff(baseText);
+            const revisedTokens = tokenizeForDiff(revisedText);
+            const lcs = buildTokenLcs(baseTokens, revisedTokens);
+
+            let insertions = 0;
+            let deletions = 0;
+            let html = '';
+
+            for (let i = 0; i < baseTokens.length; i++) {
+                if (!lcs.commonBase.has(i) && baseTokens[i].trim()) {
+                    html += `<span class="persistent-del">${escapeHtml(baseTokens[i])}</span>`;
+                    deletions++;
+                } else {
+                    html += escapeHtml(baseTokens[i]);
+                }
+            }
+
+            html += '\n\n';
+
+            for (let i = 0; i < revisedTokens.length; i++) {
+                if (!lcs.commonRev.has(i) && revisedTokens[i].trim()) {
+                    html += `<span class="persistent-ins">${escapeHtml(revisedTokens[i])}</span>`;
+                    insertions++;
+                } else {
+                    html += escapeHtml(revisedTokens[i]);
+                }
+            }
+
+            persistentDiffSummary = { insertions, deletions };
+            previewBody.innerHTML = html;
+        }
+
         function recalculateHighlights() {
             const reviewedArea = document.getElementById('reviewedContentArea');
 
             // Extract clean text from the edited content
-            // Get each <p> element's text, filter out empties, join with single newlines
-            const extractCleanText = (element) => {
-                const paragraphs = element.querySelectorAll('p');
-
-                if (paragraphs.length === 0) {
-                    // No paragraphs, get text content directly
-                    return element.textContent.trim()
-                        .split(/\n+/)
-                        .map(line => line.trim())
-                        .filter(line => line.length > 0)
-                        .join('\n');
-                }
-
-                const lines = [];
-                paragraphs.forEach(p => {
-                    const text = p.textContent.trim();
-                    // Only add non-empty lines (skip &nbsp; and empty paragraphs)
-                    if (text && text !== '\u00A0' && text.length > 0) {
-                        lines.push(text);
-                    }
-                });
-
-                return lines.join('\n');
-            };
-
-            const currentText = extractCleanText(reviewedArea);
+            const currentText = extractCleanTextFromReviewedArea(reviewedArea);
 
             quill.setText(currentText);
 
@@ -2752,6 +3284,7 @@
             });
 
             displayReviewedContent(quill.root.innerHTML);
+            renderPersistentPreview(baseApprovedMenuContent || aiCheckResults.originalMenu, currentText);
         }
 
         function findWordPosition(text, word, expectedPosition) {

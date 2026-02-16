@@ -4,8 +4,11 @@ import FormData from 'form-data';
 import fs from 'fs';
 import path from 'path';
 import dotenv from 'dotenv';
+import { exec } from 'child_process';
+import { promisify } from 'util';
 
 dotenv.config({ path: path.join(__dirname, '..', '..', '..', '.env') });
+const execAsync = promisify(exec);
 
 const app = express();
 const port = 3007;
@@ -23,6 +26,23 @@ const clickupHeaders = {
 };
 
 app.use(express.json());
+
+async function extractApprovedMenuContent(docxPath: string): Promise<{ raw: string; cleaned: string }> {
+    const scriptPath = path.resolve(__dirname, '..', '..', 'docx-redliner', 'extract_clean_menu_text.py');
+    const venvPython = path.resolve(__dirname, '..', '..', 'docx-redliner', 'venv', 'bin', 'python');
+
+    let command = `"${venvPython}" "${scriptPath}" "${docxPath}"`;
+    if (!fs.existsSync(venvPython)) {
+        command = `python3 "${scriptPath}" "${docxPath}"`;
+    }
+
+    const { stdout } = await execAsync(command, { timeout: 30000 });
+    const parsed = JSON.parse(stdout || '{}');
+    return {
+        raw: parsed.menu_content || '',
+        cleaned: parsed.cleaned_menu_content || parsed.menu_content || '',
+    };
+}
 
 /**
  * POST /create-task — Called by Dashboard after form submit.
@@ -57,6 +77,12 @@ app.post('/create-task', async (req, res) => {
             cityCountry,
             assetType,
             docxPath,
+            submissionMode,
+            revisionSource,
+            revisionBaseSubmissionId,
+            revisionBaselineDocPath,
+            revisionBaselineFileName,
+            chefPersistentDiff,
         } = req.body;
 
         // Create task in ClickUp
@@ -74,6 +100,12 @@ app.post('/create-task', async (req, res) => {
                 `**Location:** ${cityCountry || 'N/A'}`,
                 `**Asset Type:** ${assetType || 'N/A'}`,
                 `**Date Needed:** ${dateNeeded || 'N/A'}`,
+                `**Submission Mode:** ${submissionMode || 'new'}`,
+                ...(submissionMode === 'modification' ? [
+                    `**Revision Source:** ${revisionSource || (revisionBaseSubmissionId ? 'database' : 'uploaded-baseline')}`,
+                    ...(revisionBaseSubmissionId ? [`**Base Submission ID:** ${revisionBaseSubmissionId}`] : []),
+                    ...(chefPersistentDiff ? [`**Chef Persistent Diff:** ${JSON.stringify(chefPersistentDiff)}`] : []),
+                ] : []),
                 ...(assetType === 'PRINT' ? [
                     `**Crop Marks:** ${cropMarks || 'No'}`,
                     `**Bleed Marks:** ${bleedMarks || 'No'}`,
@@ -120,6 +152,28 @@ app.post('/create-task', async (req, res) => {
                 }
             );
             console.log(`DOCX attached to ClickUp task ${taskId}`);
+        }
+
+        // For modification flow with uploaded baseline, also attach the chef-provided
+        // previously approved/redlined document so Isabella can verify source version.
+        if (revisionBaselineDocPath && fs.existsSync(revisionBaselineDocPath)) {
+            const baselineForm = new FormData();
+            baselineForm.append('attachment', fs.createReadStream(revisionBaselineDocPath), {
+                filename: revisionBaselineFileName || path.basename(revisionBaselineDocPath),
+                contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            });
+
+            await axios.post(
+                `https://api.clickup.com/api/v2/task/${taskId}/attachment`,
+                baselineForm,
+                {
+                    headers: {
+                        'Authorization': CLICKUP_API_TOKEN,
+                        ...baselineForm.getHeaders(),
+                    },
+                }
+            );
+            console.log(`Baseline approved DOCX attached to ClickUp task ${taskId}`);
         }
 
         // Store clickup_task_id on submission
@@ -191,12 +245,41 @@ app.post('/webhook/clickup', async (req, res) => {
         await fs.promises.writeFile(correctedPath, fileResponse.data);
         console.log(`Downloaded corrected file to ${correctedPath}`);
 
+        // Extract canonical approved text from Isabella's uploaded DOCX.
+        // This is the source of truth for future chef revisions.
+        let extractedRaw = '';
+        let extractedClean = '';
+        try {
+            const extracted = await extractApprovedMenuContent(correctedPath);
+            extractedRaw = extracted.raw;
+            extractedClean = extracted.cleaned;
+        } catch (extractError: any) {
+            console.warn(`Failed to extract approved text from corrected DOCX: ${extractError.message}`);
+        }
+
         // Update submission status and final_path
         await axios.put(`http://localhost:3004/submissions/${submission.id}`, {
             status: 'approved',
             final_path: correctedPath,
+            approved_menu_content_raw: extractedRaw || undefined,
+            approved_menu_content: extractedClean || undefined,
+            approved_text_extracted_at: extractedClean ? new Date().toISOString() : undefined,
         });
         console.log(`Updated submission ${submission.id} to approved`);
+
+        // Store file metadata so storage backend can migrate to Teams/SharePoint later.
+        axios.post('http://localhost:3004/assets', {
+            submission_id: submission.id,
+            asset_type: 'approved_docx',
+            source: 'isabella_clickup',
+            storage_provider: 'local',
+            storage_path: correctedPath,
+            file_name: path.basename(correctedPath),
+            meta: {
+                clickup_task_id: clickupTaskId,
+                attachment_id: latestAttachment.id || null,
+            },
+        }).catch(err => console.error('Failed to save approved_docx asset metadata:', err.message));
 
         // Notify submitter (fire-and-forget)
         axios.post('http://localhost:3003/notify', {
@@ -261,9 +344,13 @@ app.get('/health', (_req, res) => {
     });
 });
 
-app.listen(port, () => {
-    console.log(`clickup-integration service listening at http://localhost:${port}`);
-    if (!CLICKUP_API_TOKEN) {
-        console.log('ClickUp API token not configured — task creation will be skipped');
-    }
-});
+if (require.main === module) {
+    app.listen(port, () => {
+        console.log(`clickup-integration service listening at http://localhost:${port}`);
+        if (!CLICKUP_API_TOKEN) {
+            console.log('ClickUp API token not configured — task creation will be skipped');
+        }
+    });
+}
+
+export default app;

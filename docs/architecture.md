@@ -31,6 +31,10 @@ Chef opens web form (/form)
   │
   ├─ Autocomplete: dashboard → GET /api/submitter-profiles/search → db service
   ├─ Recent projects: dashboard → GET /api/recent-projects → db service
+  ├─ Mode: New submission OR Modification
+  │   ├─ Modification (DB): dashboard → GET /api/submissions/search → db service
+  │   └─ Modification (upload): dashboard → POST /api/modification/baseline-upload
+  │      └─ Python extractors: extract_clean_menu_text.py + extract_project_details.py
   │
   ▼
 Fills form (submitter info, project details, approval attestation, menu content)
@@ -48,10 +52,12 @@ Reviews AI suggestions
   ▼
 Submits menu
   dashboard → POST /submissions (db service) — stores all form data
+  dashboard → POST /assets (db service) — store original_docx metadata
   dashboard → POST /submitter-profiles (db service) — fire-and-forget profile save
   dashboard → POST localhost:3007/create-task (clickup-integration) — fire-and-forget
     │
-    └─ clickup-integration → ClickUp API: create task + upload DOCX attachment
+    └─ clickup-integration → ClickUp API: create task + upload DOCX attachment(s)
+       └─ modification upload mode: attach baseline approved DOCX for Isabella verification
        clickup-integration → PATCH /submissions/:id (db service) — store clickup_task_id
 ```
 
@@ -68,7 +74,9 @@ ClickUp sends taskStatusUpdated webhook
   ├─ Filters: only processes status matching CLICKUP_CORRECTIONS_STATUS
   ├─ GET /submissions/by-clickup-task/:taskId (db service) — lookup submission
   ├─ GET ClickUp API — download latest attachment
-  ├─ PATCH /submissions/:id (db service) — update status to 'approved', set final_path
+  ├─ Python extractor: extract_clean_menu_text.py — derive canonical approved text
+  ├─ PATCH /submissions/:id (db service) — update status to 'approved', set final_path + approved_menu_content
+  ├─ POST /assets (db service) — store approved_docx metadata
   │
   ├─ Fire-and-forget: POST notifier — corrections_ready email with DOCX attached
   └─ Fire-and-forget: POST differ — compare AI draft vs corrected file (training data)
