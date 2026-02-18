@@ -136,9 +136,17 @@ def populate_template(template_path: str, form_data: dict, output_path: str):
 
     print("Adding menu content...")
 
+    def apply_menu_paragraph_style(para):
+        para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        # Keep generated menu paragraphs compact and predictable in Word.
+        para.paragraph_format.space_before = Pt(0)
+        para.paragraph_format.space_after = Pt(0)
+        para.paragraph_format.line_spacing = 1.0
+
     # Check if we have HTML content to preserve formatting
     menu_content_html = form_data.get('menuContentHtml', '')
     menu_content_text = form_data.get('menuContent', '')
+    allergens_text = (form_data.get('allergens', '') or '').strip()
 
     if menu_content_html:
         # Parse HTML content to preserve formatting
@@ -149,13 +157,13 @@ def populate_template(template_path: str, form_data: dict, output_path: str):
         for line_parts in lines:
             # Add paragraph to document
             para = doc.add_paragraph()
-            para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            apply_menu_paragraph_style(para)
 
             if line_parts:
                 for part in line_parts:
                     run = para.add_run(part['text'])
                     run.font.name = 'Calibri'
-                    run.font.size = Pt(12)
+                    run.font.size = Pt(10)
                     run.bold = part['bold']
                     run.italic = part['italic']
                     run.underline = part['underline']
@@ -169,15 +177,37 @@ def populate_template(template_path: str, form_data: dict, output_path: str):
         for line in lines:
             # Add paragraph to document
             para = doc.add_paragraph()
-            para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            apply_menu_paragraph_style(para)
 
             if line.strip():
                 run = para.add_run(line)
                 run.font.name = 'Calibri'
-                run.font.size = Pt(12)
+                run.font.size = Pt(10)
             # Empty lines create spacing
 
         print(f"Added {len(lines)} lines of plain text menu content")
+
+    # Append allergen key at the end when provided in the form.
+    if allergens_text:
+        doc.add_paragraph()
+        heading = doc.add_paragraph()
+        apply_menu_paragraph_style(heading)
+        heading_run = heading.add_run("ALLERGEN KEY")
+        heading_run.font.name = 'Calibri'
+        heading_run.font.size = Pt(10)
+        heading_run.bold = True
+
+        # Support either pipe-delimited single line or multi-line key definitions.
+        allergen_lines = [line.strip() for line in allergens_text.splitlines() if line.strip()]
+        if len(allergen_lines) == 1 and '|' in allergen_lines[0]:
+            allergen_lines = [part.strip() for part in allergen_lines[0].split('|') if part.strip()]
+
+        for line in allergen_lines:
+            para = doc.add_paragraph()
+            apply_menu_paragraph_style(para)
+            run = para.add_run(line)
+            run.font.name = 'Calibri'
+            run.font.size = Pt(10)
 
     # Save the populated document
     print(f"Saving document to: {output_path}")

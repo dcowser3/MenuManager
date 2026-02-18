@@ -74,6 +74,7 @@ function invokeJsonHandler(handler, body) {
 
 describe('Dashboard Modification Workflow (local, mocked externals)', () => {
     const submitHandler = getRouteHandler('post', '/api/form/submit');
+    const basicCheckHandler = getRouteHandler('post', '/api/form/basic-check');
 
     beforeEach(() => {
         mockedAxios.post = jest.fn(async (url, payload) => {
@@ -90,6 +91,13 @@ describe('Dashboard Modification Workflow (local, mocked externals)', () => {
             }
             if (urlStr.includes('http://localhost:3002/ai-review')) {
                 throw new Error('AI service mocked unavailable');
+            }
+            if (urlStr.includes('http://localhost:3002/run-qa-check')) {
+                return {
+                    data: {
+                        feedback: '=== CORRECTED MENU ===\nNO CHANGES\n=== END CORRECTED MENU ===\n=== SUGGESTIONS ===\n[]\n=== END SUGGESTIONS ==='
+                    }
+                };
             }
             if (urlStr.includes('http://localhost:3007/create-task')) {
                 return { data: { success: true } };
@@ -195,5 +203,50 @@ describe('Dashboard Modification Workflow (local, mocked externals)', () => {
         expect(clickupCall[1].revisionSource).toBe('uploaded_baseline');
         expect(clickupCall[1].revisionBaselineDocPath).toBe('/tmp/uploads/legacy-approved.docx');
         expect(clickupCall[1].revisionBaselineFileName).toBe('legacy-approved.docx');
+        expect(clickupCall[1].criticalOverrides).toEqual([]);
+    });
+
+    test('basic-check changed_only short-circuits when there are no changed lines', async () => {
+        const payload = {
+            menuContent: 'Guacamole - $12',
+            baselineMenuContent: 'Guacamole - $12',
+            reviewMode: 'changed_only',
+            allergens: '',
+            menuType: 'standard',
+        };
+
+        const response = await invokeJsonHandler(basicCheckHandler, payload);
+        expect(response.status).toBe(200);
+        expect(response.body.success).toBe(true);
+        expect(response.body.reviewMode).toBe('changed_only');
+        expect(response.body.changedLineCount).toBe(0);
+        expect(response.body.suggestions).toEqual([]);
+
+        const qaCall = mockedAxios.post.mock.calls.find((c) =>
+            String(c[0]).includes('http://localhost:3002/run-qa-check')
+        );
+        expect(qaCall).toBeUndefined();
+    });
+
+    test('basic-check changed_only sends only changed lines to AI', async () => {
+        const payload = {
+            menuContent: 'Guacamole - $12\nCeviche - $15',
+            baselineMenuContent: 'Guacamole - $12',
+            reviewMode: 'changed_only',
+            allergens: '',
+            menuType: 'standard',
+        };
+
+        const response = await invokeJsonHandler(basicCheckHandler, payload);
+        expect(response.status).toBe(200);
+        expect(response.body.success).toBe(true);
+        expect(response.body.reviewMode).toBe('changed_only');
+        expect(response.body.changedLineCount).toBe(1);
+
+        const qaCall = mockedAxios.post.mock.calls.find((c) =>
+            String(c[0]).includes('http://localhost:3002/run-qa-check')
+        );
+        expect(qaCall).toBeTruthy();
+        expect(qaCall[1].text).toBe('Ceviche - $15');
     });
 });

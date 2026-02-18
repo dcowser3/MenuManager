@@ -43,6 +43,7 @@ Fills form (submitter info, project details, approval attestation, menu content)
 Runs AI Check
   dashboard → POST parser (validate DOCX structure)
   dashboard → POST ai-review (two-tier: QA prompt → corrections prompt)
+  Note: in modification mode, dashboard scopes QA payload to changed lines only versus approved baseline.
   │
   ▼
 Reviews AI suggestions

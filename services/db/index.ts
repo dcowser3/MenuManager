@@ -1,6 +1,10 @@
 import express from 'express';
 import { promises as fs } from 'fs';
 import * as path from 'path';
+import * as dotenv from 'dotenv';
+import { getSupabaseClient, isSupabaseConfigured } from '@menumanager/supabase-client';
+
+dotenv.config({ path: path.join(__dirname, '..', '..', '..', '.env') });
 
 const app = express();
 const port = 3004;
@@ -10,6 +14,156 @@ const SUBMISSIONS_DB = path.join(DB_DIR, 'submissions.json');
 const REPORTS_DB = path.join(DB_DIR, 'reports.json');
 const PROFILES_DB = path.join(DB_DIR, 'submitter_profiles.json');
 const ASSETS_DB = path.join(DB_DIR, 'assets.json');
+const SUBMISSIONS_TABLE = 'submissions';
+const SUBMITTER_PROFILES_TABLE = 'submitter_profiles';
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+const SUPABASE_SUBMISSION_COLUMNS = new Set([
+    'id',
+    'legacy_id',
+    'project_name',
+    'property',
+    'width',
+    'height',
+    'crop_marks',
+    'bleed_marks',
+    'file_size_limit',
+    'file_size_limit_mb',
+    'file_delivery_notes',
+    'orientation',
+    'menu_type',
+    'template_type',
+    'date_needed',
+    'submitter_email',
+    'submitter_name',
+    'submitter_job_title',
+    'hotel_name',
+    'city_country',
+    'asset_type',
+    'menu_content',
+    'menu_content_html',
+    'approvals',
+    'critical_overrides',
+    'submission_mode',
+    'revision_source',
+    'revision_base_submission_id',
+    'revision_baseline_doc_path',
+    'revision_baseline_file_name',
+    'base_approved_menu_content',
+    'chef_persistent_diff',
+    'approved_menu_content_raw',
+    'approved_menu_content',
+    'approved_text_extracted_at',
+    'filename',
+    'original_path',
+    'ai_draft_path',
+    'final_path',
+    'clickup_task_id',
+    'status',
+    'changes_made',
+    'source',
+    'created_at',
+    'updated_at',
+    'reviewed_at',
+    'raw_payload',
+]);
+
+function toSupabaseSubmissionRecord(payload: any): Record<string, any> {
+    const mapped: Record<string, any> = {};
+    for (const [key, value] of Object.entries(payload || {})) {
+        if (!SUPABASE_SUBMISSION_COLUMNS.has(key)) continue;
+        if (value === undefined) continue;
+        mapped[key] = value;
+    }
+
+    const incomingId = (payload?.id || '').toString().trim();
+    if (incomingId) {
+        if (UUID_REGEX.test(incomingId)) {
+            mapped.id = incomingId;
+        } else {
+            mapped.legacy_id = incomingId;
+            delete mapped.id;
+        }
+    }
+
+    // Preserve the complete submission payload for audit/debug parity.
+    // This guarantees no field is lost even if schema evolves later.
+    mapped.raw_payload = payload;
+
+    return mapped;
+}
+
+async function mirrorSubmissionCreateToSupabase(localSubmission: any): Promise<void> {
+    if (!isSupabaseConfigured()) return;
+
+    const supabase = getSupabaseClient();
+    const record = toSupabaseSubmissionRecord(localSubmission);
+    const legacyId = record.legacy_id;
+
+    if (legacyId) {
+        const { data: existing, error: lookupError } = await supabase
+            .from(SUBMISSIONS_TABLE)
+            .select('id')
+            .eq('legacy_id', legacyId)
+            .maybeSingle();
+
+        if (lookupError) {
+            throw new Error(`Supabase lookup failed: ${lookupError.message}`);
+        }
+
+        if (existing?.id) {
+            const { error: updateError } = await supabase
+                .from(SUBMISSIONS_TABLE)
+                .update({ ...record, updated_at: new Date().toISOString() })
+                .eq('id', existing.id);
+            if (updateError) {
+                throw new Error(`Supabase update failed: ${updateError.message}`);
+            }
+            return;
+        }
+    }
+
+    const { error } = await supabase.from(SUBMISSIONS_TABLE).insert(record);
+    if (error) {
+        throw new Error(`Supabase insert failed: ${error.message}`);
+    }
+}
+
+async function mirrorSubmissionUpdateToSupabase(localId: string, updates: any): Promise<void> {
+    if (!isSupabaseConfigured()) return;
+
+    const supabase = getSupabaseClient();
+    const record = toSupabaseSubmissionRecord(updates);
+    delete record.id;
+    delete record.legacy_id;
+    record.updated_at = new Date().toISOString();
+
+    let matchId = localId;
+    if (!UUID_REGEX.test(localId)) {
+        const { data, error } = await supabase
+            .from(SUBMISSIONS_TABLE)
+            .select('id')
+            .eq('legacy_id', localId)
+            .maybeSingle();
+        if (error) {
+            throw new Error(`Supabase legacy lookup failed: ${error.message}`);
+        }
+        if (!data?.id) {
+            // No Supabase row to update yet; caller can ignore.
+            return;
+        }
+        matchId = data.id;
+    }
+
+    const { error } = await supabase
+        .from(SUBMISSIONS_TABLE)
+        .update(record)
+        .eq('id', matchId);
+
+    if (error) {
+        throw new Error(`Supabase update failed: ${error.message}`);
+    }
+}
 
 // Ensure DB directory and files exist
 async function initDb() {
@@ -40,6 +194,13 @@ app.post('/submissions', async (req, res) => {
         };
         submissions[newId] = newSubmission;
         await fs.writeFile(SUBMISSIONS_DB, JSON.stringify(submissions, null, 2));
+
+        try {
+            await mirrorSubmissionCreateToSupabase(newSubmission);
+        } catch (supabaseError: any) {
+            console.error('Supabase mirror create failed (kept local JSON write):', supabaseError.message);
+        }
+
         res.status(201).json(newSubmission);
     } catch (error) {
         console.error('Error saving submission:', error);
@@ -51,6 +212,19 @@ app.post('/submissions', async (req, res) => {
 // IMPORTANT: This must come BEFORE the /:id route
 app.get('/submissions/pending', async (req, res) => {
     try {
+        if (isSupabaseConfigured()) {
+            const supabase = getSupabaseClient();
+            const { data, error } = await supabase
+                .from(SUBMISSIONS_TABLE)
+                .select('*')
+                .eq('status', 'pending_human_review')
+                .order('created_at', { ascending: false });
+            if (error) {
+                throw new Error(error.message);
+            }
+            return res.status(200).json(data || []);
+        }
+
         const submissions = JSON.parse(await fs.readFile(SUBMISSIONS_DB, 'utf-8'));
         const pending = Object.values(submissions).filter(
             (sub: any) => sub.status === 'pending_human_review'
@@ -67,8 +241,25 @@ app.get('/submissions/pending', async (req, res) => {
 app.get('/submissions/recent-projects', async (req, res) => {
     try {
         const limit = parseInt(req.query.limit as string) || 20;
-        const submissions = JSON.parse(await fs.readFile(SUBMISSIONS_DB, 'utf-8'));
-        const allSubs = Object.values(submissions) as any[];
+        let allSubs: any[] = [];
+
+        if (isSupabaseConfigured()) {
+            const supabase = getSupabaseClient();
+            const { data, error } = await supabase
+                .from(SUBMISSIONS_TABLE)
+                .select('*')
+                .eq('source', 'form')
+                .not('project_name', 'is', null)
+                .order('created_at', { ascending: false })
+                .limit(500);
+            if (error) {
+                throw new Error(error.message);
+            }
+            allSubs = data || [];
+        } else {
+            const submissions = JSON.parse(await fs.readFile(SUBMISSIONS_DB, 'utf-8'));
+            allSubs = Object.values(submissions) as any[];
+        }
 
         // Filter to form submissions only
         const formSubs = allSubs.filter(s => s.source === 'form' && s.project_name);
@@ -123,38 +314,55 @@ app.get('/submissions/search', async (req, res) => {
             return res.json([]);
         }
 
-        const submissions = JSON.parse(await fs.readFile(SUBMISSIONS_DB, 'utf-8'));
-        const approvedStatuses = new Set(['approved']);
+        let sourceRows: any[] = [];
+        if (isSupabaseConfigured()) {
+            const supabase = getSupabaseClient();
+            const like = `%${q}%`;
+            const { data, error } = await supabase
+                .from(SUBMISSIONS_TABLE)
+                .select('*')
+                .eq('status', 'approved')
+                .or(`project_name.ilike.${like},property.ilike.${like},submitter_name.ilike.${like},submitter_email.ilike.${like},hotel_name.ilike.${like},city_country.ilike.${like}`)
+                .order('updated_at', { ascending: false })
+                .limit(limit);
+            if (error) {
+                throw new Error(error.message);
+            }
+            sourceRows = data || [];
+        } else {
+            const submissions = JSON.parse(await fs.readFile(SUBMISSIONS_DB, 'utf-8'));
+            const approvedStatuses = new Set(['approved']);
+            sourceRows = (Object.values(submissions) as any[])
+                .filter((s) => approvedStatuses.has((s.status || '').toLowerCase()))
+                .filter((s) => {
+                    const haystack = [
+                        s.project_name,
+                        s.property,
+                        s.submitter_name,
+                        s.submitter_email,
+                        s.hotel_name,
+                        s.city_country,
+                    ]
+                        .filter(Boolean)
+                        .join(' ')
+                        .toLowerCase();
+                    return haystack.includes(q);
+                })
+                .sort((a, b) => new Date(b.updated_at || b.created_at).getTime() - new Date(a.updated_at || a.created_at).getTime())
+                .slice(0, limit);
+        }
 
-        const results = (Object.values(submissions) as any[])
-            .filter((s) => approvedStatuses.has((s.status || '').toLowerCase()))
-            .filter((s) => {
-                const haystack = [
-                    s.project_name,
-                    s.property,
-                    s.submitter_name,
-                    s.submitter_email,
-                    s.hotel_name,
-                    s.city_country,
-                ]
-                    .filter(Boolean)
-                    .join(' ')
-                    .toLowerCase();
-                return haystack.includes(q);
-            })
-            .sort((a, b) => new Date(b.updated_at || b.created_at).getTime() - new Date(a.updated_at || a.created_at).getTime())
-            .slice(0, limit)
-            .map((s) => ({
-                id: s.id,
-                projectName: s.project_name || '',
-                property: s.property || '',
-                submitterName: s.submitter_name || '',
-                submitterEmail: s.submitter_email || '',
-                dateNeeded: s.date_needed || '',
-                updatedAt: s.updated_at || s.created_at,
-                approvedMenuContent: s.approved_menu_content || s.menu_content || '',
-                status: s.status,
-            }));
+        const results = sourceRows.map((s) => ({
+            id: s.legacy_id || s.id,
+            projectName: s.project_name || '',
+            property: s.property || '',
+            submitterName: s.submitter_name || '',
+            submitterEmail: s.submitter_email || '',
+            dateNeeded: s.date_needed || '',
+            updatedAt: s.updated_at || s.created_at,
+            approvedMenuContent: s.approved_menu_content || s.menu_content || '',
+            status: s.status,
+        }));
 
         res.json(results);
     } catch (error) {
@@ -173,14 +381,31 @@ app.get('/submissions/latest-approved', async (req, res) => {
             return res.status(400).json({ error: 'projectName and property are required' });
         }
 
-        const submissions = JSON.parse(await fs.readFile(SUBMISSIONS_DB, 'utf-8'));
-        const match = (Object.values(submissions) as any[])
-            .filter((s) => (s.status || '').toLowerCase() === 'approved')
-            .filter((s) =>
-                (s.project_name || '').trim().toLowerCase() === projectName &&
-                (s.property || '').trim().toLowerCase() === property
-            )
-            .sort((a, b) => new Date(b.updated_at || b.created_at).getTime() - new Date(a.updated_at || a.created_at).getTime())[0];
+        let match: any = null;
+        if (isSupabaseConfigured()) {
+            const supabase = getSupabaseClient();
+            const { data, error } = await supabase
+                .from(SUBMISSIONS_TABLE)
+                .select('*')
+                .eq('status', 'approved')
+                .ilike('project_name', projectName)
+                .ilike('property', property)
+                .order('updated_at', { ascending: false })
+                .limit(1);
+            if (error) {
+                throw new Error(error.message);
+            }
+            match = (data || [])[0] || null;
+        } else {
+            const submissions = JSON.parse(await fs.readFile(SUBMISSIONS_DB, 'utf-8'));
+            match = (Object.values(submissions) as any[])
+                .filter((s) => (s.status || '').toLowerCase() === 'approved')
+                .filter((s) =>
+                    (s.project_name || '').trim().toLowerCase() === projectName &&
+                    (s.property || '').trim().toLowerCase() === property
+                )
+                .sort((a, b) => new Date(b.updated_at || b.created_at).getTime() - new Date(a.updated_at || a.created_at).getTime())[0];
+        }
 
         if (!match) {
             return res.status(404).json({ error: 'No approved submission found' });
@@ -199,6 +424,28 @@ app.get('/submitter-profiles/search', async (req, res) => {
         const q = (req.query.q as string || '').trim().toLowerCase();
         if (q.length < 2) {
             return res.json([]);
+        }
+
+        if (isSupabaseConfigured()) {
+            const supabase = getSupabaseClient();
+            const like = `%${q}%`;
+            const { data, error } = await supabase
+                .from(SUBMITTER_PROFILES_TABLE)
+                .select('*')
+                .ilike('name', like)
+                .order('last_used', { ascending: false })
+                .limit(8);
+
+            if (!error && data) {
+                return res.json(
+                    data.map((p: any) => ({
+                        name: p.name || '',
+                        email: p.email || '',
+                        jobTitle: p.job_title || '',
+                        lastUsed: p.last_used || p.updated_at || p.created_at,
+                    }))
+                );
+            }
         }
 
         const profiles = JSON.parse(await fs.readFile(PROFILES_DB, 'utf-8'));
@@ -220,6 +467,26 @@ app.post('/submitter-profiles', async (req, res) => {
         const { name, email, jobTitle } = req.body;
         if (!name || !email) {
             return res.status(400).json({ error: 'name and email are required' });
+        }
+
+        if (isSupabaseConfigured()) {
+            const supabase = getSupabaseClient();
+            const now = new Date().toISOString();
+            const { error } = await supabase
+                .from(SUBMITTER_PROFILES_TABLE)
+                .upsert(
+                    {
+                        name: name.trim(),
+                        email: email.trim(),
+                        job_title: (jobTitle || '').trim(),
+                        last_used: now,
+                        updated_at: now,
+                    },
+                    { onConflict: 'email' }
+                );
+            if (error) {
+                console.error('Supabase submitter profile upsert failed, falling back local:', error.message);
+            }
         }
 
         const key = name.toLowerCase().trim();
@@ -246,6 +513,19 @@ app.post('/submitter-profiles', async (req, res) => {
 app.get('/submissions/by-clickup-task/:taskId', async (req, res) => {
     try {
         const { taskId } = req.params;
+
+        if (isSupabaseConfigured()) {
+            const supabase = getSupabaseClient();
+            const { data, error } = await supabase
+                .from(SUBMISSIONS_TABLE)
+                .select('*')
+                .eq('clickup_task_id', taskId)
+                .maybeSingle();
+            if (!error && data) {
+                return res.json(data);
+            }
+        }
+
         const submissions = JSON.parse(await fs.readFile(SUBMISSIONS_DB, 'utf-8'));
         const match = Object.values(submissions).find(
             (sub: any) => sub.clickup_task_id === taskId
@@ -266,6 +546,20 @@ app.get('/submissions/by-clickup-task/:taskId', async (req, res) => {
 app.get('/submissions/:id', async (req, res) => {
     try {
         const { id } = req.params;
+
+        if (isSupabaseConfigured()) {
+            const supabase = getSupabaseClient();
+            const idColumn = UUID_REGEX.test(id) ? 'id' : 'legacy_id';
+            const { data, error } = await supabase
+                .from(SUBMISSIONS_TABLE)
+                .select('*')
+                .eq(idColumn, id)
+                .maybeSingle();
+            if (!error && data) {
+                return res.status(200).json(data);
+            }
+        }
+
         const submissions = JSON.parse(await fs.readFile(SUBMISSIONS_DB, 'utf-8'));
 
         if (!submissions[id]) {
@@ -283,7 +577,6 @@ app.get('/submissions/:id', async (req, res) => {
 app.put('/submissions/:id', async (req, res) => {
     try {
         const { id } = req.params;
-        const { status, ai_draft_path, final_path } = req.body;
         const submissions = JSON.parse(await fs.readFile(SUBMISSIONS_DB, 'utf-8'));
 
         if (!submissions[id]) {
@@ -294,6 +587,13 @@ app.put('/submissions/:id', async (req, res) => {
         submissions[id] = updatedSubmission;
 
         await fs.writeFile(SUBMISSIONS_DB, JSON.stringify(submissions, null, 2));
+
+        try {
+            await mirrorSubmissionUpdateToSupabase(id, updatedSubmission);
+        } catch (supabaseError: any) {
+            console.error('Supabase mirror update failed (kept local JSON write):', supabaseError.message);
+        }
+
         res.status(200).json(updatedSubmission);
     } catch (error) {
         console.error('Error updating submission:', error);
@@ -380,5 +680,10 @@ app.post('/reports', async (req, res) => {
 
 app.listen(port, () => {
     console.log(`db service listening at http://localhost:${port}`);
+    if (isSupabaseConfigured()) {
+        console.log('Supabase mirror: enabled');
+    } else {
+        console.log('Supabase mirror: disabled (missing SUPABASE_URL/SUPABASE_*_KEY)');
+    }
     initDb();
 });

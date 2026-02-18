@@ -10,7 +10,64 @@ Usage:
 
 import sys
 import json
+import re
 from docx import Document
+
+ALLERGEN_KEYWORDS = [
+    "allergen",
+    "gluten",
+    "dairy",
+    "fish",
+    "nuts",
+    "egg",
+    "vegan",
+    "vegetarian",
+    "crustacean",
+    "soy",
+    "sesame",
+]
+
+
+def detect_allergen_key(paragraphs) -> str:
+    """
+    Best-effort extraction of allergen legend text from DOCX content.
+    Returns a single line string like:
+    "C crustaceans | D dairy | E egg | F fish | G gluten | N nuts"
+    """
+    candidate_lines = []
+    for paragraph in paragraphs:
+        text = (paragraph.text or "").strip()
+        if text:
+            candidate_lines.append(" ".join(text.split()))
+
+    for line in candidate_lines:
+        lower = line.lower()
+
+        if "allergen" in lower and "|" in line:
+            return line
+
+        if "|" not in line:
+            continue
+
+        parts = [p.strip() for p in line.split("|") if p.strip()]
+        parsed = []
+        for part in parts:
+            match = re.match(r"^\*?\s*([A-Za-z]{1,3})\s+([A-Za-z][A-Za-z\s/&\-]{2,})$", part)
+            if not match:
+                continue
+            code = match.group(1).upper()
+            label = " ".join(match.group(2).split())
+            parsed.append((code, label))
+
+        if len(parsed) >= 4:
+            keyword_hits = sum(
+                1 for _, label in parsed
+                if any(keyword in label.lower() for keyword in ALLERGEN_KEYWORDS)
+            )
+            if keyword_hits >= 2:
+                return " | ".join(f"{code} {label}" for code, label in parsed)
+
+    return ""
 
 
 def extract_project_details(docx_path: str) -> dict:
@@ -95,10 +152,12 @@ def extract_project_details(docx_path: str) -> dict:
         menu_lines.pop()
 
     menu_content = "\n".join(menu_lines)
+    allergen_key = detect_allergen_key(doc.paragraphs)
 
     return {
         "project_details": project_details,
-        "menu_content": menu_content
+        "menu_content": menu_content,
+        "allergen_key": allergen_key
     }
 
 

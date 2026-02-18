@@ -413,6 +413,18 @@
             margin-top: 0.25rem;
         }
 
+        .allergen-detected-badge {
+            display: inline-block;
+            margin-top: 0.4rem;
+            font-size: 0.68rem;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: var(--color-success);
+            border: 1px solid rgba(74, 124, 89, 0.35);
+            background: rgba(74, 124, 89, 0.08);
+            padding: 0.2rem 0.45rem;
+        }
+
         /* Expand Button */
         .expand-btn {
             position: absolute;
@@ -553,6 +565,10 @@
             grid-template-columns: 2fr 1fr;
             gap: 1rem;
             margin-top: 1rem;
+        }
+
+        .step2-container.revision-split {
+            grid-template-columns: 1fr 1fr;
         }
 
         .step2-left-panel,
@@ -1011,6 +1027,302 @@
             font-size: 0.8rem;
             color: var(--color-text-light);
         }
+
+        /* Autocomplete */
+        .autocomplete-wrapper {
+            position: relative;
+        }
+
+        .autocomplete-dropdown {
+            display: none;
+            position: absolute;
+            top: 100%;
+            left: 0;
+            right: 0;
+            background: var(--color-background);
+            border: 1px solid var(--color-border);
+            border-top: none;
+            max-height: 200px;
+            overflow-y: auto;
+            z-index: 100;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        }
+
+        .autocomplete-dropdown.show {
+            display: block;
+        }
+
+        .autocomplete-item {
+            padding: 0.6rem 0.75rem;
+            cursor: pointer;
+            font-size: 0.85rem;
+            border-bottom: 1px solid var(--color-border-light);
+            transition: background 0.15s ease;
+        }
+
+        .autocomplete-item:last-child {
+            border-bottom: none;
+        }
+
+        .autocomplete-item:hover,
+        .autocomplete-item.highlighted {
+            background: var(--color-background-alt);
+        }
+
+        .autocomplete-item .ac-name {
+            color: var(--color-text);
+            font-weight: 500;
+        }
+
+        .autocomplete-item .ac-detail {
+            color: var(--color-text-muted);
+            font-size: 0.75rem;
+            margin-top: 0.1rem;
+        }
+
+        .ac-match {
+            font-weight: 700;
+            color: var(--color-secondary);
+        }
+
+        /* Recent Project Loader */
+        .recent-project-loader {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            padding: 0.6rem 0.75rem;
+            margin-bottom: 1rem;
+            background: var(--color-background-alt);
+            border: 1px solid var(--color-border-light);
+        }
+
+        .recent-project-loader label {
+            font-size: 0.65rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.15em;
+            color: var(--color-text-muted);
+            white-space: nowrap;
+        }
+
+        .recent-project-loader select {
+            flex: 1;
+            padding: 0.5rem 0.75rem;
+            border: 1px solid var(--color-border);
+            font-family: var(--font-body);
+            font-size: 0.85rem;
+            color: var(--color-text);
+            background: var(--color-background);
+        }
+
+        .recent-project-loader select:focus {
+            outline: none;
+            border-color: var(--color-secondary);
+        }
+
+        .submission-mode {
+            display: flex;
+            gap: 1rem;
+            margin-bottom: 1rem;
+            flex-wrap: wrap;
+        }
+
+        .submission-mode-option {
+            border: 1px solid var(--color-border);
+            background: var(--color-background-alt);
+            padding: 0.75rem 1rem;
+            min-width: 280px;
+            cursor: pointer;
+        }
+
+        .submission-mode-option input {
+            margin-right: 0.5rem;
+        }
+
+        .modification-search {
+            display: none;
+            margin-bottom: 1rem;
+            border: 1px solid var(--color-border-light);
+            background: var(--color-background-alt);
+            padding: 0.75rem;
+        }
+
+        .modification-search.show {
+            display: block;
+        }
+
+        .modification-search label {
+            display: block;
+            margin-bottom: 0.35rem;
+            font-size: 0.65rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.12em;
+            color: var(--color-text-muted);
+        }
+
+        .modification-search input {
+            width: 100%;
+            padding: 0.6rem 0.7rem;
+            border: 1px solid var(--color-border);
+            font-family: var(--font-body);
+            font-size: 0.85rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .search-results {
+            max-height: 220px;
+            overflow-y: auto;
+            border: 1px solid var(--color-border);
+            background: var(--color-background);
+        }
+
+        .search-result-item {
+            padding: 0.6rem 0.7rem;
+            border-bottom: 1px solid var(--color-border-light);
+            cursor: pointer;
+            font-size: 0.82rem;
+        }
+
+        .search-result-item:last-child {
+            border-bottom: none;
+        }
+
+        .search-result-item:hover {
+            background: var(--color-background-alt);
+        }
+
+        .revision-selected {
+            display: none;
+            margin-bottom: 0.75rem;
+            font-size: 0.78rem;
+            color: var(--color-success);
+        }
+
+        .revision-selected.show {
+            display: block;
+        }
+
+        .modification-source-options {
+            display: flex;
+            gap: 0.75rem;
+            flex-wrap: wrap;
+            margin-bottom: 0.5rem;
+        }
+
+        .modification-source-option {
+            border: 1px solid var(--color-border);
+            background: var(--color-background);
+            padding: 0.45rem 0.65rem;
+            font-size: 0.78rem;
+            cursor: pointer;
+        }
+
+        .modification-source-option input {
+            margin-right: 0.4rem;
+        }
+
+        .modification-source-panel {
+            display: none;
+        }
+
+        .modification-source-panel.show {
+            display: block;
+        }
+
+        .baseline-upload-row {
+            display: flex;
+            gap: 0.5rem;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .baseline-upload-row input[type="file"] {
+            flex: 1;
+            margin-bottom: 0;
+            background: var(--color-background);
+            border: 1px solid var(--color-border);
+        }
+
+        .baseline-upload-btn {
+            border: 1px solid var(--color-border);
+            background: var(--color-background);
+            color: var(--color-text);
+            font-family: var(--font-body);
+            font-size: 0.78rem;
+            padding: 0.55rem 0.8rem;
+            cursor: pointer;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+        }
+
+        .baseline-upload-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .persistent-preview {
+            display: none;
+            margin-top: 1rem;
+            border: 1px solid var(--color-border);
+            background: var(--color-background-alt);
+            padding: 0.75rem;
+            flex: 1;
+            min-height: 0;
+        }
+
+        .persistent-preview.show {
+            display: block;
+        }
+
+        .persistent-preview h4 {
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            margin-bottom: 0.5rem;
+        }
+
+        .persistent-preview-body {
+            max-height: none;
+            min-height: 400px;
+            height: 100%;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            font-family: Calibri, sans-serif;
+            font-size: 10pt;
+            line-height: 1.15;
+            text-align: center;
+            background: var(--color-background);
+            padding: 0.75rem;
+            border: 1px solid var(--color-border-light);
+        }
+
+        .persistent-preview-body p {
+            margin: 0;
+            padding: 0;
+        }
+
+        .persistent-ins {
+            background: rgba(241, 196, 15, 0.25);
+        }
+
+        .persistent-del {
+            color: #b71c1c;
+            text-decoration: line-through;
+            background: rgba(183, 28, 28, 0.08);
+        }
+
+        .ai-temp-note {
+            margin-top: 0.5rem;
+            font-size: 0.72rem;
+            color: var(--color-text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+        }
+
+        .ai-suggestions-section.hidden {
+            display: none !important;
+        }
     </style>
 </head>
 <body>
@@ -1031,27 +1343,82 @@
         <!-- Step 1: Form Fields -->
         <div id="step1">
             <div class="card">
-                <h2>Project Details</h2>
+                <h2>Submitter Information</h2>
                 <div class="form-grid">
+                    <div class="form-group autocomplete-wrapper">
+                        <label for="submitterName">Your Name *</label>
+                        <input type="text" id="submitterName" required placeholder="First and Last Name" autocomplete="off" oninput="onSubmitterNameInput(this.value)">
+                        <div class="autocomplete-dropdown" id="submitterDropdown"></div>
+                    </div>
                     <div class="form-group">
+                        <label for="submitterEmail">Your Email *</label>
+                        <input type="email" id="submitterEmail" required placeholder="chef@example.com">
+                    </div>
+                    <div class="form-group">
+                        <label for="submitterJobTitle">Job Title *</label>
+                        <input type="text" id="submitterJobTitle" required placeholder="e.g., Executive Chef">
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <h2>Project Details</h2>
+                <div class="submission-mode">
+                    <label class="submission-mode-option">
+                        <input type="radio" name="submissionMode" id="submissionModeNew" value="new" checked onchange="onSubmissionModeChange()">
+                        Brand New Menu Submission
+                    </label>
+                    <label class="submission-mode-option">
+                        <input type="radio" name="submissionMode" id="submissionModeModification" value="modification" onchange="onSubmissionModeChange()">
+                        Modification to Existing Menu
+                    </label>
+                </div>
+                <div id="modificationSearchSection" class="modification-search">
+                    <div class="modification-source-options">
+                        <label class="modification-source-option">
+                            <input type="radio" name="modificationSource" id="modSourceDatabase" value="database" checked onchange="onModificationSourceChange()">
+                            Find In Database
+                        </label>
+                        <label class="modification-source-option">
+                            <input type="radio" name="modificationSource" id="modSourceUpload" value="upload" onchange="onModificationSourceChange()">
+                            Upload Prior Approved DOCX
+                        </label>
+                    </div>
+                    <div id="modSourceDatabasePanel" class="modification-source-panel show">
+                        <label for="submissionSearchQuery">Find previous approved submission</label>
+                        <input
+                            type="text"
+                            id="submissionSearchQuery"
+                            placeholder="Search by project, property, submitter..."
+                            oninput="onSubmissionSearchInput(this.value)"
+                        >
+                        <div id="submissionSearchResults" class="search-results"></div>
+                    </div>
+                    <div id="modSourceUploadPanel" class="modification-source-panel">
+                        <label for="baselineDocUpload">Upload approved/redlined DOCX received from the team</label>
+                        <div class="baseline-upload-row">
+                            <input type="file" id="baselineDocUpload" accept=".docx">
+                            <button type="button" class="baseline-upload-btn" id="baselineUploadBtn" onclick="uploadBaselineDoc()">Extract Baseline</button>
+                        </div>
+                    </div>
+                    <div id="revisionSelectedNote" class="revision-selected"></div>
+                </div>
+                <div class="recent-project-loader" id="recentProjectLoader" style="display: none;">
+                    <label for="recentProjectSelect">Load from Recent</label>
+                    <select id="recentProjectSelect" onchange="loadRecentProject(this.selectedIndex - 1)">
+                        <option value="">-- Select a recent project --</option>
+                    </select>
+                </div>
+                <div class="form-grid">
+                    <div class="form-group autocomplete-wrapper">
                         <label for="projectName">Project Name *</label>
-                        <input type="text" id="projectName" required placeholder="Enter project name">
+                        <input type="text" id="projectName" required placeholder="Enter project name" autocomplete="off" oninput="onProjectNameInput(this.value)">
+                        <div class="autocomplete-dropdown" id="projectDropdown"></div>
                     </div>
-                    <div class="form-group">
+                    <div class="form-group autocomplete-wrapper">
                         <label for="property">Property *</label>
-                        <input type="text" id="property" required placeholder="Enter property name">
-                    </div>
-                    <div class="form-group">
-                        <label for="size">Size *</label>
-                        <input type="text" id="size" required placeholder="e.g., 8.5 x 11 inches">
-                    </div>
-                    <div class="form-group">
-                        <label for="orientation">Orientation *</label>
-                        <select id="orientation" required>
-                            <option value="">Select orientation</option>
-                            <option value="Portrait">Portrait</option>
-                            <option value="Landscape">Landscape</option>
-                        </select>
+                        <input type="text" id="property" required placeholder="Enter property name" autocomplete="off" oninput="onPropertyInput(this.value)">
+                        <div class="autocomplete-dropdown" id="propertyDropdown"></div>
                     </div>
                     <div class="form-group">
                         <label for="menuType">Menu Type *</label>
@@ -1070,12 +1437,89 @@
                         </select>
                     </div>
                     <div class="form-group">
+                        <label for="hotelName">Hotel Name</label>
+                        <input type="text" id="hotelName" placeholder="Enter hotel name">
+                    </div>
+                    <div class="form-group">
+                        <label for="cityCountry">City / Country *</label>
+                        <input type="text" id="cityCountry" required placeholder="e.g., New York, USA">
+                    </div>
+                    <div class="form-group">
                         <label for="dateNeeded">Date Needed *</label>
                         <input type="date" id="dateNeeded" required>
                     </div>
                     <div class="form-group">
-                        <label for="submitterEmail">Your Email *</label>
-                        <input type="email" id="submitterEmail" required placeholder="chef@example.com">
+                        <label for="assetType">Asset Type *</label>
+                        <select id="assetType" required onchange="toggleAssetFields()">
+                            <option value="">Select asset type</option>
+                            <option value="PRINT">Print</option>
+                            <option value="DIGITAL">Digital</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="orientation">Orientation *</label>
+                        <select id="orientation" required>
+                            <option value="">Select orientation</option>
+                            <option value="Portrait">Portrait</option>
+                            <option value="Landscape">Landscape</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Print-specific fields -->
+                <div id="printFields" class="hidden">
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label for="widthPrint">Width (inches) *</label>
+                            <input type="number" id="widthPrint" step="0.01" min="0" placeholder="e.g., 8.5">
+                        </div>
+                        <div class="form-group">
+                            <label for="heightPrint">Height (inches) *</label>
+                            <input type="number" id="heightPrint" step="0.01" min="0" placeholder="e.g., 11">
+                        </div>
+                        <div class="form-group">
+                            <label for="cropMarks">Crop Marks *</label>
+                            <select id="cropMarks">
+                                <option value="no">No</option>
+                                <option value="yes">Yes</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="bleedMarks">Bleed Marks *</label>
+                            <select id="bleedMarks">
+                                <option value="no">No</option>
+                                <option value="yes">Yes</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="fileSizeLimit">File Size Limit *</label>
+                            <select id="fileSizeLimit" onchange="toggleFileSizeLimit()">
+                                <option value="no">No</option>
+                                <option value="yes">Yes</option>
+                            </select>
+                        </div>
+                        <div class="form-group hidden" id="fileSizeLimitMbGroup">
+                            <label for="fileSizeLimitMb">Max Size (MB) *</label>
+                            <input type="number" id="fileSizeLimitMb" step="0.1" min="0" placeholder="e.g., 10">
+                        </div>
+                    </div>
+                    <div class="form-group" style="margin-top: 0.5rem;">
+                        <label for="fileDeliveryNotes">File Delivery Notes</label>
+                        <textarea id="fileDeliveryNotes" rows="2" placeholder="Optional delivery instructions" style="width: 100%; padding: 0.5rem; border: 1px solid var(--color-border); font-family: var(--font-body); font-size: 0.85rem; resize: vertical;"></textarea>
+                    </div>
+                </div>
+
+                <!-- Digital-specific fields -->
+                <div id="digitalFields" class="hidden">
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label for="widthDigital">Width (pixels) *</label>
+                            <input type="number" id="widthDigital" step="1" min="0" placeholder="e.g., 1920">
+                        </div>
+                        <div class="form-group">
+                            <label for="heightDigital">Height (pixels) *</label>
+                            <input type="number" id="heightDigital" step="1" min="0" placeholder="e.g., 1080">
+                        </div>
                     </div>
                 </div>
             </div>
@@ -1142,7 +1586,7 @@
             </div>
 
             <!-- Split View: Example + Menu Input -->
-            <div class="split-container">
+            <div class="split-container" id="step1MenuCompositionSection">
                 <div class="split-panel">
                     <h3>Example Format</h3>
                     <p class="panel-subtitle">Your menu should follow this centered format</p>
@@ -1194,7 +1638,7 @@
                 </div>
             </div>
 
-            <div class="btn-container">
+            <div class="btn-container" id="step1RunCheckContainer">
                 <button id="runCheckBtn" class="btn btn-primary" onclick="runBasicCheck()">
                     Run Basic AI Check
                 </button>
@@ -1205,6 +1649,23 @@
         <div id="step2" class="hidden">
             <!-- Read-only form fields showing what user selected -->
             <div id="step2FormFields" class="form-fields-readonly">
+                <div class="card">
+                    <h2>Submitter Information <span style="font-size: 0.7rem; font-weight: 400; color: var(--color-text-muted); text-transform: uppercase; letter-spacing: 0.1em;">(Read Only)</span></h2>
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label>Your Name</label>
+                            <input type="text" id="step2SubmitterName" readonly>
+                        </div>
+                        <div class="form-group">
+                            <label>Your Email</label>
+                            <input type="text" id="step2SubmitterEmail" readonly>
+                        </div>
+                        <div class="form-group">
+                            <label>Job Title</label>
+                            <input type="text" id="step2SubmitterJobTitle" readonly>
+                        </div>
+                    </div>
+                </div>
                 <div class="card">
                     <h2>Project Details <span style="font-size: 0.7rem; font-weight: 400; color: var(--color-text-muted); text-transform: uppercase; letter-spacing: 0.1em;">(Read Only)</span></h2>
                     <div class="form-grid">
@@ -1217,14 +1678,6 @@
                             <input type="text" id="step2Property" readonly>
                         </div>
                         <div class="form-group">
-                            <label>Size</label>
-                            <input type="text" id="step2Size" readonly>
-                        </div>
-                        <div class="form-group">
-                            <label>Orientation</label>
-                            <input type="text" id="step2Orientation" readonly>
-                        </div>
-                        <div class="form-group">
                             <label>Menu Type</label>
                             <input type="text" id="step2MenuType" readonly>
                         </div>
@@ -1233,12 +1686,44 @@
                             <input type="text" id="step2TemplateType" readonly>
                         </div>
                         <div class="form-group">
+                            <label>Hotel Name</label>
+                            <input type="text" id="step2HotelName" readonly>
+                        </div>
+                        <div class="form-group">
+                            <label>City / Country</label>
+                            <input type="text" id="step2CityCountry" readonly>
+                        </div>
+                        <div class="form-group">
                             <label>Date Needed</label>
                             <input type="text" id="step2DateNeeded" readonly>
                         </div>
                         <div class="form-group">
-                            <label>Your Email</label>
-                            <input type="text" id="step2Email" readonly>
+                            <label>Asset Type</label>
+                            <input type="text" id="step2AssetType" readonly>
+                        </div>
+                        <div class="form-group">
+                            <label>Orientation</label>
+                            <input type="text" id="step2Orientation" readonly>
+                        </div>
+                        <div class="form-group">
+                            <label>Dimensions</label>
+                            <input type="text" id="step2Dimensions" readonly>
+                        </div>
+                        <div class="form-group hidden" id="step2CropMarksGroup">
+                            <label>Crop Marks</label>
+                            <input type="text" id="step2CropMarks" readonly>
+                        </div>
+                        <div class="form-group hidden" id="step2BleedMarksGroup">
+                            <label>Bleed Marks</label>
+                            <input type="text" id="step2BleedMarks" readonly>
+                        </div>
+                        <div class="form-group hidden" id="step2FileSizeLimitGroup">
+                            <label>File Size Limit</label>
+                            <input type="text" id="step2FileSizeLimit" readonly>
+                        </div>
+                        <div class="form-group hidden" id="step2FileDeliveryNotesGroup">
+                            <label>Delivery Notes</label>
+                            <input type="text" id="step2FileDeliveryNotes" readonly>
                         </div>
                     </div>
                 </div>
@@ -1248,7 +1733,7 @@
                 <div class="step2-left-panel">
                     <div class="panel-header">
                         <h3>Your Menu</h3>
-                        <p class="panel-subtitle">AI-corrected content (green = AI changes)</p>
+                        <p class="panel-subtitle" id="menuPanelSubtitle">Chef revision editor (persistent redlines preview on right)</p>
                         <div class="edit-toggle-container">
                             <button id="editToggleBtn" class="edit-toggle" onclick="toggleEditMode()">
                                 <span class="edit-toggle-icon">Edit</span>
@@ -1259,24 +1744,40 @@
                         </div>
                     </div>
                     <div id="editModeNotice" class="edit-mode-notice">
-                        Editing mode active. Make your changes directly in the text below. Green highlights will be recalculated when you finish.
+                        Editing mode active. Make your changes directly in the text below.
                     </div>
                     <div class="reviewed-content-container">
                         <div id="reviewedContentArea" class="reviewed-content-area">
                             <!-- AI-corrected content with highlights will appear here -->
                         </div>
                     </div>
+                    <div id="step2AllergensSection" class="allergens-section hidden" style="margin-top: 0.75rem;">
+                        <label for="allergensInputStep2">Allergen Key (Optional)</label>
+                        <textarea id="allergensInputStep2" class="allergens-input" placeholder="Paste your allergen key here, e.g.: C crustaceans | D dairy | E egg | F fish | G gluten | N nuts | V vegetarian | VG vegan"></textarea>
+                        <div id="step2AllergenDetectedBadge" class="allergen-detected-badge hidden">Prefilled from uploaded baseline</div>
+                        <p class="allergens-hint">If left blank, the default RSH allergen codes will be used for review.</p>
+                    </div>
                     <div id="originalMenuDisplay" style="display: none;"></div>
                 </div>
 
                 <div class="step2-right-panel">
-                    <h3 style="text-align: center; margin-bottom: 0.25rem; font-family: var(--font-heading); font-size: 1.1rem; font-weight: 500;">AI Suggestions</h3>
-                    <p class="panel-subtitle">Recommended corrections</p>
-                    <div id="suggestionsDisplay" class="suggestions-list"></div>
+                    <div id="aiSuggestionsSection" class="ai-suggestions-section">
+                        <h3 style="text-align: center; margin-bottom: 0.25rem; font-family: var(--font-heading); font-size: 1.1rem; font-weight: 500;">AI Suggestions</h3>
+                        <p class="panel-subtitle">Recommended corrections</p>
+                        <div id="suggestionsDisplay" class="suggestions-list"></div>
+                        <div class="ai-temp-note">AI highlights are temporary. Chef revision redlines are persistent.</div>
+                    </div>
+                    <div id="persistentPreviewSection" class="persistent-preview">
+                        <h4>Persistent Revision Preview (What Design Will Receive)</h4>
+                        <div id="persistentPreviewBody" class="persistent-preview-body"></div>
+                    </div>
                 </div>
             </div>
 
             <div class="btn-container">
+                <button id="runCheckBtnBottom" class="btn btn-primary hidden" onclick="runBasicCheck()">
+                    Run Basic AI Check
+                </button>
                 <div id="criticalErrorBanner" class="critical-error-banner">
                     Resolve or override all critical errors before submitting.
                 </div>
@@ -1312,6 +1813,18 @@
         let aiChanges = [];
         let originalAiCorrectedText = '';
         let criticalErrorOverrides = {};
+        let submissionMode = 'new';
+        let revisionSearchDebounce = null;
+        let revisionSearchResults = [];
+        let revisionBaseSubmissionId = null;
+        let revisionSource = 'database';
+        let revisionBaselineDocPath = '';
+        let revisionBaselineFileName = '';
+        let baseApprovedMenuContent = '';
+        let baseApprovedMenuContentHtml = '';
+        let persistentDiffSummary = { insertions: 0, deletions: 0 };
+        let persistentPreviewUpdateTimer = null;
+        let aiCheckHasRun = false;
 
         document.addEventListener('DOMContentLoaded', function() {
             quill = new Quill('#menuEditor', {
@@ -1349,6 +1862,37 @@
                 // Initialize on load
                 updateApprovalHint();
             }
+
+            // Load recent projects
+            loadRecentProjects();
+            onSubmissionModeChange();
+            setupAllergenSync();
+
+            // Submitter name keyboard nav + blur dismiss
+            const submitterNameInput = document.getElementById('submitterName');
+            submitterNameInput.addEventListener('keydown', handleSubmitterKeydown);
+            submitterNameInput.addEventListener('blur', function() {
+                setTimeout(() => {
+                    const dropdown = document.getElementById('submitterDropdown');
+                    dropdown.classList.remove('show');
+                }, 150);
+            });
+
+            const projectNameInput = document.getElementById('projectName');
+            projectNameInput.addEventListener('keydown', handleProjectKeydown);
+            projectNameInput.addEventListener('blur', function() {
+                setTimeout(() => {
+                    document.getElementById('projectDropdown').classList.remove('show');
+                }, 150);
+            });
+
+            const propertyInput = document.getElementById('property');
+            propertyInput.addEventListener('keydown', handlePropertyKeydown);
+            propertyInput.addEventListener('blur', function() {
+                setTimeout(() => {
+                    document.getElementById('propertyDropdown').classList.remove('show');
+                }, 150);
+            });
         });
 
         function updateApprovalHint() {
@@ -1359,6 +1903,685 @@
                 hintEl.textContent = 'e.g., Head of Mixology, Bar Director, Regional Director of Operations';
             } else {
                 hintEl.textContent = 'e.g., Property GM, Director of F&B, Executive Chef, Chef de Cuisine';
+            }
+        }
+
+        function setupAllergenSync() {
+            const step1Input = document.getElementById('allergensInput');
+            const step2Input = document.getElementById('allergensInputStep2');
+            if (!step1Input || !step2Input) return;
+
+            step1Input.addEventListener('input', () => {
+                if (document.activeElement === step2Input) return;
+                step2Input.value = step1Input.value;
+            });
+
+            step2Input.addEventListener('input', () => {
+                if (document.activeElement === step1Input) return;
+                step1Input.value = step2Input.value;
+            });
+        }
+
+        function getAllergenInputValue() {
+            const step2Input = document.getElementById('allergensInputStep2');
+            const step1Input = document.getElementById('allergensInput');
+            const step2AllergensVisible = step2Input && !document.getElementById('step2AllergensSection').classList.contains('hidden');
+
+            if (step2AllergensVisible) {
+                return (step2Input.value || '').trim();
+            }
+            return (step1Input?.value || '').trim();
+        }
+
+        function setAllergenInputValue(value) {
+            const safeValue = (value || '').trim();
+            const step1Input = document.getElementById('allergensInput');
+            const step2Input = document.getElementById('allergensInputStep2');
+            if (step1Input) step1Input.value = safeValue;
+            if (step2Input) step2Input.value = safeValue;
+        }
+
+        function setAllergenAutoDetectedBadge(visible) {
+            const badge = document.getElementById('step2AllergenDetectedBadge');
+            if (!badge) return;
+            if (visible) {
+                badge.classList.remove('hidden');
+            } else {
+                badge.classList.add('hidden');
+            }
+        }
+
+        function onSubmissionModeChange() {
+            submissionMode = document.getElementById('submissionModeModification').checked ? 'modification' : 'new';
+            const modSection = document.getElementById('modificationSearchSection');
+            const recentLoader = document.getElementById('recentProjectLoader');
+            const previewSection = document.getElementById('persistentPreviewSection');
+
+            if (submissionMode === 'modification') {
+                modSection.classList.add('show');
+                recentLoader.style.display = 'none';
+                previewSection.classList.add('show');
+                onModificationSourceChange();
+            } else {
+                document.getElementById('step2').classList.add('hidden');
+                document.getElementById('step1').classList.remove('hidden');
+                document.getElementById('step2FormFields').classList.remove('hidden');
+                setAiSuggestionsVisibility(false);
+
+                if (isEditMode) {
+                    toggleEditMode();
+                }
+
+                modSection.classList.remove('show');
+                if (recentProjectsData.length > 0) {
+                    recentLoader.style.display = 'flex';
+                }
+                previewSection.classList.remove('show');
+                revisionBaseSubmissionId = null;
+                revisionSource = 'database';
+                revisionBaselineDocPath = '';
+                revisionBaselineFileName = '';
+                baseApprovedMenuContent = '';
+                baseApprovedMenuContentHtml = '';
+                persistentDiffSummary = { insertions: 0, deletions: 0 };
+                aiCheckHasRun = false;
+                aiCheckResults = null;
+                criticalErrorOverrides = {};
+                const selectedNote = document.getElementById('revisionSelectedNote');
+                selectedNote.classList.remove('show');
+                selectedNote.textContent = '';
+                document.getElementById('submissionSearchResults').innerHTML = '';
+                renderPersistentPreview('', '');
+                displayReviewedContent('');
+                quill.setText('');
+                setAllergenInputValue('');
+                setAllergenAutoDetectedBadge(false);
+            }
+            updateRevisionPreCheckLayout();
+        }
+
+        function onModificationSourceChange() {
+            const useUpload = document.getElementById('modSourceUpload').checked;
+            const dbPanel = document.getElementById('modSourceDatabasePanel');
+            const uploadPanel = document.getElementById('modSourceUploadPanel');
+            const selectedNote = document.getElementById('revisionSelectedNote');
+            revisionSource = useUpload ? 'uploaded_baseline' : 'database';
+
+            if (useUpload) {
+                dbPanel.classList.remove('show');
+                uploadPanel.classList.add('show');
+                revisionBaseSubmissionId = null;
+                revisionSearchResults = [];
+                baseApprovedMenuContentHtml = '';
+                document.getElementById('submissionSearchResults').innerHTML = '';
+                selectedNote.classList.remove('show');
+                selectedNote.textContent = '';
+                setAllergenAutoDetectedBadge(false);
+            } else {
+                uploadPanel.classList.remove('show');
+                dbPanel.classList.add('show');
+                revisionBaselineDocPath = '';
+                revisionBaselineFileName = '';
+                baseApprovedMenuContentHtml = '';
+                selectedNote.classList.remove('show');
+                selectedNote.textContent = '';
+                setAllergenAutoDetectedBadge(false);
+            }
+            updateRevisionPreCheckLayout();
+        }
+
+        function onSubmissionSearchInput(value) {
+            clearTimeout(revisionSearchDebounce);
+            const query = value.trim();
+            if (query.length < 2) {
+                document.getElementById('submissionSearchResults').innerHTML = '';
+                revisionSearchResults = [];
+                return;
+            }
+            revisionSearchDebounce = setTimeout(() => searchApprovedSubmissions(query), 250);
+        }
+
+        async function searchApprovedSubmissions(query) {
+            try {
+                const response = await fetch(`/api/submissions/search?q=${encodeURIComponent(query)}&limit=20`);
+                const results = await response.json();
+                revisionSearchResults = results || [];
+                const resultsEl = document.getElementById('submissionSearchResults');
+
+                if (!revisionSearchResults.length) {
+                    resultsEl.innerHTML = '<div class="search-result-item">No approved submissions found.</div>';
+                    return;
+                }
+
+                resultsEl.innerHTML = revisionSearchResults.map((r, idx) => `
+                    <div class="search-result-item" onclick="selectRevisionResult(${idx})">
+                        <strong>${escapeHtml(r.projectName || '(Untitled)')}</strong> - ${escapeHtml(r.property || 'Unknown Property')}<br>
+                        <span style="color: var(--color-text-muted);">ID: ${escapeHtml(r.id)} | Updated: ${new Date(r.updatedAt).toLocaleString()}</span>
+                    </div>
+                `).join('');
+            } catch (error) {
+                console.error('Failed to search approved submissions:', error);
+                document.getElementById('submissionSearchResults').innerHTML = '<div class="search-result-item">Search failed.</div>';
+            }
+        }
+
+        function selectRevisionResult(index) {
+            const selected = revisionSearchResults[index];
+            if (!selected) return;
+
+            revisionBaseSubmissionId = selected.id;
+            revisionSource = 'database';
+            revisionBaselineDocPath = '';
+            revisionBaselineFileName = '';
+            baseApprovedMenuContent = selected.approvedMenuContent || '';
+            baseApprovedMenuContentHtml = '';
+            persistentDiffSummary = { insertions: 0, deletions: 0 };
+            setAllergenAutoDetectedBadge(false);
+
+            document.getElementById('projectName').value = selected.projectName || '';
+            document.getElementById('property').value = selected.property || '';
+
+            quill.setText(baseApprovedMenuContent || '');
+            renderPersistentPreview(baseApprovedMenuContent, baseApprovedMenuContent);
+
+            const selectedNote = document.getElementById('revisionSelectedNote');
+            selectedNote.textContent = `Loaded approved baseline: ${selected.projectName || 'Untitled'} (${selected.id})`;
+            selectedNote.classList.add('show');
+            document.getElementById('submissionSearchResults').innerHTML = '';
+            enterRevisionTrackingMode();
+            showAlert('Approved baseline loaded. Revision tracking mode is active.', 'success');
+        }
+
+        async function uploadBaselineDoc() {
+            const input = document.getElementById('baselineDocUpload');
+            const btn = document.getElementById('baselineUploadBtn');
+            const file = input.files && input.files[0];
+            if (!file) {
+                showAlert('Choose a .docx baseline file first.', 'error');
+                return;
+            }
+
+            const form = new FormData();
+            form.append('baselineDoc', file);
+
+            btn.disabled = true;
+            btn.textContent = 'Extracting...';
+
+            try {
+                const response = await fetch('/api/modification/baseline-upload', {
+                    method: 'POST',
+                    body: form,
+                });
+                const data = await response.json();
+                if (!response.ok) {
+                    throw new Error(data.error || 'Failed to extract baseline document');
+                }
+
+                revisionSource = 'uploaded_baseline';
+                revisionBaseSubmissionId = null;
+                revisionBaselineDocPath = data.baselineDocPath || '';
+                revisionBaselineFileName = data.baselineFileName || file.name;
+                baseApprovedMenuContent = data.approvedMenuContent || '';
+                baseApprovedMenuContentHtml = data.approvedMenuContentHtml || '';
+                persistentDiffSummary = { insertions: 0, deletions: 0 };
+
+                if (data.extractedProject) {
+                    if (data.extractedProject.projectName) document.getElementById('projectName').value = data.extractedProject.projectName;
+                    if (data.extractedProject.property) document.getElementById('property').value = data.extractedProject.property;
+                    if (data.extractedProject.orientation) setSelectValue('orientation', data.extractedProject.orientation);
+                }
+                if (data.extractedAllergenKey && data.extractedAllergenKey.trim()) {
+                    setAllergenInputValue(data.extractedAllergenKey);
+                    setAllergenAutoDetectedBadge(true);
+                } else {
+                    setAllergenAutoDetectedBadge(false);
+                }
+
+                if (baseApprovedMenuContentHtml && baseApprovedMenuContentHtml.trim()) {
+                    quill.clipboard.dangerouslyPasteHTML(baseApprovedMenuContentHtml);
+                } else {
+                    quill.setText(baseApprovedMenuContent || '');
+                }
+                renderPersistentPreview(baseApprovedMenuContent, baseApprovedMenuContent);
+
+                const selectedNote = document.getElementById('revisionSelectedNote');
+                selectedNote.textContent = `Loaded uploaded baseline: ${revisionBaselineFileName}`;
+                selectedNote.classList.add('show');
+
+                enterRevisionTrackingMode();
+                showAlert('Baseline extracted. Revision tracking mode is active.', 'success');
+            } catch (error) {
+                console.error(error);
+                showAlert('Failed to process baseline DOCX: ' + error.message, 'error');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Extract Baseline';
+            }
+        }
+
+        function enterRevisionTrackingMode() {
+            if (submissionMode !== 'modification') return;
+
+            const baselineText = baseApprovedMenuContent || quill.getText().trim();
+            const synthetic = {
+                success: true,
+                originalMenu: baselineText,
+                correctedMenu: baselineText,
+                suggestions: [],
+                hasChanges: false,
+                hasCriticalErrors: false
+            };
+
+            aiCheckHasRun = false;
+            aiCheckResults = synthetic;
+            showStep2(synthetic);
+            setAiSuggestionsVisibility(false);
+
+            // Keep Step 1 visible so chefs can still edit metadata fields before AI check.
+            document.getElementById('step1').classList.remove('hidden');
+            document.getElementById('step2FormFields').classList.add('hidden');
+
+            const step2Container = document.querySelector('.step2-container');
+            if (step2Container) {
+                step2Container.classList.add('revision-split');
+            }
+
+            // If we have extracted HTML (bold/italic/etc), render it in the editable review area.
+            if (baseApprovedMenuContentHtml && baseApprovedMenuContentHtml.trim()) {
+                displayReviewedContent(baseApprovedMenuContentHtml);
+                renderPersistentPreview(baseApprovedMenuContent, baseApprovedMenuContent);
+            }
+
+            if (!isEditMode) {
+                toggleEditMode();
+            }
+            updateRevisionPreCheckLayout();
+        }
+
+        function setAiSuggestionsVisibility(visible) {
+            const section = document.getElementById('aiSuggestionsSection');
+            if (!section) return;
+            if (visible) {
+                section.classList.remove('hidden');
+            } else {
+                section.classList.add('hidden');
+            }
+        }
+
+        // === Submitter Autocomplete ===
+        let submitterDebounceTimer = null;
+        let submitterResults = [];
+        let submitterHighlightIndex = -1;
+
+        function onSubmitterNameInput(value) {
+            clearTimeout(submitterDebounceTimer);
+            submitterDebounceTimer = setTimeout(() => {
+                if (value.trim().length < 2) {
+                    document.getElementById('submitterDropdown').classList.remove('show');
+                    submitterResults = [];
+                    return;
+                }
+                searchSubmitters(value.trim());
+            }, 250);
+        }
+
+        async function searchSubmitters(query) {
+            try {
+                const response = await fetch(`/api/submitter-profiles/search?q=${encodeURIComponent(query)}`);
+                const profiles = await response.json();
+                submitterResults = profiles;
+                submitterHighlightIndex = -1;
+                showSubmitterDropdown(profiles, query);
+            } catch (err) {
+                console.error('Submitter search error:', err);
+            }
+        }
+
+        function showSubmitterDropdown(profiles, query) {
+            const dropdown = document.getElementById('submitterDropdown');
+            if (!profiles || profiles.length === 0) {
+                dropdown.classList.remove('show');
+                return;
+            }
+
+            const queryLower = query.toLowerCase();
+            dropdown.innerHTML = profiles.map((p, i) => {
+                const nameHtml = highlightMatch(p.name, queryLower);
+                const detail = [p.email, p.jobTitle].filter(Boolean).join(' · ');
+                return `<div class="autocomplete-item" data-index="${i}" onmousedown="selectSubmitter(${i})">
+                    <div class="ac-name">${nameHtml}</div>
+                    ${detail ? `<div class="ac-detail">${escapeHtml(detail)}</div>` : ''}
+                </div>`;
+            }).join('');
+
+            dropdown.classList.add('show');
+        }
+
+        function highlightMatch(text, query) {
+            const escaped = escapeHtml(text);
+            const queryEscaped = escapeHtml(query);
+            const regex = new RegExp(`(${queryEscaped.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
+            return escaped.replace(regex, '<span class="ac-match">$1</span>');
+        }
+
+        function selectSubmitter(index) {
+            const profile = submitterResults[index];
+            if (!profile) return;
+
+            document.getElementById('submitterName').value = profile.name;
+            document.getElementById('submitterEmail').value = profile.email || '';
+            document.getElementById('submitterJobTitle').value = profile.jobTitle || '';
+            document.getElementById('submitterDropdown').classList.remove('show');
+            submitterResults = [];
+            submitterHighlightIndex = -1;
+        }
+
+        function handleSubmitterKeydown(e) {
+            const dropdown = document.getElementById('submitterDropdown');
+            if (!dropdown.classList.contains('show') || submitterResults.length === 0) return;
+
+            if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                submitterHighlightIndex = Math.min(submitterHighlightIndex + 1, submitterResults.length - 1);
+                updateSubmitterHighlight();
+            } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                submitterHighlightIndex = Math.max(submitterHighlightIndex - 1, 0);
+                updateSubmitterHighlight();
+            } else if (e.key === 'Enter' && submitterHighlightIndex >= 0) {
+                e.preventDefault();
+                selectSubmitter(submitterHighlightIndex);
+            } else if (e.key === 'Escape') {
+                dropdown.classList.remove('show');
+                submitterHighlightIndex = -1;
+            }
+        }
+
+        function updateSubmitterHighlight() {
+            const items = document.querySelectorAll('#submitterDropdown .autocomplete-item');
+            items.forEach((item, i) => {
+                item.classList.toggle('highlighted', i === submitterHighlightIndex);
+            });
+            // Scroll highlighted item into view
+            if (items[submitterHighlightIndex]) {
+                items[submitterHighlightIndex].scrollIntoView({ block: 'nearest' });
+            }
+        }
+
+        // === Recent Project Loader ===
+        let recentProjectsData = [];
+        let projectSuggestResults = [];
+        let projectSuggestHighlightIndex = -1;
+        let propertySuggestResults = [];
+        let propertySuggestHighlightIndex = -1;
+
+        async function loadRecentProjects() {
+            try {
+                const response = await fetch('/api/recent-projects?limit=20');
+                const projects = await response.json();
+                recentProjectsData = projects;
+
+                if (projects.length === 0) return;
+
+                const select = document.getElementById('recentProjectSelect');
+                projects.forEach((p, i) => {
+                    const opt = document.createElement('option');
+                    opt.value = i;
+                    opt.textContent = `${p.projectName} — ${p.property}`;
+                    select.appendChild(opt);
+                });
+
+                if (submissionMode !== 'modification') {
+                    document.getElementById('recentProjectLoader').style.display = 'flex';
+                }
+            } catch (err) {
+                console.error('Failed to load recent projects:', err);
+            }
+        }
+
+        function loadRecentProject(index) {
+            if (index < 0 || !recentProjectsData[index]) return;
+            const p = recentProjectsData[index];
+            applyProjectPrefill(p);
+        }
+
+        function applyProjectPrefill(p) {
+            if (!p) return;
+
+            document.getElementById('projectName').value = p.projectName || '';
+            document.getElementById('property').value = p.property || '';
+            document.getElementById('hotelName').value = p.hotelName || '';
+            document.getElementById('cityCountry').value = p.cityCountry || '';
+
+            setSelectValue('orientation', p.orientation);
+            setSelectValue('menuType', p.menuType);
+            setSelectValue('templateType', p.templateType);
+            setSelectValue('assetType', p.assetType);
+
+            // Show the right conditional fields
+            toggleAssetFields();
+
+            // Populate dimension fields based on asset type
+            if (p.assetType === 'PRINT') {
+                document.getElementById('widthPrint').value = p.width || '';
+                document.getElementById('heightPrint').value = p.height || '';
+                setSelectValue('cropMarks', p.cropMarks || 'no');
+                setSelectValue('bleedMarks', p.bleedMarks || 'no');
+                setSelectValue('fileSizeLimit', p.fileSizeLimit || 'no');
+                toggleFileSizeLimit();
+                document.getElementById('fileSizeLimitMb').value = p.fileSizeLimitMb || '';
+                document.getElementById('fileDeliveryNotes').value = p.fileDeliveryNotes || '';
+            } else if (p.assetType === 'DIGITAL') {
+                document.getElementById('widthDigital').value = p.width || '';
+                document.getElementById('heightDigital').value = p.height || '';
+            }
+
+            // Dispatch change event on templateType to update approval hints
+            document.getElementById('templateType').dispatchEvent(new Event('change'));
+        }
+
+        function onProjectNameInput(value) {
+            const query = (value || '').trim().toLowerCase();
+            const dropdown = document.getElementById('projectDropdown');
+            if (query.length < 2) {
+                dropdown.classList.remove('show');
+                projectSuggestResults = [];
+                projectSuggestHighlightIndex = -1;
+                return;
+            }
+
+            const seen = new Set();
+            projectSuggestResults = recentProjectsData
+                .filter(p => (p.projectName || '').toLowerCase().includes(query))
+                .filter(p => {
+                    const key = `${(p.projectName || '').toLowerCase()}|${(p.property || '').toLowerCase()}`;
+                    if (seen.has(key)) return false;
+                    seen.add(key);
+                    return true;
+                })
+                .slice(0, 8);
+            projectSuggestHighlightIndex = -1;
+            showProjectDropdown(query);
+        }
+
+        function showProjectDropdown(query) {
+            const dropdown = document.getElementById('projectDropdown');
+            if (!projectSuggestResults.length) {
+                dropdown.classList.remove('show');
+                return;
+            }
+            dropdown.innerHTML = projectSuggestResults.map((p, i) => `
+                <div class="autocomplete-item" data-index="${i}" onmousedown="selectProjectSuggestion(${i})">
+                    <div class="ac-name">${highlightMatch(p.projectName || '', query)}</div>
+                    <div class="ac-detail">${escapeHtml(p.property || '')}</div>
+                </div>
+            `).join('');
+            dropdown.classList.add('show');
+        }
+
+        function selectProjectSuggestion(index) {
+            const selected = projectSuggestResults[index];
+            if (!selected) return;
+            applyProjectPrefill(selected);
+            document.getElementById('projectDropdown').classList.remove('show');
+            projectSuggestHighlightIndex = -1;
+        }
+
+        function handleProjectKeydown(e) {
+            const dropdown = document.getElementById('projectDropdown');
+            if (!dropdown.classList.contains('show') || projectSuggestResults.length === 0) return;
+            if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                projectSuggestHighlightIndex = Math.min(projectSuggestHighlightIndex + 1, projectSuggestResults.length - 1);
+                updateAutocompleteHighlight('#projectDropdown', projectSuggestHighlightIndex);
+            } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                projectSuggestHighlightIndex = Math.max(projectSuggestHighlightIndex - 1, 0);
+                updateAutocompleteHighlight('#projectDropdown', projectSuggestHighlightIndex);
+            } else if (e.key === 'Enter' && projectSuggestHighlightIndex >= 0) {
+                e.preventDefault();
+                selectProjectSuggestion(projectSuggestHighlightIndex);
+            } else if (e.key === 'Escape') {
+                dropdown.classList.remove('show');
+                projectSuggestHighlightIndex = -1;
+            }
+        }
+
+        function onPropertyInput(value) {
+            const query = (value || '').trim().toLowerCase();
+            const dropdown = document.getElementById('propertyDropdown');
+            if (query.length < 2) {
+                dropdown.classList.remove('show');
+                propertySuggestResults = [];
+                propertySuggestHighlightIndex = -1;
+                return;
+            }
+
+            const seen = new Set();
+            propertySuggestResults = recentProjectsData
+                .filter(p => (p.property || '').toLowerCase().includes(query))
+                .filter(p => {
+                    const key = `${(p.property || '').toLowerCase()}|${(p.projectName || '').toLowerCase()}`;
+                    if (seen.has(key)) return false;
+                    seen.add(key);
+                    return true;
+                })
+                .slice(0, 8);
+            propertySuggestHighlightIndex = -1;
+            showPropertyDropdown(query);
+        }
+
+        function showPropertyDropdown(query) {
+            const dropdown = document.getElementById('propertyDropdown');
+            if (!propertySuggestResults.length) {
+                dropdown.classList.remove('show');
+                return;
+            }
+            dropdown.innerHTML = propertySuggestResults.map((p, i) => `
+                <div class="autocomplete-item" data-index="${i}" onmousedown="selectPropertySuggestion(${i})">
+                    <div class="ac-name">${highlightMatch(p.property || '', query)}</div>
+                    <div class="ac-detail">${escapeHtml(p.projectName || '')}</div>
+                </div>
+            `).join('');
+            dropdown.classList.add('show');
+        }
+
+        function selectPropertySuggestion(index) {
+            const selected = propertySuggestResults[index];
+            if (!selected) return;
+            applyProjectPrefill(selected);
+            document.getElementById('propertyDropdown').classList.remove('show');
+            propertySuggestHighlightIndex = -1;
+        }
+
+        function handlePropertyKeydown(e) {
+            const dropdown = document.getElementById('propertyDropdown');
+            if (!dropdown.classList.contains('show') || propertySuggestResults.length === 0) return;
+            if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                propertySuggestHighlightIndex = Math.min(propertySuggestHighlightIndex + 1, propertySuggestResults.length - 1);
+                updateAutocompleteHighlight('#propertyDropdown', propertySuggestHighlightIndex);
+            } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                propertySuggestHighlightIndex = Math.max(propertySuggestHighlightIndex - 1, 0);
+                updateAutocompleteHighlight('#propertyDropdown', propertySuggestHighlightIndex);
+            } else if (e.key === 'Enter' && propertySuggestHighlightIndex >= 0) {
+                e.preventDefault();
+                selectPropertySuggestion(propertySuggestHighlightIndex);
+            } else if (e.key === 'Escape') {
+                dropdown.classList.remove('show');
+                propertySuggestHighlightIndex = -1;
+            }
+        }
+
+        function updateAutocompleteHighlight(selector, index) {
+            const items = document.querySelectorAll(`${selector} .autocomplete-item`);
+            items.forEach((item, i) => {
+                item.classList.toggle('highlighted', i === index);
+            });
+            if (items[index]) {
+                items[index].scrollIntoView({ block: 'nearest' });
+            }
+        }
+
+        function toggleAssetFields() {
+            const assetType = document.getElementById('assetType').value;
+            const printFields = document.getElementById('printFields');
+            const digitalFields = document.getElementById('digitalFields');
+
+            if (assetType === 'PRINT') {
+                printFields.classList.remove('hidden');
+                digitalFields.classList.add('hidden');
+                // Clear digital fields
+                document.getElementById('widthDigital').value = '';
+                document.getElementById('heightDigital').value = '';
+            } else if (assetType === 'DIGITAL') {
+                digitalFields.classList.remove('hidden');
+                printFields.classList.add('hidden');
+                // Clear print fields
+                document.getElementById('widthPrint').value = '';
+                document.getElementById('heightPrint').value = '';
+                document.getElementById('cropMarks').value = 'no';
+                document.getElementById('bleedMarks').value = 'no';
+                document.getElementById('fileSizeLimit').value = 'no';
+                document.getElementById('fileSizeLimitMb').value = '';
+                document.getElementById('fileDeliveryNotes').value = '';
+                document.getElementById('fileSizeLimitMbGroup').classList.add('hidden');
+            } else {
+                printFields.classList.add('hidden');
+                digitalFields.classList.add('hidden');
+            }
+        }
+
+        function toggleFileSizeLimit() {
+            const fileSizeLimit = document.getElementById('fileSizeLimit').value;
+            const mbGroup = document.getElementById('fileSizeLimitMbGroup');
+            if (fileSizeLimit === 'yes') {
+                mbGroup.classList.remove('hidden');
+            } else {
+                mbGroup.classList.add('hidden');
+                document.getElementById('fileSizeLimitMb').value = '';
+            }
+        }
+
+        function setSelectValue(id, value) {
+            const select = document.getElementById(id);
+            if (!select || !value) return;
+
+            // Try exact match first
+            for (let i = 0; i < select.options.length; i++) {
+                if (select.options[i].value === value) {
+                    select.selectedIndex = i;
+                    return;
+                }
+            }
+            // Case-insensitive fallback
+            const valueLower = value.toLowerCase();
+            for (let i = 0; i < select.options.length; i++) {
+                if (select.options[i].value.toLowerCase() === valueLower) {
+                    select.selectedIndex = i;
+                    return;
+                }
             }
         }
 
@@ -1551,24 +2774,39 @@
         }
 
         function validateStep1() {
+            const submitterName = document.getElementById('submitterName').value.trim();
+            const submitterEmail = document.getElementById('submitterEmail').value.trim();
+            const submitterJobTitle = document.getElementById('submitterJobTitle').value.trim();
             const projectName = document.getElementById('projectName').value.trim();
             const property = document.getElementById('property').value.trim();
-            const size = document.getElementById('size').value.trim();
             const orientation = document.getElementById('orientation').value;
             const menuType = document.getElementById('menuType').value;
             const templateType = document.getElementById('templateType').value;
             const dateNeeded = document.getElementById('dateNeeded').value;
-            const submitterEmail = document.getElementById('submitterEmail').value.trim();
+            const cityCountry = document.getElementById('cityCountry').value.trim();
+            const assetType = document.getElementById('assetType').value;
             const menuContent = quill.getText().trim();
+            const width = assetType === 'PRINT'
+                ? document.getElementById('widthPrint').value.trim()
+                : document.getElementById('widthDigital').value.trim();
+            const height = assetType === 'PRINT'
+                ? document.getElementById('heightPrint').value.trim()
+                : document.getElementById('heightDigital').value.trim();
 
-            if (!projectName || !property || !size || !orientation || !menuType || !templateType || !dateNeeded || !submitterEmail || !menuContent) {
-                showAlert('Please fill in all required fields', 'error');
+            if (!submitterName || !submitterEmail || !submitterJobTitle) {
+                showAlert('Please fill in all submitter information fields', 'error');
                 window.scrollTo({ top: 0, behavior: 'smooth' });
                 return false;
             }
 
             if (!submitterEmail.includes('@')) {
                 showAlert('Please enter a valid email address', 'error');
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+                return false;
+            }
+
+            if (!projectName || !property || !width || !height || !orientation || !menuType || !templateType || !dateNeeded || !cityCountry || !assetType || !menuContent) {
+                showAlert('Please fill in all required fields', 'error');
                 window.scrollTo({ top: 0, behavior: 'smooth' });
                 return false;
             }
@@ -1595,29 +2833,47 @@
 
         async function runBasicCheck() {
             if (!validateStep1()) return;
+            if (submissionMode === 'modification' && !revisionBaseSubmissionId && !revisionBaselineDocPath) {
+                showAlert('Select a previous approved submission or upload an approved baseline DOCX first.', 'error');
+                return;
+            }
 
-            const btn = document.getElementById('runCheckBtn');
-            btn.disabled = true;
-            btn.innerHTML = '<span class="spinner"></span>Running AI Check...';
-
-            const delta = quill.getContents();
-            let menuContent = '';
-
-            delta.ops.forEach((op) => {
-                if (typeof op.insert === 'string') {
-                    menuContent += op.insert;
-                }
+            const topBtn = document.getElementById('runCheckBtn');
+            const bottomBtn = document.getElementById('runCheckBtnBottom');
+            [topBtn, bottomBtn].forEach(button => {
+                if (!button) return;
+                button.disabled = true;
+                button.innerHTML = '<span class="spinner"></span>Running AI Check...';
             });
 
-            menuContent = menuContent.trim();
-            const allergens = document.getElementById('allergensInput').value.trim();
+            let menuContent = '';
+            if (isEditMode && document.getElementById('step2').classList.contains('hidden') === false) {
+                const reviewedArea = document.getElementById('reviewedContentArea');
+                menuContent = extractCleanTextFromReviewedArea(reviewedArea);
+            } else {
+                const delta = quill.getContents();
+                delta.ops.forEach((op) => {
+                    if (typeof op.insert === 'string') {
+                        menuContent += op.insert;
+                    }
+                });
+                menuContent = menuContent.trim();
+            }
+            const allergens = getAllergenInputValue();
             const menuType = document.getElementById('menuType').value;
+            const reviewMode = submissionMode === 'modification' ? 'changed_only' : 'full';
 
             try {
                 const response = await fetch('/api/form/basic-check', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ menuContent, allergens, menuType })
+                    body: JSON.stringify({
+                        menuContent,
+                        allergens,
+                        menuType,
+                        baselineMenuContent: submissionMode === 'modification' ? baseApprovedMenuContent : '',
+                        reviewMode
+                    })
                 });
 
                 const data = await response.json();
@@ -1626,15 +2882,50 @@
                     throw new Error(data.error || 'Failed to run AI check');
                 }
 
+                aiCheckHasRun = true;
+                setAiSuggestionsVisibility(true);
                 aiCheckResults = data;
                 showStep2(data);
-                showAlert('AI check complete! Review the suggestions below.', 'success');
+                if (data.reviewMode === 'changed_only') {
+                    showAlert(`AI reviewed changed content only (${data.changedLineCount || 0} changed lines).`, 'success');
+                } else {
+                    showAlert('AI check complete! Review the suggestions below.', 'success');
+                }
 
             } catch (error) {
                 console.error('Error:', error);
                 showAlert('Error running AI check: ' + error.message, 'error');
-                btn.disabled = false;
-                btn.textContent = 'Run Basic AI Check';
+                [topBtn, bottomBtn].forEach(button => {
+                    if (!button) return;
+                    button.disabled = false;
+                    button.textContent = 'Run Basic AI Check';
+                });
+            }
+        }
+
+        function updateRevisionPreCheckLayout() {
+            const step1MenuSection = document.getElementById('step1MenuCompositionSection');
+            const step1RunContainer = document.getElementById('step1RunCheckContainer');
+            const step2RunButton = document.getElementById('runCheckBtnBottom');
+            const step2AllergensSection = document.getElementById('step2AllergensSection');
+            const submitBtn = document.getElementById('submitBtn');
+            const criticalBanner = document.getElementById('criticalErrorBanner');
+            const step2Visible = !document.getElementById('step2').classList.contains('hidden');
+            const showBottomRunCheck = submissionMode === 'modification' && step2Visible && !aiCheckHasRun;
+
+            if (showBottomRunCheck) {
+                if (step1MenuSection) step1MenuSection.classList.add('hidden');
+                if (step1RunContainer) step1RunContainer.classList.add('hidden');
+                if (step2RunButton) step2RunButton.classList.remove('hidden');
+                if (step2AllergensSection) step2AllergensSection.classList.remove('hidden');
+                if (submitBtn) submitBtn.classList.add('hidden');
+                if (criticalBanner) criticalBanner.classList.remove('show');
+            } else {
+                if (step1MenuSection) step1MenuSection.classList.remove('hidden');
+                if (step1RunContainer) step1RunContainer.classList.remove('hidden');
+                if (step2RunButton) step2RunButton.classList.add('hidden');
+                if (step2AllergensSection) step2AllergensSection.classList.add('hidden');
+                if (submitBtn) submitBtn.classList.remove('hidden');
             }
         }
 
@@ -1841,6 +3132,12 @@
         function updateSubmitButtonState() {
             const submitBtn = document.getElementById('submitBtn');
             const banner = document.getElementById('criticalErrorBanner');
+            if (!aiCheckHasRun) {
+                submitBtn.disabled = true;
+                submitBtn.classList.add('blocked');
+                banner.classList.remove('show');
+                return;
+            }
 
             if (!aiCheckResults || !aiCheckResults.suggestions) {
                 submitBtn.disabled = false;
@@ -1886,14 +3183,21 @@
             // Get current edited text from the reviewed content area
             const reviewedArea = document.getElementById('reviewedContentArea');
             const menuContent = (reviewedArea.innerText || reviewedArea.textContent).trim();
-            const allergens = document.getElementById('allergensInput').value.trim();
+            const allergens = getAllergenInputValue();
             const menuType = document.getElementById('menuType').value;
+            const reviewMode = submissionMode === 'modification' ? 'changed_only' : 'full';
 
             try {
                 const response = await fetch('/api/form/basic-check', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ menuContent, allergens, menuType })
+                    body: JSON.stringify({
+                        menuContent,
+                        allergens,
+                        menuType,
+                        baselineMenuContent: submissionMode === 'modification' ? baseApprovedMenuContent : '',
+                        reviewMode
+                    })
                 });
 
                 const data = await response.json();
@@ -1902,6 +3206,8 @@
                     throw new Error(data.error || 'Failed to run AI check');
                 }
 
+                aiCheckHasRun = true;
+                setAiSuggestionsVisibility(true);
                 aiCheckResults = data;
                 criticalErrorOverrides = {};
 
@@ -1919,23 +3225,91 @@
         }
 
         function showStep2(results) {
-            document.getElementById('step1').classList.add('hidden');
             document.getElementById('step2').classList.remove('hidden');
+            const step2Container = document.querySelector('.step2-container');
+            const isModificationMode = submissionMode === 'modification';
+            const preAiRevisionMode = isModificationMode && !aiCheckHasRun;
+            const menuPanelSubtitle = document.getElementById('menuPanelSubtitle');
+
+            if (step2Container) {
+                if (isModificationMode) {
+                    step2Container.classList.add('revision-split');
+                } else {
+                    step2Container.classList.remove('revision-split');
+                }
+            }
+
+            if (preAiRevisionMode) {
+                document.getElementById('step1').classList.remove('hidden');
+                document.getElementById('step2FormFields').classList.add('hidden');
+                setAiSuggestionsVisibility(false);
+                if (menuPanelSubtitle) {
+                    menuPanelSubtitle.textContent = 'Chef revision editor (persistent redlines preview on right)';
+                }
+            } else {
+                document.getElementById('step1').classList.add('hidden');
+                document.getElementById('step2FormFields').classList.remove('hidden');
+                setAiSuggestionsVisibility(true);
+                if (menuPanelSubtitle) {
+                    menuPanelSubtitle.textContent = 'AI-reviewed content (green = AI changes)';
+                }
+            }
+            updateRevisionPreCheckLayout();
 
             // Reset critical error overrides
             criticalErrorOverrides = {};
 
-            // Populate read-only form fields
+            // Populate read-only submitter fields
+            document.getElementById('step2SubmitterName').value = document.getElementById('submitterName').value;
+            document.getElementById('step2SubmitterEmail').value = document.getElementById('submitterEmail').value;
+            document.getElementById('step2SubmitterJobTitle').value = document.getElementById('submitterJobTitle').value;
+
+            // Populate read-only project detail fields
             document.getElementById('step2ProjectName').value = document.getElementById('projectName').value;
             document.getElementById('step2Property').value = document.getElementById('property').value;
-            document.getElementById('step2Size').value = document.getElementById('size').value;
-            document.getElementById('step2Orientation').value = document.getElementById('orientation').value;
             const menuTypeSelect = document.getElementById('menuType');
             document.getElementById('step2MenuType').value = menuTypeSelect.options[menuTypeSelect.selectedIndex].text;
             const templateTypeSelect = document.getElementById('templateType');
             document.getElementById('step2TemplateType').value = templateTypeSelect.options[templateTypeSelect.selectedIndex].text;
+            document.getElementById('step2HotelName').value = document.getElementById('hotelName').value || '(none)';
+            document.getElementById('step2CityCountry').value = document.getElementById('cityCountry').value;
             document.getElementById('step2DateNeeded').value = document.getElementById('dateNeeded').value;
-            document.getElementById('step2Email').value = document.getElementById('submitterEmail').value;
+            const assetTypeSelect = document.getElementById('assetType');
+            document.getElementById('step2AssetType').value = assetTypeSelect.options[assetTypeSelect.selectedIndex].text;
+            document.getElementById('step2Orientation').value = document.getElementById('orientation').value;
+
+            // Populate dimensions and print-specific fields
+            const assetTypeVal = document.getElementById('assetType').value;
+            if (assetTypeVal === 'PRINT') {
+                const w = document.getElementById('widthPrint').value;
+                const h = document.getElementById('heightPrint').value;
+                document.getElementById('step2Dimensions').value = `${w} x ${h} inches`;
+                // Show print-specific read-only fields
+                document.getElementById('step2CropMarksGroup').classList.remove('hidden');
+                document.getElementById('step2BleedMarksGroup').classList.remove('hidden');
+                document.getElementById('step2FileSizeLimitGroup').classList.remove('hidden');
+                document.getElementById('step2CropMarks').value = document.getElementById('cropMarks').value === 'yes' ? 'Yes' : 'No';
+                document.getElementById('step2BleedMarks').value = document.getElementById('bleedMarks').value === 'yes' ? 'Yes' : 'No';
+                const fsl = document.getElementById('fileSizeLimit').value;
+                const fslMb = document.getElementById('fileSizeLimitMb').value;
+                document.getElementById('step2FileSizeLimit').value = fsl === 'yes' ? `Yes (${fslMb} MB)` : 'No';
+                const deliveryNotes = document.getElementById('fileDeliveryNotes').value.trim();
+                if (deliveryNotes) {
+                    document.getElementById('step2FileDeliveryNotesGroup').classList.remove('hidden');
+                    document.getElementById('step2FileDeliveryNotes').value = deliveryNotes;
+                } else {
+                    document.getElementById('step2FileDeliveryNotesGroup').classList.add('hidden');
+                }
+            } else {
+                const w = document.getElementById('widthDigital').value;
+                const h = document.getElementById('heightDigital').value;
+                document.getElementById('step2Dimensions').value = `${w} x ${h} pixels`;
+                // Hide print-specific read-only fields
+                document.getElementById('step2CropMarksGroup').classList.add('hidden');
+                document.getElementById('step2BleedMarksGroup').classList.add('hidden');
+                document.getElementById('step2FileSizeLimitGroup').classList.add('hidden');
+                document.getElementById('step2FileDeliveryNotesGroup').classList.add('hidden');
+            }
 
             const originalText = results.originalMenu;
             const correctedText = results.correctedMenu;
@@ -1965,6 +3339,7 @@
 
             // Display the reviewed content with highlights
             displayReviewedContent(quill.root.innerHTML);
+            renderPersistentPreview(baseApprovedMenuContent || originalText, correctedText);
 
             const suggestionsDisplay = document.getElementById('suggestionsDisplay');
 
@@ -2012,6 +3387,11 @@
         }
 
         async function submitMenu() {
+            if (!aiCheckHasRun) {
+                showAlert('Run Basic AI Check before submitting.', 'error');
+                return;
+            }
+
             // Block if unresolved critical errors exist
             if (aiCheckResults && aiCheckResults.suggestions) {
                 const unresolvedCritical = aiCheckResults.suggestions.some((s, idx) =>
@@ -2023,6 +3403,11 @@
                 }
             }
 
+            if (submissionMode === 'modification' && !revisionBaseSubmissionId && !revisionBaselineDocPath) {
+                showAlert('Select a previous approved submission or upload an approved baseline DOCX before submitting.', 'error');
+                return;
+            }
+
             if (isEditMode) {
                 toggleEditMode();
             }
@@ -2032,8 +3417,8 @@
             btn.innerHTML = '<span class="spinner"></span>Submitting...';
 
             const reviewedArea = document.getElementById('reviewedContentArea');
-            const menuContentHtml = reviewedArea.innerHTML;
-            const menuContentText = (reviewedArea.innerText || reviewedArea.textContent).trim();
+            const menuContentHtml = sanitizeMenuHtmlForSubmission(reviewedArea.innerHTML || '');
+            const menuContentText = extractCleanTextFromReviewedArea(reviewedArea);
 
             // Also update the hidden display
             document.getElementById('originalMenuDisplay').innerHTML = menuContentHtml;
@@ -2072,19 +3457,41 @@
                 });
             }
 
+            const assetTypeValue = document.getElementById('assetType').value;
+            const isPrint = assetTypeValue === 'PRINT';
+
             const formData = {
+                submitterName: document.getElementById('submitterName').value.trim(),
+                submitterEmail: document.getElementById('submitterEmail').value.trim(),
+                submitterJobTitle: document.getElementById('submitterJobTitle').value.trim(),
                 projectName: document.getElementById('projectName').value.trim(),
                 property: document.getElementById('property').value.trim(),
-                size: document.getElementById('size').value.trim(),
+                width: isPrint ? document.getElementById('widthPrint').value.trim() : document.getElementById('widthDigital').value.trim(),
+                height: isPrint ? document.getElementById('heightPrint').value.trim() : document.getElementById('heightDigital').value.trim(),
+                cropMarks: isPrint ? document.getElementById('cropMarks').value : 'no',
+                bleedMarks: isPrint ? document.getElementById('bleedMarks').value : 'no',
+                fileSizeLimit: isPrint ? document.getElementById('fileSizeLimit').value : 'no',
+                fileSizeLimitMb: isPrint ? document.getElementById('fileSizeLimitMb').value.trim() : '',
+                fileDeliveryNotes: isPrint ? document.getElementById('fileDeliveryNotes').value.trim() : '',
                 orientation: document.getElementById('orientation').value,
                 menuType: document.getElementById('menuType').value,
                 templateType: document.getElementById('templateType').value,
                 dateNeeded: document.getElementById('dateNeeded').value,
-                submitterEmail: document.getElementById('submitterEmail').value.trim(),
+                hotelName: document.getElementById('hotelName').value.trim(),
+                cityCountry: document.getElementById('cityCountry').value.trim(),
+                assetType: assetTypeValue,
+                allergens: getAllergenInputValue(),
                 menuContent: menuContentText,
                 menuContentHtml: menuContentHtml,
                 approvals: approvals,
-                criticalOverrides: criticalOverrides
+                criticalOverrides: criticalOverrides,
+                submissionMode: submissionMode,
+                revisionSource: submissionMode === 'modification' ? revisionSource : null,
+                revisionBaseSubmissionId: revisionBaseSubmissionId,
+                revisionBaselineDocPath: submissionMode === 'modification' ? revisionBaselineDocPath : '',
+                revisionBaselineFileName: submissionMode === 'modification' ? revisionBaselineFileName : '',
+                baseApprovedMenuContent: submissionMode === 'modification' ? baseApprovedMenuContent : '',
+                chefPersistentDiff: submissionMode === 'modification' ? persistentDiffSummary : null
             };
 
             try {
@@ -2100,11 +3507,8 @@
                     throw new Error(data.error || 'Failed to submit menu');
                 }
 
-                showAlert('Menu submitted successfully! Redirecting to review page...', 'success');
-
-                setTimeout(() => {
-                    window.location.href = `/review/${data.submissionId}`;
-                }, 2000);
+                showAlert('Menu submitted successfully. Sent to ClickUp for team review. You can submit another menu now.', 'success');
+                prepareForNextSubmission();
 
             } catch (error) {
                 console.error('Error:', error);
@@ -2112,6 +3516,57 @@
                 btn.disabled = false;
                 btn.textContent = 'Submit Menu for Review';
             }
+        }
+
+        function prepareForNextSubmission() {
+            const retainedAllergens = getAllergenInputValue();
+
+            aiCheckHasRun = false;
+            aiCheckResults = null;
+            criticalErrorOverrides = {};
+            aiChanges = [];
+            originalAiCorrectedText = '';
+            persistentDiffSummary = { insertions: 0, deletions: 0 };
+
+            if (isEditMode) {
+                toggleEditMode();
+            }
+
+            // Return to new submission mode and clear revision-only state.
+            document.getElementById('submissionModeNew').checked = true;
+            onSubmissionModeChange();
+
+            // Keep form metadata populated but clear menu content for next submission.
+            quill.setText('');
+            displayReviewedContent('');
+            document.getElementById('originalMenuDisplay').innerHTML = '';
+            document.getElementById('step2').classList.add('hidden');
+            document.getElementById('step1').classList.remove('hidden');
+            setAiSuggestionsVisibility(false);
+            renderPersistentPreview('', '');
+            setAllergenInputValue(retainedAllergens);
+
+            const suggestionsDisplay = document.getElementById('suggestionsDisplay');
+            if (suggestionsDisplay) suggestionsDisplay.innerHTML = '';
+
+            const runCheckBtn = document.getElementById('runCheckBtn');
+            if (runCheckBtn) {
+                runCheckBtn.disabled = false;
+                runCheckBtn.textContent = 'Run Basic AI Check';
+            }
+            const runCheckBtnBottom = document.getElementById('runCheckBtnBottom');
+            if (runCheckBtnBottom) {
+                runCheckBtnBottom.disabled = false;
+                runCheckBtnBottom.textContent = 'Run Basic AI Check';
+            }
+
+            const submitBtn = document.getElementById('submitBtn');
+            submitBtn.disabled = false;
+            submitBtn.textContent = 'Submit Menu for Review';
+            submitBtn.classList.remove('blocked');
+            document.getElementById('criticalErrorBanner').classList.remove('show');
+
+            window.scrollTo({ top: 0, behavior: 'smooth' });
         }
 
         function escapeHtml(text) {
@@ -2136,6 +3591,17 @@
             document.getElementById('originalMenuDisplay').innerHTML = cleanedHtml;
         }
 
+        function sanitizeMenuHtmlForSubmission(htmlContent) {
+            let html = htmlContent || '';
+
+            // Remove purely-empty paragraphs; these often become visual double-spacing in DOCX.
+            html = html.replace(/<p>(?:\s|&nbsp;|<br\s*\/?>)*<\/p>/gi, '');
+
+            // Collapse excessive whitespace between paragraph tags.
+            html = html.replace(/>\s+</g, '><').trim();
+            return html;
+        }
+
         function toggleEditMode() {
             const editBtn = document.getElementById('editToggleBtn');
             const editNotice = document.getElementById('editModeNotice');
@@ -2150,6 +3616,7 @@
                 reviewedArea.classList.add('editable');
                 reviewedArea.contentEditable = 'true';
                 reviewedArea.focus();
+                reviewedArea.addEventListener('input', handleReviewedAreaInput);
                 // Hide re-run button while editing
                 document.getElementById('rerunCheckBtn').classList.remove('show');
             } else {
@@ -2158,42 +3625,187 @@
                 editNotice.classList.remove('show');
                 reviewedArea.classList.remove('editable');
                 reviewedArea.contentEditable = 'false';
+                reviewedArea.removeEventListener('input', handleReviewedAreaInput);
                 recalculateHighlights();
                 // Show re-run button after editing
                 document.getElementById('rerunCheckBtn').classList.add('show');
             }
         }
 
+        function extractCleanTextFromReviewedArea(element) {
+            const paragraphs = element.querySelectorAll('p');
+
+            if (paragraphs.length === 0) {
+                const rawLines = (element.textContent || '')
+                    .replace(/\r/g, '')
+                    .split('\n')
+                    .map(line => line.replace(/\u00A0/g, ' ').trim());
+                return normalizeExtractedLines(rawLines);
+            }
+
+            const rawLines = [];
+            paragraphs.forEach(p => {
+                const text = (p.textContent || '').replace(/\u00A0/g, ' ').trim();
+                rawLines.push(text);
+            });
+            return normalizeExtractedLines(rawLines);
+        }
+
+        function normalizeExtractedLines(rawLines) {
+            const lines = [...rawLines];
+
+            // Trim leading/trailing empty lines.
+            while (lines.length && lines[0] === '') lines.shift();
+            while (lines.length && lines[lines.length - 1] === '') lines.pop();
+
+            // Preserve intentional spacing, but collapse excessive empties.
+            const normalized = [];
+            let prevEmpty = false;
+            for (const line of lines) {
+                if (line === '') {
+                    if (!prevEmpty) {
+                        normalized.push('');
+                    }
+                    prevEmpty = true;
+                } else {
+                    normalized.push(line);
+                    prevEmpty = false;
+                }
+            }
+
+            return normalized.join('\n');
+        }
+
+        function handleReviewedAreaInput() {
+            if (submissionMode !== 'modification') return;
+            const reviewedArea = document.getElementById('reviewedContentArea');
+            clearTimeout(persistentPreviewUpdateTimer);
+            persistentPreviewUpdateTimer = setTimeout(() => {
+                const currentText = extractCleanTextFromReviewedArea(reviewedArea);
+                renderPersistentPreview(baseApprovedMenuContent || (aiCheckResults?.originalMenu || ''), currentText);
+            }, 120);
+        }
+
+        function tokenizeForDiff(text) {
+            return (text || '').split(/(\s+)/).filter(token => token.length > 0);
+        }
+
+        function normalizeToken(token) {
+            return token.toLowerCase().replace(/[^\p{L}\p{N}$€£¥|.-]/gu, '');
+        }
+
+        function buildTokenLcs(baseTokens, revisedTokens) {
+            const m = baseTokens.length;
+            const n = revisedTokens.length;
+            const dp = Array(m + 1).fill(null).map(() => Array(n + 1).fill(0));
+
+            for (let i = 1; i <= m; i++) {
+                for (let j = 1; j <= n; j++) {
+                    if (normalizeToken(baseTokens[i - 1]) === normalizeToken(revisedTokens[j - 1])) {
+                        dp[i][j] = dp[i - 1][j - 1] + 1;
+                    } else {
+                        dp[i][j] = Math.max(dp[i - 1][j], dp[i][j - 1]);
+                    }
+                }
+            }
+
+            const commonBase = new Set();
+            const commonRev = new Set();
+            let i = m;
+            let j = n;
+            while (i > 0 && j > 0) {
+                if (normalizeToken(baseTokens[i - 1]) === normalizeToken(revisedTokens[j - 1])) {
+                    commonBase.add(i - 1);
+                    commonRev.add(j - 1);
+                    i--;
+                    j--;
+                } else if (dp[i - 1][j] >= dp[i][j - 1]) {
+                    i--;
+                } else {
+                    j--;
+                }
+            }
+
+            return { commonBase, commonRev };
+        }
+
+        function renderPersistentPreview(baseText, revisedText) {
+            const previewSection = document.getElementById('persistentPreviewSection');
+            const previewBody = document.getElementById('persistentPreviewBody');
+
+            if (submissionMode !== 'modification') {
+                previewSection.classList.remove('show');
+                previewBody.innerHTML = '';
+                return;
+            }
+
+            previewSection.classList.add('show');
+            const baseTokens = tokenizeForDiff(baseText);
+            const revisedTokens = tokenizeForDiff(revisedText);
+            const lcs = buildTokenLcs(baseTokens, revisedTokens);
+
+            let insertions = 0;
+            let deletions = 0;
+            let html = '';
+            let i = 0;
+            let j = 0;
+            while (i < baseTokens.length || j < revisedTokens.length) {
+                const baseTok = i < baseTokens.length ? baseTokens[i] : null;
+                const revTok = j < revisedTokens.length ? revisedTokens[j] : null;
+                const baseCommon = i < baseTokens.length && lcs.commonBase.has(i);
+                const revCommon = j < revisedTokens.length && lcs.commonRev.has(j);
+                const sameToken =
+                    baseTok !== null &&
+                    revTok !== null &&
+                    normalizeToken(baseTok) === normalizeToken(revTok);
+
+                if (baseCommon && revCommon && sameToken) {
+                    html += escapeHtml(revTok);
+                    i++;
+                    j++;
+                    continue;
+                }
+
+                if (i < baseTokens.length && !baseCommon) {
+                    if (baseTok && baseTok.trim()) {
+                        html += `<span class="persistent-del">${escapeHtml(baseTok)}</span>`;
+                        deletions++;
+                    } else {
+                        html += escapeHtml(baseTok || '');
+                    }
+                    i++;
+                    continue;
+                }
+
+                if (j < revisedTokens.length && !revCommon) {
+                    if (revTok && revTok.trim()) {
+                        html += `<span class="persistent-ins">${escapeHtml(revTok)}</span>`;
+                        insertions++;
+                    } else {
+                        html += escapeHtml(revTok || '');
+                    }
+                    j++;
+                    continue;
+                }
+
+                if (j < revisedTokens.length) {
+                    html += escapeHtml(revTok || '');
+                    j++;
+                }
+                if (i < baseTokens.length) {
+                    i++;
+                }
+            }
+
+            persistentDiffSummary = { insertions, deletions };
+            previewBody.innerHTML = html;
+        }
+
         function recalculateHighlights() {
             const reviewedArea = document.getElementById('reviewedContentArea');
 
             // Extract clean text from the edited content
-            // Get each <p> element's text, filter out empties, join with single newlines
-            const extractCleanText = (element) => {
-                const paragraphs = element.querySelectorAll('p');
-
-                if (paragraphs.length === 0) {
-                    // No paragraphs, get text content directly
-                    return element.textContent.trim()
-                        .split(/\n+/)
-                        .map(line => line.trim())
-                        .filter(line => line.length > 0)
-                        .join('\n');
-                }
-
-                const lines = [];
-                paragraphs.forEach(p => {
-                    const text = p.textContent.trim();
-                    // Only add non-empty lines (skip &nbsp; and empty paragraphs)
-                    if (text && text !== '\u00A0' && text.length > 0) {
-                        lines.push(text);
-                    }
-                });
-
-                return lines.join('\n');
-            };
-
-            const currentText = extractCleanText(reviewedArea);
+            const currentText = extractCleanTextFromReviewedArea(reviewedArea);
 
             quill.setText(currentText);
 
@@ -2230,6 +3842,7 @@
             });
 
             displayReviewedContent(quill.root.innerHTML);
+            renderPersistentPreview(baseApprovedMenuContent || aiCheckResults.originalMenu, currentText);
         }
 
         function findWordPosition(text, word, expectedPosition) {

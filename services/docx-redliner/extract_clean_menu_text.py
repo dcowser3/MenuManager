@@ -9,6 +9,7 @@ Usage:
 
 import json
 import sys
+from html import escape
 from docx import Document
 
 BOUNDARY_MARKERS = [
@@ -68,6 +69,51 @@ def paragraph_clean_text(paragraph):
     return "".join(cleaned_parts)
 
 
+def paragraph_clean_html(paragraph):
+    """
+    Build cleaned HTML paragraph preserving basic inline formatting:
+    bold, italic, underline. Tracked/manual deletions are removed.
+    """
+    def local_name(tag):
+        if not isinstance(tag, str):
+            return ""
+        if "}" in tag:
+            return tag.split("}", 1)[1]
+        return tag
+
+    def run_is_in_deleted_change(run):
+        node = run._r
+        while node is not None:
+            if local_name(node.tag) in {"del", "moveFrom"}:
+                return True
+            node = node.getparent()
+        return False
+
+    fragments = []
+    for run in paragraph.runs:
+        if run_is_in_deleted_change(run):
+            continue
+        if run.font and run.font.strike:
+            continue
+
+        text = run.text or ""
+        if not text:
+            continue
+
+        chunk = escape(text).replace("\n", "<br>")
+        if run.bold:
+            chunk = f"<strong>{chunk}</strong>"
+        if run.italic:
+            chunk = f"<em>{chunk}</em>"
+        if run.underline:
+            chunk = f"<u>{chunk}</u>"
+        fragments.append(chunk)
+
+    if not fragments:
+        return "<p><br></p>"
+    return f"<p>{''.join(fragments)}</p>"
+
+
 def extract_texts(docx_path):
     doc = Document(docx_path)
     boundary_index = find_boundary_index(doc.paragraphs)
@@ -79,6 +125,7 @@ def extract_texts(docx_path):
 
     raw_lines = []
     cleaned_lines = []
+    cleaned_html_paragraphs = []
 
     for paragraph in source_paragraphs:
         raw_text = paragraph.text
@@ -90,6 +137,7 @@ def extract_texts(docx_path):
 
         raw_lines.append(raw_text)
         cleaned_lines.append(cleaned_text)
+        cleaned_html_paragraphs.append(paragraph_clean_html(paragraph))
 
     # Trim trailing blank lines
     while raw_lines and not raw_lines[-1].strip():
@@ -100,6 +148,7 @@ def extract_texts(docx_path):
     return {
         "menu_content": "\n".join(raw_lines),
         "cleaned_menu_content": "\n".join(cleaned_lines),
+        "cleaned_menu_html": "".join(cleaned_html_paragraphs),
     }
 
 

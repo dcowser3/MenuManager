@@ -184,45 +184,33 @@ function extractAllergens(line) {
 /**
  * Extract dishes from approved menu and store in database
  *
+ * Adds all dishes as a running list without deduplication.
+ * Deduplication can be handled separately if needed.
+ *
  * @param menuContent - The menu text content
  * @param property - The property/restaurant name
  * @param submissionId - The source submission ID
- * @returns Number of new dishes added
+ * @returns Number of dishes added
  */
 async function extractAndStoreDishes(menuContent, property, submissionId) {
     // Extract dishes from text
     const extractedDishes = extractDishesFromText(menuContent);
     if (extractedDishes.length === 0) {
-        return { added: 0, skipped: 0 };
+        return { added: 0 };
     }
-    // Filter out duplicates (dishes that already exist)
-    const newDishes = [];
-    let skipped = 0;
-    for (const dish of extractedDishes) {
-        const exists = await (0, dishes_1.dishExists)(dish.name, property);
-        if (!exists) {
-            newDishes.push({
-                dish_name: dish.name,
-                property,
-                menu_category: dish.category,
-                description: dish.description,
-                price: dish.price,
-                allergens: dish.allergens.length > 0 ? dish.allergens : undefined,
-                source_submission_id: submissionId
-            });
-        }
-        else {
-            skipped++;
-        }
-    }
-    // Batch insert new dishes
-    if (newDishes.length > 0) {
-        await (0, dishes_1.createDishes)(newDishes);
-    }
-    return {
-        added: newDishes.length,
-        skipped
-    };
+    // Convert to database format
+    const dishes = extractedDishes.map(dish => ({
+        dish_name: dish.name,
+        property,
+        menu_category: dish.category,
+        description: dish.description,
+        price: dish.price,
+        allergens: dish.allergens.length > 0 ? dish.allergens : undefined,
+        source_submission_id: submissionId
+    }));
+    // Batch insert all dishes
+    await (0, dishes_1.createDishes)(dishes);
+    return { added: dishes.length };
 }
 /**
  * Extract dishes without storing (for preview/testing)
