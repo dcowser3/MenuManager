@@ -45,7 +45,8 @@ For modification flows, the baseline approved text must come from one of:
 - Right-side persistent preview shows live diff against approved baseline:
   - Deletions: red strike-through
   - Insertions: yellow highlight
-- AI check runs on edited text and overlays temporary suggestion highlights separately.
+- In modification mode, AI review is scoped to changed lines only (computed against approved baseline).
+- AI suggestion highlights remain temporary and separate from persistent chef revision markup.
 
 ## Data Model Additions (JSON DB)
 
@@ -121,4 +122,6 @@ When chef uses uploaded baseline flow:
 - `services/dashboard/__tests__/modification-workflow.test.js`
   - Modification submit with DB baseline source
   - Modification submit with uploaded baseline source
+  - Basic check short-circuits when no modification lines changed
+  - Basic check sends only changed lines to AI in modification mode
   - Verifies revision fields are persisted and ClickUp payload includes baseline DOCX metadata

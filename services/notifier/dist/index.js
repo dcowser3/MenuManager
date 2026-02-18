@@ -6,6 +6,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = __importDefault(require("express"));
 const nodemailer_1 = __importDefault(require("nodemailer"));
 const dotenv_1 = __importDefault(require("dotenv"));
+const fs_1 = require("fs");
 const doc_generator_1 = require("./src/doc-generator");
 dotenv_1.default.config({ path: '../../../.env' });
 const app = (0, express_1.default)();
@@ -126,6 +127,27 @@ app.post('/notify', async (req, res) => {
                         {
                             filename: `final_${payload.filename}`,
                             content: docBuffer,
+                            contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                        },
+                    ],
+                };
+                break;
+            case 'corrections_ready':
+                const correctedBuffer = await fs_1.promises.readFile(payload.corrected_path);
+                mailOptions = {
+                    from: `"Menu Review Bot" <${process.env.GRAPH_MAILBOX_ADDRESS}>`,
+                    to: payload.submitter_email,
+                    subject: `Corrections Ready: ${payload.project_name || payload.filename}`,
+                    html: `
+                        <p>Hello ${payload.submitter_name || ''},</p>
+                        <p>The corrected version of your menu submission is ready. Please find it attached.</p>
+                        <p>Thank you,</p>
+                        <p>Menu Review Bot</p>
+                    `,
+                    attachments: [
+                        {
+                            filename: payload.filename || 'corrected-menu.docx',
+                            content: correctedBuffer,
                             contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
                         },
                     ],

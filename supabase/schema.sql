@@ -41,6 +41,9 @@ CREATE TABLE submissions (
 
     -- Menu content (plain text for AI review)
     menu_content TEXT,
+    menu_content_html TEXT,
+    approvals TEXT,                                 -- JSON string from form
+    critical_overrides TEXT,                        -- JSON string from form
 
     -- File paths
     filename VARCHAR(255),
@@ -48,6 +51,23 @@ CREATE TABLE submissions (
     ai_draft_path TEXT,
     final_path TEXT,
     clickup_task_id VARCHAR(100),
+
+    -- Revision / modification metadata
+    submission_mode VARCHAR(50) DEFAULT 'new',      -- 'new' or 'modification'
+    revision_source VARCHAR(100),                   -- 'database' or 'uploaded_baseline'
+    revision_base_submission_id VARCHAR(100),
+    revision_baseline_doc_path TEXT,
+    revision_baseline_file_name VARCHAR(255),
+    base_approved_menu_content TEXT,
+    chef_persistent_diff TEXT,                      -- JSON summary blob
+
+    -- Canonical approved text captured from Isabella upload
+    approved_menu_content_raw TEXT,
+    approved_menu_content TEXT,
+    approved_text_extracted_at TIMESTAMPTZ,
+
+    -- Full payload mirror for future-proofing and audits
+    raw_payload JSONB,
 
     -- Status tracking
     status VARCHAR(50) NOT NULL DEFAULT 'processing',
@@ -72,6 +92,22 @@ CREATE TABLE submissions (
 CREATE INDEX idx_submissions_status ON submissions(status);
 CREATE INDEX idx_submissions_created_at ON submissions(created_at DESC);
 CREATE INDEX idx_submissions_clickup_task_id ON submissions(clickup_task_id);
+
+-- ============================================================================
+-- 1b. SUBMITTER PROFILES (autocomplete cache)
+-- ============================================================================
+CREATE TABLE submitter_profiles (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name VARCHAR(255) NOT NULL,
+    email VARCHAR(255) NOT NULL UNIQUE,
+    job_title VARCHAR(255),
+    last_used TIMESTAMPTZ DEFAULT NOW(),
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX idx_submitter_profiles_name ON submitter_profiles(name);
+CREATE INDEX idx_submitter_profiles_last_used ON submitter_profiles(last_used DESC);
 
 -- ============================================================================
 -- 2. APPROVED_DISHES

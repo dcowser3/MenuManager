@@ -83,7 +83,25 @@ app.post('/create-task', async (req, res) => {
             revisionBaselineDocPath,
             revisionBaselineFileName,
             chefPersistentDiff,
+            criticalOverrides,
         } = req.body;
+
+        const overriddenCriticals = Array.isArray(criticalOverrides)
+            ? criticalOverrides.filter((o: any) => !!o)
+            : [];
+
+        const overrideLines = overriddenCriticals.length
+            ? [
+                `**Critical Overrides by Chef:** ${overriddenCriticals.length}`,
+                ...overriddenCriticals.map((o: any, idx: number) => {
+                    const issueType = (o.type || 'Unknown').toString();
+                    const item = (o.menuItem || '').toString().trim();
+                    const desc = (o.description || '').toString().trim();
+                    return `${idx + 1}. [${issueType}] ${item || 'No item specified'}${desc ? ` — ${desc}` : ''}`;
+                }),
+                `**Action Required:** Isabella please verify each override above before final approval.`,
+            ]
+            : [];
 
         // Create task in ClickUp
         const taskPayload: any = {
@@ -106,6 +124,7 @@ app.post('/create-task', async (req, res) => {
                     ...(revisionBaseSubmissionId ? [`**Base Submission ID:** ${revisionBaseSubmissionId}`] : []),
                     ...(chefPersistentDiff ? [`**Chef Persistent Diff:** ${JSON.stringify(chefPersistentDiff)}`] : []),
                 ] : []),
+                ...overrideLines,
                 ...(assetType === 'PRINT' ? [
                     `**Crop Marks:** ${cropMarks || 'No'}`,
                     `**Bleed Marks:** ${bleedMarks || 'No'}`,

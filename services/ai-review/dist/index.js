@@ -164,14 +164,12 @@ Configure OPENAI_API_KEY in .env for real AI reviews.
             await axios_1.default.put(`http://localhost:3004/submissions/${submission_id}/status`, { status: 'rejected_tier1' });
             return res.status(200).send({ status: 'rejected_tier1', message: 'Submission failed Tier 1 review.' });
         }
-        // --- Tier 2: Passed Tier 1, generate redlined version for human review ---
-        console.log(`Submission ${submission_id} passed Tier 1. Generating redlined version for review.`);
+        // --- Tier 2: Passed Tier 1, generate clean document for human review ---
+        console.log(`Submission ${submission_id} passed Tier 1. Preparing for human review.`);
         // Save the AI draft by copying the original document (preserving template)
         const draftPath = await saveAiDraft(submission_id, '', text, original_path, hasOpenAIKey);
-        // Automatically generate the redlined version using Python redliner
-        // This ensures it's ready when the reviewer opens the dashboard
-        const redlinedPath = await generateRedlinedDocument(submission_id, draftPath);
         // Update submission in DB with new status and draft path
+        // Note: Document goes directly to pending_human_review without redlining
         await axios_1.default.put(`http://localhost:3004/submissions/${submission_id}`, {
             status: 'pending_human_review',
             ai_draft_path: draftPath
@@ -199,107 +197,6 @@ Configure OPENAI_API_KEY in .env for real AI reviews.
         res.status(500).send('Error performing AI review.');
     }
 });
-async function createRedlinePrompt() {
-    const sopRulesPath = path.join(__dirname, '..', '..', '..', 'sop-processor', 'sop_rules.json');
-    const sopRules = JSON.parse(await fs_1.promises.readFile(sopRulesPath, 'utf-8'));
-    return `
-        You are an expert menu editor for Richard Sandoval Hospitality.
-        
-        IMPORTANT: The document contains a template form on page 1 (headers, form fields, instructions).
-        DO NOT make any changes to the template section. The template section ends at the text:
-        "Please drop the menu content below on page 2."
-        
-        ONLY review and correct the MENU CONTENT that appears AFTER that line (page 2 onwards).
-        This is the actual menu items, descriptions, and prices submitted by the chef.
-        
-        CAPITALIZATION - PRESERVE EXISTING:
-        - DO NOT change existing capitalization of dish names, section headers, or titles
-        - DO NOT lowercase or capitalize words that are already styled intentionally
-        - Only fix ALL CAPS that shouldn't be (except approved acronyms/brands)
-        
-        SPELLING CORRECTIONS (only fix clear errors):
-        - "tartar" → "tartare" (for raw preparations)
-        - "pre-fix" or "prefix" → "prix fixe"
-        - "avacado" → "avocado"
-        - "mozarella" → "mozzarella"
-        - "parmesian" → "parmesan"
-        - "Ceasar/Cesar" → "Caesar"
-        
-        FORMATTING:
-        - Mark deletions with [DELETE]text[/DELETE]
-        - Mark additions with [ADD]text[/ADD]
-        - DO NOT change ingredient separators - keep commas and hyphens as they are
-        - DO NOT split compound words (yuzu-lime, cucumber-cilantro, huitlacoche-stuffed)
-        - Dual prices: use " | " (space-bar-space), not "/"
-        - Allergen markers: uppercase, comma-separated, no spaces (e.g., D,G,N)
-        - Raw/undercooked items: append asterisk (*) for tartare, carpaccio, raw fish, caviar, raw egg
-        - Diacritics: jalapeño, crème brûlée, purée, soufflé, flambéed
-        
-        EXAMPLE FORMAT:
-        Original: "Tuna Tartar Tostada, avocado mousse, hibiscus ponzu D,G"
-        Corrected: "Tuna [DELETE]Tartar[/DELETE][ADD]Tartare[/ADD] Tostada, avocado mousse, hibiscus ponzu[ADD] *[/ADD] D,G"
-        
-        DO NOT CHANGE:
-        - Section headers like "The Spark – "El Primer Encuentro""
-        - Dish names like "Chilean Sea Bass en Pipián Verde"
-        - Compound words like "cucumber-cilantro", "yuzu-lime"
-        - Existing capitalization choices
-        
-        Here are the RSH menu guidelines:
-        ---
-        ${JSON.stringify(sopRules, null, 2)}
-        ---
-        
-        Remember: Leave the template (page 1) completely untouched. Only correct the menu content on page 2+.
-        Be CONSERVATIVE - only fix clear errors. Do not change stylistic choices or capitalize descriptions.
-    `;
-}
-/**
- * Generate redlined document using Python redliner
- * This applies AI corrections with visual track changes (red strikethrough, yellow highlight)
- */
-async function generateRedlinedDocument(submissionId, draftPath) {
-    try {
-        const REDLINED_DIR = path.join(__dirname, '..', '..', '..', 'tmp', 'redlined');
-        if (!fsSync.existsSync(REDLINED_DIR)) {
-            await fs_1.promises.mkdir(REDLINED_DIR, { recursive: true });
-        }
-        const redlinedPath = path.join(REDLINED_DIR, `${submissionId}-redlined.docx`);
-        // Call Python redliner script
-        const pythonScript = path.resolve(__dirname, '..', '..', 'docx-redliner', 'process_menu.py');
-        const venvPython = path.resolve(__dirname, '..', '..', 'docx-redliner', 'venv', 'bin', 'python');
-        let command = `"${venvPython}" "${pythonScript}" "${draftPath}" "${redlinedPath}"`;
-        // Check if venv python exists
-        try {
-            await fs_1.promises.access(venvPython);
-        }
-        catch {
-            command = `python3 "${pythonScript}" "${draftPath}" "${redlinedPath}"`;
-        }
-        console.log(`🔍 Generating redlined version for ${submissionId}...`);
-        console.log(`   Command: ${command}`);
-        const { exec } = require('child_process');
-        const { promisify } = require('util');
-        const execAsync = promisify(exec);
-        const { stdout, stderr } = await execAsync(command, { timeout: 120000 });
-        if (stdout)
-            console.log(`   Redliner output: ${stdout.substring(0, 200)}`);
-        if (stderr)
-            console.warn(`   Redliner warnings: ${stderr.substring(0, 200)}`);
-        // Update database with redlined path
-        await axios_1.default.put(`http://localhost:3004/submissions/${submissionId}`, {
-            redlined_path: redlinedPath,
-            redlined_at: new Date().toISOString()
-        });
-        console.log(`✅ Redlined version ready: ${redlinedPath}`);
-        return redlinedPath;
-    }
-    catch (error) {
-        console.error(`❌ Error generating redlined version: ${error.message}`);
-        // Don't fail the whole process if redlining fails
-        return null;
-    }
-}
 async function saveAiDraft(submissionId, content, originalText = '', originalPath = '', hasOpenAIKey = false) {
     const DRAFTS_DIR = path.join(__dirname, '..', '..', '..', 'tmp', 'ai-drafts');
     if (!fsSync.existsSync(DRAFTS_DIR)) {

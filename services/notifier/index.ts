@@ -8,6 +8,7 @@ dotenv.config({ path: '../../../.env' });
 
 const app = express();
 const port = 3003;
+const hasSmtpConfig = !!(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS);
 
 const transporter = nodemailer.createTransport({
     host: process.env.SMTP_HOST,
@@ -26,6 +27,11 @@ app.post('/notify', async (req, res) => {
 
     if (!type || !payload) {
         return res.status(400).send('Missing notification type or payload.');
+    }
+
+    if (!hasSmtpConfig) {
+        console.warn(`SMTP not configured. Skipping notification type "${type}".`);
+        return res.status(200).json({ skipped: true, reason: 'smtp_not_configured' });
     }
 
     try {
@@ -177,4 +183,7 @@ app.post('/notify', async (req, res) => {
 
 app.listen(port, () => {
     console.log(`notifier service listening at http://localhost:${port}`);
+    if (!hasSmtpConfig) {
+        console.log('Notifier mode: SMTP not configured, notifications will be skipped.');
+    }
 });

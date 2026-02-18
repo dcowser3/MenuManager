@@ -36,16 +36,35 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.extractBaselineFromDocx = extractBaselineFromDocx;
 const express_1 = __importDefault(require("express"));
 const multer_1 = __importDefault(require("multer"));
 const axios_1 = __importDefault(require("axios"));
 const fs_1 = require("fs");
+const fsSync = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const child_process_1 = require("child_process");
 const util_1 = require("util");
 // Supabase client for dish extraction (optional - gracefully handles if not configured)
 const supabase_client_1 = require("@menumanager/supabase-client");
 const execAsync = (0, util_1.promisify)(child_process_1.exec);
+const DEFAULT_ALLERGEN_KEY = 'C crustaceans | D dairy | E egg | F fish | G gluten | N nuts | V vegetarian | VG vegan';
+function getRepoRoot() {
+    const candidates = [
+        path.resolve(__dirname, '..', '..'), // ts-node from services/dashboard
+        path.resolve(__dirname, '..', '..', '..') // compiled from services/dashboard/dist
+    ];
+    for (const candidate of candidates) {
+        if (fsSync.existsSync(path.join(candidate, 'services')) &&
+            fsSync.existsSync(path.join(candidate, 'samples'))) {
+            return candidate;
+        }
+    }
+    return candidates[0];
+}
+function getDocxRedlinerDir() {
+    return path.join(getRepoRoot(), 'services', 'docx-redliner');
+}
 /**
  * Extract dishes from approved menu and store in database
  * Fails silently if Supabase is not configured
@@ -90,6 +109,45 @@ app.use(express_1.default.static(path.join(__dirname, 'public')));
 app.use(express_1.default.json());
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
+async function extractBaselineFromDocx(filePath) {
+    const docxRedlinerDir = getDocxRedlinerDir();
+    const venvPython = path.join(docxRedlinerDir, 'venv', 'bin', 'python');
+    const extractCleanScript = path.join(docxRedlinerDir, 'extract_clean_menu_text.py');
+    const extractDetailsScript = path.join(docxRedlinerDir, 'extract_project_details.py');
+    let pythonCmd = 'python3';
+    try {
+        await fs_1.promises.access(venvPython);
+        pythonCmd = `"${venvPython}"`;
+    }
+    catch {
+        // use system python
+    }
+    const cleanCommand = `${pythonCmd} "${extractCleanScript}" "${filePath}"`;
+    const detailsCommand = `${pythonCmd} "${extractDetailsScript}" "${filePath}"`;
+    const [{ stdout: cleanStdout }, { stdout: detailsStdout }] = await Promise.all([
+        execAsync(cleanCommand, { timeout: 30000 }),
+        execAsync(detailsCommand, { timeout: 30000 }),
+    ]);
+    const cleanData = JSON.parse((cleanStdout || '{}').trim() || '{}');
+    const detailsData = JSON.parse((detailsStdout || '{}').trim() || '{}');
+    if (cleanData.error) {
+        throw new Error(cleanData.error);
+    }
+    const projectDetails = detailsData.project_details || {};
+    return {
+        approvedMenuContent: cleanData.cleaned_menu_content || cleanData.menu_content || '',
+        approvedMenuContentRaw: cleanData.menu_content || '',
+        approvedMenuContentHtml: cleanData.cleaned_menu_html || '',
+        extractedAllergenKey: detailsData.allergen_key || '',
+        extractedProject: {
+            projectName: projectDetails.project_name || '',
+            property: projectDetails.property || '',
+            orientation: projectDetails.orientation || '',
+            dateNeeded: projectDetails.date_needed || '',
+            size: projectDetails.size || '',
+        },
+    };
+}
 /**
  * Dashboard Home - List all pending reviews
  */
@@ -421,13 +479,123 @@ app.get('/training/download-prompt/:sessionId', async (req, res) => {
     }
 });
 /**
+ * Proxy: Submitter profile search
+ */
+app.get('/api/submitter-profiles/search', async (req, res) => {
+    try {
+        const q = req.query.q || '';
+        const dbResponse = await axios_1.default.get(`http://localhost:3004/submitter-profiles/search`, {
+            params: { q }
+        });
+        res.json(dbResponse.data);
+    }
+    catch (error) {
+        res.json([]);
+    }
+});
+/**
+ * Proxy: Recent projects
+ */
+app.get('/api/recent-projects', async (req, res) => {
+    try {
+        const limit = req.query.limit || 20;
+        const dbResponse = await axios_1.default.get(`http://localhost:3004/submissions/recent-projects`, {
+            params: { limit }
+        });
+        res.json(dbResponse.data);
+    }
+    catch (error) {
+        res.json([]);
+    }
+});
+/**
+ * Proxy: Search approved submissions for modification flow
+ */
+app.get('/api/submissions/search', async (req, res) => {
+    try {
+        const q = req.query.q || '';
+        const limit = req.query.limit || 20;
+        const dbResponse = await axios_1.default.get(`http://localhost:3004/submissions/search`, {
+            params: { q, limit }
+        });
+        res.json(dbResponse.data);
+    }
+    catch (error) {
+        res.json([]);
+    }
+});
+/**
+ * Proxy: Get latest approved submission for a project/property pair
+ */
+app.get('/api/submissions/latest-approved', async (req, res) => {
+    try {
+        const { projectName, property } = req.query;
+        const dbResponse = await axios_1.default.get(`http://localhost:3004/submissions/latest-approved`, {
+            params: { projectName, property }
+        });
+        res.json(dbResponse.data);
+    }
+    catch (error) {
+        res.status(error?.response?.status || 500).json(error?.response?.data || { error: 'Failed to fetch approved submission' });
+    }
+});
+/**
+ * Modification Flow: Upload approved baseline DOCX when no prior record exists in DB.
+ * Extracts cleaned menu text + project details to prefill the form.
+ */
+app.post('/api/modification/baseline-upload', upload.single('baselineDoc'), async (req, res) => {
+    try {
+        if (!req.file) {
+            return res.status(400).json({ error: 'No baseline document uploaded' });
+        }
+        if (req.file.mimetype !== 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
+            return res.status(400).json({ error: 'Only .docx files are accepted' });
+        }
+        const extracted = await extractBaselineFromDocx(req.file.path);
+        res.json({
+            success: true,
+            baselineDocPath: req.file.path,
+            baselineFileName: req.file.originalname,
+            approvedMenuContent: extracted.approvedMenuContent,
+            approvedMenuContentRaw: extracted.approvedMenuContentRaw,
+            approvedMenuContentHtml: extracted.approvedMenuContentHtml,
+            extractedAllergenKey: extracted.extractedAllergenKey,
+            extractedProject: extracted.extractedProject,
+        });
+    }
+    catch (error) {
+        console.error('Error extracting baseline document:', error);
+        res.status(500).json({ error: 'Failed to process baseline document', details: error.message });
+    }
+});
+/**
  * Form API: Basic AI Check - Run QA check on menu content
  */
 app.post('/api/form/basic-check', async (req, res) => {
     try {
-        const { menuContent, allergens, menuType } = req.body;
+        const { menuContent, allergens, menuType, baselineMenuContent, reviewMode } = req.body;
         if (!menuContent || !menuContent.trim()) {
             return res.status(400).json({ error: 'Menu content is required' });
+        }
+        const changedOnlyMode = reviewMode === 'changed_only' && !!baselineMenuContent;
+        let textForReview = menuContent;
+        let changedLineCount = 0;
+        if (changedOnlyMode) {
+            const changedOnlyText = extractChangedLinesForReview(baselineMenuContent, menuContent);
+            changedLineCount = changedOnlyText.changedLineCount;
+            if (changedLineCount === 0) {
+                return res.json({
+                    success: true,
+                    originalMenu: menuContent,
+                    correctedMenu: menuContent,
+                    suggestions: [],
+                    hasChanges: false,
+                    hasCriticalErrors: false,
+                    reviewMode: 'changed_only',
+                    changedLineCount: 0
+                });
+            }
+            textForReview = changedOnlyText.text;
         }
         // Debug logging
         console.log('=== BASIC CHECK REQUEST ===');
@@ -437,7 +605,7 @@ app.post('/api/form/basic-check', async (req, res) => {
         console.log('Custom allergens:', allergens ? 'Yes' : 'No (using defaults)');
         console.log('===========================');
         // Load QA prompt
-        const qaPromptPath = path.join(__dirname, '..', '..', '..', 'sop-processor', 'qa_prompt.txt');
+        const qaPromptPath = path.join(getRepoRoot(), 'sop-processor', 'qa_prompt.txt');
         let qaPrompt = await fs_1.promises.readFile(qaPromptPath, 'utf-8');
         // If prix fixe menu type, inject special rules
         if (menuType === 'prix_fixe') {
@@ -496,9 +664,13 @@ Note: Use ONLY these allergen codes when checking allergen compliance. Do not us
             console.log('Injected custom allergens into prompt');
         }
         // Call AI Review service's QA endpoint
+        let finalPrompt = qaPrompt;
+        if (changedOnlyMode) {
+            finalPrompt = `${qaPrompt}\n\nIMPORTANT SCOPE FOR THIS REVIEW:\nYou are reviewing ONLY changed excerpts from a menu revision.\nDo NOT flag unchanged baseline content.\nReturn issues only for the changed excerpts provided.`;
+        }
         const qaResponse = await axios_1.default.post('http://localhost:3002/run-qa-check', {
-            text: menuContent,
-            prompt: qaPrompt
+            text: textForReview,
+            prompt: finalPrompt
         });
         const feedback = qaResponse.data.feedback;
         // Debug: Log raw feedback to see format
@@ -506,20 +678,24 @@ Note: Use ONLY these allergen codes when checking allergen compliance. Do not us
         console.log(feedback);
         console.log('=== END RAW FEEDBACK ===');
         // Parse the new format: corrected menu + suggestions
-        const parsed = parseAIResponse(feedback, menuContent);
+        const parsed = parseAIResponse(feedback, textForReview);
+        const reconciledSuggestions = reconcileCriticalSuggestionsAgainstCorrectedMenu(parsed.correctedMenu, parsed.suggestions);
         console.log('=== PARSED RESPONSE ===');
         console.log('Corrected menu length:', parsed.correctedMenu.length);
         console.log('Suggestions count:', parsed.suggestions.length);
+        console.log('Reconciled suggestions count:', reconciledSuggestions.length);
         console.log('Has changes:', parsed.correctedMenu !== menuContent);
         console.log('===========================');
-        const hasCriticalErrors = parsed.suggestions.some(s => s.severity === 'critical');
+        const hasCriticalErrors = reconciledSuggestions.some(s => s.severity === 'critical');
         res.json({
             success: true,
             originalMenu: menuContent,
-            correctedMenu: parsed.correctedMenu,
-            suggestions: parsed.suggestions,
-            hasChanges: parsed.correctedMenu !== menuContent,
-            hasCriticalErrors
+            correctedMenu: changedOnlyMode ? menuContent : parsed.correctedMenu,
+            suggestions: reconciledSuggestions,
+            hasChanges: changedOnlyMode ? false : parsed.correctedMenu !== menuContent,
+            hasCriticalErrors,
+            reviewMode: changedOnlyMode ? 'changed_only' : 'full',
+            changedLineCount
         });
     }
     catch (error) {
@@ -530,16 +706,113 @@ Note: Use ONLY these allergen codes when checking allergen compliance. Do not us
         });
     }
 });
+function extractChangedLinesForReview(baselineText, currentText) {
+    const baseLines = baselineText.split('\n').map(l => l.trim()).filter(Boolean);
+    const currLines = currentText.split('\n').map(l => l.trim()).filter(Boolean);
+    const baseSet = new Set(baseLines.map(normalizeReviewLine));
+    const changedLines = [];
+    for (const line of currLines) {
+        const norm = normalizeReviewLine(line);
+        if (!baseSet.has(norm)) {
+            changedLines.push(line);
+        }
+    }
+    return {
+        text: changedLines.join('\n'),
+        changedLineCount: changedLines.length
+    };
+}
+function normalizeReviewLine(line) {
+    return (line || '')
+        .toLowerCase()
+        .replace(/\s+/g, ' ')
+        .replace(/[“”"]/g, '"')
+        .replace(/[’']/g, "'")
+        .trim();
+}
+function stripDiacritics(input) {
+    return (input || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+}
+function normalizeForSuggestionMatch(input) {
+    return stripDiacritics(input || '')
+        .toLowerCase()
+        .replace(/[^a-z0-9\s]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+function looksLikePriceOnLine(line) {
+    const compact = (line || '').trim();
+    // Handles "... - 8", "... 14", "... $12", "... 12.50"
+    return /(?:^|[\s\-|])\$?\d{1,3}(?:[.,]\d{1,2})?\s*$/.test(compact);
+}
+function findCorrectedLineForMenuItem(correctedMenu, menuItem) {
+    const itemNorm = normalizeForSuggestionMatch(menuItem || '');
+    if (!itemNorm)
+        return null;
+    const lines = (correctedMenu || '').split('\n').map(l => l.trim()).filter(Boolean);
+    for (const line of lines) {
+        const lineNorm = normalizeForSuggestionMatch(line);
+        if (lineNorm.includes(itemNorm)) {
+            return line;
+        }
+    }
+    return null;
+}
+function isCriticalResolvedByCorrectedMenu(suggestion, correctedMenu) {
+    const type = (suggestion.type || '').toLowerCase();
+    const line = findCorrectedLineForMenuItem(correctedMenu, suggestion.menuItem || '');
+    if (!line)
+        return false;
+    if (type.includes('missing price')) {
+        return looksLikePriceOnLine(line);
+    }
+    if (type.includes('incomplete dish name')) {
+        const itemNorm = normalizeForSuggestionMatch(suggestion.menuItem || '');
+        const lineNorm = normalizeForSuggestionMatch(line);
+        const remainder = lineNorm.replace(itemNorm, '').trim();
+        if (remainder.length >= 6) {
+            return true;
+        }
+        // If AI explicitly referenced a malformed token and it's now gone, treat as resolved.
+        const combined = `${suggestion.description || ''} ${suggestion.recommendation || ''}`;
+        const quotedTokenMatch = combined.match(/['"]([^'"]{2,30})['"]/);
+        if (quotedTokenMatch && quotedTokenMatch[1]) {
+            const tokenNorm = normalizeForSuggestionMatch(quotedTokenMatch[1]);
+            if (tokenNorm && !lineNorm.includes(tokenNorm)) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+function reconcileCriticalSuggestionsAgainstCorrectedMenu(correctedMenu, suggestions) {
+    if (!Array.isArray(suggestions) || suggestions.length === 0) {
+        return [];
+    }
+    return suggestions.filter((s) => {
+        if (s.severity !== 'critical')
+            return true;
+        return !isCriticalResolvedByCorrectedMenu(s, correctedMenu);
+    });
+}
 /**
  * Form API: Submit Menu - Create docx from form and trigger review workflow
  */
 app.post('/api/form/submit', async (req, res) => {
     try {
-        const { projectName, property, size, orientation, menuType, templateType, dateNeeded, submitterEmail, menuContent, approvals } = req.body;
+        const { submitterName, submitterEmail, submitterJobTitle, projectName, property, width, height, cropMarks, bleedMarks, fileSizeLimit, fileSizeLimitMb, fileDeliveryNotes, orientation, menuType, templateType, dateNeeded, hotelName, cityCountry, assetType, allergens, menuContent, menuContentHtml, approvals, criticalOverrides, submissionMode, revisionBaseSubmissionId, revisionSource, revisionBaselineDocPath, revisionBaselineFileName, baseApprovedMenuContent, chefPersistentDiff } = req.body;
         // Validate required fields
-        if (!projectName || !property || !size || !orientation || !templateType || !dateNeeded || !submitterEmail || !menuContent) {
+        if (!submitterName || !submitterEmail || !submitterJobTitle || !projectName || !property || !width || !height || !orientation || !templateType || !dateNeeded || !cityCountry || !assetType || !menuContent) {
             return res.status(400).json({ error: 'All fields are required' });
         }
+        if (submissionMode === 'modification' && !revisionBaseSubmissionId && !revisionBaselineDocPath) {
+            return res.status(400).json({ error: 'Modification flow requires a prior approved submission or uploaded approved baseline document' });
+        }
+        // Construct size string for DOCX template backward compatibility
+        const sizeForDocx = assetType === 'PRINT'
+            ? `${width} x ${height} inches`
+            : `${width} x ${height} pixels`;
+        const effectiveAllergens = (allergens || '').trim() || DEFAULT_ALLERGEN_KEY;
         // Approvals are attestations from the submitter - we store them as-is
         // Frontend enforces that all required approvals are marked "Yes" before submission
         // Generate unique submission ID
@@ -548,28 +821,80 @@ app.post('/api/form/submit', async (req, res) => {
         const docxPath = await generateDocxFromForm(submissionId, {
             projectName,
             property,
-            size,
+            size: sizeForDocx,
             orientation,
             menuType: menuType || 'standard',
             templateType: templateType || 'food',
             dateNeeded,
-            menuContent
+            menuContent,
+            allergens: effectiveAllergens
         });
         console.log(`📝 Generated document for submission ${submissionId}: ${docxPath}`);
         // Create submission in database
         const dbResponse = await axios_1.default.post('http://localhost:3004/submissions', {
             id: submissionId,
             submitter_email: submitterEmail,
+            submitter_name: submitterName,
+            submitter_job_title: submitterJobTitle,
+            project_name: projectName,
+            property,
+            date_needed: dateNeeded,
             filename: `${projectName}_Menu.docx`,
             original_path: docxPath,
-            status: 'pending_human_review', // Go directly to human review (no AI redlining for now)
+            status: 'pending_human_review',
             created_at: new Date().toISOString(),
-            source: 'form', // Mark as form submission
-            menu_type: menuType || 'standard', // Track menu type (standard or prix_fixe)
-            template_type: templateType || 'food', // Track template type (food or beverage)
-            approvals: JSON.stringify(approvals) // Store approval attestations
+            source: 'form',
+            menu_type: menuType || 'standard',
+            template_type: templateType || 'food',
+            hotel_name: hotelName || null,
+            city_country: cityCountry,
+            asset_type: assetType,
+            width,
+            height,
+            crop_marks: cropMarks === 'yes',
+            bleed_marks: bleedMarks === 'yes',
+            file_size_limit: fileSizeLimit === 'yes',
+            file_size_limit_mb: fileSizeLimitMb || null,
+            file_delivery_notes: fileDeliveryNotes || null,
+            approvals: JSON.stringify(approvals),
+            critical_overrides: JSON.stringify(criticalOverrides || []),
+            menu_content: menuContent,
+            menu_content_html: menuContentHtml || null,
+            allergens: effectiveAllergens,
+            submission_mode: submissionMode || 'new',
+            revision_source: revisionSource || null,
+            revision_base_submission_id: revisionBaseSubmissionId || null,
+            revision_baseline_doc_path: revisionBaselineDocPath || null,
+            revision_baseline_file_name: revisionBaselineFileName || null,
+            base_approved_menu_content: baseApprovedMenuContent || null,
+            chef_persistent_diff: chefPersistentDiff ? JSON.stringify(chefPersistentDiff) : null,
         });
         console.log(`✓ Submission created in database: ${submissionId}`);
+        // Record original source document metadata (storage abstraction: local now, Teams later)
+        axios_1.default.post('http://localhost:3004/assets', {
+            submission_id: submissionId,
+            asset_type: 'original_docx',
+            source: 'chef_form',
+            storage_provider: 'local',
+            storage_path: docxPath,
+            file_name: `${projectName}_Menu.docx`
+        }).catch(err => console.error('Failed to save original_docx asset metadata:', err.message));
+        if (revisionBaselineDocPath) {
+            axios_1.default.post('http://localhost:3004/assets', {
+                submission_id: submissionId,
+                asset_type: 'baseline_approved_docx',
+                source: 'chef_modification_upload',
+                storage_provider: 'local',
+                storage_path: revisionBaselineDocPath,
+                file_name: revisionBaselineFileName || path.basename(revisionBaselineDocPath),
+            }).catch(err => console.error('Failed to save baseline_approved_docx asset metadata:', err.message));
+        }
+        // Save submitter profile (fire-and-forget)
+        axios_1.default.post('http://localhost:3004/submitter-profiles', {
+            name: submitterName,
+            email: submitterEmail,
+            jobTitle: submitterJobTitle
+        }).catch(err => console.error('Failed to save submitter profile:', err.message));
         // Trigger AI review process (same as email workflow)
         // This will:
         // 1. Copy to ai-drafts
@@ -596,6 +921,37 @@ app.post('/api/form/submit', async (req, res) => {
                 status: 'pending_human_review'
             });
         }
+        // Create ClickUp task (fire-and-forget)
+        axios_1.default.post('http://localhost:3007/create-task', {
+            submissionId,
+            submitterName,
+            submitterEmail,
+            submitterJobTitle,
+            projectName,
+            property,
+            width,
+            height,
+            cropMarks,
+            bleedMarks,
+            fileSizeLimit,
+            fileSizeLimitMb,
+            fileDeliveryNotes,
+            orientation,
+            menuType,
+            templateType,
+            dateNeeded,
+            hotelName,
+            cityCountry,
+            assetType,
+            docxPath,
+            submissionMode,
+            revisionSource,
+            revisionBaseSubmissionId,
+            revisionBaselineDocPath,
+            revisionBaselineFileName,
+            chefPersistentDiff,
+            criticalOverrides,
+        }).catch(err => console.error('Failed to create ClickUp task:', err.message));
         res.json({
             success: true,
             submissionId: submissionId,
@@ -852,14 +1208,16 @@ async function generateDocxFromForm(submissionId, formData) {
     await fs_1.promises.mkdir(UPLOADS_DIR, { recursive: true });
     const outputPath = path.join(UPLOADS_DIR, `${submissionId}.docx`);
     // Create Python script to generate docx
-    const pythonScript = path.resolve(__dirname, '..', '..', 'docx-redliner', 'generate_from_form.py');
+    const repoRoot = getRepoRoot();
+    const docxRedlinerDir = getDocxRedlinerDir();
+    const pythonScript = path.join(docxRedlinerDir, 'generate_from_form.py');
     // Select template based on templateType (food or beverage)
     const templateType = formData.templateType || 'food';
     const templatePath = templateType === 'beverage'
-        ? path.resolve(__dirname, '..', '..', '..', 'samples', 'RSH Design Brief Beverage Template.docx')
-        : path.resolve(__dirname, '..', '..', '..', 'samples', 'RSH_DESIGN BRIEF_FOOD_Menu_Template .docx');
+        ? path.join(repoRoot, 'samples', 'RSH Design Brief Beverage Template.docx')
+        : path.join(repoRoot, 'samples', 'RSH_DESIGN BRIEF_FOOD_Menu_Template .docx');
     console.log(`Using ${templateType} template: ${templatePath}`);
-    const venvPython = path.resolve(__dirname, '..', '..', 'docx-redliner', 'venv', 'bin', 'python');
+    const venvPython = path.join(docxRedlinerDir, 'venv', 'bin', 'python');
     // Create a temp JSON file with form data
     const formDataPath = path.join(UPLOADS_DIR, `${submissionId}_formdata.json`);
     await fs_1.promises.writeFile(formDataPath, JSON.stringify(formData, null, 2));
@@ -893,6 +1251,10 @@ app.post('/api/design-approval/compare', upload.fields([
 ]), async (req, res) => {
     const files = req.files;
     const tempFiles = [];
+    // Extract submitter metadata from multipart form fields
+    const submitterName = req.body.submitterName || '';
+    const submitterEmail = req.body.submitterEmail || '';
+    const submitterJobTitle = req.body.submitterJobTitle || '';
     try {
         if (!files.docxFile || !files.pdfFile) {
             return res.status(400).json({ error: 'Both DOCX and PDF files are required' });
@@ -909,7 +1271,8 @@ app.post('/api/design-approval/compare', upload.fields([
         if (pdfMime !== 'application/pdf' && !pdfMime.includes('octet-stream')) {
             return res.status(400).json({ error: 'Second file must be a PDF' });
         }
-        const venvPython = path.resolve(__dirname, '..', '..', 'docx-redliner', 'venv', 'bin', 'python');
+        const docxRedlinerDir = getDocxRedlinerDir();
+        const venvPython = path.join(docxRedlinerDir, 'venv', 'bin', 'python');
         let pythonCmd;
         try {
             await fs_1.promises.access(venvPython);
@@ -919,14 +1282,14 @@ app.post('/api/design-approval/compare', upload.fields([
             pythonCmd = 'python3';
         }
         // Extract project details + menu content from DOCX
-        const extractDetailsScript = path.resolve(__dirname, '..', '..', 'docx-redliner', 'extract_project_details.py');
+        const extractDetailsScript = path.join(docxRedlinerDir, 'extract_project_details.py');
         const detailsResult = await execAsync(`${pythonCmd} "${extractDetailsScript}" "${docxFile.path}"`, { timeout: 30000, maxBuffer: 10 * 1024 * 1024 });
         const docxData = JSON.parse(detailsResult.stdout);
         if (docxData.error) {
             return res.status(400).json({ error: `DOCX extraction failed: ${docxData.error}` });
         }
         // Extract text from PDF
-        const extractPdfScript = path.resolve(__dirname, '..', '..', 'docx-redliner', 'extract_pdf_text.py');
+        const extractPdfScript = path.join(docxRedlinerDir, 'extract_pdf_text.py');
         const pdfResult = await execAsync(`${pythonCmd} "${extractPdfScript}" "${pdfFile.path}"`, { timeout: 30000, maxBuffer: 10 * 1024 * 1024 });
         const pdfData = JSON.parse(pdfResult.stdout);
         if (pdfData.error) {
@@ -942,12 +1305,46 @@ app.post('/api/design-approval/compare', upload.fields([
         const pdfText = (pdfData.full_text || '').trim();
         const differences = compareMenuTexts(docxText, pdfText);
         const isMatch = differences.length === 0;
+        // Create submission record in database
+        const projectDetails = docxData.project_details || {};
+        const submissionId = `design-${Date.now()}`;
+        let dbSaved = false;
+        try {
+            await axios_1.default.post('http://localhost:3004/submissions', {
+                id: submissionId,
+                submitter_email: submitterEmail,
+                submitter_name: submitterName,
+                submitter_job_title: submitterJobTitle,
+                project_name: projectDetails.project_name || 'Design Approval',
+                property: projectDetails.property || '',
+                size: projectDetails.size || '',
+                orientation: projectDetails.orientation || '',
+                filename: docxFile.originalname || 'design-approval.docx',
+                status: isMatch ? 'approved' : 'needs_correction',
+                created_at: new Date().toISOString(),
+                source: 'design_approval'
+            });
+            dbSaved = true;
+            console.log(`Design approval submission saved: ${submissionId}`);
+        }
+        catch (dbError) {
+            console.error('Failed to save design approval submission:', dbError.message);
+        }
+        // Save submitter profile (fire-and-forget)
+        if (submitterName && submitterEmail) {
+            axios_1.default.post('http://localhost:3004/submitter-profiles', {
+                name: submitterName,
+                email: submitterEmail,
+                jobTitle: submitterJobTitle
+            }).catch(err => console.error('Failed to save submitter profile:', err.message));
+        }
         res.json({
             isMatch,
             projectDetails: docxData.project_details,
             differences,
             docxText,
-            pdfText
+            pdfText,
+            submissionId: dbSaved ? submissionId : undefined
         });
     }
     catch (error) {
@@ -1194,10 +1591,13 @@ function compareWords(docxLine, pdfLine) {
     }
     return diffs;
 }
-app.listen(port, () => {
-    console.log(`📊 Dashboard service listening at http://localhost:${port}`);
-    console.log(`   Access dashboard: http://localhost:${port}`);
-    console.log(`   Form submission: http://localhost:${port}/form`);
-    console.log(`   Design approval: http://localhost:${port}/design-approval`);
-    console.log(`   Training dashboard: http://localhost:${port}/training`);
-});
+if (require.main === module) {
+    app.listen(port, () => {
+        console.log(`📊 Dashboard service listening at http://localhost:${port}`);
+        console.log(`   Access dashboard: http://localhost:${port}`);
+        console.log(`   Form submission: http://localhost:${port}/form`);
+        console.log(`   Design approval: http://localhost:${port}/design-approval`);
+        console.log(`   Training dashboard: http://localhost:${port}/training`);
+    });
+}
+exports.default = app;

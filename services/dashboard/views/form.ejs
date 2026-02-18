@@ -413,6 +413,18 @@
             margin-top: 0.25rem;
         }
 
+        .allergen-detected-badge {
+            display: inline-block;
+            margin-top: 0.4rem;
+            font-size: 0.68rem;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: var(--color-success);
+            border: 1px solid rgba(74, 124, 89, 0.35);
+            background: rgba(74, 124, 89, 0.08);
+            padding: 0.2rem 0.45rem;
+        }
+
         /* Expand Button */
         .expand-btn {
             position: absolute;
@@ -553,6 +565,10 @@
             grid-template-columns: 2fr 1fr;
             gap: 1rem;
             margin-top: 1rem;
+        }
+
+        .step2-container.revision-split {
+            grid-template-columns: 1fr 1fr;
         }
 
         .step2-left-panel,
@@ -1251,6 +1267,8 @@
             border: 1px solid var(--color-border);
             background: var(--color-background-alt);
             padding: 0.75rem;
+            flex: 1;
+            min-height: 0;
         }
 
         .persistent-preview.show {
@@ -1265,14 +1283,23 @@
         }
 
         .persistent-preview-body {
-            max-height: 240px;
+            max-height: none;
+            min-height: 400px;
+            height: 100%;
             overflow-y: auto;
             white-space: pre-wrap;
-            font-size: 0.85rem;
-            line-height: 1.4;
+            font-family: Calibri, sans-serif;
+            font-size: 10pt;
+            line-height: 1.15;
+            text-align: center;
             background: var(--color-background);
             padding: 0.75rem;
             border: 1px solid var(--color-border-light);
+        }
+
+        .persistent-preview-body p {
+            margin: 0;
+            padding: 0;
         }
 
         .persistent-ins {
@@ -1291,6 +1318,10 @@
             color: var(--color-text-muted);
             text-transform: uppercase;
             letter-spacing: 0.08em;
+        }
+
+        .ai-suggestions-section.hidden {
+            display: none !important;
         }
     </style>
 </head>
@@ -1379,13 +1410,15 @@
                     </select>
                 </div>
                 <div class="form-grid">
-                    <div class="form-group">
+                    <div class="form-group autocomplete-wrapper">
                         <label for="projectName">Project Name *</label>
-                        <input type="text" id="projectName" required placeholder="Enter project name">
+                        <input type="text" id="projectName" required placeholder="Enter project name" autocomplete="off" oninput="onProjectNameInput(this.value)">
+                        <div class="autocomplete-dropdown" id="projectDropdown"></div>
                     </div>
-                    <div class="form-group">
+                    <div class="form-group autocomplete-wrapper">
                         <label for="property">Property *</label>
-                        <input type="text" id="property" required placeholder="Enter property name">
+                        <input type="text" id="property" required placeholder="Enter property name" autocomplete="off" oninput="onPropertyInput(this.value)">
+                        <div class="autocomplete-dropdown" id="propertyDropdown"></div>
                     </div>
                     <div class="form-group">
                         <label for="menuType">Menu Type *</label>
@@ -1553,7 +1586,7 @@
             </div>
 
             <!-- Split View: Example + Menu Input -->
-            <div class="split-container">
+            <div class="split-container" id="step1MenuCompositionSection">
                 <div class="split-panel">
                     <h3>Example Format</h3>
                     <p class="panel-subtitle">Your menu should follow this centered format</p>
@@ -1605,7 +1638,7 @@
                 </div>
             </div>
 
-            <div class="btn-container">
+            <div class="btn-container" id="step1RunCheckContainer">
                 <button id="runCheckBtn" class="btn btn-primary" onclick="runBasicCheck()">
                     Run Basic AI Check
                 </button>
@@ -1700,7 +1733,7 @@
                 <div class="step2-left-panel">
                     <div class="panel-header">
                         <h3>Your Menu</h3>
-                        <p class="panel-subtitle">AI-corrected content (green = AI changes)</p>
+                        <p class="panel-subtitle" id="menuPanelSubtitle">Chef revision editor (persistent redlines preview on right)</p>
                         <div class="edit-toggle-container">
                             <button id="editToggleBtn" class="edit-toggle" onclick="toggleEditMode()">
                                 <span class="edit-toggle-icon">Edit</span>
@@ -1711,29 +1744,40 @@
                         </div>
                     </div>
                     <div id="editModeNotice" class="edit-mode-notice">
-                        Editing mode active. Make your changes directly in the text below. Green highlights will be recalculated when you finish.
+                        Editing mode active. Make your changes directly in the text below.
                     </div>
                     <div class="reviewed-content-container">
                         <div id="reviewedContentArea" class="reviewed-content-area">
                             <!-- AI-corrected content with highlights will appear here -->
                         </div>
                     </div>
+                    <div id="step2AllergensSection" class="allergens-section hidden" style="margin-top: 0.75rem;">
+                        <label for="allergensInputStep2">Allergen Key (Optional)</label>
+                        <textarea id="allergensInputStep2" class="allergens-input" placeholder="Paste your allergen key here, e.g.: C crustaceans | D dairy | E egg | F fish | G gluten | N nuts | V vegetarian | VG vegan"></textarea>
+                        <div id="step2AllergenDetectedBadge" class="allergen-detected-badge hidden">Prefilled from uploaded baseline</div>
+                        <p class="allergens-hint">If left blank, the default RSH allergen codes will be used for review.</p>
+                    </div>
                     <div id="originalMenuDisplay" style="display: none;"></div>
                 </div>
 
                 <div class="step2-right-panel">
-                    <h3 style="text-align: center; margin-bottom: 0.25rem; font-family: var(--font-heading); font-size: 1.1rem; font-weight: 500;">AI Suggestions</h3>
-                    <p class="panel-subtitle">Recommended corrections</p>
-                    <div id="suggestionsDisplay" class="suggestions-list"></div>
-                    <div class="ai-temp-note">AI highlights are temporary. Chef revision redlines are persistent.</div>
+                    <div id="aiSuggestionsSection" class="ai-suggestions-section">
+                        <h3 style="text-align: center; margin-bottom: 0.25rem; font-family: var(--font-heading); font-size: 1.1rem; font-weight: 500;">AI Suggestions</h3>
+                        <p class="panel-subtitle">Recommended corrections</p>
+                        <div id="suggestionsDisplay" class="suggestions-list"></div>
+                        <div class="ai-temp-note">AI highlights are temporary. Chef revision redlines are persistent.</div>
+                    </div>
+                    <div id="persistentPreviewSection" class="persistent-preview">
+                        <h4>Persistent Revision Preview (What Design Will Receive)</h4>
+                        <div id="persistentPreviewBody" class="persistent-preview-body"></div>
+                    </div>
                 </div>
-            </div>
-            <div id="persistentPreviewSection" class="persistent-preview">
-                <h4>Persistent Revision Preview (What Design Will Receive)</h4>
-                <div id="persistentPreviewBody" class="persistent-preview-body"></div>
             </div>
 
             <div class="btn-container">
+                <button id="runCheckBtnBottom" class="btn btn-primary hidden" onclick="runBasicCheck()">
+                    Run Basic AI Check
+                </button>
                 <div id="criticalErrorBanner" class="critical-error-banner">
                     Resolve or override all critical errors before submitting.
                 </div>
@@ -1777,8 +1821,10 @@
         let revisionBaselineDocPath = '';
         let revisionBaselineFileName = '';
         let baseApprovedMenuContent = '';
+        let baseApprovedMenuContentHtml = '';
         let persistentDiffSummary = { insertions: 0, deletions: 0 };
         let persistentPreviewUpdateTimer = null;
+        let aiCheckHasRun = false;
 
         document.addEventListener('DOMContentLoaded', function() {
             quill = new Quill('#menuEditor', {
@@ -1820,6 +1866,7 @@
             // Load recent projects
             loadRecentProjects();
             onSubmissionModeChange();
+            setupAllergenSync();
 
             // Submitter name keyboard nav + blur dismiss
             const submitterNameInput = document.getElementById('submitterName');
@@ -1828,6 +1875,22 @@
                 setTimeout(() => {
                     const dropdown = document.getElementById('submitterDropdown');
                     dropdown.classList.remove('show');
+                }, 150);
+            });
+
+            const projectNameInput = document.getElementById('projectName');
+            projectNameInput.addEventListener('keydown', handleProjectKeydown);
+            projectNameInput.addEventListener('blur', function() {
+                setTimeout(() => {
+                    document.getElementById('projectDropdown').classList.remove('show');
+                }, 150);
+            });
+
+            const propertyInput = document.getElementById('property');
+            propertyInput.addEventListener('keydown', handlePropertyKeydown);
+            propertyInput.addEventListener('blur', function() {
+                setTimeout(() => {
+                    document.getElementById('propertyDropdown').classList.remove('show');
                 }, 150);
             });
         });
@@ -1843,6 +1906,51 @@
             }
         }
 
+        function setupAllergenSync() {
+            const step1Input = document.getElementById('allergensInput');
+            const step2Input = document.getElementById('allergensInputStep2');
+            if (!step1Input || !step2Input) return;
+
+            step1Input.addEventListener('input', () => {
+                if (document.activeElement === step2Input) return;
+                step2Input.value = step1Input.value;
+            });
+
+            step2Input.addEventListener('input', () => {
+                if (document.activeElement === step1Input) return;
+                step1Input.value = step2Input.value;
+            });
+        }
+
+        function getAllergenInputValue() {
+            const step2Input = document.getElementById('allergensInputStep2');
+            const step1Input = document.getElementById('allergensInput');
+            const step2AllergensVisible = step2Input && !document.getElementById('step2AllergensSection').classList.contains('hidden');
+
+            if (step2AllergensVisible) {
+                return (step2Input.value || '').trim();
+            }
+            return (step1Input?.value || '').trim();
+        }
+
+        function setAllergenInputValue(value) {
+            const safeValue = (value || '').trim();
+            const step1Input = document.getElementById('allergensInput');
+            const step2Input = document.getElementById('allergensInputStep2');
+            if (step1Input) step1Input.value = safeValue;
+            if (step2Input) step2Input.value = safeValue;
+        }
+
+        function setAllergenAutoDetectedBadge(visible) {
+            const badge = document.getElementById('step2AllergenDetectedBadge');
+            if (!badge) return;
+            if (visible) {
+                badge.classList.remove('hidden');
+            } else {
+                badge.classList.add('hidden');
+            }
+        }
+
         function onSubmissionModeChange() {
             submissionMode = document.getElementById('submissionModeModification').checked ? 'modification' : 'new';
             const modSection = document.getElementById('modificationSearchSection');
@@ -1855,6 +1963,15 @@
                 previewSection.classList.add('show');
                 onModificationSourceChange();
             } else {
+                document.getElementById('step2').classList.add('hidden');
+                document.getElementById('step1').classList.remove('hidden');
+                document.getElementById('step2FormFields').classList.remove('hidden');
+                setAiSuggestionsVisibility(false);
+
+                if (isEditMode) {
+                    toggleEditMode();
+                }
+
                 modSection.classList.remove('show');
                 if (recentProjectsData.length > 0) {
                     recentLoader.style.display = 'flex';
@@ -1865,12 +1982,22 @@
                 revisionBaselineDocPath = '';
                 revisionBaselineFileName = '';
                 baseApprovedMenuContent = '';
+                baseApprovedMenuContentHtml = '';
                 persistentDiffSummary = { insertions: 0, deletions: 0 };
+                aiCheckHasRun = false;
+                aiCheckResults = null;
+                criticalErrorOverrides = {};
                 const selectedNote = document.getElementById('revisionSelectedNote');
                 selectedNote.classList.remove('show');
                 selectedNote.textContent = '';
                 document.getElementById('submissionSearchResults').innerHTML = '';
+                renderPersistentPreview('', '');
+                displayReviewedContent('');
+                quill.setText('');
+                setAllergenInputValue('');
+                setAllergenAutoDetectedBadge(false);
             }
+            updateRevisionPreCheckLayout();
         }
 
         function onModificationSourceChange() {
@@ -1885,17 +2012,22 @@
                 uploadPanel.classList.add('show');
                 revisionBaseSubmissionId = null;
                 revisionSearchResults = [];
+                baseApprovedMenuContentHtml = '';
                 document.getElementById('submissionSearchResults').innerHTML = '';
                 selectedNote.classList.remove('show');
                 selectedNote.textContent = '';
+                setAllergenAutoDetectedBadge(false);
             } else {
                 uploadPanel.classList.remove('show');
                 dbPanel.classList.add('show');
                 revisionBaselineDocPath = '';
                 revisionBaselineFileName = '';
+                baseApprovedMenuContentHtml = '';
                 selectedNote.classList.remove('show');
                 selectedNote.textContent = '';
+                setAllergenAutoDetectedBadge(false);
             }
+            updateRevisionPreCheckLayout();
         }
 
         function onSubmissionSearchInput(value) {
@@ -1942,7 +2074,9 @@
             revisionBaselineDocPath = '';
             revisionBaselineFileName = '';
             baseApprovedMenuContent = selected.approvedMenuContent || '';
+            baseApprovedMenuContentHtml = '';
             persistentDiffSummary = { insertions: 0, deletions: 0 };
+            setAllergenAutoDetectedBadge(false);
 
             document.getElementById('projectName').value = selected.projectName || '';
             document.getElementById('property').value = selected.property || '';
@@ -1954,7 +2088,8 @@
             selectedNote.textContent = `Loaded approved baseline: ${selected.projectName || 'Untitled'} (${selected.id})`;
             selectedNote.classList.add('show');
             document.getElementById('submissionSearchResults').innerHTML = '';
-            showAlert('Approved baseline loaded. Make modifications and run AI check.', 'success');
+            enterRevisionTrackingMode();
+            showAlert('Approved baseline loaded. Revision tracking mode is active.', 'success');
         }
 
         async function uploadBaselineDoc() {
@@ -1987,6 +2122,7 @@
                 revisionBaselineDocPath = data.baselineDocPath || '';
                 revisionBaselineFileName = data.baselineFileName || file.name;
                 baseApprovedMenuContent = data.approvedMenuContent || '';
+                baseApprovedMenuContentHtml = data.approvedMenuContentHtml || '';
                 persistentDiffSummary = { insertions: 0, deletions: 0 };
 
                 if (data.extractedProject) {
@@ -1994,21 +2130,81 @@
                     if (data.extractedProject.property) document.getElementById('property').value = data.extractedProject.property;
                     if (data.extractedProject.orientation) setSelectValue('orientation', data.extractedProject.orientation);
                 }
+                if (data.extractedAllergenKey && data.extractedAllergenKey.trim()) {
+                    setAllergenInputValue(data.extractedAllergenKey);
+                    setAllergenAutoDetectedBadge(true);
+                } else {
+                    setAllergenAutoDetectedBadge(false);
+                }
 
-                quill.setText(baseApprovedMenuContent || '');
+                if (baseApprovedMenuContentHtml && baseApprovedMenuContentHtml.trim()) {
+                    quill.clipboard.dangerouslyPasteHTML(baseApprovedMenuContentHtml);
+                } else {
+                    quill.setText(baseApprovedMenuContent || '');
+                }
                 renderPersistentPreview(baseApprovedMenuContent, baseApprovedMenuContent);
 
                 const selectedNote = document.getElementById('revisionSelectedNote');
                 selectedNote.textContent = `Loaded uploaded baseline: ${revisionBaselineFileName}`;
                 selectedNote.classList.add('show');
 
-                showAlert('Baseline extracted from uploaded approved DOCX.', 'success');
+                enterRevisionTrackingMode();
+                showAlert('Baseline extracted. Revision tracking mode is active.', 'success');
             } catch (error) {
                 console.error(error);
                 showAlert('Failed to process baseline DOCX: ' + error.message, 'error');
             } finally {
                 btn.disabled = false;
                 btn.textContent = 'Extract Baseline';
+            }
+        }
+
+        function enterRevisionTrackingMode() {
+            if (submissionMode !== 'modification') return;
+
+            const baselineText = baseApprovedMenuContent || quill.getText().trim();
+            const synthetic = {
+                success: true,
+                originalMenu: baselineText,
+                correctedMenu: baselineText,
+                suggestions: [],
+                hasChanges: false,
+                hasCriticalErrors: false
+            };
+
+            aiCheckHasRun = false;
+            aiCheckResults = synthetic;
+            showStep2(synthetic);
+            setAiSuggestionsVisibility(false);
+
+            // Keep Step 1 visible so chefs can still edit metadata fields before AI check.
+            document.getElementById('step1').classList.remove('hidden');
+            document.getElementById('step2FormFields').classList.add('hidden');
+
+            const step2Container = document.querySelector('.step2-container');
+            if (step2Container) {
+                step2Container.classList.add('revision-split');
+            }
+
+            // If we have extracted HTML (bold/italic/etc), render it in the editable review area.
+            if (baseApprovedMenuContentHtml && baseApprovedMenuContentHtml.trim()) {
+                displayReviewedContent(baseApprovedMenuContentHtml);
+                renderPersistentPreview(baseApprovedMenuContent, baseApprovedMenuContent);
+            }
+
+            if (!isEditMode) {
+                toggleEditMode();
+            }
+            updateRevisionPreCheckLayout();
+        }
+
+        function setAiSuggestionsVisibility(visible) {
+            const section = document.getElementById('aiSuggestionsSection');
+            if (!section) return;
+            if (visible) {
+                section.classList.remove('hidden');
+            } else {
+                section.classList.add('hidden');
             }
         }
 
@@ -2114,6 +2310,10 @@
 
         // === Recent Project Loader ===
         let recentProjectsData = [];
+        let projectSuggestResults = [];
+        let projectSuggestHighlightIndex = -1;
+        let propertySuggestResults = [];
+        let propertySuggestHighlightIndex = -1;
 
         async function loadRecentProjects() {
             try {
@@ -2142,6 +2342,11 @@
         function loadRecentProject(index) {
             if (index < 0 || !recentProjectsData[index]) return;
             const p = recentProjectsData[index];
+            applyProjectPrefill(p);
+        }
+
+        function applyProjectPrefill(p) {
+            if (!p) return;
 
             document.getElementById('projectName').value = p.projectName || '';
             document.getElementById('property').value = p.property || '';
@@ -2173,6 +2378,150 @@
 
             // Dispatch change event on templateType to update approval hints
             document.getElementById('templateType').dispatchEvent(new Event('change'));
+        }
+
+        function onProjectNameInput(value) {
+            const query = (value || '').trim().toLowerCase();
+            const dropdown = document.getElementById('projectDropdown');
+            if (query.length < 2) {
+                dropdown.classList.remove('show');
+                projectSuggestResults = [];
+                projectSuggestHighlightIndex = -1;
+                return;
+            }
+
+            const seen = new Set();
+            projectSuggestResults = recentProjectsData
+                .filter(p => (p.projectName || '').toLowerCase().includes(query))
+                .filter(p => {
+                    const key = `${(p.projectName || '').toLowerCase()}|${(p.property || '').toLowerCase()}`;
+                    if (seen.has(key)) return false;
+                    seen.add(key);
+                    return true;
+                })
+                .slice(0, 8);
+            projectSuggestHighlightIndex = -1;
+            showProjectDropdown(query);
+        }
+
+        function showProjectDropdown(query) {
+            const dropdown = document.getElementById('projectDropdown');
+            if (!projectSuggestResults.length) {
+                dropdown.classList.remove('show');
+                return;
+            }
+            dropdown.innerHTML = projectSuggestResults.map((p, i) => `
+                <div class="autocomplete-item" data-index="${i}" onmousedown="selectProjectSuggestion(${i})">
+                    <div class="ac-name">${highlightMatch(p.projectName || '', query)}</div>
+                    <div class="ac-detail">${escapeHtml(p.property || '')}</div>
+                </div>
+            `).join('');
+            dropdown.classList.add('show');
+        }
+
+        function selectProjectSuggestion(index) {
+            const selected = projectSuggestResults[index];
+            if (!selected) return;
+            applyProjectPrefill(selected);
+            document.getElementById('projectDropdown').classList.remove('show');
+            projectSuggestHighlightIndex = -1;
+        }
+
+        function handleProjectKeydown(e) {
+            const dropdown = document.getElementById('projectDropdown');
+            if (!dropdown.classList.contains('show') || projectSuggestResults.length === 0) return;
+            if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                projectSuggestHighlightIndex = Math.min(projectSuggestHighlightIndex + 1, projectSuggestResults.length - 1);
+                updateAutocompleteHighlight('#projectDropdown', projectSuggestHighlightIndex);
+            } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                projectSuggestHighlightIndex = Math.max(projectSuggestHighlightIndex - 1, 0);
+                updateAutocompleteHighlight('#projectDropdown', projectSuggestHighlightIndex);
+            } else if (e.key === 'Enter' && projectSuggestHighlightIndex >= 0) {
+                e.preventDefault();
+                selectProjectSuggestion(projectSuggestHighlightIndex);
+            } else if (e.key === 'Escape') {
+                dropdown.classList.remove('show');
+                projectSuggestHighlightIndex = -1;
+            }
+        }
+
+        function onPropertyInput(value) {
+            const query = (value || '').trim().toLowerCase();
+            const dropdown = document.getElementById('propertyDropdown');
+            if (query.length < 2) {
+                dropdown.classList.remove('show');
+                propertySuggestResults = [];
+                propertySuggestHighlightIndex = -1;
+                return;
+            }
+
+            const seen = new Set();
+            propertySuggestResults = recentProjectsData
+                .filter(p => (p.property || '').toLowerCase().includes(query))
+                .filter(p => {
+                    const key = `${(p.property || '').toLowerCase()}|${(p.projectName || '').toLowerCase()}`;
+                    if (seen.has(key)) return false;
+                    seen.add(key);
+                    return true;
+                })
+                .slice(0, 8);
+            propertySuggestHighlightIndex = -1;
+            showPropertyDropdown(query);
+        }
+
+        function showPropertyDropdown(query) {
+            const dropdown = document.getElementById('propertyDropdown');
+            if (!propertySuggestResults.length) {
+                dropdown.classList.remove('show');
+                return;
+            }
+            dropdown.innerHTML = propertySuggestResults.map((p, i) => `
+                <div class="autocomplete-item" data-index="${i}" onmousedown="selectPropertySuggestion(${i})">
+                    <div class="ac-name">${highlightMatch(p.property || '', query)}</div>
+                    <div class="ac-detail">${escapeHtml(p.projectName || '')}</div>
+                </div>
+            `).join('');
+            dropdown.classList.add('show');
+        }
+
+        function selectPropertySuggestion(index) {
+            const selected = propertySuggestResults[index];
+            if (!selected) return;
+            applyProjectPrefill(selected);
+            document.getElementById('propertyDropdown').classList.remove('show');
+            propertySuggestHighlightIndex = -1;
+        }
+
+        function handlePropertyKeydown(e) {
+            const dropdown = document.getElementById('propertyDropdown');
+            if (!dropdown.classList.contains('show') || propertySuggestResults.length === 0) return;
+            if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                propertySuggestHighlightIndex = Math.min(propertySuggestHighlightIndex + 1, propertySuggestResults.length - 1);
+                updateAutocompleteHighlight('#propertyDropdown', propertySuggestHighlightIndex);
+            } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                propertySuggestHighlightIndex = Math.max(propertySuggestHighlightIndex - 1, 0);
+                updateAutocompleteHighlight('#propertyDropdown', propertySuggestHighlightIndex);
+            } else if (e.key === 'Enter' && propertySuggestHighlightIndex >= 0) {
+                e.preventDefault();
+                selectPropertySuggestion(propertySuggestHighlightIndex);
+            } else if (e.key === 'Escape') {
+                dropdown.classList.remove('show');
+                propertySuggestHighlightIndex = -1;
+            }
+        }
+
+        function updateAutocompleteHighlight(selector, index) {
+            const items = document.querySelectorAll(`${selector} .autocomplete-item`);
+            items.forEach((item, i) => {
+                item.classList.toggle('highlighted', i === index);
+            });
+            if (items[index]) {
+                items[index].scrollIntoView({ block: 'nearest' });
+            }
         }
 
         function toggleAssetFields() {
@@ -2489,28 +2838,42 @@
                 return;
             }
 
-            const btn = document.getElementById('runCheckBtn');
-            btn.disabled = true;
-            btn.innerHTML = '<span class="spinner"></span>Running AI Check...';
-
-            const delta = quill.getContents();
-            let menuContent = '';
-
-            delta.ops.forEach((op) => {
-                if (typeof op.insert === 'string') {
-                    menuContent += op.insert;
-                }
+            const topBtn = document.getElementById('runCheckBtn');
+            const bottomBtn = document.getElementById('runCheckBtnBottom');
+            [topBtn, bottomBtn].forEach(button => {
+                if (!button) return;
+                button.disabled = true;
+                button.innerHTML = '<span class="spinner"></span>Running AI Check...';
             });
 
-            menuContent = menuContent.trim();
-            const allergens = document.getElementById('allergensInput').value.trim();
+            let menuContent = '';
+            if (isEditMode && document.getElementById('step2').classList.contains('hidden') === false) {
+                const reviewedArea = document.getElementById('reviewedContentArea');
+                menuContent = extractCleanTextFromReviewedArea(reviewedArea);
+            } else {
+                const delta = quill.getContents();
+                delta.ops.forEach((op) => {
+                    if (typeof op.insert === 'string') {
+                        menuContent += op.insert;
+                    }
+                });
+                menuContent = menuContent.trim();
+            }
+            const allergens = getAllergenInputValue();
             const menuType = document.getElementById('menuType').value;
+            const reviewMode = submissionMode === 'modification' ? 'changed_only' : 'full';
 
             try {
                 const response = await fetch('/api/form/basic-check', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ menuContent, allergens, menuType })
+                    body: JSON.stringify({
+                        menuContent,
+                        allergens,
+                        menuType,
+                        baselineMenuContent: submissionMode === 'modification' ? baseApprovedMenuContent : '',
+                        reviewMode
+                    })
                 });
 
                 const data = await response.json();
@@ -2519,15 +2882,50 @@
                     throw new Error(data.error || 'Failed to run AI check');
                 }
 
+                aiCheckHasRun = true;
+                setAiSuggestionsVisibility(true);
                 aiCheckResults = data;
                 showStep2(data);
-                showAlert('AI check complete! Review the suggestions below.', 'success');
+                if (data.reviewMode === 'changed_only') {
+                    showAlert(`AI reviewed changed content only (${data.changedLineCount || 0} changed lines).`, 'success');
+                } else {
+                    showAlert('AI check complete! Review the suggestions below.', 'success');
+                }
 
             } catch (error) {
                 console.error('Error:', error);
                 showAlert('Error running AI check: ' + error.message, 'error');
-                btn.disabled = false;
-                btn.textContent = 'Run Basic AI Check';
+                [topBtn, bottomBtn].forEach(button => {
+                    if (!button) return;
+                    button.disabled = false;
+                    button.textContent = 'Run Basic AI Check';
+                });
+            }
+        }
+
+        function updateRevisionPreCheckLayout() {
+            const step1MenuSection = document.getElementById('step1MenuCompositionSection');
+            const step1RunContainer = document.getElementById('step1RunCheckContainer');
+            const step2RunButton = document.getElementById('runCheckBtnBottom');
+            const step2AllergensSection = document.getElementById('step2AllergensSection');
+            const submitBtn = document.getElementById('submitBtn');
+            const criticalBanner = document.getElementById('criticalErrorBanner');
+            const step2Visible = !document.getElementById('step2').classList.contains('hidden');
+            const showBottomRunCheck = submissionMode === 'modification' && step2Visible && !aiCheckHasRun;
+
+            if (showBottomRunCheck) {
+                if (step1MenuSection) step1MenuSection.classList.add('hidden');
+                if (step1RunContainer) step1RunContainer.classList.add('hidden');
+                if (step2RunButton) step2RunButton.classList.remove('hidden');
+                if (step2AllergensSection) step2AllergensSection.classList.remove('hidden');
+                if (submitBtn) submitBtn.classList.add('hidden');
+                if (criticalBanner) criticalBanner.classList.remove('show');
+            } else {
+                if (step1MenuSection) step1MenuSection.classList.remove('hidden');
+                if (step1RunContainer) step1RunContainer.classList.remove('hidden');
+                if (step2RunButton) step2RunButton.classList.add('hidden');
+                if (step2AllergensSection) step2AllergensSection.classList.add('hidden');
+                if (submitBtn) submitBtn.classList.remove('hidden');
             }
         }
 
@@ -2734,6 +3132,12 @@
         function updateSubmitButtonState() {
             const submitBtn = document.getElementById('submitBtn');
             const banner = document.getElementById('criticalErrorBanner');
+            if (!aiCheckHasRun) {
+                submitBtn.disabled = true;
+                submitBtn.classList.add('blocked');
+                banner.classList.remove('show');
+                return;
+            }
 
             if (!aiCheckResults || !aiCheckResults.suggestions) {
                 submitBtn.disabled = false;
@@ -2779,14 +3183,21 @@
             // Get current edited text from the reviewed content area
             const reviewedArea = document.getElementById('reviewedContentArea');
             const menuContent = (reviewedArea.innerText || reviewedArea.textContent).trim();
-            const allergens = document.getElementById('allergensInput').value.trim();
+            const allergens = getAllergenInputValue();
             const menuType = document.getElementById('menuType').value;
+            const reviewMode = submissionMode === 'modification' ? 'changed_only' : 'full';
 
             try {
                 const response = await fetch('/api/form/basic-check', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ menuContent, allergens, menuType })
+                    body: JSON.stringify({
+                        menuContent,
+                        allergens,
+                        menuType,
+                        baselineMenuContent: submissionMode === 'modification' ? baseApprovedMenuContent : '',
+                        reviewMode
+                    })
                 });
 
                 const data = await response.json();
@@ -2795,6 +3206,8 @@
                     throw new Error(data.error || 'Failed to run AI check');
                 }
 
+                aiCheckHasRun = true;
+                setAiSuggestionsVisibility(true);
                 aiCheckResults = data;
                 criticalErrorOverrides = {};
 
@@ -2812,8 +3225,36 @@
         }
 
         function showStep2(results) {
-            document.getElementById('step1').classList.add('hidden');
             document.getElementById('step2').classList.remove('hidden');
+            const step2Container = document.querySelector('.step2-container');
+            const isModificationMode = submissionMode === 'modification';
+            const preAiRevisionMode = isModificationMode && !aiCheckHasRun;
+            const menuPanelSubtitle = document.getElementById('menuPanelSubtitle');
+
+            if (step2Container) {
+                if (isModificationMode) {
+                    step2Container.classList.add('revision-split');
+                } else {
+                    step2Container.classList.remove('revision-split');
+                }
+            }
+
+            if (preAiRevisionMode) {
+                document.getElementById('step1').classList.remove('hidden');
+                document.getElementById('step2FormFields').classList.add('hidden');
+                setAiSuggestionsVisibility(false);
+                if (menuPanelSubtitle) {
+                    menuPanelSubtitle.textContent = 'Chef revision editor (persistent redlines preview on right)';
+                }
+            } else {
+                document.getElementById('step1').classList.add('hidden');
+                document.getElementById('step2FormFields').classList.remove('hidden');
+                setAiSuggestionsVisibility(true);
+                if (menuPanelSubtitle) {
+                    menuPanelSubtitle.textContent = 'AI-reviewed content (green = AI changes)';
+                }
+            }
+            updateRevisionPreCheckLayout();
 
             // Reset critical error overrides
             criticalErrorOverrides = {};
@@ -2946,6 +3387,11 @@
         }
 
         async function submitMenu() {
+            if (!aiCheckHasRun) {
+                showAlert('Run Basic AI Check before submitting.', 'error');
+                return;
+            }
+
             // Block if unresolved critical errors exist
             if (aiCheckResults && aiCheckResults.suggestions) {
                 const unresolvedCritical = aiCheckResults.suggestions.some((s, idx) =>
@@ -2971,8 +3417,8 @@
             btn.innerHTML = '<span class="spinner"></span>Submitting...';
 
             const reviewedArea = document.getElementById('reviewedContentArea');
-            const menuContentHtml = reviewedArea.innerHTML;
-            const menuContentText = (reviewedArea.innerText || reviewedArea.textContent).trim();
+            const menuContentHtml = sanitizeMenuHtmlForSubmission(reviewedArea.innerHTML || '');
+            const menuContentText = extractCleanTextFromReviewedArea(reviewedArea);
 
             // Also update the hidden display
             document.getElementById('originalMenuDisplay').innerHTML = menuContentHtml;
@@ -3034,6 +3480,7 @@
                 hotelName: document.getElementById('hotelName').value.trim(),
                 cityCountry: document.getElementById('cityCountry').value.trim(),
                 assetType: assetTypeValue,
+                allergens: getAllergenInputValue(),
                 menuContent: menuContentText,
                 menuContentHtml: menuContentHtml,
                 approvals: approvals,
@@ -3060,11 +3507,8 @@
                     throw new Error(data.error || 'Failed to submit menu');
                 }
 
-                showAlert('Menu submitted successfully! Redirecting to review page...', 'success');
-
-                setTimeout(() => {
-                    window.location.href = `/review/${data.submissionId}`;
-                }, 2000);
+                showAlert('Menu submitted successfully. Sent to ClickUp for team review. You can submit another menu now.', 'success');
+                prepareForNextSubmission();
 
             } catch (error) {
                 console.error('Error:', error);
@@ -3072,6 +3516,57 @@
                 btn.disabled = false;
                 btn.textContent = 'Submit Menu for Review';
             }
+        }
+
+        function prepareForNextSubmission() {
+            const retainedAllergens = getAllergenInputValue();
+
+            aiCheckHasRun = false;
+            aiCheckResults = null;
+            criticalErrorOverrides = {};
+            aiChanges = [];
+            originalAiCorrectedText = '';
+            persistentDiffSummary = { insertions: 0, deletions: 0 };
+
+            if (isEditMode) {
+                toggleEditMode();
+            }
+
+            // Return to new submission mode and clear revision-only state.
+            document.getElementById('submissionModeNew').checked = true;
+            onSubmissionModeChange();
+
+            // Keep form metadata populated but clear menu content for next submission.
+            quill.setText('');
+            displayReviewedContent('');
+            document.getElementById('originalMenuDisplay').innerHTML = '';
+            document.getElementById('step2').classList.add('hidden');
+            document.getElementById('step1').classList.remove('hidden');
+            setAiSuggestionsVisibility(false);
+            renderPersistentPreview('', '');
+            setAllergenInputValue(retainedAllergens);
+
+            const suggestionsDisplay = document.getElementById('suggestionsDisplay');
+            if (suggestionsDisplay) suggestionsDisplay.innerHTML = '';
+
+            const runCheckBtn = document.getElementById('runCheckBtn');
+            if (runCheckBtn) {
+                runCheckBtn.disabled = false;
+                runCheckBtn.textContent = 'Run Basic AI Check';
+            }
+            const runCheckBtnBottom = document.getElementById('runCheckBtnBottom');
+            if (runCheckBtnBottom) {
+                runCheckBtnBottom.disabled = false;
+                runCheckBtnBottom.textContent = 'Run Basic AI Check';
+            }
+
+            const submitBtn = document.getElementById('submitBtn');
+            submitBtn.disabled = false;
+            submitBtn.textContent = 'Submit Menu for Review';
+            submitBtn.classList.remove('blocked');
+            document.getElementById('criticalErrorBanner').classList.remove('show');
+
+            window.scrollTo({ top: 0, behavior: 'smooth' });
         }
 
         function escapeHtml(text) {
@@ -3094,6 +3589,17 @@
 
             reviewedArea.innerHTML = cleanedHtml;
             document.getElementById('originalMenuDisplay').innerHTML = cleanedHtml;
+        }
+
+        function sanitizeMenuHtmlForSubmission(htmlContent) {
+            let html = htmlContent || '';
+
+            // Remove purely-empty paragraphs; these often become visual double-spacing in DOCX.
+            html = html.replace(/<p>(?:\s|&nbsp;|<br\s*\/?>)*<\/p>/gi, '');
+
+            // Collapse excessive whitespace between paragraph tags.
+            html = html.replace(/>\s+</g, '><').trim();
+            return html;
         }
 
         function toggleEditMode() {
@@ -3130,21 +3636,44 @@
             const paragraphs = element.querySelectorAll('p');
 
             if (paragraphs.length === 0) {
-                return (element.textContent || '').trim()
-                    .split(/\n+/)
-                    .map(line => line.trim())
-                    .filter(line => line.length > 0)
-                    .join('\n');
+                const rawLines = (element.textContent || '')
+                    .replace(/\r/g, '')
+                    .split('\n')
+                    .map(line => line.replace(/\u00A0/g, ' ').trim());
+                return normalizeExtractedLines(rawLines);
             }
 
-            const lines = [];
+            const rawLines = [];
             paragraphs.forEach(p => {
-                const text = (p.textContent || '').trim();
-                if (text && text !== '\u00A0' && text.length > 0) {
-                    lines.push(text);
-                }
+                const text = (p.textContent || '').replace(/\u00A0/g, ' ').trim();
+                rawLines.push(text);
             });
-            return lines.join('\n');
+            return normalizeExtractedLines(rawLines);
+        }
+
+        function normalizeExtractedLines(rawLines) {
+            const lines = [...rawLines];
+
+            // Trim leading/trailing empty lines.
+            while (lines.length && lines[0] === '') lines.shift();
+            while (lines.length && lines[lines.length - 1] === '') lines.pop();
+
+            // Preserve intentional spacing, but collapse excessive empties.
+            const normalized = [];
+            let prevEmpty = false;
+            for (const line of lines) {
+                if (line === '') {
+                    if (!prevEmpty) {
+                        normalized.push('');
+                    }
+                    prevEmpty = true;
+                } else {
+                    normalized.push(line);
+                    prevEmpty = false;
+                }
+            }
+
+            return normalized.join('\n');
         }
 
         function handleReviewedAreaInput() {
@@ -3218,24 +3747,53 @@
             let insertions = 0;
             let deletions = 0;
             let html = '';
+            let i = 0;
+            let j = 0;
+            while (i < baseTokens.length || j < revisedTokens.length) {
+                const baseTok = i < baseTokens.length ? baseTokens[i] : null;
+                const revTok = j < revisedTokens.length ? revisedTokens[j] : null;
+                const baseCommon = i < baseTokens.length && lcs.commonBase.has(i);
+                const revCommon = j < revisedTokens.length && lcs.commonRev.has(j);
+                const sameToken =
+                    baseTok !== null &&
+                    revTok !== null &&
+                    normalizeToken(baseTok) === normalizeToken(revTok);
 
-            for (let i = 0; i < baseTokens.length; i++) {
-                if (!lcs.commonBase.has(i) && baseTokens[i].trim()) {
-                    html += `<span class="persistent-del">${escapeHtml(baseTokens[i])}</span>`;
-                    deletions++;
-                } else {
-                    html += escapeHtml(baseTokens[i]);
+                if (baseCommon && revCommon && sameToken) {
+                    html += escapeHtml(revTok);
+                    i++;
+                    j++;
+                    continue;
                 }
-            }
 
-            html += '\n\n';
+                if (i < baseTokens.length && !baseCommon) {
+                    if (baseTok && baseTok.trim()) {
+                        html += `<span class="persistent-del">${escapeHtml(baseTok)}</span>`;
+                        deletions++;
+                    } else {
+                        html += escapeHtml(baseTok || '');
+                    }
+                    i++;
+                    continue;
+                }
 
-            for (let i = 0; i < revisedTokens.length; i++) {
-                if (!lcs.commonRev.has(i) && revisedTokens[i].trim()) {
-                    html += `<span class="persistent-ins">${escapeHtml(revisedTokens[i])}</span>`;
-                    insertions++;
-                } else {
-                    html += escapeHtml(revisedTokens[i]);
+                if (j < revisedTokens.length && !revCommon) {
+                    if (revTok && revTok.trim()) {
+                        html += `<span class="persistent-ins">${escapeHtml(revTok)}</span>`;
+                        insertions++;
+                    } else {
+                        html += escapeHtml(revTok || '');
+                    }
+                    j++;
+                    continue;
+                }
+
+                if (j < revisedTokens.length) {
+                    html += escapeHtml(revTok || '');
+                    j++;
+                }
+                if (i < baseTokens.length) {
+                    i++;
                 }
             }
 

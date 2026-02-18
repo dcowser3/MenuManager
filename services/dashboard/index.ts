@@ -2,6 +2,7 @@ import express from 'express';
 import multer from 'multer';
 import axios from 'axios';
 import { promises as fs } from 'fs';
+import * as fsSync from 'fs';
 import * as path from 'path';
 import { exec } from 'child_process';
 import { promisify } from 'util';
@@ -13,6 +14,29 @@ import {
 } from '@menumanager/supabase-client';
 
 const execAsync = promisify(exec);
+const DEFAULT_ALLERGEN_KEY = 'C crustaceans | D dairy | E egg | F fish | G gluten | N nuts | V vegetarian | VG vegan';
+
+function getRepoRoot(): string {
+    const candidates = [
+        path.resolve(__dirname, '..', '..'),      // ts-node from services/dashboard
+        path.resolve(__dirname, '..', '..', '..') // compiled from services/dashboard/dist
+    ];
+
+    for (const candidate of candidates) {
+        if (
+            fsSync.existsSync(path.join(candidate, 'services')) &&
+            fsSync.existsSync(path.join(candidate, 'samples'))
+        ) {
+            return candidate;
+        }
+    }
+
+    return candidates[0];
+}
+
+function getDocxRedlinerDir(): string {
+    return path.join(getRepoRoot(), 'services', 'docx-redliner');
+}
 
 /**
  * Extract dishes from approved menu and store in database
@@ -71,6 +95,8 @@ app.set('views', path.join(__dirname, 'views'));
 export async function extractBaselineFromDocx(filePath: string): Promise<{
     approvedMenuContent: string;
     approvedMenuContentRaw: string;
+    approvedMenuContentHtml: string;
+    extractedAllergenKey: string;
     extractedProject: {
         projectName: string;
         property: string;
@@ -79,9 +105,10 @@ export async function extractBaselineFromDocx(filePath: string): Promise<{
         size: string;
     };
 }> {
-    const venvPython = path.resolve(__dirname, '..', '..', 'docx-redliner', 'venv', 'bin', 'python');
-    const extractCleanScript = path.resolve(__dirname, '..', '..', 'docx-redliner', 'extract_clean_menu_text.py');
-    const extractDetailsScript = path.resolve(__dirname, '..', '..', 'docx-redliner', 'extract_project_details.py');
+    const docxRedlinerDir = getDocxRedlinerDir();
+    const venvPython = path.join(docxRedlinerDir, 'venv', 'bin', 'python');
+    const extractCleanScript = path.join(docxRedlinerDir, 'extract_clean_menu_text.py');
+    const extractDetailsScript = path.join(docxRedlinerDir, 'extract_project_details.py');
 
     let pythonCmd = 'python3';
     try {
@@ -110,6 +137,8 @@ export async function extractBaselineFromDocx(filePath: string): Promise<{
     return {
         approvedMenuContent: cleanData.cleaned_menu_content || cleanData.menu_content || '',
         approvedMenuContentRaw: cleanData.menu_content || '',
+        approvedMenuContentHtml: cleanData.cleaned_menu_html || '',
+        extractedAllergenKey: detailsData.allergen_key || '',
         extractedProject: {
             projectName: projectDetails.project_name || '',
             property: projectDetails.property || '',
@@ -596,6 +625,8 @@ app.post('/api/modification/baseline-upload', upload.single('baselineDoc') as an
             baselineFileName: req.file.originalname,
             approvedMenuContent: extracted.approvedMenuContent,
             approvedMenuContentRaw: extracted.approvedMenuContentRaw,
+            approvedMenuContentHtml: extracted.approvedMenuContentHtml,
+            extractedAllergenKey: extracted.extractedAllergenKey,
             extractedProject: extracted.extractedProject,
         });
     } catch (error: any) {
@@ -609,10 +640,34 @@ app.post('/api/modification/baseline-upload', upload.single('baselineDoc') as an
  */
 app.post('/api/form/basic-check', async (req, res) => {
     try {
-        const { menuContent, allergens, menuType } = req.body;
+        const { menuContent, allergens, menuType, baselineMenuContent, reviewMode } = req.body;
 
         if (!menuContent || !menuContent.trim()) {
             return res.status(400).json({ error: 'Menu content is required' });
+        }
+
+        const changedOnlyMode = reviewMode === 'changed_only' && !!baselineMenuContent;
+        let textForReview = menuContent;
+        let changedLineCount = 0;
+
+        if (changedOnlyMode) {
+            const changedOnlyText = extractChangedLinesForReview(baselineMenuContent, menuContent);
+            changedLineCount = changedOnlyText.changedLineCount;
+
+            if (changedLineCount === 0) {
+                return res.json({
+                    success: true,
+                    originalMenu: menuContent,
+                    correctedMenu: menuContent,
+                    suggestions: [],
+                    hasChanges: false,
+                    hasCriticalErrors: false,
+                    reviewMode: 'changed_only',
+                    changedLineCount: 0
+                });
+            }
+
+            textForReview = changedOnlyText.text;
         }
 
         // Debug logging
@@ -624,7 +679,7 @@ app.post('/api/form/basic-check', async (req, res) => {
         console.log('===========================');
 
         // Load QA prompt
-        const qaPromptPath = path.join(__dirname, '..', '..', '..', 'sop-processor', 'qa_prompt.txt');
+        const qaPromptPath = path.join(getRepoRoot(), 'sop-processor', 'qa_prompt.txt');
         let qaPrompt = await fs.readFile(qaPromptPath, 'utf-8');
 
         // If prix fixe menu type, inject special rules
@@ -692,9 +747,14 @@ Note: Use ONLY these allergen codes when checking allergen compliance. Do not us
         }
 
         // Call AI Review service's QA endpoint
+        let finalPrompt = qaPrompt;
+        if (changedOnlyMode) {
+            finalPrompt = `${qaPrompt}\n\nIMPORTANT SCOPE FOR THIS REVIEW:\nYou are reviewing ONLY changed excerpts from a menu revision.\nDo NOT flag unchanged baseline content.\nReturn issues only for the changed excerpts provided.`;
+        }
+
         const qaResponse = await axios.post('http://localhost:3002/run-qa-check', {
-            text: menuContent,
-            prompt: qaPrompt
+            text: textForReview,
+            prompt: finalPrompt
         });
 
         const feedback = qaResponse.data.feedback;
@@ -705,23 +765,30 @@ Note: Use ONLY these allergen codes when checking allergen compliance. Do not us
         console.log('=== END RAW FEEDBACK ===');
 
         // Parse the new format: corrected menu + suggestions
-        const parsed = parseAIResponse(feedback, menuContent);
+        const parsed = parseAIResponse(feedback, textForReview);
+        const reconciledSuggestions = reconcileCriticalSuggestionsAgainstCorrectedMenu(
+            parsed.correctedMenu,
+            parsed.suggestions
+        );
 
         console.log('=== PARSED RESPONSE ===');
         console.log('Corrected menu length:', parsed.correctedMenu.length);
         console.log('Suggestions count:', parsed.suggestions.length);
+        console.log('Reconciled suggestions count:', reconciledSuggestions.length);
         console.log('Has changes:', parsed.correctedMenu !== menuContent);
         console.log('===========================');
 
-        const hasCriticalErrors = parsed.suggestions.some(s => s.severity === 'critical');
+        const hasCriticalErrors = reconciledSuggestions.some(s => s.severity === 'critical');
 
         res.json({
             success: true,
             originalMenu: menuContent,
-            correctedMenu: parsed.correctedMenu,
-            suggestions: parsed.suggestions,
-            hasChanges: parsed.correctedMenu !== menuContent,
-            hasCriticalErrors
+            correctedMenu: changedOnlyMode ? menuContent : parsed.correctedMenu,
+            suggestions: reconciledSuggestions,
+            hasChanges: changedOnlyMode ? false : parsed.correctedMenu !== menuContent,
+            hasCriticalErrors,
+            reviewMode: changedOnlyMode ? 'changed_only' : 'full',
+            changedLineCount
         });
 
     } catch (error: any) {
@@ -732,6 +799,130 @@ Note: Use ONLY these allergen codes when checking allergen compliance. Do not us
         });
     }
 });
+
+function extractChangedLinesForReview(baselineText: string, currentText: string): { text: string; changedLineCount: number } {
+    const baseLines = baselineText.split('\n').map(l => l.trim()).filter(Boolean);
+    const currLines = currentText.split('\n').map(l => l.trim()).filter(Boolean);
+
+    const baseSet = new Set(baseLines.map(normalizeReviewLine));
+    const changedLines: string[] = [];
+
+    for (const line of currLines) {
+        const norm = normalizeReviewLine(line);
+        if (!baseSet.has(norm)) {
+            changedLines.push(line);
+        }
+    }
+
+    return {
+        text: changedLines.join('\n'),
+        changedLineCount: changedLines.length
+    };
+}
+
+function normalizeReviewLine(line: string): string {
+    return (line || '')
+        .toLowerCase()
+        .replace(/\s+/g, ' ')
+        .replace(/[“”"]/g, '"')
+        .replace(/[’']/g, "'")
+        .trim();
+}
+
+function stripDiacritics(input: string): string {
+    return (input || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+}
+
+function normalizeForSuggestionMatch(input: string): string {
+    return stripDiacritics(input || '')
+        .toLowerCase()
+        .replace(/[^a-z0-9\s]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function looksLikePriceOnLine(line: string): boolean {
+    const compact = (line || '').trim();
+    // Handles "... - 8", "... 14", "... $12", "... 12.50"
+    return /(?:^|[\s\-|])\$?\d{1,3}(?:[.,]\d{1,2})?\s*$/.test(compact);
+}
+
+function findCorrectedLineForMenuItem(correctedMenu: string, menuItem: string): string | null {
+    const itemNorm = normalizeForSuggestionMatch(menuItem || '');
+    if (!itemNorm) return null;
+
+    const lines = (correctedMenu || '').split('\n').map(l => l.trim()).filter(Boolean);
+    for (const line of lines) {
+        const lineNorm = normalizeForSuggestionMatch(line);
+        if (lineNorm.includes(itemNorm)) {
+            return line;
+        }
+    }
+    return null;
+}
+
+function isCriticalResolvedByCorrectedMenu(
+    suggestion: { type?: string; menuItem?: string; description?: string; recommendation?: string },
+    correctedMenu: string
+): boolean {
+    const type = (suggestion.type || '').toLowerCase();
+    const line = findCorrectedLineForMenuItem(correctedMenu, suggestion.menuItem || '');
+    if (!line) return false;
+
+    if (type.includes('missing price')) {
+        return looksLikePriceOnLine(line);
+    }
+
+    if (type.includes('incomplete dish name')) {
+        const itemNorm = normalizeForSuggestionMatch(suggestion.menuItem || '');
+        const lineNorm = normalizeForSuggestionMatch(line);
+        const remainder = lineNorm.replace(itemNorm, '').trim();
+
+        if (remainder.length >= 6) {
+            return true;
+        }
+
+        // If AI explicitly referenced a malformed token and it's now gone, treat as resolved.
+        const combined = `${suggestion.description || ''} ${suggestion.recommendation || ''}`;
+        const quotedTokenMatch = combined.match(/['"]([^'"]{2,30})['"]/);
+        if (quotedTokenMatch && quotedTokenMatch[1]) {
+            const tokenNorm = normalizeForSuggestionMatch(quotedTokenMatch[1]);
+            if (tokenNorm && !lineNorm.includes(tokenNorm)) {
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+function reconcileCriticalSuggestionsAgainstCorrectedMenu(
+    correctedMenu: string,
+    suggestions: Array<{
+        type: string;
+        confidence: string;
+        severity?: string;
+        menuItem: string;
+        description: string;
+        recommendation: string;
+    }>
+): Array<{
+    type: string;
+    confidence: string;
+    severity?: string;
+    menuItem: string;
+    description: string;
+    recommendation: string;
+}> {
+    if (!Array.isArray(suggestions) || suggestions.length === 0) {
+        return [];
+    }
+
+    return suggestions.filter((s) => {
+        if (s.severity !== 'critical') return true;
+        return !isCriticalResolvedByCorrectedMenu(s, correctedMenu);
+    });
+}
 
 /**
  * Form API: Submit Menu - Create docx from form and trigger review workflow
@@ -758,6 +949,7 @@ app.post('/api/form/submit', async (req, res) => {
             hotelName,
             cityCountry,
             assetType,
+            allergens,
             menuContent,
             menuContentHtml,
             approvals,
@@ -784,6 +976,7 @@ app.post('/api/form/submit', async (req, res) => {
         const sizeForDocx = assetType === 'PRINT'
             ? `${width} x ${height} inches`
             : `${width} x ${height} pixels`;
+        const effectiveAllergens = (allergens || '').trim() || DEFAULT_ALLERGEN_KEY;
 
         // Approvals are attestations from the submitter - we store them as-is
         // Frontend enforces that all required approvals are marked "Yes" before submission
@@ -800,7 +993,8 @@ app.post('/api/form/submit', async (req, res) => {
             menuType: menuType || 'standard',
             templateType: templateType || 'food',
             dateNeeded,
-            menuContent
+            menuContent,
+            allergens: effectiveAllergens
         });
 
         console.log(`📝 Generated document for submission ${submissionId}: ${docxPath}`);
@@ -835,6 +1029,7 @@ app.post('/api/form/submit', async (req, res) => {
             critical_overrides: JSON.stringify(criticalOverrides || []),
             menu_content: menuContent,
             menu_content_html: menuContentHtml || null,
+            allergens: effectiveAllergens,
             submission_mode: submissionMode || 'new',
             revision_source: revisionSource || null,
             revision_base_submission_id: revisionBaseSubmissionId || null,
@@ -931,6 +1126,7 @@ app.post('/api/form/submit', async (req, res) => {
             revisionBaselineDocPath,
             revisionBaselineFileName,
             chefPersistentDiff,
+            criticalOverrides,
         }).catch(err => console.error('Failed to create ClickUp task:', err.message));
 
         res.json({
@@ -1236,17 +1432,19 @@ async function generateDocxFromForm(submissionId: string, formData: any): Promis
     const outputPath = path.join(UPLOADS_DIR, `${submissionId}.docx`);
 
     // Create Python script to generate docx
-    const pythonScript = path.resolve(__dirname, '..', '..', 'docx-redliner', 'generate_from_form.py');
+    const repoRoot = getRepoRoot();
+    const docxRedlinerDir = getDocxRedlinerDir();
+    const pythonScript = path.join(docxRedlinerDir, 'generate_from_form.py');
 
     // Select template based on templateType (food or beverage)
     const templateType = formData.templateType || 'food';
     const templatePath = templateType === 'beverage'
-        ? path.resolve(__dirname, '..', '..', '..', 'samples', 'RSH Design Brief Beverage Template.docx')
-        : path.resolve(__dirname, '..', '..', '..', 'samples', 'RSH_DESIGN BRIEF_FOOD_Menu_Template .docx');
+        ? path.join(repoRoot, 'samples', 'RSH Design Brief Beverage Template.docx')
+        : path.join(repoRoot, 'samples', 'RSH_DESIGN BRIEF_FOOD_Menu_Template .docx');
 
     console.log(`Using ${templateType} template: ${templatePath}`);
 
-    const venvPython = path.resolve(__dirname, '..', '..', 'docx-redliner', 'venv', 'bin', 'python');
+    const venvPython = path.join(docxRedlinerDir, 'venv', 'bin', 'python');
 
     // Create a temp JSON file with form data
     const formDataPath = path.join(UPLOADS_DIR, `${submissionId}_formdata.json`);
@@ -1312,7 +1510,8 @@ app.post('/api/design-approval/compare', upload.fields([
             return res.status(400).json({ error: 'Second file must be a PDF' });
         }
 
-        const venvPython = path.resolve(__dirname, '..', '..', 'docx-redliner', 'venv', 'bin', 'python');
+        const docxRedlinerDir = getDocxRedlinerDir();
+        const venvPython = path.join(docxRedlinerDir, 'venv', 'bin', 'python');
         let pythonCmd: string;
         try {
             await fs.access(venvPython);
@@ -1322,7 +1521,7 @@ app.post('/api/design-approval/compare', upload.fields([
         }
 
         // Extract project details + menu content from DOCX
-        const extractDetailsScript = path.resolve(__dirname, '..', '..', 'docx-redliner', 'extract_project_details.py');
+        const extractDetailsScript = path.join(docxRedlinerDir, 'extract_project_details.py');
         const detailsResult = await execAsync(
             `${pythonCmd} "${extractDetailsScript}" "${docxFile.path}"`,
             { timeout: 30000, maxBuffer: 10 * 1024 * 1024 }
@@ -1334,7 +1533,7 @@ app.post('/api/design-approval/compare', upload.fields([
         }
 
         // Extract text from PDF
-        const extractPdfScript = path.resolve(__dirname, '..', '..', 'docx-redliner', 'extract_pdf_text.py');
+        const extractPdfScript = path.join(docxRedlinerDir, 'extract_pdf_text.py');
         const pdfResult = await execAsync(
             `${pythonCmd} "${extractPdfScript}" "${pdfFile.path}"`,
             { timeout: 30000, maxBuffer: 10 * 1024 * 1024 }
