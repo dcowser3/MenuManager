@@ -152,15 +152,8 @@ Configure OPENAI_API_KEY in .env for real AI reviews.
         // Temporarily increased threshold to 99 for testing red-lining functionality
         // TODO: Change back to 5 for production
         if (issueCount > 99) {
-            // Fails Tier 1: Notify the original submitter to resubmit.
-            console.log(`Submission ${submission_id} failed Tier 1. Notifying submitter.`);
-            await axios_1.default.post('http://localhost:3003/notify', {
-                type: 'tier1_rejection',
-                payload: {
-                    submitter_email: submitter_email,
-                    feedback_content: generalQaFeedback
-                }
-            });
+            // Fails Tier 1: mark as rejected_tier1 (no email notification in current workflow).
+            console.log(`Submission ${submission_id} failed Tier 1.`);
             await axios_1.default.put(`http://localhost:3004/submissions/${submission_id}/status`, { status: 'rejected_tier1' });
             return res.status(200).send({ status: 'rejected_tier1', message: 'Submission failed Tier 1 review.' });
         }
@@ -174,22 +167,6 @@ Configure OPENAI_API_KEY in .env for real AI reviews.
             status: 'pending_human_review',
             ai_draft_path: draftPath
         });
-        // Trigger internal notification for human review (non-blocking)
-        // If SMTP isn't configured, this will fail but shouldn't stop the workflow
-        try {
-            await axios_1.default.post('http://localhost:3003/notify', {
-                type: 'internal_review_request',
-                payload: {
-                    submission_id: submission_id,
-                    filename: filename
-                }
-            });
-            console.log(`✓ Notification sent for submission ${submission_id}`);
-        }
-        catch (notifyError) {
-            console.warn(`⚠️  Failed to send notification (SMTP not configured?):`, notifyError.message);
-            console.log(`   Submission ${submission_id} is still ready for review in the dashboard`);
-        }
         res.status(200).send({ status: 'pending_human_review', message: 'AI draft generated and is pending human review.' });
     }
     catch (error) {
@@ -198,7 +175,10 @@ Configure OPENAI_API_KEY in .env for real AI reviews.
     }
 });
 async function saveAiDraft(submissionId, content, originalText = '', originalPath = '', hasOpenAIKey = false) {
-    const DRAFTS_DIR = path.join(__dirname, '..', '..', '..', 'tmp', 'ai-drafts');
+    let DRAFTS_DIR = path.join(__dirname, '..', '..', '..', 'tmp', 'ai-drafts');
+    if (originalPath) {
+        DRAFTS_DIR = path.dirname(originalPath);
+    }
     if (!fsSync.existsSync(DRAFTS_DIR)) {
         await fs_1.promises.mkdir(DRAFTS_DIR, { recursive: true });
     }

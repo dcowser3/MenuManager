@@ -21,6 +21,31 @@ const CLICKUP_ASSIGNEE_ID = process.env.CLICKUP_ASSIGNEE_ID;
 const CLICKUP_TEAM_ID = process.env.CLICKUP_TEAM_ID;
 const CLICKUP_WEBHOOK_URL = process.env.CLICKUP_WEBHOOK_URL;
 const CLICKUP_CORRECTIONS_STATUS = (process.env.CLICKUP_CORRECTIONS_STATUS || 'corrections complete').toLowerCase();
+function getRepoRoot() {
+    const candidates = [
+        path_1.default.resolve(__dirname, '..', '..'), // ts-node from services/clickup-integration
+        path_1.default.resolve(__dirname, '..', '..', '..') // compiled from dist
+    ];
+    for (const candidate of candidates) {
+        if (fs_1.default.existsSync(path_1.default.join(candidate, 'services')) && fs_1.default.existsSync(path_1.default.join(candidate, 'samples'))) {
+            return candidate;
+        }
+    }
+    return candidates[0];
+}
+function getDocumentStorageRoot() {
+    return process.env.DOCUMENT_STORAGE_ROOT || path_1.default.join(getRepoRoot(), 'tmp', 'documents');
+}
+function slugifyStorageSegment(value) {
+    const cleaned = (value || '')
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '');
+    return cleaned || 'unknown';
+}
+function getSubmissionDocumentDir(projectName, property, submissionId) {
+    return path_1.default.join(getDocumentStorageRoot(), slugifyStorageSegment(property), slugifyStorageSegment(projectName), submissionId);
+}
 const clickupHeaders = {
     'Authorization': CLICKUP_API_TOKEN || '',
     'Content-Type': 'application/json',
@@ -183,9 +208,10 @@ app.post('/webhook/clickup', async (req, res) => {
         }
         // Download the latest attachment
         const latestAttachment = attachments[attachments.length - 1];
-        const uploadsDir = path_1.default.join(__dirname, '..', '..', '..', 'tmp', 'uploads');
-        await fs_1.default.promises.mkdir(uploadsDir, { recursive: true });
-        const correctedPath = path_1.default.join(uploadsDir, `${submission.id}-corrected.docx`);
+        const submissionDocDir = getSubmissionDocumentDir(submission.project_name || '', submission.property || '', submission.id);
+        const approvedDir = path_1.default.join(submissionDocDir, 'approved');
+        await fs_1.default.promises.mkdir(approvedDir, { recursive: true });
+        const correctedPath = path_1.default.join(approvedDir, `${submission.id}-corrected.docx`);
         const fileResponse = await axios_1.default.get(latestAttachment.url, {
             responseType: 'arraybuffer',
             headers: { 'Authorization': CLICKUP_API_TOKEN || '' },
