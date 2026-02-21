@@ -65,6 +65,19 @@ function getRepoRoot() {
 function getDocxRedlinerDir() {
     return path.join(getRepoRoot(), 'services', 'docx-redliner');
 }
+function getDocumentStorageRoot() {
+    return process.env.DOCUMENT_STORAGE_ROOT || path.join(getRepoRoot(), 'tmp', 'documents');
+}
+function slugifyStorageSegment(value) {
+    const cleaned = (value || '')
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '');
+    return cleaned || 'unknown';
+}
+function getSubmissionDocumentDir(projectName, property, submissionId) {
+    return path.join(getDocumentStorageRoot(), slugifyStorageSegment(property), slugifyStorageSegment(projectName), submissionId);
+}
 /**
  * Extract dishes from approved menu and store in database
  * Fails silently if Supabase is not configured
@@ -276,20 +289,11 @@ app.post('/approve/:submissionId', async (req, res) => {
             ai_draft_path: submission.ai_draft_path,
             final_path: finalPath
         });
-        // Send final document to chef
-        await axios_1.default.post('http://localhost:3003/notify', {
-            type: 'final_approval_to_chef',
-            payload: {
-                submitter_email: submission.submitter_email,
-                filename: submission.filename,
-                final_path: finalPath
-            }
-        });
         // Extract dishes from approved menu (async, non-blocking)
         extractDishesAfterApproval(submissionId, submission.menu_content, submission.property || 'Unknown', finalPath).catch(err => console.error('Background dish extraction failed:', err));
         res.json({
             success: true,
-            message: 'Submission approved and sent to chef'
+            message: 'Submission approved'
         });
     }
     catch (error) {
@@ -330,20 +334,11 @@ app.post('/upload/:submissionId', upload.single('finalDocument'), async (req, re
             ai_draft_path: submission.ai_draft_path,
             final_path: finalPath
         });
-        // Send final document to chef
-        await axios_1.default.post('http://localhost:3003/notify', {
-            type: 'final_approval_to_chef',
-            payload: {
-                submitter_email: submission.submitter_email,
-                filename: submission.filename,
-                final_path: finalPath
-            }
-        });
         // Extract dishes from approved menu (async, non-blocking)
         extractDishesAfterApproval(submissionId, submission.menu_content, submission.property || 'Unknown', finalPath).catch(err => console.error('Background dish extraction failed:', err));
         res.json({
             success: true,
-            message: 'Corrected version uploaded and sent to chef'
+            message: 'Corrected version uploaded'
         });
     }
     catch (error) {
@@ -476,6 +471,80 @@ app.get('/training/download-prompt/:sessionId', async (req, res) => {
     catch (error) {
         console.error('Error downloading prompt:', error);
         res.status(404).send('Prompt file not found');
+    }
+});
+/**
+ * Learning Rules Dashboard
+ */
+app.get('/learning', async (_req, res) => {
+    try {
+        const [rulesResult, overridesResult, overlayResult] = await Promise.all([
+            axios_1.default.get('http://localhost:3006/learning/rules', { timeout: 2500 }).catch(() => ({ data: {} })),
+            axios_1.default.get('http://localhost:3006/learning/overrides', { timeout: 2500 }).catch(() => ({ data: { disabled: {} } })),
+            axios_1.default.get('http://localhost:3006/learning/overlay', { timeout: 2500 }).catch(() => ({ data: { overlay: '' } })),
+        ]);
+        const rulesData = rulesResult.data || {};
+        const overrides = overridesResult.data?.disabled || {};
+        const learnedOverlay = overlayResult?.data?.overlay || '';
+        const qaPromptPath = path.join(getRepoRoot(), 'sop-processor', 'qa_prompt.txt');
+        const basePrompt = await fs_1.promises.readFile(qaPromptPath, 'utf-8');
+        const effectivePrompt = learnedOverlay ? `${basePrompt}\n\n${learnedOverlay}` : basePrompt;
+        const decorate = (category, items) => (items || []).map((r) => {
+            const key = `${r.source_norm}=>${r.target_norm}`;
+            const override = overrides[key];
+            return {
+                ...r,
+                key,
+                category,
+                disabled: !!override,
+                disabled_reason: override?.reason || '',
+                disabled_updated_at: override?.updated_at || '',
+            };
+        });
+        const rules = [
+            ...decorate('active', rulesData.active_rules || []),
+            ...decorate('weak', rulesData.weak_rules || []),
+            ...decorate('conflicted', rulesData.conflicted_rules || []),
+        ];
+        res.render('learning', {
+            title: 'Learning Rules',
+            generatedAt: rulesData.generated_at || null,
+            minOccurrences: rulesData.min_occurrences || 2,
+            totalEntries: rulesData.total_entries_analyzed || 0,
+            totalRules: rulesData.total_rules || 0,
+            rules,
+            basePrompt,
+            learnedOverlay,
+            effectivePrompt,
+            documentStorageRoot: process.env.DOCUMENT_STORAGE_ROOT || '',
+        });
+    }
+    catch (error) {
+        console.error('Error loading learning dashboard:', error.message);
+        res.status(500).render('error', {
+            message: 'Failed to load learning dashboard'
+        });
+    }
+});
+/**
+ * Toggle learned rule enable/disable override.
+ */
+app.post('/api/learning/rules/toggle', async (req, res) => {
+    try {
+        const { ruleKey, disabled, reason } = req.body || {};
+        if (!ruleKey || typeof ruleKey !== 'string') {
+            return res.status(400).json({ error: 'ruleKey is required' });
+        }
+        const response = await axios_1.default.post('http://localhost:3006/learning/overrides', {
+            rule_key: ruleKey,
+            disabled: !!disabled,
+            reason: reason || '',
+        }, { timeout: 2500 });
+        res.json(response.data);
+    }
+    catch (error) {
+        console.error('Error toggling learning rule:', error.message);
+        res.status(500).json({ error: 'Failed to toggle learning rule' });
     }
 });
 /**
@@ -663,6 +732,12 @@ Note: Use ONLY these allergen codes when checking allergen compliance. Do not us
             qaPrompt = qaPrompt.replace('### 7. ALLERGENS', `### 7. ALLERGENS\n${allergenSection}`);
             console.log('Injected custom allergens into prompt');
         }
+        // Add learned reviewer correction overlay from differ service (fail-open).
+        const learnedOverlay = await fetchLearnedPromptOverlay();
+        if (learnedOverlay) {
+            qaPrompt = `${qaPrompt}\n\n${learnedOverlay}`;
+            console.log('Injected learned correction overlay into prompt');
+        }
         // Call AI Review service's QA endpoint
         let finalPrompt = qaPrompt;
         if (changedOnlyMode) {
@@ -732,6 +807,19 @@ function normalizeReviewLine(line) {
 }
 function stripDiacritics(input) {
     return (input || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+}
+async function fetchLearnedPromptOverlay() {
+    try {
+        const response = await axios_1.default.get('http://localhost:3006/learning/overlay', { timeout: 1500 });
+        const overlay = response.data?.overlay;
+        if (typeof overlay === 'string' && overlay.trim()) {
+            return overlay;
+        }
+        return '';
+    }
+    catch {
+        return '';
+    }
 }
 function normalizeForSuggestionMatch(input) {
     return stripDiacritics(input || '')
@@ -830,6 +918,24 @@ app.post('/api/form/submit', async (req, res) => {
             allergens: effectiveAllergens
         });
         console.log(`📝 Generated document for submission ${submissionId}: ${docxPath}`);
+        let persistedBaselineDocPath = null;
+        if (revisionBaselineDocPath) {
+            try {
+                await fs_1.promises.access(revisionBaselineDocPath);
+                const submissionDir = getSubmissionDocumentDir(projectName, property, submissionId);
+                const baselineDir = path.join(submissionDir, 'baseline');
+                await fs_1.promises.mkdir(baselineDir, { recursive: true });
+                const baselineFile = revisionBaselineFileName || path.basename(revisionBaselineDocPath);
+                persistedBaselineDocPath = path.join(baselineDir, baselineFile);
+                if (path.resolve(revisionBaselineDocPath) !== path.resolve(persistedBaselineDocPath)) {
+                    await fs_1.promises.copyFile(revisionBaselineDocPath, persistedBaselineDocPath);
+                }
+            }
+            catch (baselineError) {
+                console.warn(`Failed to persist baseline doc for ${submissionId}:`, baselineError.message);
+                persistedBaselineDocPath = revisionBaselineDocPath;
+            }
+        }
         // Create submission in database
         const dbResponse = await axios_1.default.post('http://localhost:3004/submissions', {
             id: submissionId,
@@ -864,7 +970,7 @@ app.post('/api/form/submit', async (req, res) => {
             submission_mode: submissionMode || 'new',
             revision_source: revisionSource || null,
             revision_base_submission_id: revisionBaseSubmissionId || null,
-            revision_baseline_doc_path: revisionBaselineDocPath || null,
+            revision_baseline_doc_path: persistedBaselineDocPath || null,
             revision_baseline_file_name: revisionBaselineFileName || null,
             base_approved_menu_content: baseApprovedMenuContent || null,
             chef_persistent_diff: chefPersistentDiff ? JSON.stringify(chefPersistentDiff) : null,
@@ -879,14 +985,14 @@ app.post('/api/form/submit', async (req, res) => {
             storage_path: docxPath,
             file_name: `${projectName}_Menu.docx`
         }).catch(err => console.error('Failed to save original_docx asset metadata:', err.message));
-        if (revisionBaselineDocPath) {
+        if (persistedBaselineDocPath) {
             axios_1.default.post('http://localhost:3004/assets', {
                 submission_id: submissionId,
                 asset_type: 'baseline_approved_docx',
                 source: 'chef_modification_upload',
                 storage_provider: 'local',
-                storage_path: revisionBaselineDocPath,
-                file_name: revisionBaselineFileName || path.basename(revisionBaselineDocPath),
+                storage_path: persistedBaselineDocPath,
+                file_name: revisionBaselineFileName || path.basename(persistedBaselineDocPath),
             }).catch(err => console.error('Failed to save baseline_approved_docx asset metadata:', err.message));
         }
         // Save submitter profile (fire-and-forget)
@@ -947,7 +1053,7 @@ app.post('/api/form/submit', async (req, res) => {
             submissionMode,
             revisionSource,
             revisionBaseSubmissionId,
-            revisionBaselineDocPath,
+            revisionBaselineDocPath: persistedBaselineDocPath,
             revisionBaselineFileName,
             chefPersistentDiff,
             criticalOverrides,
@@ -1204,9 +1310,12 @@ function parseFeedbackToSuggestions(feedback) {
  * Helper: Generate Word document from form data using Python
  */
 async function generateDocxFromForm(submissionId, formData) {
-    const UPLOADS_DIR = path.join(__dirname, '..', '..', '..', 'tmp', 'uploads');
-    await fs_1.promises.mkdir(UPLOADS_DIR, { recursive: true });
-    const outputPath = path.join(UPLOADS_DIR, `${submissionId}.docx`);
+    const tempUploadsDir = path.join(__dirname, '..', '..', '..', 'tmp', 'uploads');
+    await fs_1.promises.mkdir(tempUploadsDir, { recursive: true });
+    const submissionDir = getSubmissionDocumentDir(formData.projectName || '', formData.property || '', submissionId);
+    const originalDir = path.join(submissionDir, 'original');
+    await fs_1.promises.mkdir(originalDir, { recursive: true });
+    const outputPath = path.join(originalDir, `${submissionId}.docx`);
     // Create Python script to generate docx
     const repoRoot = getRepoRoot();
     const docxRedlinerDir = getDocxRedlinerDir();
@@ -1219,7 +1328,7 @@ async function generateDocxFromForm(submissionId, formData) {
     console.log(`Using ${templateType} template: ${templatePath}`);
     const venvPython = path.join(docxRedlinerDir, 'venv', 'bin', 'python');
     // Create a temp JSON file with form data
-    const formDataPath = path.join(UPLOADS_DIR, `${submissionId}_formdata.json`);
+    const formDataPath = path.join(tempUploadsDir, `${submissionId}_formdata.json`);
     await fs_1.promises.writeFile(formDataPath, JSON.stringify(formData, null, 2));
     // Try venv python first, fallback to system python3
     let command = `"${venvPython}" "${pythonScript}" "${templatePath}" "${formDataPath}" "${outputPath}"`;

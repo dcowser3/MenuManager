@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title><%= title %></title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600&family=Montserrat:wght@400;500;600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --text: #333;
+            --muted: #777;
+            --border: #e8e4de;
+            --bg: #fff;
+            --bg-alt: #fafaf8;
+            --primary: #2c2c2c;
+            --warn: #b8860b;
+            --danger: #8b3a3a;
+            --success: #4a7c59;
+        }
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            font-family: 'Montserrat', sans-serif;
+            color: var(--text);
+            background: var(--bg);
+            line-height: 1.55;
+        }
+        .header {
+            border-bottom: 1px solid var(--border);
+            padding: 2rem 4vw;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .header h1 {
+            margin: 0;
+            font-family: 'Cormorant Garamond', serif;
+            font-size: 2rem;
+            letter-spacing: .04em;
+        }
+        .links a {
+            color: var(--primary);
+            text-decoration: none;
+            margin-left: 1.25rem;
+            font-size: .75rem;
+            letter-spacing: .14em;
+            text-transform: uppercase;
+            font-weight: 500;
+        }
+        .container {
+            padding: 2rem 4vw 3rem;
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        .panel {
+            border: 1px solid var(--border);
+            background: var(--bg-alt);
+            padding: 1rem 1.25rem;
+            margin-bottom: 1rem;
+        }
+        .panel strong { color: var(--primary); }
+        .stats {
+            display: flex;
+            gap: 1rem;
+            flex-wrap: wrap;
+            margin-bottom: 1rem;
+        }
+        .stat {
+            border: 1px solid var(--border);
+            padding: .75rem 1rem;
+            min-width: 170px;
+            background: #fff;
+        }
+        .stat .label {
+            font-size: .7rem;
+            text-transform: uppercase;
+            letter-spacing: .12em;
+            color: var(--muted);
+            margin-bottom: .25rem;
+        }
+        .stat .value {
+            font-size: 1.15rem;
+            font-weight: 600;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            border: 1px solid var(--border);
+            background: #fff;
+        }
+        th, td {
+            border-bottom: 1px solid var(--border);
+            padding: .65rem .7rem;
+            vertical-align: top;
+            font-size: .85rem;
+        }
+        th {
+            text-align: left;
+            background: var(--bg-alt);
+            font-size: .7rem;
+            letter-spacing: .1em;
+            text-transform: uppercase;
+        }
+        .badge {
+            display: inline-block;
+            border: 1px solid var(--border);
+            padding: .2rem .5rem;
+            font-size: .65rem;
+            text-transform: uppercase;
+            letter-spacing: .1em;
+            background: #fff;
+        }
+        .badge.active { color: var(--success); border-color: rgba(74,124,89,.35); }
+        .badge.weak { color: var(--warn); border-color: rgba(184,134,11,.35); }
+        .badge.conflicted { color: var(--danger); border-color: rgba(139,58,58,.35); }
+        .badge.disabled { color: var(--danger); border-color: rgba(139,58,58,.35); }
+        .btn {
+            border: 1px solid var(--primary);
+            background: var(--primary);
+            color: #fff;
+            font-size: .68rem;
+            letter-spacing: .11em;
+            text-transform: uppercase;
+            padding: .45rem .65rem;
+            cursor: pointer;
+        }
+        .btn.secondary {
+            background: #fff;
+            color: var(--primary);
+        }
+        .small {
+            font-size: .72rem;
+            color: var(--muted);
+        }
+        .prompt-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1rem;
+            margin-bottom: 1rem;
+        }
+        .prompt-block {
+            border: 1px solid var(--border);
+            background: #fff;
+            padding: .75rem;
+        }
+        .prompt-block h3 {
+            margin: 0 0 .5rem;
+            font-size: .8rem;
+            text-transform: uppercase;
+            letter-spacing: .1em;
+            color: var(--muted);
+        }
+        .prompt-text {
+            width: 100%;
+            min-height: 220px;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+            font-size: .73rem;
+            line-height: 1.45;
+            border: 1px solid var(--border);
+            padding: .6rem;
+            white-space: pre;
+            overflow: auto;
+            background: #fcfcfb;
+        }
+        .prompt-full {
+            margin-bottom: 1rem;
+            border: 1px solid var(--border);
+            background: #fff;
+            padding: .75rem;
+        }
+        .prompt-full h3 {
+            margin: 0 0 .5rem;
+            font-size: .8rem;
+            text-transform: uppercase;
+            letter-spacing: .1em;
+            color: var(--muted);
+        }
+        @media (max-width: 980px) {
+            .prompt-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+        .empty {
+            border: 1px solid var(--border);
+            padding: 1.5rem;
+            text-align: center;
+            color: var(--muted);
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Learning Rules</h1>
+        <div class="links">
+            <a href="/">Dashboard</a>
+            <a href="/training">Training</a>
+            <a href="/form">Submission Form</a>
+        </div>
+    </div>
+
+    <div class="container">
+        <div class="panel">
+            <strong>Cloud Deployment Note:</strong>
+            <% if (documentStorageRoot) { %>
+                `DOCUMENT_STORAGE_ROOT` is set to <code><%= documentStorageRoot %></code>.
+            <% } else { %>
+                `DOCUMENT_STORAGE_ROOT` is not set. Files are currently stored under <code>tmp/documents</code>, which may be ephemeral in cloud deployments.
+            <% } %>
+        </div>
+
+        <div class="stats">
+            <div class="stat"><div class="label">Generated</div><div class="value"><%= generatedAt ? new Date(generatedAt).toLocaleString() : 'N/A' %></div></div>
+            <div class="stat"><div class="label">Submissions Learned</div><div class="value"><%= totalEntries %></div></div>
+            <div class="stat"><div class="label">Rules</div><div class="value"><%= totalRules %></div></div>
+            <div class="stat"><div class="label">Min Occurrences</div><div class="value"><%= minOccurrences %></div></div>
+        </div>
+
+        <div class="prompt-grid">
+            <div class="prompt-block">
+                <h3>Base QA Prompt</h3>
+                <textarea class="prompt-text" readonly><%= basePrompt || '' %></textarea>
+            </div>
+            <div class="prompt-block">
+                <h3>Learned Overlay (Injected)</h3>
+                <textarea class="prompt-text" readonly><%= learnedOverlay || '' %></textarea>
+            </div>
+        </div>
+
+        <div class="prompt-full">
+            <h3>Effective Prompt (Current Runtime)</h3>
+            <div class="small" style="margin-bottom:.5rem;">
+                This is the prompt currently sent to AI before per-submission runtime additions (custom allergens, prix-fixe rules, changed-only scope).
+            </div>
+            <textarea class="prompt-text" style="min-height:300px;" readonly><%= effectivePrompt || '' %></textarea>
+        </div>
+
+        <% if (!rules || rules.length === 0) { %>
+            <div class="empty">No learned rules yet. Once corrected documents are processed, rules will appear here.</div>
+        <% } else { %>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Rule</th>
+                        <th>Type</th>
+                        <th>Status</th>
+                        <th>Signals</th>
+                        <th>Last Seen</th>
+                        <th>Control</th>
+                    </tr>
+                </thead>
+                <tbody>
+                <% rules.forEach((rule) => { %>
+                    <tr data-rule-key="<%= rule.key %>" data-disabled="<%= rule.disabled ? '1' : '0' %>">
+                        <td>
+                            <strong><%= rule.source %></strong> -> <strong><%= rule.target %></strong>
+                            <div class="small"><code><%= rule.key %></code></div>
+                        </td>
+                        <td><%= rule.kind %></td>
+                        <td>
+                            <span class="badge <%= rule.category %>"><%= rule.category %></span>
+                            <% if (rule.disabled) { %><span class="badge disabled">disabled</span><% } %>
+                            <% if (rule.disabled_reason) { %><div class="small">Reason: <%= rule.disabled_reason %></div><% } %>
+                        </td>
+                        <td>
+                            <div>Occurrences: <strong><%= rule.occurrences %></strong></div>
+                            <div>Submissions: <strong><%= rule.submission_count %></strong></div>
+                            <div>Confidence: <strong><%= Number(rule.confidence || 0).toFixed(2) %></strong></div>
+                        </td>
+                        <td><%= rule.last_seen_at ? new Date(rule.last_seen_at).toLocaleString() : 'N/A' %></td>
+                        <td>
+                            <% if (rule.disabled) { %>
+                                <button class="btn secondary" onclick="toggleRule('<%= rule.key %>', false)">Enable</button>
+                            <% } else { %>
+                                <button class="btn" onclick="toggleRule('<%= rule.key %>', true)">Disable</button>
+                            <% } %>
+                        </td>
+                    </tr>
+                <% }) %>
+                </tbody>
+            </table>
+        <% } %>
+    </div>
+
+    <script>
+        async function toggleRule(ruleKey, disabled) {
+            const reason = disabled ? (prompt('Optional disable reason:') || '') : '';
+            const response = await fetch('/api/learning/rules/toggle', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ ruleKey, disabled, reason }),
+            });
+            const result = await response.json();
+            if (!response.ok) {
+                alert(result.error || 'Failed to update rule');
+                return;
+            }
+            window.location.reload();
+        }
+    </script>
+</body>
+</html>
