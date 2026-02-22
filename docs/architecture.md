@@ -116,11 +116,10 @@ User reviews differences, submits approval
 
 | Port | Service |
 |------|---------|
-| 3001 | db |
+| 3001 | parser |
 | 3002 | ai-review |
-| 3003 | parser |
-| 3004 | notifier |
+| 3003 | notifier |
+| 3004 | db |
 | 3005 | dashboard |
-| 3006 | docx-redliner |
+| 3006 | differ |
 | 3007 | clickup-integration |
-| 3008 | differ |

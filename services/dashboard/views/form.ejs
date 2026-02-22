@@ -537,6 +537,12 @@
             border-color: rgba(139, 115, 85, 0.2);
         }
 
+        .alert-warning {
+            background: rgba(184, 134, 11, 0.1);
+            color: var(--color-warning);
+            border-color: rgba(184, 134, 11, 0.28);
+        }
+
         /* Spinner */
         .spinner {
             border: 2px solid var(--color-border);
@@ -3508,6 +3514,9 @@
                 }
 
                 showAlert('Menu submitted successfully. Sent to ClickUp for team review. You can submit another menu now.', 'success');
+                if (data.clickup && data.clickup.warning) {
+                    showAlert(data.clickup.warning, 'warning');
+                }
                 prepareForNextSubmission();
 
             } catch (error) {

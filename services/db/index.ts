@@ -578,13 +578,41 @@ app.put('/submissions/:id', async (req, res) => {
     try {
         const { id } = req.params;
         const submissions = JSON.parse(await fs.readFile(SUBMISSIONS_DB, 'utf-8'));
+        let resolvedId = id;
 
-        if (!submissions[id]) {
+        // When Supabase is enabled, callers may pass UUID `id`, but local JSON
+        // uses legacy form IDs as keys. Resolve UUID -> local key if needed.
+        if (!submissions[resolvedId]) {
+            const match = Object.entries(submissions).find(([, value]: any) => {
+                return value?.id === id || value?.legacy_id === id;
+            });
+            if (match) {
+                resolvedId = match[0];
+            }
+        }
+
+        if (!submissions[resolvedId]) {
+            if (isSupabaseConfigured()) {
+                // Allow UUID/legacy-id updates even when local JSON entry is missing.
+                try {
+                    await mirrorSubmissionUpdateToSupabase(id, req.body || {});
+                    const supabase = getSupabaseClient();
+                    const idColumn = UUID_REGEX.test(id) ? 'id' : 'legacy_id';
+                    const { data } = await supabase
+                        .from(SUBMISSIONS_TABLE)
+                        .select('*')
+                        .eq(idColumn, id)
+                        .maybeSingle();
+                    return res.status(200).json(data || { id, ...req.body, updated_at: new Date().toISOString() });
+                } catch (supabaseError: any) {
+                    console.error('Supabase-only submission update failed:', supabaseError.message);
+                }
+            }
             return res.status(404).send('Submission not found.');
         }
 
-        const updatedSubmission = { ...submissions[id], ...req.body, updated_at: new Date().toISOString() };
-        submissions[id] = updatedSubmission;
+        const updatedSubmission = { ...submissions[resolvedId], ...req.body, updated_at: new Date().toISOString() };
+        submissions[resolvedId] = updatedSubmission;
 
         await fs.writeFile(SUBMISSIONS_DB, JSON.stringify(submissions, null, 2));
 
