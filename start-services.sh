@@ -64,10 +64,6 @@ CLICKUP_PID=$!
 
 sleep 1
 
-echo "Starting Inbound Email Service (port 3000)..."
-npm start --workspace=@menumanager/inbound-email > logs/inbound-email.log 2>&1 &
-EMAIL_PID=$!
-
 sleep 2
 
 echo ""
@@ -81,11 +77,9 @@ echo "  Notifier: $NOTIFIER_PID"
 echo "  Dashboard: $DASHBOARD_PID"
 echo "  Differ: $DIFFER_PID"
 echo "  ClickUp: $CLICKUP_PID"
-echo "  Inbound Email: $EMAIL_PID"
 echo ""
 echo "Service URLs:"
 echo "  📊 Dashboard: http://localhost:3005"
-echo "  📧 Email Monitor: http://localhost:3000"
 echo "  💾 Database: http://localhost:3004"
 echo ""
 echo "Logs are being written to the logs/ directory"
@@ -99,7 +93,6 @@ echo "$NOTIFIER_PID" >> logs/services.pid
 echo "$DASHBOARD_PID" >> logs/services.pid
 echo "$DIFFER_PID" >> logs/services.pid
 echo "$CLICKUP_PID" >> logs/services.pid
-echo "$EMAIL_PID" >> logs/services.pid
 
 echo ""
 echo "To view logs in real-time:"
@@ -110,5 +103,3 @@ echo "  tail -f logs/notifier.log"
 echo "  tail -f logs/dashboard.log"
 echo "  tail -f logs/differ.log"
 echo "  tail -f logs/clickup-integration.log"
-echo "  tail -f logs/inbound-email.log"
-

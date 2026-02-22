@@ -15,6 +15,7 @@ from html.parser import HTMLParser
 from docx import Document
 from docx.shared import Pt, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.enum.text import WD_BREAK
 
 
 class MenuHTMLParser(HTMLParser):
@@ -148,6 +149,10 @@ def populate_template(template_path: str, form_data: dict, output_path: str):
     menu_content_text = form_data.get('menuContent', '')
     allergens_text = (form_data.get('allergens', '') or '').strip()
 
+    # Force menu body to start on a fresh page regardless of template flow.
+    page_break_paragraph = doc.add_paragraph()
+    page_break_paragraph.add_run().add_break(WD_BREAK.PAGE)
+
     if menu_content_html:
         # Parse HTML content to preserve formatting
         parser = MenuHTMLParser()
@@ -187,27 +192,31 @@ def populate_template(template_path: str, form_data: dict, output_path: str):
 
         print(f"Added {len(lines)} lines of plain text menu content")
 
-    # Append allergen key at the end when provided in the form.
+    # Append allergen legend in a compact, single-line format.
     if allergens_text:
         doc.add_paragraph()
-        heading = doc.add_paragraph()
-        apply_menu_paragraph_style(heading)
-        heading_run = heading.add_run("ALLERGEN KEY")
-        heading_run.font.name = 'Calibri'
-        heading_run.font.size = Pt(10)
-        heading_run.bold = True
 
-        # Support either pipe-delimited single line or multi-line key definitions.
+        # Support either pipe-delimited single line or multi-line key definitions,
+        # then normalize to one line separated by " | ".
         allergen_lines = [line.strip() for line in allergens_text.splitlines() if line.strip()]
         if len(allergen_lines) == 1 and '|' in allergen_lines[0]:
             allergen_lines = [part.strip() for part in allergen_lines[0].split('|') if part.strip()]
+        normalized_allergen_line = " | ".join(allergen_lines)
 
-        for line in allergen_lines:
-            para = doc.add_paragraph()
-            apply_menu_paragraph_style(para)
-            run = para.add_run(line)
-            run.font.name = 'Calibri'
-            run.font.size = Pt(10)
+        allergen_para = doc.add_paragraph()
+        apply_menu_paragraph_style(allergen_para)
+        allergen_run = allergen_para.add_run(normalized_allergen_line)
+        allergen_run.font.name = 'Calibri'
+        allergen_run.font.size = Pt(10)
+
+        # Add the raw-consumption notice underneath the allergen legend.
+        raw_notice_para = doc.add_paragraph()
+        apply_menu_paragraph_style(raw_notice_para)
+        raw_notice_run = raw_notice_para.add_run(
+            "*consuming raw or undercooked meats, poultry, seafood, shellfish, or eggs may increase your risk of foodborne illness."
+        )
+        raw_notice_run.font.name = 'Calibri'
+        raw_notice_run.font.size = Pt(10)
 
     # Save the populated document
     print(f"Saving document to: {output_path}")

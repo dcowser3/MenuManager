@@ -1027,41 +1027,65 @@ app.post('/api/form/submit', async (req, res) => {
                 status: 'pending_human_review'
             });
         }
-        // Create ClickUp task (fire-and-forget)
-        axios_1.default.post('http://localhost:3007/create-task', {
-            submissionId,
-            submitterName,
-            submitterEmail,
-            submitterJobTitle,
-            projectName,
-            property,
-            width,
-            height,
-            cropMarks,
-            bleedMarks,
-            fileSizeLimit,
-            fileSizeLimitMb,
-            fileDeliveryNotes,
-            orientation,
-            menuType,
-            templateType,
-            dateNeeded,
-            hotelName,
-            cityCountry,
-            assetType,
-            docxPath,
-            submissionMode,
-            revisionSource,
-            revisionBaseSubmissionId,
-            revisionBaselineDocPath: persistedBaselineDocPath,
-            revisionBaselineFileName,
-            chefPersistentDiff,
-            criticalOverrides,
-        }).catch(err => console.error('Failed to create ClickUp task:', err.message));
+        // Create ClickUp task (synchronous so we can surface upload issues to chef)
+        let clickupWarning;
+        let clickupTaskId;
+        try {
+            const clickupResponse = await axios_1.default.post('http://localhost:3007/create-task', {
+                submissionId,
+                submitterName,
+                submitterEmail,
+                submitterJobTitle,
+                projectName,
+                property,
+                width,
+                height,
+                cropMarks,
+                bleedMarks,
+                fileSizeLimit,
+                fileSizeLimitMb,
+                fileDeliveryNotes,
+                orientation,
+                menuType,
+                templateType,
+                dateNeeded,
+                hotelName,
+                cityCountry,
+                assetType,
+                docxPath,
+                filename: `${projectName}_Menu.docx`,
+                submissionMode,
+                revisionSource,
+                revisionBaseSubmissionId,
+                revisionBaselineDocPath: persistedBaselineDocPath,
+                revisionBaselineFileName,
+                chefPersistentDiff,
+                criticalOverrides,
+                approvals,
+            });
+            const clickupData = clickupResponse.data || {};
+            clickupTaskId = clickupData.taskId;
+            if (clickupData.skipped) {
+                clickupWarning = 'Menu submitted, but ClickUp integration is not configured yet. If this persists, please email the Word document to the design team.';
+            }
+            else if (clickupData.warning || clickupData.attachmentUploadFailed || clickupData.baselineUploadFailed) {
+                const supportEmail = process.env.INTERNAL_REVIEWER_EMAIL || 'the design team';
+                clickupWarning = `Menu submitted, but we could not upload the Word document to ClickUp. If this persists, please email the Word document directly to ${supportEmail}.`;
+            }
+        }
+        catch (clickupError) {
+            console.error('Failed to create ClickUp task:', clickupError.response?.data || clickupError.message);
+            const supportEmail = process.env.INTERNAL_REVIEWER_EMAIL || 'the design team';
+            clickupWarning = `Menu submitted, but we could not create your ClickUp task. If this persists, please email the Word document directly to ${supportEmail}.`;
+        }
         res.json({
             success: true,
             submissionId: submissionId,
-            message: 'Menu submitted successfully'
+            message: 'Menu submitted successfully',
+            clickup: {
+                taskId: clickupTaskId,
+                warning: clickupWarning,
+            },
         });
     }
     catch (error) {

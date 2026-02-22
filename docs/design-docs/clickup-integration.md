@@ -34,6 +34,8 @@ When a chef submits a menu, a ClickUp task is automatically created with the gen
 
 One-time setup via `POST /webhook/register`. Requires `CLICKUP_TEAM_ID` and `CLICKUP_WEBHOOK_URL` env vars.
 
+If ClickUp returns a `secret` in the webhook registration response, set it as `CLICKUP_WEBHOOK_SECRET` so inbound webhook signatures are verified.
+
 ## Environment Variables
 
 See [docs/environment.md](../environment.md#clickup-integration) for the full list of ClickUp-related env vars and their descriptions.
