@@ -2,9 +2,13 @@ import express from 'express';
 import { promises as fs } from 'fs';
 import mammoth from 'mammoth';
 import * as path from 'path';
+import * as fsSync from 'fs';
+import { exec } from 'child_process';
+import { promisify } from 'util';
 
 const app = express();
 const port = 3006;
+const execAsync = promisify(exec);
 
 const DIFFERENCES_DIR = path.join(__dirname, '..', '..', '..', 'tmp', 'learning');
 const TRAINING_DATA_FILE = path.join(DIFFERENCES_DIR, 'training_data.jsonl');
@@ -12,6 +16,39 @@ const LEARNED_RULES_FILE = path.join(DIFFERENCES_DIR, 'learned_rules.json');
 const RULE_OVERRIDES_FILE = path.join(DIFFERENCES_DIR, 'rule_overrides.json');
 const MIN_OCCURRENCES = Number(process.env.LEARNING_MIN_OCCURRENCES || 2);
 const MAX_RULES_IN_OVERLAY = Number(process.env.LEARNING_MAX_OVERLAY_RULES || 25);
+
+function getRepoRoot(): string {
+    const candidates = [
+        path.resolve(__dirname, '..', '..'),
+        path.resolve(__dirname, '..', '..', '..'),
+    ];
+
+    for (const candidate of candidates) {
+        if (fsSync.existsSync(path.join(candidate, 'services')) && fsSync.existsSync(path.join(candidate, 'samples'))) {
+            return candidate;
+        }
+    }
+
+    return candidates[0];
+}
+
+async function extractDocxCleanText(filePath: string): Promise<string> {
+    const repoRoot = getRepoRoot();
+    const scriptPath = path.join(repoRoot, 'services', 'docx-redliner', 'extract_clean_menu_text.py');
+    const venvPython = path.join(repoRoot, 'services', 'docx-redliner', 'venv', 'bin', 'python');
+
+    let command = `python3 "${scriptPath}" "${filePath}"`;
+    if (fsSync.existsSync(venvPython)) {
+        command = `"${venvPython}" "${scriptPath}" "${filePath}"`;
+    }
+
+    const { stdout } = await execAsync(command, { timeout: 30000 });
+    const payload = JSON.parse((stdout || '{}').trim() || '{}');
+    if (payload.error) {
+        throw new Error(payload.error);
+    }
+    return String(payload.cleaned_menu_content || payload.menu_content || '').trim();
+}
 
 type ReplacementSignal = {
     from: string;
@@ -97,6 +134,10 @@ async function initDiffer() {
             RULE_OVERRIDES_FILE,
             JSON.stringify({ disabled: {} }, null, 2)
         );
+
+        // Rebuild snapshot from historical training data on boot so dashboard stats
+        // don't appear as zero after service restarts.
+        await rebuildLearnedRules();
     } catch (error) {
         console.error('Failed to initialize differ:', error);
     }
@@ -286,6 +327,16 @@ app.post('/learning/overrides', async (req, res) => {
 });
 
 async function extractText(filePath: string): Promise<string> {
+    const isDocx = filePath.toLowerCase().endsWith('.docx');
+    if (isDocx) {
+        try {
+            const cleaned = await extractDocxCleanText(filePath);
+            if (cleaned) return cleaned;
+        } catch (error: any) {
+            console.warn(`Differ fallback to Mammoth for ${path.basename(filePath)}: ${error.message}`);
+        }
+    }
+
     const buffer = await fs.readFile(filePath);
     const result = await mammoth.extractRawText({ buffer });
     return result.value;

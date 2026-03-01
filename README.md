@@ -45,11 +45,11 @@ This project is a **monorepo** using npm workspaces with independent microservic
 ```
 services/
 ├── ai-review/        # Two-tier AI review (QA + corrections)
+├── clickup-integration/ # ClickUp API + webhook + corrections email
 ├── dashboard/        # Web interface for reviewers + submission form
 ├── db/               # Database service
 ├── differ/           # AI vs human comparison for training
 ├── docx-redliner/    # DOCX track changes
-├── notifier/         # Email notifications (SMTP)
 ├── parser/           # DOCX validation and extraction
 └── supabase-client/  # Shared Supabase database client
 ```
@@ -135,7 +135,7 @@ Start individual services:
 npm start --workspace=@menumanager/dashboard   # Dashboard + Form at http://localhost:3005
 npm start --workspace=@menumanager/parser      # Template validation
 npm start --workspace=@menumanager/ai-review   # AI review
-npm start --workspace=@menumanager/notifier    # Notifications
+npm start --workspace=@menumanager/clickup-integration # ClickUp + notifications
 npm start --workspace=@menumanager/db          # Database
 ```
 

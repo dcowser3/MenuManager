@@ -16,6 +16,7 @@ from docx import Document
 from docx.shared import Pt, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.enum.text import WD_BREAK
+from docx.enum.text import WD_COLOR_INDEX
 
 
 class MenuHTMLParser(HTMLParser):
@@ -25,7 +26,13 @@ class MenuHTMLParser(HTMLParser):
         super().__init__()
         self.lines = []
         self.current_line = []
-        self.current_tags = []
+        self.format_stack = [{
+            'bold': False,
+            'italic': False,
+            'underline': False,
+            'strike': False,
+            'highlight': False
+        }]
 
     def handle_starttag(self, tag, attrs):
         if tag in ['p', 'br']:
@@ -33,11 +40,31 @@ class MenuHTMLParser(HTMLParser):
             if self.current_line:
                 self.lines.append(self.current_line)
                 self.current_line = []
-        self.current_tags.append(tag)
+
+        current = dict(self.format_stack[-1])
+        attr_map = dict(attrs or [])
+        class_attr = attr_map.get('class', '')
+        class_names = set(class_attr.split()) if class_attr else set()
+
+        if tag in ['strong', 'b']:
+            current['bold'] = True
+        elif tag in ['em', 'i']:
+            current['italic'] = True
+        elif tag == 'u':
+            current['underline'] = True
+        elif tag in ['s', 'del', 'strike']:
+            current['strike'] = True
+        elif tag == 'span':
+            if 'persistent-del' in class_names:
+                current['strike'] = True
+            if 'persistent-ins' in class_names:
+                current['highlight'] = True
+
+        self.format_stack.append(current)
 
     def handle_endtag(self, tag):
-        if self.current_tags and self.current_tags[-1] == tag:
-            self.current_tags.pop()
+        if len(self.format_stack) > 1:
+            self.format_stack.pop()
         if tag == 'p':
             if self.current_line:
                 self.lines.append(self.current_line)
@@ -45,16 +72,15 @@ class MenuHTMLParser(HTMLParser):
 
     def handle_data(self, data):
         if data.strip():
-            # Determine formatting based on current tags
-            is_bold = 'strong' in self.current_tags or 'b' in self.current_tags
-            is_italic = 'em' in self.current_tags or 'i' in self.current_tags
-            is_underline = 'u' in self.current_tags
+            current = self.format_stack[-1]
 
             self.current_line.append({
                 'text': data,
-                'bold': is_bold,
-                'italic': is_italic,
-                'underline': is_underline
+                'bold': current['bold'],
+                'italic': current['italic'],
+                'underline': current['underline'],
+                'strike': current['strike'],
+                'highlight': current['highlight']
             })
 
     def get_lines(self):
@@ -148,6 +174,7 @@ def populate_template(template_path: str, form_data: dict, output_path: str):
     menu_content_html = form_data.get('menuContentHtml', '')
     menu_content_text = form_data.get('menuContent', '')
     allergens_text = (form_data.get('allergens', '') or '').strip()
+    should_add_raw_notice = bool(form_data.get('shouldAddRawNotice', False))
 
     # Force menu body to start on a fresh page regardless of template flow.
     page_break_paragraph = doc.add_paragraph()
@@ -172,6 +199,9 @@ def populate_template(template_path: str, form_data: dict, output_path: str):
                     run.bold = part['bold']
                     run.italic = part['italic']
                     run.underline = part['underline']
+                    run.font.strike = bool(part.get('strike'))
+                    if part.get('highlight'):
+                        run.font.highlight_color = WD_COLOR_INDEX.YELLOW
             # Empty paragraph creates spacing
 
         print(f"Added {len(lines)} lines of formatted menu content")
@@ -209,14 +239,15 @@ def populate_template(template_path: str, form_data: dict, output_path: str):
         allergen_run.font.name = 'Calibri'
         allergen_run.font.size = Pt(10)
 
-        # Add the raw-consumption notice underneath the allergen legend.
-        raw_notice_para = doc.add_paragraph()
-        apply_menu_paragraph_style(raw_notice_para)
-        raw_notice_run = raw_notice_para.add_run(
-            "*consuming raw or undercooked meats, poultry, seafood, shellfish, or eggs may increase your risk of foodborne illness."
-        )
-        raw_notice_run.font.name = 'Calibri'
-        raw_notice_run.font.size = Pt(10)
+        if should_add_raw_notice:
+            # Add the raw-consumption notice underneath the allergen legend when requested.
+            raw_notice_para = doc.add_paragraph()
+            apply_menu_paragraph_style(raw_notice_para)
+            raw_notice_run = raw_notice_para.add_run(
+                "*consuming raw or undercooked meats, poultry, seafood, shellfish, or eggs may increase your risk of foodborne illness."
+            )
+            raw_notice_run.font.name = 'Calibri'
+            raw_notice_run.font.size = Pt(10)
 
     # Save the populated document
     print(f"Saving document to: {output_path}")

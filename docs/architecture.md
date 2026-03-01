@@ -5,12 +5,11 @@
 ```
 services/
 ├── ai-review/            # Two-tier AI review (QA + corrections)
-├── clickup-integration/  # ClickUp task creation + webhook handler (port 3007)
+├── clickup-integration/  # ClickUp task creation + webhook handler + notifications (port 3007)
 ├── dashboard/            # Web interface + submission form (Express + EJS)
 ├── db/                   # Database service (JSON-based, migrating to Supabase) + submitter profiles
 ├── differ/               # Compares AI draft vs human-approved for training
 ├── docx-redliner/        # DOCX redlining/track changes (Python)
-├── notifier/             # Email notifications (SMTP)
 ├── parser/               # DOCX validation and text extraction
 └── supabase-client/      # Shared Supabase database client (library)
 ```
@@ -79,7 +78,7 @@ ClickUp sends taskStatusUpdated webhook
   ├─ PATCH /submissions/:id (db service) — update status to 'approved', set final_path + approved_menu_content
   ├─ POST /assets (db service) — store approved_docx metadata
   │
-  ├─ Fire-and-forget: POST notifier — corrections_ready email with DOCX attached
+  ├─ Fire-and-forget: internal email send — corrections_ready email with DOCX attached
   └─ Fire-and-forget: POST differ — compare AI draft vs corrected file (training data)
 ```
 
@@ -106,9 +105,8 @@ User reviews differences, submits approval
 ## Dependency Directions
 
 - **dashboard** depends on: db, ai-review, parser, clickup-integration, docx-redliner (Python scripts)
-- **clickup-integration** depends on: db, notifier, differ, ClickUp API
+- **clickup-integration** depends on: db, differ, ClickUp API, SMTP server
 - **ai-review** depends on: OpenAI API
-- **notifier** depends on: SMTP server
 - **db** depends on: Supabase (optional), local JSON files (fallback)
 - **supabase-client** is a shared library used by db service
 
@@ -118,7 +116,6 @@ User reviews differences, submits approval
 |------|---------|
 | 3001 | parser |
 | 3002 | ai-review |
-| 3003 | notifier |
 | 3004 | db |
 | 3005 | dashboard |
 | 3006 | differ |

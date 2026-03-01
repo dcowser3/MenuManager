@@ -40,12 +40,6 @@ AI_PID=$!
 
 sleep 1
 
-echo "Starting Notifier Service (port 3003)..."
-npm start --workspace=@menumanager/notifier > logs/notifier.log 2>&1 &
-NOTIFIER_PID=$!
-
-sleep 1
-
 echo "Starting Dashboard Service (port 3005)..."
 npm start --workspace=@menumanager/dashboard > logs/dashboard.log 2>&1 &
 DASHBOARD_PID=$!
@@ -73,7 +67,6 @@ echo "Process IDs:"
 echo "  DB: $DB_PID"
 echo "  Parser: $PARSER_PID"
 echo "  AI Review: $AI_PID"
-echo "  Notifier: $NOTIFIER_PID"
 echo "  Dashboard: $DASHBOARD_PID"
 echo "  Differ: $DIFFER_PID"
 echo "  ClickUp: $CLICKUP_PID"
@@ -89,7 +82,6 @@ echo "Saving PIDs to logs/services.pid..."
 echo "$DB_PID" > logs/services.pid
 echo "$PARSER_PID" >> logs/services.pid
 echo "$AI_PID" >> logs/services.pid
-echo "$NOTIFIER_PID" >> logs/services.pid
 echo "$DASHBOARD_PID" >> logs/services.pid
 echo "$DIFFER_PID" >> logs/services.pid
 echo "$CLICKUP_PID" >> logs/services.pid
@@ -99,7 +91,6 @@ echo "To view logs in real-time:"
 echo "  tail -f logs/db.log"
 echo "  tail -f logs/parser.log"
 echo "  tail -f logs/ai-review.log"
-echo "  tail -f logs/notifier.log"
 echo "  tail -f logs/dashboard.log"
 echo "  tail -f logs/differ.log"
 echo "  tail -f logs/clickup-integration.log"

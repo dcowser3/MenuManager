@@ -49,6 +49,7 @@ const util_1 = require("util");
 const supabase_client_1 = require("@menumanager/supabase-client");
 const execAsync = (0, util_1.promisify)(child_process_1.exec);
 const DEFAULT_ALLERGEN_KEY = 'C crustaceans | D dairy | E egg | F fish | G gluten | N nuts | V vegetarian | VG vegan';
+const RAW_NOTICE_PATTERN = /\*?\s*consuming raw or undercooked meats,\s*poultry,\s*seafood,\s*shellfish,\s*or eggs may increase your risk of foodborne illness\.?/i;
 function getRepoRoot() {
     const candidates = [
         path.resolve(__dirname, '..', '..'), // ts-node from services/dashboard
@@ -194,7 +195,8 @@ app.get('/submit/:token', (req, res) => {
  */
 app.get('/form', (req, res) => {
     res.render('form', {
-        title: 'Submit New Menu'
+        title: 'Submit New Menu',
+        defaultAllergenKey: DEFAULT_ALLERGEN_KEY
     });
 });
 /**
@@ -478,14 +480,24 @@ app.get('/training/download-prompt/:sessionId', async (req, res) => {
  */
 app.get('/learning', async (_req, res) => {
     try {
-        const [rulesResult, overridesResult, overlayResult] = await Promise.all([
-            axios_1.default.get('http://localhost:3006/learning/rules', { timeout: 2500 }).catch(() => ({ data: {} })),
-            axios_1.default.get('http://localhost:3006/learning/overrides', { timeout: 2500 }).catch(() => ({ data: { disabled: {} } })),
-            axios_1.default.get('http://localhost:3006/learning/overlay', { timeout: 2500 }).catch(() => ({ data: { overlay: '' } })),
+        const [rulesResult, overridesResult, overlayResult, trainingResult] = await Promise.all([
+            axios_1.default.get('http://localhost:3006/learning/rules', { timeout: 2500 })
+                .then((r) => ({ ok: true, data: r.data, error: '' }))
+                .catch((e) => ({ ok: false, data: {}, error: e?.message || 'request failed' })),
+            axios_1.default.get('http://localhost:3006/learning/overrides', { timeout: 2500 })
+                .then((r) => ({ ok: true, data: r.data, error: '' }))
+                .catch((e) => ({ ok: false, data: { disabled: {} }, error: e?.message || 'request failed' })),
+            axios_1.default.get('http://localhost:3006/learning/overlay', { timeout: 2500 })
+                .then((r) => ({ ok: true, data: r.data, error: '' }))
+                .catch((e) => ({ ok: false, data: { overlay: '' }, error: e?.message || 'request failed' })),
+            axios_1.default.get('http://localhost:3006/training-data', { timeout: 2500 })
+                .then((r) => ({ ok: true, data: r.data, error: '' }))
+                .catch((e) => ({ ok: false, data: { count: 0, data: [] }, error: e?.message || 'request failed' })),
         ]);
         const rulesData = rulesResult.data || {};
         const overrides = overridesResult.data?.disabled || {};
         const learnedOverlay = overlayResult?.data?.overlay || '';
+        const trainingData = trainingResult.data || { count: 0, data: [] };
         const qaPromptPath = path.join(getRepoRoot(), 'sop-processor', 'qa_prompt.txt');
         const basePrompt = await fs_1.promises.readFile(qaPromptPath, 'utf-8');
         const effectivePrompt = learnedOverlay ? `${basePrompt}\n\n${learnedOverlay}` : basePrompt;
@@ -506,6 +518,15 @@ app.get('/learning', async (_req, res) => {
             ...decorate('weak', rulesData.weak_rules || []),
             ...decorate('conflicted', rulesData.conflicted_rules || []),
         ];
+        const recentSubmissions = (trainingData.data || []).slice(-25).reverse();
+        const differStatus = {
+            rulesOk: !!rulesResult.ok,
+            overridesOk: !!overridesResult.ok,
+            overlayOk: !!overlayResult.ok,
+            trainingOk: !!trainingResult.ok,
+            rulesError: rulesResult.error || '',
+            trainingError: trainingResult.error || '',
+        };
         res.render('learning', {
             title: 'Learning Rules',
             generatedAt: rulesData.generated_at || null,
@@ -513,6 +534,8 @@ app.get('/learning', async (_req, res) => {
             totalEntries: rulesData.total_entries_analyzed || 0,
             totalRules: rulesData.total_rules || 0,
             rules,
+            recentSubmissions,
+            differStatus,
             basePrompt,
             learnedOverlay,
             effectivePrompt,
@@ -754,20 +777,26 @@ Note: Use ONLY these allergen codes when checking allergen compliance. Do not us
         console.log('=== END RAW FEEDBACK ===');
         // Parse the new format: corrected menu + suggestions
         const parsed = parseAIResponse(feedback, textForReview);
-        const reconciledSuggestions = reconcileCriticalSuggestionsAgainstCorrectedMenu(parsed.correctedMenu, parsed.suggestions);
+        const correctedMenuSanitized = stripRawNoticeLines(parsed.correctedMenu);
+        const originalMenuSanitized = stripRawNoticeLines(menuContent);
+        const reconciledSuggestions = reconcileCriticalSuggestionsAgainstCorrectedMenu(correctedMenuSanitized, parsed.suggestions);
         console.log('=== PARSED RESPONSE ===');
-        console.log('Corrected menu length:', parsed.correctedMenu.length);
+        console.log('Corrected menu length:', correctedMenuSanitized.length);
         console.log('Suggestions count:', parsed.suggestions.length);
         console.log('Reconciled suggestions count:', reconciledSuggestions.length);
-        console.log('Has changes:', parsed.correctedMenu !== menuContent);
+        console.log('Has changes:', correctedMenuSanitized !== originalMenuSanitized);
         console.log('===========================');
-        const hasCriticalErrors = reconciledSuggestions.some(s => s.severity === 'critical');
+        let finalSuggestions = reconciledSuggestions;
+        if (menuType === 'prix_fixe') {
+            finalSuggestions = enforcePrixFixeCriticalChecks(menuContent, finalSuggestions);
+        }
+        const hasCriticalErrors = finalSuggestions.some(s => s.severity === 'critical');
         res.json({
             success: true,
             originalMenu: menuContent,
-            correctedMenu: changedOnlyMode ? menuContent : parsed.correctedMenu,
-            suggestions: reconciledSuggestions,
-            hasChanges: changedOnlyMode ? false : parsed.correctedMenu !== menuContent,
+            correctedMenu: changedOnlyMode ? menuContent : correctedMenuSanitized,
+            suggestions: finalSuggestions,
+            hasChanges: changedOnlyMode ? false : correctedMenuSanitized !== originalMenuSanitized,
             hasCriticalErrors,
             reviewMode: changedOnlyMode ? 'changed_only' : 'full',
             changedLineCount
@@ -781,6 +810,56 @@ Note: Use ONLY these allergen codes when checking allergen compliance. Do not us
         });
     }
 });
+function enforcePrixFixeCriticalChecks(menuContent, suggestions) {
+    const existing = [...(suggestions || [])];
+    const nonEmptyLines = (menuContent || '').split('\n').map((l) => l.trim()).filter(Boolean);
+    const topWindow = nonEmptyLines.slice(0, 5);
+    const topPricePattern = /^\$?\d+(?:[.,]\d+)?(?:\s*\|\s*\$?\d+(?:[.,]\d+)?)?(?:\s*(?:pp|per\s*person|wine\s*pairing))?$/i;
+    const hasTopPrixFixePrice = topWindow.some((line) => topPricePattern.test(line));
+    const headingPattern = /\b(appetizers?|starters?|specialties|mains?|entrees?|desserts?|first course|second course|third course|course)\b/i;
+    const headingIndexes = nonEmptyLines
+        .map((line, idx) => ({ line, idx }))
+        .filter(({ line }) => headingPattern.test(line));
+    const hasCourseHeadings = headingIndexes.length >= 2;
+    let missingCourseNumbers = false;
+    if (hasCourseHeadings) {
+        missingCourseNumbers = headingIndexes.some(({ idx, line }) => {
+            const thisLineNumbered = /^\d+\b/.test(line);
+            const prevLine = idx > 0 ? nonEmptyLines[idx - 1] : '';
+            const prevLineNumberOnly = /^\d+$/.test(prevLine);
+            return !(thisLineNumbered || prevLineNumberOnly);
+        });
+    }
+    const hasTopPriceSuggestion = existing.some((s) => {
+        const combined = `${s.type || ''} ${s.description || ''} ${s.recommendation || ''}`.toLowerCase();
+        return /prix\s*fixe/.test(combined) && /price.*top|top.*price|single.*price/.test(combined);
+    });
+    const hasCourseNumberSuggestion = existing.some((s) => {
+        const combined = `${s.type || ''} ${s.description || ''} ${s.recommendation || ''}`.toLowerCase();
+        return /course numbering|numbered courses|course number/.test(combined);
+    });
+    if (!hasTopPrixFixePrice && !hasTopPriceSuggestion) {
+        existing.push({
+            type: 'PRICING STRUCTURE',
+            confidence: 'high',
+            severity: 'critical',
+            menuItem: 'Prix Fixe Menu',
+            description: 'Prix fixe menu is missing a single top-level price at the top of the menu.',
+            recommendation: 'Add a single prix fixe price at the top (optionally with pairing price, e.g., "185 | 85 wine pairing").'
+        });
+    }
+    if (hasCourseHeadings && missingCourseNumbers && !hasCourseNumberSuggestion) {
+        existing.push({
+            type: 'COURSE NUMBERING',
+            confidence: 'high',
+            severity: 'critical',
+            menuItem: 'Course Headings',
+            description: 'Prix fixe courses are present but not numbered.',
+            recommendation: 'Prefix course headings with numbers (1, 2, 3...) or place a number line directly above each course heading.'
+        });
+    }
+    return existing;
+}
 function extractChangedLinesForReview(baselineText, currentText) {
     const baseLines = baselineText.split('\n').map(l => l.trim()).filter(Boolean);
     const currLines = currentText.split('\n').map(l => l.trim()).filter(Boolean);
@@ -888,7 +967,7 @@ function reconcileCriticalSuggestionsAgainstCorrectedMenu(correctedMenu, suggest
  */
 app.post('/api/form/submit', async (req, res) => {
     try {
-        const { submitterName, submitterEmail, submitterJobTitle, projectName, property, width, height, cropMarks, bleedMarks, fileSizeLimit, fileSizeLimitMb, fileDeliveryNotes, orientation, menuType, templateType, dateNeeded, hotelName, cityCountry, assetType, allergens, menuContent, menuContentHtml, approvals, criticalOverrides, submissionMode, revisionBaseSubmissionId, revisionSource, revisionBaselineDocPath, revisionBaselineFileName, baseApprovedMenuContent, chefPersistentDiff } = req.body;
+        const { submitterName, submitterEmail, submitterJobTitle, projectName, property, width, height, cropMarks, bleedMarks, fileSizeLimit, fileSizeLimitMb, fileDeliveryNotes, orientation, menuType, templateType, dateNeeded, hotelName, cityCountry, assetType, allergens, containsRawUndercooked, suppressRawNotice, menuContent, menuContentHtml, persistentDiffHtml, approvals, criticalOverrides, submissionMode, revisionBaseSubmissionId, revisionSource, revisionBaselineDocPath, revisionBaselineFileName, baseApprovedMenuContent, chefPersistentDiff } = req.body;
         // Validate required fields
         if (!submitterName || !submitterEmail || !submitterJobTitle || !projectName || !property || !width || !height || !orientation || !templateType || !dateNeeded || !cityCountry || !assetType || !menuContent) {
             return res.status(400).json({ error: 'All fields are required' });
@@ -901,6 +980,16 @@ app.post('/api/form/submit', async (req, res) => {
             ? `${width} x ${height} inches`
             : `${width} x ${height} pixels`;
         const effectiveAllergens = (allergens || '').trim() || DEFAULT_ALLERGEN_KEY;
+        const normalizedMenuContent = stripRawNoticeLines(menuContent);
+        const normalizedMenuContentHtml = stripRawNoticeFromHtml(menuContentHtml || '');
+        const normalizedPersistentDiffHtml = stripRawNoticeFromHtml(persistentDiffHtml || '');
+        const docxMenuContentHtml = submissionMode === 'modification' && normalizedPersistentDiffHtml
+            ? normalizedPersistentDiffHtml
+            : normalizedMenuContentHtml;
+        const selectedRawFlag = `${containsRawUndercooked}` === 'true' || containsRawUndercooked === true;
+        const suppressedRawFlag = `${suppressRawNotice}` === 'true' || suppressRawNotice === true;
+        const detectedRawFlag = detectRawUndercookedContent(normalizedMenuContent);
+        const shouldAddRawNotice = !suppressedRawFlag && (selectedRawFlag || detectedRawFlag);
         // Approvals are attestations from the submitter - we store them as-is
         // Frontend enforces that all required approvals are marked "Yes" before submission
         // Generate unique submission ID
@@ -914,8 +1003,10 @@ app.post('/api/form/submit', async (req, res) => {
             menuType: menuType || 'standard',
             templateType: templateType || 'food',
             dateNeeded,
-            menuContent,
-            allergens: effectiveAllergens
+            menuContent: normalizedMenuContent,
+            menuContentHtml: docxMenuContentHtml,
+            allergens: effectiveAllergens,
+            shouldAddRawNotice
         });
         console.log(`📝 Generated document for submission ${submissionId}: ${docxPath}`);
         let persistedBaselineDocPath = null;
@@ -964,8 +1055,8 @@ app.post('/api/form/submit', async (req, res) => {
             file_delivery_notes: fileDeliveryNotes || null,
             approvals: JSON.stringify(approvals),
             critical_overrides: JSON.stringify(criticalOverrides || []),
-            menu_content: menuContent,
-            menu_content_html: menuContentHtml || null,
+            menu_content: normalizedMenuContent,
+            menu_content_html: normalizedMenuContentHtml || null,
             allergens: effectiveAllergens,
             submission_mode: submissionMode || 'new',
             revision_source: revisionSource || null,
@@ -1102,7 +1193,7 @@ app.post('/api/form/submit', async (req, res) => {
 function parseAIResponse(feedback, originalMenu) {
     // Extract corrected menu between markers
     const correctedMenuMatch = feedback.match(/=== CORRECTED MENU ===\s*\n([\s\S]*?)\n=== END CORRECTED MENU ===/);
-    const correctedMenu = correctedMenuMatch ? correctedMenuMatch[1].trim() : originalMenu;
+    const correctedMenuRaw = correctedMenuMatch ? correctedMenuMatch[1].trim() : originalMenu;
     // Extract suggestions JSON between markers
     const suggestionsMatch = feedback.match(/=== SUGGESTIONS ===\s*\n([\s\S]*?)\n=== END SUGGESTIONS ===/);
     let suggestions = [];
@@ -1119,17 +1210,29 @@ function parseAIResponse(feedback, originalMenu) {
     }
     // Normalize severity on all suggestions
     suggestions = suggestions.map(s => {
+        const type = (s.type || '').toString().trim().toLowerCase();
+        const descLower = (s.description || '').toLowerCase();
+        const recLower = (s.recommendation || '').toLowerCase();
+        const combined = `${descLower} ${recLower}`;
         // Default missing severity to "normal"
         if (!s.severity) {
             s.severity = 'normal';
         }
+        const isPrixFixeTopPriceIssue = /prix\s*fixe/.test(combined) &&
+            /(price at the top|single price at the top|include a prix fixe price at the top|top of the menu)/.test(combined);
+        const isCourseNumberingIssue = type === 'course numbering' ||
+            (/prix\s*fixe/.test(combined) && /course number|numbered courses|preceded by its course number/.test(combined));
         // Force critical severity for known critical types (safety net)
-        if (s.type === 'Missing Price' || s.type === 'Incomplete Dish Name') {
+        if (s.type === 'Missing Price' ||
+            s.type === 'Incomplete Dish Name' ||
+            type === 'course progression' ||
+            type === 'pricing structure' ||
+            isPrixFixeTopPriceIssue ||
+            isCourseNumberingIssue) {
             s.severity = 'critical';
         }
         // Fallback regex: if description mentions missing price/dish name but type/severity wasn't set
         if (s.severity !== 'critical') {
-            const descLower = (s.description || '').toLowerCase();
             if (/missing\s+price|no\s+price|price\s+is\s+missing/.test(descLower) && s.type !== 'Missing Price') {
                 s.type = 'Missing Price';
                 s.severity = 'critical';
@@ -1141,10 +1244,84 @@ function parseAIResponse(feedback, originalMenu) {
         }
         return s;
     });
+    const correctedMenu = normalizeRawAsteriskPlacement(correctedMenuRaw);
     return {
         correctedMenu,
         suggestions
     };
+}
+function normalizeRawAsteriskPlacement(text) {
+    const lines = (text || '').split('\n');
+    return lines
+        .map((line) => normalizeRawAsteriskPlacementForLine(line))
+        .join('\n');
+}
+function normalizeRawAsteriskPlacementForLine(line) {
+    const original = line || '';
+    const trimmed = original.trim();
+    if (!trimmed)
+        return original;
+    if (RAW_NOTICE_PATTERN.test(trimmed))
+        return original;
+    if (!trimmed.includes('*'))
+        return original;
+    // Remove all raw markers first; we'll reinsert exactly one at canonical position.
+    let working = trimmed.replace(/\*/g, '').replace(/\s{2,}/g, ' ').trim();
+    // Skip obvious non-dish lines (titles/legends).
+    if (/^[A-Za-zÀ-ÖØ-öø-ÿ0-9 '&\-]+$/.test(working) && !working.includes(',')) {
+        return original;
+    }
+    if (working.includes(' | ') && /[A-Za-z]{2,}\s+[A-Za-z]{2,}/.test(working)) {
+        return original;
+    }
+    let trailingPrice = '';
+    let trailingAllergens = '';
+    const priceMatch = working.match(/\s+(\$?\d+(?:[.,]\d+)?(?:\s*\|\s*\d+(?:[.,]\d+)?)?)\s*$/);
+    if (priceMatch) {
+        trailingPrice = priceMatch[1];
+        working = working.slice(0, priceMatch.index).trim();
+    }
+    const allergenMatch = working.match(/\s+([A-Z]{1,3}(?:,[A-Z]{1,3})*)\s*$/);
+    if (allergenMatch) {
+        trailingAllergens = allergenMatch[1];
+        working = working.slice(0, allergenMatch.index).trim();
+    }
+    // If we extracted any suffix, place marker before suffix; otherwise keep at line end.
+    if (trailingAllergens || trailingPrice) {
+        return `${working} *${trailingAllergens ? ` ${trailingAllergens}` : ''}${trailingPrice ? ` ${trailingPrice}` : ''}`.trim();
+    }
+    return `${working}*`;
+}
+function stripRawNoticeLines(text) {
+    return (text || '')
+        .split('\n')
+        .map((line) => line.trim())
+        .filter((line) => line && !RAW_NOTICE_PATTERN.test(line))
+        .join('\n');
+}
+function stripRawNoticeFromHtml(html) {
+    return (html || '').replace(/<p[^>]*>\s*\*?\s*consuming raw or undercooked meats,\s*poultry,\s*seafood,\s*shellfish,\s*or eggs may increase your risk of foodborne illness\.?\s*<\/p>/gi, '');
+}
+function detectRawUndercookedContent(text) {
+    const normalized = (text || '').toLowerCase();
+    if (!normalized.trim())
+        return false;
+    if (/\*/.test(normalized))
+        return true;
+    const terms = [
+        'raw',
+        'undercooked',
+        'carpaccio',
+        'tartare',
+        'ceviche',
+        'tiradito',
+        'crudo',
+        'sashimi',
+        'oyster',
+        'oysters',
+        'rare'
+    ];
+    return terms.some((term) => normalized.includes(term));
 }
 /**
  * OLD: Parse AI feedback into structured suggestions with confidence levels (DEPRECATED - keeping for fallback)

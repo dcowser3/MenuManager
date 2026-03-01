@@ -35,6 +35,8 @@ This feature captures human reviewer corrections and feeds stable correction pat
 - Displays learned rules with confidence, status, and activity
 - Allows manual enable/disable controls
 - Disable actions are persisted as differ overrides and excluded from prompt overlay
+- Shows recent training ingestions (submission id, timestamp, changes, change %) for auditability
+- Shows a connectivity warning when dashboard cannot reach differ endpoints
 
 ## Guardrails
 
@@ -45,6 +47,12 @@ This feature captures human reviewer corrections and feeds stable correction pat
 - Rules must meet minimum occurrences (`LEARNING_MIN_OCCURRENCES`, default `2`).
 - Low-dominance mappings are marked `conflicted` and excluded from prompt overlay.
 - Dashboard fails open: if `differ` is unavailable, AI check still runs without overlay.
+- Deletion-only edits may be counted as document changes but may not generate replacement rules (`from -> to`) on their own.
+
+## Startup Behavior
+
+- On `differ` startup, learned-rules snapshot is rebuilt from `tmp/learning/training_data.jsonl`.
+- This keeps `/learning/rules` counters consistent after service restarts without waiting for a new compare event.
 
 ## Environment Knobs
 

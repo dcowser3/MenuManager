@@ -425,6 +425,44 @@
             padding: 0.2rem 0.45rem;
         }
 
+        .raw-toggle {
+            margin-top: 0.6rem;
+            display: flex;
+            align-items: center;
+            gap: 0.45rem;
+            font-size: 0.75rem;
+            color: var(--color-text);
+        }
+
+        .raw-toggle input[type="checkbox"] {
+            width: 14px;
+            height: 14px;
+        }
+
+        .raw-notice-box {
+            margin-top: 0.6rem;
+            border: 1px dashed var(--color-border);
+            padding: 0.55rem 0.7rem;
+            background: #fff;
+            font-size: 0.74rem;
+            line-height: 1.45;
+        }
+
+        .raw-notice-actions {
+            margin-top: 0.45rem;
+        }
+
+        .raw-notice-btn {
+            border: 1px solid var(--color-border);
+            background: var(--color-background-alt);
+            color: var(--color-text);
+            font-size: 0.66rem;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            padding: 0.3rem 0.55rem;
+            cursor: pointer;
+        }
+
         /* Expand Button */
         .expand-btn {
             position: absolute;
@@ -849,6 +887,21 @@
         }
 
         .critical-error-banner.show {
+            display: block;
+        }
+
+        .ai-stale-banner {
+            display: none;
+            background: rgba(184, 134, 11, 0.12);
+            border: 1px solid rgba(184, 134, 11, 0.35);
+            color: #8a6512;
+            padding: 0.75rem 1rem;
+            text-align: center;
+            font-size: 0.85rem;
+            margin-bottom: 0.75rem;
+        }
+
+        .ai-stale-banner.show {
             display: block;
         }
 
@@ -1640,6 +1693,10 @@
                         <label for="allergensInput">Allergen Key (Optional)</label>
                         <textarea id="allergensInput" class="allergens-input" placeholder="Paste your allergen key here, e.g.: C crustaceans | D dairy | E egg | F fish | G gluten | N nuts | V vegetarian | VG vegan"></textarea>
                         <p class="allergens-hint">If left blank, the default RSH allergen codes will be used for review.</p>
+                        <label class="raw-toggle" for="containsRawUndercooked">
+                            <input type="checkbox" id="containsRawUndercooked">
+                            This menu contains raw or undercooked items (include foodborne notice)
+                        </label>
                     </div>
                 </div>
             </div>
@@ -1762,6 +1819,10 @@
                         <textarea id="allergensInputStep2" class="allergens-input" placeholder="Paste your allergen key here, e.g.: C crustaceans | D dairy | E egg | F fish | G gluten | N nuts | V vegetarian | VG vegan"></textarea>
                         <div id="step2AllergenDetectedBadge" class="allergen-detected-badge hidden">Prefilled from uploaded baseline</div>
                         <p class="allergens-hint">If left blank, the default RSH allergen codes will be used for review.</p>
+                        <label class="raw-toggle" for="containsRawUndercookedStep2">
+                            <input type="checkbox" id="containsRawUndercookedStep2">
+                            This menu contains raw or undercooked items (include foodborne notice)
+                        </label>
                     </div>
                     <div id="originalMenuDisplay" style="display: none;"></div>
                 </div>
@@ -1784,6 +1845,9 @@
                 <button id="runCheckBtnBottom" class="btn btn-primary hidden" onclick="runBasicCheck()">
                     Run Basic AI Check
                 </button>
+                <div id="aiStaleBanner" class="ai-stale-banner">
+                    Menu was edited after AI check. Re-run AI Check before submitting.
+                </div>
                 <div id="criticalErrorBanner" class="critical-error-banner">
                     Resolve or override all critical errors before submitting.
                 </div>
@@ -1831,6 +1895,47 @@
         let persistentDiffSummary = { insertions: 0, deletions: 0 };
         let persistentPreviewUpdateTimer = null;
         let aiCheckHasRun = false;
+        let lastAiCheckedMenuText = '';
+        let requiresAiRerun = false;
+        let suppressRawNotice = false;
+        const DEFAULT_ALLERGEN_KEY = <%- JSON.stringify(defaultAllergenKey || '') %>;
+        const RAW_NOTICE_TEXT = '*consuming raw or undercooked meats, poultry, seafood, shellfish, or eggs may increase your risk of foodborne illness.';
+        const RAW_NOTICE_REGEX = /\*?\s*consuming raw or undercooked meats,\s*poultry,\s*seafood,\s*shellfish,\s*or eggs may increase your risk of foodborne illness\.?/i;
+
+        function isLikelyAllergenLegendLine(line) {
+            const normalized = (line || '').trim();
+            if (!normalized || !normalized.includes('|')) return false;
+            const parts = normalized.split('|').map((p) => p.trim()).filter(Boolean);
+            if (parts.length < 3) return false;
+            const codeParts = parts.filter((p) => /^[*]?[A-Z]{1,3}\s+.+/.test(p));
+            return codeParts.length >= Math.max(2, Math.floor(parts.length * 0.6));
+        }
+
+        function stripBaselineFooter(menuText, fallbackAllergens = '') {
+            const lines = (menuText || '').split('\n').map((l) => l.trim());
+            const cleanLines = [];
+            let extractedAllergenLine = '';
+            let hadRawNotice = false;
+
+            for (const line of lines) {
+                if (!line) continue;
+                if (RAW_NOTICE_REGEX.test(line)) {
+                    hadRawNotice = true;
+                    continue;
+                }
+                if (isLikelyAllergenLegendLine(line)) {
+                    extractedAllergenLine = line;
+                    continue;
+                }
+                cleanLines.push(line);
+            }
+
+            return {
+                menu: cleanLines.join('\n'),
+                allergens: extractedAllergenLine || (fallbackAllergens || ''),
+                hadRawNotice,
+            };
+        }
 
         document.addEventListener('DOMContentLoaded', function() {
             quill = new Quill('#menuEditor', {
@@ -1873,6 +1978,8 @@
             loadRecentProjects();
             onSubmissionModeChange();
             setupAllergenSync();
+            setupRawToggleSync();
+            renderAllergenLegend();
 
             // Submitter name keyboard nav + blur dismiss
             const submitterNameInput = document.getElementById('submitterName');
@@ -1920,11 +2027,33 @@
             step1Input.addEventListener('input', () => {
                 if (document.activeElement === step2Input) return;
                 step2Input.value = step1Input.value;
+                renderAllergenLegend();
             });
 
             step2Input.addEventListener('input', () => {
                 if (document.activeElement === step1Input) return;
                 step1Input.value = step2Input.value;
+                renderAllergenLegend();
+            });
+        }
+
+        function setupRawToggleSync() {
+            const step1 = document.getElementById('containsRawUndercooked');
+            const step2 = document.getElementById('containsRawUndercookedStep2');
+            if (!step1 || !step2) return;
+
+            step1.addEventListener('change', () => {
+                if (document.activeElement === step2) return;
+                step2.checked = step1.checked;
+                suppressRawNotice = false;
+                renderAllergenLegend();
+            });
+
+            step2.addEventListener('change', () => {
+                if (document.activeElement === step1) return;
+                step1.checked = step2.checked;
+                suppressRawNotice = false;
+                renderAllergenLegend();
             });
         }
 
@@ -1945,6 +2074,71 @@
             const step2Input = document.getElementById('allergensInputStep2');
             if (step1Input) step1Input.value = safeValue;
             if (step2Input) step2Input.value = safeValue;
+            renderAllergenLegend();
+        }
+
+        function getContainsRawSelection() {
+            const step2 = document.getElementById('containsRawUndercookedStep2');
+            const step1 = document.getElementById('containsRawUndercooked');
+            const step2Visible = step2 && !document.getElementById('step2AllergensSection').classList.contains('hidden');
+            if (step2Visible) {
+                return !!step2.checked;
+            }
+            return !!(step1 && step1.checked);
+        }
+
+        function setContainsRawSelection(checked) {
+            const step1 = document.getElementById('containsRawUndercooked');
+            const step2 = document.getElementById('containsRawUndercookedStep2');
+            if (step1) step1.checked = !!checked;
+            if (step2) step2.checked = !!checked;
+            renderAllergenLegend();
+        }
+
+        function detectRawUndercookedFromMenuText(menuText) {
+            const content = (menuText || '').toLowerCase();
+            if (!content.trim()) return false;
+            if (content.includes('*')) return true;
+            return [
+                'raw',
+                'undercooked',
+                'carpaccio',
+                'tartare',
+                'ceviche',
+                'tiradito',
+                'crudo',
+                'sashimi',
+                'oyster',
+                'oysters',
+                'rare'
+            ].some((term) => content.includes(term));
+        }
+
+        function getReviewedMenuTextForDetection() {
+            const reviewedArea = document.getElementById('reviewedContentArea');
+            if (reviewedArea && !document.getElementById('step2').classList.contains('hidden')) {
+                return extractCleanTextFromReviewedArea(reviewedArea);
+            }
+            return (quill && quill.getText) ? quill.getText().trim() : '';
+        }
+
+        function getEffectiveRawNoticeDecision() {
+            const selected = getContainsRawSelection();
+            const detected = detectRawUndercookedFromMenuText(getReviewedMenuTextForDetection());
+            return {
+                selected,
+                detected,
+                shouldAdd: !suppressRawNotice && (selected || detected)
+            };
+        }
+
+        function toggleRawNoticeSuppression() {
+            suppressRawNotice = !suppressRawNotice;
+            renderAllergenLegend();
+        }
+
+        function renderAllergenLegend() {
+            // Preview box removed by design; keep function for existing call sites.
         }
 
         function setAllergenAutoDetectedBadge(visible) {
@@ -1955,6 +2149,14 @@
             } else {
                 badge.classList.add('hidden');
             }
+        }
+
+        function markAiCheckStale() {
+            if (!aiCheckHasRun || requiresAiRerun) return;
+            requiresAiRerun = true;
+            const rerunBtn = document.getElementById('rerunCheckBtn');
+            if (rerunBtn) rerunBtn.classList.add('show');
+            updateSubmitButtonState();
         }
 
         function onSubmissionModeChange() {
@@ -2001,6 +2203,8 @@
                 displayReviewedContent('');
                 quill.setText('');
                 setAllergenInputValue('');
+                setContainsRawSelection(false);
+                suppressRawNotice = false;
                 setAllergenAutoDetectedBadge(false);
             }
             updateRevisionPreCheckLayout();
@@ -2022,6 +2226,8 @@
                 document.getElementById('submissionSearchResults').innerHTML = '';
                 selectedNote.classList.remove('show');
                 selectedNote.textContent = '';
+                setContainsRawSelection(false);
+                suppressRawNotice = false;
                 setAllergenAutoDetectedBadge(false);
             } else {
                 uploadPanel.classList.remove('show');
@@ -2031,6 +2237,8 @@
                 baseApprovedMenuContentHtml = '';
                 selectedNote.classList.remove('show');
                 selectedNote.textContent = '';
+                setContainsRawSelection(false);
+                suppressRawNotice = false;
                 setAllergenAutoDetectedBadge(false);
             }
             updateRevisionPreCheckLayout();
@@ -2079,13 +2287,18 @@
             revisionSource = 'database';
             revisionBaselineDocPath = '';
             revisionBaselineFileName = '';
-            baseApprovedMenuContent = selected.approvedMenuContent || '';
+            const normalizedBaseline = stripBaselineFooter(selected.approvedMenuContent || '', selected.allergens || '');
+            baseApprovedMenuContent = normalizedBaseline.menu || '';
             baseApprovedMenuContentHtml = '';
             persistentDiffSummary = { insertions: 0, deletions: 0 };
-            setAllergenAutoDetectedBadge(false);
+            setAllergenInputValue(normalizedBaseline.allergens || '');
+            setContainsRawSelection(!!normalizedBaseline.hadRawNotice);
+            suppressRawNotice = false;
+            setAllergenAutoDetectedBadge(!!normalizedBaseline.allergens);
 
-            document.getElementById('projectName').value = selected.projectName || '';
-            document.getElementById('property').value = selected.property || '';
+            // Reuse the same project prefill path used by "Load from Recent"
+            // so modification search fills the full project detail set.
+            applyProjectPrefill(selected);
 
             quill.setText(baseApprovedMenuContent || '');
             renderPersistentPreview(baseApprovedMenuContent, baseApprovedMenuContent);
@@ -2127,7 +2340,8 @@
                 revisionBaseSubmissionId = null;
                 revisionBaselineDocPath = data.baselineDocPath || '';
                 revisionBaselineFileName = data.baselineFileName || file.name;
-                baseApprovedMenuContent = data.approvedMenuContent || '';
+                const normalizedBaseline = stripBaselineFooter(data.approvedMenuContent || '', data.extractedAllergenKey || '');
+                baseApprovedMenuContent = normalizedBaseline.menu || '';
                 baseApprovedMenuContentHtml = data.approvedMenuContentHtml || '';
                 persistentDiffSummary = { insertions: 0, deletions: 0 };
 
@@ -2136,18 +2350,12 @@
                     if (data.extractedProject.property) document.getElementById('property').value = data.extractedProject.property;
                     if (data.extractedProject.orientation) setSelectValue('orientation', data.extractedProject.orientation);
                 }
-                if (data.extractedAllergenKey && data.extractedAllergenKey.trim()) {
-                    setAllergenInputValue(data.extractedAllergenKey);
-                    setAllergenAutoDetectedBadge(true);
-                } else {
-                    setAllergenAutoDetectedBadge(false);
-                }
+                setAllergenInputValue(normalizedBaseline.allergens || '');
+                setContainsRawSelection(!!normalizedBaseline.hadRawNotice);
+                suppressRawNotice = false;
+                setAllergenAutoDetectedBadge(!!normalizedBaseline.allergens);
 
-                if (baseApprovedMenuContentHtml && baseApprovedMenuContentHtml.trim()) {
-                    quill.clipboard.dangerouslyPasteHTML(baseApprovedMenuContentHtml);
-                } else {
-                    quill.setText(baseApprovedMenuContent || '');
-                }
+                quill.setText(baseApprovedMenuContent || '');
                 renderPersistentPreview(baseApprovedMenuContent, baseApprovedMenuContent);
 
                 const selectedNote = document.getElementById('revisionSelectedNote');
@@ -2353,6 +2561,11 @@
 
         function applyProjectPrefill(p) {
             if (!p) return;
+            const toYesNo = (value, fallback = 'no') => {
+                if (value === true || value === 'true' || value === 1 || value === '1' || value === 'yes') return 'yes';
+                if (value === false || value === 'false' || value === 0 || value === '0' || value === 'no') return 'no';
+                return fallback;
+            };
 
             document.getElementById('projectName').value = p.projectName || '';
             document.getElementById('property').value = p.property || '';
@@ -2371,9 +2584,9 @@
             if (p.assetType === 'PRINT') {
                 document.getElementById('widthPrint').value = p.width || '';
                 document.getElementById('heightPrint').value = p.height || '';
-                setSelectValue('cropMarks', p.cropMarks || 'no');
-                setSelectValue('bleedMarks', p.bleedMarks || 'no');
-                setSelectValue('fileSizeLimit', p.fileSizeLimit || 'no');
+                setSelectValue('cropMarks', toYesNo(p.cropMarks));
+                setSelectValue('bleedMarks', toYesNo(p.bleedMarks));
+                setSelectValue('fileSizeLimit', toYesNo(p.fileSizeLimit));
                 toggleFileSizeLimit();
                 document.getElementById('fileSizeLimitMb').value = p.fileSizeLimitMb || '';
                 document.getElementById('fileDeliveryNotes').value = p.fileDeliveryNotes || '';
@@ -2935,6 +3148,77 @@
             }
         }
 
+        function isHeadingLike(line) {
+            const text = (line || '').trim();
+            if (!text) return false;
+            if (text.length > 48) return false;
+            if (/[,:;]/.test(text)) return false;
+            if (/\d/.test(text)) return false;
+            return text.split(/\s+/).length <= 6;
+        }
+
+        function preserveMenuStructure(originalText, correctedText) {
+            const originalLines = (originalText || '').split('\n');
+            const correctedLines = (correctedText || '').split('\n');
+
+            // If AI already kept blank lines, trust AI output as-is.
+            if (correctedLines.some((l) => !l.trim())) {
+                return correctedText;
+            }
+
+            const originalNonEmpty = originalLines.filter((l) => l.trim());
+            const correctedNonEmpty = correctedLines.filter((l) => l.trim());
+
+            // Preserve original spacing pattern only when line counts match.
+            if (originalNonEmpty.length !== correctedNonEmpty.length) {
+                return correctedText;
+            }
+
+            const rebuilt = [];
+            let correctedIdx = 0;
+            for (const originalLine of originalLines) {
+                if (!originalLine.trim()) {
+                    rebuilt.push('');
+                } else {
+                    rebuilt.push(correctedNonEmpty[correctedIdx] || '');
+                    correctedIdx++;
+                }
+            }
+
+            return rebuilt.join('\n');
+        }
+
+        function applyHeadingFormatting(originalText, displayText) {
+            if (!quill) return;
+            const originalLines = (originalText || '').split('\n');
+            const displayLines = (displayText || '').split('\n');
+            const headingLineIndexes = [];
+
+            if (originalLines.length === displayLines.length) {
+                for (let i = 0; i < originalLines.length; i++) {
+                    if (isHeadingLike(originalLines[i]) && (displayLines[i] || '').trim()) {
+                        headingLineIndexes.push(i);
+                    }
+                }
+            } else {
+                for (let i = 0; i < displayLines.length; i++) {
+                    if (isHeadingLike(displayLines[i])) {
+                        headingLineIndexes.push(i);
+                    }
+                }
+            }
+
+            const headingSet = new Set(headingLineIndexes);
+            let charOffset = 0;
+            for (let i = 0; i < displayLines.length; i++) {
+                const line = displayLines[i] || '';
+                if (headingSet.has(i) && line.trim()) {
+                    quill.formatText(charOffset, line.length, { bold: true });
+                }
+                charOffset += line.length + 1;
+            }
+        }
+
         function computeLineDiff(original, corrected) {
             const changes = [];
             const origLines = original.split('\n').map(l => l.trim()).filter(l => l);
@@ -3138,10 +3422,20 @@
         function updateSubmitButtonState() {
             const submitBtn = document.getElementById('submitBtn');
             const banner = document.getElementById('criticalErrorBanner');
+            const staleBanner = document.getElementById('aiStaleBanner');
             if (!aiCheckHasRun) {
                 submitBtn.disabled = true;
                 submitBtn.classList.add('blocked');
                 banner.classList.remove('show');
+                staleBanner.classList.remove('show');
+                return;
+            }
+
+            if (requiresAiRerun) {
+                submitBtn.disabled = true;
+                submitBtn.classList.add('blocked');
+                banner.classList.remove('show');
+                staleBanner.classList.add('show');
                 return;
             }
 
@@ -3149,6 +3443,7 @@
                 submitBtn.disabled = false;
                 submitBtn.classList.remove('blocked');
                 banner.classList.remove('show');
+                staleBanner.classList.remove('show');
                 return;
             }
 
@@ -3160,10 +3455,12 @@
                 submitBtn.disabled = true;
                 submitBtn.classList.add('blocked');
                 banner.classList.add('show');
+                staleBanner.classList.remove('show');
             } else {
                 submitBtn.disabled = false;
                 submitBtn.classList.remove('blocked');
                 banner.classList.remove('show');
+                staleBanner.classList.remove('show');
             }
         }
 
@@ -3213,6 +3510,7 @@
                 }
 
                 aiCheckHasRun = true;
+                requiresAiRerun = false;
                 setAiSuggestionsVisibility(true);
                 aiCheckResults = data;
                 criticalErrorOverrides = {};
@@ -3261,6 +3559,7 @@
                 }
             }
             updateRevisionPreCheckLayout();
+            renderAllergenLegend();
 
             // Reset critical error overrides
             criticalErrorOverrides = {};
@@ -3321,17 +3620,19 @@
             const correctedText = results.correctedMenu;
             const hasChanges = results.hasChanges;
 
-            quill.setText(correctedText);
+            const correctedDisplayText = preserveMenuStructure(originalText, correctedText);
+            quill.setText(correctedDisplayText);
+            applyHeadingFormatting(originalText, correctedDisplayText);
 
             if (hasChanges) {
-                const changes = computeLineDiff(originalText, correctedText);
+                const changes = computeLineDiff(originalText, correctedDisplayText);
 
                 aiChanges = changes.map(change => ({
                     start: change.start,
                     length: change.length,
                     word: change.word
                 }));
-                originalAiCorrectedText = correctedText;
+                originalAiCorrectedText = correctedDisplayText;
 
                 changes.forEach(change => {
                     quill.formatText(change.start, change.length, {
@@ -3340,12 +3641,14 @@
                 });
             } else {
                 aiChanges = [];
-                originalAiCorrectedText = correctedText;
+                originalAiCorrectedText = correctedDisplayText;
             }
 
             // Display the reviewed content with highlights
             displayReviewedContent(quill.root.innerHTML);
-            renderPersistentPreview(baseApprovedMenuContent || originalText, correctedText);
+            renderPersistentPreview(baseApprovedMenuContent || originalText, correctedDisplayText);
+            lastAiCheckedMenuText = extractCleanTextFromReviewedArea(document.getElementById('reviewedContentArea'));
+            requiresAiRerun = false;
 
             const suggestionsDisplay = document.getElementById('suggestionsDisplay');
 
@@ -3398,6 +3701,11 @@
                 return;
             }
 
+            if (requiresAiRerun) {
+                showAlert('You edited the menu after AI check. Please re-run AI Check before submitting.', 'error');
+                return;
+            }
+
             // Block if unresolved critical errors exist
             if (aiCheckResults && aiCheckResults.suggestions) {
                 const unresolvedCritical = aiCheckResults.suggestions.some((s, idx) =>
@@ -3425,6 +3733,10 @@
             const reviewedArea = document.getElementById('reviewedContentArea');
             const menuContentHtml = sanitizeMenuHtmlForSubmission(reviewedArea.innerHTML || '');
             const menuContentText = extractCleanTextFromReviewedArea(reviewedArea);
+            const persistentPreviewBody = document.getElementById('persistentPreviewBody');
+            const persistentDiffHtml = submissionMode === 'modification' && persistentPreviewBody
+                ? persistentPreviewBody.innerHTML
+                : '';
 
             // Also update the hidden display
             document.getElementById('originalMenuDisplay').innerHTML = menuContentHtml;
@@ -3487,8 +3799,11 @@
                 cityCountry: document.getElementById('cityCountry').value.trim(),
                 assetType: assetTypeValue,
                 allergens: getAllergenInputValue(),
+                containsRawUndercooked: getContainsRawSelection(),
+                suppressRawNotice: suppressRawNotice,
                 menuContent: menuContentText,
                 menuContentHtml: menuContentHtml,
+                persistentDiffHtml: persistentDiffHtml,
                 approvals: approvals,
                 criticalOverrides: criticalOverrides,
                 submissionMode: submissionMode,
@@ -3686,11 +4001,14 @@
         }
 
         function handleReviewedAreaInput() {
-            if (submissionMode !== 'modification') return;
             const reviewedArea = document.getElementById('reviewedContentArea');
+            const currentText = extractCleanTextFromReviewedArea(reviewedArea);
+            if (lastAiCheckedMenuText && currentText !== lastAiCheckedMenuText) {
+                markAiCheckStale();
+            }
+            renderAllergenLegend();
             clearTimeout(persistentPreviewUpdateTimer);
             persistentPreviewUpdateTimer = setTimeout(() => {
-                const currentText = extractCleanTextFromReviewedArea(reviewedArea);
                 renderPersistentPreview(baseApprovedMenuContent || (aiCheckResults?.originalMenu || ''), currentText);
             }, 120);
         }

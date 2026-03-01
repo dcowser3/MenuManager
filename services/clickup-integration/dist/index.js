@@ -9,6 +9,7 @@ const form_data_1 = __importDefault(require("form-data"));
 const fs_1 = __importDefault(require("fs"));
 const path_1 = __importDefault(require("path"));
 const dotenv_1 = __importDefault(require("dotenv"));
+const nodemailer_1 = __importDefault(require("nodemailer"));
 const child_process_1 = require("child_process");
 const util_1 = require("util");
 const crypto_1 = __importDefault(require("crypto"));
@@ -23,6 +24,17 @@ const CLICKUP_TEAM_ID = process.env.CLICKUP_TEAM_ID;
 const CLICKUP_WEBHOOK_URL = process.env.CLICKUP_WEBHOOK_URL;
 const CLICKUP_WEBHOOK_SECRET = process.env.CLICKUP_WEBHOOK_SECRET;
 const CLICKUP_CORRECTIONS_STATUS = (process.env.CLICKUP_CORRECTIONS_STATUS || 'corrections complete').toLowerCase();
+const hasSmtpConfig = !!(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS);
+const mailFromAddress = process.env.GRAPH_MAILBOX_ADDRESS || process.env.SMTP_USER || 'no-reply@example.com';
+const mailTransporter = nodemailer_1.default.createTransport({
+    host: process.env.SMTP_HOST,
+    port: Number(process.env.SMTP_PORT || 587),
+    secure: String(process.env.SMTP_SECURE || 'false').toLowerCase() === 'true',
+    auth: {
+        user: process.env.SMTP_USER,
+        pass: process.env.SMTP_PASS,
+    },
+});
 function getRepoRoot() {
     const candidates = [
         path_1.default.resolve(__dirname, '..', '..'),
@@ -57,22 +69,50 @@ app.use(express_1.default.json({
         req.rawBody = buf.toString('utf8');
     }
 }));
+function safeTimingEqual(a, b) {
+    try {
+        const ab = Buffer.from(a);
+        const bb = Buffer.from(b);
+        if (ab.length !== bb.length)
+            return false;
+        return crypto_1.default.timingSafeEqual(ab, bb);
+    }
+    catch {
+        return false;
+    }
+}
 function verifyClickUpSignature(rawBody, signatureHeader) {
     if (!CLICKUP_WEBHOOK_SECRET)
         return true;
     if (!signatureHeader)
         return false;
-    const expected = crypto_1.default
+    const expectedHex = crypto_1.default
         .createHmac('sha256', CLICKUP_WEBHOOK_SECRET)
         .update(rawBody)
         .digest('hex');
-    const provided = signatureHeader.trim().toLowerCase();
-    try {
-        return crypto_1.default.timingSafeEqual(Buffer.from(provided), Buffer.from(expected));
-    }
-    catch {
-        return false;
-    }
+    const expectedBase64 = crypto_1.default
+        .createHmac('sha256', CLICKUP_WEBHOOK_SECRET)
+        .update(rawBody)
+        .digest('base64');
+    const expectedBase64Url = expectedBase64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+    const rawProvided = signatureHeader.trim();
+    const provided = rawProvided.replace(/^sha256=/i, '').trim();
+    const providedLower = provided.toLowerCase();
+    // Accept common encodings/header styles observed in webhook providers.
+    if (safeTimingEqual(providedLower, expectedHex.toLowerCase()))
+        return true;
+    if (safeTimingEqual(provided, expectedBase64))
+        return true;
+    if (safeTimingEqual(provided, expectedBase64Url))
+        return true;
+    return false;
+}
+function getClickUpSignatureHeader(req) {
+    return (req.header('X-Signature') ||
+        req.header('x-signature') ||
+        req.header('X-Webhook-Signature') ||
+        req.header('x-webhook-signature') ||
+        undefined);
 }
 function toTitleCase(value) {
     return value
@@ -163,6 +203,36 @@ function sanitizeAttachmentFilename(rawName, fallbackBase) {
     const withExt = cleaned.toLowerCase().endsWith('.docx') ? cleaned : `${cleaned}.docx`;
     return withExt || `${fallbackBase}.docx`;
 }
+async function sendCorrectionsReadyNotification(payload) {
+    if (!hasSmtpConfig) {
+        console.warn('SMTP not configured. Skipping corrections_ready notification.');
+        return;
+    }
+    if (!payload.submitterEmail) {
+        console.warn('No submitter email on submission. Skipping corrections_ready notification.');
+        return;
+    }
+    const correctedBuffer = await fs_1.default.promises.readFile(payload.correctedPath);
+    await mailTransporter.sendMail({
+        from: `"Menu Review Bot" <${mailFromAddress}>`,
+        to: payload.submitterEmail,
+        subject: `Corrections Ready: ${payload.projectName || payload.filename || 'Menu Submission'}`,
+        html: `
+            <p>Hello ${payload.submitterName || ''},</p>
+            <p>The corrected version of your menu submission is ready. Please find it attached.</p>
+            <p>Thank you,</p>
+            <p>Menu Review Bot</p>
+        `,
+        attachments: [
+            {
+                filename: payload.filename || 'corrected-menu.docx',
+                content: correctedBuffer,
+                contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            },
+        ],
+    });
+    console.log(`Notification email (corrections_ready) sent successfully to ${payload.submitterEmail}.`);
+}
 async function uploadTaskAttachment(taskId, filePath, preferredFilename, contentType) {
     const fieldCandidates = ['attachment[]', 'attachment'];
     let lastError;
@@ -233,6 +303,9 @@ function pickMostRecentCorrectedAttachment(attachments, submittedFilename) {
     });
     return correctedFirst || candidates[0];
 }
+function normalizeStatus(value) {
+    return String(value || '').trim().toLowerCase();
+}
 async function extractApprovedMenuContent(docxPath) {
     const scriptPath = path_1.default.resolve(__dirname, '..', '..', 'docx-redliner', 'extract_clean_menu_text.py');
     const venvPython = path_1.default.resolve(__dirname, '..', '..', 'docx-redliner', 'venv', 'bin', 'python');
@@ -246,6 +319,79 @@ async function extractApprovedMenuContent(docxPath) {
         raw: parsed.menu_content || '',
         cleaned: parsed.cleaned_menu_content || parsed.menu_content || '',
     };
+}
+async function processApprovedTask(clickupTaskId, opts) {
+    const taskResponse = await axios_1.default.get(`https://api.clickup.com/api/v2/task/${clickupTaskId}`, {
+        headers: clickupHeaders,
+    });
+    const currentStatus = normalizeStatus(taskResponse.data?.status?.status);
+    if (!opts?.skipStatusCheck && currentStatus !== CLICKUP_CORRECTIONS_STATUS) {
+        return { processed: false, reason: `task status is "${currentStatus}"` };
+    }
+    const subResponse = await axios_1.default.get(`http://localhost:3004/submissions/by-clickup-task/${clickupTaskId}`);
+    const submission = subResponse.data;
+    console.log(`Found submission ${submission.id} for ClickUp task ${clickupTaskId}`);
+    const attachments = taskResponse.data.attachments || [];
+    if (attachments.length === 0) {
+        return { processed: false, reason: 'no attachments on task', submissionId: submission.id };
+    }
+    const latestAttachment = pickMostRecentCorrectedAttachment(attachments, submission.filename);
+    if (!latestAttachment) {
+        return { processed: false, reason: 'no usable attachment found', submissionId: submission.id };
+    }
+    const submissionDocDir = getSubmissionDocumentDir(submission.project_name || '', submission.property || '', submission.id);
+    const approvedDir = path_1.default.join(submissionDocDir, 'approved');
+    await fs_1.default.promises.mkdir(approvedDir, { recursive: true });
+    const correctedPath = path_1.default.join(approvedDir, `${submission.id}-corrected.docx`);
+    const fileResponse = await axios_1.default.get(latestAttachment.url, {
+        responseType: 'arraybuffer',
+        headers: { Authorization: CLICKUP_API_TOKEN || '' },
+    });
+    await fs_1.default.promises.writeFile(correctedPath, fileResponse.data);
+    console.log(`Downloaded corrected file to ${correctedPath}`);
+    let extractedRaw = '';
+    let extractedClean = '';
+    try {
+        const extracted = await extractApprovedMenuContent(correctedPath);
+        extractedRaw = extracted.raw;
+        extractedClean = extracted.cleaned;
+    }
+    catch (extractError) {
+        console.warn(`Failed to extract approved text from corrected DOCX: ${extractError.message}`);
+    }
+    await axios_1.default.put(`http://localhost:3004/submissions/${submission.id}`, {
+        status: 'approved',
+        final_path: correctedPath,
+        approved_menu_content_raw: extractedRaw || undefined,
+        approved_menu_content: extractedClean || undefined,
+        approved_text_extracted_at: extractedClean ? new Date().toISOString() : undefined,
+    });
+    console.log(`Updated submission ${submission.id} to approved`);
+    axios_1.default.post('http://localhost:3004/assets', {
+        submission_id: submission.id,
+        asset_type: 'approved_docx',
+        source: 'isabella_clickup',
+        storage_provider: 'local',
+        storage_path: correctedPath,
+        file_name: path_1.default.basename(correctedPath),
+        meta: {
+            clickup_task_id: clickupTaskId,
+            attachment_id: latestAttachment.id || null,
+        },
+    }).catch((err) => console.error('Failed to save approved_docx asset metadata:', err.message));
+    sendCorrectionsReadyNotification({
+        submitterEmail: submission.submitter_email,
+        submitterName: submission.submitter_name,
+        projectName: submission.project_name,
+        correctedPath,
+        filename: submission.filename,
+    }).catch((err) => console.error('Failed to send corrections_ready notification:', err.message));
+    axios_1.default.post('http://localhost:3006/compare', {
+        ai_draft_path: submission.ai_draft_path,
+        final_path: correctedPath,
+        submission_id: submission.id,
+    }).catch((err) => console.error('Failed to trigger differ comparison:', err.message));
+    return { processed: true, submissionId: submission.id };
 }
 app.post('/create-task', async (req, res) => {
     try {
@@ -352,7 +498,7 @@ app.post('/create-task', async (req, res) => {
 });
 app.post('/webhook/clickup', async (req, res) => {
     const rawBody = req.rawBody || JSON.stringify(req.body || {});
-    const signature = req.header('X-Signature');
+    const signature = getClickUpSignatureHeader(req);
     if (!verifyClickUpSignature(rawBody, signature)) {
         console.warn('Rejected ClickUp webhook with invalid signature');
         return res.status(401).send('Invalid signature');
@@ -367,80 +513,65 @@ app.post('/webhook/clickup', async (req, res) => {
         if (newStatus !== CLICKUP_CORRECTIONS_STATUS)
             return;
         console.log(`ClickUp task ${clickupTaskId} moved to "${newStatus}"`);
-        const subResponse = await axios_1.default.get(`http://localhost:3004/submissions/by-clickup-task/${clickupTaskId}`);
-        const submission = subResponse.data;
-        console.log(`Found submission ${submission.id} for ClickUp task ${clickupTaskId}`);
-        const taskResponse = await axios_1.default.get(`https://api.clickup.com/api/v2/task/${clickupTaskId}`, {
-            headers: clickupHeaders,
-        });
-        const attachments = taskResponse.data.attachments || [];
-        if (attachments.length === 0) {
-            console.log(`No attachments on ClickUp task ${clickupTaskId}, skipping download`);
-            return;
+        const result = await processApprovedTask(String(clickupTaskId), { skipStatusCheck: true });
+        if (!result.processed) {
+            console.log(`Skipped ClickUp task ${clickupTaskId}: ${result.reason || 'not processed'}`);
         }
-        const latestAttachment = pickMostRecentCorrectedAttachment(attachments, submission.filename);
-        if (!latestAttachment) {
-            console.log(`No usable attachment found on ClickUp task ${clickupTaskId}, skipping download`);
-            return;
-        }
-        const submissionDocDir = getSubmissionDocumentDir(submission.project_name || '', submission.property || '', submission.id);
-        const approvedDir = path_1.default.join(submissionDocDir, 'approved');
-        await fs_1.default.promises.mkdir(approvedDir, { recursive: true });
-        const correctedPath = path_1.default.join(approvedDir, `${submission.id}-corrected.docx`);
-        const fileResponse = await axios_1.default.get(latestAttachment.url, {
-            responseType: 'arraybuffer',
-            headers: { Authorization: CLICKUP_API_TOKEN || '' },
-        });
-        await fs_1.default.promises.writeFile(correctedPath, fileResponse.data);
-        console.log(`Downloaded corrected file to ${correctedPath}`);
-        let extractedRaw = '';
-        let extractedClean = '';
-        try {
-            const extracted = await extractApprovedMenuContent(correctedPath);
-            extractedRaw = extracted.raw;
-            extractedClean = extracted.cleaned;
-        }
-        catch (extractError) {
-            console.warn(`Failed to extract approved text from corrected DOCX: ${extractError.message}`);
-        }
-        await axios_1.default.put(`http://localhost:3004/submissions/${submission.id}`, {
-            status: 'approved',
-            final_path: correctedPath,
-            approved_menu_content_raw: extractedRaw || undefined,
-            approved_menu_content: extractedClean || undefined,
-            approved_text_extracted_at: extractedClean ? new Date().toISOString() : undefined,
-        });
-        console.log(`Updated submission ${submission.id} to approved`);
-        axios_1.default.post('http://localhost:3004/assets', {
-            submission_id: submission.id,
-            asset_type: 'approved_docx',
-            source: 'isabella_clickup',
-            storage_provider: 'local',
-            storage_path: correctedPath,
-            file_name: path_1.default.basename(correctedPath),
-            meta: {
-                clickup_task_id: clickupTaskId,
-                attachment_id: latestAttachment.id || null,
-            },
-        }).catch((err) => console.error('Failed to save approved_docx asset metadata:', err.message));
-        axios_1.default.post('http://localhost:3003/notify', {
-            type: 'corrections_ready',
-            payload: {
-                submitter_email: submission.submitter_email,
-                submitter_name: submission.submitter_name,
-                project_name: submission.project_name,
-                corrected_path: correctedPath,
-                filename: submission.filename,
-            },
-        }).catch((err) => console.error('Failed to send corrections_ready notification:', err.message));
-        axios_1.default.post('http://localhost:3006/compare', {
-            ai_draft_path: submission.ai_draft_path,
-            final_path: correctedPath,
-            submission_id: submission.id,
-        }).catch((err) => console.error('Failed to trigger differ comparison:', err.message));
     }
     catch (error) {
         console.error('Error processing ClickUp webhook:', error.response?.data || error.message);
+    }
+});
+app.post('/webhook/backfill-pending', async (_req, res) => {
+    try {
+        const pendingResponse = await axios_1.default.get('http://localhost:3004/submissions/pending');
+        const pending = Array.isArray(pendingResponse.data) ? pendingResponse.data : [];
+        const candidates = pending.filter((s) => !!s.clickup_task_id);
+        const summary = {
+            scanned_pending: pending.length,
+            candidates_with_clickup: candidates.length,
+            processed: 0,
+            skipped: 0,
+            failed: 0,
+            details: [],
+        };
+        for (const submission of candidates) {
+            const taskId = String(submission.clickup_task_id);
+            try {
+                const result = await processApprovedTask(taskId, { skipStatusCheck: false });
+                if (result.processed) {
+                    summary.processed += 1;
+                    summary.details.push({
+                        submission_id: result.submissionId || submission.id,
+                        clickup_task_id: taskId,
+                        status: 'processed',
+                    });
+                }
+                else {
+                    summary.skipped += 1;
+                    summary.details.push({
+                        submission_id: submission.id,
+                        clickup_task_id: taskId,
+                        status: 'skipped',
+                        reason: result.reason,
+                    });
+                }
+            }
+            catch (error) {
+                summary.failed += 1;
+                summary.details.push({
+                    submission_id: submission.id,
+                    clickup_task_id: taskId,
+                    status: 'failed',
+                    reason: error.response?.data?.err || error.message,
+                });
+            }
+        }
+        res.json({ success: true, ...summary });
+    }
+    catch (error) {
+        console.error('Error running pending webhook backfill:', error.response?.data || error.message);
+        res.status(500).json({ error: 'Failed to run pending backfill', details: error.message });
     }
 });
 app.post('/webhook/register', async (_req, res) => {

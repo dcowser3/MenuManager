@@ -61,6 +61,11 @@
             margin-bottom: 1rem;
         }
         .panel strong { color: var(--primary); }
+        .panel.warn {
+            background: #fff8f8;
+            border-color: #f2cccc;
+            color: #7a1f1f;
+        }
         .stats {
             display: flex;
             gap: 1rem;
@@ -209,6 +214,18 @@
                 `DOCUMENT_STORAGE_ROOT` is not set. Files are currently stored under <code>tmp/documents</code>, which may be ephemeral in cloud deployments.
             <% } %>
         </div>
+        <% if (differStatus && (!differStatus.rulesOk || !differStatus.trainingOk)) { %>
+            <div class="panel warn">
+                <strong>Differ Connectivity Warning:</strong>
+                Learning page could not fully reach differ service on port 3006.
+                <% if (differStatus.rulesError) { %>
+                    <div>Rules endpoint error: <code><%= differStatus.rulesError %></code></div>
+                <% } %>
+                <% if (differStatus.trainingError) { %>
+                    <div>Training endpoint error: <code><%= differStatus.trainingError %></code></div>
+                <% } %>
+            </div>
+        <% } %>
 
         <div class="stats">
             <div class="stat"><div class="label">Generated</div><div class="value"><%= generatedAt ? new Date(generatedAt).toLocaleString() : 'N/A' %></div></div>
@@ -281,6 +298,38 @@
                 </tbody>
             </table>
         <% } %>
+
+        <div style="margin-top: 1rem;">
+            <h3 style="font-size:.8rem; text-transform:uppercase; letter-spacing:.1em; color:var(--muted); margin:.25rem 0 .6rem;">Recent Learned Submissions</h3>
+            <% if (!recentSubmissions || recentSubmissions.length === 0) { %>
+                <div class="empty">No training submissions recorded yet.</div>
+            <% } else { %>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Submission</th>
+                            <th>Timestamp</th>
+                            <th>Changes</th>
+                            <th>Change %</th>
+                            <th>AI Draft</th>
+                            <th>Final</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                    <% recentSubmissions.forEach((item) => { %>
+                        <tr>
+                            <td><code><%= item.submission_id %></code></td>
+                            <td><%= item.timestamp ? new Date(item.timestamp).toLocaleString() : 'N/A' %></td>
+                            <td><%= item.changes_detected ? 'YES' : 'NO' %></td>
+                            <td><%= Number(item.change_percentage || 0).toFixed(2) %></td>
+                            <td><code><%= (item.ai_draft_path || '').split('/').pop() || 'N/A' %></code></td>
+                            <td><code><%= (item.final_path || '').split('/').pop() || 'N/A' %></code></td>
+                        </tr>
+                    <% }) %>
+                    </tbody>
+                </table>
+            <% } %>
+        </div>
     </div>
 
     <script>
