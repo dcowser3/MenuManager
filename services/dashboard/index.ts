@@ -551,7 +551,7 @@ app.get('/training/download-prompt/:sessionId', async (req, res) => {
  */
 app.get('/learning', async (_req, res) => {
     try {
-        const [rulesResult, overridesResult, overlayResult, trainingResult] = await Promise.all([
+        const [rulesResult, overridesResult, overlayResult, trainingResult, submissionsResult] = await Promise.all([
             axios.get('http://localhost:3006/learning/rules', { timeout: 2500 })
                 .then((r) => ({ ok: true, data: r.data, error: '' }))
                 .catch((e: any) => ({ ok: false, data: {}, error: e?.message || 'request failed' })),
@@ -564,12 +564,16 @@ app.get('/learning', async (_req, res) => {
             axios.get('http://localhost:3006/training-data', { timeout: 2500 })
                 .then((r) => ({ ok: true, data: r.data, error: '' }))
                 .catch((e: any) => ({ ok: false, data: { count: 0, data: [] }, error: e?.message || 'request failed' })),
+            axios.get('http://localhost:3006/learning/submissions', { timeout: 2500 })
+                .then((r) => ({ ok: true, data: r.data, error: '' }))
+                .catch((e: any) => ({ ok: false, data: { submissions: [] }, error: e?.message || 'request failed' })),
         ]);
 
         const rulesData = (rulesResult as any).data || {};
         const overrides = (overridesResult as any).data?.disabled || {};
         const learnedOverlay = (overlayResult as any)?.data?.overlay || '';
         const trainingData = (trainingResult as any).data || { count: 0, data: [] };
+        const learningSubmissions = (submissionsResult as any).data?.submissions || [];
         const qaPromptPath = path.join(getRepoRoot(), 'sop-processor', 'qa_prompt.txt');
         const basePrompt = await fs.readFile(qaPromptPath, 'utf-8');
         const effectivePrompt = learnedOverlay ? `${basePrompt}\n\n${learnedOverlay}` : basePrompt;
@@ -598,8 +602,10 @@ app.get('/learning', async (_req, res) => {
             overridesOk: !!(overridesResult as any).ok,
             overlayOk: !!(overlayResult as any).ok,
             trainingOk: !!(trainingResult as any).ok,
+            submissionsOk: !!(submissionsResult as any).ok,
             rulesError: (rulesResult as any).error || '',
             trainingError: (trainingResult as any).error || '',
+            submissionsError: (submissionsResult as any).error || '',
         };
 
         res.render('learning', {
@@ -610,6 +616,7 @@ app.get('/learning', async (_req, res) => {
             totalRules: rulesData.total_rules || 0,
             rules,
             recentSubmissions,
+            learningSubmissions,
             differStatus,
             basePrompt,
             learnedOverlay,
@@ -620,6 +627,52 @@ app.get('/learning', async (_req, res) => {
         console.error('Error loading learning dashboard:', error.message);
         res.status(500).render('error', {
             message: 'Failed to load learning dashboard'
+        });
+    }
+});
+
+app.get('/learning/submission/:submissionId', async (req, res) => {
+    try {
+        const { submissionId } = req.params;
+        const [learningDetailResult, submissionResult, savedRulesResult, propertiesResult] = await Promise.all([
+            axios.get(`http://localhost:3006/learning/submissions/${encodeURIComponent(submissionId)}`, { timeout: 3500 })
+                .then((r) => ({ ok: true, data: r.data, error: '' }))
+                .catch((e: any) => ({ ok: false, data: null, error: e?.message || 'request failed' })),
+            axios.get(`http://localhost:3004/submissions/${encodeURIComponent(submissionId)}`, { timeout: 3500 })
+                .then((r) => ({ ok: true, data: r.data, error: '' }))
+                .catch((e: any) => ({ ok: false, data: null, error: e?.message || 'request failed' })),
+            axios.get(`http://localhost:3006/learning/location-rules`, {
+                timeout: 3500,
+                params: { submission_id: submissionId }
+            })
+                .then((r) => ({ ok: true, data: r.data, error: '' }))
+                .catch((e: any) => ({ ok: false, data: { rules: [] }, error: e?.message || 'request failed' })),
+            axios.get(`http://localhost:3004/submissions/properties`, { timeout: 3500 })
+                .then((r) => ({ ok: true, data: r.data, error: '' }))
+                .catch((e: any) => ({ ok: false, data: { properties: [] }, error: e?.message || 'request failed' })),
+        ]);
+
+        if (!(learningDetailResult as any).ok || !(learningDetailResult as any).data) {
+            return res.status(404).render('error', { message: 'Learning details not found for this submission' });
+        }
+
+        const learningDetail = (learningDetailResult as any).data;
+        const submissionMeta = (submissionResult as any).data || {};
+        const savedLocationRules = (savedRulesResult as any).data?.rules || [];
+        const locationOptions: string[] = (propertiesResult as any).data?.properties || [];
+
+        res.render('learning-submission', {
+            title: `Learning Review: ${submissionId}`,
+            submissionId,
+            learningDetail,
+            submissionMeta,
+            savedLocationRules,
+            locationOptions,
+        });
+    } catch (error: any) {
+        console.error('Error loading learning submission detail page:', error.message);
+        res.status(500).render('error', {
+            message: 'Failed to load learning submission details'
         });
     }
 });
@@ -644,6 +697,16 @@ app.post('/api/learning/rules/toggle', async (req, res) => {
     } catch (error: any) {
         console.error('Error toggling learning rule:', error.message);
         res.status(500).json({ error: 'Failed to toggle learning rule' });
+    }
+});
+
+app.post('/api/learning/location-rules', async (req, res) => {
+    try {
+        const response = await axios.post('http://localhost:3006/learning/location-rules', req.body || {}, { timeout: 3000 });
+        res.json(response.data);
+    } catch (error: any) {
+        console.error('Error saving location-specific rule:', error.message);
+        res.status(error?.response?.status || 500).json(error?.response?.data || { error: 'Failed to save location-specific rule' });
     }
 });
 
@@ -1132,6 +1195,31 @@ function reconcileCriticalSuggestionsAgainstCorrectedMenu(
 }
 
 /**
+ * Form API: Menu image upload (optional)
+ */
+app.post('/api/form/menu-image-upload', upload.single('menuImage') as any, async (req, res) => {
+    try {
+        if (!req.file) {
+            return res.status(400).json({ error: 'No image uploaded' });
+        }
+
+        const mime = req.file.mimetype || '';
+        if (!mime.startsWith('image/')) {
+            return res.status(400).json({ error: 'Only image uploads are allowed' });
+        }
+
+        res.json({
+            success: true,
+            menuImagePath: req.file.path,
+            menuImageFileName: req.file.originalname || path.basename(req.file.path),
+        });
+    } catch (error: any) {
+        console.error('Error uploading menu image:', error.message);
+        res.status(500).json({ error: 'Failed to upload menu image' });
+    }
+});
+
+/**
  * Form API: Submit Menu - Create docx from form and trigger review workflow
  */
 app.post('/api/form/submit', async (req, res) => {
@@ -1144,6 +1232,13 @@ app.post('/api/form/submit', async (req, res) => {
             property,
             width,
             height,
+            printWidth,
+            printHeight,
+            printRegion,
+            printSize,
+            folded,
+            digitalWidth,
+            digitalHeight,
             cropMarks,
             bleedMarks,
             fileSizeLimit,
@@ -1152,6 +1247,7 @@ app.post('/api/form/submit', async (req, res) => {
             orientation,
             menuType,
             templateType,
+            turnaroundDays,
             dateNeeded,
             hotelName,
             cityCountry,
@@ -1170,12 +1266,45 @@ app.post('/api/form/submit', async (req, res) => {
             revisionBaselineDocPath,
             revisionBaselineFileName,
             baseApprovedMenuContent,
-            chefPersistentDiff
+            chefPersistentDiff,
+            skipAiReview,
+            menuImagePath,
+            menuImageFileName
         } = req.body;
 
+        const wantsPrint = assetType === 'PRINT' || assetType === 'BOTH';
+        const wantsDigital = assetType === 'DIGITAL' || assetType === 'BOTH';
+        const normalizedTemplateType = templateType || 'food';
+        const skipAi = !!skipAiReview || normalizedTemplateType === 'non_beverage';
+        const minTurnaroundDays = submissionMode === 'modification' ? 2 : 5;
+        const parsedTurnaroundDays = Number.parseInt(`${turnaroundDays || ''}`, 10);
+        const normalizedTurnaroundDays = Number.isFinite(parsedTurnaroundDays) ? parsedTurnaroundDays : minTurnaroundDays;
+
         // Validate required fields
-        if (!submitterName || !submitterEmail || !submitterJobTitle || !projectName || !property || !width || !height || !orientation || !templateType || !dateNeeded || !cityCountry || !assetType || !menuContent) {
+        if (!submitterName || !submitterEmail || !submitterJobTitle || !projectName || !property || !orientation || !templateType || !dateNeeded || !cityCountry || !assetType || !menuContent) {
             return res.status(400).json({ error: 'All fields are required' });
+        }
+
+        if (normalizedTurnaroundDays < minTurnaroundDays) {
+            return res.status(400).json({
+                error: `Turnaround days must be at least ${minTurnaroundDays} for ${submissionMode === 'modification' ? 'modification' : 'new'} submissions`
+            });
+        }
+
+        if (wantsDigital && (!digitalWidth || !digitalHeight)) {
+            return res.status(400).json({ error: 'Digital width and height are required' });
+        }
+
+        if (wantsPrint) {
+            if (!printRegion || !folded || !cropMarks || !bleedMarks || !fileSizeLimit) {
+                return res.status(400).json({ error: 'All print fields are required for print assets' });
+            }
+            if (printRegion === 'US' && (!printWidth || !printHeight)) {
+                return res.status(400).json({ error: 'US print requires print width and height' });
+            }
+            if (printRegion === 'NON_US' && !printSize) {
+                return res.status(400).json({ error: 'Non-US print requires A-size selection' });
+            }
         }
 
         if (submissionMode === 'modification' && !revisionBaseSubmissionId && !revisionBaselineDocPath) {
@@ -1183,9 +1312,15 @@ app.post('/api/form/submit', async (req, res) => {
         }
 
         // Construct size string for DOCX template backward compatibility
-        const sizeForDocx = assetType === 'PRINT'
-            ? `${width} x ${height} inches`
-            : `${width} x ${height} pixels`;
+        const printSizeForDocx = wantsPrint
+            ? (printRegion === 'NON_US' ? (printSize || 'N/A') : `${printWidth || width || ''} x ${printHeight || height || ''} inches`)
+            : '';
+        const digitalSizeForDocx = wantsDigital
+            ? `${digitalWidth || width || ''} x ${digitalHeight || height || ''} pixels`
+            : '';
+        const sizeForDocx = assetType === 'BOTH'
+            ? `Digital: ${digitalSizeForDocx} | Print: ${printSizeForDocx}`
+            : (wantsPrint ? printSizeForDocx : digitalSizeForDocx);
         const effectiveAllergens = (allergens || '').trim() || DEFAULT_ALLERGEN_KEY;
         const normalizedMenuContent = stripRawNoticeLines(menuContent);
         const normalizedMenuContentHtml = stripRawNoticeFromHtml(menuContentHtml || '');
@@ -1212,7 +1347,7 @@ app.post('/api/form/submit', async (req, res) => {
             size: sizeForDocx,
             orientation,
             menuType: menuType || 'standard',
-            templateType: templateType || 'food',
+            templateType: normalizedTemplateType === 'non_beverage' ? 'food' : normalizedTemplateType,
             dateNeeded,
             menuContent: normalizedMenuContent,
             menuContentHtml: docxMenuContentHtml,
@@ -1240,6 +1375,26 @@ app.post('/api/form/submit', async (req, res) => {
             }
         }
 
+        let persistedMenuImagePath: string | null = null;
+        if (menuImagePath) {
+            try {
+                await fs.access(menuImagePath);
+                const submissionDir = getSubmissionDocumentDir(projectName, property, submissionId);
+                const assetDir = path.join(submissionDir, 'assets');
+                await fs.mkdir(assetDir, { recursive: true });
+                const imageFileName = menuImageFileName || path.basename(menuImagePath);
+                persistedMenuImagePath = path.join(assetDir, imageFileName);
+                if (path.resolve(menuImagePath) !== path.resolve(persistedMenuImagePath)) {
+                    await fs.copyFile(menuImagePath, persistedMenuImagePath);
+                }
+            } catch (imageError: any) {
+                console.warn(`Failed to persist menu image for ${submissionId}:`, imageError.message);
+                persistedMenuImagePath = menuImagePath;
+            }
+        }
+
+        const submissionStatus = skipAi ? 'submitted_no_ai_review' : 'pending_human_review';
+
         // Create submission in database
         const dbResponse = await axios.post('http://localhost:3004/submissions', {
             id: submissionId,
@@ -1251,16 +1406,24 @@ app.post('/api/form/submit', async (req, res) => {
             date_needed: dateNeeded,
             filename: `${projectName}_Menu.docx`,
             original_path: docxPath,
-            status: 'pending_human_review',
+            status: submissionStatus,
             created_at: new Date().toISOString(),
             source: 'form',
             menu_type: menuType || 'standard',
-            template_type: templateType || 'food',
+            template_type: normalizedTemplateType,
             hotel_name: hotelName || null,
             city_country: cityCountry,
             asset_type: assetType,
-            width,
-            height,
+            width: width || (wantsPrint ? (printRegion === 'NON_US' ? printSize : printWidth) : digitalWidth),
+            height: height || (wantsPrint ? (printRegion === 'NON_US' ? printSize : printHeight) : digitalHeight),
+            print_width: printWidth || null,
+            print_height: printHeight || null,
+            print_region: printRegion || null,
+            print_size: printSize || null,
+            folded: folded === 'yes',
+            digital_width: digitalWidth || null,
+            digital_height: digitalHeight || null,
+            turnaround_days: normalizedTurnaroundDays,
             crop_marks: cropMarks === 'yes',
             bleed_marks: bleedMarks === 'yes',
             file_size_limit: fileSizeLimit === 'yes',
@@ -1303,6 +1466,17 @@ app.post('/api/form/submit', async (req, res) => {
             }).catch(err => console.error('Failed to save baseline_approved_docx asset metadata:', err.message));
         }
 
+        if (persistedMenuImagePath) {
+            axios.post('http://localhost:3004/assets', {
+                submission_id: submissionId,
+                asset_type: 'menu_image',
+                source: 'chef_form',
+                storage_provider: 'local',
+                storage_path: persistedMenuImagePath,
+                file_name: menuImageFileName || path.basename(persistedMenuImagePath),
+            }).catch(err => console.error('Failed to save menu_image asset metadata:', err.message));
+        }
+
         // Save submitter profile (fire-and-forget)
         axios.post('http://localhost:3004/submitter-profiles', {
             name: submitterName,
@@ -1316,26 +1490,30 @@ app.post('/api/form/submit', async (req, res) => {
         // 2. Generate redlined version
         // 3. Set status to 'pending_human_review'
         try {
+            if (skipAi) {
+                console.log(`Skipping AI review for submission ${submissionId} (template: ${normalizedTemplateType})`);
+            } else {
             // Extract text from the document for AI review
-        const mammoth = require('mammoth');
-        const result = await mammoth.extractRawText({ path: docxPath });
-        const text = result.value;
+                const mammoth = require('mammoth');
+                const result = await mammoth.extractRawText({ path: docxPath });
+                const text = result.value;
 
-            await axios.post('http://localhost:3002/ai-review', {
-                text: text,
-                submission_id: submissionId,
-                submitter_email: submitterEmail,
-                filename: `${projectName}_Menu.docx`,
-                original_path: docxPath
-        });
+                await axios.post('http://localhost:3002/ai-review', {
+                    text: text,
+                    submission_id: submissionId,
+                    submitter_email: submitterEmail,
+                    filename: `${projectName}_Menu.docx`,
+                    original_path: docxPath
+                });
 
-            console.log(`✓ AI review triggered for ${submissionId}`);
+                console.log(`✓ AI review triggered for ${submissionId}`);
+            }
         } catch (aiError: any) {
             console.error('Error triggering AI review:', aiError.message);
             // Update status to indicate manual review needed
             await axios.put(`http://localhost:3004/submissions/${submissionId}`, {
-                status: 'pending_human_review'
-        });
+                status: skipAi ? 'submitted_no_ai_review' : 'pending_human_review'
+            });
         }
 
         // Create ClickUp task (synchronous so we can surface upload issues to chef)
@@ -1349,8 +1527,15 @@ app.post('/api/form/submit', async (req, res) => {
                 submitterJobTitle,
                 projectName,
                 property,
-                width,
-                height,
+                width: width || (wantsPrint ? (printRegion === 'NON_US' ? printSize : printWidth) : digitalWidth),
+                height: height || (wantsPrint ? (printRegion === 'NON_US' ? printSize : printHeight) : digitalHeight),
+                printWidth,
+                printHeight,
+                printRegion,
+                printSize,
+                folded,
+                digitalWidth,
+                digitalHeight,
                 cropMarks,
                 bleedMarks,
                 fileSizeLimit,
@@ -1358,12 +1543,15 @@ app.post('/api/form/submit', async (req, res) => {
                 fileDeliveryNotes,
                 orientation,
                 menuType,
-                templateType,
+                templateType: normalizedTemplateType,
+                turnaroundDays: normalizedTurnaroundDays,
                 dateNeeded,
                 hotelName,
                 cityCountry,
                 assetType,
                 docxPath,
+                menuImagePath: persistedMenuImagePath,
+                menuImageFileName,
                 filename: `${projectName}_Menu.docx`,
                 submissionMode,
                 revisionSource,
@@ -1856,18 +2044,50 @@ app.post('/api/design-approval/compare', upload.fields([
     const submitterName = req.body.submitterName || '';
     const submitterEmail = req.body.submitterEmail || '';
     const submitterJobTitle = req.body.submitterJobTitle || '';
+    const existingDocxSubmissionId = req.body.existingDocxSubmissionId || '';
+    const requiredApprovalsRaw = req.body.requiredApprovals || '[]';
+    let requiredApprovals: any[] = [];
+    try {
+        requiredApprovals = JSON.parse(requiredApprovalsRaw);
+    } catch {
+        requiredApprovals = [];
+    }
 
     try {
-        if (!files.docxFile || !files.pdfFile) {
-            return res.status(400).json({ error: 'Both DOCX and PDF files are required' });
+        if (!files.pdfFile) {
+            return res.status(400).json({ error: 'PDF file is required' });
         }
 
-        const docxFile = files.docxFile[0];
+        let docxPath = '';
+        let docxOriginalName = 'design-approval.docx';
+        let docxMime = '';
+        if (files.docxFile && files.docxFile[0]) {
+            docxPath = files.docxFile[0].path;
+            docxOriginalName = files.docxFile[0].originalname || docxOriginalName;
+            docxMime = files.docxFile[0].mimetype;
+            tempFiles.push(docxPath);
+        } else if (existingDocxSubmissionId) {
+            const subResponse = await axios.get(`http://localhost:3004/submissions/${encodeURIComponent(existingDocxSubmissionId)}`);
+            const baselineSubmission = subResponse.data || {};
+            let candidatePath = baselineSubmission.final_path || baselineSubmission.approved_path || baselineSubmission.original_path;
+            if (!candidatePath) {
+                return res.status(400).json({ error: 'Selected submission has no available DOCX file path' });
+            }
+            if (candidatePath.startsWith('../')) {
+                candidatePath = path.resolve(__dirname, candidatePath);
+            }
+            await fs.access(candidatePath);
+            docxPath = candidatePath;
+            docxOriginalName = baselineSubmission.filename || docxOriginalName;
+            docxMime = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+        } else {
+            return res.status(400).json({ error: 'DOCX source is required (upload or database selection)' });
+        }
+
         const pdfFile = files.pdfFile[0];
-        tempFiles.push(docxFile.path, pdfFile.path);
+        tempFiles.push(pdfFile.path);
 
         // Validate MIME types
-        const docxMime = docxFile.mimetype;
         const pdfMime = pdfFile.mimetype;
 
         if (!docxMime.includes('wordprocessingml') && !docxMime.includes('octet-stream')) {
@@ -1890,7 +2110,7 @@ app.post('/api/design-approval/compare', upload.fields([
         // Extract project details + menu content from DOCX
         const extractDetailsScript = path.join(docxRedlinerDir, 'extract_project_details.py');
         const detailsResult = await execAsync(
-            `${pythonCmd} "${extractDetailsScript}" "${docxFile.path}"`,
+            `${pythonCmd} "${extractDetailsScript}" "${docxPath}"`,
             { timeout: 30000, maxBuffer: 10 * 1024 * 1024 }
         );
 
@@ -1938,10 +2158,12 @@ app.post('/api/design-approval/compare', upload.fields([
                 property: projectDetails.property || '',
                 size: projectDetails.size || '',
                 orientation: projectDetails.orientation || '',
-                filename: docxFile.originalname || 'design-approval.docx',
+                filename: docxOriginalName || 'design-approval.docx',
                 status: isMatch ? 'approved' : 'needs_correction',
                 created_at: new Date().toISOString(),
-                source: 'design_approval'
+                source: 'design_approval',
+                approvals: JSON.stringify(requiredApprovals),
+                mismatch_override: false,
             });
             dbSaved = true;
             console.log(`Design approval submission saved: ${submissionId}`);
@@ -1964,6 +2186,7 @@ app.post('/api/design-approval/compare', upload.fields([
             differences,
             docxText,
             pdfText,
+            requiredApprovals,
             submissionId: dbSaved ? submissionId : undefined
         });
 
@@ -1975,6 +2198,28 @@ app.post('/api/design-approval/compare', upload.fields([
         for (const f of tempFiles) {
             fs.unlink(f).catch(() => {});
         }
+    }
+});
+
+app.post('/api/design-approval/:submissionId/override', async (req, res) => {
+    try {
+        const { submissionId } = req.params;
+        const reason = (req.body?.reason || '').toString().trim();
+        if (!reason) {
+            return res.status(400).json({ error: 'Override reason is required' });
+        }
+
+        await axios.put(`http://localhost:3004/submissions/${encodeURIComponent(submissionId)}`, {
+            status: 'approved_override',
+            mismatch_override: true,
+            mismatch_override_reason: reason,
+            mismatch_override_at: new Date().toISOString(),
+        });
+
+        res.json({ success: true });
+    } catch (error: any) {
+        console.error('Failed to save design approval override:', error.message);
+        res.status(500).json({ error: 'Failed to save override' });
     }
 });
 

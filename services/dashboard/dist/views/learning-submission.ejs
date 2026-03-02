@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title><%= title %></title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600&family=Montserrat:wght@400;500;600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --text: #333;
+            --muted: #777;
+            --border: #e8e4de;
+            --bg: #fff;
+            --bg-alt: #fafaf8;
+            --primary: #2c2c2c;
+            --success: #4a7c59;
+            --error: #8b3a3a;
+        }
+        * { box-sizing: border-box; }
+        body { margin: 0; font-family: 'Montserrat', sans-serif; color: var(--text); background: var(--bg); }
+        .header { border-bottom: 1px solid var(--border); padding: 1.75rem 4vw; }
+        .header h1 { margin: 0; font-family: 'Cormorant Garamond', serif; font-size: 2rem; letter-spacing: .04em; }
+        .links { margin-top: .35rem; }
+        .links a { color: var(--primary); text-decoration: none; margin-right: 1rem; font-size: .75rem; text-transform: uppercase; letter-spacing: .12em; }
+        .container { max-width: 1400px; margin: 0 auto; padding: 1.5rem 4vw 2.5rem; }
+        .card { border: 1px solid var(--border); background: #fff; padding: 1rem; margin-bottom: 1rem; }
+        .meta-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: .75rem; }
+        .meta-item { border: 1px solid var(--border); background: var(--bg-alt); padding: .6rem .7rem; }
+        .meta-label { font-size: .65rem; text-transform: uppercase; letter-spacing: .1em; color: var(--muted); margin-bottom: .2rem; }
+        .meta-value { font-size: .85rem; font-weight: 500; }
+
+        .dish-card { border: 1px solid var(--border); margin-bottom: 1.25rem; }
+        .dish-head { background: var(--bg-alt); border-bottom: 1px solid var(--border); padding: .7rem .8rem; display: flex; align-items: center; gap: .6rem; }
+        .dish-head-title { font-size: .75rem; text-transform: uppercase; letter-spacing: .1em; font-weight: 600; }
+        .badge { display: inline-block; font-size: .6rem; text-transform: uppercase; letter-spacing: .08em; padding: .2rem .45rem; border-radius: 2px; font-weight: 600; }
+        .badge-modified { background: #fff3e0; color: #e65100; }
+        .badge-removed { background: #ffebee; color: #c62828; }
+        .badge-added { background: #e8f5e9; color: #2e7d32; }
+        .dish-body { padding: 1rem; }
+
+        .diff-display { border: 1px solid var(--border); background: #fcfcfb; padding: .65rem .75rem; font-size: .88rem; line-height: 1.55; white-space: pre-wrap; margin-bottom: .85rem; font-family: 'Montserrat', sans-serif; }
+
+        .plain-toggle { font-size: .7rem; color: var(--muted); cursor: pointer; text-decoration: underline; margin-bottom: .5rem; display: inline-block; }
+        .plain-lines { display: none; margin-bottom: .85rem; }
+        .plain-lines.open { display: block; }
+        .plain-label { font-size: .63rem; text-transform: uppercase; letter-spacing: .1em; color: var(--muted); margin-bottom: .15rem; }
+        .plain-text { border: 1px solid var(--border); background: var(--bg-alt); padding: .45rem .55rem; font-size: .8rem; line-height: 1.35; white-space: pre-wrap; margin-bottom: .4rem; }
+
+        .annotation-section { border-top: 1px solid var(--border); padding-top: .85rem; margin-top: .85rem; }
+        .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: .7rem; }
+        label { display: block; font-size: .63rem; text-transform: uppercase; letter-spacing: .1em; color: var(--muted); margin-bottom: .25rem; }
+        input, textarea, select { width: 100%; border: 1px solid var(--border); padding: .55rem .6rem; font-family: inherit; font-size: .84rem; }
+        textarea { min-height: 80px; resize: vertical; }
+        select[multiple] { min-height: 100px; }
+
+        .location-check { display: flex; align-items: center; gap: .45rem; margin-bottom: .5rem; }
+        .location-check input[type="checkbox"] { width: auto; }
+        .location-check label { margin: 0; font-size: .8rem; text-transform: none; letter-spacing: 0; color: var(--text); cursor: pointer; }
+        .location-fields { display: none; }
+        .location-fields.open { display: block; }
+
+        .btn { border: 1px solid var(--primary); background: var(--primary); color: #fff; text-transform: uppercase; letter-spacing: .1em; font-size: .68rem; padding: .5rem .7rem; cursor: pointer; }
+        .save-status { margin-left: .6rem; font-size: .78rem; color: var(--muted); }
+        .save-status.ok { color: var(--success); }
+        .save-status.err { color: var(--error); }
+
+        table { width: 100%; border-collapse: collapse; }
+        th, td { border: 1px solid var(--border); padding: .5rem .55rem; vertical-align: top; font-size: .8rem; }
+        th { background: var(--bg-alt); text-align: left; font-size: .68rem; text-transform: uppercase; letter-spacing: .1em; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Submission Correction Review</h1>
+        <div class="links">
+            <a href="/learning">Back to Learning</a>
+            <a href="/">Dashboard</a>
+        </div>
+    </div>
+
+    <div class="container">
+        <div class="card">
+            <div class="meta-grid">
+                <div class="meta-item">
+                    <div class="meta-label">Submission ID</div>
+                    <div class="meta-value"><code><%= submissionId %></code></div>
+                </div>
+                <div class="meta-item">
+                    <div class="meta-label">Timestamp</div>
+                    <div class="meta-value"><%= learningDetail.timestamp ? new Date(learningDetail.timestamp).toLocaleString() : 'N/A' %></div>
+                </div>
+                <div class="meta-item">
+                    <div class="meta-label">Restaurant / Project</div>
+                    <div class="meta-value"><%= submissionMeta.project_name || 'N/A' %></div>
+                </div>
+                <div class="meta-item">
+                    <div class="meta-label">Location</div>
+                    <div class="meta-value"><%= submissionMeta.property || submissionMeta.city_country || 'N/A' %></div>
+                </div>
+                <div class="meta-item">
+                    <div class="meta-label">Dish Corrections</div>
+                    <div class="meta-value"><%= learningDetail.dish_correction_count || 0 %></div>
+                </div>
+            </div>
+        </div>
+
+        <% const dishes = learningDetail.dish_corrections || []; %>
+        <% if (dishes.length === 0) { %>
+            <div class="card">No dish-level corrections were detected for this submission.</div>
+        <% } else { %>
+            <% dishes.forEach((dish, idx) => { %>
+                <div class="dish-card">
+                    <div class="dish-head">
+                        <span class="dish-head-title">Dish <%= idx + 1 %></span>
+                        <% if (dish.change_type === 'modified') { %>
+                            <span class="badge badge-modified">Modified</span>
+                        <% } else if (dish.change_type === 'removed') { %>
+                            <span class="badge badge-removed">Removed</span>
+                        <% } else if (dish.change_type === 'added') { %>
+                            <span class="badge badge-added">Added</span>
+                        <% } %>
+                    </div>
+                    <div class="dish-body">
+                        <div class="diff-display"><%- dish.diff_html %></div>
+
+                        <span class="plain-toggle" onclick="togglePlain(<%= idx %>)">Show original / corrected text</span>
+                        <div class="plain-lines" id="plain-<%= idx %>">
+                            <% if (dish.before_line) { %>
+                                <div class="plain-label">Original</div>
+                                <div class="plain-text"><%= dish.before_line %></div>
+                            <% } %>
+                            <% if (dish.after_line) { %>
+                                <div class="plain-label">Corrected</div>
+                                <div class="plain-text"><%= dish.after_line %></div>
+                            <% } %>
+                        </div>
+
+                        <div class="annotation-section">
+                            <div style="margin-bottom: .7rem;">
+                                <label for="explanation-<%= idx %>">Why was this correction made? Why did AI miss it? *</label>
+                                <textarea id="explanation-<%= idx %>" placeholder="e.g., 'Cr&#232;me br&#251;l&#233;e' requires French diacritics per brand standard. AI missed diacritics on accent grave and circumflex."></textarea>
+                            </div>
+
+                            <div class="form-grid">
+                                <div>
+                                    <label for="restaurant-<%= idx %>">Restaurant Name *</label>
+                                    <input id="restaurant-<%= idx %>" value="<%= submissionMeta.project_name || '' %>" placeholder="e.g., Toro Toro">
+                                </div>
+                                <div>
+                                    <label for="reviewer-<%= idx %>">Reviewer Name</label>
+                                    <input id="reviewer-<%= idx %>" placeholder="Optional">
+                                </div>
+                            </div>
+
+                            <div style="margin-top: .7rem;">
+                                <div class="location-check">
+                                    <input type="checkbox" id="loc-check-<%= idx %>" onchange="toggleLocationFields(<%= idx %>)">
+                                    <label for="loc-check-<%= idx %>">This is a location-specific rule</label>
+                                </div>
+                                <div class="location-fields" id="loc-fields-<%= idx %>">
+                                    <div class="form-grid">
+                                        <div>
+                                            <label for="location-<%= idx %>">Primary Location *</label>
+                                            <input id="location-<%= idx %>" value="<%= submissionMeta.property || submissionMeta.city_country || '' %>" placeholder="e.g., Miami">
+                                        </div>
+                                        <div>
+                                            <label for="shared-<%= idx %>">Additional Locations Where This Rule Applies</label>
+                                            <select multiple id="shared-<%= idx %>">
+                                                <% (locationOptions || []).forEach((loc) => { %>
+                                                    <option value="<%= loc %>"
+                                                        <%= (loc === (submissionMeta.property || submissionMeta.city_country || '')) ? 'disabled' : '' %>
+                                                    ><%= loc %></option>
+                                                <% }) %>
+                                            </select>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div style="margin-top: .8rem;">
+                                <button class="btn" onclick='saveDishRule(<%- JSON.stringify(dish) %>, <%= idx %>)'>Save Rule</button>
+                                <span class="save-status" id="save-status-<%= idx %>"></span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            <% }) %>
+        <% } %>
+
+        <div class="card">
+            <h3 style="margin-top:0; font-size:.9rem; text-transform:uppercase; letter-spacing:.1em; color:var(--muted);">Saved Rules For This Submission</h3>
+            <% if (!savedLocationRules || savedLocationRules.length === 0) { %>
+                <div>No saved rules yet.</div>
+            <% } else { %>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Created</th>
+                            <th>Correction</th>
+                            <th>Restaurant</th>
+                            <th>Location</th>
+                            <th>Shared Locations</th>
+                            <th>Reasoning</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <% savedLocationRules.forEach((item) => { %>
+                            <tr>
+                                <td><%= item.created_at ? new Date(item.created_at).toLocaleString() : 'N/A' %></td>
+                                <td><code><%= item.correction_id %></code></td>
+                                <td><%= item.restaurant_name || '' %></td>
+                                <td><%= item.location || '' %></td>
+                                <td><%= (item.shared_locations || []).join(', ') %></td>
+                                <td><%= item.explanation || '' %></td>
+                            </tr>
+                        <% }) %>
+                    </tbody>
+                </table>
+            <% } %>
+        </div>
+    </div>
+
+    <script>
+        function togglePlain(idx) {
+            document.getElementById(`plain-${idx}`).classList.toggle('open');
+        }
+
+        function toggleLocationFields(idx) {
+            const checked = document.getElementById(`loc-check-${idx}`).checked;
+            document.getElementById(`loc-fields-${idx}`).classList.toggle('open', checked);
+        }
+
+        async function saveDishRule(dish, idx) {
+            const statusEl = document.getElementById(`save-status-${idx}`);
+            const explanation = (document.getElementById(`explanation-${idx}`).value || '').trim();
+            const restaurantName = (document.getElementById(`restaurant-${idx}`).value || '').trim();
+            const reviewerName = (document.getElementById(`reviewer-${idx}`).value || '').trim();
+            const isLocationSpecific = document.getElementById(`loc-check-${idx}`).checked;
+            const locationInput = document.getElementById(`location-${idx}`);
+            const location = isLocationSpecific ? (locationInput.value || '').trim() : '';
+
+            const sharedSelect = document.getElementById(`shared-${idx}`);
+            const sharedLocations = isLocationSpecific
+                ? Array.from(sharedSelect.selectedOptions).map((o) => o.value)
+                : [];
+
+            if (!explanation || !restaurantName) {
+                statusEl.textContent = 'Explanation and restaurant name are required.';
+                statusEl.className = 'save-status err';
+                return;
+            }
+            if (isLocationSpecific && !location) {
+                statusEl.textContent = 'Primary location is required for location-specific rules.';
+                statusEl.className = 'save-status err';
+                return;
+            }
+
+            statusEl.textContent = 'Saving...';
+            statusEl.className = 'save-status';
+
+            try {
+                const response = await fetch('/api/learning/location-rules', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        submission_id: '<%= submissionId %>',
+                        correction_id: dish.correction_id,
+                        before_line: dish.before_line,
+                        after_line: dish.after_line,
+                        token_changes: [],
+                        explanation,
+                        restaurant_name: restaurantName,
+                        location: location || '<%= submissionMeta.property || submissionMeta.city_country || "" %>',
+                        shared_locations: sharedLocations,
+                        reviewer_name: reviewerName,
+                    })
+                });
+                const data = await response.json();
+                if (!response.ok) {
+                    throw new Error(data.error || 'Failed to save rule');
+                }
+                statusEl.textContent = 'Saved.';
+                statusEl.className = 'save-status ok';
+                setTimeout(() => window.location.reload(), 600);
+            } catch (error) {
+                statusEl.textContent = error.message || 'Save failed.';
+                statusEl.className = 'save-status err';
+            }
+        }
+    </script>
+</body>
+</html>

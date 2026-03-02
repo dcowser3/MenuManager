@@ -299,6 +299,13 @@ app.get('/submissions/recent-projects', async (req, res) => {
             property: s.property || '',
             width: s.width || '',
             height: s.height || '',
+            printWidth: s.print_width || s.raw_payload?.printWidth || '',
+            printHeight: s.print_height || s.raw_payload?.printHeight || '',
+            printRegion: s.print_region || s.raw_payload?.printRegion || '',
+            printSize: s.print_size || s.raw_payload?.printSize || '',
+            folded: s.folded || s.raw_payload?.folded || '',
+            digitalWidth: s.digital_width || s.raw_payload?.digitalWidth || '',
+            digitalHeight: s.digital_height || s.raw_payload?.digitalHeight || '',
             cropMarks: s.crop_marks || '',
             bleedMarks: s.bleed_marks || '',
             fileSizeLimit: s.file_size_limit || '',
@@ -310,6 +317,7 @@ app.get('/submissions/recent-projects', async (req, res) => {
             hotelName: s.hotel_name || '',
             cityCountry: s.city_country || '',
             assetType: s.asset_type || '',
+            turnaroundDays: s.turnaround_days || s.raw_payload?.turnaroundDays || '',
         }));
         res.json(projects);
     }
@@ -372,6 +380,13 @@ app.get('/submissions/search', async (req, res) => {
             property: s.property || '',
             width: s.width || '',
             height: s.height || '',
+            printWidth: s.print_width || s.raw_payload?.printWidth || '',
+            printHeight: s.print_height || s.raw_payload?.printHeight || '',
+            printRegion: s.print_region || s.raw_payload?.printRegion || '',
+            printSize: s.print_size || s.raw_payload?.printSize || '',
+            folded: s.folded || s.raw_payload?.folded || '',
+            digitalWidth: s.digital_width || s.raw_payload?.digitalWidth || '',
+            digitalHeight: s.digital_height || s.raw_payload?.digitalHeight || '',
             cropMarks: s.crop_marks || '',
             bleedMarks: s.bleed_marks || '',
             fileSizeLimit: s.file_size_limit || '',
@@ -386,6 +401,7 @@ app.get('/submissions/search', async (req, res) => {
             submitterName: s.submitter_name || '',
             submitterEmail: s.submitter_email || '',
             dateNeeded: s.date_needed || '',
+            turnaroundDays: s.turnaround_days || s.raw_payload?.turnaroundDays || '',
             updatedAt: s.updated_at || s.created_at,
             approvedMenuContent: s.approved_menu_content || s.menu_content || '',
             allergens: s.allergens || '',
@@ -396,6 +412,36 @@ app.get('/submissions/search', async (req, res) => {
     catch (error) {
         console.error('Error searching submissions:', error);
         res.status(500).json([]);
+    }
+});
+// Distinct property values across all submissions (for location dropdowns).
+// IMPORTANT: Must come BEFORE /submissions/:id
+app.get('/submissions/properties', async (req, res) => {
+    try {
+        let properties = [];
+        if ((0, supabase_client_1.isSupabaseConfigured)()) {
+            const supabase = (0, supabase_client_1.getSupabaseClient)();
+            const { data, error } = await supabase
+                .from(SUBMISSIONS_TABLE)
+                .select('property');
+            if (error)
+                throw new Error(error.message);
+            properties = (data || [])
+                .map((r) => (r.property || '').trim())
+                .filter(Boolean);
+        }
+        else {
+            const submissions = JSON.parse(await fs_1.promises.readFile(SUBMISSIONS_DB, 'utf-8'));
+            properties = Object.values(submissions)
+                .map((s) => (s.property || '').trim())
+                .filter(Boolean);
+        }
+        const unique = [...new Set(properties)].sort();
+        res.json({ properties: unique });
+    }
+    catch (error) {
+        console.error('Error fetching distinct properties:', error);
+        res.status(500).json({ properties: [] });
     }
 });
 // Latest approved submission for a project/property pair.

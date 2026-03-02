@@ -14,10 +14,18 @@ if [ ! -f .env ]; then
     exit 1
 fi
 
-# Check if built
-if [ ! -d "services/db/dist" ]; then
+# Build services unless explicitly skipped.
+# This ensures updated EJS/templates and TS changes are reflected on restart.
+if [ "$SKIP_BUILD" = "1" ]; then
+    echo "⏭️  SKIP_BUILD=1 set, skipping build step."
+    echo ""
+else
     echo "📦 Building services..."
     npm run build --workspaces
+    if [ $? -ne 0 ]; then
+        echo "❌ Build failed. Aborting startup."
+        exit 1
+    fi
     echo ""
 fi
 

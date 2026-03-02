@@ -1,5 +1,6 @@
 # Ignore environment variables and secrets
 .env
+.env.bak
 
 # Ignore temporary files
 tmp/

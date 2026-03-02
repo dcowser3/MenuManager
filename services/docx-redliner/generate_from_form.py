@@ -200,6 +200,8 @@ def populate_template(template_path: str, form_data: dict, output_path: str):
                     run.italic = part['italic']
                     run.underline = part['underline']
                     run.font.strike = bool(part.get('strike'))
+                    if part.get('strike'):
+                        run.font.color.rgb = RGBColor(0xFF, 0x00, 0x00)
                     if part.get('highlight'):
                         run.font.highlight_color = WD_COLOR_INDEX.YELLOW
             # Empty paragraph creates spacing

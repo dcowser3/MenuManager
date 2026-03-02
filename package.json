@@ -7,7 +7,8 @@
     "services/*"
   ],
   "scripts": {
-    "test": "jest"
+    "test": "jest",
+    "prompt:optimize": "node scripts/prompt-optimize.js"
   },
   "keywords": [],
   "author": "",

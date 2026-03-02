@@ -28,6 +28,9 @@ This feature captures human reviewer corrections and feeds stable correction pat
   - Returns manual disable overrides for specific learned rules.
 - `POST /learning/overrides`
   - Enables/disables a specific learned rule key (`source=>target`).
+- `POST /learning/recompute-signals`
+  - Recomputes replacement signals for existing `training_data.jsonl` entries from stored AI/final DOCX paths and rebuilds `learned_rules.json`.
+  - Use this after extraction logic changes to clean stale/bad learned rules without deleting all history.
 
 ## Learning Admin Dashboard
 
@@ -37,13 +40,45 @@ This feature captures human reviewer corrections and feeds stable correction pat
 - Disable actions are persisted as differ overrides and excluded from prompt overlay
 - Shows recent training ingestions (submission id, timestamp, changes, change %) for auditability
 - Shows a connectivity warning when dashboard cannot reach differ endpoints
+- Each submission row links to `GET /learning/submission/:submissionId` for manual correction review
+
+## Manual Correction Review + Location Rules
+
+### Submission detail page
+
+- Route: `GET /learning/submission/:submissionId`
+- Displays all detected corrections for the selected submission
+- Each correction shows:
+  - full original line
+  - full corrected line
+  - token-level delta summary
+
+### Reviewer annotation capture
+
+- Reviewer can save, per correction:
+  - reasoning/explanation for the change
+  - restaurant name
+  - primary location
+  - additional locations that should share the same rule
+- Data is saved as **location-specific rules** for weekly manual prompt review, not auto-injected into prompt.
+
+### APIs
+
+- `GET /learning/submissions` (differ): latest learned entry per submission
+- `GET /learning/submissions/:submissionId` (differ): line-level correction detail
+- `GET /learning/location-rules` (differ): saved location-specific rules (optionally filtered by `submission_id`)
+- `POST /learning/location-rules` (differ): save reviewer annotation for a correction
 
 ## Guardrails
 
 - Conservative filtering removes noisy signals:
+  - stopword tokens (e.g. `of`, `or`, `the`, `may`)
+  - allergen-code tokens (e.g. `D`, `G`, `VG`)
   - numeric-heavy tokens
+  - very short tokens
   - very long tokens
   - low-signal mismatches
+- Replacement extraction uses line-diff alignment first (instead of raw same-line-index comparison) to reduce false mappings when line numbers shift.
 - Rules must meet minimum occurrences (`LEARNING_MIN_OCCURRENCES`, default `2`).
 - Low-dominance mappings are marked `conflicted` and excluded from prompt overlay.
 - Dashboard fails open: if `differ` is unavailable, AI check still runs without overlay.

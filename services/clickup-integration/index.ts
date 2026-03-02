@@ -184,7 +184,15 @@ function buildTaskDescription(input: {
     assetType?: string;
     width?: string;
     height?: string;
+    printWidth?: string;
+    printHeight?: string;
+    printRegion?: string;
+    printSize?: string;
+    folded?: string;
+    digitalWidth?: string;
+    digitalHeight?: string;
     orientation?: string;
+    turnaroundDays?: string | number;
     dateNeeded?: string;
     submissionMode?: string;
     revisionSource?: string;
@@ -213,10 +221,12 @@ function buildTaskDescription(input: {
         `- Menu Type: ${input.menuType || 'standard'}`,
         `- Template: ${input.templateType || 'food'}`,
         `- Asset Type: ${input.assetType || 'N/A'}`,
-        `- Dimensions: ${input.width || 'N/A'} x ${input.height || 'N/A'} ${input.assetType === 'PRINT' ? 'in' : 'px'}`,
+        `- Dimensions: ${input.width || 'N/A'} x ${input.height || 'N/A'} ${input.assetType === 'PRINT' ? 'in' : (input.assetType === 'BOTH' ? 'mixed' : 'px')}`,
         `- Orientation: ${input.orientation || 'N/A'}`,
+        `- Turnaround: ${input.turnaroundDays || 'N/A'} day(s)`,
         `- Date Needed: ${formatDateNeeded(input.dateNeeded)}`,
         `- Submission Mode: ${input.submissionMode || 'new'}`,
+        '- ClickUp Watchers: TODO add Marketing Team as watcher when watcher mapping/API is configured.',
     ];
 
     if (input.submissionMode === 'modification') {
@@ -226,7 +236,17 @@ function buildTaskDescription(input: {
         }
     }
 
-    if (input.assetType === 'PRINT') {
+    if (input.assetType === 'PRINT' || input.assetType === 'BOTH') {
+        if (input.assetType === 'BOTH') {
+            lines.push(`- Digital Dimensions: ${input.digitalWidth || 'N/A'} x ${input.digitalHeight || 'N/A'} px`);
+        }
+        lines.push(`- Print Region: ${input.printRegion || 'N/A'}`);
+        lines.push(`- Folded: ${input.folded === 'yes' ? 'Yes' : (input.folded === 'no' ? 'No' : 'N/A')}`);
+        if (input.printRegion === 'NON_US') {
+            lines.push(`- Print Size: ${input.printSize || 'N/A'}`);
+        } else {
+            lines.push(`- Print Dimensions: ${input.printWidth || 'N/A'} x ${input.printHeight || 'N/A'} in`);
+        }
         lines.push(`- Crop Marks: ${input.cropMarks || 'No'}`);
         lines.push(`- Bleed Marks: ${input.bleedMarks || 'No'}`);
         lines.push(`- File Size Limit: ${input.fileSizeLimit === 'yes' ? `Yes (${input.fileSizeLimitMb || 'N/A'} MB)` : 'No'}`);
@@ -252,14 +272,15 @@ function buildTaskDescription(input: {
     return lines.join('\n');
 }
 
-function sanitizeAttachmentFilename(rawName: string | undefined, fallbackBase: string): string {
+function sanitizeAttachmentFilename(rawName: string | undefined, fallbackBase: string, defaultExtension = '.docx'): string {
     const base = (rawName || '').trim() || fallbackBase;
     const cleaned = base
         .replace(/[/\\?%*:|"<>]/g, '-')
         .replace(/\s+/g, ' ')
         .trim();
-    const withExt = cleaned.toLowerCase().endsWith('.docx') ? cleaned : `${cleaned}.docx`;
-    return withExt || `${fallbackBase}.docx`;
+    const lower = cleaned.toLowerCase();
+    const withExt = lower.endsWith(defaultExtension.toLowerCase()) ? cleaned : `${cleaned}${defaultExtension}`;
+    return withExt || `${fallbackBase}${defaultExtension}`;
 }
 
 async function sendCorrectionsReadyNotification(payload: {
@@ -514,6 +535,13 @@ app.post('/create-task', async (req, res) => {
             property,
             width,
             height,
+            printWidth,
+            printHeight,
+            printRegion,
+            printSize,
+            folded,
+            digitalWidth,
+            digitalHeight,
             cropMarks,
             bleedMarks,
             fileSizeLimit,
@@ -522,11 +550,14 @@ app.post('/create-task', async (req, res) => {
             orientation,
             menuType,
             templateType,
+            turnaroundDays,
             dateNeeded,
             hotelName,
             cityCountry,
             assetType,
             docxPath,
+            menuImagePath,
+            menuImageFileName,
             filename,
             submissionMode,
             revisionSource,
@@ -564,7 +595,15 @@ app.post('/create-task', async (req, res) => {
                 assetType,
                 width,
                 height,
+                printWidth,
+                printHeight,
+                printRegion,
+                printSize,
+                folded,
+                digitalWidth,
+                digitalHeight,
                 orientation,
+                turnaroundDays,
                 dateNeeded,
                 submissionMode,
                 revisionSource,
@@ -639,6 +678,25 @@ app.post('/create-task', async (req, res) => {
                 const errorDetail = baselineError.response?.data?.err || baselineError.message;
                 warnings.push(`Baseline DOCX upload failed: ${errorDetail}`);
                 console.error(`Failed to attach baseline DOCX to ClickUp task ${taskId}:`, errorDetail);
+            }
+        }
+
+        if (menuImagePath && fs.existsSync(menuImagePath)) {
+            try {
+                const fallbackName = `${submissionId || 'menu-submission'}-menu-image`;
+                const ext = path.extname(menuImageFileName || menuImagePath) || '.png';
+                const safeName = sanitizeAttachmentFilename(menuImageFileName || path.basename(menuImagePath), fallbackName, ext);
+                await uploadTaskAttachment(
+                    taskId,
+                    menuImagePath,
+                    safeName,
+                    'application/octet-stream'
+                );
+                console.log(`Menu image attached to ClickUp task ${taskId}`);
+            } catch (imageError: any) {
+                const errorDetail = imageError.response?.data?.err || imageError.message;
+                warnings.push(`Menu image upload failed: ${errorDetail}`);
+                console.error(`Failed to attach menu image to ClickUp task ${taskId}:`, errorDetail);
             }
         }
 

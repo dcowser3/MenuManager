@@ -1,16 +1,20 @@
 # Design Approval
 
-**Status:** Complete (Feb 2026)
+**Status:** Complete (Updated Mar 2026)
 
-A stateless comparison tool that validates printed PDF proofs against the original DOCX template. No database storage needed.
+A comparison tool that validates printed PDF proofs against the approved DOCX source.
 
 ## User Flow
 
 1. User visits `/submit/:token` (welcome page) or navigates directly to `/design-approval`
-2. Uploads the DOCX template and the PDF proof
-3. System extracts text from both documents and compares them
-4. Differences are displayed, classified by type
-5. User reviews and submits approval
+2. Completes required approvals (`RSH Culinary`, `RSH Regional`)
+3. Chooses DOCX source:
+   - Upload local DOCX, or
+   - Search and select an approved submission from the database
+4. Uploads the PDF proof
+5. System extracts text from both documents and compares them
+6. Differences are displayed, classified by type
+7. If needed, user can submit a mismatch override with required reason
 
 ## Comparison Algorithm
 
@@ -28,8 +32,19 @@ A stateless comparison tool that validates printed PDF proofs against the origin
 ## Architecture
 
 - **Routes:** `/submit/:token` (welcome page), `/design-approval` (comparison tool)
+- **API routes:** `POST /api/design-approval/compare`, `POST /api/design-approval/:submissionId/override`
 - **Python scripts:** Located in `services/docx-redliner/`
   - `extract_pdf_text.py` — Uses PyMuPDF
   - `extract_project_details.py` — Uses python-docx
 - **Python venv:** `services/docx-redliner/venv/bin/python`
 - Submitter autocomplete is available on this form (see [submitter-autofill.md](submitter-autofill.md))
+
+## Data Notes
+
+- Design approval comparisons are saved as submissions (`source: design_approval`)
+- Required approvals are stored in submission metadata
+- Override writes:
+  - `status: approved_override`
+  - `mismatch_override: true`
+  - `mismatch_override_reason`
+  - `mismatch_override_at`

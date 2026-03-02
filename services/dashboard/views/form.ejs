@@ -142,6 +142,18 @@
             border-color: var(--color-secondary);
         }
 
+        .form-group input.input-error,
+        .form-group select.input-error {
+            border-color: var(--color-error);
+        }
+
+        .field-error {
+            margin-top: 0.35rem;
+            font-size: 0.72rem;
+            color: var(--color-error);
+            line-height: 1.35;
+        }
+
         /* Required Approvals Section */
         .approvals-intro {
             font-size: 0.85rem;
@@ -1489,10 +1501,11 @@
                     </div>
                     <div class="form-group">
                         <label for="templateType">Template Type *</label>
-                        <select id="templateType" required>
+                        <select id="templateType" required onchange="updateApprovalHint(); updateRunCheckButtonLabel();">
                             <option value="">Select template type</option>
                             <option value="food">Food Menu</option>
                             <option value="beverage">Beverage Menu</option>
+                            <option value="non_beverage">Non-Beverage (No AI Review)</option>
                         </select>
                     </div>
                     <div class="form-group">
@@ -1504,8 +1517,13 @@
                         <input type="text" id="cityCountry" required placeholder="e.g., New York, USA">
                     </div>
                     <div class="form-group">
+                        <label for="turnaroundDays">Turnaround (Days) *</label>
+                        <input type="number" id="turnaroundDays" min="1" step="1" required onchange="onTurnaroundDaysChange()" oninput="onTurnaroundDaysChange()">
+                        <div id="turnaroundDaysError" class="field-error hidden"></div>
+                    </div>
+                    <div class="form-group">
                         <label for="dateNeeded">Date Needed *</label>
-                        <input type="date" id="dateNeeded" required>
+                        <input type="date" id="dateNeeded" required readonly style="background:#f0efed;color:var(--muted);cursor:not-allowed;">
                     </div>
                     <div class="form-group">
                         <label for="assetType">Asset Type *</label>
@@ -1513,6 +1531,7 @@
                             <option value="">Select asset type</option>
                             <option value="PRINT">Print</option>
                             <option value="DIGITAL">Digital</option>
+                            <option value="BOTH">Digital + Print</option>
                         </select>
                     </div>
                     <div class="form-group">
@@ -1527,34 +1546,63 @@
 
                 <!-- Print-specific fields -->
                 <div id="printFields" class="hidden">
+                    <p style="font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.12em; color: var(--color-text-muted); margin: 0.5rem 0;">Print Settings</p>
                     <div class="form-grid">
-                        <div class="form-group">
+                        <div class="form-group" id="printWidthGroup">
                             <label for="widthPrint">Width (inches) *</label>
                             <input type="number" id="widthPrint" step="0.01" min="0" placeholder="e.g., 8.5">
                         </div>
-                        <div class="form-group">
+                        <div class="form-group" id="printHeightGroup">
                             <label for="heightPrint">Height (inches) *</label>
                             <input type="number" id="heightPrint" step="0.01" min="0" placeholder="e.g., 11">
                         </div>
                         <div class="form-group">
+                            <label for="folded">Folded *</label>
+                            <select id="folded">
+                                <option value="">Select</option>
+                                <option value="yes">Folded</option>
+                                <option value="no">Not Folded</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="printRegion">Print Region *</label>
+                            <select id="printRegion" onchange="togglePrintRegionFields()">
+                                <option value="">Select</option>
+                                <option value="US">US</option>
+                                <option value="NON_US">Non-US</option>
+                            </select>
+                        </div>
+                        <div class="form-group hidden" id="printSizeGroup">
+                            <label for="printSize">Size *</label>
+                            <select id="printSize">
+                                <option value="">Select</option>
+                                <option value="A3">A3</option>
+                                <option value="A4">A4</option>
+                                <option value="A5">A5</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
                             <label for="cropMarks">Crop Marks *</label>
                             <select id="cropMarks">
-                                <option value="no">No</option>
+                                <option value="">Select</option>
                                 <option value="yes">Yes</option>
+                                <option value="no">No</option>
                             </select>
                         </div>
                         <div class="form-group">
                             <label for="bleedMarks">Bleed Marks *</label>
                             <select id="bleedMarks">
-                                <option value="no">No</option>
+                                <option value="">Select</option>
                                 <option value="yes">Yes</option>
+                                <option value="no">No</option>
                             </select>
                         </div>
                         <div class="form-group">
                             <label for="fileSizeLimit">File Size Limit *</label>
                             <select id="fileSizeLimit" onchange="toggleFileSizeLimit()">
-                                <option value="no">No</option>
+                                <option value="">Select</option>
                                 <option value="yes">Yes</option>
+                                <option value="no">No</option>
                             </select>
                         </div>
                         <div class="form-group hidden" id="fileSizeLimitMbGroup">
@@ -1570,6 +1618,7 @@
 
                 <!-- Digital-specific fields -->
                 <div id="digitalFields" class="hidden">
+                    <p style="font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.12em; color: var(--color-text-muted); margin: 0.5rem 0;">Digital Settings</p>
                     <div class="form-grid">
                         <div class="form-group">
                             <label for="widthDigital">Width (pixels) *</label>
@@ -1580,6 +1629,14 @@
                             <input type="number" id="heightDigital" step="1" min="0" placeholder="e.g., 1080">
                         </div>
                     </div>
+                </div>
+
+                <div style="margin-top: 0.75rem;">
+                    <label for="menuImageUpload" style="display:block; font-size:0.65rem; font-weight:500; color: var(--color-text-muted); text-transform:uppercase; letter-spacing:0.15em; margin-bottom:0.35rem;">Menu Image Upload (Optional)</label>
+                    <input type="file" id="menuImageUpload" accept="image/*">
+                    <p style="font-size: 0.8rem; color: var(--color-text-light); margin-top: 0.35rem;">
+                        This image is sent with the ClickUp task as design reference.
+                    </p>
                 </div>
             </div>
 
@@ -1757,6 +1814,10 @@
                             <input type="text" id="step2CityCountry" readonly>
                         </div>
                         <div class="form-group">
+                            <label>Turnaround</label>
+                            <input type="text" id="step2TurnaroundDays" readonly>
+                        </div>
+                        <div class="form-group">
                             <label>Date Needed</label>
                             <input type="text" id="step2DateNeeded" readonly>
                         </div>
@@ -1787,6 +1848,18 @@
                         <div class="form-group hidden" id="step2FileDeliveryNotesGroup">
                             <label>Delivery Notes</label>
                             <input type="text" id="step2FileDeliveryNotes" readonly>
+                        </div>
+                        <div class="form-group hidden" id="step2FoldedGroup">
+                            <label>Folded</label>
+                            <input type="text" id="step2Folded" readonly>
+                        </div>
+                        <div class="form-group hidden" id="step2PrintRegionGroup">
+                            <label>Print Region</label>
+                            <input type="text" id="step2PrintRegion" readonly>
+                        </div>
+                        <div class="form-group hidden" id="step2PrintSizeGroup">
+                            <label>Print Size</label>
+                            <input type="text" id="step2PrintSize" readonly>
                         </div>
                     </div>
                 </div>
@@ -1898,6 +1971,8 @@
         let lastAiCheckedMenuText = '';
         let requiresAiRerun = false;
         let suppressRawNotice = false;
+        let uploadedMenuImagePath = '';
+        let uploadedMenuImageFileName = '';
         const DEFAULT_ALLERGEN_KEY = <%- JSON.stringify(defaultAllergenKey || '') %>;
         const RAW_NOTICE_TEXT = '*consuming raw or undercooked meats, poultry, seafood, shellfish, or eggs may increase your risk of foodborne illness.';
         const RAW_NOTICE_REGEX = /\*?\s*consuming raw or undercooked meats,\s*poultry,\s*seafood,\s*shellfish,\s*or eggs may increase your risk of foodborne illness\.?/i;
@@ -1970,8 +2045,10 @@
             const templateTypeSelect = document.getElementById('templateType');
             if (templateTypeSelect) {
                 templateTypeSelect.addEventListener('change', updateApprovalHint);
+                templateTypeSelect.addEventListener('change', updateRunCheckButtonLabel);
                 // Initialize on load
                 updateApprovalHint();
+                updateRunCheckButtonLabel();
             }
 
             // Load recent projects
@@ -1980,6 +2057,8 @@
             setupAllergenSync();
             setupRawToggleSync();
             renderAllergenLegend();
+            applyTurnaroundDefaults(true);
+            toggleAssetFields();
 
             // Submitter name keyboard nav + blur dismiss
             const submitterNameInput = document.getElementById('submitterName');
@@ -2014,9 +2093,116 @@
 
             if (templateType === 'beverage') {
                 hintEl.textContent = 'e.g., Head of Mixology, Bar Director, Regional Director of Operations';
+            } else if (templateType === 'non_beverage') {
+                hintEl.textContent = 'Non-beverage submission (AI review is skipped)';
             } else {
                 hintEl.textContent = 'e.g., Property GM, Director of F&B, Executive Chef, Chef de Cuisine';
             }
+        }
+
+        function requiresAiReview() {
+            return document.getElementById('templateType').value !== 'non_beverage';
+        }
+
+        function updateRunCheckButtonLabel() {
+            const label = requiresAiReview() ? 'Run Basic AI Check' : 'Submit Menu for Review';
+            const topBtn = document.getElementById('runCheckBtn');
+            const bottomBtn = document.getElementById('runCheckBtnBottom');
+            if (topBtn) topBtn.textContent = label;
+            if (bottomBtn) bottomBtn.textContent = label;
+        }
+
+        function getDefaultTurnaroundDays() {
+            return submissionMode === 'modification' ? 2 : 5;
+        }
+
+        function getMinimumTurnaroundDays() {
+            return submissionMode === 'modification' ? 2 : 5;
+        }
+
+        function getTurnaroundMinimumMessage() {
+            const minDays = getMinimumTurnaroundDays();
+            return `This is the minimum time needed for a menu review. Please enter ${minDays} or greater.`;
+        }
+
+        function setTurnaroundFieldError(message) {
+            const turnaroundInput = document.getElementById('turnaroundDays');
+            const errorEl = document.getElementById('turnaroundDaysError');
+            if (!turnaroundInput || !errorEl) return;
+
+            if (message) {
+                errorEl.textContent = message;
+                errorEl.classList.remove('hidden');
+                turnaroundInput.classList.add('input-error');
+            } else {
+                errorEl.textContent = '';
+                errorEl.classList.add('hidden');
+                turnaroundInput.classList.remove('input-error');
+            }
+        }
+
+        function formatDateForInput(date) {
+            const year = date.getFullYear();
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const day = String(date.getDate()).padStart(2, '0');
+            return `${year}-${month}-${day}`;
+        }
+
+        function addDays(date, days) {
+            const d = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+            d.setDate(d.getDate() + days);
+            return d;
+        }
+
+        function getTurnaroundDaysValue() {
+            const raw = parseInt((document.getElementById('turnaroundDays').value || '').trim(), 10);
+            const minDays = getMinimumTurnaroundDays();
+            if (!Number.isFinite(raw) || raw < minDays) {
+                return getDefaultTurnaroundDays();
+            }
+            return raw;
+        }
+
+        function setDateNeededMinimumFromTurnaround(forceDateToMinimum = false) {
+            const dateInput = document.getElementById('dateNeeded');
+            const days = getTurnaroundDaysValue();
+            const minDate = addDays(new Date(), days);
+            const minDateStr = formatDateForInput(minDate);
+            dateInput.min = minDateStr;
+            dateInput.value = minDateStr;
+        }
+
+        function onTurnaroundDaysChange() {
+            const turnaroundInput = document.getElementById('turnaroundDays');
+            const minDays = getMinimumTurnaroundDays();
+            turnaroundInput.min = String(minDays);
+            const current = parseInt((turnaroundInput.value || '').trim(), 10);
+            if (Number.isFinite(current) && current < minDays) {
+                turnaroundInput.setCustomValidity(getTurnaroundMinimumMessage());
+                setTurnaroundFieldError(getTurnaroundMinimumMessage());
+            } else {
+                turnaroundInput.setCustomValidity('');
+                setTurnaroundFieldError('');
+            }
+            setDateNeededMinimumFromTurnaround(true);
+        }
+
+        function onDateNeededBlur() {
+            const dateInput = document.getElementById('dateNeeded');
+            if (dateInput.value && dateInput.min && dateInput.value < dateInput.min) {
+                showAlert(`Date needed cannot be earlier than ${dateInput.min} based on turnaround days.`, 'error');
+                dateInput.value = dateInput.min;
+            }
+        }
+
+        function applyTurnaroundDefaults(forceDateToMinimum = false) {
+            const turnaroundInput = document.getElementById('turnaroundDays');
+            const defaultDays = getDefaultTurnaroundDays();
+            turnaroundInput.min = String(getMinimumTurnaroundDays());
+            turnaroundInput.value = String(defaultDays);
+            turnaroundInput.setCustomValidity('');
+            setTurnaroundFieldError('');
+            setDateNeededMinimumFromTurnaround(forceDateToMinimum);
         }
 
         function setupAllergenSync() {
@@ -2170,6 +2356,7 @@
                 recentLoader.style.display = 'none';
                 previewSection.classList.add('show');
                 onModificationSourceChange();
+                applyTurnaroundDefaults(true);
             } else {
                 document.getElementById('step2').classList.add('hidden');
                 document.getElementById('step1').classList.remove('hidden');
@@ -2206,6 +2393,7 @@
                 setContainsRawSelection(false);
                 suppressRawNotice = false;
                 setAllergenAutoDetectedBadge(false);
+                applyTurnaroundDefaults(true);
             }
             updateRevisionPreCheckLayout();
         }
@@ -2576,6 +2764,10 @@
             setSelectValue('menuType', p.menuType);
             setSelectValue('templateType', p.templateType);
             setSelectValue('assetType', p.assetType);
+            if (p.turnaroundDays) {
+                document.getElementById('turnaroundDays').value = p.turnaroundDays;
+                setDateNeededMinimumFromTurnaround(true);
+            }
 
             // Show the right conditional fields
             toggleAssetFields();
@@ -2590,9 +2782,28 @@
                 toggleFileSizeLimit();
                 document.getElementById('fileSizeLimitMb').value = p.fileSizeLimitMb || '';
                 document.getElementById('fileDeliveryNotes').value = p.fileDeliveryNotes || '';
+                setSelectValue('folded', toYesNo(p.folded));
+                setSelectValue('printRegion', p.printRegion || 'US');
+                setSelectValue('printSize', p.printSize || '');
+                togglePrintRegionFields();
             } else if (p.assetType === 'DIGITAL') {
                 document.getElementById('widthDigital').value = p.width || '';
                 document.getElementById('heightDigital').value = p.height || '';
+            } else if (p.assetType === 'BOTH') {
+                document.getElementById('widthDigital').value = p.digitalWidth || '';
+                document.getElementById('heightDigital').value = p.digitalHeight || '';
+                document.getElementById('widthPrint').value = '';
+                document.getElementById('heightPrint').value = '';
+                document.getElementById('cropMarks').value = '';
+                document.getElementById('bleedMarks').value = '';
+                document.getElementById('fileSizeLimit').value = '';
+                document.getElementById('fileSizeLimitMb').value = '';
+                document.getElementById('fileDeliveryNotes').value = '';
+                document.getElementById('folded').value = '';
+                document.getElementById('printRegion').value = '';
+                document.getElementById('printSize').value = '';
+                togglePrintRegionFields();
+                toggleFileSizeLimit();
             }
 
             // Dispatch change event on templateType to update approval hints
@@ -2760,15 +2971,75 @@
                 // Clear print fields
                 document.getElementById('widthPrint').value = '';
                 document.getElementById('heightPrint').value = '';
-                document.getElementById('cropMarks').value = 'no';
-                document.getElementById('bleedMarks').value = 'no';
-                document.getElementById('fileSizeLimit').value = 'no';
+                document.getElementById('cropMarks').value = '';
+                document.getElementById('bleedMarks').value = '';
+                document.getElementById('fileSizeLimit').value = '';
                 document.getElementById('fileSizeLimitMb').value = '';
                 document.getElementById('fileDeliveryNotes').value = '';
+                document.getElementById('folded').value = '';
+                document.getElementById('printRegion').value = '';
+                document.getElementById('printSize').value = '';
                 document.getElementById('fileSizeLimitMbGroup').classList.add('hidden');
+                document.getElementById('printSizeGroup').classList.add('hidden');
+            } else if (assetType === 'BOTH') {
+                digitalFields.classList.remove('hidden');
+                printFields.classList.remove('hidden');
+                document.getElementById('widthPrint').value = '';
+                document.getElementById('heightPrint').value = '';
+                document.getElementById('cropMarks').value = '';
+                document.getElementById('bleedMarks').value = '';
+                document.getElementById('fileSizeLimit').value = '';
+                document.getElementById('fileSizeLimitMb').value = '';
+                document.getElementById('fileDeliveryNotes').value = '';
+                document.getElementById('folded').value = '';
+                document.getElementById('printRegion').value = '';
+                document.getElementById('printSize').value = '';
+                document.getElementById('fileSizeLimitMbGroup').classList.add('hidden');
+                document.getElementById('printSizeGroup').classList.add('hidden');
             } else {
                 printFields.classList.add('hidden');
                 digitalFields.classList.add('hidden');
+            }
+            togglePrintRegionFields();
+        }
+
+        function togglePrintRegionFields() {
+            const printRegion = document.getElementById('printRegion').value;
+            const printSizeGroup = document.getElementById('printSizeGroup');
+            const printWidthGroup = document.getElementById('printWidthGroup');
+            const printHeightGroup = document.getElementById('printHeightGroup');
+            const widthInput = document.getElementById('widthPrint');
+            const heightInput = document.getElementById('heightPrint');
+            const sizeSelect = document.getElementById('printSize');
+            const needsPrint = ['PRINT', 'BOTH'].includes(document.getElementById('assetType').value);
+
+            if (!needsPrint) {
+                printSizeGroup.classList.add('hidden');
+                printWidthGroup.classList.remove('hidden');
+                printHeightGroup.classList.remove('hidden');
+                widthInput.disabled = false;
+                heightInput.disabled = false;
+                sizeSelect.value = '';
+                return;
+            }
+
+            if (printRegion === 'NON_US') {
+                printSizeGroup.classList.remove('hidden');
+                printWidthGroup.classList.add('hidden');
+                printHeightGroup.classList.add('hidden');
+                widthInput.value = '';
+                heightInput.value = '';
+                widthInput.disabled = true;
+                heightInput.disabled = true;
+            } else {
+                printSizeGroup.classList.add('hidden');
+                printWidthGroup.classList.remove('hidden');
+                printHeightGroup.classList.remove('hidden');
+                widthInput.disabled = false;
+                heightInput.disabled = false;
+                if (printRegion === 'US') {
+                    sizeSelect.value = '';
+                }
             }
         }
 
@@ -3001,16 +3272,19 @@
             const orientation = document.getElementById('orientation').value;
             const menuType = document.getElementById('menuType').value;
             const templateType = document.getElementById('templateType').value;
+            const turnaroundDays = document.getElementById('turnaroundDays').value.trim();
             const dateNeeded = document.getElementById('dateNeeded').value;
             const cityCountry = document.getElementById('cityCountry').value.trim();
             const assetType = document.getElementById('assetType').value;
             const menuContent = quill.getText().trim();
-            const width = assetType === 'PRINT'
-                ? document.getElementById('widthPrint').value.trim()
-                : document.getElementById('widthDigital').value.trim();
-            const height = assetType === 'PRINT'
-                ? document.getElementById('heightPrint').value.trim()
-                : document.getElementById('heightDigital').value.trim();
+            const needsPrint = assetType === 'PRINT' || assetType === 'BOTH';
+            const needsDigital = assetType === 'DIGITAL' || assetType === 'BOTH';
+            const printRegion = document.getElementById('printRegion').value;
+            const printWidth = document.getElementById('widthPrint').value.trim();
+            const printHeight = document.getElementById('heightPrint').value.trim();
+            const printSize = document.getElementById('printSize').value;
+            const digitalWidth = document.getElementById('widthDigital').value.trim();
+            const digitalHeight = document.getElementById('heightDigital').value.trim();
 
             if (!submitterName || !submitterEmail || !submitterJobTitle) {
                 showAlert('Please fill in all submitter information fields', 'error');
@@ -3024,10 +3298,56 @@
                 return false;
             }
 
-            if (!projectName || !property || !width || !height || !orientation || !menuType || !templateType || !dateNeeded || !cityCountry || !assetType || !menuContent) {
+            if (!projectName || !property || !orientation || !menuType || !templateType || !turnaroundDays || !dateNeeded || !cityCountry || !assetType || !menuContent) {
                 showAlert('Please fill in all required fields', 'error');
                 window.scrollTo({ top: 0, behavior: 'smooth' });
                 return false;
+            }
+
+            const turnaroundDaysNum = parseInt(turnaroundDays, 10);
+            const minTurnaroundDays = getMinimumTurnaroundDays();
+            if (!Number.isFinite(turnaroundDaysNum) || turnaroundDaysNum < minTurnaroundDays) {
+                setTurnaroundFieldError(getTurnaroundMinimumMessage());
+                showAlert(getTurnaroundMinimumMessage(), 'error');
+                return false;
+            }
+            setTurnaroundFieldError('');
+
+            if (dateNeeded < document.getElementById('dateNeeded').min) {
+                showAlert(`Date needed cannot be earlier than ${document.getElementById('dateNeeded').min}`, 'error');
+                return false;
+            }
+
+            if (needsDigital && (!digitalWidth || !digitalHeight)) {
+                showAlert('Please provide digital width and height', 'error');
+                return false;
+            }
+
+            if (needsPrint) {
+                const folded = document.getElementById('folded').value;
+                const cropMarks = document.getElementById('cropMarks').value;
+                const bleedMarks = document.getElementById('bleedMarks').value;
+                const fileSizeLimit = document.getElementById('fileSizeLimit').value;
+
+                if (!folded || !printRegion || !cropMarks || !bleedMarks || !fileSizeLimit) {
+                    showAlert('Please complete all required print fields', 'error');
+                    return false;
+                }
+
+                if (printRegion === 'US' && (!printWidth || !printHeight)) {
+                    showAlert('Please provide print width and height for US print assets', 'error');
+                    return false;
+                }
+
+                if (printRegion === 'NON_US' && !printSize) {
+                    showAlert('Please select an A-size for Non-US print assets', 'error');
+                    return false;
+                }
+
+                if (fileSizeLimit === 'yes' && !document.getElementById('fileSizeLimitMb').value.trim()) {
+                    showAlert('Please provide the max file size in MB', 'error');
+                    return false;
+                }
             }
 
             // Validate required approval
@@ -3054,6 +3374,12 @@
             if (!validateStep1()) return;
             if (submissionMode === 'modification' && !revisionBaseSubmissionId && !revisionBaselineDocPath) {
                 showAlert('Select a previous approved submission or upload an approved baseline DOCX first.', 'error');
+                return;
+            }
+
+            if (!requiresAiReview()) {
+                showAlert('AI review is skipped for non-beverage templates. Submitting directly.', 'success');
+                await submitMenu(true);
                 return;
             }
 
@@ -3578,6 +3904,7 @@
             document.getElementById('step2TemplateType').value = templateTypeSelect.options[templateTypeSelect.selectedIndex].text;
             document.getElementById('step2HotelName').value = document.getElementById('hotelName').value || '(none)';
             document.getElementById('step2CityCountry').value = document.getElementById('cityCountry').value;
+            document.getElementById('step2TurnaroundDays').value = `${getTurnaroundDaysValue()} day(s)`;
             document.getElementById('step2DateNeeded').value = document.getElementById('dateNeeded').value;
             const assetTypeSelect = document.getElementById('assetType');
             document.getElementById('step2AssetType').value = assetTypeSelect.options[assetTypeSelect.selectedIndex].text;
@@ -3585,19 +3912,38 @@
 
             // Populate dimensions and print-specific fields
             const assetTypeVal = document.getElementById('assetType').value;
-            if (assetTypeVal === 'PRINT') {
+            const printRegion = document.getElementById('printRegion').value;
+            if (assetTypeVal === 'PRINT' || assetTypeVal === 'BOTH') {
                 const w = document.getElementById('widthPrint').value;
                 const h = document.getElementById('heightPrint').value;
-                document.getElementById('step2Dimensions').value = `${w} x ${h} inches`;
+                const size = document.getElementById('printSize').value;
+                const printDim = printRegion === 'NON_US'
+                    ? `${size || 'N/A'}`
+                    : `${w || 'N/A'} x ${h || 'N/A'} inches`;
+                const digitalW = document.getElementById('widthDigital').value;
+                const digitalH = document.getElementById('heightDigital').value;
+                document.getElementById('step2Dimensions').value = assetTypeVal === 'BOTH'
+                    ? `Digital ${digitalW || 'N/A'} x ${digitalH || 'N/A'} px | Print ${printDim}`
+                    : printDim;
                 // Show print-specific read-only fields
                 document.getElementById('step2CropMarksGroup').classList.remove('hidden');
                 document.getElementById('step2BleedMarksGroup').classList.remove('hidden');
                 document.getElementById('step2FileSizeLimitGroup').classList.remove('hidden');
+                document.getElementById('step2FoldedGroup').classList.remove('hidden');
+                document.getElementById('step2PrintRegionGroup').classList.remove('hidden');
                 document.getElementById('step2CropMarks').value = document.getElementById('cropMarks').value === 'yes' ? 'Yes' : 'No';
                 document.getElementById('step2BleedMarks').value = document.getElementById('bleedMarks').value === 'yes' ? 'Yes' : 'No';
                 const fsl = document.getElementById('fileSizeLimit').value;
                 const fslMb = document.getElementById('fileSizeLimitMb').value;
                 document.getElementById('step2FileSizeLimit').value = fsl === 'yes' ? `Yes (${fslMb} MB)` : 'No';
+                document.getElementById('step2Folded').value = document.getElementById('folded').value === 'yes' ? 'Folded' : 'Not Folded';
+                document.getElementById('step2PrintRegion').value = printRegion === 'NON_US' ? 'Non-US' : 'US';
+                if (printRegion === 'NON_US') {
+                    document.getElementById('step2PrintSizeGroup').classList.remove('hidden');
+                    document.getElementById('step2PrintSize').value = size || 'N/A';
+                } else {
+                    document.getElementById('step2PrintSizeGroup').classList.add('hidden');
+                }
                 const deliveryNotes = document.getElementById('fileDeliveryNotes').value.trim();
                 if (deliveryNotes) {
                     document.getElementById('step2FileDeliveryNotesGroup').classList.remove('hidden');
@@ -3614,6 +3960,9 @@
                 document.getElementById('step2BleedMarksGroup').classList.add('hidden');
                 document.getElementById('step2FileSizeLimitGroup').classList.add('hidden');
                 document.getElementById('step2FileDeliveryNotesGroup').classList.add('hidden');
+                document.getElementById('step2FoldedGroup').classList.add('hidden');
+                document.getElementById('step2PrintRegionGroup').classList.add('hidden');
+                document.getElementById('step2PrintSizeGroup').classList.add('hidden');
             }
 
             const originalText = results.originalMenu;
@@ -3695,19 +4044,41 @@
             updateSubmitButtonState();
         }
 
-        async function submitMenu() {
-            if (!aiCheckHasRun) {
+        async function uploadMenuImageIfNeeded() {
+            const input = document.getElementById('menuImageUpload');
+            const file = input?.files?.[0];
+            if (!file) {
+                uploadedMenuImagePath = '';
+                uploadedMenuImageFileName = '';
+                return;
+            }
+
+            const form = new FormData();
+            form.append('menuImage', file);
+            const response = await fetch('/api/form/menu-image-upload', {
+                method: 'POST',
+                body: form
+            });
+            const data = await response.json();
+            if (!response.ok) {
+                throw new Error(data.error || 'Failed to upload menu image');
+            }
+            uploadedMenuImagePath = data.menuImagePath || '';
+            uploadedMenuImageFileName = data.menuImageFileName || file.name;
+        }
+
+        async function submitMenu(skipAiReview = false) {
+            if (!skipAiReview && !aiCheckHasRun) {
                 showAlert('Run Basic AI Check before submitting.', 'error');
                 return;
             }
 
-            if (requiresAiRerun) {
+            if (!skipAiReview && requiresAiRerun) {
                 showAlert('You edited the menu after AI check. Please re-run AI Check before submitting.', 'error');
                 return;
             }
 
-            // Block if unresolved critical errors exist
-            if (aiCheckResults && aiCheckResults.suggestions) {
+            if (!skipAiReview && aiCheckResults && aiCheckResults.suggestions) {
                 const unresolvedCritical = aiCheckResults.suggestions.some((s, idx) =>
                     s.severity === 'critical' && !criticalErrorOverrides[idx]
                 );
@@ -3730,29 +4101,34 @@
             btn.disabled = true;
             btn.innerHTML = '<span class="spinner"></span>Submitting...';
 
-            const reviewedArea = document.getElementById('reviewedContentArea');
-            const menuContentHtml = sanitizeMenuHtmlForSubmission(reviewedArea.innerHTML || '');
-            const menuContentText = extractCleanTextFromReviewedArea(reviewedArea);
+            let menuContentHtml = '';
+            let menuContentText = '';
+            const step2Visible = !document.getElementById('step2').classList.contains('hidden');
+            if (step2Visible) {
+                const reviewedArea = document.getElementById('reviewedContentArea');
+                menuContentHtml = sanitizeMenuHtmlForSubmission(reviewedArea.innerHTML || '');
+                menuContentText = extractCleanTextFromReviewedArea(reviewedArea);
+            } else {
+                menuContentHtml = sanitizeMenuHtmlForSubmission(quill.root.innerHTML || '');
+                menuContentText = quill.getText().trim();
+            }
+
             const persistentPreviewBody = document.getElementById('persistentPreviewBody');
             const persistentDiffHtml = submissionMode === 'modification' && persistentPreviewBody
                 ? persistentPreviewBody.innerHTML
                 : '';
 
-            // Also update the hidden display
             document.getElementById('originalMenuDisplay').innerHTML = menuContentHtml;
 
-            // Collect approval data
             const approvals = [{
                 approved: document.getElementById('approval1').value === 'yes',
                 name: document.getElementById('approver1Name').value.trim(),
                 position: document.getElementById('approver1Position').value.trim()
             }];
 
-            // Check if additional approver was added
             const approval2 = document.getElementById('approval2').value;
             const approver2Name = document.getElementById('approver2Name').value.trim();
             const approver2Position = document.getElementById('approver2Position').value.trim();
-
             if (approval2 && approver2Name && approver2Position) {
                 approvals.push({
                     approved: approval2 === 'yes',
@@ -3761,7 +4137,6 @@
                 });
             }
 
-            // Collect critical error overrides for audit trail
             const criticalOverrides = [];
             if (aiCheckResults && aiCheckResults.suggestions) {
                 aiCheckResults.suggestions.forEach((s, idx) => {
@@ -3776,7 +4151,20 @@
             }
 
             const assetTypeValue = document.getElementById('assetType').value;
-            const isPrint = assetTypeValue === 'PRINT';
+            const isPrint = assetTypeValue === 'PRINT' || assetTypeValue === 'BOTH';
+            const isDigital = assetTypeValue === 'DIGITAL' || assetTypeValue === 'BOTH';
+            const printRegion = document.getElementById('printRegion').value || '';
+            const printSize = document.getElementById('printSize').value || '';
+            const printWidth = document.getElementById('widthPrint').value.trim();
+            const printHeight = document.getElementById('heightPrint').value.trim();
+            const digitalWidth = document.getElementById('widthDigital').value.trim();
+            const digitalHeight = document.getElementById('heightDigital').value.trim();
+            const resolvedWidth = assetTypeValue === 'DIGITAL'
+                ? digitalWidth
+                : (assetTypeValue === 'PRINT' ? (printRegion === 'NON_US' ? printSize : printWidth) : digitalWidth);
+            const resolvedHeight = assetTypeValue === 'DIGITAL'
+                ? digitalHeight
+                : (assetTypeValue === 'PRINT' ? (printRegion === 'NON_US' ? printSize : printHeight) : digitalHeight);
 
             const formData = {
                 submitterName: document.getElementById('submitterName').value.trim(),
@@ -3784,16 +4172,24 @@
                 submitterJobTitle: document.getElementById('submitterJobTitle').value.trim(),
                 projectName: document.getElementById('projectName').value.trim(),
                 property: document.getElementById('property').value.trim(),
-                width: isPrint ? document.getElementById('widthPrint').value.trim() : document.getElementById('widthDigital').value.trim(),
-                height: isPrint ? document.getElementById('heightPrint').value.trim() : document.getElementById('heightDigital').value.trim(),
-                cropMarks: isPrint ? document.getElementById('cropMarks').value : 'no',
-                bleedMarks: isPrint ? document.getElementById('bleedMarks').value : 'no',
-                fileSizeLimit: isPrint ? document.getElementById('fileSizeLimit').value : 'no',
+                width: resolvedWidth,
+                height: resolvedHeight,
+                printWidth: isPrint ? printWidth : '',
+                printHeight: isPrint ? printHeight : '',
+                printRegion: isPrint ? printRegion : '',
+                printSize: isPrint ? printSize : '',
+                folded: isPrint ? document.getElementById('folded').value : '',
+                digitalWidth: isDigital ? digitalWidth : '',
+                digitalHeight: isDigital ? digitalHeight : '',
+                cropMarks: isPrint ? document.getElementById('cropMarks').value : '',
+                bleedMarks: isPrint ? document.getElementById('bleedMarks').value : '',
+                fileSizeLimit: isPrint ? document.getElementById('fileSizeLimit').value : '',
                 fileSizeLimitMb: isPrint ? document.getElementById('fileSizeLimitMb').value.trim() : '',
                 fileDeliveryNotes: isPrint ? document.getElementById('fileDeliveryNotes').value.trim() : '',
                 orientation: document.getElementById('orientation').value,
                 menuType: document.getElementById('menuType').value,
                 templateType: document.getElementById('templateType').value,
+                turnaroundDays: getTurnaroundDaysValue(),
                 dateNeeded: document.getElementById('dateNeeded').value,
                 hotelName: document.getElementById('hotelName').value.trim(),
                 cityCountry: document.getElementById('cityCountry').value.trim(),
@@ -3812,10 +4208,17 @@
                 revisionBaselineDocPath: submissionMode === 'modification' ? revisionBaselineDocPath : '',
                 revisionBaselineFileName: submissionMode === 'modification' ? revisionBaselineFileName : '',
                 baseApprovedMenuContent: submissionMode === 'modification' ? baseApprovedMenuContent : '',
-                chefPersistentDiff: submissionMode === 'modification' ? persistentDiffSummary : null
+                chefPersistentDiff: submissionMode === 'modification' ? persistentDiffSummary : null,
+                skipAiReview: !!skipAiReview,
+                menuImagePath: '',
+                menuImageFileName: ''
             };
 
             try {
+                await uploadMenuImageIfNeeded();
+                formData.menuImagePath = uploadedMenuImagePath || '';
+                formData.menuImageFileName = uploadedMenuImageFileName || '';
+
                 const response = await fetch('/api/form/submit', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -3876,12 +4279,12 @@
             const runCheckBtn = document.getElementById('runCheckBtn');
             if (runCheckBtn) {
                 runCheckBtn.disabled = false;
-                runCheckBtn.textContent = 'Run Basic AI Check';
+                runCheckBtn.textContent = requiresAiReview() ? 'Run Basic AI Check' : 'Submit Menu for Review';
             }
             const runCheckBtnBottom = document.getElementById('runCheckBtnBottom');
             if (runCheckBtnBottom) {
                 runCheckBtnBottom.disabled = false;
-                runCheckBtnBottom.textContent = 'Run Basic AI Check';
+                runCheckBtnBottom.textContent = requiresAiReview() ? 'Run Basic AI Check' : 'Submit Menu for Review';
             }
 
             const submitBtn = document.getElementById('submitBtn');
@@ -3889,6 +4292,11 @@
             submitBtn.textContent = 'Submit Menu for Review';
             submitBtn.classList.remove('blocked');
             document.getElementById('criticalErrorBanner').classList.remove('show');
+            const imageUpload = document.getElementById('menuImageUpload');
+            if (imageUpload) imageUpload.value = '';
+            uploadedMenuImagePath = '';
+            uploadedMenuImageFileName = '';
+            applyTurnaroundDefaults(true);
 
             window.scrollTo({ top: 0, behavior: 'smooth' });
         }

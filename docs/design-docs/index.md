@@ -11,4 +11,5 @@ Catalog of design decisions and feature documentation for Menu Manager.
 | [Approval Attestation](approval-attestation.md) | Complete | Required manager approval attestation before submission |
 | [Revision / Modification Flow](revision-modification-flow.md) | Complete | Dual-path revision workflow with DB search or uploaded approved baseline DOCX |
 | [Reviewer Learning Loop](reviewer-learning-loop.md) | Complete (Phase 1) | Auto-learns recurring human reviewer corrections and injects stable rules into QA prompt |
+| [Weekly Prompt Optimization](prompt-optimization.md) | Complete | Weekly command that compiles corrected-menu history into candidate prompt edits + metrics |
 | [Document Storage](document-storage.md) | Complete (Local/PV) | Environment-driven persistent document storage layout and deployment guidance |

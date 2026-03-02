@@ -146,6 +146,10 @@ Or use the helper scripts:
 ./verify-setup.sh     # Verify configuration
 ```
 
+Notes:
+- `start-services.sh` now runs a full workspace build by default before starting services so latest TypeScript/EJS changes are always reflected.
+- To skip the build step (faster restart when nothing changed), run: `SKIP_BUILD=1 ./start-services.sh`
+
 ## Implementation Roadmap
 
 | Phase | Task | Status |

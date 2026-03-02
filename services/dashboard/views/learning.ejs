@@ -311,19 +311,23 @@
                             <th>Timestamp</th>
                             <th>Changes</th>
                             <th>Change %</th>
+                            <th>Signals</th>
                             <th>AI Draft</th>
                             <th>Final</th>
+                            <th>Review</th>
                         </tr>
                     </thead>
                     <tbody>
-                    <% recentSubmissions.forEach((item) => { %>
+                    <% (learningSubmissions && learningSubmissions.length ? learningSubmissions : recentSubmissions).forEach((item) => { %>
                         <tr>
                             <td><code><%= item.submission_id %></code></td>
                             <td><%= item.timestamp ? new Date(item.timestamp).toLocaleString() : 'N/A' %></td>
                             <td><%= item.changes_detected ? 'YES' : 'NO' %></td>
                             <td><%= Number(item.change_percentage || 0).toFixed(2) %></td>
+                            <td><%= item.replacement_count || item.learning_signals?.replacement_count || 0 %></td>
                             <td><code><%= (item.ai_draft_path || '').split('/').pop() || 'N/A' %></code></td>
                             <td><code><%= (item.final_path || '').split('/').pop() || 'N/A' %></code></td>
+                            <td><a href="/learning/submission/<%= item.submission_id %>">Open</a></td>
                         </tr>
                     <% }) %>
                     </tbody>

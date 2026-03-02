@@ -598,10 +598,48 @@
             </div>
 
             <div class="card">
+                <h2>Required Approval</h2>
+                <p style="font-size: 0.85rem; color: var(--color-text-light); margin-bottom: 1rem;">
+                    Confirm required approvals before comparing files.
+                </p>
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label for="approvalCulinary">RSH Culinary *</label>
+                        <select id="approvalCulinary" required>
+                            <option value="yes" selected>Yes</option>
+                            <option value="no">No</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="approvalRegional">RSH Regional *</label>
+                        <select id="approvalRegional" required>
+                            <option value="yes" selected>Yes</option>
+                            <option value="no">No</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
                 <h2>Upload Documents</h2>
                 <p style="font-size: 0.85rem; color: var(--color-text-light); margin-bottom: 1.25rem;">
                     Upload your approved Word document and the designer-created PDF to compare them for accuracy.
                 </p>
+                <div class="form-grid" style="margin-bottom: 1rem;">
+                    <div class="form-group">
+                        <label for="docxSourceMode">Word Doc Source *</label>
+                        <select id="docxSourceMode" onchange="onDocxSourceModeChange()">
+                            <option value="upload">Upload DOCX</option>
+                            <option value="database">Find in Database</option>
+                        </select>
+                    </div>
+                </div>
+                <div id="docxDatabaseSearch" class="hidden" style="margin-bottom: 1rem;">
+                    <label for="docxSearchInput" style="display:block; font-size:0.65rem; font-weight:600; text-transform:uppercase; letter-spacing:0.12em; color: var(--color-text-muted); margin-bottom:0.35rem;">Search approved Word document</label>
+                    <input type="text" id="docxSearchInput" placeholder="Search by project, property, submitter..." style="width:100%; padding:0.65rem 0.75rem; border:1px solid var(--color-border); font-family: var(--font-body); font-size:0.85rem;" oninput="onDocxSearchInput(this.value)">
+                    <div id="docxSearchResults" class="search-results" style="margin-top:0.5rem;"></div>
+                    <div id="selectedDocxNote" class="hidden" style="margin-top:0.5rem; font-size:0.8rem; color: var(--color-success);"></div>
+                </div>
                 <div class="upload-grid">
                     <div class="upload-zone" id="docxZone">
                         <input type="file" id="docxFile" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" onchange="handleFileSelect(this, 'docx')">
@@ -682,6 +720,20 @@
                 </div>
             </div>
 
+            <div id="mismatchOverrideCard" class="card hidden">
+                <h2>Mismatch Override</h2>
+                <p style="font-size: 0.85rem; color: var(--color-text-light); margin-bottom: 1rem;">
+                    If the mismatch is acceptable, you can override and mark this design approval as approved.
+                </p>
+                <div class="form-group">
+                    <label for="overrideReason">Reason *</label>
+                    <input type="text" id="overrideReason" placeholder="Explain why this mismatch is acceptable">
+                </div>
+                <div style="margin-top: 1rem;">
+                    <button class="btn btn-primary" id="overrideMismatchBtn" onclick="overrideMismatchDecision()">Override Mismatch and Approve</button>
+                </div>
+            </div>
+
             <div class="btn-container">
                 <button class="btn btn-primary" onclick="resetForm()">
                     Upload New Documents
@@ -693,6 +745,9 @@
     <script>
         let docxFileSelected = false;
         let pdfFileSelected = false;
+        let selectedDocxSubmission = null;
+        let docxSearchResults = [];
+        let currentDesignApprovalSubmissionId = '';
 
         // Drag and drop
         ['docxZone', 'pdfZone'].forEach(zoneId => {
@@ -716,6 +771,73 @@
             });
         });
 
+        function onDocxSourceModeChange() {
+            const mode = document.getElementById('docxSourceMode').value;
+            const dbSection = document.getElementById('docxDatabaseSearch');
+            const docxZone = document.getElementById('docxZone');
+            const docxInput = document.getElementById('docxFile');
+
+            if (mode === 'database') {
+                dbSection.classList.remove('hidden');
+                docxZone.classList.add('hidden');
+                docxInput.value = '';
+                docxFileSelected = false;
+            } else {
+                dbSection.classList.add('hidden');
+                docxZone.classList.remove('hidden');
+                selectedDocxSubmission = null;
+                document.getElementById('selectedDocxNote').classList.add('hidden');
+            }
+
+            updateCompareButtonState();
+        }
+
+        async function onDocxSearchInput(value) {
+            const query = (value || '').trim();
+            const resultsEl = document.getElementById('docxSearchResults');
+            if (query.length < 2) {
+                resultsEl.innerHTML = '';
+                docxSearchResults = [];
+                return;
+            }
+
+            try {
+                const response = await fetch(`/api/submissions/search?q=${encodeURIComponent(query)}&limit=15`);
+                const results = await response.json();
+                docxSearchResults = Array.isArray(results) ? results : [];
+                if (!docxSearchResults.length) {
+                    resultsEl.innerHTML = '<div class="search-result-item">No approved submissions found.</div>';
+                    return;
+                }
+                resultsEl.innerHTML = docxSearchResults.map((r, i) => `
+                    <div class="search-result-item" onclick="selectDocxSearchResult(${i})">
+                        <strong>${escapeHtml(r.projectName || '(Untitled)')}</strong> - ${escapeHtml(r.property || 'Unknown Property')}<br>
+                        <span style="color: var(--color-text-muted);">ID: ${escapeHtml(r.id || '')}</span>
+                    </div>
+                `).join('');
+            } catch (error) {
+                console.error('DOCX search failed:', error);
+                resultsEl.innerHTML = '<div class="search-result-item">Search failed.</div>';
+            }
+        }
+
+        function selectDocxSearchResult(index) {
+            const selected = docxSearchResults[index];
+            if (!selected) return;
+            selectedDocxSubmission = selected;
+            const note = document.getElementById('selectedDocxNote');
+            note.textContent = `Selected: ${selected.projectName || 'Untitled'} (${selected.id})`;
+            note.classList.remove('hidden');
+            document.getElementById('docxSearchResults').innerHTML = '';
+            updateCompareButtonState();
+        }
+
+        function updateCompareButtonState() {
+            const mode = document.getElementById('docxSourceMode').value;
+            const hasDocx = mode === 'database' ? !!selectedDocxSubmission : docxFileSelected;
+            document.getElementById('compareBtn').disabled = !(hasDocx && pdfFileSelected);
+        }
+
         function handleFileSelect(input, type) {
             const file = input.files[0];
             if (!file) return;
@@ -729,8 +851,7 @@
 
             if (type === 'docx') docxFileSelected = true;
             else pdfFileSelected = true;
-
-            document.getElementById('compareBtn').disabled = !(docxFileSelected && pdfFileSelected);
+            updateCompareButtonState();
         }
 
         async function compareDocuments() {
@@ -751,11 +872,29 @@
                 return;
             }
 
+            const approvalCulinary = document.getElementById('approvalCulinary').value;
+            const approvalRegional = document.getElementById('approvalRegional').value;
+            if (approvalCulinary !== 'yes' || approvalRegional !== 'yes') {
+                showAlert('Both required approvals must be marked Yes before continuing.', 'error');
+                return;
+            }
+
             const docxInput = document.getElementById('docxFile');
             const pdfInput = document.getElementById('pdfFile');
+            const sourceMode = document.getElementById('docxSourceMode').value;
 
-            if (!docxInput.files[0] || !pdfInput.files[0]) {
-                showAlert('Please select both files', 'error');
+            if (!pdfInput.files[0]) {
+                showAlert('Please select the PDF file', 'error');
+                return;
+            }
+
+            if (sourceMode === 'upload' && !docxInput.files[0]) {
+                showAlert('Please select a DOCX file', 'error');
+                return;
+            }
+
+            if (sourceMode === 'database' && !selectedDocxSubmission) {
+                showAlert('Please select an approved Word document from the database', 'error');
                 return;
             }
 
@@ -764,11 +903,19 @@
             btn.innerHTML = '<span class="spinner"></span>Comparing Documents...';
 
             const formData = new FormData();
-            formData.append('docxFile', docxInput.files[0]);
             formData.append('pdfFile', pdfInput.files[0]);
+            if (sourceMode === 'upload') {
+                formData.append('docxFile', docxInput.files[0]);
+            } else {
+                formData.append('existingDocxSubmissionId', selectedDocxSubmission.id || '');
+            }
             formData.append('submitterName', submitterName);
             formData.append('submitterEmail', submitterEmail);
             formData.append('submitterJobTitle', submitterJobTitle);
+            formData.append('requiredApprovals', JSON.stringify([
+                { label: 'RSH culinary', approved: approvalCulinary === 'yes' },
+                { label: 'RSH regional', approved: approvalRegional === 'yes' }
+            ]));
 
             try {
                 const response = await fetch('/api/design-approval/compare', {
@@ -794,6 +941,7 @@
         function showResults(data) {
             document.getElementById('step1').classList.add('hidden');
             document.getElementById('step2').classList.remove('hidden');
+            currentDesignApprovalSubmissionId = data.submissionId || '';
 
             // Populate submitter info readonly fields
             document.getElementById('step2SubmitterName').value = document.getElementById('submitterName').value;
@@ -825,6 +973,8 @@
             if (isMatch) {
                 banner.className = 'result-banner result-pass';
                 banner.innerHTML = `<h3>Documents Match</h3><p>Your designed PDF matches the approved menu. You may proceed.</p>`;
+                document.getElementById('summarySection').classList.add('hidden');
+                document.getElementById('mismatchOverrideCard').classList.add('hidden');
             } else {
                 banner.className = 'result-banner result-fail';
                 banner.innerHTML = `<h3>Discrepancies Found</h3><p>Please correct your PDF and resubmit. See details below.</p>`;
@@ -833,6 +983,7 @@
                 renderSummary(data);
                 renderSplitView(data);
                 renderDiffList(data);
+                document.getElementById('mismatchOverrideCard').classList.remove('hidden');
             }
         }
 
@@ -926,10 +1077,50 @@
             }).join('');
         }
 
+        async function overrideMismatchDecision() {
+            if (!currentDesignApprovalSubmissionId) {
+                showAlert('No submission available to override.', 'error');
+                return;
+            }
+
+            const reason = (document.getElementById('overrideReason').value || '').trim();
+            if (!reason) {
+                showAlert('Please provide a reason before overriding.', 'error');
+                return;
+            }
+
+            const btn = document.getElementById('overrideMismatchBtn');
+            btn.disabled = true;
+            btn.textContent = 'Saving Override...';
+            try {
+                const response = await fetch(`/api/design-approval/${encodeURIComponent(currentDesignApprovalSubmissionId)}/override`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ reason })
+                });
+                const data = await response.json();
+                if (!response.ok) {
+                    throw new Error(data.error || 'Failed to save override');
+                }
+                showAlert('Mismatch override saved. Submission marked approved.', 'success');
+                const banner = document.getElementById('resultBanner');
+                banner.className = 'result-banner result-pass';
+                banner.innerHTML = '<h3>Mismatch Overridden</h3><p>This submission has been marked approved with override.</p>';
+                document.getElementById('mismatchOverrideCard').classList.add('hidden');
+            } catch (error) {
+                showAlert(error.message || 'Failed to save override', 'error');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Override Mismatch and Approve';
+            }
+        }
+
         function resetForm() {
             document.getElementById('step1').classList.remove('hidden');
             document.getElementById('step2').classList.add('hidden');
             document.getElementById('summarySection').classList.add('hidden');
+            document.getElementById('mismatchOverrideCard').classList.add('hidden');
+            currentDesignApprovalSubmissionId = '';
 
             // Reset file inputs
             document.getElementById('docxFile').value = '';
@@ -940,11 +1131,21 @@
             document.getElementById('pdfFilename').classList.add('hidden');
             docxFileSelected = false;
             pdfFileSelected = false;
+            selectedDocxSubmission = null;
+            document.getElementById('docxSourceMode').value = 'upload';
+            document.getElementById('docxDatabaseSearch').classList.add('hidden');
+            document.getElementById('docxZone').classList.remove('hidden');
+            document.getElementById('docxSearchInput').value = '';
+            document.getElementById('docxSearchResults').innerHTML = '';
+            document.getElementById('selectedDocxNote').classList.add('hidden');
+            document.getElementById('overrideReason').value = '';
 
             // Reset submitter fields
             document.getElementById('submitterName').value = '';
             document.getElementById('submitterEmail').value = '';
             document.getElementById('submitterJobTitle').value = '';
+            document.getElementById('approvalCulinary').value = 'yes';
+            document.getElementById('approvalRegional').value = 'yes';
 
             const btn = document.getElementById('compareBtn');
             btn.disabled = true;
@@ -1074,6 +1275,8 @@
                     document.getElementById('submitterDropdown').classList.remove('show');
                 }, 150);
             });
+            onDocxSourceModeChange();
+            updateCompareButtonState();
         });
     </script>
 </body>

@@ -1,6 +1,6 @@
 # ClickUp Integration
 
-**Status:** Complete (Feb 2026)
+**Status:** Complete (Updated Mar 2026)
 
 When a chef submits a menu, a ClickUp task is automatically created with the generated DOCX attached and assigned to the reviewer. When the reviewer uploads corrections and changes the task status, the system detects this via webhook, downloads the corrected file, emails it to the submitter, and feeds it to the differ service as training data.
 
@@ -9,8 +9,19 @@ When a chef submits a menu, a ClickUp task is automatically created with the gen
 - Dashboard fires-and-forgets a `POST localhost:3007/create-task` after form submission
 - Creates task named `"{projectName} — {property}"` with submission details in the description
 - Uploads the generated DOCX as an attachment
+- Uploads optional menu image attachment when provided in the form (`menuImageUpload`)
 - Stores `clickup_task_id` on the submission record
 - Gracefully skips if ClickUp env vars are not configured (`{ skipped: true }`)
+
+### Task metadata additions
+
+- Description now includes:
+  - Turnaround days
+  - Asset-type-specific detail for `PRINT`, `DIGITAL`, or `BOTH`
+  - Print region (`US` / `NON_US`), folded flag, and `A3/A4/A5` size when non-US
+  - Critical override audit lines (when present)
+- Description also contains implementation note:
+  - `TODO add Marketing Team as watcher when watcher mapping/API is configured.`
 
 ## Inbound Flow (ClickUp Webhook → Corrections)
 
