@@ -171,6 +171,63 @@ export async function extractBaselineFromDocx(filePath: string): Promise<{
     };
 }
 
+export async function extractUnapprovedFromDocx(filePath: string): Promise<{
+    visibleText: string;
+    unapprovedHtml: string;
+    annotations: Array<Array<{ start: number; end: number; type: string }>>;
+    extractedAllergenKey: string;
+    extractedProject: {
+        projectName: string;
+        property: string;
+        orientation: string;
+        dateNeeded: string;
+        size: string;
+    };
+}> {
+    const docxRedlinerDir = getDocxRedlinerDir();
+    const venvPython = path.join(docxRedlinerDir, 'venv', 'bin', 'python');
+    const extractCleanScript = path.join(docxRedlinerDir, 'extract_clean_menu_text.py');
+    const extractDetailsScript = path.join(docxRedlinerDir, 'extract_project_details.py');
+
+    let pythonCmd = 'python3';
+    try {
+        await fs.access(venvPython);
+        pythonCmd = `"${venvPython}"`;
+    } catch {
+        // use system python
+    }
+
+    const unapprovedCommand = `${pythonCmd} "${extractCleanScript}" "${filePath}" --mode unapproved`;
+    const detailsCommand = `${pythonCmd} "${extractDetailsScript}" "${filePath}"`;
+
+    const [{ stdout: unapprovedStdout }, { stdout: detailsStdout }] = await Promise.all([
+        execAsync(unapprovedCommand, { timeout: 30000 }),
+        execAsync(detailsCommand, { timeout: 30000 }),
+    ]);
+
+    const unapprovedData = JSON.parse((unapprovedStdout || '{}').trim() || '{}');
+    const detailsData = JSON.parse((detailsStdout || '{}').trim() || '{}');
+
+    if (unapprovedData.error) {
+        throw new Error(unapprovedData.error);
+    }
+
+    const projectDetails = detailsData.project_details || {};
+    return {
+        visibleText: unapprovedData.visible_text || '',
+        unapprovedHtml: unapprovedData.unapproved_html || '',
+        annotations: unapprovedData.annotations || [],
+        extractedAllergenKey: detailsData.allergen_key || '',
+        extractedProject: {
+            projectName: projectDetails.project_name || '',
+            property: projectDetails.property || '',
+            orientation: projectDetails.orientation || '',
+            dateNeeded: projectDetails.date_needed || '',
+            size: projectDetails.size || '',
+        },
+    };
+}
+
 /**
  * Dashboard Home - List all pending reviews
  */
@@ -799,6 +856,38 @@ app.post('/api/modification/baseline-upload', upload.single('baselineDoc') as an
     } catch (error: any) {
         console.error('Error extracting baseline document:', error);
         res.status(500).json({ error: 'Failed to process baseline document', details: error.message });
+    }
+});
+
+/**
+ * Modification Flow: Upload unapproved DOCX — preserves existing redlines/highlights.
+ * Returns visible text (including deletions), HTML with existing-del/existing-ins spans,
+ * and per-paragraph annotation ranges for the persistent preview.
+ */
+app.post('/api/modification/unapproved-upload', upload.single('baselineDoc') as any, async (req, res) => {
+    try {
+        if (!req.file) {
+            return res.status(400).json({ error: 'No document uploaded' });
+        }
+
+        if (req.file.mimetype !== 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
+            return res.status(400).json({ error: 'Only .docx files are accepted' });
+        }
+
+        const extracted = await extractUnapprovedFromDocx(req.file.path);
+        res.json({
+            success: true,
+            baselineDocPath: req.file.path,
+            baselineFileName: req.file.originalname,
+            visibleText: extracted.visibleText,
+            unapprovedHtml: extracted.unapprovedHtml,
+            annotations: extracted.annotations,
+            extractedAllergenKey: extracted.extractedAllergenKey,
+            extractedProject: extracted.extractedProject,
+        });
+    } catch (error: any) {
+        console.error('Error extracting unapproved document:', error);
+        res.status(500).json({ error: 'Failed to process unapproved document', details: error.message });
     }
 });
 

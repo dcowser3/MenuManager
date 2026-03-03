@@ -55,9 +55,9 @@ class MenuHTMLParser(HTMLParser):
         elif tag in ['s', 'del', 'strike']:
             current['strike'] = True
         elif tag == 'span':
-            if 'persistent-del' in class_names:
+            if 'persistent-del' in class_names or 'existing-del' in class_names:
                 current['strike'] = True
-            if 'persistent-ins' in class_names:
+            if 'persistent-ins' in class_names or 'existing-ins' in class_names:
                 current['highlight'] = True
 
         self.format_stack.append(current)

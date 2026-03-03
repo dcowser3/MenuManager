@@ -37,6 +37,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.extractBaselineFromDocx = extractBaselineFromDocx;
+exports.extractUnapprovedFromDocx = extractUnapprovedFromDocx;
 const express_1 = __importDefault(require("express"));
 const multer_1 = __importDefault(require("multer"));
 const axios_1 = __importDefault(require("axios"));
@@ -152,6 +153,45 @@ async function extractBaselineFromDocx(filePath) {
         approvedMenuContent: cleanData.cleaned_menu_content || cleanData.menu_content || '',
         approvedMenuContentRaw: cleanData.menu_content || '',
         approvedMenuContentHtml: cleanData.cleaned_menu_html || '',
+        extractedAllergenKey: detailsData.allergen_key || '',
+        extractedProject: {
+            projectName: projectDetails.project_name || '',
+            property: projectDetails.property || '',
+            orientation: projectDetails.orientation || '',
+            dateNeeded: projectDetails.date_needed || '',
+            size: projectDetails.size || '',
+        },
+    };
+}
+async function extractUnapprovedFromDocx(filePath) {
+    const docxRedlinerDir = getDocxRedlinerDir();
+    const venvPython = path.join(docxRedlinerDir, 'venv', 'bin', 'python');
+    const extractCleanScript = path.join(docxRedlinerDir, 'extract_clean_menu_text.py');
+    const extractDetailsScript = path.join(docxRedlinerDir, 'extract_project_details.py');
+    let pythonCmd = 'python3';
+    try {
+        await fs_1.promises.access(venvPython);
+        pythonCmd = `"${venvPython}"`;
+    }
+    catch {
+        // use system python
+    }
+    const unapprovedCommand = `${pythonCmd} "${extractCleanScript}" "${filePath}" --mode unapproved`;
+    const detailsCommand = `${pythonCmd} "${extractDetailsScript}" "${filePath}"`;
+    const [{ stdout: unapprovedStdout }, { stdout: detailsStdout }] = await Promise.all([
+        execAsync(unapprovedCommand, { timeout: 30000 }),
+        execAsync(detailsCommand, { timeout: 30000 }),
+    ]);
+    const unapprovedData = JSON.parse((unapprovedStdout || '{}').trim() || '{}');
+    const detailsData = JSON.parse((detailsStdout || '{}').trim() || '{}');
+    if (unapprovedData.error) {
+        throw new Error(unapprovedData.error);
+    }
+    const projectDetails = detailsData.project_details || {};
+    return {
+        visibleText: unapprovedData.visible_text || '',
+        unapprovedHtml: unapprovedData.unapproved_html || '',
+        annotations: unapprovedData.annotations || [],
         extractedAllergenKey: detailsData.allergen_key || '',
         extractedProject: {
             projectName: projectDetails.project_name || '',
@@ -718,6 +758,36 @@ app.post('/api/modification/baseline-upload', upload.single('baselineDoc'), asyn
     catch (error) {
         console.error('Error extracting baseline document:', error);
         res.status(500).json({ error: 'Failed to process baseline document', details: error.message });
+    }
+});
+/**
+ * Modification Flow: Upload unapproved DOCX — preserves existing redlines/highlights.
+ * Returns visible text (including deletions), HTML with existing-del/existing-ins spans,
+ * and per-paragraph annotation ranges for the persistent preview.
+ */
+app.post('/api/modification/unapproved-upload', upload.single('baselineDoc'), async (req, res) => {
+    try {
+        if (!req.file) {
+            return res.status(400).json({ error: 'No document uploaded' });
+        }
+        if (req.file.mimetype !== 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
+            return res.status(400).json({ error: 'Only .docx files are accepted' });
+        }
+        const extracted = await extractUnapprovedFromDocx(req.file.path);
+        res.json({
+            success: true,
+            baselineDocPath: req.file.path,
+            baselineFileName: req.file.originalname,
+            visibleText: extracted.visibleText,
+            unapprovedHtml: extracted.unapprovedHtml,
+            annotations: extracted.annotations,
+            extractedAllergenKey: extracted.extractedAllergenKey,
+            extractedProject: extracted.extractedProject,
+        });
+    }
+    catch (error) {
+        console.error('Error extracting unapproved document:', error);
+        res.status(500).json({ error: 'Failed to process unapproved document', details: error.message });
     }
 });
 /**

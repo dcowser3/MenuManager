@@ -11,10 +11,11 @@ Support two chef submission paths in the same form:
 1. **Brand New Menu**
 2. **Modification of Existing Menu**
 
-For modification flows, the baseline approved text must come from one of:
+For modification flows, the baseline text must come from one of:
 
 - Latest approved submission in Menu Manager database, or
-- Chef-uploaded approved/redlined DOCX (for legacy projects not yet in DB).
+- Chef-uploaded approved/redlined DOCX (for legacy projects not yet in DB), or
+- Chef-uploaded **unapproved** DOCX with existing redlines/highlights preserved.
 
 ## Key Rules
 
@@ -38,6 +39,10 @@ For modification flows, the baseline approved text must come from one of:
 - `Upload Prior Approved DOCX`:
   - Upload previously approved/redlined DOCX.
   - System extracts clean menu text + project details to prefill fields.
+- `Upload Unapproved DOCX (Preserve Redlines)`:
+  - Upload DOCX still under review with existing tracked changes / highlights.
+  - System extracts all visible text (including deletions) and preserves existing redlines as `existing-del` / `existing-ins` CSS classes.
+  - Python script returns per-paragraph annotation ranges so the persistent preview can render both layers: existing redlines + new chef changes.
 
 ## Step 3: Editing + Review
 
@@ -58,7 +63,7 @@ Submission fields:
 - `menu_content`
 - `menu_content_html`
 - `submission_mode` (`new` | `modification`)
-- `revision_source` (`database` | `uploaded_baseline`)
+- `revision_source` (`database` | `uploaded_baseline` | `uploaded_unapproved`)
 - `revision_base_submission_id` (nullable)
 - `revision_baseline_doc_path` (nullable)
 - `revision_baseline_file_name` (nullable)
@@ -89,6 +94,7 @@ Dashboard service:
 - `GET /api/submissions/search`
 - `GET /api/submissions/latest-approved`
 - `POST /api/modification/baseline-upload`
+- `POST /api/modification/unapproved-upload`
 
 DB service:
 
@@ -108,6 +114,20 @@ When chef uses uploaded baseline flow:
 
 - The uploaded prior approved DOCX is attached to the ClickUp task.
 - This gives Isabella direct visibility to verify the baseline version submitted by chef.
+
+## Unapproved DOCX Flow (Preserve Existing Redlines)
+
+When a chef uploads an unapproved DOCX:
+
+1. **Python extraction** (`extract_clean_menu_text.py --mode unapproved`):
+   - Returns `visible_text` (all text including deletions), `unapproved_html` (with `existing-del`/`existing-ins` spans), and per-paragraph `annotations` (char-offset ranges with type `del`/`ins`).
+2. **Dashboard endpoint** (`POST /api/modification/unapproved-upload`):
+   - Calls the Python script with `--mode unapproved` and also extracts project details.
+3. **Frontend** (`form.ejs`):
+   - Loads `unapprovedBaseHtml` into the editable review area so existing redlines are visible during editing.
+   - `renderPersistentPreview()` uses annotation ranges to wrap unchanged tokens in `existing-del`/`existing-ins` spans; new changes get `persistent-del`/`persistent-ins` as usual.
+4. **DOCX generation** (`generate_from_form.py`):
+   - `existing-del` → red strikethrough, `existing-ins` → yellow highlight (same formatting as `persistent-del`/`persistent-ins`).
 
 ## Notes / Limits
 

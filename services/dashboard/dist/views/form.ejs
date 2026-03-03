@@ -1383,6 +1383,16 @@
             background: rgba(183, 28, 28, 0.08);
         }
 
+        .existing-del {
+            color: #b71c1c;
+            text-decoration: line-through;
+            background: rgba(183, 28, 28, 0.08);
+        }
+
+        .existing-ins {
+            background: rgba(241, 196, 15, 0.25);
+        }
+
         .ai-temp-note {
             margin-top: 0.5rem;
             font-size: 0.72rem;
@@ -1454,6 +1464,10 @@
                             <input type="radio" name="modificationSource" id="modSourceUpload" value="upload" onchange="onModificationSourceChange()">
                             Upload Prior Approved DOCX
                         </label>
+                        <label class="modification-source-option">
+                            <input type="radio" name="modificationSource" id="modSourceUnapproved" value="unapproved" onchange="onModificationSourceChange()">
+                            Upload Unapproved DOCX (Preserve Redlines)
+                        </label>
                     </div>
                     <div id="modSourceDatabasePanel" class="modification-source-panel show">
                         <label for="submissionSearchQuery">Find previous approved submission</label>
@@ -1470,6 +1484,13 @@
                         <div class="baseline-upload-row">
                             <input type="file" id="baselineDocUpload" accept=".docx">
                             <button type="button" class="baseline-upload-btn" id="baselineUploadBtn" onclick="uploadBaselineDoc()">Extract Baseline</button>
+                        </div>
+                    </div>
+                    <div id="modSourceUnapprovedPanel" class="modification-source-panel">
+                        <label for="unapprovedDocUpload">Upload unapproved DOCX with existing redlines/highlights</label>
+                        <div class="baseline-upload-row">
+                            <input type="file" id="unapprovedDocUpload" accept=".docx">
+                            <button type="button" class="baseline-upload-btn" id="unapprovedUploadBtn" onclick="uploadUnapprovedDoc()">Extract with Redlines</button>
                         </div>
                     </div>
                     <div id="revisionSelectedNote" class="revision-selected"></div>
@@ -1966,6 +1987,9 @@
         let baseApprovedMenuContent = '';
         let baseApprovedMenuContentHtml = '';
         let persistentDiffSummary = { insertions: 0, deletions: 0 };
+        let unapprovedMode = false;
+        let unapprovedAnnotations = [];
+        let unapprovedBaseHtml = '';
         let persistentPreviewUpdateTimer = null;
         let aiCheckHasRun = false;
         let lastAiCheckedMenuText = '';
@@ -2379,6 +2403,9 @@
                 baseApprovedMenuContent = '';
                 baseApprovedMenuContentHtml = '';
                 persistentDiffSummary = { insertions: 0, deletions: 0 };
+                unapprovedMode = false;
+                unapprovedAnnotations = [];
+                unapprovedBaseHtml = '';
                 aiCheckHasRun = false;
                 aiCheckResults = null;
                 criticalErrorOverrides = {};
@@ -2400,34 +2427,57 @@
 
         function onModificationSourceChange() {
             const useUpload = document.getElementById('modSourceUpload').checked;
+            const useUnapproved = document.getElementById('modSourceUnapproved').checked;
             const dbPanel = document.getElementById('modSourceDatabasePanel');
             const uploadPanel = document.getElementById('modSourceUploadPanel');
+            const unapprovedPanel = document.getElementById('modSourceUnapprovedPanel');
             const selectedNote = document.getElementById('revisionSelectedNote');
-            revisionSource = useUpload ? 'uploaded_baseline' : 'database';
 
-            if (useUpload) {
-                dbPanel.classList.remove('show');
+            if (useUnapproved) {
+                revisionSource = 'uploaded_unapproved';
+            } else if (useUpload) {
+                revisionSource = 'uploaded_baseline';
+            } else {
+                revisionSource = 'database';
+            }
+
+            // Hide all panels first
+            dbPanel.classList.remove('show');
+            uploadPanel.classList.remove('show');
+            unapprovedPanel.classList.remove('show');
+
+            // Reset common state
+            selectedNote.classList.remove('show');
+            selectedNote.textContent = '';
+            setContainsRawSelection(false);
+            suppressRawNotice = false;
+            setAllergenAutoDetectedBadge(false);
+
+            if (useUnapproved) {
+                unapprovedPanel.classList.add('show');
+                revisionBaseSubmissionId = null;
+                revisionSearchResults = [];
+                baseApprovedMenuContentHtml = '';
+                document.getElementById('submissionSearchResults').innerHTML = '';
+            } else if (useUpload) {
                 uploadPanel.classList.add('show');
                 revisionBaseSubmissionId = null;
                 revisionSearchResults = [];
                 baseApprovedMenuContentHtml = '';
                 document.getElementById('submissionSearchResults').innerHTML = '';
-                selectedNote.classList.remove('show');
-                selectedNote.textContent = '';
-                setContainsRawSelection(false);
-                suppressRawNotice = false;
-                setAllergenAutoDetectedBadge(false);
+                // Reset unapproved state when switching away
+                unapprovedMode = false;
+                unapprovedAnnotations = [];
+                unapprovedBaseHtml = '';
             } else {
-                uploadPanel.classList.remove('show');
                 dbPanel.classList.add('show');
                 revisionBaselineDocPath = '';
                 revisionBaselineFileName = '';
                 baseApprovedMenuContentHtml = '';
-                selectedNote.classList.remove('show');
-                selectedNote.textContent = '';
-                setContainsRawSelection(false);
-                suppressRawNotice = false;
-                setAllergenAutoDetectedBadge(false);
+                // Reset unapproved state when switching away
+                unapprovedMode = false;
+                unapprovedAnnotations = [];
+                unapprovedBaseHtml = '';
             }
             updateRevisionPreCheckLayout();
         }
@@ -2561,6 +2611,73 @@
             }
         }
 
+        async function uploadUnapprovedDoc() {
+            const input = document.getElementById('unapprovedDocUpload');
+            const btn = document.getElementById('unapprovedUploadBtn');
+            const file = input.files && input.files[0];
+            if (!file) {
+                showAlert('Choose a .docx file first.', 'error');
+                return;
+            }
+
+            const form = new FormData();
+            form.append('baselineDoc', file);
+
+            btn.disabled = true;
+            btn.textContent = 'Extracting...';
+
+            try {
+                const response = await fetch('/api/modification/unapproved-upload', {
+                    method: 'POST',
+                    body: form,
+                });
+                const data = await response.json();
+                if (!response.ok) {
+                    throw new Error(data.error || 'Failed to extract unapproved document');
+                }
+
+                unapprovedMode = true;
+                unapprovedAnnotations = data.annotations || [];
+                unapprovedBaseHtml = data.unapprovedHtml || '';
+                revisionSource = 'uploaded_unapproved';
+                revisionBaseSubmissionId = null;
+                revisionBaselineDocPath = data.baselineDocPath || '';
+                revisionBaselineFileName = data.baselineFileName || file.name;
+                baseApprovedMenuContent = data.visibleText || '';
+                baseApprovedMenuContentHtml = '';
+                persistentDiffSummary = { insertions: 0, deletions: 0 };
+
+                if (data.extractedProject) {
+                    if (data.extractedProject.projectName) document.getElementById('projectName').value = data.extractedProject.projectName;
+                    if (data.extractedProject.property) document.getElementById('property').value = data.extractedProject.property;
+                    if (data.extractedProject.orientation) setSelectValue('orientation', data.extractedProject.orientation);
+                }
+                const normalizedBaseline = stripBaselineFooter(data.visibleText || '', data.extractedAllergenKey || '');
+                setAllergenInputValue(normalizedBaseline.allergens || '');
+                setContainsRawSelection(!!normalizedBaseline.hadRawNotice);
+                suppressRawNotice = false;
+                setAllergenAutoDetectedBadge(!!normalizedBaseline.allergens);
+
+                // Use visible text (including deletions) as baseline for diff tracking
+                baseApprovedMenuContent = normalizedBaseline.menu || '';
+                quill.setText(baseApprovedMenuContent || '');
+                renderPersistentPreview(baseApprovedMenuContent, baseApprovedMenuContent);
+
+                const selectedNote = document.getElementById('revisionSelectedNote');
+                selectedNote.textContent = `Loaded unapproved DOCX (redlines preserved): ${revisionBaselineFileName}`;
+                selectedNote.classList.add('show');
+
+                enterRevisionTrackingMode();
+                showAlert('Unapproved DOCX loaded. Existing redlines are preserved. Revision tracking mode is active.', 'success');
+            } catch (error) {
+                console.error(error);
+                showAlert('Failed to process unapproved DOCX: ' + error.message, 'error');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Extract with Redlines';
+            }
+        }
+
         function enterRevisionTrackingMode() {
             if (submissionMode !== 'modification') return;
 
@@ -2589,7 +2706,10 @@
             }
 
             // If we have extracted HTML (bold/italic/etc), render it in the editable review area.
-            if (baseApprovedMenuContentHtml && baseApprovedMenuContentHtml.trim()) {
+            if (unapprovedMode && unapprovedBaseHtml && unapprovedBaseHtml.trim()) {
+                displayReviewedContent(unapprovedBaseHtml);
+                renderPersistentPreview(baseApprovedMenuContent, baseApprovedMenuContent);
+            } else if (baseApprovedMenuContentHtml && baseApprovedMenuContentHtml.trim()) {
                 displayReviewedContent(baseApprovedMenuContentHtml);
                 renderPersistentPreview(baseApprovedMenuContent, baseApprovedMenuContent);
             }
@@ -4203,6 +4323,7 @@
                 approvals: approvals,
                 criticalOverrides: criticalOverrides,
                 submissionMode: submissionMode,
+                unapprovedMode: submissionMode === 'modification' ? unapprovedMode : false,
                 revisionSource: submissionMode === 'modification' ? revisionSource : null,
                 revisionBaseSubmissionId: revisionBaseSubmissionId,
                 revisionBaselineDocPath: submissionMode === 'modification' ? revisionBaselineDocPath : '',
@@ -4254,6 +4375,9 @@
             aiChanges = [];
             originalAiCorrectedText = '';
             persistentDiffSummary = { insertions: 0, deletions: 0 };
+            unapprovedMode = false;
+            unapprovedAnnotations = [];
+            unapprovedBaseHtml = '';
 
             if (isEditMode) {
                 toggleEditMode();
@@ -4464,6 +4588,55 @@
             return { commonBase, commonRev };
         }
 
+        /**
+         * Build a flat annotation lookup from unapprovedAnnotations (per-paragraph).
+         * Returns a map keyed by character offset into the full baseText, with value 'del' or 'ins'.
+         */
+        function buildAnnotationMap(baseText) {
+            const map = {};
+            if (!unapprovedAnnotations || !unapprovedAnnotations.length) return map;
+
+            // Split baseText into lines (paragraphs) matching the annotation array.
+            const lines = baseText.split('\n');
+            let globalOffset = 0;
+            for (let lineIdx = 0; lineIdx < lines.length; lineIdx++) {
+                const paraAnnotations = lineIdx < unapprovedAnnotations.length ? unapprovedAnnotations[lineIdx] : [];
+                if (paraAnnotations && paraAnnotations.length) {
+                    for (const ann of paraAnnotations) {
+                        for (let c = ann.start; c < ann.end; c++) {
+                            map[globalOffset + c] = ann.type;
+                        }
+                    }
+                }
+                globalOffset += lines[lineIdx].length + 1; // +1 for the '\n'
+            }
+            return map;
+        }
+
+        /**
+         * Wrap a token with existing-annotation styling if its character range
+         * overlaps any annotation in the map. Returns the HTML string.
+         */
+        function wrapWithExistingAnnotation(token, charOffset, annotationMap) {
+            if (!token || !token.trim()) return escapeHtml(token || '');
+
+            // Determine dominant annotation type for this token
+            let delCount = 0;
+            let insCount = 0;
+            for (let c = 0; c < token.length; c++) {
+                const ann = annotationMap[charOffset + c];
+                if (ann === 'del') delCount++;
+                else if (ann === 'ins') insCount++;
+            }
+
+            if (delCount > 0 && delCount >= insCount) {
+                return `<span class="existing-del">${escapeHtml(token)}</span>`;
+            } else if (insCount > 0) {
+                return `<span class="existing-ins">${escapeHtml(token)}</span>`;
+            }
+            return escapeHtml(token);
+        }
+
         function renderPersistentPreview(baseText, revisedText) {
             const previewSection = document.getElementById('persistentPreviewSection');
             const previewBody = document.getElementById('persistentPreviewBody');
@@ -4478,6 +4651,19 @@
             const baseTokens = tokenizeForDiff(baseText);
             const revisedTokens = tokenizeForDiff(revisedText);
             const lcs = buildTokenLcs(baseTokens, revisedTokens);
+
+            // Build annotation map for unapproved mode
+            const annotationMap = unapprovedMode ? buildAnnotationMap(baseText) : {};
+
+            // Build token → base char offset mapping for annotation lookup
+            let baseCharOffsets = [];
+            if (unapprovedMode) {
+                let offset = 0;
+                for (let t = 0; t < baseTokens.length; t++) {
+                    baseCharOffsets.push(offset);
+                    offset += (baseTokens[t] || '').length;
+                }
+            }
 
             let insertions = 0;
             let deletions = 0;
@@ -4495,7 +4681,12 @@
                     normalizeToken(baseTok) === normalizeToken(revTok);
 
                 if (baseCommon && revCommon && sameToken) {
-                    html += escapeHtml(revTok);
+                    // Unchanged token — in unapproved mode, check for existing annotations
+                    if (unapprovedMode && i < baseCharOffsets.length) {
+                        html += wrapWithExistingAnnotation(revTok, baseCharOffsets[i], annotationMap);
+                    } else {
+                        html += escapeHtml(revTok);
+                    }
                     i++;
                     j++;
                     continue;
