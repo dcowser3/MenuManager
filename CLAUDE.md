@@ -36,7 +36,7 @@
 | Environment | [docs/environment.md](docs/environment.md) | All env vars (required + optional) with descriptions |
 | Design Decisions | [docs/design-docs/index.md](docs/design-docs/index.md) | Catalog of all design docs |
 | — ClickUp Integration | [docs/design-docs/clickup-integration.md](docs/design-docs/clickup-integration.md) | Outbound/inbound flows, webhook, architecture |
-| — Critical Error Blocking | [docs/design-docs/critical-error-blocking.md](docs/design-docs/critical-error-blocking.md) | Severity system, hard stops, override flow |
+| — Critical Error Blocking | [docs/design-docs/critical-error-blocking.md](docs/design-docs/critical-error-blocking.md) | 3-layer detection (AI prompt, normalizer, deterministic), all critical types, override flow |
 | — Submitter Autofill | [docs/design-docs/submitter-autofill.md](docs/design-docs/submitter-autofill.md) | Autocomplete, recent projects, profile storage |
 | — Design Approval | [docs/design-docs/design-approval.md](docs/design-docs/design-approval.md) | DOCX vs PDF comparison tool |
 | — Approval Attestation | [docs/design-docs/approval-attestation.md](docs/design-docs/approval-attestation.md) | Required approval system, attestation model |
@@ -54,6 +54,7 @@
 - **DOCX boundary markers:** `"MENU"` (exact match) or `"Please drop the menu content below on page 2"`
 - **DOCX template structure:** First table = project details; content starts after boundary marker
 - **Severity vs confidence:** `severity` ("critical"/"normal") controls blocking; `confidence` is separate
+- **Critical errors:** Detected across 3 layers (AI prompt → severity normalizer → deterministic checks); see [critical-error-blocking.md](docs/design-docs/critical-error-blocking.md) for full map
 - **Prix fixe exemption:** Prix fixe menus skip missing-price critical errors
 - **Archive:** Old docs and legacy services in `archive/` — web form is the only active submission path
 

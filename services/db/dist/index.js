@@ -49,9 +49,78 @@ const SUBMISSIONS_DB = path.join(DB_DIR, 'submissions.json');
 const REPORTS_DB = path.join(DB_DIR, 'reports.json');
 const PROFILES_DB = path.join(DB_DIR, 'submitter_profiles.json');
 const ASSETS_DB = path.join(DB_DIR, 'assets.json');
+const PROPERTIES_DB = path.join(DB_DIR, 'properties.json');
 const SUBMISSIONS_TABLE = 'submissions';
 const SUBMITTER_PROFILES_TABLE = 'submitter_profiles';
+const PROPERTIES_TABLE = 'properties';
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const DEFAULT_PROPERTY_NAMES = [
+    '89Agave - Sedona',
+    'Agent\'s Only - Pasadena',
+    'Anchor & Brine - Tampa',
+    'Aqimero - Philadelphia',
+    'Bayou & Bottle - Houston',
+    'Beacon - Tampa',
+    'Casa Chi - Chicago',
+    'Cayao - Los Cabos',
+    'Ciclo - Austin',
+    'Coraluz - Los Cabos',
+    'D\'Taco Joint - Newark',
+    'dLeña - Houston',
+    'dLeña - Washington, D.C.',
+    'Driftwood - Tampa',
+    'DRINK Bar (Fareground) - Austin',
+    'Ellis Bar (Fareground) - Austin',
+    'Fareground - Austin',
+    'Ironwood - Scottsdale',
+    'La Hacienda - Scottsdale',
+    'Live Oak - Austin',
+    'Lona - Fort Lauderdale',
+    'Lona - Nashville',
+    'Lona - Tampa',
+    'Maya - Dubai',
+    'Maya - New York',
+    'Raya - Laguna Niguel',
+    'Sidecut - Whistler',
+    'Sora - Los Cabos',
+    'Spa at JW - Tampa',
+    'Stoke & Rye - Avon',
+    'Taco Pegaso - Austin',
+    'Tamayo - Denver',
+    'tán - New York',
+    'Toro - Belgrade',
+    'Toro - Chicago',
+    'Toro - Denver',
+    'Toro - Istanbul',
+    'Toro - Los Cabos',
+    'Toro - Marrakech',
+    'Toro - Riviera Maya',
+    'Toro - Scottsdale',
+    'Toro - Snowmass',
+    'Toro Del Mar - Athens',
+    'Toro Toro - Dubai',
+    'Toro Toro - Fort Worth',
+    'Toro Toro - Houston',
+    'Toro Toro - Malta',
+    'Toro Toro - Miami',
+    'Venga Venga - Snowmass',
+    'Zengo - Doha',
+    'Zengo - Dubai',
+];
+function deriveCityCountryFromProperty(name) {
+    const idx = name.lastIndexOf(' - ');
+    if (idx < 0)
+        return '';
+    return name.slice(idx + 3).trim();
+}
+function buildDefaultPropertyCatalog() {
+    return DEFAULT_PROPERTY_NAMES.map((name, index) => ({
+        name,
+        city_country: deriveCityCountryFromProperty(name),
+        sort_order: index + 1,
+        is_active: true,
+    }));
+}
 const SUPABASE_SUBMISSION_COLUMNS = new Set([
     'id',
     'legacy_id',
@@ -188,6 +257,55 @@ async function mirrorSubmissionUpdateToSupabase(localId, updates) {
         throw new Error(`Supabase update failed: ${error.message}`);
     }
 }
+async function readLocalPropertyCatalog() {
+    try {
+        const content = await fs_1.promises.readFile(PROPERTIES_DB, 'utf-8');
+        const parsed = JSON.parse(content);
+        if (!Array.isArray(parsed))
+            return buildDefaultPropertyCatalog();
+        return parsed
+            .map((item, index) => ({
+            name: `${item?.name || ''}`.trim(),
+            city_country: `${item?.city_country || deriveCityCountryFromProperty(`${item?.name || ''}`) || ''}`.trim(),
+            sort_order: Number.isFinite(Number(item?.sort_order)) ? Number(item.sort_order) : index + 1,
+            is_active: item?.is_active !== false,
+        }))
+            .filter((item) => !!item.name);
+    }
+    catch {
+        return buildDefaultPropertyCatalog();
+    }
+}
+async function getPropertyCatalog() {
+    if ((0, supabase_client_1.isSupabaseConfigured)()) {
+        try {
+            const supabase = (0, supabase_client_1.getSupabaseClient)();
+            const { data, error } = await supabase
+                .from(PROPERTIES_TABLE)
+                .select('name, city_country, sort_order, is_active')
+                .eq('is_active', true)
+                .order('sort_order', { ascending: true })
+                .order('name', { ascending: true });
+            if (!error && Array.isArray(data) && data.length > 0) {
+                return data
+                    .map((item, index) => ({
+                    name: `${item?.name || ''}`.trim(),
+                    city_country: `${item?.city_country || deriveCityCountryFromProperty(`${item?.name || ''}`) || ''}`.trim(),
+                    sort_order: Number.isFinite(Number(item?.sort_order)) ? Number(item.sort_order) : index + 1,
+                    is_active: item?.is_active !== false,
+                }))
+                    .filter((item) => !!item.name);
+            }
+        }
+        catch (error) {
+            console.warn('Falling back to local property catalog:', error?.message || error);
+        }
+    }
+    const local = await readLocalPropertyCatalog();
+    return local
+        .filter((item) => item.is_active !== false)
+        .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0) || a.name.localeCompare(b.name));
+}
 // Ensure DB directory and files exist
 async function initDb() {
     try {
@@ -196,6 +314,7 @@ async function initDb() {
         await fs_1.promises.access(REPORTS_DB).catch(() => fs_1.promises.writeFile(REPORTS_DB, '[]'));
         await fs_1.promises.access(PROFILES_DB).catch(() => fs_1.promises.writeFile(PROFILES_DB, '{}'));
         await fs_1.promises.access(ASSETS_DB).catch(() => fs_1.promises.writeFile(ASSETS_DB, '[]'));
+        await fs_1.promises.access(PROPERTIES_DB).catch(() => fs_1.promises.writeFile(PROPERTIES_DB, JSON.stringify(buildDefaultPropertyCatalog(), null, 2)));
     }
     catch (error) {
         console.error('Failed to initialize database:', error);
@@ -414,33 +533,47 @@ app.get('/submissions/search', async (req, res) => {
         res.status(500).json([]);
     }
 });
-// Distinct property values across all submissions (for location dropdowns).
-// IMPORTANT: Must come BEFORE /submissions/:id
-app.get('/submissions/properties', async (req, res) => {
+// Canonical property list used by form + learning dashboard.
+app.get('/properties', async (_req, res) => {
     try {
-        let properties = [];
-        if ((0, supabase_client_1.isSupabaseConfigured)()) {
-            const supabase = (0, supabase_client_1.getSupabaseClient)();
-            const { data, error } = await supabase
-                .from(SUBMISSIONS_TABLE)
-                .select('property');
-            if (error)
-                throw new Error(error.message);
-            properties = (data || [])
-                .map((r) => (r.property || '').trim())
-                .filter(Boolean);
-        }
-        else {
-            const submissions = JSON.parse(await fs_1.promises.readFile(SUBMISSIONS_DB, 'utf-8'));
-            properties = Object.values(submissions)
-                .map((s) => (s.property || '').trim())
-                .filter(Boolean);
-        }
-        const unique = [...new Set(properties)].sort();
-        res.json({ properties: unique });
+        const catalog = await getPropertyCatalog();
+        res.json({
+            properties: catalog.map((item) => item.name),
+            catalog,
+        });
     }
     catch (error) {
-        console.error('Error fetching distinct properties:', error);
+        console.error('Error fetching property catalog:', error);
+        res.status(500).json({ properties: [], catalog: [] });
+    }
+});
+app.get('/properties/validate', async (req, res) => {
+    try {
+        const name = `${req.query.name || ''}`.trim();
+        if (!name) {
+            return res.status(400).json({ error: 'name is required' });
+        }
+        const catalog = await getPropertyCatalog();
+        const match = catalog.find((item) => item.name.toLowerCase() === name.toLowerCase());
+        if (!match) {
+            return res.json({ valid: false });
+        }
+        res.json({ valid: true, property: match });
+    }
+    catch (error) {
+        console.error('Error validating property:', error);
+        res.status(500).json({ valid: false });
+    }
+});
+// Backward-compatible alias.
+// IMPORTANT: Must come BEFORE /submissions/:id
+app.get('/submissions/properties', async (_req, res) => {
+    try {
+        const catalog = await getPropertyCatalog();
+        res.json({ properties: catalog.map((item) => item.name) });
+    }
+    catch (error) {
+        console.error('Error fetching property names:', error);
         res.status(500).json({ properties: [] });
     }
 });

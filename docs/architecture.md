@@ -29,6 +29,7 @@ services/
 Chef opens web form (/form)
   │
   ├─ Autocomplete: dashboard → GET /api/submitter-profiles/search → db service
+  ├─ Property catalog: dashboard → GET /api/properties → db service (`properties` table / local mirror)
   ├─ Recent projects: dashboard → GET /api/recent-projects → db service
   ├─ Mode: New submission OR Modification
   │   ├─ Modification (DB): dashboard → GET /api/submissions/search → db service
@@ -37,6 +38,7 @@ Chef opens web form (/form)
   │
   ▼
 Fills form (submitter info, project details, approval attestation, menu content)
+  Note: property must be selected from canonical list; separate free-text location field is removed.
   │
   ▼
 Runs AI Check

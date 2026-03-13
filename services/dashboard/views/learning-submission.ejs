@@ -96,7 +96,7 @@
                     <div class="meta-value"><%= submissionMeta.project_name || 'N/A' %></div>
                 </div>
                 <div class="meta-item">
-                    <div class="meta-label">Location</div>
+                    <div class="meta-label">Property</div>
                     <div class="meta-value"><%= submissionMeta.property || submissionMeta.city_country || 'N/A' %></div>
                 </div>
                 <div class="meta-item">
@@ -157,16 +157,21 @@
                             <div style="margin-top: .7rem;">
                                 <div class="location-check">
                                     <input type="checkbox" id="loc-check-<%= idx %>" onchange="toggleLocationFields(<%= idx %>)">
-                                    <label for="loc-check-<%= idx %>">This is a location-specific rule</label>
+                                    <label for="loc-check-<%= idx %>">This is a property-specific rule</label>
                                 </div>
                                 <div class="location-fields" id="loc-fields-<%= idx %>">
                                     <div class="form-grid">
                                         <div>
-                                            <label for="location-<%= idx %>">Primary Location *</label>
-                                            <input id="location-<%= idx %>" value="<%= submissionMeta.property || submissionMeta.city_country || '' %>" placeholder="e.g., Miami">
+                                            <label for="location-<%= idx %>">Primary Property *</label>
+                                            <select id="location-<%= idx %>">
+                                                <option value="">Select property</option>
+                                                <% (locationOptions || []).forEach((loc) => { %>
+                                                    <option value="<%= loc %>" <%= loc === (submissionMeta.property || submissionMeta.city_country || '') ? 'selected' : '' %>><%= loc %></option>
+                                                <% }) %>
+                                            </select>
                                         </div>
                                         <div>
-                                            <label for="shared-<%= idx %>">Additional Locations Where This Rule Applies</label>
+                                            <label for="shared-<%= idx %>">Additional Properties Where This Rule Applies</label>
                                             <select multiple id="shared-<%= idx %>">
                                                 <% (locationOptions || []).forEach((loc) => { %>
                                                     <option value="<%= loc %>"
@@ -200,8 +205,8 @@
                             <th>Created</th>
                             <th>Correction</th>
                             <th>Restaurant</th>
-                            <th>Location</th>
-                            <th>Shared Locations</th>
+                            <th>Property</th>
+                            <th>Shared Properties</th>
                             <th>Reasoning</th>
                         </tr>
                     </thead>
@@ -252,7 +257,7 @@
                 return;
             }
             if (isLocationSpecific && !location) {
-                statusEl.textContent = 'Primary location is required for location-specific rules.';
+                statusEl.textContent = 'Primary property is required for property-specific rules.';
                 statusEl.className = 'save-status err';
                 return;
             }

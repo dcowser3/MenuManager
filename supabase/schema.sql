@@ -26,7 +26,7 @@ CREATE TABLE submissions (
     file_delivery_notes TEXT,
     orientation VARCHAR(50),
     menu_type VARCHAR(50) DEFAULT 'standard',        -- 'standard' or 'prix_fixe'
-    template_type VARCHAR(50) DEFAULT 'food',        -- 'food' or 'beverage'
+    template_type VARCHAR(50) DEFAULT 'food',        -- 'food', 'beverage', 'food_beverage', or 'non_beverage'
     date_needed DATE,
 
     -- Submitter info
@@ -108,6 +108,75 @@ CREATE TABLE submitter_profiles (
 
 CREATE INDEX idx_submitter_profiles_name ON submitter_profiles(name);
 CREATE INDEX idx_submitter_profiles_last_used ON submitter_profiles(last_used DESC);
+
+-- ============================================================================
+-- 1c. PROPERTIES (canonical selectable list for submissions + learning)
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS properties (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name VARCHAR(255) NOT NULL UNIQUE,
+    city_country VARCHAR(255),
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    is_active BOOLEAN NOT NULL DEFAULT true,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_properties_active_order ON properties(is_active, sort_order, name);
+
+INSERT INTO properties (name, city_country, sort_order) VALUES
+    ('89Agave - Sedona', 'Sedona', 1),
+    ('Agent''s Only - Pasadena', 'Pasadena', 2),
+    ('Anchor & Brine - Tampa', 'Tampa', 3),
+    ('Aqimero - Philadelphia', 'Philadelphia', 4),
+    ('Bayou & Bottle - Houston', 'Houston', 5),
+    ('Beacon - Tampa', 'Tampa', 6),
+    ('Casa Chi - Chicago', 'Chicago', 7),
+    ('Cayao - Los Cabos', 'Los Cabos', 8),
+    ('Ciclo - Austin', 'Austin', 9),
+    ('Coraluz - Los Cabos', 'Los Cabos', 10),
+    ('D''Taco Joint - Newark', 'Newark', 11),
+    ('dLeña - Houston', 'Houston', 12),
+    ('dLeña - Washington, D.C.', 'Washington, D.C.', 13),
+    ('Driftwood - Tampa', 'Tampa', 14),
+    ('DRINK Bar (Fareground) - Austin', 'Austin', 15),
+    ('Ellis Bar (Fareground) - Austin', 'Austin', 16),
+    ('Fareground - Austin', 'Austin', 17),
+    ('Ironwood - Scottsdale', 'Scottsdale', 18),
+    ('La Hacienda - Scottsdale', 'Scottsdale', 19),
+    ('Live Oak - Austin', 'Austin', 20),
+    ('Lona - Fort Lauderdale', 'Fort Lauderdale', 21),
+    ('Lona - Nashville', 'Nashville', 22),
+    ('Lona - Tampa', 'Tampa', 23),
+    ('Maya - Dubai', 'Dubai', 24),
+    ('Maya - New York', 'New York', 25),
+    ('Raya - Laguna Niguel', 'Laguna Niguel', 26),
+    ('Sidecut - Whistler', 'Whistler', 27),
+    ('Sora - Los Cabos', 'Los Cabos', 28),
+    ('Spa at JW - Tampa', 'Tampa', 29),
+    ('Stoke & Rye - Avon', 'Avon', 30),
+    ('Taco Pegaso - Austin', 'Austin', 31),
+    ('Tamayo - Denver', 'Denver', 32),
+    ('tán - New York', 'New York', 33),
+    ('Toro - Belgrade', 'Belgrade', 34),
+    ('Toro - Chicago', 'Chicago', 35),
+    ('Toro - Denver', 'Denver', 36),
+    ('Toro - Istanbul', 'Istanbul', 37),
+    ('Toro - Los Cabos', 'Los Cabos', 38),
+    ('Toro - Marrakech', 'Marrakech', 39),
+    ('Toro - Riviera Maya', 'Riviera Maya', 40),
+    ('Toro - Scottsdale', 'Scottsdale', 41),
+    ('Toro - Snowmass', 'Snowmass', 42),
+    ('Toro Del Mar - Athens', 'Athens', 43),
+    ('Toro Toro - Dubai', 'Dubai', 44),
+    ('Toro Toro - Fort Worth', 'Fort Worth', 45),
+    ('Toro Toro - Houston', 'Houston', 46),
+    ('Toro Toro - Malta', 'Malta', 47),
+    ('Toro Toro - Miami', 'Miami', 48),
+    ('Venga Venga - Snowmass', 'Snowmass', 49),
+    ('Zengo - Doha', 'Doha', 50),
+    ('Zengo - Dubai', 'Dubai', 51)
+ON CONFLICT (name) DO NOTHING;
 
 -- ============================================================================
 -- 2. APPROVED_DISHES

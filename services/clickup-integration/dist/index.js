@@ -17,6 +17,8 @@ dotenv_1.default.config({ path: path_1.default.join(__dirname, '..', '..', '..',
 const execAsync = (0, util_1.promisify)(child_process_1.exec);
 const app = (0, express_1.default)();
 const port = 3007;
+const DB_SERVICE_URL = process.env.DB_SERVICE_URL || 'http://localhost:3004';
+const DIFFER_SERVICE_URL = process.env.DIFFER_SERVICE_URL || 'http://localhost:3006';
 const CLICKUP_API_TOKEN = process.env.CLICKUP_API_TOKEN;
 const CLICKUP_LIST_ID = process.env.CLICKUP_LIST_ID;
 const CLICKUP_ASSIGNEE_ID = process.env.CLICKUP_ASSIGNEE_ID;
@@ -342,7 +344,7 @@ async function processApprovedTask(clickupTaskId, opts) {
     if (!opts?.skipStatusCheck && currentStatus !== CLICKUP_CORRECTIONS_STATUS) {
         return { processed: false, reason: `task status is "${currentStatus}"` };
     }
-    const subResponse = await axios_1.default.get(`http://localhost:3004/submissions/by-clickup-task/${clickupTaskId}`);
+    const subResponse = await axios_1.default.get(`${DB_SERVICE_URL}/submissions/by-clickup-task/${clickupTaskId}`);
     const submission = subResponse.data;
     console.log(`Found submission ${submission.id} for ClickUp task ${clickupTaskId}`);
     const attachments = taskResponse.data.attachments || [];
@@ -373,7 +375,7 @@ async function processApprovedTask(clickupTaskId, opts) {
     catch (extractError) {
         console.warn(`Failed to extract approved text from corrected DOCX: ${extractError.message}`);
     }
-    await axios_1.default.put(`http://localhost:3004/submissions/${submission.id}`, {
+    await axios_1.default.put(`${DB_SERVICE_URL}/submissions/${submission.id}`, {
         status: 'approved',
         final_path: correctedPath,
         approved_menu_content_raw: extractedRaw || undefined,
@@ -381,7 +383,7 @@ async function processApprovedTask(clickupTaskId, opts) {
         approved_text_extracted_at: extractedClean ? new Date().toISOString() : undefined,
     });
     console.log(`Updated submission ${submission.id} to approved`);
-    axios_1.default.post('http://localhost:3004/assets', {
+    axios_1.default.post(`${DB_SERVICE_URL}/assets`, {
         submission_id: submission.id,
         asset_type: 'approved_docx',
         source: 'isabella_clickup',
@@ -400,7 +402,7 @@ async function processApprovedTask(clickupTaskId, opts) {
         correctedPath,
         filename: submission.filename,
     }).catch((err) => console.error('Failed to send corrections_ready notification:', err.message));
-    axios_1.default.post('http://localhost:3006/compare', {
+    axios_1.default.post(`${DIFFER_SERVICE_URL}/compare`, {
         ai_draft_path: submission.ai_draft_path,
         final_path: correctedPath,
         submission_id: submission.id,
@@ -514,7 +516,7 @@ app.post('/create-task', async (req, res) => {
             }
         }
         if (submissionId) {
-            await axios_1.default.put(`http://localhost:3004/submissions/${submissionId}`, {
+            await axios_1.default.put(`${DB_SERVICE_URL}/submissions/${submissionId}`, {
                 clickup_task_id: taskId,
             });
             console.log(`Stored clickup_task_id ${taskId} on submission ${submissionId}`);
@@ -560,7 +562,7 @@ app.post('/webhook/clickup', async (req, res) => {
 });
 app.post('/webhook/backfill-pending', async (_req, res) => {
     try {
-        const pendingResponse = await axios_1.default.get('http://localhost:3004/submissions/pending');
+        const pendingResponse = await axios_1.default.get(`${DB_SERVICE_URL}/submissions/pending`);
         const pending = Array.isArray(pendingResponse.data) ? pendingResponse.data : [];
         const candidates = pending.filter((s) => !!s.clickup_task_id);
         const summary = {

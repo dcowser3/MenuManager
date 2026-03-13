@@ -1,0 +1,121 @@
+version: "3.9"
+
+services:
+  db:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.service
+      args:
+        SERVICE: db
+    env_file: .env
+    environment:
+      - NODE_ENV=production
+    ports:
+      - "3004:3004"
+    volumes:
+      - menumanager_tmp:/app/tmp
+      - menumanager_logs:/app/logs
+
+  ai-review:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.service
+      args:
+        SERVICE: ai-review
+    env_file: .env
+    environment:
+      - NODE_ENV=production
+      - DB_SERVICE_URL=http://db:3004
+    ports:
+      - "3002:3002"
+    depends_on:
+      - db
+    volumes:
+      - menumanager_tmp:/app/tmp
+      - menumanager_logs:/app/logs
+
+  parser:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.service
+      args:
+        SERVICE: parser
+    env_file: .env
+    environment:
+      - NODE_ENV=production
+      - DB_SERVICE_URL=http://db:3004
+      - AI_REVIEW_URL=http://ai-review:3002
+    ports:
+      - "3001:3001"
+    depends_on:
+      - db
+      - ai-review
+    volumes:
+      - menumanager_tmp:/app/tmp
+      - menumanager_logs:/app/logs
+
+  differ:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.service
+      args:
+        SERVICE: differ
+    env_file: .env
+    environment:
+      - NODE_ENV=production
+    ports:
+      - "3006:3006"
+    depends_on:
+      - db
+    volumes:
+      - menumanager_tmp:/app/tmp
+      - menumanager_logs:/app/logs
+
+  clickup-integration:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.service
+      args:
+        SERVICE: clickup-integration
+    env_file: .env
+    environment:
+      - NODE_ENV=production
+      - DB_SERVICE_URL=http://db:3004
+      - DIFFER_SERVICE_URL=http://differ:3006
+    ports:
+      - "3007:3007"
+    depends_on:
+      - db
+      - differ
+    volumes:
+      - menumanager_tmp:/app/tmp
+      - menumanager_logs:/app/logs
+
+  dashboard:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.service
+      args:
+        SERVICE: dashboard
+    env_file: .env
+    environment:
+      - NODE_ENV=production
+      - DB_SERVICE_URL=http://db:3004
+      - AI_REVIEW_URL=http://ai-review:3002
+      - DIFFER_SERVICE_URL=http://differ:3006
+      - CLICKUP_SERVICE_URL=http://clickup-integration:3007
+      - DASHBOARD_URL=http://localhost:3005
+    ports:
+      - "3005:3005"
+    depends_on:
+      - db
+      - ai-review
+      - differ
+      - clickup-integration
+    volumes:
+      - menumanager_tmp:/app/tmp
+      - menumanager_logs:/app/logs
+
+volumes:
+  menumanager_tmp:
+  menumanager_logs:

@@ -27,6 +27,7 @@ Menu Manager is an AI-powered service designed to automate the review process fo
 
 ### Current (Phase 1)
 - Web form for chef submissions
+- Canonical property selection (type-to-search, value must match configured list)
 - AI-powered two-tier review (general QA + detailed corrections)
 - DOCX template validation and redlining
 - Reviewer dashboard
@@ -65,7 +66,7 @@ services/
 
 ## The Review Workflow
 
-1. **Submission** - Chef uploads menu via web form, selects reviewer(s)
+1. **Submission** - Chef uploads menu via web form, selects reviewer(s), and selects property from the configured catalog
 2. **Template Validation** - System validates `.docx` structure
 3. **Tier 1 AI Review** - High-level QA check (spelling, grammar, clarity)
 4. **Decision Point** - If issues found, chef is notified to resubmit
@@ -74,6 +75,14 @@ services/
 7. **Multi-Level Approval** - Additional reviewers if required
 8. **ClickUp Integration** - Final approval creates task in ClickUp
 9. **Dishes Database** - Approved dishes extracted and stored
+
+## Property Catalog
+
+- The form property field is now restricted to a canonical list managed by the DB service.
+- Submitters can type to search, but the selected value must match an allowed property.
+- The old separate free-text location field is removed; location metadata is derived from the selected property.
+- The form-side `Hotel Name` input is currently removed from chef entry flow.
+- Learning dashboards reuse the same property list for location-specific rule assignment and filtering.
 
 ## Getting Started
 
@@ -120,6 +129,13 @@ SMTP_PASS=
 
 # AI Review
 OPENAI_API_KEY=
+AI_REVIEW_MODEL=gpt-4o-mini
+
+# Service URLs (override in cloud deployments)
+DB_SERVICE_URL=http://localhost:3004
+AI_REVIEW_URL=http://localhost:3002
+DIFFER_SERVICE_URL=http://localhost:3006
+CLICKUP_SERVICE_URL=http://localhost:3007
 
 # Supabase
 SUPABASE_URL=https://your-project.supabase.co
@@ -182,6 +198,7 @@ Notes:
 - `CLAUDE.md` — Project map and agent conventions (~66 lines)
 - `docs/` — Detailed documentation (architecture, design decisions, environment, roadmap)
 - `docs/design-docs/` — Feature design documents (ClickUp, critical errors, autofill, etc.)
+- `docs/aws-deployment.md` — AWS deployment guide (EC2 + Docker Compose, ECS notes)
 - `archive/` — Historical documentation from Phase 1
 
 ## Running Tests

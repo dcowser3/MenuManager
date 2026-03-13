@@ -75,7 +75,7 @@ Note:
 Yes, OpenAI API usage is a separate variable cost on top of cloud hosting.
 
 Current repo note:
-- `services/ai-review/index.ts` is currently configured to call `gpt-4o`.
+- `services/ai-review/index.ts` defaults to `gpt-4o-mini` and can be overridden with `AI_REVIEW_MODEL`.
 
 Pricing reference used:
 - `gpt-4o` text pricing: **$2.50 / 1M input tokens**, **$10.00 / 1M output tokens**.

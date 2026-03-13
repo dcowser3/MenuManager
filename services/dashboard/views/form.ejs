@@ -719,7 +719,8 @@
             background: var(--color-background);
         }
 
-        .reviewed-content-area p {
+        .reviewed-content-area p,
+        .reviewed-content-area div {
             margin: 0;
             padding: 0;
         }
@@ -1509,8 +1510,9 @@
                     </div>
                     <div class="form-group autocomplete-wrapper">
                         <label for="property">Property *</label>
-                        <input type="text" id="property" required placeholder="Enter property name" autocomplete="off" oninput="onPropertyInput(this.value)">
+                        <input type="text" id="property" required placeholder="Select property" autocomplete="off" oninput="onPropertyInput(this.value)">
                         <div class="autocomplete-dropdown" id="propertyDropdown"></div>
+                        <div id="propertyFieldError" class="field-error hidden"></div>
                     </div>
                     <div class="form-group">
                         <label for="menuType">Menu Type *</label>
@@ -1526,20 +1528,13 @@
                             <option value="">Select template type</option>
                             <option value="food">Food Menu</option>
                             <option value="beverage">Beverage Menu</option>
+                            <option value="food_beverage">Food + Beverage Menu</option>
                             <option value="non_beverage">Non-Beverage (No AI Review)</option>
                         </select>
                     </div>
                     <div class="form-group">
-                        <label for="hotelName">Hotel Name</label>
-                        <input type="text" id="hotelName" placeholder="Enter hotel name">
-                    </div>
-                    <div class="form-group">
-                        <label for="cityCountry">City / Country *</label>
-                        <input type="text" id="cityCountry" required placeholder="e.g., New York, USA">
-                    </div>
-                    <div class="form-group">
                         <label for="turnaroundDays">Turnaround (Days) *</label>
-                        <input type="number" id="turnaroundDays" min="1" step="1" required onchange="onTurnaroundDaysChange()" oninput="onTurnaroundDaysChange()">
+                        <input type="number" id="turnaroundDays" min="1" step="1" required value="5" onchange="onTurnaroundDaysChange()" oninput="onTurnaroundDaysChange()">
                         <div id="turnaroundDaysError" class="field-error hidden"></div>
                     </div>
                     <div class="form-group">
@@ -1827,14 +1822,6 @@
                             <input type="text" id="step2TemplateType" readonly>
                         </div>
                         <div class="form-group">
-                            <label>Hotel Name</label>
-                            <input type="text" id="step2HotelName" readonly>
-                        </div>
-                        <div class="form-group">
-                            <label>City / Country</label>
-                            <input type="text" id="step2CityCountry" readonly>
-                        </div>
-                        <div class="form-group">
                             <label>Turnaround</label>
                             <input type="text" id="step2TurnaroundDays" readonly>
                         </div>
@@ -2036,7 +2023,7 @@
             };
         }
 
-        document.addEventListener('DOMContentLoaded', function() {
+        document.addEventListener('DOMContentLoaded', async function() {
             quill = new Quill('#menuEditor', {
                 theme: 'snow',
                 modules: {
@@ -2075,13 +2062,14 @@
                 updateRunCheckButtonLabel();
             }
 
-            // Load recent projects
+            // Load reference data
+            await loadPropertyCatalog();
             loadRecentProjects();
             onSubmissionModeChange();
             setupAllergenSync();
             setupRawToggleSync();
             renderAllergenLegend();
-            applyTurnaroundDefaults(true);
+            applyTurnaroundDefaults(true, true);
             toggleAssetFields();
 
             // Submitter name keyboard nav + blur dismiss
@@ -2107,6 +2095,13 @@
             propertyInput.addEventListener('blur', function() {
                 setTimeout(() => {
                     document.getElementById('propertyDropdown').classList.remove('show');
+                    const currentValue = propertyInput.value.trim();
+                    if (currentValue && !isPropertyFromCatalog(currentValue)) {
+                        setPropertyFieldError('Please select a property from the list.');
+                        showAlert('Please select a property from the list', 'error');
+                    } else {
+                        setPropertyFieldError('');
+                    }
                 }, 150);
             });
         });
@@ -2117,6 +2112,8 @@
 
             if (templateType === 'beverage') {
                 hintEl.textContent = 'e.g., Head of Mixology, Bar Director, Regional Director of Operations';
+            } else if (templateType === 'food_beverage') {
+                hintEl.textContent = 'e.g., Property GM, Director of F&B, Executive Chef, Head of Mixology';
             } else if (templateType === 'non_beverage') {
                 hintEl.textContent = 'Non-beverage submission (AI review is skipped)';
             } else {
@@ -2162,6 +2159,21 @@
                 errorEl.textContent = '';
                 errorEl.classList.add('hidden');
                 turnaroundInput.classList.remove('input-error');
+            }
+        }
+
+        function setPropertyFieldError(message) {
+            const propertyInput = document.getElementById('property');
+            const errorEl = document.getElementById('propertyFieldError');
+            if (!propertyInput || !errorEl) return;
+            if (message) {
+                errorEl.textContent = message;
+                errorEl.classList.remove('hidden');
+                propertyInput.classList.add('input-error');
+            } else {
+                errorEl.textContent = '';
+                errorEl.classList.add('hidden');
+                propertyInput.classList.remove('input-error');
             }
         }
 
@@ -2219,11 +2231,13 @@
             }
         }
 
-        function applyTurnaroundDefaults(forceDateToMinimum = false) {
+        function applyTurnaroundDefaults(forceDateToMinimum = false, forceValue = false) {
             const turnaroundInput = document.getElementById('turnaroundDays');
             const defaultDays = getDefaultTurnaroundDays();
             turnaroundInput.min = String(getMinimumTurnaroundDays());
-            turnaroundInput.value = String(defaultDays);
+            if (forceValue || !(turnaroundInput.value || '').trim()) {
+                turnaroundInput.value = String(defaultDays);
+            }
             turnaroundInput.setCustomValidity('');
             setTurnaroundFieldError('');
             setDateNeededMinimumFromTurnaround(forceDateToMinimum);
@@ -2380,7 +2394,7 @@
                 recentLoader.style.display = 'none';
                 previewSection.classList.add('show');
                 onModificationSourceChange();
-                applyTurnaroundDefaults(true);
+                applyTurnaroundDefaults(true, true);
             } else {
                 document.getElementById('step2').classList.add('hidden');
                 document.getElementById('step1').classList.remove('hidden');
@@ -2420,7 +2434,7 @@
                 setContainsRawSelection(false);
                 suppressRawNotice = false;
                 setAllergenAutoDetectedBadge(false);
-                applyTurnaroundDefaults(true);
+                applyTurnaroundDefaults(true, false);
             }
             updateRevisionPreCheckLayout();
         }
@@ -2831,11 +2845,36 @@
         }
 
         // === Recent Project Loader ===
+        <% const safePropertyOptions = typeof propertyOptions === 'undefined' ? [] : propertyOptions; %>
+        const initialPropertyOptions = <%- JSON.stringify(safePropertyOptions) %>;
         let recentProjectsData = [];
+        let propertyCatalogData = Array.isArray(initialPropertyOptions) ? initialPropertyOptions.slice() : [];
         let projectSuggestResults = [];
         let projectSuggestHighlightIndex = -1;
         let propertySuggestResults = [];
         let propertySuggestHighlightIndex = -1;
+
+        async function loadPropertyCatalog() {
+            if (!propertyCatalogData.length && Array.isArray(initialPropertyOptions)) {
+                propertyCatalogData = initialPropertyOptions.slice();
+            }
+            try {
+                const response = await fetch('/api/properties');
+                const data = await response.json();
+                const catalog = Array.isArray(data?.catalog) ? data.catalog : [];
+                const names = catalog
+                    .map((item) => `${item?.name || ''}`.trim())
+                    .filter(Boolean);
+                if (names.length) {
+                    propertyCatalogData = names;
+                }
+            } catch (err) {
+                console.error('Failed to load property catalog:', err);
+                if (!propertyCatalogData.length) {
+                    propertyCatalogData = [];
+                }
+            }
+        }
 
         async function loadRecentProjects() {
             try {
@@ -2877,8 +2916,6 @@
 
             document.getElementById('projectName').value = p.projectName || '';
             document.getElementById('property').value = p.property || '';
-            document.getElementById('hotelName').value = p.hotelName || '';
-            document.getElementById('cityCountry').value = p.cityCountry || '';
 
             setSelectValue('orientation', p.orientation);
             setSelectValue('menuType', p.menuType);
@@ -3004,14 +3041,17 @@
                 dropdown.classList.remove('show');
                 propertySuggestResults = [];
                 propertySuggestHighlightIndex = -1;
+                if (!query) {
+                    setPropertyFieldError('');
+                }
                 return;
             }
 
             const seen = new Set();
-            propertySuggestResults = recentProjectsData
-                .filter(p => (p.property || '').toLowerCase().includes(query))
-                .filter(p => {
-                    const key = `${(p.property || '').toLowerCase()}|${(p.projectName || '').toLowerCase()}`;
+            propertySuggestResults = propertyCatalogData
+                .filter((name) => (name || '').toLowerCase().includes(query))
+                .filter((name) => {
+                    const key = (name || '').toLowerCase();
                     if (seen.has(key)) return false;
                     seen.add(key);
                     return true;
@@ -3019,6 +3059,9 @@
                 .slice(0, 8);
             propertySuggestHighlightIndex = -1;
             showPropertyDropdown(query);
+            if (isPropertyFromCatalog(value)) {
+                setPropertyFieldError('');
+            }
         }
 
         function showPropertyDropdown(query) {
@@ -3027,21 +3070,25 @@
                 dropdown.classList.remove('show');
                 return;
             }
-            dropdown.innerHTML = propertySuggestResults.map((p, i) => `
+            dropdown.innerHTML = propertySuggestResults.map((propertyName, i) => `
                 <div class="autocomplete-item" data-index="${i}" onmousedown="selectPropertySuggestion(${i})">
-                    <div class="ac-name">${highlightMatch(p.property || '', query)}</div>
-                    <div class="ac-detail">${escapeHtml(p.projectName || '')}</div>
+                    <div class="ac-name">${highlightMatch(propertyName || '', query)}</div>
                 </div>
             `).join('');
             dropdown.classList.add('show');
         }
 
         function selectPropertySuggestion(index) {
-            const selected = propertySuggestResults[index];
+            const selected = propertySuggestResults[index] || '';
             if (!selected) return;
-            applyProjectPrefill(selected);
+            document.getElementById('property').value = selected;
             document.getElementById('propertyDropdown').classList.remove('show');
             propertySuggestHighlightIndex = -1;
+        }
+
+        function isPropertyFromCatalog(value) {
+            const normalized = (value || '').trim().toLowerCase();
+            return !!normalized && propertyCatalogData.some((item) => item.toLowerCase() === normalized);
         }
 
         function handlePropertyKeydown(e) {
@@ -3394,7 +3441,6 @@
             const templateType = document.getElementById('templateType').value;
             const turnaroundDays = document.getElementById('turnaroundDays').value.trim();
             const dateNeeded = document.getElementById('dateNeeded').value;
-            const cityCountry = document.getElementById('cityCountry').value.trim();
             const assetType = document.getElementById('assetType').value;
             const menuContent = quill.getText().trim();
             const needsPrint = assetType === 'PRINT' || assetType === 'BOTH';
@@ -3418,10 +3464,18 @@
                 return false;
             }
 
-            if (!projectName || !property || !orientation || !menuType || !templateType || !turnaroundDays || !dateNeeded || !cityCountry || !assetType || !menuContent) {
+            if (!projectName || !property || !orientation || !menuType || !templateType || !turnaroundDays || !dateNeeded || !assetType || !menuContent) {
                 showAlert('Please fill in all required fields', 'error');
                 window.scrollTo({ top: 0, behavior: 'smooth' });
                 return false;
+            }
+            if (!isPropertyFromCatalog(property)) {
+                setPropertyFieldError('Please select a property from the list.');
+                showAlert('Please select a property from the configured list', 'error');
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+                return false;
+            } else {
+                setPropertyFieldError('');
             }
 
             const turnaroundDaysNum = parseInt(turnaroundDays, 10);
@@ -4022,8 +4076,6 @@
             document.getElementById('step2MenuType').value = menuTypeSelect.options[menuTypeSelect.selectedIndex].text;
             const templateTypeSelect = document.getElementById('templateType');
             document.getElementById('step2TemplateType').value = templateTypeSelect.options[templateTypeSelect.selectedIndex].text;
-            document.getElementById('step2HotelName').value = document.getElementById('hotelName').value || '(none)';
-            document.getElementById('step2CityCountry').value = document.getElementById('cityCountry').value;
             document.getElementById('step2TurnaroundDays').value = `${getTurnaroundDaysValue()} day(s)`;
             document.getElementById('step2DateNeeded').value = document.getElementById('dateNeeded').value;
             const assetTypeSelect = document.getElementById('assetType');
@@ -4311,8 +4363,6 @@
                 templateType: document.getElementById('templateType').value,
                 turnaroundDays: getTurnaroundDaysValue(),
                 dateNeeded: document.getElementById('dateNeeded').value,
-                hotelName: document.getElementById('hotelName').value.trim(),
-                cityCountry: document.getElementById('cityCountry').value.trim(),
                 assetType: assetTypeValue,
                 allergens: getAllergenInputValue(),
                 containsRawUndercooked: getContainsRawSelection(),
@@ -4420,7 +4470,7 @@
             if (imageUpload) imageUpload.value = '';
             uploadedMenuImagePath = '';
             uploadedMenuImageFileName = '';
-            applyTurnaroundDefaults(true);
+            applyTurnaroundDefaults(true, true);
 
             window.scrollTo({ top: 0, behavior: 'smooth' });
         }
@@ -4489,9 +4539,11 @@
         }
 
         function extractCleanTextFromReviewedArea(element) {
-            const paragraphs = element.querySelectorAll('p');
+            // Collect all direct block children (p, div, or other) — browsers may
+            // insert <div> elements when the user presses Enter in contentEditable.
+            const blocks = element.querySelectorAll('p, div');
 
-            if (paragraphs.length === 0) {
+            if (blocks.length === 0) {
                 const rawLines = (element.textContent || '')
                     .replace(/\r/g, '')
                     .split('\n')
@@ -4500,8 +4552,10 @@
             }
 
             const rawLines = [];
-            paragraphs.forEach(p => {
-                const text = (p.textContent || '').replace(/\u00A0/g, ' ').trim();
+            blocks.forEach(block => {
+                // Skip nested blocks (e.g., a <p> inside a <div>) to avoid duplication.
+                if (block.parentElement !== element) return;
+                const text = (block.textContent || '').replace(/\u00A0/g, ' ').trim();
                 rawLines.push(text);
             });
             return normalizeExtractedLines(rawLines);

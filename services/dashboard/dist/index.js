@@ -51,6 +51,10 @@ const supabase_client_1 = require("@menumanager/supabase-client");
 const execAsync = (0, util_1.promisify)(child_process_1.exec);
 const DEFAULT_ALLERGEN_KEY = 'C crustaceans | D dairy | E egg | F fish | G gluten | N nuts | V vegetarian | VG vegan';
 const RAW_NOTICE_PATTERN = /\*?\s*consuming raw or undercooked meats,\s*poultry,\s*seafood,\s*shellfish,\s*or eggs may increase your risk of foodborne illness\.?/i;
+const DB_SERVICE_URL = process.env.DB_SERVICE_URL || 'http://localhost:3004';
+const AI_REVIEW_URL = process.env.AI_REVIEW_URL || 'http://localhost:3002';
+const DIFFER_SERVICE_URL = process.env.DIFFER_SERVICE_URL || 'http://localhost:3006';
+const CLICKUP_SERVICE_URL = process.env.CLICKUP_SERVICE_URL || 'http://localhost:3007';
 function getRepoRoot() {
     const candidates = [
         path.resolve(__dirname, '..', '..'), // ts-node from services/dashboard
@@ -79,6 +83,24 @@ function slugifyStorageSegment(value) {
 }
 function getSubmissionDocumentDir(projectName, property, submissionId) {
     return path.join(getDocumentStorageRoot(), slugifyStorageSegment(property), slugifyStorageSegment(projectName), submissionId);
+}
+async function getPropertyCatalogFromDb() {
+    const dbResponse = await axios_1.default.get(`${DB_SERVICE_URL}/properties`, { timeout: 3000 });
+    const raw = Array.isArray(dbResponse?.data?.catalog) ? dbResponse.data.catalog : [];
+    return raw
+        .map((item) => ({
+        name: `${item?.name || ''}`.trim(),
+        city_country: `${item?.city_country || ''}`.trim(),
+        sort_order: Number(item?.sort_order || 0),
+        is_active: item?.is_active !== false,
+    }))
+        .filter((item) => !!item.name);
+}
+function resolveCityCountryFromCatalog(property, catalog) {
+    const match = catalog.find((item) => item.name.toLowerCase() === property.toLowerCase());
+    if (!match)
+        return '';
+    return match.city_country || '';
 }
 /**
  * Extract dishes from approved menu and store in database
@@ -208,7 +230,7 @@ async function extractUnapprovedFromDocx(filePath) {
 app.get('/', async (req, res) => {
     try {
         // Get all submissions with status 'pending_human_review'
-        const dbResponse = await axios_1.default.get('http://localhost:3004/submissions/pending');
+        const dbResponse = await axios_1.default.get(`${DB_SERVICE_URL}/submissions/pending`);
         const pendingReviews = dbResponse.data;
         res.render('index', {
             reviews: pendingReviews,
@@ -233,10 +255,19 @@ app.get('/submit/:token', (req, res) => {
 /**
  * Form Submission Page - New menu submission via form
  */
-app.get('/form', (req, res) => {
+app.get('/form', async (_req, res) => {
+    let propertyOptions = [];
+    try {
+        const catalog = await getPropertyCatalogFromDb();
+        propertyOptions = catalog.map((item) => item.name);
+    }
+    catch (error) {
+        console.warn('Failed to prefetch property catalog for form:', error?.message || error);
+    }
     res.render('form', {
         title: 'Submit New Menu',
-        defaultAllergenKey: DEFAULT_ALLERGEN_KEY
+        defaultAllergenKey: DEFAULT_ALLERGEN_KEY,
+        propertyOptions,
     });
 });
 /**
@@ -254,7 +285,7 @@ app.get('/review/:submissionId', async (req, res) => {
     try {
         const { submissionId } = req.params;
         // Get submission details from DB
-        const dbResponse = await axios_1.default.get(`http://localhost:3004/submissions/${submissionId}`);
+        const dbResponse = await axios_1.default.get(`${DB_SERVICE_URL}/submissions/${submissionId}`);
         const submission = dbResponse.data;
         if (!submission) {
             return res.status(404).render('error', {
@@ -284,7 +315,7 @@ app.get('/review/:submissionId', async (req, res) => {
 app.get('/download/original/:submissionId', async (req, res) => {
     try {
         const { submissionId } = req.params;
-        const dbResponse = await axios_1.default.get(`http://localhost:3004/submissions/${submissionId}`);
+        const dbResponse = await axios_1.default.get(`${DB_SERVICE_URL}/submissions/${submissionId}`);
         const submission = dbResponse.data;
         if (!submission || !submission.original_path) {
             return res.status(404).send('File not found');
@@ -310,7 +341,7 @@ app.post('/approve/:submissionId', async (req, res) => {
         const { submissionId } = req.params;
         console.log(`Quick approve for submission ${submissionId}`);
         // Get submission details
-        const dbResponse = await axios_1.default.get(`http://localhost:3004/submissions/${submissionId}`);
+        const dbResponse = await axios_1.default.get(`${DB_SERVICE_URL}/submissions/${submissionId}`);
         const submission = dbResponse.data;
         if (!submission) {
             return res.status(404).json({ error: 'Submission not found' });
@@ -319,14 +350,14 @@ app.post('/approve/:submissionId', async (req, res) => {
         const finalPath = submission.ai_draft_path.replace('-draft.', '-final.');
         await fs_1.promises.copyFile(submission.ai_draft_path, finalPath);
         // Update DB with final path and status
-        await axios_1.default.put(`http://localhost:3004/submissions/${submissionId}`, {
+        await axios_1.default.put(`${DB_SERVICE_URL}/submissions/${submissionId}`, {
             status: 'approved',
             final_path: finalPath,
             reviewed_at: new Date().toISOString(),
             changes_made: false // No human changes
         });
         // Trigger differ service (will show no differences)
-        await axios_1.default.post('http://localhost:3006/compare', {
+        await axios_1.default.post(`${DIFFER_SERVICE_URL}/compare`, {
             submission_id: submissionId,
             ai_draft_path: submission.ai_draft_path,
             final_path: finalPath
@@ -354,7 +385,7 @@ app.post('/upload/:submissionId', upload.single('finalDocument'), async (req, re
         }
         console.log(`Corrected version uploaded for submission ${submissionId}`);
         // Get submission details
-        const dbResponse = await axios_1.default.get(`http://localhost:3004/submissions/${submissionId}`);
+        const dbResponse = await axios_1.default.get(`${DB_SERVICE_URL}/submissions/${submissionId}`);
         const submission = dbResponse.data;
         if (!submission) {
             return res.status(404).json({ error: 'Submission not found' });
@@ -364,14 +395,14 @@ app.post('/upload/:submissionId', upload.single('finalDocument'), async (req, re
         await fs_1.promises.mkdir(path.dirname(finalPath), { recursive: true });
         await fs_1.promises.rename(req.file.path, finalPath);
         // Update DB with final path and status
-        await axios_1.default.put(`http://localhost:3004/submissions/${submissionId}`, {
+        await axios_1.default.put(`${DB_SERVICE_URL}/submissions/${submissionId}`, {
             status: 'approved',
             final_path: finalPath,
             reviewed_at: new Date().toISOString(),
             changes_made: true // Human made corrections
         });
         // Trigger differ service (will analyze differences for learning)
-        await axios_1.default.post('http://localhost:3006/compare', {
+        await axios_1.default.post(`${DIFFER_SERVICE_URL}/compare`, {
             submission_id: submissionId,
             ai_draft_path: submission.ai_draft_path,
             final_path: finalPath
@@ -394,7 +425,7 @@ app.post('/upload/:submissionId', upload.single('finalDocument'), async (req, re
 app.get('/api/submission/:submissionId/status', async (req, res) => {
     try {
         const { submissionId } = req.params;
-        const dbResponse = await axios_1.default.get(`http://localhost:3004/submissions/${submissionId}`);
+        const dbResponse = await axios_1.default.get(`${DB_SERVICE_URL}/submissions/${submissionId}`);
         res.json(dbResponse.data);
     }
     catch (error) {
@@ -520,28 +551,36 @@ app.get('/training/download-prompt/:sessionId', async (req, res) => {
  */
 app.get('/learning', async (_req, res) => {
     try {
-        const [rulesResult, overridesResult, overlayResult, trainingResult, submissionsResult] = await Promise.all([
-            axios_1.default.get('http://localhost:3006/learning/rules', { timeout: 2500 })
+        const [rulesResult, overridesResult, overlayResult, trainingResult, submissionsResult, locationRulesResult, propertiesResult] = await Promise.all([
+            axios_1.default.get(`${DIFFER_SERVICE_URL}/learning/rules`, { timeout: 2500 })
                 .then((r) => ({ ok: true, data: r.data, error: '' }))
                 .catch((e) => ({ ok: false, data: {}, error: e?.message || 'request failed' })),
-            axios_1.default.get('http://localhost:3006/learning/overrides', { timeout: 2500 })
+            axios_1.default.get(`${DIFFER_SERVICE_URL}/learning/overrides`, { timeout: 2500 })
                 .then((r) => ({ ok: true, data: r.data, error: '' }))
                 .catch((e) => ({ ok: false, data: { disabled: {} }, error: e?.message || 'request failed' })),
-            axios_1.default.get('http://localhost:3006/learning/overlay', { timeout: 2500 })
+            axios_1.default.get(`${DIFFER_SERVICE_URL}/learning/overlay`, { timeout: 2500 })
                 .then((r) => ({ ok: true, data: r.data, error: '' }))
                 .catch((e) => ({ ok: false, data: { overlay: '' }, error: e?.message || 'request failed' })),
-            axios_1.default.get('http://localhost:3006/training-data', { timeout: 2500 })
+            axios_1.default.get(`${DIFFER_SERVICE_URL}/training-data`, { timeout: 2500 })
                 .then((r) => ({ ok: true, data: r.data, error: '' }))
                 .catch((e) => ({ ok: false, data: { count: 0, data: [] }, error: e?.message || 'request failed' })),
-            axios_1.default.get('http://localhost:3006/learning/submissions', { timeout: 2500 })
+            axios_1.default.get(`${DIFFER_SERVICE_URL}/learning/submissions`, { timeout: 2500 })
                 .then((r) => ({ ok: true, data: r.data, error: '' }))
                 .catch((e) => ({ ok: false, data: { submissions: [] }, error: e?.message || 'request failed' })),
+            axios_1.default.get(`${DIFFER_SERVICE_URL}/learning/location-rules`, { timeout: 2500 })
+                .then((r) => ({ ok: true, data: r.data, error: '' }))
+                .catch((e) => ({ ok: false, data: { rules: [] }, error: e?.message || 'request failed' })),
+            axios_1.default.get(`${DB_SERVICE_URL}/properties`, { timeout: 2500 })
+                .then((r) => ({ ok: true, data: r.data, error: '' }))
+                .catch((e) => ({ ok: false, data: { properties: [] }, error: e?.message || 'request failed' })),
         ]);
         const rulesData = rulesResult.data || {};
         const overrides = overridesResult.data?.disabled || {};
         const learnedOverlay = overlayResult?.data?.overlay || '';
         const trainingData = trainingResult.data || { count: 0, data: [] };
         const learningSubmissions = submissionsResult.data?.submissions || [];
+        const locationRules = locationRulesResult.data?.rules || [];
+        const propertyOptions = propertiesResult.data?.properties || [];
         const qaPromptPath = path.join(getRepoRoot(), 'sop-processor', 'qa_prompt.txt');
         const basePrompt = await fs_1.promises.readFile(qaPromptPath, 'utf-8');
         const effectivePrompt = learnedOverlay ? `${basePrompt}\n\n${learnedOverlay}` : basePrompt;
@@ -582,6 +621,8 @@ app.get('/learning', async (_req, res) => {
             rules,
             recentSubmissions,
             learningSubmissions,
+            locationRules,
+            propertyOptions,
             differStatus,
             basePrompt,
             learnedOverlay,
@@ -600,19 +641,19 @@ app.get('/learning/submission/:submissionId', async (req, res) => {
     try {
         const { submissionId } = req.params;
         const [learningDetailResult, submissionResult, savedRulesResult, propertiesResult] = await Promise.all([
-            axios_1.default.get(`http://localhost:3006/learning/submissions/${encodeURIComponent(submissionId)}`, { timeout: 3500 })
+            axios_1.default.get(`${DIFFER_SERVICE_URL}/learning/submissions/${encodeURIComponent(submissionId)}`, { timeout: 3500 })
                 .then((r) => ({ ok: true, data: r.data, error: '' }))
                 .catch((e) => ({ ok: false, data: null, error: e?.message || 'request failed' })),
-            axios_1.default.get(`http://localhost:3004/submissions/${encodeURIComponent(submissionId)}`, { timeout: 3500 })
+            axios_1.default.get(`${DB_SERVICE_URL}/submissions/${encodeURIComponent(submissionId)}`, { timeout: 3500 })
                 .then((r) => ({ ok: true, data: r.data, error: '' }))
                 .catch((e) => ({ ok: false, data: null, error: e?.message || 'request failed' })),
-            axios_1.default.get(`http://localhost:3006/learning/location-rules`, {
+            axios_1.default.get(`${DIFFER_SERVICE_URL}/learning/location-rules`, {
                 timeout: 3500,
                 params: { submission_id: submissionId }
             })
                 .then((r) => ({ ok: true, data: r.data, error: '' }))
                 .catch((e) => ({ ok: false, data: { rules: [] }, error: e?.message || 'request failed' })),
-            axios_1.default.get(`http://localhost:3004/submissions/properties`, { timeout: 3500 })
+            axios_1.default.get(`${DB_SERVICE_URL}/properties`, { timeout: 3500 })
                 .then((r) => ({ ok: true, data: r.data, error: '' }))
                 .catch((e) => ({ ok: false, data: { properties: [] }, error: e?.message || 'request failed' })),
         ]);
@@ -648,7 +689,7 @@ app.post('/api/learning/rules/toggle', async (req, res) => {
         if (!ruleKey || typeof ruleKey !== 'string') {
             return res.status(400).json({ error: 'ruleKey is required' });
         }
-        const response = await axios_1.default.post('http://localhost:3006/learning/overrides', {
+        const response = await axios_1.default.post(`${DIFFER_SERVICE_URL}/learning/overrides`, {
             rule_key: ruleKey,
             disabled: !!disabled,
             reason: reason || '',
@@ -662,7 +703,25 @@ app.post('/api/learning/rules/toggle', async (req, res) => {
 });
 app.post('/api/learning/location-rules', async (req, res) => {
     try {
-        const response = await axios_1.default.post('http://localhost:3006/learning/location-rules', req.body || {}, { timeout: 3000 });
+        const payload = req.body || {};
+        const catalog = await getPropertyCatalogFromDb();
+        const propertyNames = new Set(catalog.map((item) => item.name.toLowerCase()));
+        const location = `${payload.location || ''}`.trim();
+        const sharedLocations = Array.isArray(payload.shared_locations)
+            ? payload.shared_locations.map((item) => `${item || ''}`.trim()).filter((item) => !!item)
+            : [];
+        if (!location || !propertyNames.has(location.toLowerCase())) {
+            return res.status(400).json({ error: 'location must be one of the configured properties' });
+        }
+        const invalidShared = sharedLocations.find((item) => !propertyNames.has(item.toLowerCase()));
+        if (invalidShared) {
+            return res.status(400).json({ error: `shared location "${invalidShared}" is not in configured properties` });
+        }
+        const response = await axios_1.default.post(`${DIFFER_SERVICE_URL}/learning/location-rules`, {
+            ...payload,
+            location,
+            shared_locations: sharedLocations,
+        }, { timeout: 3000 });
         res.json(response.data);
     }
     catch (error) {
@@ -676,7 +735,7 @@ app.post('/api/learning/location-rules', async (req, res) => {
 app.get('/api/submitter-profiles/search', async (req, res) => {
     try {
         const q = req.query.q || '';
-        const dbResponse = await axios_1.default.get(`http://localhost:3004/submitter-profiles/search`, {
+        const dbResponse = await axios_1.default.get(`${DB_SERVICE_URL}/submitter-profiles/search`, {
             params: { q }
         });
         res.json(dbResponse.data);
@@ -691,7 +750,7 @@ app.get('/api/submitter-profiles/search', async (req, res) => {
 app.get('/api/recent-projects', async (req, res) => {
     try {
         const limit = req.query.limit || 20;
-        const dbResponse = await axios_1.default.get(`http://localhost:3004/submissions/recent-projects`, {
+        const dbResponse = await axios_1.default.get(`${DB_SERVICE_URL}/submissions/recent-projects`, {
             params: { limit }
         });
         res.json(dbResponse.data);
@@ -701,13 +760,25 @@ app.get('/api/recent-projects', async (req, res) => {
     }
 });
 /**
+ * Proxy: Canonical properties catalog
+ */
+app.get('/api/properties', async (_req, res) => {
+    try {
+        const dbResponse = await axios_1.default.get(`${DB_SERVICE_URL}/properties`, { timeout: 3000 });
+        res.json(dbResponse.data);
+    }
+    catch (error) {
+        res.json({ properties: [], catalog: [] });
+    }
+});
+/**
  * Proxy: Search approved submissions for modification flow
  */
 app.get('/api/submissions/search', async (req, res) => {
     try {
         const q = req.query.q || '';
         const limit = req.query.limit || 20;
-        const dbResponse = await axios_1.default.get(`http://localhost:3004/submissions/search`, {
+        const dbResponse = await axios_1.default.get(`${DB_SERVICE_URL}/submissions/search`, {
             params: { q, limit }
         });
         res.json(dbResponse.data);
@@ -722,7 +793,7 @@ app.get('/api/submissions/search', async (req, res) => {
 app.get('/api/submissions/latest-approved', async (req, res) => {
     try {
         const { projectName, property } = req.query;
-        const dbResponse = await axios_1.default.get(`http://localhost:3004/submissions/latest-approved`, {
+        const dbResponse = await axios_1.default.get(`${DB_SERVICE_URL}/submissions/latest-approved`, {
             params: { projectName, property }
         });
         res.json(dbResponse.data);
@@ -896,7 +967,7 @@ Note: Use ONLY these allergen codes when checking allergen compliance. Do not us
         if (changedOnlyMode) {
             finalPrompt = `${qaPrompt}\n\nIMPORTANT SCOPE FOR THIS REVIEW:\nYou are reviewing ONLY changed excerpts from a menu revision.\nDo NOT flag unchanged baseline content.\nReturn issues only for the changed excerpts provided.`;
         }
-        const qaResponse = await axios_1.default.post('http://localhost:3002/run-qa-check', {
+        const qaResponse = await axios_1.default.post(`${AI_REVIEW_URL}/run-qa-check`, {
             text: textForReview,
             prompt: finalPrompt
         });
@@ -988,6 +1059,13 @@ function enforcePrixFixeCriticalChecks(menuContent, suggestions) {
             recommendation: 'Prefix course headings with numbers (1, 2, 3...) or place a number line directly above each course heading.'
         });
     }
+    // Remove course numbering suggestions if numbers ARE present (AI false positive)
+    if (hasCourseHeadings && !missingCourseNumbers) {
+        return existing.filter((s) => {
+            const combined = `${s.type || ''} ${s.description || ''} ${s.recommendation || ''}`.toLowerCase();
+            return !/course numbering|numbered courses|course number|not numbered/.test(combined);
+        });
+    }
     return existing;
 }
 function extractChangedLinesForReview(baselineText, currentText) {
@@ -1019,7 +1097,7 @@ function stripDiacritics(input) {
 }
 async function fetchLearnedPromptOverlay() {
     try {
-        const response = await axios_1.default.get('http://localhost:3006/learning/overlay', { timeout: 1500 });
+        const response = await axios_1.default.get(`${DIFFER_SERVICE_URL}/learning/overlay`, { timeout: 1500 });
         const overlay = response.data?.overlay;
         if (typeof overlay === 'string' && overlay.trim()) {
             return overlay;
@@ -1128,9 +1206,19 @@ app.post('/api/form/submit', async (req, res) => {
         const minTurnaroundDays = submissionMode === 'modification' ? 2 : 5;
         const parsedTurnaroundDays = Number.parseInt(`${turnaroundDays || ''}`, 10);
         const normalizedTurnaroundDays = Number.isFinite(parsedTurnaroundDays) ? parsedTurnaroundDays : minTurnaroundDays;
+        const normalizedProperty = `${property || ''}`.trim();
+        const propertyCatalog = await getPropertyCatalogFromDb();
+        const normalizedCityCountry = resolveCityCountryFromCatalog(normalizedProperty, propertyCatalog) || `${cityCountry || ''}`.trim();
         // Validate required fields
-        if (!submitterName || !submitterEmail || !submitterJobTitle || !projectName || !property || !orientation || !templateType || !dateNeeded || !cityCountry || !assetType || !menuContent) {
+        if (!submitterName || !submitterEmail || !submitterJobTitle || !projectName || !normalizedProperty || !orientation || !templateType || !dateNeeded || !assetType || !menuContent) {
             return res.status(400).json({ error: 'All fields are required' });
+        }
+        if (!normalizedCityCountry) {
+            return res.status(400).json({ error: 'Selected property must map to a configured location' });
+        }
+        const isAllowedProperty = propertyCatalog.some((item) => item.name.toLowerCase() === normalizedProperty.toLowerCase());
+        if (!isAllowedProperty) {
+            return res.status(400).json({ error: 'Property must be selected from the configured property list' });
         }
         if (normalizedTurnaroundDays < minTurnaroundDays) {
             return res.status(400).json({
@@ -1182,7 +1270,7 @@ app.post('/api/form/submit', async (req, res) => {
         // Create Word document from template and form data
         const docxPath = await generateDocxFromForm(submissionId, {
             projectName,
-            property,
+            property: normalizedProperty,
             size: sizeForDocx,
             orientation,
             menuType: menuType || 'standard',
@@ -1198,7 +1286,7 @@ app.post('/api/form/submit', async (req, res) => {
         if (revisionBaselineDocPath) {
             try {
                 await fs_1.promises.access(revisionBaselineDocPath);
-                const submissionDir = getSubmissionDocumentDir(projectName, property, submissionId);
+                const submissionDir = getSubmissionDocumentDir(projectName, normalizedProperty, submissionId);
                 const baselineDir = path.join(submissionDir, 'baseline');
                 await fs_1.promises.mkdir(baselineDir, { recursive: true });
                 const baselineFile = revisionBaselineFileName || path.basename(revisionBaselineDocPath);
@@ -1216,7 +1304,7 @@ app.post('/api/form/submit', async (req, res) => {
         if (menuImagePath) {
             try {
                 await fs_1.promises.access(menuImagePath);
-                const submissionDir = getSubmissionDocumentDir(projectName, property, submissionId);
+                const submissionDir = getSubmissionDocumentDir(projectName, normalizedProperty, submissionId);
                 const assetDir = path.join(submissionDir, 'assets');
                 await fs_1.promises.mkdir(assetDir, { recursive: true });
                 const imageFileName = menuImageFileName || path.basename(menuImagePath);
@@ -1232,13 +1320,13 @@ app.post('/api/form/submit', async (req, res) => {
         }
         const submissionStatus = skipAi ? 'submitted_no_ai_review' : 'pending_human_review';
         // Create submission in database
-        const dbResponse = await axios_1.default.post('http://localhost:3004/submissions', {
+        const dbResponse = await axios_1.default.post(`${DB_SERVICE_URL}/submissions`, {
             id: submissionId,
             submitter_email: submitterEmail,
             submitter_name: submitterName,
             submitter_job_title: submitterJobTitle,
             project_name: projectName,
-            property,
+            property: normalizedProperty,
             date_needed: dateNeeded,
             filename: `${projectName}_Menu.docx`,
             original_path: docxPath,
@@ -1248,7 +1336,7 @@ app.post('/api/form/submit', async (req, res) => {
             menu_type: menuType || 'standard',
             template_type: normalizedTemplateType,
             hotel_name: hotelName || null,
-            city_country: cityCountry,
+            city_country: normalizedCityCountry,
             asset_type: assetType,
             width: width || (wantsPrint ? (printRegion === 'NON_US' ? printSize : printWidth) : digitalWidth),
             height: height || (wantsPrint ? (printRegion === 'NON_US' ? printSize : printHeight) : digitalHeight),
@@ -1280,7 +1368,7 @@ app.post('/api/form/submit', async (req, res) => {
         });
         console.log(`✓ Submission created in database: ${submissionId}`);
         // Record original source document metadata (storage abstraction: local now, Teams later)
-        axios_1.default.post('http://localhost:3004/assets', {
+        axios_1.default.post(`${DB_SERVICE_URL}/assets`, {
             submission_id: submissionId,
             asset_type: 'original_docx',
             source: 'chef_form',
@@ -1289,7 +1377,7 @@ app.post('/api/form/submit', async (req, res) => {
             file_name: `${projectName}_Menu.docx`
         }).catch(err => console.error('Failed to save original_docx asset metadata:', err.message));
         if (persistedBaselineDocPath) {
-            axios_1.default.post('http://localhost:3004/assets', {
+            axios_1.default.post(`${DB_SERVICE_URL}/assets`, {
                 submission_id: submissionId,
                 asset_type: 'baseline_approved_docx',
                 source: 'chef_modification_upload',
@@ -1299,7 +1387,7 @@ app.post('/api/form/submit', async (req, res) => {
             }).catch(err => console.error('Failed to save baseline_approved_docx asset metadata:', err.message));
         }
         if (persistedMenuImagePath) {
-            axios_1.default.post('http://localhost:3004/assets', {
+            axios_1.default.post(`${DB_SERVICE_URL}/assets`, {
                 submission_id: submissionId,
                 asset_type: 'menu_image',
                 source: 'chef_form',
@@ -1309,7 +1397,7 @@ app.post('/api/form/submit', async (req, res) => {
             }).catch(err => console.error('Failed to save menu_image asset metadata:', err.message));
         }
         // Save submitter profile (fire-and-forget)
-        axios_1.default.post('http://localhost:3004/submitter-profiles', {
+        axios_1.default.post(`${DB_SERVICE_URL}/submitter-profiles`, {
             name: submitterName,
             email: submitterEmail,
             jobTitle: submitterJobTitle
@@ -1328,7 +1416,7 @@ app.post('/api/form/submit', async (req, res) => {
                 const mammoth = require('mammoth');
                 const result = await mammoth.extractRawText({ path: docxPath });
                 const text = result.value;
-                await axios_1.default.post('http://localhost:3002/ai-review', {
+                await axios_1.default.post(`${AI_REVIEW_URL}/ai-review`, {
                     text: text,
                     submission_id: submissionId,
                     submitter_email: submitterEmail,
@@ -1341,7 +1429,7 @@ app.post('/api/form/submit', async (req, res) => {
         catch (aiError) {
             console.error('Error triggering AI review:', aiError.message);
             // Update status to indicate manual review needed
-            await axios_1.default.put(`http://localhost:3004/submissions/${submissionId}`, {
+            await axios_1.default.put(`${DB_SERVICE_URL}/submissions/${submissionId}`, {
                 status: skipAi ? 'submitted_no_ai_review' : 'pending_human_review'
             });
         }
@@ -1349,13 +1437,13 @@ app.post('/api/form/submit', async (req, res) => {
         let clickupWarning;
         let clickupTaskId;
         try {
-            const clickupResponse = await axios_1.default.post('http://localhost:3007/create-task', {
+            const clickupResponse = await axios_1.default.post(`${CLICKUP_SERVICE_URL}/create-task`, {
                 submissionId,
                 submitterName,
                 submitterEmail,
                 submitterJobTitle,
                 projectName,
-                property,
+                property: normalizedProperty,
                 width: width || (wantsPrint ? (printRegion === 'NON_US' ? printSize : printWidth) : digitalWidth),
                 height: height || (wantsPrint ? (printRegion === 'NON_US' ? printSize : printHeight) : digitalHeight),
                 printWidth,
@@ -1376,7 +1464,7 @@ app.post('/api/form/submit', async (req, res) => {
                 turnaroundDays: normalizedTurnaroundDays,
                 dateNeeded,
                 hotelName,
-                cityCountry,
+                cityCountry: normalizedCityCountry,
                 assetType,
                 docxPath,
                 menuImagePath: persistedMenuImagePath,
@@ -1530,11 +1618,30 @@ function normalizeRawAsteriskPlacementForLine(line) {
     return `${working}*`;
 }
 function stripRawNoticeLines(text) {
-    return (text || '')
-        .split('\n')
-        .map((line) => line.trim())
-        .filter((line) => line && !RAW_NOTICE_PATTERN.test(line))
-        .join('\n');
+    const lines = (text || '').split('\n').map((line) => line.trim());
+    // Remove raw notice lines but PRESERVE blank lines so spacing structure
+    // survives into preserveMenuStructure on the frontend.
+    const filtered = lines.filter((line) => !RAW_NOTICE_PATTERN.test(line));
+    // Collapse runs of more than one consecutive blank line into a single blank.
+    const result = [];
+    let prevEmpty = false;
+    for (const line of filtered) {
+        if (!line) {
+            if (!prevEmpty)
+                result.push('');
+            prevEmpty = true;
+        }
+        else {
+            result.push(line);
+            prevEmpty = false;
+        }
+    }
+    // Trim leading/trailing blank lines.
+    while (result.length && result[0] === '')
+        result.shift();
+    while (result.length && result[result.length - 1] === '')
+        result.pop();
+    return result.join('\n');
 }
 function stripRawNoticeFromHtml(html) {
     return (html || '').replace(/<p[^>]*>\s*\*?\s*consuming raw or undercooked meats,\s*poultry,\s*seafood,\s*shellfish,\s*or eggs may increase your risk of foodborne illness\.?\s*<\/p>/gi, '');
@@ -1825,7 +1932,7 @@ app.post('/api/design-approval/compare', upload.fields([
             tempFiles.push(docxPath);
         }
         else if (existingDocxSubmissionId) {
-            const subResponse = await axios_1.default.get(`http://localhost:3004/submissions/${encodeURIComponent(existingDocxSubmissionId)}`);
+            const subResponse = await axios_1.default.get(`${DB_SERVICE_URL}/submissions/${encodeURIComponent(existingDocxSubmissionId)}`);
             const baselineSubmission = subResponse.data || {};
             let candidatePath = baselineSubmission.final_path || baselineSubmission.approved_path || baselineSubmission.original_path;
             if (!candidatePath) {
@@ -1891,7 +1998,7 @@ app.post('/api/design-approval/compare', upload.fields([
         const submissionId = `design-${Date.now()}`;
         let dbSaved = false;
         try {
-            await axios_1.default.post('http://localhost:3004/submissions', {
+            await axios_1.default.post(`${DB_SERVICE_URL}/submissions`, {
                 id: submissionId,
                 submitter_email: submitterEmail,
                 submitter_name: submitterName,
@@ -1915,7 +2022,7 @@ app.post('/api/design-approval/compare', upload.fields([
         }
         // Save submitter profile (fire-and-forget)
         if (submitterName && submitterEmail) {
-            axios_1.default.post('http://localhost:3004/submitter-profiles', {
+            axios_1.default.post(`${DB_SERVICE_URL}/submitter-profiles`, {
                 name: submitterName,
                 email: submitterEmail,
                 jobTitle: submitterJobTitle
@@ -1949,7 +2056,7 @@ app.post('/api/design-approval/:submissionId/override', async (req, res) => {
         if (!reason) {
             return res.status(400).json({ error: 'Override reason is required' });
         }
-        await axios_1.default.put(`http://localhost:3004/submissions/${encodeURIComponent(submissionId)}`, {
+        await axios_1.default.put(`${DB_SERVICE_URL}/submissions/${encodeURIComponent(submissionId)}`, {
             status: 'approved_override',
             mismatch_override: true,
             mismatch_override_reason: reason,

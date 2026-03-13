@@ -23,6 +23,15 @@ Available on `/form` only.
 - Populates all project fields except Date Needed (always fresh per submission)
 - Groups submissions by project name, shows most recent of each
 
+## Property Catalog (Canonical)
+
+Available on `/form` and learning rule workflows.
+
+- Property is selected from a configured list (type-to-search + pick), not free text.
+- The property value must match one of the configured properties (validated server-side).
+- The previous free-text location field is removed; location metadata is derived from selected property.
+- The `Hotel Name` input is temporarily removed from the chef form UI.
+
 ## Architecture
 
 ### Storage
@@ -36,10 +45,13 @@ Available on `/form` only.
 - `GET /submitter-profiles/search?q=` — search profiles by name prefix
 - `POST /submitter-profiles` — upsert profile
 - `GET /submissions/recent-projects` — get recent unique projects
+- `GET /properties` — canonical property list for submission/learning UIs
+- `GET /properties/validate?name=` — validate a property name against canonical list
 
 **Dashboard proxies:**
 - `GET /api/submitter-profiles/search` → db service
 - `GET /api/recent-projects` → db service
+- `GET /api/properties` → db service
 
 ### Profile Save
 

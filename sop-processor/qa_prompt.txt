@@ -10,8 +10,9 @@ You MUST respond with EXACTLY this structure:
 - Spelling errors (see vocabulary rules below)
 - Missing or incorrect diacritical marks (see accents list below)
 - Clear typos
-- Allergen code formatting issues
-- Raw/undercooked item markers (*)
+- Allergen code formatting issues (including alphabetizing allergen codes)
+- Raw/undercooked item markers (*) — ADD the asterisk if missing on items that clearly need it (oysters, tartare, sushi, sashimi, ceviche, crudo, raw preparations, undercooked meats, runny eggs, etc.)
+- Missing allergen codes when HIGH confidence based on visible ingredients (e.g., add V for vegetarian if dish clearly contains no meat/fish/seafood; add F for obvious fish dishes; add D for dishes with cheese/cream/butter)
 
 DO NOT make corrections for:
 - Stylistic preferences
@@ -338,7 +339,7 @@ D dairy | G gluten | N nuts | S shellfish | V vegetarian | VG vegan
 
 #### 7.2 Formatting
 - Comma-separated, NO spaces
-- ALPHABETICAL order (preferred but not always enforced - flag as suggestion)
+- ALPHABETICAL order — auto-correct in the CORRECTED MENU (e.g., "G,D,N" → "D,G,N")
 - Example: `Dish Name D,G,N 18`
 
 #### 7.3 Ingredient-to-Allergen Mapping
@@ -471,8 +472,8 @@ When reviewing menu text:
 
 1. **Check spelling** against vocabulary rules (Section 3) - HIGH CONFIDENCE
 2. **Apply accents** to all words that need them (Section 4) - HIGH CONFIDENCE
-3. **Validate allergen codes** are present, alphabetized, and correctly formatted (Section 7) - HIGH CONFIDENCE
-4. **Flag raw/undercooked items** missing asterisks (Section 8) - HIGH CONFIDENCE
+3. **Validate allergen codes** are present, alphabetized, and correctly formatted (Section 7) - HIGH CONFIDENCE — auto-correct alphabetical order AND add missing allergen codes when ingredients make it obvious (e.g., add V for vegetarian dishes with no meat/fish/seafood, add F for fish dishes). Also include a suggestion so the reviewer sees the change.
+4. **Add raw/undercooked item asterisks** where missing (Section 8) - HIGH CONFIDENCE — auto-add the asterisk (*) in the CORRECTED MENU for items that clearly need it (oysters, tartare, sushi, ceviche, crudo, raw tuna, Wagyu, etc.). Also include a suggestion so the reviewer sees the change.
 5. **Check plural/singular** usage (Section 6) - MEDIUM CONFIDENCE
 6. **Flag redundant words** (Section 5.2) - MEDIUM CONFIDENCE
 7. **Fix hyphenation** per rules (Section 5.1) - MEDIUM CONFIDENCE
@@ -493,7 +494,8 @@ When reviewing menu text:
 
 ## IMPORTANT GUIDELINES:
 
-- Be aggressive with high-confidence corrections (spelling, accents, typos, obvious errors)
+- Be aggressive with high-confidence corrections (spelling, accents, typos, obvious errors, allergen alphabetization, missing asterisks for raw items, missing allergen codes when ingredients make it obvious)
+- When you auto-correct something non-trivial (like adding an asterisk, adding a missing allergen code, or reordering allergens), ALSO include a suggestion entry so the reviewer can see what was changed and why
 - Only include medium/low confidence items in the SUGGESTIONS section
 - ALWAYS return the corrected menu between the markers, even if no changes were made
 - Format suggestions as valid JSON array

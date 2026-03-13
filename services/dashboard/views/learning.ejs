@@ -193,6 +193,19 @@
             text-align: center;
             color: var(--muted);
         }
+        .filter-row {
+            display: flex;
+            gap: .75rem;
+            align-items: center;
+            margin-bottom: .75rem;
+        }
+        .filter-row select {
+            border: 1px solid var(--border);
+            background: #fff;
+            padding: .5rem .6rem;
+            font-size: .8rem;
+            min-width: 260px;
+        }
     </style>
 </head>
 <body>
@@ -232,6 +245,50 @@
             <div class="stat"><div class="label">Submissions Learned</div><div class="value"><%= totalEntries %></div></div>
             <div class="stat"><div class="label">Rules</div><div class="value"><%= totalRules %></div></div>
             <div class="stat"><div class="label">Min Occurrences</div><div class="value"><%= minOccurrences %></div></div>
+        </div>
+
+        <div class="panel">
+            <strong>Location-Specific Rules</strong>
+            <div class="small" style="margin-top:.35rem; margin-bottom:.55rem;">
+                Filtered by configured properties from the canonical property list.
+            </div>
+            <div class="filter-row">
+                <label for="locationRuleFilter" class="small" style="margin:0;">Property Filter:</label>
+                <select id="locationRuleFilter" onchange="filterLocationRules()">
+                    <option value="">All Properties</option>
+                    <% (propertyOptions || []).forEach((property) => { %>
+                        <option value="<%= property %>"><%= property %></option>
+                    <% }) %>
+                </select>
+            </div>
+            <% if (!locationRules || locationRules.length === 0) { %>
+                <div class="empty">No location-specific rules saved yet.</div>
+            <% } else { %>
+                <table id="locationRulesTable">
+                    <thead>
+                        <tr>
+                            <th>Created</th>
+                            <th>Submission</th>
+                            <th>Restaurant</th>
+                            <th>Property</th>
+                            <th>Shared Properties</th>
+                            <th>Reasoning</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <% locationRules.forEach((item) => { %>
+                            <tr data-location="<%= (item.location || '').toLowerCase() %>">
+                                <td><%= item.created_at ? new Date(item.created_at).toLocaleString() : 'N/A' %></td>
+                                <td><code><%= item.submission_id || '' %></code></td>
+                                <td><%= item.restaurant_name || '' %></td>
+                                <td><%= item.location || '' %></td>
+                                <td><%= (item.shared_locations || []).join(', ') %></td>
+                                <td><%= item.explanation || '' %></td>
+                            </tr>
+                        <% }) %>
+                    </tbody>
+                </table>
+            <% } %>
         </div>
 
         <div class="prompt-grid">
@@ -350,6 +407,16 @@
                 return;
             }
             window.location.reload();
+        }
+
+        function filterLocationRules() {
+            const select = document.getElementById('locationRuleFilter');
+            const selected = (select?.value || '').trim().toLowerCase();
+            const rows = document.querySelectorAll('#locationRulesTable tbody tr');
+            rows.forEach((row) => {
+                const rowLocation = (row.getAttribute('data-location') || '').trim().toLowerCase();
+                row.style.display = !selected || rowLocation === selected ? '' : 'none';
+            });
         }
     </script>
 </body>

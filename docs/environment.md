@@ -20,8 +20,13 @@ All variables are configured in `.env` at the project root. See `.env.example` f
 | Variable | Description |
 |----------|-------------|
 | `INTERNAL_REVIEWER_EMAIL` | Email address that receives internal review notifications |
+| `AI_REVIEW_MODEL` | OpenAI model used by AI review service (default: `gpt-4o-mini`) |
 | `SOP_DOC_PATH` | Path to SOP document (default: `samples/sop.txt`) |
 | `DASHBOARD_URL` | Base URL for email links (default: `http://localhost:3005`) |
+| `DB_SERVICE_URL` | Base URL for DB service (default: `http://localhost:3004`) |
+| `AI_REVIEW_URL` | Base URL for AI review service (default: `http://localhost:3002`) |
+| `DIFFER_SERVICE_URL` | Base URL for differ service (default: `http://localhost:3006`) |
+| `CLICKUP_SERVICE_URL` | Base URL for ClickUp integration service (default: `http://localhost:3007`) |
 | `DOCUMENT_STORAGE_ROOT` | Root directory for persisted menu DOCX assets (default: `tmp/documents`) |
 | `LEARNING_MIN_OCCURRENCES` | Minimum repeated corrections needed before a learned rule is active (default: `2`) |
 | `LEARNING_MAX_OVERLAY_RULES` | Max learned rules injected into QA prompt overlay (default: `25`) |

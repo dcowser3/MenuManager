@@ -13,11 +13,13 @@ dotenv.config({ path: envPath });
 
 const app = express();
 const port = 3002;
+const DB_SERVICE_URL = process.env.DB_SERVICE_URL || 'http://localhost:3004';
 
 const configuration = new Configuration({
     apiKey: process.env.OPENAI_API_KEY,
 });
 const openai = new OpenAIApi(configuration);
+const AI_REVIEW_MODEL = process.env.AI_REVIEW_MODEL || 'gpt-4o-mini';
 
 app.use(express.json());
 
@@ -45,7 +47,7 @@ app.post('/run-qa-check', async (req, res) => {
 
         console.log('Running QA check...');
         const qaResponse = await openai.createChatCompletion({
-            model: 'gpt-4o',
+            model: AI_REVIEW_MODEL,
             messages: [
                 { role: 'system', content: prompt },
                 { role: 'user', content: `Here is the menu text to review:\n\n---\n\n${text}` }
@@ -115,14 +117,14 @@ Configure OPENAI_API_KEY in .env for real AI reviews.
 ==============================================`;
         } else {
             // Real AI mode with OpenAI
-            console.log(`Using OpenAI for submission ${submission_id}`);
+            console.log(`Using OpenAI model ${AI_REVIEW_MODEL} for submission ${submission_id}`);
             
             // --- Tier 1: Run the General QA Prompt ---
             const qaPromptPath = path.join(__dirname, '..', '..', '..', 'sop-processor', 'qa_prompt.txt');
             const qaPrompt = await fs.readFile(qaPromptPath, 'utf-8');
 
             const qaResponse = await openai.createChatCompletion({
-                model: 'gpt-4o',
+                model: AI_REVIEW_MODEL,
                 messages: [
                     { role: 'system', content: qaPrompt },
                     { role: 'user', content: `Here is the menu text to review:\n\n---\n\n${text}` }
@@ -137,7 +139,7 @@ Configure OPENAI_API_KEY in .env for real AI reviews.
         if (issueCount > 99) {
             // Fails Tier 1: mark as rejected_tier1 (no email notification in current workflow).
             console.log(`Submission ${submission_id} failed Tier 1.`);
-            await axios.put(`http://localhost:3004/submissions/${submission_id}/status`, { status: 'rejected_tier1' });
+            await axios.put(`${DB_SERVICE_URL}/submissions/${submission_id}/status`, { status: 'rejected_tier1' });
             return res.status(200).send({ status: 'rejected_tier1', message: 'Submission failed Tier 1 review.' });
         }
 
@@ -149,7 +151,7 @@ Configure OPENAI_API_KEY in .env for real AI reviews.
 
         // Update submission in DB with new status and draft path
         // Note: Document goes directly to pending_human_review without redlining
-        await axios.put(`http://localhost:3004/submissions/${submission_id}`, {
+        await axios.put(`${DB_SERVICE_URL}/submissions/${submission_id}`, {
             status: 'pending_human_review',
             ai_draft_path: draftPath
         });
