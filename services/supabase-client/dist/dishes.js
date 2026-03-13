@@ -173,7 +173,7 @@ async function getAllProperties() {
         throw new Error(`Failed to get properties: ${error.message}`);
     }
     // Get unique properties
-    const properties = [...new Set(data.map(d => d.property).filter(Boolean))];
+    const properties = [...new Set(data.map((d) => d.property).filter(Boolean))];
     return properties.sort();
 }
 /**

@@ -51,6 +51,8 @@ Fill out `.env` with:
 docker compose up -d --build
 ```
 
+Note: On some Ubuntu images, the command is `docker-compose` (with a dash).
+
 Logs:
 ```
 docker compose logs -f dashboard
@@ -152,3 +154,4 @@ Recommended if you want managed scaling or a multi-AZ setup.
 - If you don’t use Supabase, the DB service stores data locally under `/app/tmp/db`.
 - `DOCUMENT_STORAGE_ROOT` should point into `/app/tmp` or another persistent path.
 - The dashboard uses `DASHBOARD_URL` for email links; set this to your public domain.
+- Docker builds run the workspace TypeScript compiles; ensure your repo is up to date before building.

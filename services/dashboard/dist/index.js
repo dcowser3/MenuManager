@@ -363,7 +363,7 @@ app.post('/approve/:submissionId', async (req, res) => {
             final_path: finalPath
         });
         // Extract dishes from approved menu (async, non-blocking)
-        extractDishesAfterApproval(submissionId, submission.menu_content, submission.property || 'Unknown', finalPath).catch(err => console.error('Background dish extraction failed:', err));
+        extractDishesAfterApproval(submissionId, submission.menu_content, submission.property || 'Unknown', finalPath).catch((err) => console.error('Background dish extraction failed:', err));
         res.json({
             success: true,
             message: 'Submission approved'
@@ -408,7 +408,7 @@ app.post('/upload/:submissionId', upload.single('finalDocument'), async (req, re
             final_path: finalPath
         });
         // Extract dishes from approved menu (async, non-blocking)
-        extractDishesAfterApproval(submissionId, submission.menu_content, submission.property || 'Unknown', finalPath).catch(err => console.error('Background dish extraction failed:', err));
+        extractDishesAfterApproval(submissionId, submission.menu_content, submission.property || 'Unknown', finalPath).catch((err) => console.error('Background dish extraction failed:', err));
         res.json({
             success: true,
             message: 'Corrected version uploaded'
@@ -1375,7 +1375,7 @@ app.post('/api/form/submit', async (req, res) => {
             storage_provider: 'local',
             storage_path: docxPath,
             file_name: `${projectName}_Menu.docx`
-        }).catch(err => console.error('Failed to save original_docx asset metadata:', err.message));
+        }).catch((err) => console.error('Failed to save original_docx asset metadata:', err.message));
         if (persistedBaselineDocPath) {
             axios_1.default.post(`${DB_SERVICE_URL}/assets`, {
                 submission_id: submissionId,
@@ -1384,7 +1384,7 @@ app.post('/api/form/submit', async (req, res) => {
                 storage_provider: 'local',
                 storage_path: persistedBaselineDocPath,
                 file_name: revisionBaselineFileName || path.basename(persistedBaselineDocPath),
-            }).catch(err => console.error('Failed to save baseline_approved_docx asset metadata:', err.message));
+            }).catch((err) => console.error('Failed to save baseline_approved_docx asset metadata:', err.message));
         }
         if (persistedMenuImagePath) {
             axios_1.default.post(`${DB_SERVICE_URL}/assets`, {
@@ -1394,14 +1394,14 @@ app.post('/api/form/submit', async (req, res) => {
                 storage_provider: 'local',
                 storage_path: persistedMenuImagePath,
                 file_name: menuImageFileName || path.basename(persistedMenuImagePath),
-            }).catch(err => console.error('Failed to save menu_image asset metadata:', err.message));
+            }).catch((err) => console.error('Failed to save menu_image asset metadata:', err.message));
         }
         // Save submitter profile (fire-and-forget)
         axios_1.default.post(`${DB_SERVICE_URL}/submitter-profiles`, {
             name: submitterName,
             email: submitterEmail,
             jobTitle: submitterJobTitle
-        }).catch(err => console.error('Failed to save submitter profile:', err.message));
+        }).catch((err) => console.error('Failed to save submitter profile:', err.message));
         // Trigger AI review process (same as email workflow)
         // This will:
         // 1. Copy to ai-drafts
@@ -2026,7 +2026,7 @@ app.post('/api/design-approval/compare', upload.fields([
                 name: submitterName,
                 email: submitterEmail,
                 jobTitle: submitterJobTitle
-            }).catch(err => console.error('Failed to save submitter profile:', err.message));
+            }).catch((err) => console.error('Failed to save submitter profile:', err.message));
         }
         res.json({
             isMatch,

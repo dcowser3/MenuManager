@@ -212,7 +212,7 @@ export async function getAllProperties(): Promise<string[]> {
     }
 
     // Get unique properties
-    const properties = [...new Set(data.map(d => d.property).filter(Boolean))];
+    const properties = [...new Set(data.map((d: { property?: string | null }) => d.property).filter(Boolean))];
     return properties.sort() as string[];
 }
 

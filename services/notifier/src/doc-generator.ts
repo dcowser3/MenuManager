@@ -3,7 +3,7 @@ import { Buffer } from "buffer";
 
 export async function generateRedlinedDoc(markedUpText: string): Promise<Buffer> {
     const paragraphs = markedUpText.split('\n').map(line => {
-        const runs: TextRun[] = [];
+        const runs: any[] = [];
         // Use a regex to split the line by our [DELETE] and [ADD] tags
         const parts = line.split(/(\[DELETE\].*?\[\/DELETE\]|\[ADD\].*?\[\/ADD\])/g);
 
