@@ -1,4 +1,4 @@
-FROM node:18-alpine AS builder
+FROM node:18-slim AS builder
 
 WORKDIR /app
 
@@ -11,11 +11,19 @@ COPY . .
 
 RUN npm run build --workspace=@menumanager/supabase-client && npm run build --workspaces
 
-FROM node:18-alpine
+FROM node:18-slim
 
 WORKDIR /app
 
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends python3 python3-venv python3-pip \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY --from=builder /app /app
+
+RUN rm -rf /app/services/docx-redliner/venv \
+    && python3 -m venv /app/services/docx-redliner/venv \
+    && /app/services/docx-redliner/venv/bin/pip install --no-cache-dir -r /app/services/docx-redliner/requirements.txt
 
 ARG SERVICE
 ENV NODE_ENV=production
