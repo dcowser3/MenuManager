@@ -261,22 +261,10 @@ export async function extractUnapprovedFromDocx(filePath: string): Promise<{
 /**
  * Dashboard Home - List all pending reviews
  */
-app.get('/', async (req, res) => {
-    try {
-        // Get all submissions with status 'pending_human_review'
-        const dbResponse = await axios.get(`${DB_SERVICE_URL}/submissions/pending`);
-        const pendingReviews = dbResponse.data;
-
-        res.render('index', {
-            reviews: pendingReviews,
-            title: 'Menu Review Dashboard'
-        });
-    } catch (error) {
-        console.error('Error loading dashboard:', error);
-        res.status(500).render('error', {
-            message: 'Failed to load pending reviews'
-        });
-    }
+app.get('/', (_req, res) => {
+    res.render('welcome', {
+        title: 'Welcome - RSH Menu Manager'
+    });
 });
 
 /**

@@ -13,3 +13,4 @@ Catalog of design decisions and feature documentation for Menu Manager.
 | [Reviewer Learning Loop](reviewer-learning-loop.md) | Complete (Phase 1) | Auto-learns recurring human reviewer corrections and injects stable rules into QA prompt |
 | [Weekly Prompt Optimization](prompt-optimization.md) | Complete | Weekly command that compiles corrected-menu history into candidate prompt edits + metrics |
 | [Document Storage](document-storage.md) | Complete (Local/PV) | Environment-driven persistent document storage layout and deployment guidance |
+| [Training Pipeline](training-pipeline.md) | Complete | End-to-end: data capture → rule aggregation → prompt injection → weekly optimization → cloud storage |

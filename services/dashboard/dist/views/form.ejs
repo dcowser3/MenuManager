@@ -1534,7 +1534,7 @@
                     </div>
                     <div class="form-group">
                         <label for="turnaroundDays">Turnaround (Days) *</label>
-                        <input type="number" id="turnaroundDays" min="1" step="1" required value="5" onchange="onTurnaroundDaysChange()" oninput="onTurnaroundDaysChange()">
+                        <input type="number" id="turnaroundDays" min="1" step="1" required value="5" onchange="onTurnaroundDaysChange(event)" oninput="onTurnaroundDaysChange(event)">
                         <div id="turnaroundDaysError" class="field-error hidden"></div>
                     </div>
                     <div class="form-group">
@@ -1965,6 +1965,10 @@
         let originalAiCorrectedText = '';
         let criticalErrorOverrides = {};
         let submissionMode = 'new';
+        const turnaroundUserState = {
+            new: { isUserSet: false, value: '' },
+            modification: { isUserSet: false, value: '' }
+        };
         let revisionSearchDebounce = null;
         let revisionSearchResults = [];
         let revisionBaseSubmissionId = null;
@@ -2208,9 +2212,14 @@
             dateInput.value = minDateStr;
         }
 
-        function onTurnaroundDaysChange() {
+        function onTurnaroundDaysChange(event) {
             const turnaroundInput = document.getElementById('turnaroundDays');
             const minDays = getMinimumTurnaroundDays();
+            if (event && event.isTrusted) {
+                const rawValue = (turnaroundInput.value || '').trim();
+                turnaroundUserState[submissionMode].isUserSet = !!rawValue;
+                turnaroundUserState[submissionMode].value = rawValue;
+            }
             turnaroundInput.min = String(minDays);
             const current = parseInt((turnaroundInput.value || '').trim(), 10);
             if (Number.isFinite(current) && current < minDays) {
@@ -2234,9 +2243,16 @@
         function applyTurnaroundDefaults(forceDateToMinimum = false, forceValue = false) {
             const turnaroundInput = document.getElementById('turnaroundDays');
             const defaultDays = getDefaultTurnaroundDays();
+            const modeState = turnaroundUserState[submissionMode];
+            const storedValue = (modeState.value || '').trim();
+            const hasUserValue = modeState.isUserSet && storedValue;
+            const desiredValue = hasUserValue ? storedValue : String(defaultDays);
             turnaroundInput.min = String(getMinimumTurnaroundDays());
-            if (forceValue || !(turnaroundInput.value || '').trim()) {
-                turnaroundInput.value = String(defaultDays);
+            if (forceValue || !hasUserValue || (turnaroundInput.value || '').trim() !== desiredValue) {
+                turnaroundInput.value = desiredValue;
+            }
+            if (!hasUserValue) {
+                modeState.value = String(defaultDays);
             }
             turnaroundInput.setCustomValidity('');
             setTurnaroundFieldError('');

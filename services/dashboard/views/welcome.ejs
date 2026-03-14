@@ -45,6 +45,29 @@
             border-bottom: 1px solid var(--color-border);
         }
 
+        .header-inner {
+            max-width: 1600px;
+            margin: 0 auto;
+            padding: 0 4vw;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .header-links a {
+            color: var(--color-primary);
+            text-decoration: none;
+            margin-left: 1.25rem;
+            font-size: 0.7rem;
+            letter-spacing: 0.14em;
+            text-transform: uppercase;
+            font-weight: 500;
+        }
+
+        .header-links a:hover {
+            color: var(--color-secondary);
+        }
+
         .header h1 {
             font-family: var(--font-heading);
             font-size: 1.75rem;
@@ -166,9 +189,15 @@
 </head>
 <body>
     <div class="header">
-        <div style="max-width: 1600px; margin: 0 auto; padding: 0 4vw;">
-            <h1>Richard Sandoval Hospitality</h1>
-            <p>Menu Management</p>
+        <div class="header-inner">
+            <div>
+                <h1>Richard Sandoval Hospitality</h1>
+                <p>Menu Management</p>
+            </div>
+            <div class="header-links">
+                <a href="/learning">Learning Dashboard</a>
+                <a href="/training">Training</a>
+            </div>
         </div>
     </div>
 
