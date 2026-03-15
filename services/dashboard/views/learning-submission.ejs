@@ -49,9 +49,48 @@
         .plain-text { border: 1px solid var(--border); background: var(--bg-alt); padding: .45rem .55rem; font-size: .8rem; line-height: 1.35; white-space: pre-wrap; margin-bottom: .4rem; }
 
         .annotation-section { border-top: 1px solid var(--border); padding-top: .85rem; margin-top: .85rem; }
-        .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: .7rem; }
+        .annotation-group {
+            border: 1px solid var(--border);
+            padding: 1rem;
+            margin-bottom: .75rem;
+            background: var(--bg-alt);
+        }
+        .annotation-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+            margin-bottom: .75rem;
+        }
+        .annotation-title {
+            font-family: 'Cormorant Garamond', serif;
+            font-size: 1rem;
+            font-weight: 500;
+            color: var(--primary);
+        }
+        .annotation-hint {
+            font-size: .7rem;
+            color: var(--muted);
+            font-style: italic;
+        }
+        .annotation-fields {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: .75rem;
+            align-items: end;
+        }
+        .annotation-fields.three-col {
+            grid-template-columns: 1fr 1fr 1fr;
+        }
+        .annotation-field {
+            display: flex;
+            flex-direction: column;
+        }
+        .annotation-field.full-width {
+            grid-column: 1 / -1;
+        }
         label { display: block; font-size: .63rem; text-transform: uppercase; letter-spacing: .1em; color: var(--muted); margin-bottom: .25rem; }
         input, textarea, select { width: 100%; border: 1px solid var(--border); padding: .55rem .6rem; font-family: inherit; font-size: .84rem; }
+        input:focus, textarea:focus, select:focus { outline: none; border-color: #8b7355; }
         textarea { min-height: 80px; resize: vertical; }
         select[multiple] { min-height: 100px; }
 
@@ -60,6 +99,11 @@
         .location-check label { margin: 0; font-size: .8rem; text-transform: none; letter-spacing: 0; color: var(--text); cursor: pointer; }
         .location-fields { display: none; }
         .location-fields.open { display: block; }
+
+        @media (max-width: 640px) {
+            .annotation-fields, .annotation-fields.three-col { grid-template-columns: 1fr; }
+            .annotation-header { flex-direction: column; align-items: flex-start; }
+        }
 
         .btn { border: 1px solid var(--primary); background: var(--primary); color: #fff; text-transform: uppercase; letter-spacing: .1em; font-size: .68rem; padding: .5rem .7rem; cursor: pointer; }
         .save-status { margin-left: .6rem; font-size: .78rem; color: var(--muted); }
@@ -138,53 +182,56 @@
                         </div>
 
                         <div class="annotation-section">
-                            <div style="margin-bottom: .7rem;">
-                                <label for="explanation-<%= idx %>">Why was this correction made? Why did AI miss it? *</label>
-                                <textarea id="explanation-<%= idx %>" placeholder="e.g., 'Cr&#232;me br&#251;l&#233;e' requires French diacritics per brand standard. AI missed diacritics on accent grave and circumflex."></textarea>
-                            </div>
+                            <input type="hidden" id="restaurant-<%= idx %>" value="<%= submissionMeta.project_name || submissionMeta.property || '' %>">
 
-                            <div class="form-grid">
-                                <div>
-                                    <label for="restaurant-<%= idx %>">Restaurant Name *</label>
-                                    <input id="restaurant-<%= idx %>" value="<%= submissionMeta.project_name || '' %>" placeholder="e.g., Toro Toro">
+                            <!-- Correction Reasoning -->
+                            <div class="annotation-group">
+                                <div class="annotation-header">
+                                    <span class="annotation-title">Correction Details</span>
+                                    <span class="annotation-hint">Explain why this correction was needed</span>
                                 </div>
-                                <div>
-                                    <label for="reviewer-<%= idx %>">Reviewer Name</label>
-                                    <input id="reviewer-<%= idx %>" placeholder="Optional">
-                                </div>
-                            </div>
-
-                            <div style="margin-top: .7rem;">
-                                <div class="location-check">
-                                    <input type="checkbox" id="loc-check-<%= idx %>" onchange="toggleLocationFields(<%= idx %>)">
-                                    <label for="loc-check-<%= idx %>">This is a property-specific rule</label>
-                                </div>
-                                <div class="location-fields" id="loc-fields-<%= idx %>">
-                                    <div class="form-grid">
-                                        <div>
-                                            <label for="location-<%= idx %>">Primary Property *</label>
-                                            <select id="location-<%= idx %>">
-                                                <option value="">Select property</option>
-                                                <% (locationOptions || []).forEach((loc) => { %>
-                                                    <option value="<%= loc %>" <%= loc === (submissionMeta.property || submissionMeta.city_country || '') ? 'selected' : '' %>><%= loc %></option>
-                                                <% }) %>
-                                            </select>
-                                        </div>
-                                        <div>
-                                            <label for="shared-<%= idx %>">Additional Properties Where This Rule Applies</label>
-                                            <select multiple id="shared-<%= idx %>">
-                                                <% (locationOptions || []).forEach((loc) => { %>
-                                                    <option value="<%= loc %>"
-                                                        <%= (loc === (submissionMeta.property || submissionMeta.city_country || '')) ? 'disabled' : '' %>
-                                                    ><%= loc %></option>
-                                                <% }) %>
-                                            </select>
-                                        </div>
+                                <div class="annotation-fields">
+                                    <div class="annotation-field full-width">
+                                        <label for="explanation-<%= idx %>">Explanation *</label>
+                                        <textarea id="explanation-<%= idx %>" placeholder="e.g., 'Cr&#232;me br&#251;l&#233;e' requires French diacritics per brand standard. AI missed diacritics on accent grave and circumflex."></textarea>
+                                    </div>
+                                    <div class="annotation-field">
+                                        <label for="reviewer-<%= idx %>">Reviewer Name</label>
+                                        <input id="reviewer-<%= idx %>" placeholder="Optional">
                                     </div>
                                 </div>
                             </div>
 
-                            <div style="margin-top: .8rem;">
+                            <!-- Property Scope -->
+                            <div class="annotation-group">
+                                <div class="annotation-header">
+                                    <span class="annotation-title">Property Scope</span>
+                                    <span class="annotation-hint">Does this rule apply to specific properties?</span>
+                                </div>
+                                <div class="annotation-fields">
+                                    <div class="annotation-field">
+                                        <label for="location-<%= idx %>">Primary Property</label>
+                                        <select id="location-<%= idx %>">
+                                            <option value="">All properties (global rule)</option>
+                                            <% (locationOptions || []).forEach((loc) => { %>
+                                                <option value="<%= loc %>" <%= loc === (submissionMeta.property || submissionMeta.city_country || '') ? 'selected' : '' %>><%= loc %></option>
+                                            <% }) %>
+                                        </select>
+                                    </div>
+                                    <div class="annotation-field">
+                                        <label for="shared-<%= idx %>">Additional Properties</label>
+                                        <select multiple id="shared-<%= idx %>">
+                                            <% (locationOptions || []).forEach((loc) => { %>
+                                                <option value="<%= loc %>"
+                                                    <%= (loc === (submissionMeta.property || submissionMeta.city_country || '')) ? 'disabled' : '' %>
+                                                ><%= loc %></option>
+                                            <% }) %>
+                                        </select>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div style="margin-top: .5rem;">
                                 <button class="btn" onclick='saveDishRule(<%- JSON.stringify(dish) %>, <%= idx %>)'>Save Rule</button>
                                 <span class="save-status" id="save-status-<%= idx %>"></span>
                             </div>
@@ -232,32 +279,20 @@
             document.getElementById(`plain-${idx}`).classList.toggle('open');
         }
 
-        function toggleLocationFields(idx) {
-            const checked = document.getElementById(`loc-check-${idx}`).checked;
-            document.getElementById(`loc-fields-${idx}`).classList.toggle('open', checked);
-        }
 
         async function saveDishRule(dish, idx) {
             const statusEl = document.getElementById(`save-status-${idx}`);
             const explanation = (document.getElementById(`explanation-${idx}`).value || '').trim();
             const restaurantName = (document.getElementById(`restaurant-${idx}`).value || '').trim();
             const reviewerName = (document.getElementById(`reviewer-${idx}`).value || '').trim();
-            const isLocationSpecific = document.getElementById(`loc-check-${idx}`).checked;
             const locationInput = document.getElementById(`location-${idx}`);
-            const location = isLocationSpecific ? (locationInput.value || '').trim() : '';
+            const location = (locationInput.value || '').trim();
 
             const sharedSelect = document.getElementById(`shared-${idx}`);
-            const sharedLocations = isLocationSpecific
-                ? Array.from(sharedSelect.selectedOptions).map((o) => o.value)
-                : [];
+            const sharedLocations = Array.from(sharedSelect.selectedOptions).map((o) => o.value);
 
-            if (!explanation || !restaurantName) {
-                statusEl.textContent = 'Explanation and restaurant name are required.';
-                statusEl.className = 'save-status err';
-                return;
-            }
-            if (isLocationSpecific && !location) {
-                statusEl.textContent = 'Primary property is required for property-specific rules.';
+            if (!explanation) {
+                statusEl.textContent = 'Explanation is required.';
                 statusEl.className = 'save-status err';
                 return;
             }

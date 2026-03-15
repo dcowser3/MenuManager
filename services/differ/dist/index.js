@@ -560,7 +560,10 @@ function pushLineEdit(edits, type, line, idx) {
     edits.push({ type, lines: [line], indices: [idx] });
 }
 function normalizeLine(line) {
-    return normalizeWhitespace(stripDiacritics((line || '').toLowerCase()));
+    // Only normalize whitespace — preserve case and diacritics so that
+    // capitalization changes (meyer → Meyer) and accent changes
+    // (Jalapeno → Jalapeño) are detected as real edits.
+    return normalizeWhitespace((line || ''));
 }
 function linesLikelySameContext(beforeLine, afterLine) {
     const beforeTokens = tokenize(beforeLine).map((t) => normalizeToken(stripDiacritics(t))).filter(Boolean);
@@ -613,8 +616,11 @@ function tokenize(line) {
     return matches || [];
 }
 function diffTokens(before, after) {
-    const beforeNorm = before.map((t) => normalizeToken(t));
-    const afterNorm = after.map((t) => normalizeToken(t));
+    // Normalize only punctuation (quotes/apostrophes), NOT case — so that
+    // capitalization changes like "meyer" → "Meyer" are detected as edits.
+    const normForDiff = (t) => (t || '').replace(/[''`]/g, "'").trim();
+    const beforeNorm = before.map(normForDiff);
+    const afterNorm = after.map(normForDiff);
     const m = beforeNorm.length;
     const n = afterNorm.length;
     const dp = Array.from({ length: m + 1 }, () => Array(n + 1).fill(0));
@@ -705,7 +711,8 @@ function isHighSignalReplacement(from, to) {
     const toNorm = normalizeToken(to);
     if (!fromNorm || !toNorm)
         return false;
-    if (fromNorm === toNorm)
+    // If tokens differ only in case (e.g., "meyer" → "Meyer"), that's a real change
+    if (fromNorm === toNorm && from.trim() === to.trim())
         return false;
     if (fromNorm.length < 3 || toNorm.length < 3)
         return false;
@@ -736,6 +743,9 @@ function classifyReplacementKind(from, to) {
     const toNorm = normalizeToken(to);
     const fromPlain = stripDiacritics(fromNorm);
     const toPlain = stripDiacritics(toNorm);
+    // Case-only change: lowercased forms are identical but original forms differ
+    if (fromNorm === toNorm && from.trim() !== to.trim())
+        return 'capitalization';
     if (fromPlain === toPlain && fromNorm !== toNorm)
         return 'diacritic';
     const fromNoPunc = fromPlain.replace(/[^a-z0-9]/g, '');
@@ -753,6 +763,8 @@ function baseSignalConfidence(from, to, kind) {
     let confidence = 0.55;
     if (kind === 'diacritic')
         confidence += 0.2;
+    if (kind === 'capitalization')
+        confidence += 0.15;
     if (kind === 'punctuation')
         confidence += 0.1;
     if (ratio <= 0.2)

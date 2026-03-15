@@ -312,6 +312,44 @@ CREATE TRIGGER update_users_updated_at
     EXECUTE FUNCTION update_updated_at_column();
 
 -- ============================================================================
+-- 6. ASSETS
+-- Document / file metadata for storage abstraction and document pairing
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS assets (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    submission_id VARCHAR(100) NOT NULL,
+    revision_submission_id VARCHAR(100),
+    asset_type VARCHAR(50) NOT NULL,              -- 'original_docx', 'approved_docx', 'ai_draft_docx', etc.
+    source VARCHAR(100),
+    storage_provider VARCHAR(50) DEFAULT 'local',
+    storage_path TEXT NOT NULL,
+    file_name VARCHAR(255),
+    meta JSONB,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_assets_submission ON assets(submission_id);
+CREATE INDEX IF NOT EXISTS idx_assets_type ON assets(asset_type);
+
+-- ============================================================================
+-- 6b. DOCUMENT_PAIRS VIEW
+-- Easy lookup of original → approved DOCX pairs for learning pipeline
+-- ============================================================================
+CREATE OR REPLACE VIEW document_pairs AS
+SELECT
+    o.submission_id,
+    o.storage_path AS original_path,
+    o.file_name AS original_filename,
+    a.storage_path AS approved_path,
+    a.file_name AS approved_filename,
+    o.created_at AS submitted_at,
+    a.created_at AS approved_at
+FROM assets o
+JOIN assets a ON o.submission_id = a.submission_id
+WHERE o.asset_type = 'original_docx'
+  AND a.asset_type = 'approved_docx';
+
+-- ============================================================================
 -- ROW LEVEL SECURITY (RLS) - Enable later when auth is added
 -- ============================================================================
 -- ALTER TABLE submissions ENABLE ROW LEVEL SECURITY;

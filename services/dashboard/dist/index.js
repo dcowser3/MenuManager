@@ -977,7 +977,7 @@ Note: Use ONLY these allergen codes when checking allergen compliance. Do not us
         console.log('===========================');
         let finalSuggestions = reconciledSuggestions;
         if (menuType === 'prix_fixe') {
-            finalSuggestions = enforcePrixFixeCriticalChecks(menuContent, finalSuggestions);
+            finalSuggestions = enforcePrixFixeCriticalChecks(correctedMenuSanitized, finalSuggestions);
         }
         const hasCriticalErrors = finalSuggestions.some(s => s.severity === 'critical');
         res.json({

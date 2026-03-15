@@ -17,6 +17,7 @@ const ASSETS_DB = path.join(DB_DIR, 'assets.json');
 const PROPERTIES_DB = path.join(DB_DIR, 'properties.json');
 const SUBMISSIONS_TABLE = 'submissions';
 const SUBMITTER_PROFILES_TABLE = 'submitter_profiles';
+const ASSETS_TABLE = 'assets';
 const PROPERTIES_TABLE = 'properties';
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const DEFAULT_PROPERTY_NAMES = [
@@ -226,7 +227,20 @@ async function mirrorSubmissionUpdateToSupabase(localId: string, updates: any): 
             throw new Error(`Supabase legacy lookup failed: ${error.message}`);
         }
         if (!data?.id) {
-            // No Supabase row to update yet; caller can ignore.
+            // No Supabase row yet — self-heal by reading local JSON and creating it.
+            try {
+                const submissions = JSON.parse(await fs.readFile(SUBMISSIONS_DB, 'utf-8'));
+                const localRecord = submissions[localId];
+                if (localRecord) {
+                    const merged = { ...localRecord, ...updates, updated_at: new Date().toISOString() };
+                    await mirrorSubmissionCreateToSupabase(merged);
+                    console.log(`Supabase self-healed: created missing row for ${localId}`);
+                } else {
+                    console.warn(`Supabase mirror update skipped: no local record for ${localId}`);
+                }
+            } catch (healError: any) {
+                console.error(`Supabase self-heal failed for ${localId}:`, healError.message);
+            }
             return;
         }
         matchId = data.id;
@@ -326,7 +340,7 @@ app.post('/submissions', async (req, res) => {
         try {
             await mirrorSubmissionCreateToSupabase(newSubmission);
         } catch (supabaseError: any) {
-            console.error('Supabase mirror create failed (kept local JSON write):', supabaseError.message);
+            console.error(`Supabase mirror create failed for ${newId} (kept local JSON write):`, supabaseError.message);
         }
 
         res.status(201).json(newSubmission);
@@ -864,6 +878,21 @@ app.post('/assets', async (req, res) => {
         };
         assets.push(newAsset);
         await fs.writeFile(ASSETS_DB, JSON.stringify(assets, null, 2));
+
+        // Fire-and-forget Supabase mirror
+        if (isSupabaseConfigured()) {
+            (async () => {
+                try {
+                    const supabase = getSupabaseClient();
+                    const { id: _localId, ...supabaseRecord } = newAsset;
+                    const { error: sbError } = await supabase.from(ASSETS_TABLE).insert(supabaseRecord);
+                    if (sbError) console.error(`Supabase asset mirror failed for ${newAsset.submission_id}:`, sbError.message);
+                } catch (err: any) {
+                    console.error(`Supabase asset mirror error for ${newAsset.submission_id}:`, err.message);
+                }
+            })();
+        }
+
         res.status(201).json(newAsset);
     } catch (error) {
         console.error('Error saving asset metadata:', error);
@@ -875,6 +904,20 @@ app.post('/assets', async (req, res) => {
 app.get('/assets/by-submission/:submissionId', async (req, res) => {
     try {
         const { submissionId } = req.params;
+
+        if (isSupabaseConfigured()) {
+            const supabase = getSupabaseClient();
+            const { data, error } = await supabase
+                .from(ASSETS_TABLE)
+                .select('*')
+                .eq('submission_id', submissionId)
+                .order('created_at', { ascending: false });
+            if (!error && data && data.length > 0) {
+                return res.json(data);
+            }
+        }
+
+        // Fallback to local JSON
         const assets = JSON.parse(await fs.readFile(ASSETS_DB, 'utf-8'));
         const matches = (assets as any[])
             .filter((a) => a.submission_id === submissionId)
@@ -886,6 +929,59 @@ app.get('/assets/by-submission/:submissionId', async (req, res) => {
     }
 });
 
+
+// Document pairs for learning pipeline — original DOCX ↔ approved DOCX
+app.get('/assets/document-pairs', async (req, res) => {
+    try {
+        const limit = Math.min(parseInt((req.query.limit as string) || '50', 10), 200);
+
+        if (isSupabaseConfigured()) {
+            const supabase = getSupabaseClient();
+            const { data, error } = await supabase
+                .from('document_pairs')
+                .select('*')
+                .order('approved_at', { ascending: false })
+                .limit(limit);
+            if (!error && data) {
+                return res.json(data);
+            }
+            if (error) {
+                console.warn('Supabase document_pairs view query failed, falling back to local:', error.message);
+            }
+        }
+
+        // Local fallback: join assets by submission_id
+        const assets = JSON.parse(await fs.readFile(ASSETS_DB, 'utf-8')) as any[];
+        const bySubmission = new Map<string, { original?: any; approved?: any }>();
+        for (const a of assets) {
+            if (a.asset_type === 'original_docx' || a.asset_type === 'approved_docx') {
+                if (!bySubmission.has(a.submission_id)) bySubmission.set(a.submission_id, {});
+                const entry = bySubmission.get(a.submission_id)!;
+                if (a.asset_type === 'original_docx') entry.original = a;
+                if (a.asset_type === 'approved_docx') entry.approved = a;
+            }
+        }
+
+        const pairs = Array.from(bySubmission.entries())
+            .filter(([, v]) => v.original && v.approved)
+            .map(([submissionId, v]) => ({
+                submission_id: submissionId,
+                original_path: v.original.storage_path,
+                original_filename: v.original.file_name,
+                approved_path: v.approved.storage_path,
+                approved_filename: v.approved.file_name,
+                submitted_at: v.original.created_at,
+                approved_at: v.approved.created_at,
+            }))
+            .sort((a, b) => new Date(b.approved_at).getTime() - new Date(a.approved_at).getTime())
+            .slice(0, limit);
+
+        res.json(pairs);
+    } catch (error) {
+        console.error('Error getting document pairs:', error);
+        res.status(500).json([]);
+    }
+});
 
 // Endpoint to create a new report (can be deprecated or used for logging)
 app.post('/reports', async (req, res) => {

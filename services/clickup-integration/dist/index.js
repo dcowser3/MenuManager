@@ -151,25 +151,22 @@ function buildTaskName(input) {
     return parts.join(' - ');
 }
 function buildTaskDescription(input) {
-    const lines = [
-        '## Menu Submission',
-        `- Submission ID: ${input.submissionId || 'N/A'}`,
-        `- Submitter: ${input.submitterName || 'N/A'} (${input.submitterEmail || 'N/A'})`,
-        `- Job Title: ${input.submitterJobTitle || 'N/A'}`,
-        `- Property: ${input.property || 'N/A'}`,
-        `- Project: ${input.projectName || 'N/A'}`,
-        `- Hotel: ${input.hotelName || 'N/A'}`,
-        `- Location: ${input.cityCountry || 'N/A'}`,
-        `- Menu Type: ${input.menuType || 'standard'}`,
-        `- Template: ${input.templateType || 'food'}`,
-        `- Asset Type: ${input.assetType || 'N/A'}`,
-        `- Dimensions: ${input.width || 'N/A'} x ${input.height || 'N/A'} ${input.assetType === 'PRINT' ? 'in' : (input.assetType === 'BOTH' ? 'mixed' : 'px')}`,
-        `- Orientation: ${input.orientation || 'N/A'}`,
-        `- Turnaround: ${input.turnaroundDays || 'N/A'} day(s)`,
-        `- Date Needed: ${formatDateNeeded(input.dateNeeded)}`,
-        `- Submission Mode: ${input.submissionMode || 'new'}`,
-        '- ClickUp Watchers: TODO add Marketing Team as watcher when watcher mapping/API is configured.',
-    ];
+    const lines = [];
+    // Overrides and attestations at the top for reviewer visibility
+    if (input.overrideLines && input.overrideLines.length) {
+        lines.push('## Critical Overrides', ...input.overrideLines, '');
+    }
+    if (Array.isArray(input.approvals) && input.approvals.length) {
+        lines.push('## Approval Attestations');
+        input.approvals.forEach((approval, index) => {
+            const status = approval?.approved ? 'Approved' : 'Not approved';
+            const name = (approval?.name || '').trim() || 'N/A';
+            const position = (approval?.position || '').trim() || 'N/A';
+            lines.push(`- Level ${index + 1}: ${status} by ${name} (${position})`);
+        });
+        lines.push('');
+    }
+    lines.push('## Menu Submission', `- Submission ID: ${input.submissionId || 'N/A'}`, `- Submitter: ${input.submitterName || 'N/A'} (${input.submitterEmail || 'N/A'})`, `- Job Title: ${input.submitterJobTitle || 'N/A'}`, `- Property: ${input.property || 'N/A'}`, `- Project: ${input.projectName || 'N/A'}`, `- Hotel: ${input.hotelName || 'N/A'}`, `- Location: ${input.cityCountry || 'N/A'}`, `- Menu Type: ${input.menuType || 'standard'}`, `- Template: ${input.templateType || 'food'}`, `- Asset Type: ${input.assetType || 'N/A'}`, `- Dimensions: ${input.width || 'N/A'} x ${input.height || 'N/A'} ${input.assetType === 'PRINT' ? 'in' : (input.assetType === 'BOTH' ? 'mixed' : 'px')}`, `- Orientation: ${input.orientation || 'N/A'}`, `- Turnaround: ${input.turnaroundDays || 'N/A'} day(s)`, `- Date Needed: ${formatDateNeeded(input.dateNeeded)}`, `- Submission Mode: ${input.submissionMode || 'new'}`, '- ClickUp Watchers: TODO add Marketing Team as watcher when watcher mapping/API is configured.');
     if (input.submissionMode === 'modification') {
         lines.push(`- Revision Source: ${input.revisionSource || (input.revisionBaseSubmissionId ? 'database' : 'uploaded-baseline')}`);
         if (input.revisionBaseSubmissionId) {
@@ -194,18 +191,6 @@ function buildTaskDescription(input) {
         if (input.fileDeliveryNotes) {
             lines.push(`- Delivery Notes: ${input.fileDeliveryNotes}`);
         }
-    }
-    if (input.overrideLines && input.overrideLines.length) {
-        lines.push('', '## Critical Overrides', ...input.overrideLines);
-    }
-    if (Array.isArray(input.approvals) && input.approvals.length) {
-        lines.push('', '## Approval Attestations');
-        input.approvals.forEach((approval, index) => {
-            const status = approval?.approved ? 'Approved' : 'Not approved';
-            const name = (approval?.name || '').trim() || 'N/A';
-            const position = (approval?.position || '').trim() || 'N/A';
-            lines.push(`- Level ${index + 1}: ${status} by ${name} (${position})`);
-        });
     }
     return lines.join('\n');
 }
