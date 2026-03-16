@@ -5,6 +5,10 @@ import * as path from 'path';
 import * as fsSync from 'fs';
 import { exec } from 'child_process';
 import { promisify } from 'util';
+import * as dotenv from 'dotenv';
+import { getSupabaseClient, isSupabaseConfigured } from '@menumanager/supabase-client';
+
+dotenv.config({ path: path.join(__dirname, '..', '..', '..', '.env') });
 
 const app = express();
 const port = 3006;
@@ -309,21 +313,15 @@ app.get('/learning/rules', async (_req, res) => {
     }
 });
 
+// v2: Overlay injection removed. This endpoint returns empty for backward compatibility.
 app.get('/learning/overlay', async (_req, res) => {
-    try {
-        const snapshot = await readLearnedRulesSnapshot();
-        const overrides = await readRuleOverrides();
-        const enabledRules = snapshot.active_rules.filter((r) => !isRuleDisabled(r, overrides));
-        const overlay = buildPromptOverlay(enabledRules);
-        res.json({
-            generated_at: snapshot.generated_at,
-            rules_used: enabledRules.length,
-            overlay,
-        });
-    } catch (error) {
-        console.error('Error generating learning overlay:', error);
-        res.status(500).json({ error: 'Failed to build learning overlay' });
-    }
+    res.json({
+        generated_at: new Date().toISOString(),
+        rules_used: 0,
+        overlay: '',
+        deprecated: true,
+        message: 'Overlay injection removed in v2. Rules now flow through correction_rules table.',
+    });
 });
 
 app.get('/learning/overrides', async (_req, res) => {
@@ -1268,7 +1266,77 @@ async function rebuildLearnedRules(): Promise<LearnedRulesSnapshot> {
     };
 
     await fs.writeFile(LEARNED_RULES_FILE, JSON.stringify(snapshot, null, 2));
+
+    // v2: Propose active rules as system-generated correction_rules in Supabase
+    // (fire-and-forget, never blocks the compare response)
+    if (isSupabaseConfigured() && activeRules.length > 0) {
+        proposeSystemRules(activeRules, pairMap).catch((err) => {
+            console.error('System rule proposal failed:', err.message || err);
+        });
+    }
+
     return snapshot;
+}
+
+async function proposeSystemRules(
+    activeRules: LearnedRule[],
+    pairMap: Map<string, { submissions: Set<string> }>
+): Promise<void> {
+    const supabase = getSupabaseClient();
+    const CORRECTION_RULES_TABLE = 'correction_rules';
+
+    // Fetch existing system-proposed rules to avoid duplicates
+    const { data: existing, error: fetchError } = await supabase
+        .from(CORRECTION_RULES_TABLE)
+        .select('original_text, corrected_text')
+        .eq('source', 'system');
+
+    if (fetchError) {
+        console.warn('Could not fetch existing system rules for dedup:', fetchError.message);
+        return;
+    }
+
+    const existingKeys = new Set(
+        (existing || []).map((r: any) => `${(r.original_text || '').toLowerCase()}=>${(r.corrected_text || '').toLowerCase()}`)
+    );
+
+    const newProposals: any[] = [];
+    for (const rule of activeRules) {
+        const dedupKey = `${rule.source.toLowerCase()}=>${rule.target.toLowerCase()}`;
+        if (existingKeys.has(dedupKey)) continue;
+
+        const pairData = pairMap.get(`${rule.source_norm}=>${rule.target_norm}`);
+        const submissionIds = pairData ? Array.from(pairData.submissions) : [];
+
+        newProposals.push({
+            submission_id: submissionIds[submissionIds.length - 1] || 'unknown',
+            correction_id: `system-${rule.source_norm}=>${rule.target_norm}`,
+            original_text: rule.source,
+            corrected_text: rule.target,
+            change_type: rule.kind,
+            rule: `Always use "${rule.target}" instead of "${rule.source}" (seen ${rule.occurrences}x across ${rule.submission_count} submissions)`,
+            is_location_specific: false,
+            restaurant_name: '',
+            location: 'All properties (global rule)',
+            source: 'system',
+            status: 'pending',
+            occurrences: rule.occurrences,
+            confidence: rule.confidence,
+            submission_ids: submissionIds,
+        });
+    }
+
+    if (newProposals.length === 0) return;
+
+    const { error: insertError } = await supabase
+        .from(CORRECTION_RULES_TABLE)
+        .insert(newProposals);
+
+    if (insertError) {
+        console.error('Failed to insert system rule proposals:', insertError.message);
+    } else {
+        console.log(`Proposed ${newProposals.length} system rules for human review`);
+    }
 }
 
 async function readRuleOverrides(): Promise<RuleOverrides> {

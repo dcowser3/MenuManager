@@ -1004,6 +1004,263 @@ app.post('/reports', async (req, res) => {
     }
 });
 
+// ============================================================================
+// Correction Rules (Learning Pipeline v2)
+// ============================================================================
+const CORRECTION_RULES_TABLE = 'correction_rules';
+
+app.post('/correction-rules', async (req, res) => {
+    try {
+        if (!isSupabaseConfigured()) {
+            return res.status(503).json({ error: 'Supabase not configured — correction_rules require Supabase' });
+        }
+
+        const record = req.body || {};
+        if (!record.submission_id || !record.correction_id || !record.original_text || !record.corrected_text || !record.rule) {
+            return res.status(400).json({ error: 'submission_id, correction_id, original_text, corrected_text, and rule are required' });
+        }
+
+        const supabase = getSupabaseClient();
+        const { data, error } = await supabase
+            .from(CORRECTION_RULES_TABLE)
+            .insert({
+                submission_id: record.submission_id,
+                correction_id: record.correction_id,
+                original_text: record.original_text,
+                corrected_text: record.corrected_text,
+                change_type: record.change_type || null,
+                rule: record.rule,
+                is_location_specific: record.is_location_specific || false,
+                project_name: record.project_name || null,
+                restaurant_name: record.restaurant_name || '',
+                location: record.location || 'All properties (global rule)',
+                other_applicable_locations: record.other_applicable_locations || [],
+                reviewer_name: record.reviewer_name || null,
+                source: record.source || 'human',
+                status: record.status || 'accepted',
+                occurrences: record.occurrences || 1,
+                confidence: record.confidence || null,
+                submission_ids: record.submission_ids || null,
+            })
+            .select()
+            .single();
+
+        if (error) {
+            throw new Error(error.message);
+        }
+        res.status(201).json(data);
+    } catch (error: any) {
+        console.error('Error creating correction rule:', error.message);
+        res.status(500).json({ error: 'Failed to create correction rule' });
+    }
+});
+
+app.get('/correction-rules', async (req, res) => {
+    try {
+        if (!isSupabaseConfigured()) {
+            return res.json([]);
+        }
+
+        const supabase = getSupabaseClient();
+        let query = supabase
+            .from(CORRECTION_RULES_TABLE)
+            .select('*')
+            .order('created_at', { ascending: false });
+
+        if (req.query.submission_id) {
+            query = query.eq('submission_id', req.query.submission_id as string);
+        }
+        if (req.query.status) {
+            query = query.eq('status', req.query.status as string);
+        }
+        if (req.query.source) {
+            query = query.eq('source', req.query.source as string);
+        }
+
+        const limit = Math.min(parseInt((req.query.limit as string) || '200', 10), 500);
+        query = query.limit(limit);
+
+        const { data, error } = await query;
+        if (error) {
+            throw new Error(error.message);
+        }
+        res.json(data || []);
+    } catch (error: any) {
+        console.error('Error fetching correction rules:', error.message);
+        res.status(500).json([]);
+    }
+});
+
+// IMPORTANT: Must come BEFORE any /:id route in correction-rules
+app.get('/correction-rules/pending', async (req, res) => {
+    try {
+        if (!isSupabaseConfigured()) {
+            return res.json([]);
+        }
+
+        const supabase = getSupabaseClient();
+        const { data, error } = await supabase
+            .from(CORRECTION_RULES_TABLE)
+            .select('*')
+            .eq('status', 'pending')
+            .order('created_at', { ascending: false })
+            .limit(100);
+
+        if (error) {
+            throw new Error(error.message);
+        }
+        res.json(data || []);
+    } catch (error: any) {
+        console.error('Error fetching pending correction rules:', error.message);
+        res.status(500).json([]);
+    }
+});
+
+app.put('/correction-rules/:id', async (req, res) => {
+    try {
+        if (!isSupabaseConfigured()) {
+            return res.status(503).json({ error: 'Supabase not configured' });
+        }
+
+        const { id } = req.params;
+        const updates = req.body || {};
+
+        // Only allow specific fields to be updated
+        const allowedFields: Record<string, any> = {};
+        const editable = ['status', 'rule', 'is_location_specific', 'other_applicable_locations',
+                          'change_type', 'restaurant_name', 'location', 'project_name', 'reviewer_name'];
+        for (const key of editable) {
+            if (updates[key] !== undefined) {
+                allowedFields[key] = updates[key];
+            }
+        }
+
+        if (Object.keys(allowedFields).length === 0) {
+            return res.status(400).json({ error: 'No valid fields to update' });
+        }
+
+        allowedFields.updated_at = new Date().toISOString();
+
+        const supabase = getSupabaseClient();
+        const { data, error } = await supabase
+            .from(CORRECTION_RULES_TABLE)
+            .update(allowedFields)
+            .eq('id', id)
+            .select()
+            .single();
+
+        if (error) {
+            throw new Error(error.message);
+        }
+        res.json(data);
+    } catch (error: any) {
+        console.error('Error updating correction rule:', error.message);
+        res.status(500).json({ error: 'Failed to update correction rule' });
+    }
+});
+
+// ============================================================================
+// Prompt Proposals (Learning Pipeline v2)
+// ============================================================================
+const PROMPT_PROPOSALS_TABLE = 'prompt_proposals';
+
+app.get('/prompt-proposals/latest', async (_req, res) => {
+    try {
+        if (!isSupabaseConfigured()) {
+            return res.json(null);
+        }
+        const supabase = getSupabaseClient();
+        const { data, error } = await supabase
+            .from(PROMPT_PROPOSALS_TABLE)
+            .select('*')
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+
+        if (error) throw new Error(error.message);
+        res.json(data || null);
+    } catch (error: any) {
+        console.error('Error fetching latest prompt proposal:', error.message);
+        res.status(500).json(null);
+    }
+});
+
+app.get('/prompt-proposals', async (_req, res) => {
+    try {
+        if (!isSupabaseConfigured()) {
+            return res.json([]);
+        }
+        const supabase = getSupabaseClient();
+        const { data, error } = await supabase
+            .from(PROMPT_PROPOSALS_TABLE)
+            .select('id, cycle_id, status, correction_rule_count, submission_count, date_range_start, date_range_end, llm_model, reviewer_name, reviewed_at, created_at')
+            .order('created_at', { ascending: false })
+            .limit(20);
+
+        if (error) throw new Error(error.message);
+        res.json(data || []);
+    } catch (error: any) {
+        console.error('Error fetching prompt proposals:', error.message);
+        res.status(500).json([]);
+    }
+});
+
+app.get('/prompt-proposals/:id', async (req, res) => {
+    try {
+        if (!isSupabaseConfigured()) {
+            return res.status(404).json({ error: 'Supabase not configured' });
+        }
+        const supabase = getSupabaseClient();
+        const { data, error } = await supabase
+            .from(PROMPT_PROPOSALS_TABLE)
+            .select('*')
+            .eq('id', req.params.id)
+            .maybeSingle();
+
+        if (error) throw new Error(error.message);
+        if (!data) return res.status(404).json({ error: 'Proposal not found' });
+        res.json(data);
+    } catch (error: any) {
+        console.error('Error fetching prompt proposal:', error.message);
+        res.status(500).json({ error: 'Failed to fetch proposal' });
+    }
+});
+
+app.put('/prompt-proposals/:id', async (req, res) => {
+    try {
+        if (!isSupabaseConfigured()) {
+            return res.status(503).json({ error: 'Supabase not configured' });
+        }
+
+        const updates = req.body || {};
+        const allowedFields: Record<string, any> = {};
+        const editable = ['status', 'reviewer_name', 'reviewer_notes', 'final_prompt', 'reviewed_at'];
+        for (const key of editable) {
+            if (updates[key] !== undefined) {
+                allowedFields[key] = updates[key];
+            }
+        }
+
+        if (Object.keys(allowedFields).length === 0) {
+            return res.status(400).json({ error: 'No valid fields to update' });
+        }
+
+        const supabase = getSupabaseClient();
+        const { data, error } = await supabase
+            .from(PROMPT_PROPOSALS_TABLE)
+            .update(allowedFields)
+            .eq('id', req.params.id)
+            .select()
+            .single();
+
+        if (error) throw new Error(error.message);
+        res.json(data);
+    } catch (error: any) {
+        console.error('Error updating prompt proposal:', error.message);
+        res.status(500).json({ error: 'Failed to update proposal' });
+    }
+});
+
 app.listen(port, () => {
     console.log(`db service listening at http://localhost:${port}`);
     if (isSupabaseConfigured()) {

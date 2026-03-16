@@ -8,7 +8,8 @@
   ],
   "scripts": {
     "test": "jest",
-    "prompt:optimize": "node scripts/prompt-optimize.js"
+    "prompt:optimize": "node scripts/prompt-optimize.js",
+    "prompt:rewrite": "node scripts/prompt-rewrite.js"
   },
   "keywords": [],
   "author": "",

@@ -350,6 +350,94 @@ WHERE o.asset_type = 'original_docx'
   AND a.asset_type = 'approved_docx';
 
 -- ============================================================================
+-- 7. CORRECTION_RULES
+-- Human-annotated and system-proposed correction rules for learning pipeline v2
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS correction_rules (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+    -- Link to submission where correction was observed
+    submission_id VARCHAR(100) NOT NULL,
+    correction_id VARCHAR(100) NOT NULL,
+
+    -- The correction itself
+    original_text TEXT NOT NULL,
+    corrected_text TEXT NOT NULL,
+    change_type VARCHAR(50),              -- 'diacritic', 'spelling', 'punctuation',
+                                          -- 'capitalization', 'content', 'formatting'
+
+    -- Human annotation
+    rule TEXT NOT NULL,                    -- Actionable instruction / reasoning
+    is_location_specific BOOLEAN DEFAULT false,
+
+    -- Context
+    project_name VARCHAR(255),
+    restaurant_name VARCHAR(255) NOT NULL,
+    location VARCHAR(255) NOT NULL,        -- Primary property
+    other_applicable_locations TEXT[],      -- Other locations this rule applies to
+    reviewer_name VARCHAR(255),
+
+    -- Review status
+    status VARCHAR(50) DEFAULT 'pending',  -- 'pending', 'accepted', 'rejected', 'modified'
+    source VARCHAR(50) DEFAULT 'human',    -- 'human' or 'system'
+
+    -- System-proposed rule metadata
+    occurrences INTEGER DEFAULT 1,
+    confidence NUMERIC(4,3),
+    submission_ids TEXT[],
+
+    -- Weekly prompt cycle tracking
+    prompt_cycle_id VARCHAR(100),
+    consumed_at TIMESTAMPTZ,
+
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_correction_rules_submission ON correction_rules(submission_id);
+CREATE INDEX IF NOT EXISTS idx_correction_rules_status ON correction_rules(status);
+CREATE INDEX IF NOT EXISTS idx_correction_rules_location ON correction_rules(location);
+CREATE INDEX IF NOT EXISTS idx_correction_rules_unconsumed ON correction_rules(prompt_cycle_id)
+    WHERE prompt_cycle_id IS NULL;
+
+CREATE TRIGGER update_correction_rules_updated_at
+    BEFORE UPDATE ON correction_rules
+    FOR EACH ROW
+    EXECUTE FUNCTION update_updated_at_column();
+
+-- ============================================================================
+-- 8. PROMPT_PROPOSALS
+-- Weekly prompt rewrite proposals for human review
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS prompt_proposals (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+    cycle_id VARCHAR(100) NOT NULL UNIQUE,  -- e.g., '2026-W12'
+    current_prompt TEXT NOT NULL,
+    proposed_prompt TEXT NOT NULL,
+    prompt_diff TEXT,
+
+    -- What fed into this proposal
+    correction_rule_count INTEGER,
+    submission_count INTEGER,
+    date_range_start DATE,
+    date_range_end DATE,
+
+    -- LLM reasoning
+    llm_analysis TEXT,
+    llm_model VARCHAR(100),
+
+    -- Human review
+    status VARCHAR(50) DEFAULT 'pending',   -- 'pending', 'approved', 'approved_modified', 'rejected'
+    reviewer_name VARCHAR(255),
+    reviewer_notes TEXT,
+    final_prompt TEXT,
+    reviewed_at TIMESTAMPTZ,
+
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ============================================================================
 -- ROW LEVEL SECURITY (RLS) - Enable later when auth is added
 -- ============================================================================
 -- ALTER TABLE submissions ENABLE ROW LEVEL SECURITY;

@@ -89,6 +89,13 @@
             font-size: 1.15rem;
             font-weight: 600;
         }
+        .section-title {
+            font-size: .8rem;
+            text-transform: uppercase;
+            letter-spacing: .1em;
+            color: var(--muted);
+            margin: 1.5rem 0 .6rem;
+        }
         table {
             width: 100%;
             border-collapse: collapse;
@@ -117,10 +124,14 @@
             letter-spacing: .1em;
             background: #fff;
         }
+        .badge.pending { color: var(--warn); border-color: rgba(184,134,11,.35); }
+        .badge.accepted { color: var(--success); border-color: rgba(74,124,89,.35); }
+        .badge.rejected { color: var(--danger); border-color: rgba(139,58,58,.35); }
         .badge.active { color: var(--success); border-color: rgba(74,124,89,.35); }
         .badge.weak { color: var(--warn); border-color: rgba(184,134,11,.35); }
         .badge.conflicted { color: var(--danger); border-color: rgba(139,58,58,.35); }
-        .badge.disabled { color: var(--danger); border-color: rgba(139,58,58,.35); }
+        .badge.system { color: #555; border-color: #ccc; }
+        .badge.human { color: var(--primary); border-color: var(--border); }
         .btn {
             border: 1px solid var(--primary);
             background: var(--primary);
@@ -135,20 +146,24 @@
             background: #fff;
             color: var(--primary);
         }
+        .btn.success {
+            background: var(--success);
+            border-color: var(--success);
+        }
+        .btn.danger {
+            background: var(--danger);
+            border-color: var(--danger);
+        }
+        .btn-group { display: flex; gap: .35rem; }
         .small {
             font-size: .72rem;
             color: var(--muted);
-        }
-        .prompt-grid {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 1rem;
-            margin-bottom: 1rem;
         }
         .prompt-block {
             border: 1px solid var(--border);
             background: #fff;
             padding: .75rem;
+            margin-bottom: 1rem;
         }
         .prompt-block h3 {
             margin: 0 0 .5rem;
@@ -168,24 +183,6 @@
             white-space: pre;
             overflow: auto;
             background: #fcfcfb;
-        }
-        .prompt-full {
-            margin-bottom: 1rem;
-            border: 1px solid var(--border);
-            background: #fff;
-            padding: .75rem;
-        }
-        .prompt-full h3 {
-            margin: 0 0 .5rem;
-            font-size: .8rem;
-            text-transform: uppercase;
-            letter-spacing: .1em;
-            color: var(--muted);
-        }
-        @media (max-width: 980px) {
-            .prompt-grid {
-                grid-template-columns: 1fr;
-            }
         }
         .empty {
             border: 1px solid var(--border);
@@ -213,6 +210,7 @@
         <h1>Learning Rules</h1>
         <div class="links">
             <a href="/">Dashboard</a>
+            <a href="/learning/prompt-proposal">Prompt Proposals</a>
             <a href="/training">Training</a>
             <a href="/form">Submission Form</a>
         </div>
@@ -241,114 +239,52 @@
         <% } %>
 
         <div class="stats">
-            <div class="stat"><div class="label">Generated</div><div class="value"><%= generatedAt ? new Date(generatedAt).toLocaleString() : 'N/A' %></div></div>
-            <div class="stat"><div class="label">Submissions Learned</div><div class="value"><%= totalEntries %></div></div>
-            <div class="stat"><div class="label">Rules</div><div class="value"><%= totalRules %></div></div>
-            <div class="stat"><div class="label">Min Occurrences</div><div class="value"><%= minOccurrences %></div></div>
+            <div class="stat"><div class="label">Last Scan</div><div class="value"><%= generatedAt ? new Date(generatedAt).toLocaleString() : 'N/A' %></div></div>
+            <div class="stat"><div class="label">Submissions Analyzed</div><div class="value"><%= totalEntries %></div></div>
+            <div class="stat"><div class="label">Detected Patterns</div><div class="value"><%= totalRules %></div></div>
+            <div class="stat"><div class="label">Pending Review</div><div class="value"><%= pendingRules.length %></div></div>
+            <div class="stat"><div class="label">Accepted Rules</div><div class="value"><%= acceptedRules.length %></div></div>
         </div>
 
-        <div class="panel">
-            <strong>Location-Specific Rules</strong>
-            <div class="small" style="margin-top:.35rem; margin-bottom:.55rem;">
-                Filtered by configured properties from the canonical property list.
-            </div>
-            <div class="filter-row">
-                <label for="locationRuleFilter" class="small" style="margin:0;">Property Filter:</label>
-                <select id="locationRuleFilter" onchange="filterLocationRules()">
-                    <option value="">All Properties</option>
-                    <% (propertyOptions || []).forEach((property) => { %>
-                        <option value="<%= property %>"><%= property %></option>
-                    <% }) %>
-                </select>
-            </div>
-            <% if (!locationRules || locationRules.length === 0) { %>
-                <div class="empty">No location-specific rules saved yet.</div>
-            <% } else { %>
-                <table id="locationRulesTable">
-                    <thead>
-                        <tr>
-                            <th>Created</th>
-                            <th>Submission</th>
-                            <th>Restaurant</th>
-                            <th>Property</th>
-                            <th>Shared Properties</th>
-                            <th>Reasoning</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <% locationRules.forEach((item) => { %>
-                            <tr data-location="<%= (item.location || '').toLowerCase() %>">
-                                <td><%= item.created_at ? new Date(item.created_at).toLocaleString() : 'N/A' %></td>
-                                <td><code><%= item.submission_id || '' %></code></td>
-                                <td><%= item.restaurant_name || '' %></td>
-                                <td><%= item.location || '' %></td>
-                                <td><%= (item.shared_locations || []).join(', ') %></td>
-                                <td><%= item.explanation || '' %></td>
-                            </tr>
-                        <% }) %>
-                    </tbody>
-                </table>
-            <% } %>
-        </div>
-
-        <div class="prompt-grid">
-            <div class="prompt-block">
-                <h3>Base QA Prompt</h3>
-                <textarea class="prompt-text" readonly><%= basePrompt || '' %></textarea>
-            </div>
-            <div class="prompt-block">
-                <h3>Learned Overlay (Injected)</h3>
-                <textarea class="prompt-text" readonly><%= learnedOverlay || '' %></textarea>
-            </div>
-        </div>
-
-        <div class="prompt-full">
-            <h3>Effective Prompt (Current Runtime)</h3>
-            <div class="small" style="margin-bottom:.5rem;">
-                This is the prompt currently sent to AI before per-submission runtime additions (custom allergens, prix-fixe rules, changed-only scope).
-            </div>
-            <textarea class="prompt-text" style="min-height:300px;" readonly><%= effectivePrompt || '' %></textarea>
-        </div>
-
-        <% if (!rules || rules.length === 0) { %>
-            <div class="empty">No learned rules yet. Once corrected documents are processed, rules will appear here.</div>
-        <% } else { %>
+        <!-- Pending Rules (need human review) -->
+        <% if (pendingRules.length > 0) { %>
+            <h3 class="section-title">Pending Rules (Awaiting Review)</h3>
             <table>
                 <thead>
                     <tr>
+                        <th>Original</th>
+                        <th>Corrected</th>
                         <th>Rule</th>
-                        <th>Type</th>
-                        <th>Status</th>
+                        <th>Source</th>
+                        <th>Restaurant / Location</th>
                         <th>Signals</th>
-                        <th>Last Seen</th>
-                        <th>Control</th>
+                        <th>Action</th>
                     </tr>
                 </thead>
                 <tbody>
-                <% rules.forEach((rule) => { %>
-                    <tr data-rule-key="<%= rule.key %>" data-disabled="<%= rule.disabled ? '1' : '0' %>">
+                <% pendingRules.forEach((rule) => { %>
+                    <tr id="rule-row-<%= rule.id %>">
+                        <td><strong><%= rule.original_text %></strong></td>
+                        <td><strong><%= rule.corrected_text %></strong></td>
+                        <td><%= rule.rule || '' %></td>
+                        <td><span class="badge <%= rule.source %>"><%= rule.source %></span></td>
                         <td>
-                            <strong><%= rule.source %></strong> -> <strong><%= rule.target %></strong>
-                            <div class="small"><code><%= rule.key %></code></div>
-                        </td>
-                        <td><%= rule.kind %></td>
-                        <td>
-                            <span class="badge <%= rule.category %>"><%= rule.category %></span>
-                            <% if (rule.disabled) { %><span class="badge disabled">disabled</span><% } %>
-                            <% if (rule.disabled_reason) { %><div class="small">Reason: <%= rule.disabled_reason %></div><% } %>
+                            <div><%= rule.restaurant_name || '' %></div>
+                            <div class="small"><%= rule.location || '' %><%= rule.is_location_specific ? '' : ' (global)' %></div>
                         </td>
                         <td>
-                            <div>Occurrences: <strong><%= rule.occurrences %></strong></div>
-                            <div>Submissions: <strong><%= rule.submission_count %></strong></div>
-                            <div>Confidence: <strong><%= Number(rule.confidence || 0).toFixed(2) %></strong></div>
-                        </td>
-                        <td><%= rule.last_seen_at ? new Date(rule.last_seen_at).toLocaleString() : 'N/A' %></td>
-                        <td>
-                            <% if (rule.disabled) { %>
-                                <button class="btn secondary" onclick="toggleRule('<%= rule.key %>', false)">Enable</button>
-                            <% } else { %>
-                                <button class="btn" onclick="toggleRule('<%= rule.key %>', true)">Disable</button>
+                            <% if (rule.occurrences > 1) { %>
+                                <div>Seen: <strong><%= rule.occurrences %>x</strong></div>
                             <% } %>
+                            <% if (rule.confidence) { %>
+                                <div>Confidence: <strong><%= Number(rule.confidence).toFixed(2) %></strong></div>
+                            <% } %>
+                        </td>
+                        <td>
+                            <div class="btn-group">
+                                <button class="btn success" onclick="reviewRule('<%= rule.id %>', 'accepted')">Accept</button>
+                                <button class="btn danger" onclick="reviewRule('<%= rule.id %>', 'rejected')">Reject</button>
+                            </div>
                         </td>
                     </tr>
                 <% }) %>
@@ -356,63 +292,161 @@
             </table>
         <% } %>
 
-        <div style="margin-top: 1rem;">
-            <h3 style="font-size:.8rem; text-transform:uppercase; letter-spacing:.1em; color:var(--muted); margin:.25rem 0 .6rem;">Recent Learned Submissions</h3>
-            <% if (!recentSubmissions || recentSubmissions.length === 0) { %>
-                <div class="empty">No training submissions recorded yet.</div>
-            <% } else { %>
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Submission</th>
-                            <th>Timestamp</th>
-                            <th>Changes</th>
-                            <th>Change %</th>
-                            <th>Signals</th>
-                            <th>AI Draft</th>
-                            <th>Final</th>
-                            <th>Review</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                    <% (learningSubmissions && learningSubmissions.length ? learningSubmissions : recentSubmissions).forEach((item) => { %>
-                        <tr>
-                            <td><code><%= item.submission_id %></code></td>
-                            <td><%= item.timestamp ? new Date(item.timestamp).toLocaleString() : 'N/A' %></td>
-                            <td><%= item.changes_detected ? 'YES' : 'NO' %></td>
-                            <td><%= Number(item.change_percentage || 0).toFixed(2) %></td>
-                            <td><%= item.replacement_count || item.learning_signals?.replacement_count || 0 %></td>
-                            <td><code><%= (item.ai_draft_path || '').split('/').pop() || 'N/A' %></code></td>
-                            <td><code><%= (item.final_path || '').split('/').pop() || 'N/A' %></code></td>
-                            <td><a href="/learning/submission/<%= item.submission_id %>">Open</a></td>
-                        </tr>
-                    <% }) %>
-                    </tbody>
-                </table>
-            <% } %>
+        <!-- Accepted Correction Rules -->
+        <h3 class="section-title">Accepted Correction Rules</h3>
+        <div class="filter-row">
+            <label for="ruleLocationFilter" class="small" style="margin:0;">Property Filter:</label>
+            <select id="ruleLocationFilter" onchange="filterAcceptedRules()">
+                <option value="">All Properties</option>
+                <% (propertyOptions || []).forEach((property) => { %>
+                    <option value="<%= property %>"><%= property %></option>
+                <% }) %>
+            </select>
         </div>
+        <% if (acceptedRules.length === 0) { %>
+            <div class="empty">No accepted correction rules yet. Annotate corrections from submission reviews to build the rule set.</div>
+        <% } else { %>
+            <table id="acceptedRulesTable">
+                <thead>
+                    <tr>
+                        <th>Original</th>
+                        <th>Corrected</th>
+                        <th>Rule</th>
+                        <th>Type</th>
+                        <th>Restaurant</th>
+                        <th>Location</th>
+                        <th>Source</th>
+                        <th>Created</th>
+                    </tr>
+                </thead>
+                <tbody>
+                <% acceptedRules.forEach((rule) => { %>
+                    <tr data-location="<%= (rule.location || '').toLowerCase() %>">
+                        <td><%= rule.original_text || '' %></td>
+                        <td><%= rule.corrected_text || '' %></td>
+                        <td><%= rule.rule || '' %></td>
+                        <td><%= rule.change_type || '' %></td>
+                        <td><%= rule.restaurant_name || '' %></td>
+                        <td>
+                            <%= rule.location || '' %><%= rule.is_location_specific ? '' : ' (global)' %>
+                            <% if (rule.other_applicable_locations && rule.other_applicable_locations.length > 0) { %>
+                                <div class="small">Also: <%= rule.other_applicable_locations.join(', ') %></div>
+                            <% } %>
+                        </td>
+                        <td><span class="badge <%= rule.source %>"><%= rule.source %></span></td>
+                        <td><%= rule.created_at ? new Date(rule.created_at).toLocaleString() : 'N/A' %></td>
+                    </tr>
+                <% }) %>
+                </tbody>
+            </table>
+        <% } %>
+
+        <!-- Base Prompt (read-only reference) -->
+        <h3 class="section-title">Current Base Prompt</h3>
+        <div class="prompt-block">
+            <div class="small" style="margin-bottom:.5rem;">
+                This is the prompt sent to AI. It evolves through weekly prompt rewrite proposals — no auto-injection.
+            </div>
+            <textarea class="prompt-text" readonly><%= basePrompt || '' %></textarea>
+        </div>
+
+        <!-- Detected Patterns (read-only reference from differ) -->
+        <h3 class="section-title">Detected Patterns (Auto-Scanned)</h3>
+        <div class="small" style="margin-bottom:.5rem;">
+            Patterns detected by the differ service from before/after document comparisons. These are <strong>not</strong> injected into the prompt. Use them as reference when annotating corrections.
+        </div>
+        <% if (!detectedPatterns || detectedPatterns.length === 0) { %>
+            <div class="empty">No patterns detected yet. Once corrected documents are processed, patterns will appear here.</div>
+        <% } else { %>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Pattern</th>
+                        <th>Type</th>
+                        <th>Status</th>
+                        <th>Signals</th>
+                        <th>Last Seen</th>
+                    </tr>
+                </thead>
+                <tbody>
+                <% detectedPatterns.forEach((pattern) => { %>
+                    <tr>
+                        <td>
+                            <strong><%= pattern.source %></strong> -> <strong><%= pattern.target %></strong>
+                        </td>
+                        <td><%= pattern.kind %></td>
+                        <td><span class="badge <%= pattern.category %>"><%= pattern.category %></span></td>
+                        <td>
+                            <div>Occurrences: <strong><%= pattern.occurrences %></strong></div>
+                            <div>Submissions: <strong><%= pattern.submission_count %></strong></div>
+                            <div>Confidence: <strong><%= Number(pattern.confidence || 0).toFixed(2) %></strong></div>
+                        </td>
+                        <td><%= pattern.last_seen_at ? new Date(pattern.last_seen_at).toLocaleString() : 'N/A' %></td>
+                    </tr>
+                <% }) %>
+                </tbody>
+            </table>
+        <% } %>
+
+        <!-- Recent Learned Submissions -->
+        <h3 class="section-title">Recent Learned Submissions</h3>
+        <% if (!recentSubmissions || recentSubmissions.length === 0) { %>
+            <div class="empty">No training submissions recorded yet.</div>
+        <% } else { %>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Submission</th>
+                        <th>Timestamp</th>
+                        <th>Changes</th>
+                        <th>Change %</th>
+                        <th>Signals</th>
+                        <th>AI Draft</th>
+                        <th>Final</th>
+                        <th>Review</th>
+                    </tr>
+                </thead>
+                <tbody>
+                <% (learningSubmissions && learningSubmissions.length ? learningSubmissions : recentSubmissions).forEach((item) => { %>
+                    <tr>
+                        <td><code><%= item.submission_id %></code></td>
+                        <td><%= item.timestamp ? new Date(item.timestamp).toLocaleString() : 'N/A' %></td>
+                        <td><%= item.changes_detected ? 'YES' : 'NO' %></td>
+                        <td><%= Number(item.change_percentage || 0).toFixed(2) %></td>
+                        <td><%= item.replacement_count || item.learning_signals?.replacement_count || 0 %></td>
+                        <td><code><%= (item.ai_draft_path || '').split('/').pop() || 'N/A' %></code></td>
+                        <td><code><%= (item.final_path || '').split('/').pop() || 'N/A' %></code></td>
+                        <td><a href="/learning/submission/<%= item.submission_id %>">Open</a></td>
+                    </tr>
+                <% }) %>
+                </tbody>
+            </table>
+        <% } %>
     </div>
 
     <script>
-        async function toggleRule(ruleKey, disabled) {
-            const reason = disabled ? (prompt('Optional disable reason:') || '') : '';
-            const response = await fetch('/api/learning/rules/toggle', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ ruleKey, disabled, reason }),
-            });
-            const result = await response.json();
-            if (!response.ok) {
-                alert(result.error || 'Failed to update rule');
-                return;
+        async function reviewRule(ruleId, newStatus) {
+            try {
+                const response = await fetch(`/api/learning/correction-rules/${ruleId}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ status: newStatus }),
+                });
+                const result = await response.json();
+                if (!response.ok) {
+                    alert(result.error || 'Failed to update rule');
+                    return;
+                }
+                window.location.reload();
+            } catch (error) {
+                alert('Failed to update rule');
             }
-            window.location.reload();
         }
 
-        function filterLocationRules() {
-            const select = document.getElementById('locationRuleFilter');
+        function filterAcceptedRules() {
+            const select = document.getElementById('ruleLocationFilter');
             const selected = (select?.value || '').trim().toLowerCase();
-            const rows = document.querySelectorAll('#locationRulesTable tbody tr');
+            const rows = document.querySelectorAll('#acceptedRulesTable tbody tr');
             rows.forEach((row) => {
                 const rowLocation = (row.getAttribute('data-location') || '').trim().toLowerCase();
                 row.style.display = !selected || rowLocation === selected ? '' : 'none';

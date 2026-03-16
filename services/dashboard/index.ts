@@ -634,64 +634,53 @@ app.get('/training/download-prompt/:sessionId', async (req, res) => {
  */
 app.get('/learning', async (_req, res) => {
     try {
-        const [rulesResult, overridesResult, overlayResult, trainingResult, submissionsResult, locationRulesResult, propertiesResult] = await Promise.all([
+        const [rulesResult, trainingResult, submissionsResult, correctionRulesResult, propertiesResult] = await Promise.all([
             axios.get(`${DIFFER_SERVICE_URL}/learning/rules`, { timeout: 2500 })
                 .then((r) => ({ ok: true, data: r.data, error: '' }))
                 .catch((e: any) => ({ ok: false, data: {}, error: e?.message || 'request failed' })),
-            axios.get(`${DIFFER_SERVICE_URL}/learning/overrides`, { timeout: 2500 })
-                .then((r) => ({ ok: true, data: r.data, error: '' }))
-                .catch((e: any) => ({ ok: false, data: { disabled: {} }, error: e?.message || 'request failed' })),
-            axios.get(`${DIFFER_SERVICE_URL}/learning/overlay`, { timeout: 2500 })
-                .then((r) => ({ ok: true, data: r.data, error: '' }))
-                .catch((e: any) => ({ ok: false, data: { overlay: '' }, error: e?.message || 'request failed' })),
             axios.get(`${DIFFER_SERVICE_URL}/training-data`, { timeout: 2500 })
                 .then((r) => ({ ok: true, data: r.data, error: '' }))
                 .catch((e: any) => ({ ok: false, data: { count: 0, data: [] }, error: e?.message || 'request failed' })),
             axios.get(`${DIFFER_SERVICE_URL}/learning/submissions`, { timeout: 2500 })
                 .then((r) => ({ ok: true, data: r.data, error: '' }))
                 .catch((e: any) => ({ ok: false, data: { submissions: [] }, error: e?.message || 'request failed' })),
-            axios.get(`${DIFFER_SERVICE_URL}/learning/location-rules`, { timeout: 2500 })
+            axios.get(`${DB_SERVICE_URL}/correction-rules`, { timeout: 2500 })
                 .then((r) => ({ ok: true, data: r.data, error: '' }))
-                .catch((e: any) => ({ ok: false, data: { rules: [] }, error: e?.message || 'request failed' })),
+                .catch((e: any) => ({ ok: false, data: [], error: e?.message || 'request failed' })),
             axios.get(`${DB_SERVICE_URL}/properties`, { timeout: 2500 })
                 .then((r) => ({ ok: true, data: r.data, error: '' }))
                 .catch((e: any) => ({ ok: false, data: { properties: [] }, error: e?.message || 'request failed' })),
         ]);
 
         const rulesData = (rulesResult as any).data || {};
-        const overrides = (overridesResult as any).data?.disabled || {};
-        const learnedOverlay = (overlayResult as any)?.data?.overlay || '';
         const trainingData = (trainingResult as any).data || { count: 0, data: [] };
         const learningSubmissions = (submissionsResult as any).data?.submissions || [];
-        const locationRules = (locationRulesResult as any).data?.rules || [];
+        const correctionRules: any[] = (correctionRulesResult as any).data || [];
         const propertyOptions: string[] = (propertiesResult as any).data?.properties || [];
         const qaPromptPath = path.join(getRepoRoot(), 'sop-processor', 'qa_prompt.txt');
         const basePrompt = await fs.readFile(qaPromptPath, 'utf-8');
-        const effectivePrompt = learnedOverlay ? `${basePrompt}\n\n${learnedOverlay}` : basePrompt;
-        const decorate = (category: string, items: any[]) =>
-            (items || []).map((r: any) => {
-                const key = `${r.source_norm}=>${r.target_norm}`;
-                const override = overrides[key];
-                return {
-                    ...r,
-                    key,
-                    category,
-                    disabled: !!override,
-                    disabled_reason: override?.reason || '',
-                    disabled_updated_at: override?.updated_at || '',
-                };
-            });
 
-        const rules = [
+        // v2: detected patterns from differ (read-only reference, not auto-injected)
+        const decorate = (category: string, items: any[]) =>
+            (items || []).map((r: any) => ({
+                ...r,
+                key: `${r.source_norm}=>${r.target_norm}`,
+                category,
+            }));
+
+        const detectedPatterns = [
             ...decorate('active', rulesData.active_rules || []),
             ...decorate('weak', rulesData.weak_rules || []),
             ...decorate('conflicted', rulesData.conflicted_rules || []),
         ];
         const recentSubmissions = (trainingData.data || []).slice(-25).reverse();
+
+        // Split correction rules by status for the dashboard
+        const pendingRules = correctionRules.filter((r: any) => r.status === 'pending');
+        const acceptedRules = correctionRules.filter((r: any) => r.status === 'accepted');
+
         const differStatus = {
             rulesOk: !!(rulesResult as any).ok,
-            overridesOk: !!(overridesResult as any).ok,
-            overlayOk: !!(overlayResult as any).ok,
             trainingOk: !!(trainingResult as any).ok,
             submissionsOk: !!(submissionsResult as any).ok,
             rulesError: (rulesResult as any).error || '',
@@ -705,15 +694,14 @@ app.get('/learning', async (_req, res) => {
             minOccurrences: rulesData.min_occurrences || 2,
             totalEntries: rulesData.total_entries_analyzed || 0,
             totalRules: rulesData.total_rules || 0,
-            rules,
+            detectedPatterns,
+            pendingRules,
+            acceptedRules,
             recentSubmissions,
             learningSubmissions,
-            locationRules,
             propertyOptions,
             differStatus,
             basePrompt,
-            learnedOverlay,
-            effectivePrompt,
             documentStorageRoot: process.env.DOCUMENT_STORAGE_ROOT || '',
         });
     } catch (error: any) {
@@ -727,19 +715,16 @@ app.get('/learning', async (_req, res) => {
 app.get('/learning/submission/:submissionId', async (req, res) => {
     try {
         const { submissionId } = req.params;
-        const [learningDetailResult, submissionResult, savedRulesResult, propertiesResult] = await Promise.all([
+        const [learningDetailResult, submissionResult, correctionRulesResult, propertiesResult] = await Promise.all([
             axios.get(`${DIFFER_SERVICE_URL}/learning/submissions/${encodeURIComponent(submissionId)}`, { timeout: 3500 })
                 .then((r) => ({ ok: true, data: r.data, error: '' }))
                 .catch((e: any) => ({ ok: false, data: null, error: e?.message || 'request failed' })),
             axios.get(`${DB_SERVICE_URL}/submissions/${encodeURIComponent(submissionId)}`, { timeout: 3500 })
                 .then((r) => ({ ok: true, data: r.data, error: '' }))
                 .catch((e: any) => ({ ok: false, data: null, error: e?.message || 'request failed' })),
-            axios.get(`${DIFFER_SERVICE_URL}/learning/location-rules`, {
-                timeout: 3500,
-                params: { submission_id: submissionId }
-            })
+            axios.get(`${DB_SERVICE_URL}/correction-rules?submission_id=${encodeURIComponent(submissionId)}`, { timeout: 3500 })
                 .then((r) => ({ ok: true, data: r.data, error: '' }))
-                .catch((e: any) => ({ ok: false, data: { rules: [] }, error: e?.message || 'request failed' })),
+                .catch((e: any) => ({ ok: false, data: [], error: e?.message || 'request failed' })),
             axios.get(`${DB_SERVICE_URL}/properties`, { timeout: 3500 })
                 .then((r) => ({ ok: true, data: r.data, error: '' }))
                 .catch((e: any) => ({ ok: false, data: { properties: [] }, error: e?.message || 'request failed' })),
@@ -751,7 +736,7 @@ app.get('/learning/submission/:submissionId', async (req, res) => {
 
         const learningDetail = (learningDetailResult as any).data;
         const submissionMeta = (submissionResult as any).data || {};
-        const savedLocationRules = (savedRulesResult as any).data?.rules || [];
+        const savedCorrectionRules: any[] = (correctionRulesResult as any).data || [];
         const locationOptions: string[] = (propertiesResult as any).data?.properties || [];
 
         res.render('learning-submission', {
@@ -759,7 +744,7 @@ app.get('/learning/submission/:submissionId', async (req, res) => {
             submissionId,
             learningDetail,
             submissionMeta,
-            savedLocationRules,
+            savedCorrectionRules,
             locationOptions,
         });
     } catch (error: any) {
@@ -771,25 +756,129 @@ app.get('/learning/submission/:submissionId', async (req, res) => {
 });
 
 /**
- * Toggle learned rule enable/disable override.
+ * Correction rules: create (human-annotated or accept system proposal)
  */
-app.post('/api/learning/rules/toggle', async (req, res) => {
+app.post('/api/learning/correction-rules', async (req, res) => {
     try {
-        const { ruleKey, disabled, reason } = req.body || {};
-        if (!ruleKey || typeof ruleKey !== 'string') {
-            return res.status(400).json({ error: 'ruleKey is required' });
+        const payload = req.body || {};
+        const catalog = await getPropertyCatalogFromDb();
+        const propertyNames = new Set(catalog.map((item) => item.name.toLowerCase()));
+        const location = `${payload.location || ''}`.trim();
+
+        if (location && !propertyNames.has(location.toLowerCase())) {
+            return res.status(400).json({ error: 'location must be one of the configured properties' });
         }
 
-        const response = await axios.post(`${DIFFER_SERVICE_URL}/learning/overrides`, {
-            rule_key: ruleKey,
-            disabled: !!disabled,
-            reason: reason || '',
-        }, { timeout: 2500 });
+        const otherLocations = Array.isArray(payload.other_applicable_locations)
+            ? payload.other_applicable_locations.map((s: any) => `${s || ''}`.trim()).filter(Boolean)
+            : [];
 
+        const record = {
+            submission_id: `${payload.submission_id || ''}`.trim(),
+            correction_id: `${payload.correction_id || ''}`.trim(),
+            original_text: `${payload.original_text || payload.before_line || ''}`.trim(),
+            corrected_text: `${payload.corrected_text || payload.after_line || ''}`.trim(),
+            change_type: `${payload.change_type || ''}`.trim() || null,
+            rule: `${payload.rule || ''}`.trim(),
+            is_location_specific: !!payload.is_location_specific,
+            project_name: `${payload.project_name || ''}`.trim() || null,
+            restaurant_name: `${payload.restaurant_name || ''}`.trim(),
+            location: location || 'All properties (global rule)',
+            other_applicable_locations: otherLocations,
+            reviewer_name: `${payload.reviewer_name || ''}`.trim() || null,
+            source: payload.source || 'human',
+            status: payload.source === 'system' ? 'pending' : 'accepted',
+        };
+
+        if (!record.submission_id || !record.correction_id || !record.original_text || !record.corrected_text || !record.rule) {
+            return res.status(400).json({ error: 'submission_id, correction_id, original_text, corrected_text, and rule are required' });
+        }
+
+        const response = await axios.post(`${DB_SERVICE_URL}/correction-rules`, record, { timeout: 3000 });
         res.json(response.data);
     } catch (error: any) {
-        console.error('Error toggling learning rule:', error.message);
-        res.status(500).json({ error: 'Failed to toggle learning rule' });
+        console.error('Error saving correction rule:', error.message);
+        res.status(error?.response?.status || 500).json(error?.response?.data || { error: 'Failed to save correction rule' });
+    }
+});
+
+/**
+ * Correction rules: update status (accept/reject/modify)
+ */
+app.put('/api/learning/correction-rules/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const response = await axios.put(`${DB_SERVICE_URL}/correction-rules/${encodeURIComponent(id)}`, req.body || {}, { timeout: 3000 });
+        res.json(response.data);
+    } catch (error: any) {
+        console.error('Error updating correction rule:', error.message);
+        res.status(error?.response?.status || 500).json(error?.response?.data || { error: 'Failed to update correction rule' });
+    }
+});
+
+/**
+ * Prompt Proposal review page
+ */
+app.get('/learning/prompt-proposal', async (_req, res) => {
+    try {
+        const [proposalResult, historyResult] = await Promise.all([
+            axios.get(`${DB_SERVICE_URL}/prompt-proposals/latest`, { timeout: 3500 })
+                .then((r) => ({ ok: true, data: r.data, error: '' }))
+                .catch((e: any) => ({ ok: false, data: null, error: e?.message || 'request failed' })),
+            axios.get(`${DB_SERVICE_URL}/prompt-proposals`, { timeout: 3500 })
+                .then((r) => ({ ok: true, data: r.data, error: '' }))
+                .catch((e: any) => ({ ok: false, data: [], error: e?.message || 'request failed' })),
+        ]);
+
+        const proposal = (proposalResult as any).data;
+        const history: any[] = (historyResult as any).data || [];
+
+        res.render('prompt-proposal', {
+            title: 'Prompt Proposal Review',
+            proposal,
+            history,
+        });
+    } catch (error: any) {
+        console.error('Error loading prompt proposal page:', error.message);
+        res.status(500).render('error', { message: 'Failed to load prompt proposal page' });
+    }
+});
+
+/**
+ * Approve or reject a prompt proposal
+ */
+app.post('/api/learning/prompt-proposal/:id/review', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { status, reviewer_name, reviewer_notes, final_prompt } = req.body || {};
+
+        if (!status || !['approved', 'approved_modified', 'rejected'].includes(status)) {
+            return res.status(400).json({ error: 'status must be approved, approved_modified, or rejected' });
+        }
+
+        // Update proposal status
+        const response = await axios.put(`${DB_SERVICE_URL}/prompt-proposals/${encodeURIComponent(id)}`, {
+            status,
+            reviewer_name: reviewer_name || null,
+            reviewer_notes: reviewer_notes || null,
+            final_prompt: final_prompt || null,
+            reviewed_at: new Date().toISOString(),
+        }, { timeout: 5000 });
+
+        // If approved, write the new prompt to qa_prompt.txt
+        if (status === 'approved' || status === 'approved_modified') {
+            const promptToWrite = final_prompt || response.data?.proposed_prompt;
+            if (promptToWrite) {
+                const qaPromptPath = path.join(getRepoRoot(), 'sop-processor', 'qa_prompt.txt');
+                await fs.writeFile(qaPromptPath, promptToWrite, 'utf-8');
+                console.log(`Base prompt updated from proposal ${id} (status: ${status})`);
+            }
+        }
+
+        res.json({ success: true, proposal: response.data });
+    } catch (error: any) {
+        console.error('Error reviewing prompt proposal:', error.message);
+        res.status(500).json({ error: 'Failed to review prompt proposal' });
     }
 });
 
@@ -1070,13 +1159,6 @@ Note: Use ONLY these allergen codes when checking allergen compliance. Do not us
             console.log('Injected custom allergens into prompt');
         }
 
-        // Add learned reviewer correction overlay from differ service (fail-open).
-        const learnedOverlay = await fetchLearnedPromptOverlay();
-        if (learnedOverlay) {
-            qaPrompt = `${qaPrompt}\n\n${learnedOverlay}`;
-            console.log('Injected learned correction overlay into prompt');
-        }
-
         // Call AI Review service's QA endpoint
         let finalPrompt = qaPrompt;
         if (changedOnlyMode) {
@@ -1255,18 +1337,8 @@ function stripDiacritics(input: string): string {
     return (input || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 }
 
-async function fetchLearnedPromptOverlay(): Promise<string> {
-    try {
-        const response = await axios.get(`${DIFFER_SERVICE_URL}/learning/overlay`, { timeout: 1500 });
-        const overlay = response.data?.overlay;
-        if (typeof overlay === 'string' && overlay.trim()) {
-            return overlay;
-        }
-        return '';
-    } catch {
-        return '';
-    }
-}
+// fetchLearnedPromptOverlay() removed in Learning Pipeline v2.
+// Rules now flow through correction_rules table, not auto-injected overlay.
 
 function normalizeForSuggestionMatch(input: string): string {
     return stripDiacritics(input || '')
