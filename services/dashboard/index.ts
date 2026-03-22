@@ -7,11 +7,15 @@ import * as path from 'path';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 
-// Supabase client for dish extraction (optional - gracefully handles if not configured)
+// Supabase client for dish extraction and alerting (optional - gracefully handles if not configured)
 import {
     isSupabaseConfigured,
-    extractAndStoreDishes
+    extractAndStoreDishes,
+    logAlert,
+    buildAlertEmailHtml,
+    SystemAlert
 } from '@menumanager/supabase-client';
+import nodemailer from 'nodemailer';
 
 const execAsync = promisify(exec);
 const DEFAULT_ALLERGEN_KEY = 'C crustaceans | D dairy | E egg | F fish | G gluten | N nuts | V vegetarian | VG vegan';
@@ -20,6 +24,45 @@ const DB_SERVICE_URL = process.env.DB_SERVICE_URL || 'http://localhost:3004';
 const AI_REVIEW_URL = process.env.AI_REVIEW_URL || 'http://localhost:3002';
 const DIFFER_SERVICE_URL = process.env.DIFFER_SERVICE_URL || 'http://localhost:3006';
 const CLICKUP_SERVICE_URL = process.env.CLICKUP_SERVICE_URL || 'http://localhost:3007';
+const ALERT_EMAIL = process.env.ALERT_EMAIL || '';
+const DASHBOARD_URL = process.env.DASHBOARD_URL || 'http://localhost:3005';
+
+// SMTP for admin alerts (reuses existing SMTP config)
+const hasSmtpConfig = !!(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS);
+const alertTransporter = hasSmtpConfig ? nodemailer.createTransport({
+    host: process.env.SMTP_HOST,
+    port: Number(process.env.SMTP_PORT || 587),
+    secure: false,
+    auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
+}) : null;
+
+// Alert dedup: 15-min cooldown per alert_type
+const alertCooldowns = new Map<string, number>();
+const ALERT_COOLDOWN_MS = 15 * 60 * 1000;
+
+/**
+ * Send an admin alert: logs to Supabase + sends email (both fire-and-forget).
+ * Deduplicates by alert_type with a 15-minute cooldown.
+ */
+function sendAdminAlert(alert: SystemAlert): void {
+    const lastSent = alertCooldowns.get(alert.alert_type) || 0;
+    if (Date.now() - lastSent < ALERT_COOLDOWN_MS) return;
+    alertCooldowns.set(alert.alert_type, Date.now());
+
+    // Log to Supabase
+    logAlert(alert);
+
+    // Send email
+    if (alertTransporter && ALERT_EMAIL) {
+        const severityLabel = alert.severity.toUpperCase();
+        alertTransporter.sendMail({
+            from: `"Menu Manager Alerts" <${process.env.SMTP_USER}>`,
+            to: ALERT_EMAIL,
+            subject: `[${severityLabel}] ${alert.alert_type.replace(/_/g, ' ')} — Menu Manager`,
+            html: buildAlertEmailHtml(alert, DASHBOARD_URL),
+        }).catch((err: any) => console.error('Failed to send alert email:', err.message));
+    }
+}
 
 function getRepoRoot(): string {
     const candidates = [
@@ -882,6 +925,51 @@ app.post('/api/learning/prompt-proposal/:id/review', async (req, res) => {
     }
 });
 
+/**
+ * System Alerts page
+ */
+app.get('/alerts', async (_req, res) => {
+    try {
+        let alerts: any[] = [];
+        if (isSupabaseConfigured()) {
+            const supabase = (await import('@menumanager/supabase-client')).getSupabaseClient();
+            const { data, error } = await supabase
+                .from('system_alerts')
+                .select('*')
+                .order('created_at', { ascending: false })
+                .limit(100);
+            if (!error && data) alerts = data;
+        }
+        res.render('alerts', { title: 'System Alerts', alerts });
+    } catch (error: any) {
+        console.error('Error loading alerts page:', error.message);
+        res.status(500).render('error', { message: 'Failed to load alerts page' });
+    }
+});
+
+app.put('/api/alerts/:id/acknowledge', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { acknowledged_by } = req.body || {};
+        if (!isSupabaseConfigured()) {
+            return res.status(503).json({ error: 'Supabase not configured' });
+        }
+        const supabase = (await import('@menumanager/supabase-client')).getSupabaseClient();
+        const { error } = await supabase
+            .from('system_alerts')
+            .update({
+                acknowledged: true,
+                acknowledged_by: acknowledged_by || 'admin',
+                acknowledged_at: new Date().toISOString(),
+            })
+            .eq('id', id);
+        if (error) throw error;
+        res.json({ success: true });
+    } catch (error: any) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
 app.post('/api/learning/location-rules', async (req, res) => {
     try {
         const payload = req.body || {};
@@ -1676,6 +1764,7 @@ app.post('/api/form/submit', async (req, res) => {
             file_size_limit: fileSizeLimit === 'yes',
             file_size_limit_mb: fileSizeLimitMb || null,
             file_delivery_notes: fileDeliveryNotes || null,
+            orientation,
             approvals: JSON.stringify(approvals),
             critical_overrides: JSON.stringify(criticalOverrides || []),
             menu_content: normalizedMenuContent,
@@ -1761,6 +1850,14 @@ app.post('/api/form/submit', async (req, res) => {
             await axios.put(`${DB_SERVICE_URL}/submissions/${submissionId}`, {
                 status: skipAi ? 'submitted_no_ai_review' : 'pending_human_review'
             });
+            sendAdminAlert({
+                alert_type: 'ai_review_failed',
+                severity: 'warning',
+                service: 'dashboard',
+                submission_id: submissionId,
+                message: `AI review failed for "${projectName}". Submission moved to manual review.`,
+                details: { error: aiError.message },
+            });
         }
 
         // Create ClickUp task (synchronous so we can surface upload issues to chef)
@@ -1822,6 +1919,14 @@ app.post('/api/form/submit', async (req, res) => {
             console.error('Failed to create ClickUp task:', clickupError.response?.data || clickupError.message);
             const supportEmail = process.env.INTERNAL_REVIEWER_EMAIL || 'the design team';
             clickupWarning = `Menu submitted, but we could not create your ClickUp task. If this persists, please email the Word document directly to ${supportEmail}.`;
+            sendAdminAlert({
+                alert_type: 'clickup_task_failed',
+                severity: 'error',
+                service: 'dashboard',
+                submission_id: submissionId,
+                message: `ClickUp task creation failed for "${projectName}" (${normalizedProperty})`,
+                details: { error: clickupError.response?.data || clickupError.message, submitter: submitterEmail },
+            });
         }
 
         res.json({
@@ -1836,6 +1941,13 @@ app.post('/api/form/submit', async (req, res) => {
 
     } catch (error: any) {
         console.error('Error submitting form:', error);
+        sendAdminAlert({
+            alert_type: 'submission_failed',
+            severity: 'critical',
+            service: 'dashboard',
+            message: `Menu submission failed completely: ${error.message}`,
+            details: { error: error.message, stack: error.stack?.slice(0, 500) },
+        });
         res.status(500).json({
             error: 'Failed to submit menu',
             details: error.message

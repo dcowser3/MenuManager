@@ -16,4 +16,5 @@ export * from './types';
 export * from './submissions';
 export * from './dishes';
 export * from './dish-extractor';
+export * from './alerts';
 //# sourceMappingURL=index.d.ts.map

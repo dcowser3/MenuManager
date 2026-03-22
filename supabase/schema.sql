@@ -438,6 +438,30 @@ CREATE TABLE IF NOT EXISTS prompt_proposals (
 );
 
 -- ============================================================================
+-- 9. SYSTEM_ALERTS
+-- Logs critical system failures for monitoring and audit
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS system_alerts (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    alert_type VARCHAR(100) NOT NULL,          -- e.g., 'clickup_task_failed', 'supabase_mirror_failed'
+    severity VARCHAR(20) DEFAULT 'error',      -- 'error', 'warning', 'critical'
+    service VARCHAR(100) NOT NULL,             -- 'dashboard', 'clickup-integration', 'db', etc.
+    submission_id VARCHAR(100),
+    message TEXT NOT NULL,
+    details JSONB,                             -- Stack trace, request payload, etc.
+    notified BOOLEAN DEFAULT false,            -- Whether an email was sent
+    acknowledged BOOLEAN DEFAULT false,        -- Whether a human has reviewed it
+    acknowledged_by VARCHAR(255),
+    acknowledged_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_system_alerts_type ON system_alerts(alert_type);
+CREATE INDEX IF NOT EXISTS idx_system_alerts_created ON system_alerts(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_system_alerts_unacknowledged ON system_alerts(acknowledged)
+    WHERE acknowledged = false;
+
+-- ============================================================================
 -- ROW LEVEL SECURITY (RLS) - Enable later when auth is added
 -- ============================================================================
 -- ALTER TABLE submissions ENABLE ROW LEVEL SECURITY;

@@ -194,14 +194,6 @@
                                         <textarea id="rule-<%= idx %>" placeholder="e.g., Jalape&#241;o always needs the &#241; per RSH brand guide"></textarea>
                                     </div>
                                     <div class="annotation-field">
-                                        <label for="restaurant-<%= idx %>">Restaurant</label>
-                                        <input id="restaurant-<%= idx %>" value="<%= submissionMeta.project_name || submissionMeta.property || '' %>">
-                                    </div>
-                                    <div class="annotation-field">
-                                        <label for="project-name-<%= idx %>">Project Name</label>
-                                        <input id="project-name-<%= idx %>" value="<%= submissionMeta.project_name || '' %>" placeholder="Auto-filled from submission">
-                                    </div>
-                                    <div class="annotation-field">
                                         <label for="change-type-<%= idx %>">Change Type</label>
                                         <select id="change-type-<%= idx %>">
                                             <option value="">Auto-detect</option>
@@ -319,8 +311,6 @@
         async function saveDishRule(dish, idx) {
             const statusEl = document.getElementById(`save-status-${idx}`);
             const rule = (document.getElementById(`rule-${idx}`).value || '').trim();
-            const restaurantName = (document.getElementById(`restaurant-${idx}`).value || '').trim();
-            const projectName = (document.getElementById(`project-name-${idx}`).value || '').trim();
             const changeType = (document.getElementById(`change-type-${idx}`).value || '').trim();
             const reviewerName = (document.getElementById(`reviewer-${idx}`).value || '').trim();
             const isLocationSpecific = document.getElementById(`loc-specific-${idx}`).checked;
@@ -354,8 +344,8 @@
                         change_type: changeType || null,
                         rule,
                         is_location_specific: isLocationSpecific,
-                        project_name: projectName,
-                        restaurant_name: restaurantName || '<%= submissionMeta.property || submissionMeta.city_country || "" %>',
+                        project_name: '<%= (submissionMeta.project_name || "").replace(/'/g, "\\'") %>',
+                        restaurant_name: '<%= (submissionMeta.project_name || submissionMeta.property || "").replace(/'/g, "\\'") %>',
                         location: location || 'All properties (global rule)',
                         other_applicable_locations: otherLocations,
                         reviewer_name: reviewerName,

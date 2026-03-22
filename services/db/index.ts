@@ -2,7 +2,7 @@ import express from 'express';
 import { promises as fs } from 'fs';
 import * as path from 'path';
 import * as dotenv from 'dotenv';
-import { getSupabaseClient, isSupabaseConfigured } from '@menumanager/supabase-client';
+import { getSupabaseClient, isSupabaseConfigured, logAlert } from '@menumanager/supabase-client';
 
 dotenv.config({ path: path.join(__dirname, '..', '..', '..', '.env') });
 
@@ -240,6 +240,14 @@ async function mirrorSubmissionUpdateToSupabase(localId: string, updates: any): 
                 }
             } catch (healError: any) {
                 console.error(`Supabase self-heal failed for ${localId}:`, healError.message);
+                logAlert({
+                    alert_type: 'supabase_mirror_failed',
+                    severity: 'error',
+                    service: 'db',
+                    submission_id: localId,
+                    message: `Supabase self-heal failed for submission ${localId}`,
+                    details: { error: healError.message },
+                });
             }
             return;
         }
@@ -341,6 +349,14 @@ app.post('/submissions', async (req, res) => {
             await mirrorSubmissionCreateToSupabase(newSubmission);
         } catch (supabaseError: any) {
             console.error(`Supabase mirror create failed for ${newId} (kept local JSON write):`, supabaseError.message);
+            logAlert({
+                alert_type: 'supabase_mirror_failed',
+                severity: 'error',
+                service: 'db',
+                submission_id: newId,
+                message: `Supabase mirror create failed for new submission ${newId}`,
+                details: { error: supabaseError.message },
+            });
         }
 
         res.status(201).json(newSubmission);

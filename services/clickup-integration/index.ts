@@ -8,6 +8,7 @@ import nodemailer from 'nodemailer';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import crypto from 'crypto';
+import { logAlert, buildAlertEmailHtml, SystemAlert } from '@menumanager/supabase-client';
 
 dotenv.config({ path: path.join(__dirname, '..', '..', '..', '.env') });
 const execAsync = promisify(exec);
@@ -36,6 +37,29 @@ const mailTransporter = nodemailer.createTransport({
         pass: process.env.SMTP_PASS,
     },
 });
+
+const ALERT_EMAIL = process.env.ALERT_EMAIL || '';
+const DASHBOARD_URL = process.env.DASHBOARD_URL || 'http://localhost:3005';
+const alertCooldowns = new Map<string, number>();
+const ALERT_COOLDOWN_MS = 15 * 60 * 1000;
+
+function sendAdminAlert(alert: SystemAlert): void {
+    const lastSent = alertCooldowns.get(alert.alert_type) || 0;
+    if (Date.now() - lastSent < ALERT_COOLDOWN_MS) return;
+    alertCooldowns.set(alert.alert_type, Date.now());
+
+    logAlert(alert);
+
+    if (hasSmtpConfig && ALERT_EMAIL) {
+        const severityLabel = alert.severity.toUpperCase();
+        mailTransporter.sendMail({
+            from: `"Menu Manager Alerts" <${process.env.SMTP_USER}>`,
+            to: ALERT_EMAIL,
+            subject: `[${severityLabel}] ${alert.alert_type.replace(/_/g, ' ')} — Menu Manager`,
+            html: buildAlertEmailHtml(alert, DASHBOARD_URL),
+        }).catch((err: any) => console.error('Failed to send alert email:', err.message));
+    }
+}
 
 function getRepoRoot(): string {
     const candidates = [
@@ -514,7 +538,17 @@ async function processApprovedTask(clickupTaskId: string, opts?: { skipStatusChe
         projectName: submission.project_name,
         correctedPath,
         filename: submission.filename,
-    }).catch((err: any) => console.error('Failed to send corrections_ready notification:', err.message));
+    }).catch((err: any) => {
+        console.error('Failed to send corrections_ready notification:', err.message);
+        sendAdminAlert({
+            alert_type: 'notification_email_failed',
+            severity: 'warning',
+            service: 'clickup-integration',
+            submission_id: submission.id,
+            message: `Failed to send corrections email to ${submission.submitter_email} for "${submission.project_name}"`,
+            details: { error: err.message },
+        });
+    });
 
     axios.post(`${DIFFER_SERVICE_URL}/compare`, {
         ai_draft_path: submission.ai_draft_path,
@@ -752,6 +786,13 @@ app.post('/webhook/clickup', async (req: any, res) => {
         }
     } catch (error: any) {
         console.error('Error processing ClickUp webhook:', error.response?.data || error.message);
+        sendAdminAlert({
+            alert_type: 'clickup_webhook_failed',
+            severity: 'error',
+            service: 'clickup-integration',
+            message: `Failed to process ClickUp webhook for task ${req.body?.task_id || 'unknown'}`,
+            details: { error: error.response?.data || error.message, event: req.body?.event },
+        });
     }
 });
 

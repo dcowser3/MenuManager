@@ -76,4 +76,5 @@ __exportStar(require("./types"), exports);
 __exportStar(require("./submissions"), exports);
 __exportStar(require("./dishes"), exports);
 __exportStar(require("./dish-extractor"), exports);
+__exportStar(require("./alerts"), exports);
 //# sourceMappingURL=index.js.map
