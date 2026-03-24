@@ -46,8 +46,9 @@ const fsSync = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const child_process_1 = require("child_process");
 const util_1 = require("util");
-// Supabase client for dish extraction (optional - gracefully handles if not configured)
+// Supabase client for dish extraction and alerting (optional - gracefully handles if not configured)
 const supabase_client_1 = require("@menumanager/supabase-client");
+const nodemailer_1 = __importDefault(require("nodemailer"));
 const execAsync = (0, util_1.promisify)(child_process_1.exec);
 const DEFAULT_ALLERGEN_KEY = 'C crustaceans | D dairy | E egg | F fish | G gluten | N nuts | V vegetarian | VG vegan';
 const RAW_NOTICE_PATTERN = /\*?\s*consuming raw or undercooked meats,\s*poultry,\s*seafood,\s*shellfish,\s*or eggs may increase your risk of foodborne illness\.?/i;
@@ -55,6 +56,41 @@ const DB_SERVICE_URL = process.env.DB_SERVICE_URL || 'http://localhost:3004';
 const AI_REVIEW_URL = process.env.AI_REVIEW_URL || 'http://localhost:3002';
 const DIFFER_SERVICE_URL = process.env.DIFFER_SERVICE_URL || 'http://localhost:3006';
 const CLICKUP_SERVICE_URL = process.env.CLICKUP_SERVICE_URL || 'http://localhost:3007';
+const ALERT_EMAIL = process.env.ALERT_EMAIL || '';
+const DASHBOARD_URL = process.env.DASHBOARD_URL || 'http://localhost:3005';
+// SMTP for admin alerts (reuses existing SMTP config)
+const hasSmtpConfig = !!(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS);
+const alertTransporter = hasSmtpConfig ? nodemailer_1.default.createTransport({
+    host: process.env.SMTP_HOST,
+    port: Number(process.env.SMTP_PORT || 587),
+    secure: false,
+    auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
+}) : null;
+// Alert dedup: 15-min cooldown per alert_type
+const alertCooldowns = new Map();
+const ALERT_COOLDOWN_MS = 15 * 60 * 1000;
+/**
+ * Send an admin alert: logs to Supabase + sends email (both fire-and-forget).
+ * Deduplicates by alert_type with a 15-minute cooldown.
+ */
+function sendAdminAlert(alert) {
+    const lastSent = alertCooldowns.get(alert.alert_type) || 0;
+    if (Date.now() - lastSent < ALERT_COOLDOWN_MS)
+        return;
+    alertCooldowns.set(alert.alert_type, Date.now());
+    // Log to Supabase
+    (0, supabase_client_1.logAlert)(alert);
+    // Send email
+    if (alertTransporter && ALERT_EMAIL) {
+        const severityLabel = alert.severity.toUpperCase();
+        alertTransporter.sendMail({
+            from: `"Menu Manager Alerts" <${process.env.SMTP_USER}>`,
+            to: ALERT_EMAIL,
+            subject: `[${severityLabel}] ${alert.alert_type.replace(/_/g, ' ')} — Menu Manager`,
+            html: (0, supabase_client_1.buildAlertEmailHtml)(alert, DASHBOARD_URL),
+        }).catch((err) => console.error('Failed to send alert email:', err.message));
+    }
+}
 function getRepoRoot() {
     const candidates = [
         path.resolve(__dirname, '..', '..'), // ts-node from services/dashboard
@@ -539,61 +575,47 @@ app.get('/training/download-prompt/:sessionId', async (req, res) => {
  */
 app.get('/learning', async (_req, res) => {
     try {
-        const [rulesResult, overridesResult, overlayResult, trainingResult, submissionsResult, locationRulesResult, propertiesResult] = await Promise.all([
+        const [rulesResult, trainingResult, submissionsResult, correctionRulesResult, propertiesResult] = await Promise.all([
             axios_1.default.get(`${DIFFER_SERVICE_URL}/learning/rules`, { timeout: 2500 })
                 .then((r) => ({ ok: true, data: r.data, error: '' }))
                 .catch((e) => ({ ok: false, data: {}, error: e?.message || 'request failed' })),
-            axios_1.default.get(`${DIFFER_SERVICE_URL}/learning/overrides`, { timeout: 2500 })
-                .then((r) => ({ ok: true, data: r.data, error: '' }))
-                .catch((e) => ({ ok: false, data: { disabled: {} }, error: e?.message || 'request failed' })),
-            axios_1.default.get(`${DIFFER_SERVICE_URL}/learning/overlay`, { timeout: 2500 })
-                .then((r) => ({ ok: true, data: r.data, error: '' }))
-                .catch((e) => ({ ok: false, data: { overlay: '' }, error: e?.message || 'request failed' })),
             axios_1.default.get(`${DIFFER_SERVICE_URL}/training-data`, { timeout: 2500 })
                 .then((r) => ({ ok: true, data: r.data, error: '' }))
                 .catch((e) => ({ ok: false, data: { count: 0, data: [] }, error: e?.message || 'request failed' })),
             axios_1.default.get(`${DIFFER_SERVICE_URL}/learning/submissions`, { timeout: 2500 })
                 .then((r) => ({ ok: true, data: r.data, error: '' }))
                 .catch((e) => ({ ok: false, data: { submissions: [] }, error: e?.message || 'request failed' })),
-            axios_1.default.get(`${DIFFER_SERVICE_URL}/learning/location-rules`, { timeout: 2500 })
+            axios_1.default.get(`${DB_SERVICE_URL}/correction-rules`, { timeout: 2500 })
                 .then((r) => ({ ok: true, data: r.data, error: '' }))
-                .catch((e) => ({ ok: false, data: { rules: [] }, error: e?.message || 'request failed' })),
+                .catch((e) => ({ ok: false, data: [], error: e?.message || 'request failed' })),
             axios_1.default.get(`${DB_SERVICE_URL}/properties`, { timeout: 2500 })
                 .then((r) => ({ ok: true, data: r.data, error: '' }))
                 .catch((e) => ({ ok: false, data: { properties: [] }, error: e?.message || 'request failed' })),
         ]);
         const rulesData = rulesResult.data || {};
-        const overrides = overridesResult.data?.disabled || {};
-        const learnedOverlay = overlayResult?.data?.overlay || '';
         const trainingData = trainingResult.data || { count: 0, data: [] };
         const learningSubmissions = submissionsResult.data?.submissions || [];
-        const locationRules = locationRulesResult.data?.rules || [];
+        const correctionRules = correctionRulesResult.data || [];
         const propertyOptions = propertiesResult.data?.properties || [];
         const qaPromptPath = path.join(getRepoRoot(), 'sop-processor', 'qa_prompt.txt');
         const basePrompt = await fs_1.promises.readFile(qaPromptPath, 'utf-8');
-        const effectivePrompt = learnedOverlay ? `${basePrompt}\n\n${learnedOverlay}` : basePrompt;
-        const decorate = (category, items) => (items || []).map((r) => {
-            const key = `${r.source_norm}=>${r.target_norm}`;
-            const override = overrides[key];
-            return {
-                ...r,
-                key,
-                category,
-                disabled: !!override,
-                disabled_reason: override?.reason || '',
-                disabled_updated_at: override?.updated_at || '',
-            };
-        });
-        const rules = [
+        // v2: detected patterns from differ (read-only reference, not auto-injected)
+        const decorate = (category, items) => (items || []).map((r) => ({
+            ...r,
+            key: `${r.source_norm}=>${r.target_norm}`,
+            category,
+        }));
+        const detectedPatterns = [
             ...decorate('active', rulesData.active_rules || []),
             ...decorate('weak', rulesData.weak_rules || []),
             ...decorate('conflicted', rulesData.conflicted_rules || []),
         ];
         const recentSubmissions = (trainingData.data || []).slice(-25).reverse();
+        // Split correction rules by status for the dashboard
+        const pendingRules = correctionRules.filter((r) => r.status === 'pending');
+        const acceptedRules = correctionRules.filter((r) => r.status === 'accepted');
         const differStatus = {
             rulesOk: !!rulesResult.ok,
-            overridesOk: !!overridesResult.ok,
-            overlayOk: !!overlayResult.ok,
             trainingOk: !!trainingResult.ok,
             submissionsOk: !!submissionsResult.ok,
             rulesError: rulesResult.error || '',
@@ -606,15 +628,14 @@ app.get('/learning', async (_req, res) => {
             minOccurrences: rulesData.min_occurrences || 2,
             totalEntries: rulesData.total_entries_analyzed || 0,
             totalRules: rulesData.total_rules || 0,
-            rules,
+            detectedPatterns,
+            pendingRules,
+            acceptedRules,
             recentSubmissions,
             learningSubmissions,
-            locationRules,
             propertyOptions,
             differStatus,
             basePrompt,
-            learnedOverlay,
-            effectivePrompt,
             documentStorageRoot: process.env.DOCUMENT_STORAGE_ROOT || '',
         });
     }
@@ -628,19 +649,16 @@ app.get('/learning', async (_req, res) => {
 app.get('/learning/submission/:submissionId', async (req, res) => {
     try {
         const { submissionId } = req.params;
-        const [learningDetailResult, submissionResult, savedRulesResult, propertiesResult] = await Promise.all([
+        const [learningDetailResult, submissionResult, correctionRulesResult, propertiesResult] = await Promise.all([
             axios_1.default.get(`${DIFFER_SERVICE_URL}/learning/submissions/${encodeURIComponent(submissionId)}`, { timeout: 3500 })
                 .then((r) => ({ ok: true, data: r.data, error: '' }))
                 .catch((e) => ({ ok: false, data: null, error: e?.message || 'request failed' })),
             axios_1.default.get(`${DB_SERVICE_URL}/submissions/${encodeURIComponent(submissionId)}`, { timeout: 3500 })
                 .then((r) => ({ ok: true, data: r.data, error: '' }))
                 .catch((e) => ({ ok: false, data: null, error: e?.message || 'request failed' })),
-            axios_1.default.get(`${DIFFER_SERVICE_URL}/learning/location-rules`, {
-                timeout: 3500,
-                params: { submission_id: submissionId }
-            })
+            axios_1.default.get(`${DB_SERVICE_URL}/correction-rules?submission_id=${encodeURIComponent(submissionId)}`, { timeout: 3500 })
                 .then((r) => ({ ok: true, data: r.data, error: '' }))
-                .catch((e) => ({ ok: false, data: { rules: [] }, error: e?.message || 'request failed' })),
+                .catch((e) => ({ ok: false, data: [], error: e?.message || 'request failed' })),
             axios_1.default.get(`${DB_SERVICE_URL}/properties`, { timeout: 3500 })
                 .then((r) => ({ ok: true, data: r.data, error: '' }))
                 .catch((e) => ({ ok: false, data: { properties: [] }, error: e?.message || 'request failed' })),
@@ -650,14 +668,14 @@ app.get('/learning/submission/:submissionId', async (req, res) => {
         }
         const learningDetail = learningDetailResult.data;
         const submissionMeta = submissionResult.data || {};
-        const savedLocationRules = savedRulesResult.data?.rules || [];
+        const savedCorrectionRules = correctionRulesResult.data || [];
         const locationOptions = propertiesResult.data?.properties || [];
         res.render('learning-submission', {
             title: `Learning Review: ${submissionId}`,
             submissionId,
             learningDetail,
             submissionMeta,
-            savedLocationRules,
+            savedCorrectionRules,
             locationOptions,
         });
     }
@@ -669,24 +687,166 @@ app.get('/learning/submission/:submissionId', async (req, res) => {
     }
 });
 /**
- * Toggle learned rule enable/disable override.
+ * Correction rules: create (human-annotated or accept system proposal)
  */
-app.post('/api/learning/rules/toggle', async (req, res) => {
+app.post('/api/learning/correction-rules', async (req, res) => {
     try {
-        const { ruleKey, disabled, reason } = req.body || {};
-        if (!ruleKey || typeof ruleKey !== 'string') {
-            return res.status(400).json({ error: 'ruleKey is required' });
+        const payload = req.body || {};
+        const catalog = await getPropertyCatalogFromDb();
+        const propertyNames = new Set(catalog.map((item) => item.name.toLowerCase()));
+        const location = `${payload.location || ''}`.trim();
+        if (location && !propertyNames.has(location.toLowerCase())) {
+            return res.status(400).json({ error: 'location must be one of the configured properties' });
         }
-        const response = await axios_1.default.post(`${DIFFER_SERVICE_URL}/learning/overrides`, {
-            rule_key: ruleKey,
-            disabled: !!disabled,
-            reason: reason || '',
-        }, { timeout: 2500 });
+        const otherLocations = Array.isArray(payload.other_applicable_locations)
+            ? payload.other_applicable_locations.map((s) => `${s || ''}`.trim()).filter(Boolean)
+            : [];
+        const record = {
+            submission_id: `${payload.submission_id || ''}`.trim(),
+            correction_id: `${payload.correction_id || ''}`.trim(),
+            original_text: `${payload.original_text || payload.before_line || ''}`.trim(),
+            corrected_text: `${payload.corrected_text || payload.after_line || ''}`.trim(),
+            change_type: `${payload.change_type || ''}`.trim() || null,
+            rule: `${payload.rule || ''}`.trim(),
+            is_location_specific: !!payload.is_location_specific,
+            project_name: `${payload.project_name || ''}`.trim() || null,
+            restaurant_name: `${payload.restaurant_name || ''}`.trim(),
+            location: location || 'All properties (global rule)',
+            other_applicable_locations: otherLocations,
+            reviewer_name: `${payload.reviewer_name || ''}`.trim() || null,
+            source: payload.source || 'human',
+            status: payload.source === 'system' ? 'pending' : 'accepted',
+        };
+        if (!record.submission_id || !record.correction_id || !record.original_text || !record.corrected_text || !record.rule) {
+            return res.status(400).json({ error: 'submission_id, correction_id, original_text, corrected_text, and rule are required' });
+        }
+        const response = await axios_1.default.post(`${DB_SERVICE_URL}/correction-rules`, record, { timeout: 3000 });
         res.json(response.data);
     }
     catch (error) {
-        console.error('Error toggling learning rule:', error.message);
-        res.status(500).json({ error: 'Failed to toggle learning rule' });
+        console.error('Error saving correction rule:', error.message);
+        res.status(error?.response?.status || 500).json(error?.response?.data || { error: 'Failed to save correction rule' });
+    }
+});
+/**
+ * Correction rules: update status (accept/reject/modify)
+ */
+app.put('/api/learning/correction-rules/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const response = await axios_1.default.put(`${DB_SERVICE_URL}/correction-rules/${encodeURIComponent(id)}`, req.body || {}, { timeout: 3000 });
+        res.json(response.data);
+    }
+    catch (error) {
+        console.error('Error updating correction rule:', error.message);
+        res.status(error?.response?.status || 500).json(error?.response?.data || { error: 'Failed to update correction rule' });
+    }
+});
+/**
+ * Prompt Proposal review page
+ */
+app.get('/learning/prompt-proposal', async (_req, res) => {
+    try {
+        const [proposalResult, historyResult] = await Promise.all([
+            axios_1.default.get(`${DB_SERVICE_URL}/prompt-proposals/latest`, { timeout: 3500 })
+                .then((r) => ({ ok: true, data: r.data, error: '' }))
+                .catch((e) => ({ ok: false, data: null, error: e?.message || 'request failed' })),
+            axios_1.default.get(`${DB_SERVICE_URL}/prompt-proposals`, { timeout: 3500 })
+                .then((r) => ({ ok: true, data: r.data, error: '' }))
+                .catch((e) => ({ ok: false, data: [], error: e?.message || 'request failed' })),
+        ]);
+        const proposal = proposalResult.data;
+        const history = historyResult.data || [];
+        res.render('prompt-proposal', {
+            title: 'Prompt Proposal Review',
+            proposal,
+            history,
+        });
+    }
+    catch (error) {
+        console.error('Error loading prompt proposal page:', error.message);
+        res.status(500).render('error', { message: 'Failed to load prompt proposal page' });
+    }
+});
+/**
+ * Approve or reject a prompt proposal
+ */
+app.post('/api/learning/prompt-proposal/:id/review', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { status, reviewer_name, reviewer_notes, final_prompt } = req.body || {};
+        if (!status || !['approved', 'approved_modified', 'rejected'].includes(status)) {
+            return res.status(400).json({ error: 'status must be approved, approved_modified, or rejected' });
+        }
+        // Update proposal status
+        const response = await axios_1.default.put(`${DB_SERVICE_URL}/prompt-proposals/${encodeURIComponent(id)}`, {
+            status,
+            reviewer_name: reviewer_name || null,
+            reviewer_notes: reviewer_notes || null,
+            final_prompt: final_prompt || null,
+            reviewed_at: new Date().toISOString(),
+        }, { timeout: 5000 });
+        // If approved, write the new prompt to qa_prompt.txt
+        if (status === 'approved' || status === 'approved_modified') {
+            const promptToWrite = final_prompt || response.data?.proposed_prompt;
+            if (promptToWrite) {
+                const qaPromptPath = path.join(getRepoRoot(), 'sop-processor', 'qa_prompt.txt');
+                await fs_1.promises.writeFile(qaPromptPath, promptToWrite, 'utf-8');
+                console.log(`Base prompt updated from proposal ${id} (status: ${status})`);
+            }
+        }
+        res.json({ success: true, proposal: response.data });
+    }
+    catch (error) {
+        console.error('Error reviewing prompt proposal:', error.message);
+        res.status(500).json({ error: 'Failed to review prompt proposal' });
+    }
+});
+/**
+ * System Alerts page
+ */
+app.get('/alerts', async (_req, res) => {
+    try {
+        let alerts = [];
+        if ((0, supabase_client_1.isSupabaseConfigured)()) {
+            const supabase = (await Promise.resolve().then(() => __importStar(require('@menumanager/supabase-client')))).getSupabaseClient();
+            const { data, error } = await supabase
+                .from('system_alerts')
+                .select('*')
+                .order('created_at', { ascending: false })
+                .limit(100);
+            if (!error && data)
+                alerts = data;
+        }
+        res.render('alerts', { title: 'System Alerts', alerts });
+    }
+    catch (error) {
+        console.error('Error loading alerts page:', error.message);
+        res.status(500).render('error', { message: 'Failed to load alerts page' });
+    }
+});
+app.put('/api/alerts/:id/acknowledge', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { acknowledged_by } = req.body || {};
+        if (!(0, supabase_client_1.isSupabaseConfigured)()) {
+            return res.status(503).json({ error: 'Supabase not configured' });
+        }
+        const supabase = (await Promise.resolve().then(() => __importStar(require('@menumanager/supabase-client')))).getSupabaseClient();
+        const { error } = await supabase
+            .from('system_alerts')
+            .update({
+            acknowledged: true,
+            acknowledged_by: acknowledged_by || 'admin',
+            acknowledged_at: new Date().toISOString(),
+        })
+            .eq('id', id);
+        if (error)
+            throw error;
+        res.json({ success: true });
+    }
+    catch (error) {
+        res.status(500).json({ error: error.message });
     }
 });
 app.post('/api/learning/location-rules', async (req, res) => {
@@ -944,12 +1104,6 @@ Note: Use ONLY these allergen codes when checking allergen compliance. Do not us
             qaPrompt = qaPrompt.replace('### 7. ALLERGENS', `### 7. ALLERGENS\n${allergenSection}`);
             console.log('Injected custom allergens into prompt');
         }
-        // Add learned reviewer correction overlay from differ service (fail-open).
-        const learnedOverlay = await fetchLearnedPromptOverlay();
-        if (learnedOverlay) {
-            qaPrompt = `${qaPrompt}\n\n${learnedOverlay}`;
-            console.log('Injected learned correction overlay into prompt');
-        }
         // Call AI Review service's QA endpoint
         let finalPrompt = qaPrompt;
         if (changedOnlyMode) {
@@ -1083,19 +1237,8 @@ function normalizeReviewLine(line) {
 function stripDiacritics(input) {
     return (input || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 }
-async function fetchLearnedPromptOverlay() {
-    try {
-        const response = await axios_1.default.get(`${DIFFER_SERVICE_URL}/learning/overlay`, { timeout: 1500 });
-        const overlay = response.data?.overlay;
-        if (typeof overlay === 'string' && overlay.trim()) {
-            return overlay;
-        }
-        return '';
-    }
-    catch {
-        return '';
-    }
-}
+// fetchLearnedPromptOverlay() removed in Learning Pipeline v2.
+// Rules now flow through correction_rules table, not auto-injected overlay.
 function normalizeForSuggestionMatch(input) {
     return stripDiacritics(input || '')
         .toLowerCase()
@@ -1341,6 +1484,7 @@ app.post('/api/form/submit', async (req, res) => {
             file_size_limit: fileSizeLimit === 'yes',
             file_size_limit_mb: fileSizeLimitMb || null,
             file_delivery_notes: fileDeliveryNotes || null,
+            orientation,
             approvals: JSON.stringify(approvals),
             critical_overrides: JSON.stringify(criticalOverrides || []),
             menu_content: normalizedMenuContent,
@@ -1420,6 +1564,14 @@ app.post('/api/form/submit', async (req, res) => {
             await axios_1.default.put(`${DB_SERVICE_URL}/submissions/${submissionId}`, {
                 status: skipAi ? 'submitted_no_ai_review' : 'pending_human_review'
             });
+            sendAdminAlert({
+                alert_type: 'ai_review_failed',
+                severity: 'warning',
+                service: 'dashboard',
+                submission_id: submissionId,
+                message: `AI review failed for "${projectName}". Submission moved to manual review.`,
+                details: { error: aiError.message },
+            });
         }
         // Create ClickUp task (synchronous so we can surface upload issues to chef)
         let clickupWarning;
@@ -1481,6 +1633,14 @@ app.post('/api/form/submit', async (req, res) => {
             console.error('Failed to create ClickUp task:', clickupError.response?.data || clickupError.message);
             const supportEmail = process.env.INTERNAL_REVIEWER_EMAIL || 'the design team';
             clickupWarning = `Menu submitted, but we could not create your ClickUp task. If this persists, please email the Word document directly to ${supportEmail}.`;
+            sendAdminAlert({
+                alert_type: 'clickup_task_failed',
+                severity: 'error',
+                service: 'dashboard',
+                submission_id: submissionId,
+                message: `ClickUp task creation failed for "${projectName}" (${normalizedProperty})`,
+                details: { error: clickupError.response?.data || clickupError.message, submitter: submitterEmail },
+            });
         }
         res.json({
             success: true,
@@ -1494,6 +1654,13 @@ app.post('/api/form/submit', async (req, res) => {
     }
     catch (error) {
         console.error('Error submitting form:', error);
+        sendAdminAlert({
+            alert_type: 'submission_failed',
+            severity: 'critical',
+            service: 'dashboard',
+            message: `Menu submission failed completely: ${error.message}`,
+            details: { error: error.message, stack: error.stack?.slice(0, 500) },
+        });
         res.status(500).json({
             error: 'Failed to submit menu',
             details: error.message

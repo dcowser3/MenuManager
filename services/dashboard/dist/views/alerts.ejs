@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title><%= title %></title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600&family=Montserrat:wght@400;500;600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --text: #333;
+            --muted: #777;
+            --border: #e8e4de;
+            --bg: #fff;
+            --bg-alt: #fafaf8;
+            --primary: #2c2c2c;
+            --success: #4a7c59;
+            --danger: #8b3a3a;
+            --warn: #b8860b;
+        }
+        * { box-sizing: border-box; }
+        body { margin: 0; font-family: 'Montserrat', sans-serif; color: var(--text); background: var(--bg); line-height: 1.55; }
+        .header { border-bottom: 1px solid var(--border); padding: 1.75rem 4vw; }
+        .header h1 { margin: 0; font-family: 'Cormorant Garamond', serif; font-size: 2rem; letter-spacing: .04em; }
+        .links { margin-top: .35rem; }
+        .links a { color: var(--primary); text-decoration: none; margin-right: 1rem; font-size: .75rem; text-transform: uppercase; letter-spacing: .12em; }
+        .container { max-width: 1400px; margin: 0 auto; padding: 1.5rem 4vw 2.5rem; }
+        .stats { display: flex; gap: 1rem; margin-bottom: 1.5rem; flex-wrap: wrap; }
+        .stat-card { border: 1px solid var(--border); padding: .75rem 1rem; min-width: 140px; }
+        .stat-label { font-size: .6rem; text-transform: uppercase; letter-spacing: .1em; color: var(--muted); }
+        .stat-value { font-size: 1.4rem; font-weight: 600; }
+        .badge {
+            display: inline-block;
+            border: 1px solid var(--border);
+            padding: .15rem .4rem;
+            font-size: .6rem;
+            text-transform: uppercase;
+            letter-spacing: .08em;
+        }
+        .badge.critical { color: #d32f2f; border-color: rgba(211,47,47,.35); background: #ffebee; }
+        .badge.error { color: var(--danger); border-color: rgba(139,58,58,.35); }
+        .badge.warning { color: var(--warn); border-color: rgba(184,134,11,.35); }
+        .badge.acknowledged { color: var(--success); border-color: rgba(74,124,89,.35); }
+        table { width: 100%; border-collapse: collapse; border: 1px solid var(--border); background: #fff; }
+        th, td { border-bottom: 1px solid var(--border); padding: .5rem .6rem; font-size: .82rem; vertical-align: top; }
+        th { background: var(--bg-alt); text-align: left; font-size: .68rem; text-transform: uppercase; letter-spacing: .1em; }
+        .empty { border: 1px solid var(--border); padding: 1.5rem; text-align: center; color: var(--muted); }
+        .small { font-size: .72rem; color: var(--muted); }
+        .btn-sm {
+            border: 1px solid var(--border);
+            background: #fff;
+            color: var(--text);
+            font-size: .65rem;
+            letter-spacing: .08em;
+            text-transform: uppercase;
+            padding: .3rem .5rem;
+            cursor: pointer;
+        }
+        .btn-sm:hover { background: var(--bg-alt); }
+        .details-toggle { cursor: pointer; color: var(--primary); text-decoration: underline; font-size: .75rem; }
+        .details-content { display: none; margin-top: .5rem; background: #f5f5f5; padding: .5rem; font-family: monospace; font-size: .7rem; white-space: pre-wrap; overflow: auto; max-height: 200px; }
+        tr.acked { opacity: .5; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>System Alerts</h1>
+        <div class="links">
+            <a href="/">Dashboard</a>
+            <a href="/learning">Learning</a>
+        </div>
+    </div>
+
+    <div class="container">
+        <% const unacked = alerts.filter(a => !a.acknowledged); %>
+        <% const critCount = alerts.filter(a => a.severity === 'critical' && !a.acknowledged).length; %>
+        <% const errCount = alerts.filter(a => a.severity === 'error' && !a.acknowledged).length; %>
+        <% const warnCount = alerts.filter(a => a.severity === 'warning' && !a.acknowledged).length; %>
+
+        <div class="stats">
+            <div class="stat-card">
+                <div class="stat-label">Unacknowledged</div>
+                <div class="stat-value" style="color: <%= unacked.length > 0 ? 'var(--danger)' : 'var(--success)' %>"><%= unacked.length %></div>
+            </div>
+            <% if (critCount > 0) { %>
+            <div class="stat-card">
+                <div class="stat-label">Critical</div>
+                <div class="stat-value" style="color: #d32f2f"><%= critCount %></div>
+            </div>
+            <% } %>
+            <% if (errCount > 0) { %>
+            <div class="stat-card">
+                <div class="stat-label">Errors</div>
+                <div class="stat-value" style="color: var(--danger)"><%= errCount %></div>
+            </div>
+            <% } %>
+            <% if (warnCount > 0) { %>
+            <div class="stat-card">
+                <div class="stat-label">Warnings</div>
+                <div class="stat-value" style="color: var(--warn)"><%= warnCount %></div>
+            </div>
+            <% } %>
+            <div class="stat-card">
+                <div class="stat-label">Total (last 100)</div>
+                <div class="stat-value"><%= alerts.length %></div>
+            </div>
+        </div>
+
+        <% if (alerts.length === 0) { %>
+            <div class="empty">No system alerts recorded yet.</div>
+        <% } else { %>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Severity</th>
+                        <th>Type</th>
+                        <th>Service</th>
+                        <th>Message</th>
+                        <th>Submission</th>
+                        <th>Time</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                <% alerts.forEach((alert, idx) => { %>
+                    <tr class="<%= alert.acknowledged ? 'acked' : '' %>" id="row-<%= alert.id %>">
+                        <td><span class="badge <%= alert.severity %>"><%= alert.severity %></span></td>
+                        <td><%= alert.alert_type.replace(/_/g, ' ') %></td>
+                        <td><%= alert.service %></td>
+                        <td>
+                            <%= alert.message %>
+                            <% if (alert.details) { %>
+                                <br><span class="details-toggle" onclick="toggleDetails(<%= idx %>)">details</span>
+                                <div class="details-content" id="details-<%= idx %>"><%= typeof alert.details === 'string' ? alert.details : JSON.stringify(alert.details, null, 2) %></div>
+                            <% } %>
+                        </td>
+                        <td>
+                            <% if (alert.submission_id) { %>
+                                <a href="/review/<%= alert.submission_id %>" class="small"><%= alert.submission_id.substring(0, 12) %>...</a>
+                            <% } %>
+                        </td>
+                        <td class="small"><%= alert.created_at ? new Date(alert.created_at).toLocaleString() : '' %></td>
+                        <td>
+                            <% if (!alert.acknowledged) { %>
+                                <button class="btn-sm" onclick="acknowledge('<%= alert.id %>')">Ack</button>
+                            <% } else { %>
+                                <span class="badge acknowledged">acked</span>
+                                <% if (alert.acknowledged_by) { %><br><span class="small"><%= alert.acknowledged_by %></span><% } %>
+                            <% } %>
+                        </td>
+                    </tr>
+                <% }) %>
+                </tbody>
+            </table>
+        <% } %>
+    </div>
+
+    <script>
+        function toggleDetails(idx) {
+            const el = document.getElementById('details-' + idx);
+            el.style.display = el.style.display === 'block' ? 'none' : 'block';
+        }
+
+        async function acknowledge(id) {
+            try {
+                const res = await fetch('/api/alerts/' + id + '/acknowledge', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ acknowledged_by: 'admin' }),
+                });
+                if (res.ok) {
+                    document.getElementById('row-' + id).classList.add('acked');
+                    const btn = document.querySelector('#row-' + id + ' .btn-sm');
+                    if (btn) btn.outerHTML = '<span class="badge acknowledged">acked</span>';
+                }
+            } catch (err) {
+                console.error('Failed to acknowledge:', err);
+            }
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title><%= title %></title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600&family=Montserrat:wght@400;500;600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --text: #333;
+            --muted: #777;
+            --border: #e8e4de;
+            --bg: #fff;
+            --bg-alt: #fafaf8;
+            --primary: #2c2c2c;
+            --success: #4a7c59;
+            --danger: #8b3a3a;
+            --warn: #b8860b;
+            --diff-add-bg: #e6ffed;
+            --diff-add-text: #22863a;
+            --diff-del-bg: #ffeef0;
+            --diff-del-text: #cb2431;
+        }
+        * { box-sizing: border-box; }
+        body { margin: 0; font-family: 'Montserrat', sans-serif; color: var(--text); background: var(--bg); line-height: 1.55; }
+        .header { border-bottom: 1px solid var(--border); padding: 1.75rem 4vw; }
+        .header h1 { margin: 0; font-family: 'Cormorant Garamond', serif; font-size: 2rem; letter-spacing: .04em; }
+        .links { margin-top: .35rem; }
+        .links a { color: var(--primary); text-decoration: none; margin-right: 1rem; font-size: .75rem; text-transform: uppercase; letter-spacing: .12em; }
+        .container { max-width: 1400px; margin: 0 auto; padding: 1.5rem 4vw 2.5rem; }
+        .card { border: 1px solid var(--border); background: #fff; padding: 1.25rem; margin-bottom: 1rem; }
+        .section-title {
+            font-size: .8rem;
+            text-transform: uppercase;
+            letter-spacing: .1em;
+            color: var(--muted);
+            margin: 1.5rem 0 .6rem;
+        }
+        .badge {
+            display: inline-block;
+            border: 1px solid var(--border);
+            padding: .2rem .5rem;
+            font-size: .65rem;
+            text-transform: uppercase;
+            letter-spacing: .1em;
+            background: #fff;
+        }
+        .badge.pending { color: var(--warn); border-color: rgba(184,134,11,.35); }
+        .badge.approved, .badge.approved_modified { color: var(--success); border-color: rgba(74,124,89,.35); }
+        .badge.rejected { color: var(--danger); border-color: rgba(139,58,58,.35); }
+        .meta-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: .75rem; margin-bottom: 1rem; }
+        .meta-item { border: 1px solid var(--border); background: var(--bg-alt); padding: .5rem .6rem; }
+        .meta-label { font-size: .6rem; text-transform: uppercase; letter-spacing: .1em; color: var(--muted); margin-bottom: .15rem; }
+        .meta-value { font-size: .82rem; font-weight: 500; }
+        .prompt-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1rem;
+            margin-bottom: 1rem;
+        }
+        @media (max-width: 980px) { .prompt-grid { grid-template-columns: 1fr; } }
+        .prompt-block { border: 1px solid var(--border); background: #fff; padding: .75rem; }
+        .prompt-block h3 { margin: 0 0 .5rem; font-size: .75rem; text-transform: uppercase; letter-spacing: .1em; color: var(--muted); }
+        .prompt-text {
+            width: 100%;
+            min-height: 350px;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+            font-size: .72rem;
+            line-height: 1.4;
+            border: 1px solid var(--border);
+            padding: .6rem;
+            white-space: pre-wrap;
+            overflow: auto;
+            background: #fcfcfb;
+        }
+        .diff-view {
+            font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+            font-size: .72rem;
+            line-height: 1.5;
+            border: 1px solid var(--border);
+            padding: .6rem;
+            overflow: auto;
+            background: #fcfcfb;
+            max-height: 500px;
+        }
+        .diff-line { white-space: pre-wrap; }
+        .diff-add { background: var(--diff-add-bg); color: var(--diff-add-text); }
+        .diff-del { background: var(--diff-del-bg); color: var(--diff-del-text); }
+        .analysis-box {
+            border: 1px solid var(--border);
+            background: var(--bg-alt);
+            padding: 1rem;
+            font-size: .85rem;
+            line-height: 1.6;
+            white-space: pre-wrap;
+        }
+        .btn {
+            border: 1px solid var(--primary);
+            background: var(--primary);
+            color: #fff;
+            font-size: .7rem;
+            letter-spacing: .1em;
+            text-transform: uppercase;
+            padding: .55rem .8rem;
+            cursor: pointer;
+        }
+        .btn.success { background: var(--success); border-color: var(--success); }
+        .btn.danger { background: var(--danger); border-color: var(--danger); }
+        .btn.secondary { background: #fff; color: var(--primary); }
+        .btn-group { display: flex; gap: .5rem; margin-top: 1rem; }
+        .review-form { margin-top: 1rem; }
+        .review-form label { display: block; font-size: .65rem; text-transform: uppercase; letter-spacing: .1em; color: var(--muted); margin-bottom: .25rem; margin-top: .75rem; }
+        .review-form input, .review-form textarea { width: 100%; border: 1px solid var(--border); padding: .5rem; font-family: inherit; font-size: .84rem; }
+        .review-form textarea { min-height: 80px; resize: vertical; }
+        .status-msg { margin-top: .75rem; font-size: .85rem; font-weight: 500; }
+        .status-msg.ok { color: var(--success); }
+        .status-msg.err { color: var(--danger); }
+        table { width: 100%; border-collapse: collapse; border: 1px solid var(--border); background: #fff; }
+        th, td { border-bottom: 1px solid var(--border); padding: .5rem .6rem; font-size: .82rem; vertical-align: top; }
+        th { background: var(--bg-alt); text-align: left; font-size: .68rem; text-transform: uppercase; letter-spacing: .1em; }
+        .empty { border: 1px solid var(--border); padding: 1.5rem; text-align: center; color: var(--muted); }
+        .small { font-size: .72rem; color: var(--muted); }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Prompt Proposal Review</h1>
+        <div class="links">
+            <a href="/learning">Learning Dashboard</a>
+            <a href="/">Dashboard</a>
+        </div>
+    </div>
+
+    <div class="container">
+        <% if (!proposal) { %>
+            <div class="empty">
+                No prompt proposals yet. Run <code>npm run prompt:rewrite</code> to generate one from accumulated corrections.
+            </div>
+        <% } else { %>
+            <div class="card">
+                <div class="meta-grid">
+                    <div class="meta-item">
+                        <div class="meta-label">Cycle</div>
+                        <div class="meta-value"><%= proposal.cycle_id %></div>
+                    </div>
+                    <div class="meta-item">
+                        <div class="meta-label">Status</div>
+                        <div class="meta-value"><span class="badge <%= proposal.status %>"><%= proposal.status %></span></div>
+                    </div>
+                    <div class="meta-item">
+                        <div class="meta-label">Corrections Used</div>
+                        <div class="meta-value"><%= proposal.correction_rule_count || 0 %></div>
+                    </div>
+                    <div class="meta-item">
+                        <div class="meta-label">Submissions</div>
+                        <div class="meta-value"><%= proposal.submission_count || 0 %></div>
+                    </div>
+                    <div class="meta-item">
+                        <div class="meta-label">Date Range</div>
+                        <div class="meta-value"><%= proposal.date_range_start || '' %> to <%= proposal.date_range_end || '' %></div>
+                    </div>
+                    <div class="meta-item">
+                        <div class="meta-label">Model</div>
+                        <div class="meta-value"><%= proposal.llm_model || 'N/A' %></div>
+                    </div>
+                    <div class="meta-item">
+                        <div class="meta-label">Generated</div>
+                        <div class="meta-value"><%= proposal.created_at ? new Date(proposal.created_at).toLocaleString() : 'N/A' %></div>
+                    </div>
+                    <% if (proposal.reviewed_at) { %>
+                        <div class="meta-item">
+                            <div class="meta-label">Reviewed</div>
+                            <div class="meta-value"><%= new Date(proposal.reviewed_at).toLocaleString() %> by <%= proposal.reviewer_name || 'Unknown' %></div>
+                        </div>
+                    <% } %>
+                </div>
+            </div>
+
+            <% if (proposal.llm_analysis) { %>
+                <h3 class="section-title">LLM Analysis</h3>
+                <div class="analysis-box"><%= proposal.llm_analysis %></div>
+            <% } %>
+
+            <h3 class="section-title">Diff View</h3>
+            <div class="diff-view" id="diffView">
+                <% if (proposal.prompt_diff) { %>
+                    <% proposal.prompt_diff.split('\n').forEach((line) => { %>
+                        <% if (line.startsWith('+ ')) { %>
+                            <div class="diff-line diff-add"><%= line %></div>
+                        <% } else if (line.startsWith('- ')) { %>
+                            <div class="diff-line diff-del"><%= line %></div>
+                        <% } else { %>
+                            <div class="diff-line"><%= line %></div>
+                        <% } %>
+                    <% }) %>
+                <% } else { %>
+                    <div class="small">No diff available</div>
+                <% } %>
+            </div>
+
+            <h3 class="section-title">Side-by-Side</h3>
+            <div class="prompt-grid">
+                <div class="prompt-block">
+                    <h3>Current Prompt</h3>
+                    <textarea class="prompt-text" readonly><%= proposal.current_prompt || '' %></textarea>
+                </div>
+                <div class="prompt-block">
+                    <h3>Proposed Prompt</h3>
+                    <textarea class="prompt-text" id="proposedPrompt"><%= proposal.final_prompt || proposal.proposed_prompt || '' %></textarea>
+                </div>
+            </div>
+
+            <% if (proposal.status === 'pending') { %>
+                <div class="card">
+                    <h3 class="section-title" style="margin-top:0">Review</h3>
+                    <div class="small">
+                        You can edit the proposed prompt above before approving. "Approve as-is" uses the proposed prompt unchanged.
+                        "Approve with edits" uses your modified version.
+                    </div>
+                    <div class="review-form">
+                        <label for="reviewerName">Reviewer Name</label>
+                        <input id="reviewerName" placeholder="Your name">
+                        <label for="reviewerNotes">Notes (optional)</label>
+                        <textarea id="reviewerNotes" placeholder="Any notes about this prompt change..."></textarea>
+                    </div>
+                    <div class="btn-group">
+                        <button class="btn success" onclick="submitReview('approved')">Approve As-Is</button>
+                        <button class="btn" onclick="submitReview('approved_modified')">Approve With Edits</button>
+                        <button class="btn danger" onclick="submitReview('rejected')">Reject</button>
+                    </div>
+                    <div class="status-msg" id="reviewStatus"></div>
+                </div>
+            <% } else if (proposal.reviewer_notes) { %>
+                <div class="card">
+                    <h3 class="section-title" style="margin-top:0">Reviewer Notes</h3>
+                    <div><%= proposal.reviewer_notes %></div>
+                </div>
+            <% } %>
+        <% } %>
+
+        <!-- Proposal History -->
+        <h3 class="section-title">Proposal History</h3>
+        <% if (!history || history.length === 0) { %>
+            <div class="empty">No proposals generated yet.</div>
+        <% } else { %>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Cycle</th>
+                        <th>Status</th>
+                        <th>Corrections</th>
+                        <th>Submissions</th>
+                        <th>Date Range</th>
+                        <th>Model</th>
+                        <th>Reviewed</th>
+                        <th>Created</th>
+                    </tr>
+                </thead>
+                <tbody>
+                <% history.forEach((p) => { %>
+                    <tr>
+                        <td><strong><%= p.cycle_id %></strong></td>
+                        <td><span class="badge <%= p.status %>"><%= p.status %></span></td>
+                        <td><%= p.correction_rule_count || 0 %></td>
+                        <td><%= p.submission_count || 0 %></td>
+                        <td><%= p.date_range_start || '' %> - <%= p.date_range_end || '' %></td>
+                        <td><%= p.llm_model || '' %></td>
+                        <td><%= p.reviewed_at ? new Date(p.reviewed_at).toLocaleString() : '' %></td>
+                        <td><%= p.created_at ? new Date(p.created_at).toLocaleString() : '' %></td>
+                    </tr>
+                <% }) %>
+                </tbody>
+            </table>
+        <% } %>
+    </div>
+
+    <% if (proposal && proposal.status === 'pending') { %>
+    <script>
+        async function submitReview(status) {
+            const statusEl = document.getElementById('reviewStatus');
+            const reviewerName = (document.getElementById('reviewerName').value || '').trim();
+            const reviewerNotes = (document.getElementById('reviewerNotes').value || '').trim();
+            const proposedText = document.getElementById('proposedPrompt').value;
+
+            if (!reviewerName) {
+                statusEl.textContent = 'Reviewer name is required.';
+                statusEl.className = 'status-msg err';
+                return;
+            }
+
+            const body = {
+                status,
+                reviewer_name: reviewerName,
+                reviewer_notes: reviewerNotes || null,
+            };
+
+            // Both approve modes send the prompt text from the textarea
+            // (unchanged for "as-is", potentially edited for "with edits")
+            if (status === 'approved' || status === 'approved_modified') {
+                body.final_prompt = proposedText;
+            }
+
+            statusEl.textContent = 'Submitting...';
+            statusEl.className = 'status-msg';
+
+            try {
+                const response = await fetch('/api/learning/prompt-proposal/<%= proposal.id %>/review', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body),
+                });
+                const result = await response.json();
+                if (!response.ok) {
+                    throw new Error(result.error || 'Failed to submit review');
+                }
+                statusEl.textContent = status.includes('approved')
+                    ? 'Approved! Base prompt has been updated.'
+                    : 'Rejected. No changes made to the prompt.';
+                statusEl.className = 'status-msg ok';
+                setTimeout(() => window.location.reload(), 1200);
+            } catch (error) {
+                statusEl.textContent = error.message || 'Review failed.';
+                statusEl.className = 'status-msg err';
+            }
+        }
+    </script>
+    <% } %>
+</body>
+</html>
