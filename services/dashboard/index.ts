@@ -1529,8 +1529,8 @@ app.post('/api/form/menu-image-upload', upload.single('menuImage') as any, async
         }
 
         const mime = req.file.mimetype || '';
-        if (!mime.startsWith('image/')) {
-            return res.status(400).json({ error: 'Only image uploads are allowed' });
+        if (!mime.startsWith('image/') && mime !== 'application/pdf') {
+            return res.status(400).json({ error: 'Only image or PDF uploads are allowed' });
         }
 
         res.json({

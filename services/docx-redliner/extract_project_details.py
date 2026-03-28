@@ -89,6 +89,7 @@ def extract_project_details(docx_path: str) -> dict:
         "date_needed": ""
     }
 
+    # Exact-match mapping for standard RSH template fields
     field_mapping = {
         "PROJECT NAME": "project_name",
         "PROPERTY": "property",
@@ -97,15 +98,56 @@ def extract_project_details(docx_path: str) -> dict:
         "DATE NEEDED": "date_needed"
     }
 
+    # Normalized keyword mapping for briefs that use alternative field names.
+    # Keys are lowercase substrings to match against the cell label;
+    # checked in order so more-specific patterns are tried first.
+    alt_field_mapping = [
+        # project_name alternatives
+        ("project name", "project_name"),
+        ("menu name", "project_name"),
+        ("event name", "project_name"),
+        # property alternatives
+        ("property", "property"),
+        ("hotel name", "property"),
+        ("outlet name", "property"),
+        ("venue name", "property"),
+        ("restaurant name", "property"),
+        ("location name", "property"),
+        ("location", "property"),
+        # size
+        ("size", "size"),
+        ("dimension", "size"),
+        # orientation
+        ("orientation", "orientation"),
+        # date
+        ("date needed", "date_needed"),
+        ("due date", "date_needed"),
+        ("deadline", "date_needed"),
+    ]
+
     if len(doc.tables) > 0:
         table = doc.tables[0]
         for row in table.rows:
             cells = row.cells
             if len(cells) >= 2:
                 field_name = cells[0].text.strip()
+                value = cells[1].text.strip()
+                if not value:
+                    continue
+
+                # Try exact match first (standard template)
                 if field_name in field_mapping:
                     key = field_mapping[field_name]
-                    project_details[key] = cells[1].text.strip()
+                    if not project_details[key]:
+                        project_details[key] = value
+                    continue
+
+                # Fuzzy match for alternative field names (briefs)
+                field_lower = field_name.lower()
+                for pattern, key in alt_field_mapping:
+                    if pattern in field_lower and not project_details[key]:
+                        project_details[key] = value
+                        break
 
     # Find boundary marker and extract menu content after it
     boundary_markers = [

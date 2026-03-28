@@ -107,7 +107,22 @@ describe('Dashboard Modification Workflow (local, mocked externals)', () => {
         });
 
         mockedAxios.put = jest.fn(async () => ({ data: { ok: true } }));
-        mockedAxios.get = jest.fn(async () => ({ data: [] }));
+        mockedAxios.get = jest.fn(async (url) => {
+            const urlStr = String(url);
+
+            if (urlStr.includes('http://localhost:3004/properties')) {
+                return {
+                    data: {
+                        catalog: [
+                            { name: 'Test Property', city_country: 'Denver, USA' },
+                            { name: 'Legacy Property', city_country: 'Miami, USA' },
+                        ],
+                    },
+                };
+            }
+
+            return { data: [] };
+        });
     });
 
     test('accepts modification submission using DB baseline and persists revision fields', async () => {

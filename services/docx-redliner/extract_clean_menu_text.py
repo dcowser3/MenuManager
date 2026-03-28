@@ -12,6 +12,8 @@ import sys
 from html import escape
 from docx import Document
 from docx.enum.text import WD_COLOR_INDEX
+from docx.oxml.ns import qn
+from docx.text.run import Run
 
 BOUNDARY_MARKERS = [
     "Please drop the menu content below on page 2",
@@ -58,6 +60,31 @@ def run_has_highlight(run):
         return False
 
 
+def run_is_struck_through(run):
+    """Return True if the run has single OR double strikethrough."""
+    try:
+        if run.font.strike:
+            return True
+    except Exception:
+        pass
+    try:
+        if run.font.double_strike:
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def all_runs_in_paragraph(paragraph):
+    """Return Run objects for ALL w:r elements in the paragraph, including
+    those nested inside w:del, w:ins, w:moveFrom, w:moveTo, w:hyperlink, etc.
+
+    python-docx's paragraph.runs only returns DIRECT w:r children of the w:p
+    element, silently skipping runs inside tracked-change wrappers. This helper
+    walks the full XML subtree so that deletion/insertion detection works."""
+    return [Run(r, paragraph) for r in paragraph._p.iter(qn("w:r"))]
+
+
 # ── Boundary detection ────────────────────────────────────────────────────────
 
 def find_boundary_index(paragraphs):
@@ -75,22 +102,26 @@ def find_boundary_index(paragraphs):
 def paragraph_clean_text(paragraph):
     """
     Best-effort cleaner:
-    - Removes explicitly struck-through text (common manual redline deletion style).
+    - Removes explicitly struck-through text (single and double strikethrough).
     - Keeps inserted/highlighted text.
     - Removes Word tracked deletions (w:del / w:moveFrom) and keeps
       tracked insertions (w:ins / w:moveTo).
+
+    Uses all_runs_in_paragraph() to iterate ALL w:r elements, including those
+    nested inside tracked-change wrappers that paragraph.runs would miss.
     """
-    if not paragraph.runs:
+    runs = all_runs_in_paragraph(paragraph)
+    if not runs:
         return paragraph.text
 
     cleaned_parts = []
-    for run in paragraph.runs:
+    for run in runs:
         text = run.text or ""
         if not text:
             continue
         if run_is_in_deleted_change(run):
             continue
-        if run.font and run.font.strike:
+        if run_is_struck_through(run):
             continue
         cleaned_parts.append(text)
 
@@ -103,10 +134,10 @@ def paragraph_clean_html(paragraph):
     bold, italic, underline. Tracked/manual deletions are removed.
     """
     fragments = []
-    for run in paragraph.runs:
+    for run in all_runs_in_paragraph(paragraph):
         if run_is_in_deleted_change(run):
             continue
-        if run.font and run.font.strike:
+        if run_is_struck_through(run):
             continue
 
         text = run.text or ""
@@ -134,10 +165,11 @@ def paragraph_unapproved_text(paragraph):
     Return ALL visible text including deletions (struck-through / tracked deletes).
     This is the full text the chef sees when reviewing the unapproved document.
     """
-    if not paragraph.runs:
+    runs = all_runs_in_paragraph(paragraph)
+    if not runs:
         return paragraph.text
     parts = []
-    for run in paragraph.runs:
+    for run in runs:
         text = run.text or ""
         if text:
             parts.append(text)
@@ -152,12 +184,12 @@ def paragraph_unapproved_html(paragraph):
     - Everything else rendered normally with bold/italic/underline.
     """
     fragments = []
-    for run in paragraph.runs:
+    for run in all_runs_in_paragraph(paragraph):
         text = run.text or ""
         if not text:
             continue
 
-        is_deleted = run_is_in_deleted_change(run) or (run.font and run.font.strike)
+        is_deleted = run_is_in_deleted_change(run) or run_is_struck_through(run)
         is_inserted = run_is_in_inserted_change(run) or run_has_highlight(run)
 
         chunk = escape(text).replace("\n", "<br>")
@@ -191,13 +223,13 @@ def paragraph_annotation_ranges(paragraph):
     """
     annotations = []
     offset = 0
-    for run in paragraph.runs:
+    for run in all_runs_in_paragraph(paragraph):
         text = run.text or ""
         if not text:
             continue
 
         length = len(text)
-        is_deleted = run_is_in_deleted_change(run) or (run.font and run.font.strike)
+        is_deleted = run_is_in_deleted_change(run) or run_is_struck_through(run)
         is_inserted = run_is_in_inserted_change(run) or run_has_highlight(run)
 
         if is_deleted:

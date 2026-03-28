@@ -1649,9 +1649,9 @@
 
                 <div style="margin-top: 0.75rem;">
                     <label for="menuImageUpload" style="display:block; font-size:0.65rem; font-weight:500; color: var(--color-text-muted); text-transform:uppercase; letter-spacing:0.15em; margin-bottom:0.35rem;">Menu Image Upload (Optional)</label>
-                    <input type="file" id="menuImageUpload" accept="image/*">
+                    <input type="file" id="menuImageUpload" accept="image/*,application/pdf">
                     <p style="font-size: 0.8rem; color: var(--color-text-light); margin-top: 0.35rem;">
-                        This image is sent with the ClickUp task as design reference.
+                        This image or PDF is sent with the ClickUp task as design reference.
                     </p>
                 </div>
             </div>
@@ -3759,170 +3759,118 @@
             }
         }
 
-        function computeLineDiff(original, corrected) {
-            const changes = [];
-            const origLines = original.split('\n').map(l => l.trim()).filter(l => l);
-            const corrLines = corrected.split('\n').map(l => l.trim()).filter(l => l);
-            const origLineSet = new Set(origLines.map(l => normalizeWord(l)));
-            const origLineMap = new Map();
+        function normalizeDiffTokenValue(value) {
+            return (value || '')
+                .normalize('NFC')
+                .replace(/[’`]/g, "'");
+        }
 
-            origLines.forEach((line, idx) => {
-                const norm = normalizeWord(line);
-                if (!origLineMap.has(norm)) {
-                    origLineMap.set(norm, []);
-                }
-                origLineMap.get(norm).push({ line, idx });
-            });
+        function getDiffTokenType(value) {
+            if (/^\s+$/u.test(value)) return 'whitespace';
+            if (/^[\p{L}\p{N}]+(?:['’`][\p{L}\p{N}]+)*$/u.test(value)) return 'word';
+            if (/^[-,./|:]$/u.test(value)) return 'separator';
+            return 'punctuation';
+        }
 
-            let corrOffset = 0;
-            const corrFullLines = corrected.split('\n');
+        function tokenizeDiffText(text) {
+            const source = text || '';
+            const tokenPattern = /\s+|[\p{L}\p{N}]+(?:['’`][\p{L}\p{N}]+)*|[^\s]/gu;
+            const tokens = [];
+            let match;
 
-            for (let i = 0; i < corrFullLines.length; i++) {
-                const corrLine = corrFullLines[i];
-                const corrLineTrimmed = corrLine.trim();
-
-                if (corrLineTrimmed) {
-                    const corrNorm = normalizeWord(corrLineTrimmed);
-
-                    if (origLineSet.has(corrNorm)) {
-                        const origMatches = origLineMap.get(corrNorm);
-                        if (origMatches && origMatches.length > 0) {
-                            const bestMatch = origMatches[0].line;
-                            const wordChanges = findWordChanges(bestMatch, corrLineTrimmed, corrOffset + (corrLine.length - corrLine.trimStart().length));
-                            changes.push(...wordChanges);
-                        }
-                    } else {
-                        let bestMatch = null;
-                        let bestScore = 0;
-
-                        for (const origLine of origLines) {
-                            const score = similarityScore(origLine, corrLineTrimmed);
-                            if (score > bestScore) {
-                                bestScore = score;
-                                bestMatch = origLine;
-                            }
-                        }
-
-                        if (bestMatch && bestScore > 0.5) {
-                            const lineStart = corrOffset + (corrLine.length - corrLine.trimStart().length);
-                            const wordChanges = findWordChanges(bestMatch, corrLineTrimmed, lineStart);
-                            changes.push(...wordChanges);
-                        } else if (bestScore <= 0.5) {
-                            const lineStart = corrOffset + (corrLine.length - corrLine.trimStart().length);
-                            changes.push({
-                                start: lineStart,
-                                length: corrLineTrimmed.length,
-                                word: corrLineTrimmed
-                            });
-                        }
-                    }
-                }
-
-                corrOffset += corrLine.length + 1;
+            while ((match = tokenPattern.exec(source)) !== null) {
+                const value = match[0];
+                tokens.push({
+                    value,
+                    start: match.index,
+                    end: match.index + value.length,
+                    type: getDiffTokenType(value),
+                    normalized: normalizeDiffTokenValue(value)
+                });
             }
 
-            return changes;
+            return tokens;
         }
 
-        function similarityScore(str1, str2) {
-            const words1 = str1.toLowerCase().split(/\s+/).filter(w => w);
-            const words2 = str2.toLowerCase().split(/\s+/).filter(w => w);
-
-            if (words1.length === 0 || words2.length === 0) return 0;
-
-            let matches = 0;
-            for (const w1 of words1) {
-                for (const w2 of words2) {
-                    if (wordsAreSimilar(w1, w2)) {
-                        matches++;
-                        break;
-                    }
-                }
-            }
-
-            return matches / Math.max(words1.length, words2.length);
+        function diffTokensEqual(left, right) {
+            if (!left || !right) return false;
+            return left.normalized === right.normalized;
         }
 
-        function findWordChanges(origLine, corrLine, lineOffset) {
-            const changes = [];
-            const origWords = origLine.split(/(\s+)/);
-            const corrWords = corrLine.split(/(\s+)/);
-            const lcs = longestCommonSubsequence(origWords, corrWords);
-
-            let charOffset = lineOffset;
-
-            for (let i = 0; i < corrWords.length; i++) {
-                const word = corrWords[i];
-                const isCommon = lcs.includes(i);
-
-                if (!isCommon && word.trim()) {
-                    changes.push({
-                        start: charOffset,
-                        length: word.length,
-                        word: word
-                    });
-                }
-
-                charOffset += word.length;
-            }
-
-            return changes;
-        }
-
-        function normalizeWord(word) {
-            return word.toLowerCase()
-                .replace(/[$€£¥]/g, '')
-                .replace(/[.,;:!?'"()\[\]{}]/g, '')
-                .replace(/\s+/g, '');
-        }
-
-        function wordsAreSimilar(word1, word2) {
-            const norm1 = normalizeWord(word1);
-            const norm2 = normalizeWord(word2);
-
-            if (norm1 === norm2) return true;
-            if (norm1 + 's' === norm2 || norm2 + 's' === norm1) return true;
-            if (norm1 + 'es' === norm2 || norm2 + 'es' === norm1) return true;
-
-            if (Math.abs(norm1.length - norm2.length) === 1) {
-                const longer = norm1.length > norm2.length ? norm1 : norm2;
-                const shorter = norm1.length > norm2.length ? norm2 : norm1;
-                if (longer.startsWith(shorter) && longer.endsWith('s')) return true;
-            }
-
-            return false;
-        }
-
-        function longestCommonSubsequence(origWords, corrWords) {
-            const m = origWords.length;
-            const n = corrWords.length;
+        function buildTokenLcs(baseTokens, revisedTokens) {
+            const m = baseTokens.length;
+            const n = revisedTokens.length;
             const dp = Array(m + 1).fill(null).map(() => Array(n + 1).fill(0));
 
-            for (let i = 1; i <= m; i++) {
-                for (let j = 1; j <= n; j++) {
-                    if (wordsAreSimilar(origWords[i - 1], corrWords[j - 1])) {
-                        dp[i][j] = dp[i - 1][j - 1] + 1;
+            for (let i = m - 1; i >= 0; i--) {
+                for (let j = n - 1; j >= 0; j--) {
+                    if (diffTokensEqual(baseTokens[i], revisedTokens[j])) {
+                        dp[i][j] = dp[i + 1][j + 1] + 1;
                     } else {
-                        dp[i][j] = Math.max(dp[i - 1][j], dp[i][j - 1]);
+                        dp[i][j] = Math.max(dp[i + 1][j], dp[i][j + 1]);
                     }
                 }
             }
 
-            const commonIndices = [];
-            let i = m, j = n;
-            while (i > 0 && j > 0) {
-                if (wordsAreSimilar(origWords[i - 1], corrWords[j - 1])) {
-                    commonIndices.unshift(j - 1);
-                    i--;
-                    j--;
-                } else if (dp[i - 1][j] > dp[i][j - 1]) {
-                    i--;
+            const commonBase = new Set();
+            const commonRev = new Set();
+            let i = 0;
+            let j = 0;
+
+            while (i < m && j < n) {
+                if (diffTokensEqual(baseTokens[i], revisedTokens[j])) {
+                    commonBase.add(i);
+                    commonRev.add(j);
+                    i++;
+                    j++;
+                } else if (dp[i + 1][j] >= dp[i][j + 1]) {
+                    i++;
                 } else {
-                    j--;
+                    j++;
                 }
             }
 
-            return commonIndices;
+            return { commonBase, commonRev };
+        }
+
+        function computeLineDiff(original, corrected) {
+            const revisedTokens = tokenizeDiffText(corrected);
+            const baseTokens = tokenizeDiffText(original);
+            const lcs = buildTokenLcs(baseTokens, revisedTokens);
+            const changes = [];
+
+            let idx = 0;
+            while (idx < revisedTokens.length) {
+                if (lcs.commonRev.has(idx)) {
+                    idx++;
+                    continue;
+                }
+
+                const start = revisedTokens[idx].start;
+                let end = revisedTokens[idx].end;
+                let hasVisibleToken = revisedTokens[idx].type !== 'whitespace';
+
+                idx++;
+                while (idx < revisedTokens.length && !lcs.commonRev.has(idx)) {
+                    end = revisedTokens[idx].end;
+                    if (revisedTokens[idx].type !== 'whitespace') {
+                        hasVisibleToken = true;
+                    }
+                    idx++;
+                }
+
+                if (!hasVisibleToken) {
+                    continue;
+                }
+
+                changes.push({
+                    start,
+                    length: end - start,
+                    word: corrected.slice(start, end)
+                });
+            }
+
+            return changes;
         }
 
         function renderSuggestionCard(suggestion, idx) {
@@ -4231,7 +4179,7 @@
                         <div class="suggestion-type" style="color: var(--color-success);">Auto-Corrected</div>
                         <div class="suggestion-detail" style="color: var(--color-success);">
                             High-confidence spelling and grammar corrections have been automatically applied.
-                            Green highlights show the changes.
+                            Green highlights show inserted or modified text, including punctuation and separator changes.
                         </div>
                     </div>
                 `;
@@ -4641,49 +4589,6 @@
             }, 120);
         }
 
-        function tokenizeForDiff(text) {
-            return (text || '').split(/(\s+)/).filter(token => token.length > 0);
-        }
-
-        function normalizeToken(token) {
-            return token.toLowerCase().replace(/[^\p{L}\p{N}$€£¥|.-]/gu, '');
-        }
-
-        function buildTokenLcs(baseTokens, revisedTokens) {
-            const m = baseTokens.length;
-            const n = revisedTokens.length;
-            const dp = Array(m + 1).fill(null).map(() => Array(n + 1).fill(0));
-
-            for (let i = 1; i <= m; i++) {
-                for (let j = 1; j <= n; j++) {
-                    if (normalizeToken(baseTokens[i - 1]) === normalizeToken(revisedTokens[j - 1])) {
-                        dp[i][j] = dp[i - 1][j - 1] + 1;
-                    } else {
-                        dp[i][j] = Math.max(dp[i - 1][j], dp[i][j - 1]);
-                    }
-                }
-            }
-
-            const commonBase = new Set();
-            const commonRev = new Set();
-            let i = m;
-            let j = n;
-            while (i > 0 && j > 0) {
-                if (normalizeToken(baseTokens[i - 1]) === normalizeToken(revisedTokens[j - 1])) {
-                    commonBase.add(i - 1);
-                    commonRev.add(j - 1);
-                    i--;
-                    j--;
-                } else if (dp[i - 1][j] >= dp[i][j - 1]) {
-                    i--;
-                } else {
-                    j--;
-                }
-            }
-
-            return { commonBase, commonRev };
-        }
-
         /**
          * Build a flat annotation lookup from unapprovedAnnotations (per-paragraph).
          * Returns a map keyed by character offset into the full baseText, with value 'del' or 'ins'.
@@ -4744,22 +4649,12 @@
             }
 
             previewSection.classList.add('show');
-            const baseTokens = tokenizeForDiff(baseText);
-            const revisedTokens = tokenizeForDiff(revisedText);
+            const baseTokens = tokenizeDiffText(baseText);
+            const revisedTokens = tokenizeDiffText(revisedText);
             const lcs = buildTokenLcs(baseTokens, revisedTokens);
 
             // Build annotation map for unapproved mode
             const annotationMap = unapprovedMode ? buildAnnotationMap(baseText) : {};
-
-            // Build token → base char offset mapping for annotation lookup
-            let baseCharOffsets = [];
-            if (unapprovedMode) {
-                let offset = 0;
-                for (let t = 0; t < baseTokens.length; t++) {
-                    baseCharOffsets.push(offset);
-                    offset += (baseTokens[t] || '').length;
-                }
-            }
 
             let insertions = 0;
             let deletions = 0;
@@ -4774,14 +4669,14 @@
                 const sameToken =
                     baseTok !== null &&
                     revTok !== null &&
-                    normalizeToken(baseTok) === normalizeToken(revTok);
+                    diffTokensEqual(baseTok, revTok);
 
                 if (baseCommon && revCommon && sameToken) {
                     // Unchanged token — in unapproved mode, check for existing annotations
-                    if (unapprovedMode && i < baseCharOffsets.length) {
-                        html += wrapWithExistingAnnotation(revTok, baseCharOffsets[i], annotationMap);
+                    if (unapprovedMode && baseTok) {
+                        html += wrapWithExistingAnnotation(revTok.value, baseTok.start, annotationMap);
                     } else {
-                        html += escapeHtml(revTok);
+                        html += escapeHtml(revTok.value);
                     }
                     i++;
                     j++;
@@ -4789,29 +4684,29 @@
                 }
 
                 if (i < baseTokens.length && !baseCommon) {
-                    if (baseTok && baseTok.trim()) {
-                        html += `<span class="persistent-del">${escapeHtml(baseTok)}</span>`;
+                    if (baseTok && baseTok.value.trim()) {
+                        html += `<span class="persistent-del">${escapeHtml(baseTok.value)}</span>`;
                         deletions++;
                     } else {
-                        html += escapeHtml(baseTok || '');
+                        html += escapeHtml(baseTok?.value || '');
                     }
                     i++;
                     continue;
                 }
 
                 if (j < revisedTokens.length && !revCommon) {
-                    if (revTok && revTok.trim()) {
-                        html += `<span class="persistent-ins">${escapeHtml(revTok)}</span>`;
+                    if (revTok && revTok.value.trim()) {
+                        html += `<span class="persistent-ins">${escapeHtml(revTok.value)}</span>`;
                         insertions++;
                     } else {
-                        html += escapeHtml(revTok || '');
+                        html += escapeHtml(revTok?.value || '');
                     }
                     j++;
                     continue;
                 }
 
                 if (j < revisedTokens.length) {
-                    html += escapeHtml(revTok || '');
+                    html += escapeHtml(revTok?.value || '');
                     j++;
                 }
                 if (i < baseTokens.length) {

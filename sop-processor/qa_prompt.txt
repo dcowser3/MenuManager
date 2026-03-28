@@ -270,6 +270,12 @@ These words MUST use proper accents - apply automatically:
 - lime cilantro (NOT lime-cilantro)
 - guajillo macha (NOT guajillo-macha) - Exception: if part of a sauce name like "guajillo–macha sauce"
 
+**CRITICAL — Preserve ingredient separators exactly as written:**
+- DO NOT change hyphens to commas or vice versa (e.g., keep "pineapple-habanero sauce" exactly as-is)
+- DO NOT split compound words with hyphens unless a specific rule above applies
+- Only apply the hyphenation rules above when the pattern clearly matches; when in doubt, preserve the original punctuation
+- Every change to ingredient separators or punctuation MUST be flagged as a correction — never silently rewrite
+
 #### 5.2 Redundant Words to AVOID (Flag as Suggestions)
 
 **Food descriptions - remove these:**

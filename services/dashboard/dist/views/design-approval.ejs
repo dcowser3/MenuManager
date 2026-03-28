@@ -454,6 +454,24 @@
             margin-bottom: 0.5rem;
             background: var(--color-background);
             border: 1px solid var(--color-border);
+            cursor: pointer;
+            transition: background 0.15s ease, border-color 0.15s ease;
+        }
+
+        .diff-item:hover {
+            background: var(--color-background-alt);
+            border-color: var(--color-secondary);
+        }
+
+        .diff-item.active {
+            border-left: 3px solid var(--color-secondary);
+            background: rgba(139, 115, 85, 0.06);
+        }
+
+        .diff-line.highlight-focus {
+            background: rgba(139, 115, 85, 0.25) !important;
+            outline: 2px solid var(--color-secondary);
+            outline-offset: -1px;
         }
 
         .diff-item-header {
@@ -1073,12 +1091,12 @@
 
             docxPanel.innerHTML = docxLines.map((line, i) => {
                 const cls = docxIssueLines.has(i) ? ' diff-changed' : '';
-                return `<div class="diff-line${cls}">${escapeHtml(line) || '&nbsp;'}</div>`;
+                return `<div class="diff-line${cls}" data-line="${i}" data-panel="docx">${escapeHtml(line) || '&nbsp;'}</div>`;
             }).join('');
 
             pdfPanel.innerHTML = pdfLines.map((line, i) => {
                 const cls = pdfIssueLines.has(i) ? ' diff-changed' : '';
-                return `<div class="diff-line${cls}">${escapeHtml(line) || '&nbsp;'}</div>`;
+                return `<div class="diff-line${cls}" data-line="${i}" data-panel="pdf">${escapeHtml(line) || '&nbsp;'}</div>`;
             }).join('');
         }
 
@@ -1091,7 +1109,7 @@
                 return;
             }
 
-            list.innerHTML = diffs.map(d => {
+            list.innerHTML = diffs.map((d, idx) => {
                 const typeBadgeClass = 'badge-' + (d.type || 'formatting');
                 const sevBadgeClass = 'badge-' + (d.severity || 'info');
 
@@ -1104,16 +1122,64 @@
                     detail = `Extra in PDF: <code>${escapeHtml(d.pdfValue)}</code>`;
                 }
 
+                const hasLineRef = d.docxLineNum !== undefined || d.pdfLineNum !== undefined;
+
                 return `
-                    <div class="diff-item">
+                    <div class="diff-item${hasLineRef ? '' : ' no-nav'}" data-diff-idx="${idx}"
+                         data-docx-line="${d.docxLineNum !== undefined ? d.docxLineNum : ''}"
+                         data-pdf-line="${d.pdfLineNum !== undefined ? d.pdfLineNum : ''}"
+                         onclick="focusDiffLine(this)"
+                         title="${hasLineRef ? 'Click to view in documents' : ''}">
                         <div class="diff-item-header">
                             <span class="badge ${typeBadgeClass}">${escapeHtml(d.type || 'other')}</span>
                             <span class="badge ${sevBadgeClass}">${escapeHtml(d.severity || 'info')}</span>
+                            ${hasLineRef ? '<span style="margin-left:auto;font-size:0.65rem;color:var(--color-text-muted);text-transform:uppercase;letter-spacing:0.05em;">Click to locate</span>' : ''}
                         </div>
-                        <div class="diff-item-text">${d.description ? escapeHtml(d.description) : detail}</div>
+                        <div class="diff-item-text">${d.description ? escapeHtml(d.description) : ''}</div>
+                        ${detail ? `<div class="diff-item-text" style="margin-top:0.25rem;">${detail}</div>` : ''}
                     </div>
                 `;
             }).join('');
+        }
+
+        function focusDiffLine(el) {
+            const docxLine = el.getAttribute('data-docx-line');
+            const pdfLine = el.getAttribute('data-pdf-line');
+            if (!docxLine && !pdfLine) return;
+
+            // Mark active diff item
+            document.querySelectorAll('.diff-item.active').forEach(item => item.classList.remove('active'));
+            el.classList.add('active');
+
+            // Clear previous highlights
+            document.querySelectorAll('.diff-line.highlight-focus').forEach(line => line.classList.remove('highlight-focus'));
+
+            // Highlight and scroll in DOCX panel
+            if (docxLine !== '') {
+                const docxEl = document.querySelector(`#docxTextPanel .diff-line[data-line="${docxLine}"]`);
+                if (docxEl) {
+                    docxEl.classList.add('highlight-focus');
+                    docxEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }
+            }
+
+            // Highlight and scroll in PDF panel
+            if (pdfLine !== '') {
+                const pdfEl = document.querySelector(`#pdfTextPanel .diff-line[data-line="${pdfLine}"]`);
+                if (pdfEl) {
+                    pdfEl.classList.add('highlight-focus');
+                    pdfEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }
+            }
+
+            // Scroll split view into viewport if not visible
+            const splitView = document.querySelector('.split-compare');
+            if (splitView) {
+                const rect = splitView.getBoundingClientRect();
+                if (rect.top < 0 || rect.bottom > window.innerHeight) {
+                    splitView.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }
+            }
         }
 
         async function overrideMismatchDecision() {

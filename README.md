@@ -29,6 +29,7 @@ Menu Manager is an AI-powered service designed to automate the review process fo
 - Web form for chef submissions
 - Canonical property selection (type-to-search, value must match configured list)
 - AI-powered two-tier review (general QA + detailed corrections)
+- Review highlights and persistent redlines surface punctuation/separator edits such as hyphen, comma, slash, and pipe changes
 - DOCX template validation and redlining
 - Reviewer dashboard
 - Notification system

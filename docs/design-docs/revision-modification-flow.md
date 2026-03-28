@@ -50,8 +50,9 @@ For modification flows, the baseline text must come from one of:
 - Right-side persistent preview shows live diff against approved baseline:
   - Deletions: red strike-through
   - Insertions: yellow highlight
+- Separator and punctuation edits are diffed as first-class changes, so hyphen/comma/slash rewrites render as explicit insertions/deletions instead of being treated as unchanged text.
 - In modification mode, AI review is scoped to changed lines only (computed against approved baseline).
-- AI suggestion highlights remain temporary and separate from persistent chef revision markup.
+- AI suggestion highlights remain temporary and separate from persistent chef revision markup, but they now preserve punctuation/separator mutations in the highlighted ranges instead of normalizing them away.
 
 ## Data Model Additions (JSON DB)
 
@@ -126,6 +127,7 @@ When a chef uploads an unapproved DOCX:
 3. **Frontend** (`form.ejs`):
    - Loads `unapprovedBaseHtml` into the editable review area so existing redlines are visible during editing.
    - `renderPersistentPreview()` uses annotation ranges to wrap unchanged tokens in `existing-del`/`existing-ins` spans; new changes get `persistent-del`/`persistent-ins` as usual.
+   - The preview diff tokenizes punctuation and separators separately so ingredient-separator edits are visible in the persistent redline.
 4. **DOCX generation** (`generate_from_form.py`):
    - `existing-del` → red strikethrough, `existing-ins` → yellow highlight (same formatting as `persistent-del`/`persistent-ins`).
 
