@@ -236,7 +236,10 @@ function extractAllergens(line: string): string[] {
 export async function extractAndStoreDishes(
     menuContent: string,
     property: string,
-    submissionId: string
+    submissionId: string,
+    options?: {
+        servicePeriod?: string;
+    }
 ): Promise<{ added: number }> {
     // Extract dishes from text
     const extractedDishes = extractDishesFromText(menuContent);
@@ -249,6 +252,7 @@ export async function extractAndStoreDishes(
     const dishes: CreateDishInput[] = extractedDishes.map(dish => ({
         dish_name: dish.name,
         property,
+        service_period: options?.servicePeriod || undefined,
         menu_category: dish.category,
         description: dish.description,
         price: dish.price,

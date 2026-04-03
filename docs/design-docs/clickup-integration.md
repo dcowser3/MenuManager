@@ -2,12 +2,13 @@
 
 **Status:** Complete (Updated Mar 2026)
 
-When a chef submits a menu, a ClickUp task is automatically created with the generated DOCX attached and assigned to the reviewer. When the reviewer uploads corrections and changes the task status, the system detects this via webhook, downloads the corrected file, emails it to the submitter, and feeds it to the differ service as training data.
+When a chef submits a menu, a ClickUp task is automatically created with the generated DOCX attached and assigned to the reviewer. When the reviewer uploads corrections and changes the task status, the system detects this via webhook, downloads the corrected file, emails it to the submitter, feeds it to the differ service as training data, and extracts approved dishes into Supabase.
 
 ## Outbound Flow (Form Submit → ClickUp)
 
 - Dashboard fires-and-forgets a `POST localhost:3007/create-task` after form submission
 - Creates task named `"{projectName} — {property}"` with submission details in the description
+- Submission payload includes both `menuType` and `servicePeriod` so ClickUp context matches the original chef request
 - Uploads the generated DOCX as an attachment
 - Uploads optional menu image attachment when provided in the form (`menuImageUpload`)
 - Stores `clickup_task_id` on the submission record
@@ -29,7 +30,9 @@ When a chef submits a menu, a ClickUp task is automatically created with the gen
 - Filters for status matching `CLICKUP_CORRECTIONS_STATUS` env var (default: `"corrections complete"`)
 - Looks up submission via `GET /submissions/by-clickup-task/:taskId` on the DB service
 - Downloads the latest attachment from the ClickUp task
-- Updates submission to `status: 'approved'` with `final_path`
+- Extracts canonical approved menu text from the corrected DOCX
+- Updates submission to `status: 'approved'` with `final_path`, `approved_menu_content_raw`, and `approved_menu_content`
+- Extracts approved dishes into `approved_dishes`, carrying forward the submission `service_period`
 - Fire-and-forget: clickup-integration sends `corrections_ready` email with the DOCX attached
 - Fire-and-forget: differ compares AI draft vs corrected file for training
 
@@ -39,7 +42,7 @@ When a chef submits a menu, a ClickUp task is automatically created with the gen
 - **Routes:** `POST /create-task`, `POST /webhook/clickup`, `POST /webhook/register`, `GET /health`
 - **DB service:** added `GET /submissions/by-clickup-task/:taskId` lookup route (registered BEFORE `/:id`)
 - **Email send:** `clickup-integration` now sends `corrections_ready` emails directly (reads DOCX from disk and attaches to email)
-- **Supabase schema:** `clickup_task_id VARCHAR(100)` column + index on submissions table
+- **Supabase schema:** `clickup_task_id VARCHAR(100)` column + index on submissions table, plus `service_period` on `submissions` and `approved_dishes`
 
 ## Webhook Registration
 

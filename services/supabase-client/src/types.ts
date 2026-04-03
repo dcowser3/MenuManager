@@ -33,6 +33,7 @@ export interface Submission {
     size?: string;
     orientation?: string;
     menu_type: MenuType;
+    service_period?: string;
     template_type: TemplateType;
     date_needed?: string;
 
@@ -69,6 +70,7 @@ export interface CreateSubmissionInput {
     size?: string;
     orientation?: string;
     menu_type?: MenuType;
+    service_period?: string;
     template_type?: TemplateType;
     date_needed?: string;
     submitter_email: string;
@@ -88,6 +90,7 @@ export interface UpdateSubmissionInput {
     size?: string;
     orientation?: string;
     menu_type?: MenuType;
+    service_period?: string;
     template_type?: TemplateType;
     date_needed?: string;
     menu_content?: string;
@@ -108,6 +111,7 @@ export interface ApprovedDish {
     dish_name: string;
     dish_name_normalized: string;
     property?: string;
+    service_period?: string;
     menu_category?: string;
     description?: string;
     price?: string;
@@ -123,6 +127,7 @@ export interface ApprovedDish {
 export interface CreateDishInput {
     dish_name: string;
     property?: string;
+    service_period?: string;
     menu_category?: string;
     description?: string;
     price?: string;

@@ -13,6 +13,7 @@ const nodemailer_1 = __importDefault(require("nodemailer"));
 const child_process_1 = require("child_process");
 const util_1 = require("util");
 const crypto_1 = __importDefault(require("crypto"));
+const supabase_client_1 = require("@menumanager/supabase-client");
 dotenv_1.default.config({ path: path_1.default.join(__dirname, '..', '..', '..', '.env') });
 const execAsync = (0, util_1.promisify)(child_process_1.exec);
 const app = (0, express_1.default)();
@@ -37,6 +38,26 @@ const mailTransporter = nodemailer_1.default.createTransport({
         pass: process.env.SMTP_PASS,
     },
 });
+const ALERT_EMAIL = process.env.ALERT_EMAIL || '';
+const DASHBOARD_URL = process.env.DASHBOARD_URL || 'http://localhost:3005';
+const alertCooldowns = new Map();
+const ALERT_COOLDOWN_MS = 15 * 60 * 1000;
+function sendAdminAlert(alert) {
+    const lastSent = alertCooldowns.get(alert.alert_type) || 0;
+    if (Date.now() - lastSent < ALERT_COOLDOWN_MS)
+        return;
+    alertCooldowns.set(alert.alert_type, Date.now());
+    (0, supabase_client_1.logAlert)(alert);
+    if (hasSmtpConfig && ALERT_EMAIL) {
+        const severityLabel = alert.severity.toUpperCase();
+        mailTransporter.sendMail({
+            from: `"Menu Manager Alerts" <${process.env.SMTP_USER}>`,
+            to: ALERT_EMAIL,
+            subject: `[${severityLabel}] ${alert.alert_type.replace(/_/g, ' ')} — Menu Manager`,
+            html: (0, supabase_client_1.buildAlertEmailHtml)(alert, DASHBOARD_URL),
+        }).catch((err) => console.error('Failed to send alert email:', err.message));
+    }
+}
 function getRepoRoot() {
     const candidates = [
         path_1.default.resolve(__dirname, '..', '..'),
@@ -135,10 +156,18 @@ function formatDateNeeded(value) {
 function buildTaskName(input) {
     const property = (input.property || '').trim();
     const menuType = (input.menuType || '').trim();
+    const servicePeriod = (input.servicePeriod || '').trim();
     const projectName = (input.projectName || '').trim();
     const assetType = (input.assetType || '').trim();
     const submissionMode = (input.submissionMode || '').trim();
-    const menuLabel = menuType ? `${toTitleCase(menuType)} Menu` : '';
+    const menuTypeLabel = menuType && menuType !== 'standard'
+        ? toTitleCase(menuType.replace(/_/g, ' '))
+        : '';
+    const menuLabelParts = [
+        servicePeriod ? toTitleCase(servicePeriod.replace(/_/g, ' ')) : '',
+        menuTypeLabel,
+    ].filter(Boolean);
+    const menuLabel = menuLabelParts.length ? `${menuLabelParts.join(' ')} Menu` : '';
     const projectLabel = projectName || (assetType ? toTitleCase(assetType) : 'Menu Submission');
     const parts = ['RSH'];
     if (property)
@@ -166,7 +195,7 @@ function buildTaskDescription(input) {
         });
         lines.push('');
     }
-    lines.push('## Menu Submission', `- Submission ID: ${input.submissionId || 'N/A'}`, `- Submitter: ${input.submitterName || 'N/A'} (${input.submitterEmail || 'N/A'})`, `- Job Title: ${input.submitterJobTitle || 'N/A'}`, `- Property: ${input.property || 'N/A'}`, `- Project: ${input.projectName || 'N/A'}`, `- Hotel: ${input.hotelName || 'N/A'}`, `- Location: ${input.cityCountry || 'N/A'}`, `- Menu Type: ${input.menuType || 'standard'}`, `- Template: ${input.templateType || 'food'}`, `- Asset Type: ${input.assetType || 'N/A'}`, `- Dimensions: ${input.width || 'N/A'} x ${input.height || 'N/A'} ${input.assetType === 'PRINT' ? 'in' : (input.assetType === 'BOTH' ? 'mixed' : 'px')}`, `- Orientation: ${input.orientation || 'N/A'}`, `- Turnaround: ${input.turnaroundDays || 'N/A'} day(s)`, `- Date Needed: ${formatDateNeeded(input.dateNeeded)}`, `- Submission Mode: ${input.submissionMode || 'new'}`, '- ClickUp Watchers: TODO add Marketing Team as watcher when watcher mapping/API is configured.');
+    lines.push('## Menu Submission', `- Submission ID: ${input.submissionId || 'N/A'}`, `- Submitter: ${input.submitterName || 'N/A'} (${input.submitterEmail || 'N/A'})`, `- Job Title: ${input.submitterJobTitle || 'N/A'}`, `- Property: ${input.property || 'N/A'}`, `- Project: ${input.projectName || 'N/A'}`, `- Hotel: ${input.hotelName || 'N/A'}`, `- Location: ${input.cityCountry || 'N/A'}`, `- Menu Type: ${input.menuType || 'standard'}`, `- Service Period: ${input.servicePeriod || 'other'}`, `- Template: ${input.templateType || 'food'}`, `- Asset Type: ${input.assetType || 'N/A'}`, `- Dimensions: ${input.width || 'N/A'} x ${input.height || 'N/A'} ${input.assetType === 'PRINT' ? 'in' : (input.assetType === 'BOTH' ? 'mixed' : 'px')}`, `- Orientation: ${input.orientation || 'N/A'}`, `- Turnaround: ${input.turnaroundDays || 'N/A'} day(s)`, `- Date Needed: ${formatDateNeeded(input.dateNeeded)}`, `- Submission Mode: ${input.submissionMode || 'new'}`, '- ClickUp Watchers: TODO add Marketing Team as watcher when watcher mapping/API is configured.');
     if (input.submissionMode === 'modification') {
         lines.push(`- Revision Source: ${input.revisionSource || (input.revisionBaseSubmissionId ? 'database' : 'uploaded-baseline')}`);
         if (input.revisionBaseSubmissionId) {
@@ -321,6 +350,31 @@ async function extractApprovedMenuContent(docxPath) {
         cleaned: parsed.cleaned_menu_content || parsed.menu_content || '',
     };
 }
+async function extractApprovedDishesForSubmission(input) {
+    if (!(0, supabase_client_1.isSupabaseConfigured)()) {
+        console.log('Supabase not configured - skipping approved dish extraction');
+        return;
+    }
+    const property = `${input.property || ''}`.trim() || 'Unknown';
+    let content = `${input.approvedMenuContent || ''}`.trim();
+    if (!content && input.finalPath) {
+        try {
+            const extracted = await extractApprovedMenuContent(input.finalPath);
+            content = `${extracted.cleaned || extracted.raw || ''}`.trim();
+        }
+        catch (error) {
+            console.warn(`Failed to extract approved dishes text from corrected DOCX for ${input.submissionId}: ${error.message}`);
+        }
+    }
+    if (!content) {
+        console.log(`No approved menu content available for dish extraction on ${input.submissionId}`);
+        return;
+    }
+    const result = await (0, supabase_client_1.extractAndStoreDishes)(content, property, input.submissionId, {
+        servicePeriod: input.servicePeriod,
+    });
+    console.log(`Approved dish extraction complete for ${input.submissionId}: ${result.added} dishes added`);
+}
 async function processApprovedTask(clickupTaskId, opts) {
     const taskResponse = await axios_1.default.get(`https://api.clickup.com/api/v2/task/${clickupTaskId}`, {
         headers: clickupHeaders,
@@ -386,12 +440,29 @@ async function processApprovedTask(clickupTaskId, opts) {
         projectName: submission.project_name,
         correctedPath,
         filename: submission.filename,
-    }).catch((err) => console.error('Failed to send corrections_ready notification:', err.message));
+    }).catch((err) => {
+        console.error('Failed to send corrections_ready notification:', err.message);
+        sendAdminAlert({
+            alert_type: 'notification_email_failed',
+            severity: 'warning',
+            service: 'clickup-integration',
+            submission_id: submission.id,
+            message: `Failed to send corrections email to ${submission.submitter_email} for "${submission.project_name}"`,
+            details: { error: err.message },
+        });
+    });
     axios_1.default.post(`${DIFFER_SERVICE_URL}/compare`, {
         ai_draft_path: submission.ai_draft_path,
         final_path: correctedPath,
         submission_id: submission.id,
     }).catch((err) => console.error('Failed to trigger differ comparison:', err.message));
+    extractApprovedDishesForSubmission({
+        submissionId: submission.id,
+        property: submission.property,
+        servicePeriod: submission.service_period || submission.raw_payload?.servicePeriod,
+        approvedMenuContent: extractedClean || submission.approved_menu_content || submission.menu_content,
+        finalPath: correctedPath,
+    }).catch((err) => console.error('Failed to extract approved dishes:', err.message));
     return { processed: true, submissionId: submission.id };
 }
 app.post('/create-task', async (req, res) => {
@@ -400,7 +471,7 @@ app.post('/create-task', async (req, res) => {
             console.log('ClickUp not configured, skipping task creation');
             return res.json({ skipped: true });
         }
-        const { submissionId, submitterName, submitterEmail, submitterJobTitle, projectName, property, width, height, printWidth, printHeight, printRegion, printSize, folded, digitalWidth, digitalHeight, cropMarks, bleedMarks, fileSizeLimit, fileSizeLimitMb, fileDeliveryNotes, orientation, menuType, templateType, turnaroundDays, dateNeeded, hotelName, cityCountry, assetType, docxPath, menuImagePath, menuImageFileName, filename, submissionMode, revisionSource, revisionBaseSubmissionId, revisionBaselineDocPath, revisionBaselineFileName, criticalOverrides, approvals, } = req.body;
+        const { submissionId, submitterName, submitterEmail, submitterJobTitle, projectName, property, width, height, printWidth, printHeight, printRegion, printSize, folded, digitalWidth, digitalHeight, cropMarks, bleedMarks, fileSizeLimit, fileSizeLimitMb, fileDeliveryNotes, orientation, menuType, servicePeriod, templateType, turnaroundDays, dateNeeded, hotelName, cityCountry, assetType, docxPath, menuImagePath, menuImageFileName, filename, submissionMode, revisionSource, revisionBaseSubmissionId, revisionBaselineDocPath, revisionBaselineFileName, criticalOverrides, approvals, } = req.body;
         const overriddenCriticals = Array.isArray(criticalOverrides)
             ? criticalOverrides.filter((o) => !!o)
             : [];
@@ -411,7 +482,7 @@ app.post('/create-task', async (req, res) => {
             return `${idx + 1}. [${issueType}] ${item || 'No item specified'}${desc ? ` - ${desc}` : ''}`;
         });
         const taskPayload = {
-            name: buildTaskName({ property, menuType, projectName, assetType, submissionMode }),
+            name: buildTaskName({ property, menuType, servicePeriod, projectName, assetType, submissionMode }),
             description: buildTaskDescription({
                 submissionId,
                 submitterName,
@@ -422,6 +493,7 @@ app.post('/create-task', async (req, res) => {
                 hotelName,
                 cityCountry,
                 menuType,
+                servicePeriod,
                 templateType,
                 assetType,
                 width,
@@ -543,6 +615,13 @@ app.post('/webhook/clickup', async (req, res) => {
     }
     catch (error) {
         console.error('Error processing ClickUp webhook:', error.response?.data || error.message);
+        sendAdminAlert({
+            alert_type: 'clickup_webhook_failed',
+            severity: 'error',
+            service: 'clickup-integration',
+            message: `Failed to process ClickUp webhook for task ${req.body?.task_id || 'unknown'}`,
+            details: { error: error.response?.data || error.message, event: req.body?.event },
+        });
     }
 });
 app.post('/webhook/backfill-pending', async (_req, res) => {

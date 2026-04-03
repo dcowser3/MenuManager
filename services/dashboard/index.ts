@@ -141,7 +141,8 @@ async function extractDishesAfterApproval(
     submissionId: string,
     menuContent: string | undefined,
     property: string,
-    finalPath: string
+    finalPath: string,
+    servicePeriod?: string
 ): Promise<void> {
     if (!isSupabaseConfigured()) {
         console.log('Supabase not configured - skipping dish extraction');
@@ -167,7 +168,9 @@ async function extractDishesAfterApproval(
             return;
         }
 
-        const result = await extractAndStoreDishes(content, property, submissionId);
+        const result = await extractAndStoreDishes(content, property, submissionId, {
+            servicePeriod,
+        });
         console.log(`Dish extraction complete: ${result.added} dishes added`);
     } catch (error) {
         console.error('Error extracting dishes:', error);
@@ -446,10 +449,11 @@ app.post('/approve/:submissionId', async (req, res) => {
 
         // Extract dishes from approved menu (async, non-blocking)
         extractDishesAfterApproval(
-            submissionId,
+            submission.id || submissionId,
             submission.menu_content,
             submission.property || 'Unknown',
-            finalPath
+            finalPath,
+            submission.service_period || submission.raw_payload?.servicePeriod
         ).catch((err: any) => console.error('Background dish extraction failed:', err));
 
         res.json({
@@ -509,10 +513,11 @@ app.post('/upload/:submissionId', upload.single('finalDocument') as any, async (
 
         // Extract dishes from approved menu (async, non-blocking)
         extractDishesAfterApproval(
-            submissionId,
+            submission.id || submissionId,
             submission.menu_content,
             submission.property || 'Unknown',
-            finalPath
+            finalPath,
+            submission.service_period || submission.raw_payload?.servicePeriod
         ).catch((err: any) => console.error('Background dish extraction failed:', err));
 
         res.json({
@@ -1571,6 +1576,7 @@ app.post('/api/form/submit', async (req, res) => {
             fileDeliveryNotes,
             orientation,
             menuType,
+            servicePeriod,
             templateType,
             turnaroundDays,
             dateNeeded,
@@ -1609,7 +1615,7 @@ app.post('/api/form/submit', async (req, res) => {
         const normalizedCityCountry = resolveCityCountryFromCatalog(normalizedProperty, propertyCatalog) || `${cityCountry || ''}`.trim();
 
         // Validate required fields
-        if (!submitterName || !submitterEmail || !submitterJobTitle || !projectName || !normalizedProperty || !orientation || !templateType || !dateNeeded || !assetType || !menuContent) {
+        if (!submitterName || !submitterEmail || !submitterJobTitle || !projectName || !normalizedProperty || !orientation || !menuType || !servicePeriod || !templateType || !dateNeeded || !assetType || !menuContent) {
             return res.status(400).json({ error: 'All fields are required' });
         }
         if (!normalizedCityCountry) {
@@ -1745,6 +1751,7 @@ app.post('/api/form/submit', async (req, res) => {
             created_at: new Date().toISOString(),
             source: 'form',
             menu_type: menuType || 'standard',
+            service_period: servicePeriod || 'other',
             template_type: normalizedTemplateType,
             hotel_name: hotelName || null,
             city_country: normalizedCityCountry,
@@ -1887,6 +1894,7 @@ app.post('/api/form/submit', async (req, res) => {
                 fileDeliveryNotes,
                 orientation,
                 menuType,
+                servicePeriod,
                 templateType: normalizedTemplateType,
                 turnaroundDays: normalizedTurnaroundDays,
                 dateNeeded,

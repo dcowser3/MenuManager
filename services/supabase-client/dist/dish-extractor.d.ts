@@ -29,7 +29,9 @@ export declare function extractDishesFromText(menuContent: string): ExtractedDis
  * @param submissionId - The source submission ID
  * @returns Number of dishes added
  */
-export declare function extractAndStoreDishes(menuContent: string, property: string, submissionId: string): Promise<{
+export declare function extractAndStoreDishes(menuContent: string, property: string, submissionId: string, options?: {
+    servicePeriod?: string;
+}): Promise<{
     added: number;
 }>;
 /**

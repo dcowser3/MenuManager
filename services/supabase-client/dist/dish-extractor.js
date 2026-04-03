@@ -192,7 +192,7 @@ function extractAllergens(line) {
  * @param submissionId - The source submission ID
  * @returns Number of dishes added
  */
-async function extractAndStoreDishes(menuContent, property, submissionId) {
+async function extractAndStoreDishes(menuContent, property, submissionId, options) {
     // Extract dishes from text
     const extractedDishes = extractDishesFromText(menuContent);
     if (extractedDishes.length === 0) {
@@ -202,6 +202,7 @@ async function extractAndStoreDishes(menuContent, property, submissionId) {
     const dishes = extractedDishes.map(dish => ({
         dish_name: dish.name,
         property,
+        service_period: options?.servicePeriod || undefined,
         menu_category: dish.category,
         description: dish.description,
         price: dish.price,

@@ -1,6 +1,6 @@
 # Menu Manager
 
-Menu Manager is an AI-powered service designed to automate the review process for menu design submissions. Chefs worldwide submit their menus via a web form, select reviewers, and the system guides the submission through a multi-level approval workflow with AI-assisted corrections.
+Menu Manager is an AI-powered service designed to automate the review process for menu design submissions. Chefs worldwide submit their menus via a web form, choose the property, menu type, and service period, and the system guides the submission through review and approval with AI-assisted corrections.
 
 ## Vision
 
@@ -28,11 +28,13 @@ Menu Manager is an AI-powered service designed to automate the review process fo
 ### Current (Phase 1)
 - Web form for chef submissions
 - Canonical property selection (type-to-search, value must match configured list)
+- Required service-period classification on submission (`breakfast`, `brunch`, `lunch`, `dinner`, `happy_hour`, `holiday`, `other`)
 - AI-powered two-tier review (general QA + detailed corrections)
 - Review highlights and persistent redlines surface punctuation/separator edits such as hyphen, comma, slash, and pipe changes
 - DOCX template validation and redlining
 - Reviewer dashboard
 - Notification system
+- Approved dishes are extracted automatically when the ClickUp-reviewed DOCX is marked approved
 
 ### Planned (Phase 2)
 - **Web Form Submission** - Chefs upload menus and select reviewers via web form
@@ -67,15 +69,15 @@ services/
 
 ## The Review Workflow
 
-1. **Submission** - Chef uploads menu via web form, selects reviewer(s), and selects property from the configured catalog
+1. **Submission** - Chef uploads menu via web form, selects property from the configured catalog, and sets menu type plus service period
 2. **Template Validation** - System validates `.docx` structure
 3. **Tier 1 AI Review** - High-level QA check (spelling, grammar, clarity)
 4. **Decision Point** - If issues found, chef is notified to resubmit
 5. **Tier 2 AI Review** - Detailed corrections based on SOP rules
 6. **Human Review** - Reviewer downloads, reviews, uploads corrections
 7. **Multi-Level Approval** - Additional reviewers if required
-8. **ClickUp Integration** - Final approval creates task in ClickUp
-9. **Dishes Database** - Approved dishes extracted and stored
+8. **ClickUp Integration** - Submission creates a ClickUp task and final approval webhook pulls the corrected DOCX back in
+9. **Dishes Database** - Approved dishes extracted from the approved menu text and stored
 
 ## Property Catalog
 
@@ -176,8 +178,8 @@ Notes:
 | 3 | Enhance reviewer dashboard (download/upload/approve) | Pending |
 | 4 | Implement multi-level approval workflow (Inngest) | Pending |
 | 5 | Add email notifications at each step (Resend) | Pending |
-| 6 | Build approved dishes extraction & database | Pending |
-| 7 | ClickUp integration for task creation | Pending |
+| 6 | Build approved dishes extraction & database | Complete |
+| 7 | ClickUp integration for task creation | Complete |
 | 8 | Deploy to production (Railway) | Pending |
 | 9 | Add authentication & roles (Clerk) | Pending |
 

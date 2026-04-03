@@ -8,7 +8,13 @@ import nodemailer from 'nodemailer';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import crypto from 'crypto';
-import { logAlert, buildAlertEmailHtml, SystemAlert } from '@menumanager/supabase-client';
+import {
+    logAlert,
+    buildAlertEmailHtml,
+    SystemAlert,
+    extractAndStoreDishes,
+    isSupabaseConfigured,
+} from '@menumanager/supabase-client';
 
 dotenv.config({ path: path.join(__dirname, '..', '..', '..', '.env') });
 const execAsync = promisify(exec);
@@ -174,17 +180,26 @@ function formatDateNeeded(value: string | undefined): string {
 function buildTaskName(input: {
     property?: string;
     menuType?: string;
+    servicePeriod?: string;
     projectName?: string;
     assetType?: string;
     submissionMode?: string;
 }): string {
     const property = (input.property || '').trim();
     const menuType = (input.menuType || '').trim();
+    const servicePeriod = (input.servicePeriod || '').trim();
     const projectName = (input.projectName || '').trim();
     const assetType = (input.assetType || '').trim();
     const submissionMode = (input.submissionMode || '').trim();
 
-    const menuLabel = menuType ? `${toTitleCase(menuType)} Menu` : '';
+    const menuTypeLabel = menuType && menuType !== 'standard'
+        ? toTitleCase(menuType.replace(/_/g, ' '))
+        : '';
+    const menuLabelParts = [
+        servicePeriod ? toTitleCase(servicePeriod.replace(/_/g, ' ')) : '',
+        menuTypeLabel,
+    ].filter(Boolean);
+    const menuLabel = menuLabelParts.length ? `${menuLabelParts.join(' ')} Menu` : '';
     const projectLabel = projectName || (assetType ? toTitleCase(assetType) : 'Menu Submission');
     const parts = ['RSH'];
 
@@ -206,6 +221,7 @@ function buildTaskDescription(input: {
     hotelName?: string;
     cityCountry?: string;
     menuType?: string;
+    servicePeriod?: string;
     templateType?: string;
     assetType?: string;
     width?: string;
@@ -263,6 +279,7 @@ function buildTaskDescription(input: {
         `- Hotel: ${input.hotelName || 'N/A'}`,
         `- Location: ${input.cityCountry || 'N/A'}`,
         `- Menu Type: ${input.menuType || 'standard'}`,
+        `- Service Period: ${input.servicePeriod || 'other'}`,
         `- Template: ${input.templateType || 'food'}`,
         `- Asset Type: ${input.assetType || 'N/A'}`,
         `- Dimensions: ${input.width || 'N/A'} x ${input.height || 'N/A'} ${input.assetType === 'PRINT' ? 'in' : (input.assetType === 'BOTH' ? 'mixed' : 'px')}`,
@@ -460,6 +477,41 @@ async function extractApprovedMenuContent(docxPath: string): Promise<{ raw: stri
     };
 }
 
+async function extractApprovedDishesForSubmission(input: {
+    submissionId: string;
+    property?: string;
+    servicePeriod?: string;
+    approvedMenuContent?: string;
+    finalPath?: string;
+}): Promise<void> {
+    if (!isSupabaseConfigured()) {
+        console.log('Supabase not configured - skipping approved dish extraction');
+        return;
+    }
+
+    const property = `${input.property || ''}`.trim() || 'Unknown';
+    let content = `${input.approvedMenuContent || ''}`.trim();
+
+    if (!content && input.finalPath) {
+        try {
+            const extracted = await extractApprovedMenuContent(input.finalPath);
+            content = `${extracted.cleaned || extracted.raw || ''}`.trim();
+        } catch (error: any) {
+            console.warn(`Failed to extract approved dishes text from corrected DOCX for ${input.submissionId}: ${error.message}`);
+        }
+    }
+
+    if (!content) {
+        console.log(`No approved menu content available for dish extraction on ${input.submissionId}`);
+        return;
+    }
+
+    const result = await extractAndStoreDishes(content, property, input.submissionId, {
+        servicePeriod: input.servicePeriod,
+    });
+    console.log(`Approved dish extraction complete for ${input.submissionId}: ${result.added} dishes added`);
+}
+
 async function processApprovedTask(clickupTaskId: string, opts?: { skipStatusCheck?: boolean }): Promise<{
     processed: boolean;
     reason?: string;
@@ -556,6 +608,14 @@ async function processApprovedTask(clickupTaskId: string, opts?: { skipStatusChe
         submission_id: submission.id,
     }).catch((err) => console.error('Failed to trigger differ comparison:', err.message));
 
+    extractApprovedDishesForSubmission({
+        submissionId: submission.id,
+        property: submission.property,
+        servicePeriod: submission.service_period || submission.raw_payload?.servicePeriod,
+        approvedMenuContent: extractedClean || submission.approved_menu_content || submission.menu_content,
+        finalPath: correctedPath,
+    }).catch((err: any) => console.error('Failed to extract approved dishes:', err.message));
+
     return { processed: true, submissionId: submission.id };
 }
 
@@ -589,6 +649,7 @@ app.post('/create-task', async (req, res) => {
             fileDeliveryNotes,
             orientation,
             menuType,
+            servicePeriod,
             templateType,
             turnaroundDays,
             dateNeeded,
@@ -620,7 +681,7 @@ app.post('/create-task', async (req, res) => {
         });
 
         const taskPayload: any = {
-            name: buildTaskName({ property, menuType, projectName, assetType, submissionMode }),
+            name: buildTaskName({ property, menuType, servicePeriod, projectName, assetType, submissionMode }),
             description: buildTaskDescription({
                 submissionId,
                 submitterName,
@@ -631,6 +692,7 @@ app.post('/create-task', async (req, res) => {
                 hotelName,
                 cityCountry,
                 menuType,
+                servicePeriod,
                 templateType,
                 assetType,
                 width,

@@ -37,7 +37,7 @@ Chef opens web form (/form)
   │      └─ Python extractors: extract_clean_menu_text.py + extract_project_details.py
   │
   ▼
-Fills form (submitter info, project details, approval attestation, menu content)
+Fills form (submitter info, project details, menu type, service period, approval attestation, menu content)
   Note: property must be selected from canonical list; separate free-text location field is removed.
   │
   ▼
@@ -79,6 +79,7 @@ ClickUp sends taskStatusUpdated webhook
   ├─ Python extractor: extract_clean_menu_text.py — derive canonical approved text
   ├─ PATCH /submissions/:id (db service) — update status to 'approved', set final_path + approved_menu_content
   ├─ POST /assets (db service) — store approved_docx metadata
+  ├─ Supabase dish extraction — parse approved menu text into `approved_dishes`
   │
   ├─ Fire-and-forget: internal email send — corrections_ready email with DOCX attached
   └─ Fire-and-forget: POST differ — compare AI draft vs corrected file (training data)

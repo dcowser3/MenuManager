@@ -142,7 +142,7 @@ function resolveCityCountryFromCatalog(property, catalog) {
  * Extract dishes from approved menu and store in database
  * Fails silently if Supabase is not configured
  */
-async function extractDishesAfterApproval(submissionId, menuContent, property, finalPath) {
+async function extractDishesAfterApproval(submissionId, menuContent, property, finalPath, servicePeriod) {
     if (!(0, supabase_client_1.isSupabaseConfigured)()) {
         console.log('Supabase not configured - skipping dish extraction');
         return;
@@ -165,7 +165,9 @@ async function extractDishesAfterApproval(submissionId, menuContent, property, f
             console.log('No menu content available for dish extraction');
             return;
         }
-        const result = await (0, supabase_client_1.extractAndStoreDishes)(content, property, submissionId);
+        const result = await (0, supabase_client_1.extractAndStoreDishes)(content, property, submissionId, {
+            servicePeriod,
+        });
         console.log(`Dish extraction complete: ${result.added} dishes added`);
     }
     catch (error) {
@@ -387,7 +389,7 @@ app.post('/approve/:submissionId', async (req, res) => {
             final_path: finalPath
         });
         // Extract dishes from approved menu (async, non-blocking)
-        extractDishesAfterApproval(submissionId, submission.menu_content, submission.property || 'Unknown', finalPath).catch((err) => console.error('Background dish extraction failed:', err));
+        extractDishesAfterApproval(submission.id || submissionId, submission.menu_content, submission.property || 'Unknown', finalPath, submission.service_period || submission.raw_payload?.servicePeriod).catch((err) => console.error('Background dish extraction failed:', err));
         res.json({
             success: true,
             message: 'Submission approved'
@@ -432,7 +434,7 @@ app.post('/upload/:submissionId', upload.single('finalDocument'), async (req, re
             final_path: finalPath
         });
         // Extract dishes from approved menu (async, non-blocking)
-        extractDishesAfterApproval(submissionId, submission.menu_content, submission.property || 'Unknown', finalPath).catch((err) => console.error('Background dish extraction failed:', err));
+        extractDishesAfterApproval(submission.id || submissionId, submission.menu_content, submission.property || 'Unknown', finalPath, submission.service_period || submission.raw_payload?.servicePeriod).catch((err) => console.error('Background dish extraction failed:', err));
         res.json({
             success: true,
             message: 'Corrected version uploaded'
@@ -1329,7 +1331,7 @@ app.post('/api/form/menu-image-upload', upload.single('menuImage'), async (req, 
  */
 app.post('/api/form/submit', async (req, res) => {
     try {
-        const { submitterName, submitterEmail, submitterJobTitle, projectName, property, width, height, printWidth, printHeight, printRegion, printSize, folded, digitalWidth, digitalHeight, cropMarks, bleedMarks, fileSizeLimit, fileSizeLimitMb, fileDeliveryNotes, orientation, menuType, templateType, turnaroundDays, dateNeeded, hotelName, cityCountry, assetType, allergens, containsRawUndercooked, suppressRawNotice, menuContent, menuContentHtml, persistentDiffHtml, approvals, criticalOverrides, submissionMode, revisionBaseSubmissionId, revisionSource, revisionBaselineDocPath, revisionBaselineFileName, baseApprovedMenuContent, chefPersistentDiff, skipAiReview, menuImagePath, menuImageFileName } = req.body;
+        const { submitterName, submitterEmail, submitterJobTitle, projectName, property, width, height, printWidth, printHeight, printRegion, printSize, folded, digitalWidth, digitalHeight, cropMarks, bleedMarks, fileSizeLimit, fileSizeLimitMb, fileDeliveryNotes, orientation, menuType, servicePeriod, templateType, turnaroundDays, dateNeeded, hotelName, cityCountry, assetType, allergens, containsRawUndercooked, suppressRawNotice, menuContent, menuContentHtml, persistentDiffHtml, approvals, criticalOverrides, submissionMode, revisionBaseSubmissionId, revisionSource, revisionBaselineDocPath, revisionBaselineFileName, baseApprovedMenuContent, chefPersistentDiff, skipAiReview, menuImagePath, menuImageFileName } = req.body;
         const wantsPrint = assetType === 'PRINT' || assetType === 'BOTH';
         const wantsDigital = assetType === 'DIGITAL' || assetType === 'BOTH';
         const normalizedTemplateType = templateType || 'food';
@@ -1341,7 +1343,7 @@ app.post('/api/form/submit', async (req, res) => {
         const propertyCatalog = await getPropertyCatalogFromDb();
         const normalizedCityCountry = resolveCityCountryFromCatalog(normalizedProperty, propertyCatalog) || `${cityCountry || ''}`.trim();
         // Validate required fields
-        if (!submitterName || !submitterEmail || !submitterJobTitle || !projectName || !normalizedProperty || !orientation || !templateType || !dateNeeded || !assetType || !menuContent) {
+        if (!submitterName || !submitterEmail || !submitterJobTitle || !projectName || !normalizedProperty || !orientation || !menuType || !servicePeriod || !templateType || !dateNeeded || !assetType || !menuContent) {
             return res.status(400).json({ error: 'All fields are required' });
         }
         if (!normalizedCityCountry) {
@@ -1465,6 +1467,7 @@ app.post('/api/form/submit', async (req, res) => {
             created_at: new Date().toISOString(),
             source: 'form',
             menu_type: menuType || 'standard',
+            service_period: servicePeriod || 'other',
             template_type: normalizedTemplateType,
             hotel_name: hotelName || null,
             city_country: normalizedCityCountry,
@@ -1600,6 +1603,7 @@ app.post('/api/form/submit', async (req, res) => {
                 fileDeliveryNotes,
                 orientation,
                 menuType,
+                servicePeriod,
                 templateType: normalizedTemplateType,
                 turnaroundDays: normalizedTurnaroundDays,
                 dateNeeded,

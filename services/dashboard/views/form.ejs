@@ -1523,6 +1523,19 @@
                         </select>
                     </div>
                     <div class="form-group">
+                        <label for="servicePeriod">Service Period *</label>
+                        <select id="servicePeriod" required>
+                            <option value="">Select service period</option>
+                            <option value="breakfast">Breakfast</option>
+                            <option value="brunch">Brunch</option>
+                            <option value="lunch">Lunch</option>
+                            <option value="dinner">Dinner</option>
+                            <option value="happy_hour">Happy Hour</option>
+                            <option value="holiday">Holiday</option>
+                            <option value="other">Other</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
                         <label for="templateType">Template Type *</label>
                         <select id="templateType" required onchange="updateApprovalHint(); updateRunCheckButtonLabel();">
                             <option value="">Select template type</option>
@@ -1816,6 +1829,10 @@
                         <div class="form-group">
                             <label>Menu Type</label>
                             <input type="text" id="step2MenuType" readonly>
+                        </div>
+                        <div class="form-group">
+                            <label>Service Period</label>
+                            <input type="text" id="step2ServicePeriod" readonly>
                         </div>
                         <div class="form-group">
                             <label>Template Type</label>
@@ -2935,6 +2952,7 @@
 
             setSelectValue('orientation', p.orientation);
             setSelectValue('menuType', p.menuType);
+            setSelectValue('servicePeriod', p.servicePeriod);
             setSelectValue('templateType', p.templateType);
             setSelectValue('assetType', p.assetType);
             if (p.turnaroundDays) {
@@ -3478,6 +3496,7 @@
             const property = document.getElementById('property').value.trim();
             const orientation = document.getElementById('orientation').value;
             const menuType = document.getElementById('menuType').value;
+            const servicePeriod = document.getElementById('servicePeriod').value;
             const templateType = document.getElementById('templateType').value;
             const turnaroundDays = document.getElementById('turnaroundDays').value.trim();
             const dateNeeded = document.getElementById('dateNeeded').value;
@@ -3504,7 +3523,7 @@
                 return false;
             }
 
-            if (!projectName || !property || !orientation || !menuType || !templateType || !turnaroundDays || !dateNeeded || !assetType || !menuContent) {
+            if (!projectName || !property || !orientation || !menuType || !servicePeriod || !templateType || !turnaroundDays || !dateNeeded || !assetType || !menuContent) {
                 showAlert('Please fill in all required fields', 'error');
                 window.scrollTo({ top: 0, behavior: 'smooth' });
                 return false;
@@ -4062,6 +4081,8 @@
             document.getElementById('step2Property').value = document.getElementById('property').value;
             const menuTypeSelect = document.getElementById('menuType');
             document.getElementById('step2MenuType').value = menuTypeSelect.options[menuTypeSelect.selectedIndex].text;
+            const servicePeriodSelect = document.getElementById('servicePeriod');
+            document.getElementById('step2ServicePeriod').value = servicePeriodSelect.options[servicePeriodSelect.selectedIndex].text;
             const templateTypeSelect = document.getElementById('templateType');
             document.getElementById('step2TemplateType').value = templateTypeSelect.options[templateTypeSelect.selectedIndex].text;
             document.getElementById('step2TurnaroundDays').value = `${getTurnaroundDaysValue()} day(s)`;
@@ -4348,6 +4369,7 @@
                 fileDeliveryNotes: isPrint ? document.getElementById('fileDeliveryNotes').value.trim() : '',
                 orientation: document.getElementById('orientation').value,
                 menuType: document.getElementById('menuType').value,
+                servicePeriod: document.getElementById('servicePeriod').value,
                 templateType: document.getElementById('templateType').value,
                 turnaroundDays: getTurnaroundDaysValue(),
                 dateNeeded: document.getElementById('dateNeeded').value,

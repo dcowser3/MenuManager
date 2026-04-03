@@ -26,6 +26,7 @@ CREATE TABLE submissions (
     file_delivery_notes TEXT,
     orientation VARCHAR(50),
     menu_type VARCHAR(50) DEFAULT 'standard',        -- 'standard' or 'prix_fixe'
+    service_period VARCHAR(50) DEFAULT 'other',      -- 'breakfast', 'brunch', 'lunch', 'dinner', 'happy_hour', 'holiday', 'other'
     template_type VARCHAR(50) DEFAULT 'food',        -- 'food', 'beverage', 'food_beverage', or 'non_beverage'
     date_needed DATE,
 
@@ -189,6 +190,7 @@ CREATE TABLE approved_dishes (
     dish_name VARCHAR(500) NOT NULL,
     dish_name_normalized VARCHAR(500) NOT NULL,      -- Lowercase, trimmed for deduplication
     property VARCHAR(255),                           -- Which property/restaurant
+    service_period VARCHAR(50),                      -- service period for the approved menu source
     menu_category VARCHAR(255),                      -- e.g., "Appetizers", "Entrees", "Desserts"
     description TEXT,
     price VARCHAR(50),                               -- Keep as string to handle various formats

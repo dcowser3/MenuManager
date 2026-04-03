@@ -8,7 +8,7 @@
 | 2 | Build chef submission form with required approval attestations | Complete |
 | 3 | Create reviewer dashboard (download/upload/approve) | Complete |
 | 4 | Add email notifications at each step | Pending |
-| 5 | Build approved dishes extraction & database | Pending |
+| 5 | Build approved dishes extraction & database | Complete |
 | 6 | ClickUp integration for task creation | Complete |
 | 7 | Deploy to production (Railway) | Pending |
 | 8 | Add authentication & roles (Clerk) | Pending |
@@ -29,14 +29,14 @@
 ## In Progress (Phase 2)
 
 - ~~ClickUp integration for task management~~ (Complete)
-- Approved dishes database (running list of all approved dishes)
+- ~~Approved dishes database (running list of all approved dishes)~~ (Complete)
 - Email notifications at each workflow step
 - Role-based access (chef, reviewer, admin)
 
 ## Planned (Phase 3)
 
 - **Extended menu content validation**: Additional critical error types beyond prices and dish names (e.g., missing allergen codes). The severity/blocking infrastructure is already in place.
-- **Approved dishes database**: Extract dishes from approved menus into a searchable database.
+- **Approved dishes search/review tools**: Expand the searchable approved-dishes data into dedicated reviewer/admin workflows.
 
 ## Planned Services
 
