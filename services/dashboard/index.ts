@@ -2784,6 +2784,41 @@ function compareMenuTexts(docxText: string, pdfText: string): { differences: Dif
         aligned.push(...filteredAligned);
     }
 
+    // Pre-process: merge price-only docx lines into adjacent match pairs
+    // e.g., DOCX has "BOTTOMLESS ENHANCEMENTS" + "+ 10" on separate lines,
+    // PDF has "BOTTOMLESS ENHANCEMENTS +10" on one line — merge the DOCX lines
+    if (designComparisonRules.ignoreWhitespaceInPrices) {
+        const mergedIndices = new Set<number>();
+        for (let ai = 0; ai < aligned.length; ai++) {
+            if (aligned[ai].type !== 'docx_only') continue;
+            const docxLine = docxLines[aligned[ai].docxIdx!];
+            const isPriceLine = /^[\+\$\s]*\d+\.?\d*$/.test(docxLine.trim());
+            if (!isPriceLine) continue;
+
+            // Find adjacent match pair and merge the price into it
+            for (let adj = ai - 1; adj <= ai + 1; adj += 2) {
+                if (adj < 0 || adj >= aligned.length) continue;
+                if (aligned[adj].type !== 'match') continue;
+                const pdfLine = pdfLines[aligned[adj].pdfIdx!];
+                const priceVal = docxLine.trim().replace(/[\s\+\$]/g, '').replace(/^0+/, '');
+                const pPrices = (pdfLine.match(/[\+\$]?\d+\.?\d*/g) || []).map(p => p.replace(/[\$\+\s]/g, '').replace(/^0+/, ''));
+                if (pPrices.includes(priceVal)) {
+                    // Merge: update the DOCX line in the match to include the price
+                    const origDocxLine = docxLines[aligned[adj].docxIdx!];
+                    // Normalize price format to match PDF (e.g., "+ 10" → "+10")
+                    const normalizedPrice = docxLine.trim().replace(/\s+/g, '');
+                    docxLines[aligned[adj].docxIdx!] = origDocxLine + ' ' + normalizedPrice;
+                    mergedIndices.add(ai);
+                    break;
+                }
+            }
+        }
+        // Remove merged price lines from alignment
+        const filtered = aligned.filter((_, idx) => !mergedIndices.has(idx));
+        aligned.length = 0;
+        aligned.push(...filtered);
+    }
+
     // Process aligned pairs
     const ignorableWords = new Set((designComparisonRules.ignorableWords || []).map((w: string) => w.toLowerCase()));
     const minWordLen = designComparisonRules.minWordLengthForMissing || 0;
@@ -2804,24 +2839,6 @@ function compareMenuTexts(docxText: string, pdfText: string): { differences: Dif
                     docxLineNum: pair.docxIdx
                 });
                 continue;
-            }
-
-            // Check if this is a price-only line that was merged into an adjacent PDF line
-            const isPriceLine = /^[\+\$\s]*\d+\.?\d*$/.test(docxLine.trim());
-            if (isPriceLine && designComparisonRules.ignoreWhitespaceInPrices) {
-                // Check if any adjacent matched line in the PDF contains this price
-                const priceVal = docxLine.trim().replace(/[\s\+\$]/g, '').replace(/^0+/, '');
-                const adjacentMatch = aligned.some(a => {
-                    if (a.type !== 'match' || a.pdfIdx === undefined) return false;
-                    const pLine = pdfLines[a.pdfIdx];
-                    // Check if the PDF line contains this price value
-                    const pPrices = (pLine.match(/\$?\d+\.?\d*/g) || []).map(p => p.replace(/[\$]/g, '').replace(/^0+/, ''));
-                    return pPrices.includes(priceVal);
-                });
-                if (adjacentMatch) {
-                    // Price exists in PDF, just on a different line — skip entirely from both diffs and visual
-                    continue;
-                }
             }
 
             // Check if line is only short ignorable words
@@ -2847,7 +2864,7 @@ function compareMenuTexts(docxText: string, pdfText: string): { differences: Dif
             alignments.push({ type: 'pdf_only', pdfLine, pdfIdx: pair.pdfIdx });
             differences.push({
                 type: 'extra',
-                severity: isPriceOnly && designComparisonRules.ignoreWhitespaceInPrices ? 'info' : 'warning',
+                severity: isPriceOnly ? 'info' : 'warning',
                 description: isPriceOnly ? `Price on separate line in PDF` : `Extra line in PDF`,
                 pdfValue: pdfLine,
                 pdfLineNum: pair.pdfIdx
@@ -3071,14 +3088,7 @@ function compareWords(docxLine: string, pdfLine: string): { diffs: Difference[];
         } else if (cur.type === 'pdf') {
             const word = pdfWords[cur.pIdx!];
             const cleanWord = word.replace(/[^\w]/g, '').toLowerCase();
-            const isPrice = /^[\+\$]?\d+\.?\d*$/.test(word);
             const isIgnorable = ignorableWords.has(cleanWord) || (designComparisonRules.ignoreConjunctionChanges && ['and', 'or', '&'].includes(cleanWord));
-            // Skip price words that were merged from a separate DOCX line
-            if (isPrice && designComparisonRules.ignoreWhitespaceInPrices) {
-                wordAlignments.push({ type: 'added', text: word });
-                idx++;
-                continue;
-            }
             diffs.push({
                 type: 'extra',
                 severity: isIgnorable ? 'info' : 'info',
