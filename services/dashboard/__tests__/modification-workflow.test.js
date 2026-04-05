@@ -34,6 +34,13 @@ jest.mock('child_process', () => ({
 jest.mock('mammoth', () => ({
     extractRawText: jest.fn().mockResolvedValue({ value: 'Guacamole - $12' }),
 }));
+jest.mock('@menumanager/supabase-client', () => ({
+    __esModule: true,
+    isSupabaseConfigured: jest.fn(() => false),
+    extractAndStoreDishes: jest.fn().mockResolvedValue({ added: 0 }),
+    logAlert: jest.fn().mockResolvedValue(undefined),
+    buildAlertEmailHtml: jest.fn(() => ''),
+}));
 
 const axios = require('axios').default;
 const app = require('../index').default;
@@ -77,6 +84,10 @@ describe('Dashboard Modification Workflow (local, mocked externals)', () => {
     const basicCheckHandler = getRouteHandler('post', '/api/form/basic-check');
 
     beforeEach(() => {
+        jest.spyOn(console, 'log').mockImplementation(() => {});
+        jest.spyOn(console, 'warn').mockImplementation(() => {});
+        jest.spyOn(console, 'error').mockImplementation(() => {});
+
         mockedAxios.post = jest.fn(async (url, payload) => {
             const urlStr = String(url);
 
@@ -123,6 +134,10 @@ describe('Dashboard Modification Workflow (local, mocked externals)', () => {
 
             return { data: [] };
         });
+    });
+
+    afterEach(() => {
+        jest.restoreAllMocks();
     });
 
     test('accepts modification submission using DB baseline and persists revision fields', async () => {

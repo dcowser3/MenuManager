@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "rules": {
+    "ignoreCaseDifferences": true,
+    "ignoreLeadingPhrases": ["Choice of:", "Choice of", "Served with", "Served with:"],
+    "ignoreConjunctionChanges": true,
+    "ignorePunctuationDifferences": true,
+    "ignoreWhitespaceInPrices": true,
+    "reorderingTolerance": true,
+    "minWordLengthForMissing": 3,
+    "ignorableWords": ["of", "the", "a", "an", "with", "and", "or", "&"],
+    "treatCaseOnlyAsInfo": true
+  },
+  "notes": "These rules control how strictly the design PDF is compared against the source Word document. Designers commonly change casing, remove prefixes like 'Choice of:', and reorder items."
+}

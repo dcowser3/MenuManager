@@ -8,6 +8,7 @@ Catalog of design decisions and feature documentation for Menu Manager.
 | [Critical Error Blocking](critical-error-blocking.md) | Complete | Severity system that blocks submission on missing prices / incomplete dish names |
 | [Submitter Autofill](submitter-autofill.md) | Complete | Autocomplete from saved profiles + recent project loader |
 | [Design Approval](design-approval.md) | Complete | DOCX vs PDF comparison tool for design proof validation |
+| [Design Comparison Rules](design-comparison-rules.md) | Complete | Configurable tolerance rules for design approval comparison |
 | [Approval Attestation](approval-attestation.md) | Complete | Required manager approval attestation before submission |
 | [Revision / Modification Flow](revision-modification-flow.md) | Complete | Dual-path revision workflow with DB search or uploaded approved baseline DOCX |
 | [Reviewer Learning Loop](reviewer-learning-loop.md) | Complete (Phase 1) | Auto-learns recurring human reviewer corrections and injects stable rules into QA prompt |

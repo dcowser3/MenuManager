@@ -2524,7 +2524,9 @@ app.post('/api/design-approval/compare', upload.fields([
         // Run comparison
         const docxText = (docxData.menu_content || '').trim();
         const pdfText = (pdfData.full_text || '').trim();
-        const differences = compareMenuTexts(docxText, pdfText);
+        const { differences: allDifferences, alignments } = compareMenuTexts(docxText, pdfText);
+        // Filter out info-level diffs (case-only, ignorable words, etc.) from the reported list
+        const differences = allDifferences.filter(d => d.severity !== 'info');
         const isMatch = differences.length === 0;
 
         // Create submission record in database
@@ -2568,6 +2570,7 @@ app.post('/api/design-approval/compare', upload.fields([
             isMatch,
             projectDetails: docxData.project_details,
             differences,
+            alignments,
             docxText,
             pdfText,
             requiredApprovals,
@@ -2609,6 +2612,13 @@ app.post('/api/design-approval/:submissionId/override', async (req, res) => {
 
 // ---- Design Approval comparison helpers ----
 
+// Load design comparison rules
+const designRulesPath = path.join(__dirname, 'design-comparison-rules.json');
+let designComparisonRules: any = {};
+try {
+    designComparisonRules = JSON.parse(require('fs').readFileSync(designRulesPath, 'utf8')).rules || {};
+} catch { /* use defaults */ }
+
 interface Difference {
     type: string;
     severity: string;
@@ -2617,6 +2627,23 @@ interface Difference {
     pdfValue?: string;
     docxLineNum?: number;
     pdfLineNum?: number;
+}
+
+interface AlignmentEntry {
+    type: 'match' | 'docx_only' | 'pdf_only';
+    docxLine?: string;
+    pdfLine?: string;
+    docxIdx?: number;
+    pdfIdx?: number;
+    wordDiffs?: WordDiff[];
+}
+
+interface WordDiff {
+    type: 'same' | 'changed' | 'missing' | 'added';
+    text?: string;
+    docxText?: string;
+    pdfText?: string;
+    classification?: { type: string; severity: string };
 }
 
 const PRICE_REGEX = /\$?\d+\.?\d*/g;
@@ -2648,18 +2675,36 @@ function classifyWordDiff(docxWord: string, pdfWord: string): { type: string; se
         }
     }
 
+    // Case-only difference — treat as info if rules say so
+    if (docxWord.toLowerCase() === pdfWord.toLowerCase()) {
+        if (designComparisonRules.treatCaseOnlyAsInfo) {
+            return { type: 'formatting', severity: 'info' };
+        }
+        return { type: 'formatting', severity: 'warning' };
+    }
+
     // Diacritical difference
     if (stripAccents(docxWord).toLowerCase() === stripAccents(pdfWord).toLowerCase() &&
         docxWord.toLowerCase() !== pdfWord.toLowerCase()) {
         return { type: 'diacritical', severity: 'warning' };
     }
 
+    // Punctuation-only difference (e.g., trailing comma vs none)
+    if (designComparisonRules.ignorePunctuationDifferences) {
+        const docxStripped = docxWord.replace(/[^\w]/g, '').toLowerCase();
+        const pdfStripped = pdfWord.replace(/[^\w]/g, '').toLowerCase();
+        if (docxStripped === pdfStripped && docxStripped.length > 0) {
+            return { type: 'formatting', severity: 'info' };
+        }
+    }
+
     // Spelling
     return { type: 'spelling', severity: 'warning' };
 }
 
-function compareMenuTexts(docxText: string, pdfText: string): Difference[] {
+function compareMenuTexts(docxText: string, pdfText: string): { differences: Difference[]; alignments: AlignmentEntry[] } {
     const differences: Difference[] = [];
+    const alignments: AlignmentEntry[] = [];
 
     const docxLines = docxText.split('\n').map(l => l.trim()).filter(l => l.length > 0);
     const pdfLines = pdfText.split('\n').map(l => l.trim()).filter(l => l.length > 0);
@@ -2705,22 +2750,106 @@ function compareMenuTexts(docxText: string, pdfText: string): Difference[] {
         j--;
     }
 
+    // Reordering detection: try to match docx_only lines with pdf_only lines
+    if (designComparisonRules.reorderingTolerance) {
+        const docxOnlyIndices = aligned
+            .map((a, idx) => a.type === 'docx_only' ? idx : -1)
+            .filter(idx => idx >= 0);
+        const pdfOnlyIndices = aligned
+            .map((a, idx) => a.type === 'pdf_only' ? idx : -1)
+            .filter(idx => idx >= 0);
+
+        const matchedPdfIndices = new Set<number>();
+        for (const dIdx of docxOnlyIndices) {
+            const docxLine = docxLines[aligned[dIdx].docxIdx!];
+            for (const pIdx of pdfOnlyIndices) {
+                if (matchedPdfIndices.has(pIdx)) continue;
+                const pdfLine = pdfLines[aligned[pIdx].pdfIdx!];
+                if (linesMatchFuzzy(docxLine, pdfLine)) {
+                    // Convert both to a match pair
+                    aligned[dIdx] = {
+                        type: 'match',
+                        docxIdx: aligned[dIdx].docxIdx,
+                        pdfIdx: aligned[pIdx].pdfIdx
+                    };
+                    aligned[pIdx] = { type: 'match', docxIdx: -1, pdfIdx: -1 }; // mark for removal
+                    matchedPdfIndices.add(pIdx);
+                    break;
+                }
+            }
+        }
+        // Remove the placeholder entries (matched pdf_only that became redundant)
+        const filteredAligned = aligned.filter(a => !(a.type === 'match' && a.docxIdx === -1 && a.pdfIdx === -1));
+        aligned.length = 0;
+        aligned.push(...filteredAligned);
+    }
+
     // Process aligned pairs
+    const ignorableWords = new Set((designComparisonRules.ignorableWords || []).map((w: string) => w.toLowerCase()));
+    const minWordLen = designComparisonRules.minWordLengthForMissing || 0;
+
     for (const pair of aligned) {
         if (pair.type === 'docx_only') {
+            const docxLine = docxLines[pair.docxIdx!];
+            // Check if this is just a leading phrase that got stripped
+            const stripped = stripLeadingPhrases(docxLine).trim();
+            if (stripped.length === 0) {
+                // Entire line was just a leading phrase — info level
+                alignments.push({ type: 'docx_only', docxLine, docxIdx: pair.docxIdx });
+                differences.push({
+                    type: 'missing',
+                    severity: 'info',
+                    description: `Line missing in PDF (ignorable prefix only)`,
+                    docxValue: docxLine,
+                    docxLineNum: pair.docxIdx
+                });
+                continue;
+            }
+
+            // Check if this is a price-only line that was merged into an adjacent PDF line
+            const isPriceLine = /^[\+\$\s]*\d+\.?\d*$/.test(docxLine.trim());
+            if (isPriceLine && designComparisonRules.ignoreWhitespaceInPrices) {
+                // Check if any adjacent matched line in the PDF contains this price
+                const priceVal = docxLine.trim().replace(/[\s\+\$]/g, '').replace(/^0+/, '');
+                const adjacentMatch = aligned.some(a => {
+                    if (a.type !== 'match' || a.pdfIdx === undefined) return false;
+                    const pLine = pdfLines[a.pdfIdx];
+                    // Check if the PDF line contains this price value
+                    const pPrices = (pLine.match(/\$?\d+\.?\d*/g) || []).map(p => p.replace(/[\$]/g, '').replace(/^0+/, ''));
+                    return pPrices.includes(priceVal);
+                });
+                if (adjacentMatch) {
+                    // Price exists in PDF, just on a different line — skip entirely from both diffs and visual
+                    continue;
+                }
+            }
+
+            // Check if line is only short ignorable words
+            const words = docxLine.split(/\s+/);
+            const allIgnorable = words.every(w =>
+                ignorableWords.has(w.toLowerCase().replace(/[^\w]/g, '')) || w.replace(/[^\w]/g, '').length < minWordLen
+            );
+
+            alignments.push({ type: 'docx_only', docxLine, docxIdx: pair.docxIdx });
             differences.push({
                 type: 'missing',
-                severity: 'critical',
+                severity: allIgnorable ? 'info' : 'critical',
                 description: `Line missing in PDF`,
-                docxValue: docxLines[pair.docxIdx!],
+                docxValue: docxLine,
                 docxLineNum: pair.docxIdx
             });
         } else if (pair.type === 'pdf_only') {
+            const pdfLine = pdfLines[pair.pdfIdx!];
+
+            // Check if it's just a price that was on the previous line in docx
+            const isPriceOnly = /^[\+\$\s]*\d+\.?\d*$/.test(pdfLine.trim());
+
+            alignments.push({ type: 'pdf_only', pdfLine, pdfIdx: pair.pdfIdx });
             differences.push({
                 type: 'extra',
-                severity: 'warning',
-                description: `Extra line in PDF`,
-                pdfValue: pdfLines[pair.pdfIdx!],
+                severity: isPriceOnly && designComparisonRules.ignoreWhitespaceInPrices ? 'info' : 'warning',
+                description: isPriceOnly ? `Price on separate line in PDF` : `Extra line in PDF`,
+                pdfValue: pdfLine,
                 pdfLineNum: pair.pdfIdx
             });
         } else if (pair.type === 'match') {
@@ -2729,7 +2858,7 @@ function compareMenuTexts(docxText: string, pdfText: string): Difference[] {
 
             // Even if lines "match" fuzzy, check word-by-word for differences
             if (docxLine !== pdfLine) {
-                const wordDiffs = compareWords(docxLine, pdfLine);
+                const { diffs: wordDiffs, wordAlignments } = compareWords(docxLine, pdfLine);
                 for (const wd of wordDiffs) {
                     differences.push({
                         ...wd,
@@ -2737,11 +2866,57 @@ function compareMenuTexts(docxText: string, pdfText: string): Difference[] {
                         pdfLineNum: pair.pdfIdx
                     });
                 }
+                alignments.push({
+                    type: 'match',
+                    docxLine,
+                    pdfLine,
+                    docxIdx: pair.docxIdx,
+                    pdfIdx: pair.pdfIdx,
+                    wordDiffs: wordAlignments
+                });
+            } else {
+                alignments.push({
+                    type: 'match',
+                    docxLine,
+                    pdfLine,
+                    docxIdx: pair.docxIdx,
+                    pdfIdx: pair.pdfIdx
+                });
             }
         }
     }
 
-    return differences;
+    return { differences, alignments };
+}
+
+function stripLeadingPhrases(line: string): string {
+    const phrases = designComparisonRules.ignoreLeadingPhrases || [];
+    let result = line;
+    for (const phrase of phrases) {
+        if (result.toLowerCase().startsWith(phrase.toLowerCase())) {
+            result = result.slice(phrase.length).trim();
+        }
+    }
+    return result;
+}
+
+function stripPricesFromLine(line: string): string {
+    // Remove standalone prices like "29", "$29", "+10", "+ 10", "$29.00"
+    return line.replace(/[\+]?\s*\$?\d+\.?\d*/g, '').replace(/\s+/g, ' ').trim();
+}
+
+function normalizeLine(line: string): string {
+    let norm = stripAccents(line).toLowerCase().replace(/\s+/g, ' ').trim();
+    norm = stripLeadingPhrases(norm);
+    // Remove ignorable conjunction words for matching purposes
+    if (designComparisonRules.ignoreConjunctionChanges) {
+        const ignorable = new Set(designComparisonRules.ignorableWords || []);
+        norm = norm.split(/\s+/).filter((w: string) => !ignorable.has(w.replace(/[^\w]/g, ''))).join(' ');
+    }
+    if (designComparisonRules.ignorePunctuationDifferences) {
+        norm = norm.replace(/[,;:.\-–—]/g, '').replace(/\s+/g, ' ').trim();
+    }
+    return norm;
 }
 
 function linesMatchFuzzy(a: string, b: string): boolean {
@@ -2751,9 +2926,21 @@ function linesMatchFuzzy(a: string, b: string): boolean {
     const normB = stripAccents(b).toLowerCase().replace(/\s+/g, ' ').trim();
     if (normA === normB) return true;
 
+    // Try matching after stripping leading phrases and applying rules
+    const deepNormA = normalizeLine(a);
+    const deepNormB = normalizeLine(b);
+    if (deepNormA === deepNormB) return true;
+
+    // Try matching with prices stripped (price on different line)
+    if (designComparisonRules.ignoreWhitespaceInPrices) {
+        const noPriceA = stripPricesFromLine(deepNormA);
+        const noPriceB = stripPricesFromLine(deepNormB);
+        if (noPriceA.length > 0 && noPriceA === noPriceB) return true;
+    }
+
     // Similarity based on common words
-    const wordsA = normA.split(/\s+/);
-    const wordsB = normB.split(/\s+/);
+    const wordsA = deepNormA.split(/\s+/);
+    const wordsB = deepNormB.split(/\s+/);
     if (wordsA.length === 0 || wordsB.length === 0) return false;
 
     let common = 0;
@@ -2765,19 +2952,42 @@ function linesMatchFuzzy(a: string, b: string): boolean {
     return common / Math.max(wordsA.length, wordsB.length) > 0.5;
 }
 
-function compareWords(docxLine: string, pdfLine: string): Difference[] {
+function compareWords(docxLine: string, pdfLine: string): { diffs: Difference[]; wordAlignments: WordDiff[] } {
     const diffs: Difference[] = [];
-    const docxWords = docxLine.split(/\s+/);
-    const pdfWords = pdfLine.split(/\s+/);
+    const wordAlignments: WordDiff[] = [];
+    const ignorableWords = new Set((designComparisonRules.ignorableWords || []).map((w: string) => w.toLowerCase()));
+    const minWordLen = designComparisonRules.minWordLengthForMissing || 0;
 
-    // LCS on words
+    // Strip leading phrases before comparing words
+    let processedDocx = docxLine;
+    let processedPdf = pdfLine;
+    if (designComparisonRules.ignoreLeadingPhrases) {
+        processedDocx = stripLeadingPhrases(processedDocx);
+        processedPdf = stripLeadingPhrases(processedPdf);
+    }
+
+    const docxWords = processedDocx.split(/\s+/).filter(w => w.length > 0);
+    const pdfWords = processedPdf.split(/\s+/).filter(w => w.length > 0);
+
+    // LCS on words — use case-insensitive matching for alignment
     const m = docxWords.length;
     const n = pdfWords.length;
     const dp: number[][] = Array(m + 1).fill(null).map(() => Array(n + 1).fill(0));
 
+    const wordsMatch = (a: string, b: string): boolean => {
+        if (a === b) return true;
+        if (designComparisonRules.ignoreCaseDifferences && a.toLowerCase() === b.toLowerCase()) return true;
+        if (designComparisonRules.ignorePunctuationDifferences) {
+            const aStripped = a.replace(/[^\w]/g, '').toLowerCase();
+            const bStripped = b.replace(/[^\w]/g, '').toLowerCase();
+            if (aStripped === bStripped && aStripped.length > 0) return true;
+        }
+        return false;
+    };
+
     for (let i = 1; i <= m; i++) {
         for (let j = 1; j <= n; j++) {
-            if (docxWords[i - 1] === pdfWords[j - 1]) {
+            if (wordsMatch(docxWords[i - 1], pdfWords[j - 1])) {
                 dp[i][j] = dp[i - 1][j - 1] + 1;
             } else {
                 dp[i][j] = Math.max(dp[i - 1][j], dp[i][j - 1]);
@@ -2791,7 +3001,7 @@ function compareWords(docxLine: string, pdfLine: string): Difference[] {
     let wi = m, wj = n;
 
     while (wi > 0 && wj > 0) {
-        if (docxWords[wi - 1] === pdfWords[wj - 1]) {
+        if (wordsMatch(docxWords[wi - 1], pdfWords[wj - 1])) {
             waligned.unshift({ type: 'same', dIdx: wi - 1, pIdx: wj - 1 });
             wi--; wj--;
         } else if (dp[wi - 1][wj] > dp[wi][wj - 1]) {
@@ -2821,6 +3031,12 @@ function compareWords(docxLine: string, pdfLine: string): Difference[] {
                 docxValue: docxW,
                 pdfValue: pdfW
             });
+            wordAlignments.push({
+                type: 'changed',
+                docxText: docxW,
+                pdfText: pdfW,
+                classification
+            });
             idx += 2;
         } else if (cur.type === 'pdf' && idx + 1 < waligned.length && waligned[idx + 1].type === 'docx') {
             const docxW = docxWords[waligned[idx + 1].dIdx!];
@@ -2833,29 +3049,76 @@ function compareWords(docxLine: string, pdfLine: string): Difference[] {
                 docxValue: docxW,
                 pdfValue: pdfW
             });
+            wordAlignments.push({
+                type: 'changed',
+                docxText: docxW,
+                pdfText: pdfW,
+                classification
+            });
             idx += 2;
         } else if (cur.type === 'docx') {
+            const word = docxWords[cur.dIdx!];
+            const cleanWord = word.replace(/[^\w]/g, '').toLowerCase();
+            const isIgnorable = ignorableWords.has(cleanWord) || cleanWord.length < minWordLen;
             diffs.push({
                 type: 'missing',
-                severity: 'critical',
-                description: `Word missing in PDF: "${docxWords[cur.dIdx!]}"`,
-                docxValue: docxWords[cur.dIdx!]
+                severity: isIgnorable ? 'info' : 'critical',
+                description: `Word missing in PDF: "${word}"`,
+                docxValue: word
             });
+            wordAlignments.push({ type: 'missing', text: word });
             idx++;
         } else if (cur.type === 'pdf') {
+            const word = pdfWords[cur.pIdx!];
+            const cleanWord = word.replace(/[^\w]/g, '').toLowerCase();
+            const isPrice = /^[\+\$]?\d+\.?\d*$/.test(word);
+            const isIgnorable = ignorableWords.has(cleanWord) || (designComparisonRules.ignoreConjunctionChanges && ['and', 'or', '&'].includes(cleanWord));
+            // Skip price words that were merged from a separate DOCX line
+            if (isPrice && designComparisonRules.ignoreWhitespaceInPrices) {
+                wordAlignments.push({ type: 'added', text: word });
+                idx++;
+                continue;
+            }
             diffs.push({
                 type: 'extra',
-                severity: 'info',
-                description: `Extra word in PDF: "${pdfWords[cur.pIdx!]}"`,
-                pdfValue: pdfWords[cur.pIdx!]
+                severity: isIgnorable ? 'info' : 'info',
+                description: `Extra word in PDF: "${word}"`,
+                pdfValue: word
             });
+            wordAlignments.push({ type: 'added', text: word });
             idx++;
         } else {
+            // 'same' type — but if the actual strings differ (case only), emit formatting info
+            if (cur.type === 'same' && cur.dIdx !== undefined && cur.pIdx !== undefined) {
+                const docxW = docxWords[cur.dIdx];
+                const pdfW = pdfWords[cur.pIdx];
+                if (docxW !== pdfW) {
+                    const classification = classifyWordDiff(docxW, pdfW);
+                    diffs.push({
+                        type: classification.type,
+                        severity: classification.severity,
+                        description: `"${docxW}" changed to "${pdfW}"`,
+                        docxValue: docxW,
+                        pdfValue: pdfW
+                    });
+                    wordAlignments.push({
+                        type: 'changed',
+                        docxText: docxW,
+                        pdfText: pdfW,
+                        classification
+                    });
+                } else {
+                    wordAlignments.push({ type: 'same', text: docxW });
+                }
+            } else {
+                idx++;
+                continue;
+            }
             idx++;
         }
     }
 
-    return diffs;
+    return { diffs, wordAlignments };
 }
 
 if (require.main === module) {
