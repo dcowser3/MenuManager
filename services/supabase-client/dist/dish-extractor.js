@@ -11,7 +11,7 @@ exports.extractAndStoreDishes = extractAndStoreDishes;
 exports.previewDishExtraction = previewDishExtraction;
 const dishes_1 = require("./dishes");
 // Common allergen codes
-const ALLERGEN_CODES = ['GF', 'V', 'VG', 'DF', 'N', 'SF', 'S', '*'];
+const ALLERGEN_CODES = ['GF', 'V', 'VG', 'DF', 'N', 'SF', 'S'];
 // Category detection patterns
 const CATEGORY_PATTERNS = [
     /^(appetizers?|starters?|first\s*course)/i,

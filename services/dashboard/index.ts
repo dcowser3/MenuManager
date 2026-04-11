@@ -2566,6 +2566,16 @@ app.post('/api/design-approval/compare', upload.fields([
             }).catch((err: any) => console.error('Failed to save submitter profile:', err.message));
         }
 
+        // Extract dishes from approved design (async, non-blocking)
+        if (isMatch && dbSaved) {
+            extractDishesAfterApproval(
+                submissionId,
+                docxText,
+                projectDetails.property || 'Unknown',
+                '', // no final file path for design approval
+            ).catch((err: any) => console.error('Background dish extraction failed (design approval):', err));
+        }
+
         res.json({
             isMatch,
             projectDetails: docxData.project_details,
@@ -2596,12 +2606,32 @@ app.post('/api/design-approval/:submissionId/override', async (req, res) => {
             return res.status(400).json({ error: 'Override reason is required' });
         }
 
+        // Get submission details before updating so we have menu content for dish extraction
+        let submission: any = null;
+        try {
+            const dbResponse = await axios.get(`${DB_SERVICE_URL}/submissions/${encodeURIComponent(submissionId)}`);
+            submission = dbResponse.data;
+        } catch (err: any) {
+            console.error('Failed to fetch submission for dish extraction:', err.message);
+        }
+
         await axios.put(`${DB_SERVICE_URL}/submissions/${encodeURIComponent(submissionId)}`, {
             status: 'approved_override',
             mismatch_override: true,
             mismatch_override_reason: reason,
             mismatch_override_at: new Date().toISOString(),
         });
+
+        // Extract dishes from overridden approval (async, non-blocking)
+        if (submission) {
+            extractDishesAfterApproval(
+                submissionId,
+                submission.menu_content,
+                submission.property || 'Unknown',
+                submission.final_path || '',
+                submission.service_period
+            ).catch((err: any) => console.error('Background dish extraction failed (design override):', err));
+        }
 
         res.json({ success: true });
     } catch (error: any) {

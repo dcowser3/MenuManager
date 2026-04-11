@@ -9,7 +9,7 @@ import { createDishes } from './dishes';
 import { CreateDishInput } from './types';
 
 // Common allergen codes
-const ALLERGEN_CODES = ['GF', 'V', 'VG', 'DF', 'N', 'SF', 'S', '*'];
+const ALLERGEN_CODES = ['GF', 'V', 'VG', 'DF', 'N', 'SF', 'S'];
 
 // Category detection patterns
 const CATEGORY_PATTERNS = [

@@ -23,14 +23,14 @@ const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-
 const DEFAULT_PROPERTY_NAMES = [
     '89Agave - Sedona',
     'Agent\'s Only - Pasadena',
-    'Anchor & Brine - Tampa',
-    'Aqimero - Philadelphia',
-    'Bayou & Bottle - Houston',
+    'Anchor & Brine - Marriott Tampa Water Street - Tampa',
+    'Aqimero - Ritz-Carlton - Philadelphia',
+    'Bayou & Bottle - Four Seasons - Houston',
     'Beacon - Tampa',
-    'Casa Chi - Chicago',
-    'Cayao - Los Cabos',
-    'Ciclo - Austin',
-    'Coraluz - Los Cabos',
+    'Casa Chi - InterContinental - Chicago',
+    'Cayao - Four Seasons Cabo Del Sol - Los Cabos',
+    'Ciclo - Four Seasons - Austin',
+    'Coraluz - Four Seasons Cabo Del Sol - Los Cabos',
     'D\'Taco Joint - Newark',
     'dLeña - Houston',
     'dLeña - Washington, D.C.',
@@ -38,46 +38,46 @@ const DEFAULT_PROPERTY_NAMES = [
     'DRINK Bar (Fareground) - Austin',
     'Ellis Bar (Fareground) - Austin',
     'Fareground - Austin',
-    'Ironwood - Scottsdale',
-    'La Hacienda - Scottsdale',
-    'Live Oak - Austin',
-    'Lona - Fort Lauderdale',
-    'Lona - Nashville',
-    'Lona - Tampa',
-    'Maya - Dubai',
+    'Ironwood - Fairmont Scottsdale Princess - Scottsdale',
+    'La Hacienda - Fairmont Scottsdale Princess - Scottsdale',
+    'Live Oak - Four Seasons - Austin',
+    'Lona - Westin - Fort Lauderdale',
+    'Lona - Noelle - Nashville',
+    'Lona - Marriott Tampa Water Street - Tampa',
+    'Maya - Le Royal Meridien - Dubai',
     'Maya - New York',
-    'Raya - Laguna Niguel',
-    'Sidecut - Whistler',
-    'Sora - Los Cabos',
+    'Raya - Ritz-Carlton Laguna Niguel - Laguna Niguel',
+    'Sidecut - Four Seasons - Whistler',
+    'Sora - Four Seasons Cabo Del Sol - Los Cabos',
     'Spa at JW - Tampa',
-    'Stoke & Rye - Avon',
+    'Stoke & Rye - Westin Riverfront - Avon',
     'Taco Pegaso - Austin',
     'Tamayo - Denver',
     'tán - New York',
     'Toro - Belgrade',
-    'Toro - Chicago',
-    'Toro - Denver',
-    'Toro - Istanbul',
+    'Toro - Fairmont Millennium Park - Chicago',
+    'Toro - Hotel Clio - Denver',
+    'Toro - Six Senses Kocatas Mansions - Istanbul',
     'Toro - Los Cabos',
     'Toro - Marrakech',
-    'Toro - Riviera Maya',
-    'Toro - Scottsdale',
-    'Toro - Snowmass',
+    'Toro - St. Regis Kanai - Riviera Maya',
+    'Toro - Fairmont Scottsdale Princess - Scottsdale',
+    'Toro - Viceroy - Snowmass',
     'Toro Del Mar - Athens',
-    'Toro Toro - Dubai',
-    'Toro Toro - Fort Worth',
-    'Toro Toro - Houston',
+    'Toro Toro - Grosvenor House - Dubai',
+    'Toro Toro - Worthington Renaissance - Fort Worth',
+    'Toro Toro - Four Seasons - Houston',
     'Toro Toro - Malta',
-    'Toro Toro - Miami',
+    'Toro Toro - InterContinental - Miami',
     'Venga Venga - Snowmass',
-    'Zengo - Doha',
-    'Zengo - Dubai',
+    'Zengo - Kempinski - Doha',
+    'Zengo - Le Royal Meridien - Dubai',
 ];
 
 type PropertyCatalogRecord = {
     name: string;
     city_country: string;
-    sort_order: number;
+    hotel?: string;
     is_active: boolean;
 };
 
@@ -88,10 +88,9 @@ function deriveCityCountryFromProperty(name: string): string {
 }
 
 function buildDefaultPropertyCatalog(): PropertyCatalogRecord[] {
-    return DEFAULT_PROPERTY_NAMES.map((name, index) => ({
+    return DEFAULT_PROPERTY_NAMES.map((name) => ({
         name,
         city_country: deriveCityCountryFromProperty(name),
-        sort_order: index + 1,
         is_active: true,
     }));
 }
@@ -271,10 +270,10 @@ async function readLocalPropertyCatalog(): Promise<PropertyCatalogRecord[]> {
         const parsed = JSON.parse(content);
         if (!Array.isArray(parsed)) return buildDefaultPropertyCatalog();
         return parsed
-            .map((item: any, index: number) => ({
+            .map((item: any) => ({
                 name: `${item?.name || ''}`.trim(),
                 city_country: `${item?.city_country || deriveCityCountryFromProperty(`${item?.name || ''}`) || ''}`.trim(),
-                sort_order: Number.isFinite(Number(item?.sort_order)) ? Number(item.sort_order) : index + 1,
+                hotel: item?.hotel || undefined,
                 is_active: item?.is_active !== false,
             }))
             .filter((item: PropertyCatalogRecord) => !!item.name);
@@ -289,17 +288,16 @@ async function getPropertyCatalog(): Promise<PropertyCatalogRecord[]> {
             const supabase = getSupabaseClient();
             const { data, error } = await supabase
                 .from(PROPERTIES_TABLE)
-                .select('name, city_country, sort_order, is_active')
+                .select('name, city_country, hotel, is_active')
                 .eq('is_active', true)
-                .order('sort_order', { ascending: true })
                 .order('name', { ascending: true });
 
             if (!error && Array.isArray(data) && data.length > 0) {
                 return data
-                    .map((item: any, index: number) => ({
+                    .map((item: any) => ({
                         name: `${item?.name || ''}`.trim(),
                         city_country: `${item?.city_country || deriveCityCountryFromProperty(`${item?.name || ''}`) || ''}`.trim(),
-                        sort_order: Number.isFinite(Number(item?.sort_order)) ? Number(item.sort_order) : index + 1,
+                        hotel: item?.hotel || undefined,
                         is_active: item?.is_active !== false,
                     }))
                     .filter((item: PropertyCatalogRecord) => !!item.name);
@@ -312,7 +310,7 @@ async function getPropertyCatalog(): Promise<PropertyCatalogRecord[]> {
     const local = await readLocalPropertyCatalog();
     return local
         .filter((item) => item.is_active !== false)
-        .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0) || a.name.localeCompare(b.name));
+        .sort((a, b) => a.name.localeCompare(b.name));
 }
 
 // Ensure DB directory and files exist
