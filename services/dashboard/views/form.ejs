@@ -1998,6 +1998,8 @@
         let unapprovedMode = false;
         let unapprovedAnnotations = [];
         let unapprovedBaseHtml = '';
+        let unapprovedDiffBaseline = '';
+        let unapprovedAnnotationMap = {};
         let persistentPreviewUpdateTimer = null;
         let aiCheckHasRun = false;
         let lastAiCheckedMenuText = '';
@@ -2025,23 +2027,61 @@
             let hadRawNotice = false;
 
             for (const line of lines) {
-                if (!line) continue;
                 if (RAW_NOTICE_REGEX.test(line)) {
                     hadRawNotice = true;
                     continue;
                 }
-                if (isLikelyAllergenLegendLine(line)) {
+                if (line && isLikelyAllergenLegendLine(line)) {
                     extractedAllergenLine = line;
                     continue;
                 }
                 cleanLines.push(line);
             }
 
+            // Normalize blank lines the same way extractCleanTextFromReviewedArea does:
+            // trim leading/trailing empties and collapse consecutive empties to one.
+            while (cleanLines.length && cleanLines[0] === '') cleanLines.shift();
+            while (cleanLines.length && cleanLines[cleanLines.length - 1] === '') cleanLines.pop();
+            const normalized = [];
+            let prevEmpty = false;
+            for (const cl of cleanLines) {
+                if (cl === '') {
+                    if (!prevEmpty) normalized.push('');
+                    prevEmpty = true;
+                } else {
+                    normalized.push(cl);
+                    prevEmpty = false;
+                }
+            }
+
             return {
-                menu: cleanLines.join('\n'),
+                menu: normalized.join('\n'),
                 allergens: extractedAllergenLine || (fallbackAllergens || ''),
                 hadRawNotice,
             };
+        }
+
+        /**
+         * Normalize text for diff comparison: trim each line, collapse consecutive
+         * blank lines, trim leading/trailing blanks. Same logic as normalizeExtractedLines
+         * but accepts a raw string instead of an array.
+         */
+        function normalizeMenuText(text) {
+            const lines = (text || '').split('\n').map(l => l.trim());
+            while (lines.length && lines[0] === '') lines.shift();
+            while (lines.length && lines[lines.length - 1] === '') lines.pop();
+            const normalized = [];
+            let prevEmpty = false;
+            for (const line of lines) {
+                if (line === '') {
+                    if (!prevEmpty) normalized.push('');
+                    prevEmpty = true;
+                } else {
+                    normalized.push(line);
+                    prevEmpty = false;
+                }
+            }
+            return normalized.join('\n');
         }
 
         document.addEventListener('DOMContentLoaded', async function() {
@@ -2453,6 +2493,8 @@
                 unapprovedMode = false;
                 unapprovedAnnotations = [];
                 unapprovedBaseHtml = '';
+                unapprovedDiffBaseline = '';
+                unapprovedAnnotationMap = {};
                 aiCheckHasRun = false;
                 aiCheckResults = null;
                 criticalErrorOverrides = {};
@@ -2516,6 +2558,8 @@
                 unapprovedMode = false;
                 unapprovedAnnotations = [];
                 unapprovedBaseHtml = '';
+                unapprovedDiffBaseline = '';
+                unapprovedAnnotationMap = {};
             } else {
                 dbPanel.classList.add('show');
                 revisionBaselineDocPath = '';
@@ -2525,6 +2569,8 @@
                 unapprovedMode = false;
                 unapprovedAnnotations = [];
                 unapprovedBaseHtml = '';
+                unapprovedDiffBaseline = '';
+                unapprovedAnnotationMap = {};
             }
             updateRevisionPreCheckLayout();
         }
@@ -2705,10 +2751,13 @@
                 suppressRawNotice = false;
                 setAllergenAutoDetectedBadge(!!normalizedBaseline.allergens);
 
-                // Use visible text (including deletions) as baseline for diff tracking
+                // Baseline and annotation map are extracted from the editor DOM
+                // in enterRevisionTrackingMode() after the HTML is loaded.
+                // This guarantees structural identity with subsequent extractions.
+
+                // Use stripped text for Quill / submission
                 baseApprovedMenuContent = normalizedBaseline.menu || '';
                 quill.setText(baseApprovedMenuContent || '');
-                renderPersistentPreview(baseApprovedMenuContent, baseApprovedMenuContent);
 
                 const selectedNote = document.getElementById('revisionSelectedNote');
                 selectedNote.textContent = `Loaded unapproved DOCX (redlines preserved): ${revisionBaselineFileName}`;
@@ -2755,7 +2804,12 @@
             // If we have extracted HTML (bold/italic/etc), render it in the editable review area.
             if (unapprovedMode && unapprovedBaseHtml && unapprovedBaseHtml.trim()) {
                 displayReviewedContent(unapprovedBaseHtml);
-                renderPersistentPreview(baseApprovedMenuContent, baseApprovedMenuContent);
+                // Extract baseline from the editor DOM using the SAME function
+                // used during editing — guarantees structural identity.
+                const reviewedArea = document.getElementById('reviewedContentArea');
+                unapprovedDiffBaseline = extractCleanTextFromReviewedArea(reviewedArea);
+                unapprovedAnnotationMap = buildAnnotationMapFromDOM(reviewedArea);
+                renderPersistentPreview(unapprovedDiffBaseline, unapprovedDiffBaseline);
             } else if (baseApprovedMenuContentHtml && baseApprovedMenuContentHtml.trim()) {
                 displayReviewedContent(baseApprovedMenuContentHtml);
                 renderPersistentPreview(baseApprovedMenuContent, baseApprovedMenuContent);
@@ -4176,7 +4230,10 @@
 
             // Display the reviewed content with highlights
             displayReviewedContent(quill.root.innerHTML);
-            renderPersistentPreview(baseApprovedMenuContent || originalText, correctedDisplayText);
+            const aiCheckBase = (unapprovedMode && unapprovedDiffBaseline)
+                ? unapprovedDiffBaseline
+                : (baseApprovedMenuContent || originalText);
+            renderPersistentPreview(aiCheckBase, correctedDisplayText);
             lastAiCheckedMenuText = extractCleanTextFromReviewedArea(document.getElementById('reviewedContentArea'));
             requiresAiRerun = false;
 
@@ -4440,6 +4497,8 @@
             unapprovedMode = false;
             unapprovedAnnotations = [];
             unapprovedBaseHtml = '';
+            unapprovedDiffBaseline = '';
+            unapprovedAnnotationMap = {};
 
             if (isEditMode) {
                 toggleEditMode();
@@ -4533,6 +4592,16 @@
                 editNotice.classList.add('show');
                 reviewedArea.classList.add('editable');
                 reviewedArea.contentEditable = 'true';
+
+                // Prevent new text from inheriting existing redline/insertion styles.
+                // Making annotation spans non-editable keeps the cursor outside them
+                // so typing adjacent to a redline doesn't inherit strikethrough/highlight.
+                if (unapprovedMode) {
+                    reviewedArea.querySelectorAll('.existing-del, .existing-ins').forEach(span => {
+                        span.contentEditable = 'false';
+                    });
+                }
+
                 reviewedArea.focus();
                 reviewedArea.addEventListener('input', handleReviewedAreaInput);
                 // Hide re-run button while editing
@@ -4544,6 +4613,13 @@
                 reviewedArea.classList.remove('editable');
                 reviewedArea.contentEditable = 'false';
                 reviewedArea.removeEventListener('input', handleReviewedAreaInput);
+
+                // Remove contentEditable overrides from annotation spans
+                if (unapprovedMode) {
+                    reviewedArea.querySelectorAll('.existing-del, .existing-ins').forEach(span => {
+                        span.removeAttribute('contenteditable');
+                    });
+                }
                 recalculateHighlights();
                 // Show re-run button after editing
                 document.getElementById('rerunCheckBtn').classList.add('show');
@@ -4551,26 +4627,18 @@
         }
 
         function extractCleanTextFromReviewedArea(element) {
-            // Collect all direct block children (p, div, or other) — browsers may
-            // insert <div> elements when the user presses Enter in contentEditable.
-            const blocks = element.querySelectorAll('p, div');
-
-            if (blocks.length === 0) {
-                const rawLines = (element.textContent || '')
-                    .replace(/\r/g, '')
-                    .split('\n')
-                    .map(line => line.replace(/\u00A0/g, ' ').trim());
-                return normalizeExtractedLines(rawLines);
+            // Walk each direct child block (p or div) individually to get
+            // one line per visual line. This avoids innerText's double-\n
+            // between <p> elements while preserving real blank lines from
+            // empty paragraphs.
+            const lines = [];
+            for (const child of element.children) {
+                const text = (child.innerText || '')
+                    .replace(/\u00A0/g, ' ')
+                    .trim();
+                lines.push(text);
             }
-
-            const rawLines = [];
-            blocks.forEach(block => {
-                // Skip nested blocks (e.g., a <p> inside a <div>) to avoid duplication.
-                if (block.parentElement !== element) return;
-                const text = (block.textContent || '').replace(/\u00A0/g, ' ').trim();
-                rawLines.push(text);
-            });
-            return normalizeExtractedLines(rawLines);
+            return normalizeExtractedLines(lines);
         }
 
         function normalizeExtractedLines(rawLines) {
@@ -4607,7 +4675,10 @@
             renderAllergenLegend();
             clearTimeout(persistentPreviewUpdateTimer);
             persistentPreviewUpdateTimer = setTimeout(() => {
-                renderPersistentPreview(baseApprovedMenuContent || (aiCheckResults?.originalMenu || ''), currentText);
+                const diffBase = (unapprovedMode && unapprovedDiffBaseline)
+                    ? unapprovedDiffBaseline
+                    : (baseApprovedMenuContent || (aiCheckResults?.originalMenu || ''));
+                renderPersistentPreview(diffBase, currentText);
             }, 120);
         }
 
@@ -4633,6 +4704,40 @@
                 }
                 globalOffset += lines[lineIdx].length + 1; // +1 for the '\n'
             }
+            return map;
+        }
+
+        /**
+         * Build annotation map from the editor DOM at load time.
+         * Finds .existing-del / .existing-ins spans, extracts their text
+         * using innerText (matching extractCleanTextFromReviewedArea),
+         * and locates them in the baseline string via indexOf.
+         * Returns a map keyed by character offset into the baseline text.
+         */
+        function buildAnnotationMapFromDOM(element) {
+            const map = {};
+            const baseline = extractCleanTextFromReviewedArea(element);
+            // Advance cursor so spans later in the DOM only match later in the text.
+            // This prevents "chicken" in MolePoblano from matching the earlier
+            // "chicken" in Enchiladas Verdes, etc.
+            let cursor = 0;
+
+            element.querySelectorAll('.existing-del, .existing-ins').forEach(span => {
+                const type = span.classList.contains('existing-del') ? 'del' : 'ins';
+                const text = (span.innerText || span.textContent || '')
+                    .replace(/\u00A0/g, ' ')
+                    .trim();
+                if (!text) return;
+
+                const idx = baseline.indexOf(text, cursor);
+                if (idx !== -1) {
+                    for (let c = 0; c < text.length; c++) {
+                        map[idx + c] = type;
+                    }
+                    cursor = idx + text.length;
+                }
+            });
+
             return map;
         }
 
@@ -4676,7 +4781,7 @@
             const lcs = buildTokenLcs(baseTokens, revisedTokens);
 
             // Build annotation map for unapproved mode
-            const annotationMap = unapprovedMode ? buildAnnotationMap(baseText) : {};
+            const annotationMap = unapprovedMode ? unapprovedAnnotationMap : {};
 
             let insertions = 0;
             let deletions = 0;
@@ -4781,7 +4886,10 @@
             });
 
             displayReviewedContent(quill.root.innerHTML);
-            renderPersistentPreview(baseApprovedMenuContent || aiCheckResults.originalMenu, currentText);
+            const recalcBase = (unapprovedMode && unapprovedDiffBaseline)
+                ? unapprovedDiffBaseline
+                : (baseApprovedMenuContent || aiCheckResults.originalMenu);
+            renderPersistentPreview(recalcBase, currentText);
         }
 
         function findWordPosition(text, word, expectedPosition) {

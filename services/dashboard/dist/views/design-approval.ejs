@@ -577,6 +577,95 @@
             font-weight: 700;
             color: var(--color-secondary);
         }
+
+        /* Inline word-level diff highlighting */
+        .diff-word-source {
+            background: rgba(184, 134, 11, 0.08);
+            padding: 0 2px;
+            border-radius: 2px;
+        }
+
+        .diff-word-changed {
+            padding: 0 2px;
+            border-radius: 2px;
+            font-weight: 500;
+        }
+
+        .diff-sev-critical .diff-word-changed,
+        .diff-word-changed.diff-sev-critical {
+            background: rgba(139, 58, 58, 0.15);
+            border-bottom: 2px solid rgba(139, 58, 58, 0.6);
+        }
+
+        .diff-sev-warning .diff-word-changed,
+        .diff-word-changed.diff-sev-warning {
+            background: rgba(184, 134, 11, 0.15);
+            border-bottom: 2px solid rgba(184, 134, 11, 0.5);
+        }
+
+        .diff-sev-info .diff-word-changed,
+        .diff-word-changed.diff-sev-info {
+            background: rgba(139, 115, 85, 0.08);
+            border-bottom: 1px dashed rgba(139, 115, 85, 0.4);
+        }
+
+        .diff-word-source.diff-sev-critical {
+            background: rgba(139, 58, 58, 0.08);
+        }
+        .diff-word-source.diff-sev-warning {
+            background: rgba(184, 134, 11, 0.08);
+        }
+        .diff-word-source.diff-sev-info {
+            background: rgba(139, 115, 85, 0.05);
+        }
+
+        .diff-word-missing {
+            background: rgba(139, 58, 58, 0.12);
+            color: #8b3a3a;
+            padding: 0 2px;
+            border-radius: 2px;
+            text-decoration: line-through;
+            opacity: 0.8;
+        }
+
+        .diff-word-missing-placeholder {
+            color: rgba(139, 58, 58, 0.3);
+            font-size: 0.75em;
+        }
+
+        .diff-word-added {
+            background: rgba(74, 124, 89, 0.15);
+            color: #4a7c59;
+            padding: 0 2px;
+            border-radius: 2px;
+            border-bottom: 2px solid rgba(74, 124, 89, 0.4);
+        }
+
+        .char-diff {
+            background: rgba(139, 58, 58, 0.25);
+            color: #8b3a3a;
+            font-weight: 700;
+            border-radius: 1px;
+        }
+
+        .diff-line-issues {
+            background: rgba(184, 134, 11, 0.03);
+        }
+
+        .diff-line-missing {
+            background: rgba(139, 58, 58, 0.06);
+            border-left: 3px solid rgba(139, 58, 58, 0.4);
+        }
+
+        .diff-line-extra {
+            background: rgba(74, 124, 89, 0.06);
+            border-left: 3px solid rgba(74, 124, 89, 0.4);
+        }
+
+        .diff-line-empty {
+            background: rgba(0, 0, 0, 0.02);
+            min-height: 1.4em;
+        }
     </style>
 </head>
 <body>
@@ -1072,32 +1161,128 @@
             bar.innerHTML = html;
         }
 
+        function renderCharDiff(docxText, pdfText) {
+            // Character-level LCS to find matching chars
+            const a = docxText || '';
+            const b = pdfText || '';
+
+            const m = a.length, n = b.length;
+            const dp = Array(m + 1).fill(null).map(() => Array(n + 1).fill(0));
+
+            for (let i = 1; i <= m; i++) {
+                for (let j = 1; j <= n; j++) {
+                    if (a[i-1].toLowerCase() === b[j-1].toLowerCase()) {
+                        dp[i][j] = dp[i-1][j-1] + 1;
+                    } else {
+                        dp[i][j] = Math.max(dp[i-1][j], dp[i][j-1]);
+                    }
+                }
+            }
+
+            // Backtrack to find which chars in pdfText are different
+            const pdfCharMatched = new Array(n).fill(false);
+            let i = m, j = n;
+            while (i > 0 && j > 0) {
+                if (a[i-1].toLowerCase() === b[j-1].toLowerCase()) {
+                    pdfCharMatched[j-1] = true;
+                    i--; j--;
+                } else if (dp[i-1][j] > dp[i][j-1]) {
+                    i--;
+                } else {
+                    j--;
+                }
+            }
+
+            // Build HTML: unmatched chars get highlighted
+            let html = '';
+            for (let k = 0; k < n; k++) {
+                const ch = escapeHtml(b[k]);
+                if (pdfCharMatched[k]) {
+                    html += ch;
+                } else {
+                    html += `<span class="char-diff">${ch}</span>`;
+                }
+            }
+            return html;
+        }
+
         function renderSplitView(data) {
             const docxPanel = document.getElementById('docxTextPanel');
             const pdfPanel = document.getElementById('pdfTextPanel');
+            const alignments = data.alignments || [];
 
-            const docxLines = (data.docxText || '').split('\n');
-            const pdfLines = (data.pdfText || '').split('\n');
-            const diffs = data.differences || [];
+            // If no alignments (backwards compat), fall back to old approach
+            if (alignments.length === 0) {
+                const docxLines = (data.docxText || '').split('\n');
+                const pdfLines = (data.pdfText || '').split('\n');
+                const diffs = data.differences || [];
 
-            // Build sets of line numbers that have issues
-            const docxIssueLines = new Set();
-            const pdfIssueLines = new Set();
+                const docxIssueLines = new Set();
+                const pdfIssueLines = new Set();
 
-            diffs.forEach(d => {
-                if (d.docxLineNum !== undefined) docxIssueLines.add(d.docxLineNum);
-                if (d.pdfLineNum !== undefined) pdfIssueLines.add(d.pdfLineNum);
+                diffs.forEach(d => {
+                    if (d.docxLineNum !== undefined) docxIssueLines.add(d.docxLineNum);
+                    if (d.pdfLineNum !== undefined) pdfIssueLines.add(d.pdfLineNum);
+                });
+
+                docxPanel.innerHTML = docxLines.map((line, i) => {
+                    const cls = docxIssueLines.has(i) ? ' diff-changed' : '';
+                    return `<div class="diff-line${cls}" data-line="${i}" data-panel="docx">${escapeHtml(line) || '&nbsp;'}</div>`;
+                }).join('');
+
+                pdfPanel.innerHTML = pdfLines.map((line, i) => {
+                    const cls = pdfIssueLines.has(i) ? ' diff-changed' : '';
+                    return `<div class="diff-line${cls}" data-line="${i}" data-panel="pdf">${escapeHtml(line) || '&nbsp;'}</div>`;
+                }).join('');
+                return;
+            }
+
+            let docxHtml = '';
+            let pdfHtml = '';
+
+            alignments.forEach((align, idx) => {
+                if (align.type === 'match') {
+                    if (align.wordDiffs && align.wordDiffs.length > 0) {
+                        // Render with inline word highlighting
+                        let docxLineHtml = '';
+                        let pdfLineHtml = '';
+
+                        align.wordDiffs.forEach(wd => {
+                            if (wd.type === 'same') {
+                                docxLineHtml += escapeHtml(wd.text) + ' ';
+                                pdfLineHtml += escapeHtml(wd.text) + ' ';
+                            } else if (wd.type === 'changed') {
+                                const sevClass = wd.classification ? `diff-sev-${wd.classification.severity}` : 'diff-sev-warning';
+                                docxLineHtml += `<span class="diff-word-source ${sevClass}">${escapeHtml(wd.docxText)}</span> `;
+                                pdfLineHtml += `<span class="diff-word-changed ${sevClass}">${renderCharDiff(wd.docxText, wd.pdfText)}</span> `;
+                            } else if (wd.type === 'missing') {
+                                docxLineHtml += `<span class="diff-word-missing">${escapeHtml(wd.text)}</span> `;
+                                pdfLineHtml += `<span class="diff-word-missing-placeholder">\u2300</span> `;
+                            } else if (wd.type === 'added') {
+                                pdfLineHtml += `<span class="diff-word-added">${escapeHtml(wd.text)}</span> `;
+                            }
+                        });
+
+                        const hasIssues = align.wordDiffs.some(wd => wd.type !== 'same');
+                        const lineCls = hasIssues ? ' diff-line-issues' : '';
+                        docxHtml += `<div class="diff-line${lineCls}" data-line="${align.docxIdx}" data-panel="docx">${docxLineHtml.trim()}</div>`;
+                        pdfHtml += `<div class="diff-line${lineCls}" data-line="${align.pdfIdx}" data-panel="pdf">${pdfLineHtml.trim()}</div>`;
+                    } else {
+                        // Lines match exactly
+                        docxHtml += `<div class="diff-line" data-line="${align.docxIdx}" data-panel="docx">${escapeHtml(align.docxLine)}</div>`;
+                        pdfHtml += `<div class="diff-line" data-line="${align.pdfIdx}" data-panel="pdf">${escapeHtml(align.pdfLine)}</div>`;
+                    }
+                } else if (align.type === 'docx_only') {
+                    docxHtml += `<div class="diff-line diff-line-missing" data-line="${align.docxIdx}" data-panel="docx">${escapeHtml(align.docxLine)}</div>`;
+                    pdfHtml += `<div class="diff-line diff-line-empty">&nbsp;</div>`;
+                } else if (align.type === 'pdf_only') {
+                    docxHtml += `<div class="diff-line diff-line-empty">&nbsp;</div>`;
+                    pdfHtml += `<div class="diff-line diff-line-extra" data-line="${align.pdfIdx}" data-panel="pdf">${escapeHtml(align.pdfLine)}</div>`;
+                }
             });
 
-            docxPanel.innerHTML = docxLines.map((line, i) => {
-                const cls = docxIssueLines.has(i) ? ' diff-changed' : '';
-                return `<div class="diff-line${cls}" data-line="${i}" data-panel="docx">${escapeHtml(line) || '&nbsp;'}</div>`;
-            }).join('');
-
-            pdfPanel.innerHTML = pdfLines.map((line, i) => {
-                const cls = pdfIssueLines.has(i) ? ' diff-changed' : '';
-                return `<div class="diff-line${cls}" data-line="${i}" data-panel="pdf">${escapeHtml(line) || '&nbsp;'}</div>`;
-            }).join('');
+            docxPanel.innerHTML = docxHtml;
+            pdfPanel.innerHTML = pdfHtml;
         }
 
         function renderDiffList(data) {
