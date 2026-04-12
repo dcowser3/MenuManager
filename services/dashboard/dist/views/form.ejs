@@ -4814,9 +4814,11 @@
                     if (baseTok && baseTok.value.trim()) {
                         html += `<span class="persistent-del">${escapeHtml(baseTok.value)}</span>`;
                         deletions++;
+                    } else {
+                        // Render deleted whitespace to preserve line breaks
+                        // around deleted content.
+                        html += escapeHtml(baseTok?.value || '');
                     }
-                    // Deleted whitespace — skip it so removed line breaks
-                    // actually disappear from the preview.
                     i++;
                     continue;
                 }
