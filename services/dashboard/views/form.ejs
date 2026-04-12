@@ -3833,9 +3833,9 @@
         }
 
         function normalizeDiffTokenValue(value) {
-            return (value || '')
-                .normalize('NFC')
-                .replace(/[’`]/g, "'");
+            var v = (value || "").normalize("NFC").replace(/[\u2018\u2019`]/g, "'");
+            if (/^\s+$/.test(v)) return " ";
+            return v;
         }
 
         function getDiffTokenType(value) {
@@ -4814,9 +4814,9 @@
                     if (baseTok && baseTok.value.trim()) {
                         html += `<span class="persistent-del">${escapeHtml(baseTok.value)}</span>`;
                         deletions++;
-                    } else {
-                        html += escapeHtml(baseTok?.value || '');
                     }
+                    // Deleted whitespace — skip it so removed line breaks
+                    // actually disappear from the preview.
                     i++;
                     continue;
                 }
