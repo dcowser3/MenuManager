@@ -1,4 +1,4 @@
-import express from 'express';
+import express = require('express');
 import multer from 'multer';
 import { promises as fs } from 'fs';
 import { validateTemplate } from './src/validator';
@@ -6,7 +6,7 @@ import axios from 'axios';
 import * as path from 'path';
 import { exec } from 'child_process';
 import { promisify } from 'util';
-import dotenv from 'dotenv';
+import dotenv = require('dotenv');
 
 // Load .env from project root (works whether running from src or dist)
 const envPath = path.resolve(__dirname, '../../../.env');

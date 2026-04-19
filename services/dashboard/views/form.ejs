@@ -10,6 +10,7 @@
     <!-- Quill Rich Text Editor -->
     <link href="https://cdn.quilljs.com/1.3.6/quill.snow.css" rel="stylesheet">
     <script src="https://cdn.quilljs.com/1.3.6/quill.js"></script>
+    <script src="/js/form-helpers.js"></script>
     <style>
         :root {
             --color-primary: #2c2c2c;
@@ -96,6 +97,10 @@
             margin-bottom: 1rem;
         }
 
+        .card.card-error {
+            border-color: var(--color-error);
+        }
+
         .card h2 {
             font-family: var(--font-heading);
             font-size: 1.25rem;
@@ -154,6 +159,14 @@
             line-height: 1.35;
         }
 
+        /* Extraction-populated field indicator */
+        .field-extracted {
+            background-color: #fff8e1 !important;
+            border-color: #f5b400 !important;
+            box-shadow: 0 0 0 2px rgba(245, 180, 0, 0.15);
+            transition: background-color 0.25s ease, box-shadow 0.25s ease;
+        }
+
         /* Required Approvals Section */
         .approvals-intro {
             font-size: 0.85rem;
@@ -167,6 +180,10 @@
             padding: 1rem;
             margin-bottom: 1rem;
             background: var(--color-background-alt);
+        }
+
+        .approval-group.approval-group-error {
+            border-color: var(--color-error);
         }
 
         .approval-group:last-child {
@@ -1429,21 +1446,24 @@
                 <div class="form-grid">
                     <div class="form-group autocomplete-wrapper">
                         <label for="submitterName">Your Name *</label>
-                        <input type="text" id="submitterName" required placeholder="First and Last Name" autocomplete="off" oninput="onSubmitterNameInput(this.value)">
+                        <input type="text" id="submitterName" required placeholder="First and Last Name" autocomplete="off" oninput="onSubmitterNameInput(this.value); clearSubmitterFieldError('submitterName');">
                         <div class="autocomplete-dropdown" id="submitterDropdown"></div>
+                        <div id="submitterNameError" class="field-error hidden"></div>
                     </div>
                     <div class="form-group">
                         <label for="submitterEmail">Your Email *</label>
-                        <input type="email" id="submitterEmail" required placeholder="chef@example.com">
+                        <input type="email" id="submitterEmail" required placeholder="chef@example.com" oninput="clearSubmitterFieldError('submitterEmail')">
+                        <div id="submitterEmailError" class="field-error hidden"></div>
                     </div>
                     <div class="form-group">
                         <label for="submitterJobTitle">Job Title *</label>
-                        <input type="text" id="submitterJobTitle" required placeholder="e.g., Executive Chef">
+                        <input type="text" id="submitterJobTitle" required placeholder="e.g., Executive Chef" oninput="clearSubmitterFieldError('submitterJobTitle')">
+                        <div id="submitterJobTitleError" class="field-error hidden"></div>
                     </div>
                 </div>
             </div>
 
-            <div class="card">
+            <div class="card" id="projectDetailsCard">
                 <h2>Project Details</h2>
                 <div class="submission-mode">
                     <label class="submission-mode-option">
@@ -1507,6 +1527,7 @@
                         <label for="projectName">Project Name *</label>
                         <input type="text" id="projectName" required placeholder="Enter project name" autocomplete="off" oninput="onProjectNameInput(this.value)">
                         <div class="autocomplete-dropdown" id="projectDropdown"></div>
+                        <div id="projectNameError" class="field-error hidden"></div>
                     </div>
                     <div class="form-group autocomplete-wrapper">
                         <label for="property">Property *</label>
@@ -1521,6 +1542,7 @@
                             <option value="standard">Standard Menu</option>
                             <option value="prix_fixe">Prix Fixe / Pre-Fix</option>
                         </select>
+                        <div id="menuTypeError" class="field-error hidden"></div>
                     </div>
                     <div class="form-group">
                         <label for="servicePeriod">Service Period *</label>
@@ -1534,6 +1556,7 @@
                             <option value="holiday">Holiday</option>
                             <option value="other">Other</option>
                         </select>
+                        <div id="servicePeriodError" class="field-error hidden"></div>
                     </div>
                     <div class="form-group">
                         <label for="templateType">Template Type *</label>
@@ -1544,6 +1567,7 @@
                             <option value="food_beverage">Food + Beverage Menu</option>
                             <option value="non_beverage">Non-Beverage (No AI Review)</option>
                         </select>
+                        <div id="templateTypeError" class="field-error hidden"></div>
                     </div>
                     <div class="form-group">
                         <label for="turnaroundDays">Turnaround (Days) *</label>
@@ -1553,6 +1577,7 @@
                     <div class="form-group">
                         <label for="dateNeeded">Date Needed *</label>
                         <input type="date" id="dateNeeded" required readonly style="background:#f0efed;color:var(--muted);cursor:not-allowed;">
+                        <div id="dateNeededError" class="field-error hidden"></div>
                     </div>
                     <div class="form-group">
                         <label for="assetType">Asset Type *</label>
@@ -1562,6 +1587,7 @@
                             <option value="DIGITAL">Digital</option>
                             <option value="BOTH">Digital + Print</option>
                         </select>
+                        <div id="assetTypeError" class="field-error hidden"></div>
                     </div>
                     <div class="form-group">
                         <label for="orientation">Orientation *</label>
@@ -1570,6 +1596,7 @@
                             <option value="Portrait">Portrait</option>
                             <option value="Landscape">Landscape</option>
                         </select>
+                        <div id="orientationError" class="field-error hidden"></div>
                     </div>
                 </div>
 
@@ -1673,8 +1700,9 @@
             <div class="card" id="approvalsCard">
                 <h2>Required Approval</h2>
                 <p class="approvals-intro">Confirm this menu has been reviewed and approved before submission.</p>
+                <div id="approvalsCardError" class="field-error hidden" style="margin-bottom: 1rem;"></div>
 
-                <div class="approval-group">
+                <div class="approval-group" id="approvalGroupPrimary">
                     <div class="approval-header">
                         <span class="approval-title">Approver</span>
                         <span class="approval-hint" id="approvalHint">e.g., Property GM, Director of F&B, Executive Chef, Chef de Cuisine</span>
@@ -1687,14 +1715,17 @@
                                 <option value="yes">Yes</option>
                                 <option value="no">No</option>
                             </select>
+                            <div id="approval1Error" class="field-error hidden"></div>
                         </div>
                         <div class="approval-field">
                             <label>Approver Name *</label>
                             <input type="text" id="approver1Name" required placeholder="First and Last Name">
+                            <div id="approver1NameError" class="field-error hidden"></div>
                         </div>
                         <div class="approval-field">
                             <label>Position *</label>
                             <input type="text" id="approver1Position" required placeholder="e.g., Executive Chef">
+                            <div id="approver1PositionError" class="field-error hidden"></div>
                         </div>
                     </div>
                 </div>
@@ -2107,10 +2138,58 @@
                         const menuHeight = entry.contentRect.height;
                         const allergensSection = document.querySelector('.allergens-section');
                         const allergensHeight = allergensSection ? allergensSection.offsetHeight : 80;
-                        exampleContent.style.minHeight = (menuHeight + allergensHeight) + 'px';
+                exampleContent.style.minHeight = (menuHeight + allergensHeight) + 'px';
                     }
                 });
                 resizeObserver.observe(menuContainer);
+            }
+
+            [
+                'projectName',
+                'menuType',
+                'servicePeriod',
+                'templateType',
+                'dateNeeded',
+                'assetType',
+                'orientation',
+                'approval1',
+                'approver1Name',
+                'approver1Position'
+            ].forEach((fieldId) => {
+                const field = document.getElementById(fieldId);
+                if (!field) return;
+
+                const clearFn = () => {
+                    clearGenericFieldError(fieldId);
+                    if (['approval1', 'approver1Name', 'approver1Position'].includes(fieldId)) {
+                        syncApprovalsCardErrorState();
+                    } else {
+                        syncProjectDetailsCardErrorState();
+                    }
+                };
+
+                field.addEventListener('input', clearFn);
+                field.addEventListener('change', clearFn);
+            });
+
+            const propertyField = document.getElementById('property');
+            if (propertyField) {
+                const clearPropertyError = () => {
+                    setPropertyFieldError('');
+                    syncProjectDetailsCardErrorState();
+                };
+                propertyField.addEventListener('input', clearPropertyError);
+                propertyField.addEventListener('change', clearPropertyError);
+            }
+
+            const turnaroundField = document.getElementById('turnaroundDays');
+            if (turnaroundField) {
+                const clearTurnaroundError = () => {
+                    setTurnaroundFieldError('');
+                    syncProjectDetailsCardErrorState();
+                };
+                turnaroundField.addEventListener('input', clearTurnaroundError);
+                turnaroundField.addEventListener('change', clearTurnaroundError);
             }
 
             // Handle template type changes for approval hint text
@@ -2236,6 +2315,148 @@
                 errorEl.classList.add('hidden');
                 propertyInput.classList.remove('input-error');
             }
+        }
+
+        function setSubmitterFieldError(fieldId, message) {
+            const input = document.getElementById(fieldId);
+            const errorEl = document.getElementById(fieldId + 'Error');
+            if (!input || !errorEl) return;
+            if (message) {
+                errorEl.textContent = message;
+                errorEl.classList.remove('hidden');
+                input.classList.add('input-error');
+            } else {
+                errorEl.textContent = '';
+                errorEl.classList.add('hidden');
+                input.classList.remove('input-error');
+            }
+        }
+
+        function clearSubmitterFieldError(fieldId) {
+            setSubmitterFieldError(fieldId, '');
+        }
+
+        function setGenericFieldError(fieldId, message) {
+            const input = document.getElementById(fieldId);
+            const errorEl = document.getElementById(fieldId + 'Error');
+            if (!input) return;
+
+            if (message) {
+                input.classList.add('input-error');
+                if (errorEl) {
+                    errorEl.textContent = message;
+                    errorEl.classList.remove('hidden');
+                }
+            } else {
+                input.classList.remove('input-error');
+                if (errorEl) {
+                    errorEl.textContent = '';
+                    errorEl.classList.add('hidden');
+                }
+            }
+        }
+
+        function clearGenericFieldError(fieldId) {
+            setGenericFieldError(fieldId, '');
+        }
+
+        function setCardError(cardId, hasError) {
+            const card = document.getElementById(cardId);
+            if (!card) return;
+            card.classList.toggle('card-error', !!hasError);
+        }
+
+        function setApprovalsCardError(message) {
+            const errorEl = document.getElementById('approvalsCardError');
+            const primaryGroup = document.getElementById('approvalGroupPrimary');
+
+            setCardError('approvalsCard', !!message);
+            if (primaryGroup) {
+                primaryGroup.classList.toggle('approval-group-error', !!message);
+            }
+
+            if (!errorEl) return;
+            if (message) {
+                errorEl.textContent = message;
+                errorEl.classList.remove('hidden');
+            } else {
+                errorEl.textContent = '';
+                errorEl.classList.add('hidden');
+            }
+        }
+
+        function clearApprovalsCardError() {
+            setApprovalsCardError('');
+        }
+
+        function syncProjectDetailsCardErrorState() {
+            const card = document.getElementById('projectDetailsCard');
+            if (!card) return;
+            setCardError('projectDetailsCard', !!card.querySelector('.input-error'));
+        }
+
+        function syncApprovalsCardErrorState() {
+            const card = document.getElementById('approvalsCard');
+            if (!card) return;
+            if (!card.querySelector('.input-error')) {
+                clearApprovalsCardError();
+            }
+        }
+
+        function applyProjectFieldValidationErrors() {
+            const projectName = document.getElementById('projectName').value.trim();
+            const property = document.getElementById('property').value.trim();
+            const orientation = document.getElementById('orientation').value;
+            const menuType = document.getElementById('menuType').value;
+            const servicePeriod = document.getElementById('servicePeriod').value;
+            const templateType = document.getElementById('templateType').value;
+            const turnaroundDays = document.getElementById('turnaroundDays').value.trim();
+            const dateNeeded = document.getElementById('dateNeeded').value;
+            const assetType = document.getElementById('assetType').value;
+
+            setGenericFieldError('projectName', projectName ? '' : 'Please enter a project name');
+            setPropertyFieldError(property ? '' : 'Please select a property');
+            setGenericFieldError('orientation', orientation ? '' : 'Please select an orientation');
+            setGenericFieldError('menuType', menuType ? '' : 'Please select a menu type');
+            setGenericFieldError('servicePeriod', servicePeriod ? '' : 'Please select a service period');
+            setGenericFieldError('templateType', templateType ? '' : 'Please select a template type');
+            setTurnaroundFieldError(turnaroundDays ? '' : 'Please enter turnaround days');
+            setGenericFieldError('dateNeeded', dateNeeded ? '' : 'Please select a date needed');
+            setGenericFieldError('assetType', assetType ? '' : 'Please select an asset type');
+
+            const hasProjectFieldErrors = !projectName || !property || !orientation || !menuType || !servicePeriod || !templateType || !turnaroundDays || !dateNeeded || !assetType;
+            setCardError('projectDetailsCard', hasProjectFieldErrors);
+            return hasProjectFieldErrors;
+        }
+
+        function applyApprovalFieldValidationErrors() {
+            const approval1 = document.getElementById('approval1').value;
+            const approver1Name = document.getElementById('approver1Name').value.trim();
+            const approver1Position = document.getElementById('approver1Position').value.trim();
+
+            setGenericFieldError('approval1', approval1 ? '' : 'Please confirm approval');
+            setGenericFieldError('approver1Name', approver1Name ? '' : 'Please enter the approver name');
+            setGenericFieldError('approver1Position', approver1Position ? '' : 'Please enter the approver position');
+
+            if (!approval1 || !approver1Name || !approver1Position) {
+                setApprovalsCardError('Please complete the required approval fields');
+                return false;
+            }
+
+            if (approval1 !== 'yes') {
+                setGenericFieldError('approval1', 'Approval must be set to Yes before submission');
+                setApprovalsCardError('Approval is required before submission');
+                return false;
+            }
+
+            clearApprovalsCardError();
+            return true;
+        }
+
+        function clearErrorAlerts() {
+            const container = document.getElementById('alertContainer');
+            if (!container) return;
+            container.querySelectorAll('.alert-error').forEach(el => el.remove());
         }
 
         function formatDateForInput(date) {
@@ -2677,9 +2898,7 @@
                 persistentDiffSummary = { insertions: 0, deletions: 0 };
 
                 if (data.extractedProject) {
-                    if (data.extractedProject.projectName) document.getElementById('projectName').value = data.extractedProject.projectName;
-                    if (data.extractedProject.property) document.getElementById('property').value = data.extractedProject.property;
-                    if (data.extractedProject.orientation) setSelectValue('orientation', data.extractedProject.orientation);
+                    applyExtractedProjectToForm(data.extractedProject);
                 }
                 setAllergenInputValue(normalizedBaseline.allergens || '');
                 setContainsRawSelection(!!normalizedBaseline.hadRawNotice);
@@ -2741,9 +2960,7 @@
                 persistentDiffSummary = { insertions: 0, deletions: 0 };
 
                 if (data.extractedProject) {
-                    if (data.extractedProject.projectName) document.getElementById('projectName').value = data.extractedProject.projectName;
-                    if (data.extractedProject.property) document.getElementById('property').value = data.extractedProject.property;
-                    if (data.extractedProject.orientation) setSelectValue('orientation', data.extractedProject.orientation);
+                    applyExtractedProjectToForm(data.extractedProject);
                 }
                 const normalizedBaseline = stripBaselineFooter(data.visibleText || '', data.extractedAllergenKey || '');
                 setAllergenInputValue(normalizedBaseline.allergens || '');
@@ -3330,6 +3547,69 @@
             }
         }
 
+        function markFieldAsExtracted(fieldId) {
+            const el = document.getElementById(fieldId);
+            if (!el || el.classList.contains('field-extracted')) return;
+            el.classList.add('field-extracted');
+            const clear = () => {
+                el.classList.remove('field-extracted');
+                el.removeEventListener('input', clear);
+                el.removeEventListener('change', clear);
+            };
+            el.addEventListener('input', clear);
+            el.addEventListener('change', clear);
+        }
+
+        function setFieldValueAndMark(fieldId, value) {
+            const el = document.getElementById(fieldId);
+            if (!el) return;
+            el.value = value;
+            markFieldAsExtracted(fieldId);
+        }
+
+        function setSelectValueAndMark(fieldId, value) {
+            const before = document.getElementById(fieldId)?.value;
+            setSelectValue(fieldId, value);
+            const after = document.getElementById(fieldId)?.value;
+            if (after && after !== before) markFieldAsExtracted(fieldId);
+        }
+
+        function applyExtractedProjectToForm(extracted) {
+            if (!extracted) return;
+            if (extracted.projectName) setFieldValueAndMark('projectName', extracted.projectName);
+            if (extracted.property) setFieldValueAndMark('property', extracted.property);
+            if (extracted.orientation) setSelectValueAndMark('orientation', extracted.orientation);
+            if (extracted.dateNeeded) applyExtractedDateNeeded(extracted.dateNeeded);
+            if (extracted.size) applyExtractedSize(extracted.size);
+        }
+
+        function applyExtractedDateNeeded(dateStr) {
+            const dateInput = document.getElementById('dateNeeded');
+            setDateNeededMinimumFromTurnaround(false);
+            const { value, warning } = window.formHelpers.clampExtractedDateNeeded(dateStr, dateInput.min);
+            dateInput.value = value;
+            markFieldAsExtracted('dateNeeded');
+            if (warning) showAlert(warning, 'warning');
+        }
+
+        function applyExtractedSize(sizeText) {
+            const parsed = window.formHelpers.parseExtractedSize(sizeText);
+            if (!parsed) return;
+            const currentAssetType = document.getElementById('assetType').value;
+
+            if (parsed.unit === 'print') {
+                if (!currentAssetType) setSelectValueAndMark('assetType', 'PRINT');
+                toggleAssetFields();
+                setFieldValueAndMark('widthPrint', parsed.width);
+                setFieldValueAndMark('heightPrint', parsed.height);
+            } else if (parsed.unit === 'digital') {
+                if (!currentAssetType) setSelectValueAndMark('assetType', 'DIGITAL');
+                toggleAssetFields();
+                setFieldValueAndMark('widthDigital', parsed.width);
+                setFieldValueAndMark('heightDigital', parsed.height);
+            }
+        }
+
         function toggleAdditionalApproval() {
             const additionalGroup = document.getElementById('additionalApprovalGroup');
             const addBtn = document.getElementById('addApprovalBtn');
@@ -3543,6 +3823,8 @@
         }
 
         function validateStep1() {
+            clearErrorAlerts();
+            clearApprovalsCardError();
             const submitterName = document.getElementById('submitterName').value.trim();
             const submitterEmail = document.getElementById('submitterEmail').value.trim();
             const submitterJobTitle = document.getElementById('submitterJobTitle').value.trim();
@@ -3565,40 +3847,53 @@
             const digitalWidth = document.getElementById('widthDigital').value.trim();
             const digitalHeight = document.getElementById('heightDigital').value.trim();
 
-            if (!submitterName || !submitterEmail || !submitterJobTitle) {
-                showAlert('Please fill in all submitter information fields', 'error');
-                window.scrollTo({ top: 0, behavior: 'smooth' });
+            setSubmitterFieldError('submitterName', submitterName ? '' : 'Please enter your name');
+            setSubmitterFieldError('submitterEmail', submitterEmail ? '' : 'Please enter your email');
+            setSubmitterFieldError('submitterJobTitle', submitterJobTitle ? '' : 'Please enter your job title');
+            const submitterMissing = !submitterName || !submitterEmail || !submitterJobTitle;
+
+            const projectFieldsMissing = applyProjectFieldValidationErrors();
+            const approvalValid = applyApprovalFieldValidationErrors();
+
+            if (submitterMissing || projectFieldsMissing || !approvalValid || !menuContent) {
+                showAlert('Please fill in all required fields', 'error');
+                if (submitterMissing) {
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                } else if (projectFieldsMissing || !menuContent) {
+                    document.getElementById('projectDetailsCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
+                } else {
+                    document.getElementById('approvalsCard').scrollIntoView({ behavior: 'smooth' });
+                }
                 return false;
             }
 
             if (!submitterEmail.includes('@')) {
+                setSubmitterFieldError('submitterEmail', 'Please enter a valid email address');
                 showAlert('Please enter a valid email address', 'error');
-                window.scrollTo({ top: 0, behavior: 'smooth' });
-                return false;
-            }
-
-            if (!projectName || !property || !orientation || !menuType || !servicePeriod || !templateType || !turnaroundDays || !dateNeeded || !assetType || !menuContent) {
-                showAlert('Please fill in all required fields', 'error');
                 window.scrollTo({ top: 0, behavior: 'smooth' });
                 return false;
             }
             if (!isPropertyFromCatalog(property)) {
                 setPropertyFieldError('Please select a property from the list.');
+                setCardError('projectDetailsCard', true);
                 showAlert('Please select a property from the configured list', 'error');
-                window.scrollTo({ top: 0, behavior: 'smooth' });
+                document.getElementById('projectDetailsCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
                 return false;
             } else {
                 setPropertyFieldError('');
+                syncProjectDetailsCardErrorState();
             }
 
             const turnaroundDaysNum = parseInt(turnaroundDays, 10);
             const minTurnaroundDays = getMinimumTurnaroundDays();
             if (!Number.isFinite(turnaroundDaysNum) || turnaroundDaysNum < minTurnaroundDays) {
                 setTurnaroundFieldError(getTurnaroundMinimumMessage());
+                setCardError('projectDetailsCard', true);
                 showAlert(getTurnaroundMinimumMessage(), 'error');
                 return false;
             }
             setTurnaroundFieldError('');
+            syncProjectDetailsCardErrorState();
 
             if (dateNeeded < document.getElementById('dateNeeded').min) {
                 showAlert(`Date needed cannot be earlier than ${document.getElementById('dateNeeded').min}`, 'error');
@@ -3635,23 +3930,6 @@
                     showAlert('Please provide the max file size in MB', 'error');
                     return false;
                 }
-            }
-
-            // Validate required approval
-            const approval1 = document.getElementById('approval1').value;
-            const approver1Name = document.getElementById('approver1Name').value.trim();
-            const approver1Position = document.getElementById('approver1Position').value.trim();
-
-            if (!approval1 || !approver1Name || !approver1Position) {
-                showAlert('Please complete the required approval fields', 'error');
-                document.getElementById('approvalsCard').scrollIntoView({ behavior: 'smooth' });
-                return false;
-            }
-
-            if (approval1 !== 'yes') {
-                showAlert('Approval is required before submission', 'error');
-                document.getElementById('approvalsCard').scrollIntoView({ behavior: 'smooth' });
-                return false;
             }
 
             return true;

@@ -123,7 +123,8 @@ When a chef uploads an unapproved DOCX:
 1. **Python extraction** (`extract_clean_menu_text.py --mode unapproved`):
    - Returns `visible_text` (all text including deletions), `unapproved_html` (with `existing-del`/`existing-ins` spans), and per-paragraph `annotations` (char-offset ranges with type `del`/`ins`).
 2. **Dashboard endpoint** (`POST /api/modification/unapproved-upload`):
-   - Calls the Python script with `--mode unapproved` and also extracts project details.
+   - Calls the Python script with `--mode unapproved` and also attempts project-detail extraction.
+   - Project metadata extraction is best-effort; if `extract_project_details.py` times out or fails, the upload still succeeds and the redline editor opens with blank metadata fields rather than returning `500`.
 3. **Frontend** (`form.ejs`):
    - Loads `unapprovedBaseHtml` into the editable review area so existing redlines are visible during editing.
    - `renderPersistentPreview()` uses annotation ranges to wrap unchanged tokens in `existing-del`/`existing-ins` spans; new changes get `persistent-del`/`persistent-ins` as usual.

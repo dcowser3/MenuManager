@@ -11,10 +11,18 @@ logs/
 
 # Ignore node modules
 node_modules/
+node_modules.old/
+**/node_modules.old/
 
 # Ignore python cache
 __pycache__/
 *.pyc
+
+# Ignore Python virtual environments
+venv/
+**/venv/
+.venv/
+**/.venv/
 
 # Ignore Microsoft Word temporary files
 ~$*.docx

@@ -36,14 +36,17 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-const express_1 = __importDefault(require("express"));
+const express = require("express");
 const fs_1 = require("fs");
 const mammoth_1 = __importDefault(require("mammoth"));
 const path = __importStar(require("path"));
 const fsSync = __importStar(require("fs"));
 const child_process_1 = require("child_process");
 const util_1 = require("util");
-const app = (0, express_1.default)();
+const dotenv = require("dotenv");
+const supabase_client_1 = require("@menumanager/supabase-client");
+dotenv.config({ path: path.join(__dirname, '..', '..', '..', '.env') });
+const app = express();
 const port = 3006;
 const execAsync = (0, util_1.promisify)(child_process_1.exec);
 const DIFFERENCES_DIR = path.join(__dirname, '..', '..', '..', 'tmp', 'learning');
@@ -113,10 +116,10 @@ async function ensureFile(filePath, initialContent) {
         await fs_1.promises.writeFile(filePath, initialContent);
     }
 }
-app.use(express_1.default.json());
+app.use(express.json());
 app.post('/compare', async (req, res) => {
     try {
-        const { submission_id, ai_draft_path, final_path } = req.body;
+        const { submission_id, ai_draft_path, final_path, original_path } = req.body;
         if (!submission_id || !ai_draft_path || !final_path) {
             return res.status(400).json({
                 error: 'Missing required fields: submission_id, ai_draft_path, final_path',
@@ -134,6 +137,7 @@ app.post('/compare', async (req, res) => {
             final_length: finalText.length,
             changes_detected: differences.hasChanges,
             change_percentage: differences.changePercentage,
+            ...(original_path ? { original_path } : {}),
             ai_draft_path,
             final_path,
             analysis: differences.summary,
@@ -210,22 +214,15 @@ app.get('/learning/rules', async (_req, res) => {
         res.status(500).json({ error: 'Failed to get learned rules' });
     }
 });
+// v2: Overlay injection removed. This endpoint returns empty for backward compatibility.
 app.get('/learning/overlay', async (_req, res) => {
-    try {
-        const snapshot = await readLearnedRulesSnapshot();
-        const overrides = await readRuleOverrides();
-        const enabledRules = snapshot.active_rules.filter((r) => !isRuleDisabled(r, overrides));
-        const overlay = buildPromptOverlay(enabledRules);
-        res.json({
-            generated_at: snapshot.generated_at,
-            rules_used: enabledRules.length,
-            overlay,
-        });
-    }
-    catch (error) {
-        console.error('Error generating learning overlay:', error);
-        res.status(500).json({ error: 'Failed to build learning overlay' });
-    }
+    res.json({
+        generated_at: new Date().toISOString(),
+        rules_used: 0,
+        overlay: '',
+        deprecated: true,
+        message: 'Overlay injection removed in v2. Rules now flow through correction_rules table.',
+    });
 });
 app.get('/learning/overrides', async (_req, res) => {
     try {
@@ -1106,7 +1103,63 @@ async function rebuildLearnedRules() {
         conflicted_rules: conflictedRules,
     };
     await fs_1.promises.writeFile(LEARNED_RULES_FILE, JSON.stringify(snapshot, null, 2));
+    // v2: Propose active rules as system-generated correction_rules in Supabase
+    // (fire-and-forget, never blocks the compare response)
+    if ((0, supabase_client_1.isSupabaseConfigured)() && activeRules.length > 0) {
+        proposeSystemRules(activeRules, pairMap).catch((err) => {
+            console.error('System rule proposal failed:', err.message || err);
+        });
+    }
     return snapshot;
+}
+async function proposeSystemRules(activeRules, pairMap) {
+    const supabase = (0, supabase_client_1.getSupabaseClient)();
+    const CORRECTION_RULES_TABLE = 'correction_rules';
+    // Fetch existing system-proposed rules to avoid duplicates
+    const { data: existing, error: fetchError } = await supabase
+        .from(CORRECTION_RULES_TABLE)
+        .select('original_text, corrected_text')
+        .eq('source', 'system');
+    if (fetchError) {
+        console.warn('Could not fetch existing system rules for dedup:', fetchError.message);
+        return;
+    }
+    const existingKeys = new Set((existing || []).map((r) => `${(r.original_text || '').toLowerCase()}=>${(r.corrected_text || '').toLowerCase()}`));
+    const newProposals = [];
+    for (const rule of activeRules) {
+        const dedupKey = `${rule.source.toLowerCase()}=>${rule.target.toLowerCase()}`;
+        if (existingKeys.has(dedupKey))
+            continue;
+        const pairData = pairMap.get(`${rule.source_norm}=>${rule.target_norm}`);
+        const submissionIds = pairData ? Array.from(pairData.submissions) : [];
+        newProposals.push({
+            submission_id: submissionIds[submissionIds.length - 1] || 'unknown',
+            correction_id: `system-${rule.source_norm}=>${rule.target_norm}`,
+            original_text: rule.source,
+            corrected_text: rule.target,
+            change_type: rule.kind,
+            rule: `Always use "${rule.target}" instead of "${rule.source}" (seen ${rule.occurrences}x across ${rule.submission_count} submissions)`,
+            is_location_specific: false,
+            restaurant_name: '',
+            location: 'All properties (global rule)',
+            source: 'system',
+            status: 'pending',
+            occurrences: rule.occurrences,
+            confidence: rule.confidence,
+            submission_ids: submissionIds,
+        });
+    }
+    if (newProposals.length === 0)
+        return;
+    const { error: insertError } = await supabase
+        .from(CORRECTION_RULES_TABLE)
+        .insert(newProposals);
+    if (insertError) {
+        console.error('Failed to insert system rule proposals:', insertError.message);
+    }
+    else {
+        console.log(`Proposed ${newProposals.length} system rules for human review`);
+    }
 }
 async function readRuleOverrides() {
     const content = await fs_1.promises.readFile(RULE_OVERRIDES_FILE, 'utf-8');

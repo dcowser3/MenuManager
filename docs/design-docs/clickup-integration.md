@@ -2,7 +2,7 @@
 
 **Status:** Complete (Updated Mar 2026)
 
-When a chef submits a menu, a ClickUp task is automatically created with the generated DOCX attached and assigned to the reviewer. When the reviewer uploads corrections and changes the task status, the system detects this via webhook, downloads the corrected file, emails it to the submitter, feeds it to the differ service as training data, and extracts approved dishes into Supabase.
+When a chef submits a menu, a ClickUp task is automatically created with the generated DOCX attached and assigned to the reviewer. When the reviewer uploads corrections and changes the task status, the system detects this via webhook, downloads the corrected file, emails it to the submitter, feeds it to the differ service as training data, and asks the DB service to extract approved dishes into Supabase.
 
 ## Outbound Flow (Form Submit → ClickUp)
 
@@ -32,7 +32,7 @@ When a chef submits a menu, a ClickUp task is automatically created with the gen
 - Downloads the latest attachment from the ClickUp task
 - Extracts canonical approved menu text from the corrected DOCX
 - Updates submission to `status: 'approved'` with `final_path`, `approved_menu_content_raw`, and `approved_menu_content`
-- Extracts approved dishes into `approved_dishes`, carrying forward the submission `service_period`
+- Calls `POST /approved-dishes/extract` on the DB service, which inserts approved dishes into `approved_dishes` and carries forward the submission `service_period`
 - Fire-and-forget: clickup-integration sends `corrections_ready` email with the DOCX attached
 - Fire-and-forget: differ compares AI draft vs corrected file for training
 
@@ -40,7 +40,7 @@ When a chef submits a menu, a ClickUp task is automatically created with the gen
 
 - **Service:** `services/clickup-integration/index.ts` (port 3007)
 - **Routes:** `POST /create-task`, `POST /webhook/clickup`, `POST /webhook/register`, `GET /health`
-- **DB service:** added `GET /submissions/by-clickup-task/:taskId` lookup route (registered BEFORE `/:id`)
+- **DB service:** added `GET /submissions/by-clickup-task/:taskId` lookup route, `POST /approved-dishes/extract` extraction route, and `POST /approved-dishes/backfill-approved` for already-approved submissions that missed extraction
 - **Email send:** `clickup-integration` now sends `corrections_ready` emails directly (reads DOCX from disk and attaches to email)
 - **Supabase schema:** `clickup_task_id VARCHAR(100)` column + index on submissions table, plus `service_period` on `submissions` and `approved_dishes`
 

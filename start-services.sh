@@ -21,11 +21,19 @@ if [ "$SKIP_BUILD" = "1" ]; then
     echo ""
 else
     echo "📦 Building services..."
-    npm run build --workspaces
-    if [ $? -ne 0 ]; then
-        echo "❌ Build failed. Aborting startup."
-        exit 1
-    fi
+    # Build one-at-a-time and fail fast on the first error.
+    # Using `npm run build --workspaces` (plural) continues past failures and
+    # sometimes hits spurious "lib.es2020.full.d.ts not found" / "tsc: command not found"
+    # errors when state is mid-install. Per-workspace invocations are more reliable.
+    for svc in supabase-client ai-review clickup-integration db differ notifier parser dashboard; do
+        echo "  → building @menumanager/$svc"
+        npm run build --workspace=@menumanager/$svc --silent
+        if [ $? -ne 0 ]; then
+            echo "❌ Build failed at @menumanager/$svc. Aborting startup."
+            echo "   Try: rm -rf node_modules services/*/node_modules package-lock.json && npm install"
+            exit 1
+        fi
+    done
     echo ""
 fi
 

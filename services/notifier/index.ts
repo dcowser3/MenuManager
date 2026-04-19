@@ -1,6 +1,6 @@
-import express from 'express';
+import express = require('express');
 import nodemailer from 'nodemailer';
-import dotenv from 'dotenv';
+import dotenv = require('dotenv');
 import { promises as fsPromises } from 'fs';
 
 dotenv.config({ path: '../../../.env' });

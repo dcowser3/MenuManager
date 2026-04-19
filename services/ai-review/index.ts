@@ -1,6 +1,6 @@
-import express from 'express';
+import express = require('express');
 import { Configuration, OpenAIApi } from 'openai';
-import dotenv from 'dotenv';
+import dotenv = require('dotenv');
 import { promises as fs } from 'fs';
 import * as fsSync from 'fs';
 import * as path from 'path';

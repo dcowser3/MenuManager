@@ -32,6 +32,8 @@ Menu Manager is an AI-powered service designed to automate the review process fo
 - AI-powered two-tier review (general QA + detailed corrections)
 - Review highlights and persistent redlines surface punctuation/separator edits such as hyphen, comma, slash, and pipe changes
 - DOCX template validation and redlining
+- Modification uploads with preserved redlines remain usable even if project metadata extraction cannot be parsed from the DOCX
+- Required-field validation now highlights missing submitter, project-details, and approval inputs directly in the form
 - Reviewer dashboard
 - Notification system
 - Approved dishes are extracted automatically when the ClickUp-reviewed DOCX is marked approved

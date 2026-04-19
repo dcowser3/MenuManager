@@ -3,20 +3,20 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-const express_1 = __importDefault(require("express"));
+const express = require("express");
 const axios_1 = __importDefault(require("axios"));
 const form_data_1 = __importDefault(require("form-data"));
 const fs_1 = __importDefault(require("fs"));
 const path_1 = __importDefault(require("path"));
-const dotenv_1 = __importDefault(require("dotenv"));
+const dotenv = require("dotenv");
 const nodemailer_1 = __importDefault(require("nodemailer"));
 const child_process_1 = require("child_process");
 const util_1 = require("util");
 const crypto_1 = __importDefault(require("crypto"));
 const supabase_client_1 = require("@menumanager/supabase-client");
-dotenv_1.default.config({ path: path_1.default.join(__dirname, '..', '..', '..', '.env') });
+dotenv.config({ path: path_1.default.join(__dirname, '..', '..', '..', '.env') });
 const execAsync = (0, util_1.promisify)(child_process_1.exec);
-const app = (0, express_1.default)();
+const app = express();
 const port = 3007;
 const DB_SERVICE_URL = process.env.DB_SERVICE_URL || 'http://localhost:3004';
 const DIFFER_SERVICE_URL = process.env.DIFFER_SERVICE_URL || 'http://localhost:3006';
@@ -87,7 +87,7 @@ const clickupHeaders = {
     Authorization: CLICKUP_API_TOKEN || '',
     'Content-Type': 'application/json',
 };
-app.use(express_1.default.json({
+app.use(express.json({
     verify: (req, _res, buf) => {
         req.rawBody = buf.toString('utf8');
     }
@@ -351,29 +351,14 @@ async function extractApprovedMenuContent(docxPath) {
     };
 }
 async function extractApprovedDishesForSubmission(input) {
-    if (!(0, supabase_client_1.isSupabaseConfigured)()) {
-        console.log('Supabase not configured - skipping approved dish extraction');
-        return;
-    }
-    const property = `${input.property || ''}`.trim() || 'Unknown';
-    let content = `${input.approvedMenuContent || ''}`.trim();
-    if (!content && input.finalPath) {
-        try {
-            const extracted = await extractApprovedMenuContent(input.finalPath);
-            content = `${extracted.cleaned || extracted.raw || ''}`.trim();
-        }
-        catch (error) {
-            console.warn(`Failed to extract approved dishes text from corrected DOCX for ${input.submissionId}: ${error.message}`);
-        }
-    }
-    if (!content) {
-        console.log(`No approved menu content available for dish extraction on ${input.submissionId}`);
-        return;
-    }
-    const result = await (0, supabase_client_1.extractAndStoreDishes)(content, property, input.submissionId, {
+    const response = await axios_1.default.post(`${DB_SERVICE_URL}/approved-dishes/extract`, {
+        submissionId: input.submissionId,
+        property: input.property,
         servicePeriod: input.servicePeriod,
+        approvedMenuContent: input.approvedMenuContent,
     });
-    console.log(`Approved dish extraction complete for ${input.submissionId}: ${result.added} dishes added`);
+    const added = Number(response.data?.added || 0);
+    console.log(`Approved dish extraction complete for ${input.submissionId}: ${added} dishes added`);
 }
 async function processApprovedTask(clickupTaskId, opts) {
     const taskResponse = await axios_1.default.get(`https://api.clickup.com/api/v2/task/${clickupTaskId}`, {
@@ -461,7 +446,6 @@ async function processApprovedTask(clickupTaskId, opts) {
         property: submission.property,
         servicePeriod: submission.service_period || submission.raw_payload?.servicePeriod,
         approvedMenuContent: extractedClean || submission.approved_menu_content || submission.menu_content,
-        finalPath: correctedPath,
     }).catch((err) => console.error('Failed to extract approved dishes:', err.message));
     return { processed: true, submissionId: submission.id };
 }

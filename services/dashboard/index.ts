@@ -90,6 +90,22 @@ function getDocumentStorageRoot(): string {
     return process.env.DOCUMENT_STORAGE_ROOT || path.join(getRepoRoot(), 'tmp', 'documents');
 }
 
+type ExtractedProjectDetails = {
+    projectName: string;
+    property: string;
+    orientation: string;
+    dateNeeded: string;
+    size: string;
+};
+
+const EMPTY_EXTRACTED_PROJECT: ExtractedProjectDetails = {
+    projectName: '',
+    property: '',
+    orientation: '',
+    dateNeeded: '',
+    size: '',
+};
+
 function slugifyStorageSegment(value: string): string {
     const cleaned = (value || '')
         .toLowerCase()
@@ -195,13 +211,7 @@ export async function extractBaselineFromDocx(filePath: string): Promise<{
     approvedMenuContentRaw: string;
     approvedMenuContentHtml: string;
     extractedAllergenKey: string;
-    extractedProject: {
-        projectName: string;
-        property: string;
-        orientation: string;
-        dateNeeded: string;
-        size: string;
-    };
+    extractedProject: ExtractedProjectDetails;
 }> {
     const docxRedlinerDir = getDocxRedlinerDir();
     const venvPython = path.join(docxRedlinerDir, 'venv', 'bin', 'python');
@@ -219,13 +229,18 @@ export async function extractBaselineFromDocx(filePath: string): Promise<{
     const cleanCommand = `${pythonCmd} "${extractCleanScript}" "${filePath}"`;
     const detailsCommand = `${pythonCmd} "${extractDetailsScript}" "${filePath}"`;
 
-    const [{ stdout: cleanStdout }, { stdout: detailsStdout }] = await Promise.all([
-        execAsync(cleanCommand, { timeout: 30000 }),
-        execAsync(detailsCommand, { timeout: 30000 }),
+    const [{ stdout: cleanStdout }, detailsResult] = await Promise.all([
+        execAsync(cleanCommand, { timeout: 30000, maxBuffer: 10 * 1024 * 1024 }),
+        execAsync(detailsCommand, { timeout: 8000, maxBuffer: 2 * 1024 * 1024 })
+            .then(({ stdout }) => ({ stdout }))
+            .catch((error: any) => {
+                console.warn('Project details extraction failed during baseline upload:', error?.stderr || error?.message || error);
+                return { stdout: '{}' };
+            }),
     ]);
 
     const cleanData = JSON.parse((cleanStdout || '{}').trim() || '{}');
-    const detailsData = JSON.parse((detailsStdout || '{}').trim() || '{}');
+    const detailsData = JSON.parse((detailsResult.stdout || '{}').trim() || '{}');
 
     if (cleanData.error) {
         throw new Error(cleanData.error);
@@ -252,13 +267,7 @@ export async function extractUnapprovedFromDocx(filePath: string): Promise<{
     unapprovedHtml: string;
     annotations: Array<Array<{ start: number; end: number; type: string }>>;
     extractedAllergenKey: string;
-    extractedProject: {
-        projectName: string;
-        property: string;
-        orientation: string;
-        dateNeeded: string;
-        size: string;
-    };
+    extractedProject: ExtractedProjectDetails;
 }> {
     const docxRedlinerDir = getDocxRedlinerDir();
     const venvPython = path.join(docxRedlinerDir, 'venv', 'bin', 'python');
@@ -276,13 +285,18 @@ export async function extractUnapprovedFromDocx(filePath: string): Promise<{
     const unapprovedCommand = `${pythonCmd} "${extractCleanScript}" "${filePath}" --mode unapproved`;
     const detailsCommand = `${pythonCmd} "${extractDetailsScript}" "${filePath}"`;
 
-    const [{ stdout: unapprovedStdout }, { stdout: detailsStdout }] = await Promise.all([
-        execAsync(unapprovedCommand, { timeout: 30000 }),
-        execAsync(detailsCommand, { timeout: 30000 }),
+    const [{ stdout: unapprovedStdout }, detailsResult] = await Promise.all([
+        execAsync(unapprovedCommand, { timeout: 30000, maxBuffer: 10 * 1024 * 1024 }),
+        execAsync(detailsCommand, { timeout: 8000, maxBuffer: 2 * 1024 * 1024 })
+            .then(({ stdout }) => ({ stdout }))
+            .catch((error: any) => {
+                console.warn('Project details extraction failed during unapproved upload:', error?.stderr || error?.message || error);
+                return { stdout: '{}' };
+            }),
     ]);
 
     const unapprovedData = JSON.parse((unapprovedStdout || '{}').trim() || '{}');
-    const detailsData = JSON.parse((detailsStdout || '{}').trim() || '{}');
+    const detailsData = JSON.parse((detailsResult.stdout || '{}').trim() || '{}');
 
     if (unapprovedData.error) {
         throw new Error(unapprovedData.error);
@@ -295,6 +309,7 @@ export async function extractUnapprovedFromDocx(filePath: string): Promise<{
         annotations: unapprovedData.annotations || [],
         extractedAllergenKey: detailsData.allergen_key || '',
         extractedProject: {
+            ...EMPTY_EXTRACTED_PROJECT,
             projectName: projectDetails.project_name || '',
             property: projectDetails.property || '',
             orientation: projectDetails.orientation || '',

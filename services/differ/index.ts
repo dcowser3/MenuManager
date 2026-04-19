@@ -1,11 +1,11 @@
-import express from 'express';
+import express = require('express');
 import { promises as fs } from 'fs';
 import mammoth from 'mammoth';
 import * as path from 'path';
 import * as fsSync from 'fs';
 import { exec } from 'child_process';
 import { promisify } from 'util';
-import * as dotenv from 'dotenv';
+import dotenv = require('dotenv');
 import { getSupabaseClient, isSupabaseConfigured } from '@menumanager/supabase-client';
 
 dotenv.config({ path: path.join(__dirname, '..', '..', '..', '.env') });

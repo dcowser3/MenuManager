@@ -1,9 +1,9 @@
-import express from 'express';
+import express = require('express');
 import axios from 'axios';
 import FormData from 'form-data';
 import fs from 'fs';
 import path from 'path';
-import dotenv from 'dotenv';
+import dotenv = require('dotenv');
 import nodemailer from 'nodemailer';
 import { exec } from 'child_process';
 import { promisify } from 'util';
@@ -12,8 +12,6 @@ import {
     logAlert,
     buildAlertEmailHtml,
     SystemAlert,
-    extractAndStoreDishes,
-    isSupabaseConfigured,
 } from '@menumanager/supabase-client';
 
 dotenv.config({ path: path.join(__dirname, '..', '..', '..', '.env') });
@@ -482,34 +480,15 @@ async function extractApprovedDishesForSubmission(input: {
     property?: string;
     servicePeriod?: string;
     approvedMenuContent?: string;
-    finalPath?: string;
 }): Promise<void> {
-    if (!isSupabaseConfigured()) {
-        console.log('Supabase not configured - skipping approved dish extraction');
-        return;
-    }
-
-    const property = `${input.property || ''}`.trim() || 'Unknown';
-    let content = `${input.approvedMenuContent || ''}`.trim();
-
-    if (!content && input.finalPath) {
-        try {
-            const extracted = await extractApprovedMenuContent(input.finalPath);
-            content = `${extracted.cleaned || extracted.raw || ''}`.trim();
-        } catch (error: any) {
-            console.warn(`Failed to extract approved dishes text from corrected DOCX for ${input.submissionId}: ${error.message}`);
-        }
-    }
-
-    if (!content) {
-        console.log(`No approved menu content available for dish extraction on ${input.submissionId}`);
-        return;
-    }
-
-    const result = await extractAndStoreDishes(content, property, input.submissionId, {
+    const response = await axios.post(`${DB_SERVICE_URL}/approved-dishes/extract`, {
+        submissionId: input.submissionId,
+        property: input.property,
         servicePeriod: input.servicePeriod,
+        approvedMenuContent: input.approvedMenuContent,
     });
-    console.log(`Approved dish extraction complete for ${input.submissionId}: ${result.added} dishes added`);
+    const added = Number(response.data?.added || 0);
+    console.log(`Approved dish extraction complete for ${input.submissionId}: ${added} dishes added`);
 }
 
 async function processApprovedTask(clickupTaskId: string, opts?: { skipStatusCheck?: boolean }): Promise<{
@@ -613,7 +592,6 @@ async function processApprovedTask(clickupTaskId: string, opts?: { skipStatusChe
         property: submission.property,
         servicePeriod: submission.service_period || submission.raw_payload?.servicePeriod,
         approvedMenuContent: extractedClean || submission.approved_menu_content || submission.menu_content,
-        finalPath: correctedPath,
     }).catch((err: any) => console.error('Failed to extract approved dishes:', err.message));
 
     return { processed: true, submissionId: submission.id };

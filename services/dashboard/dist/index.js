@@ -110,6 +110,13 @@ function getDocxRedlinerDir() {
 function getDocumentStorageRoot() {
     return process.env.DOCUMENT_STORAGE_ROOT || path.join(getRepoRoot(), 'tmp', 'documents');
 }
+const EMPTY_EXTRACTED_PROJECT = {
+    projectName: '',
+    property: '',
+    orientation: '',
+    dateNeeded: '',
+    size: '',
+};
 function slugifyStorageSegment(value) {
     const cleaned = (value || '')
         .toLowerCase()
@@ -199,12 +206,17 @@ async function extractBaselineFromDocx(filePath) {
     }
     const cleanCommand = `${pythonCmd} "${extractCleanScript}" "${filePath}"`;
     const detailsCommand = `${pythonCmd} "${extractDetailsScript}" "${filePath}"`;
-    const [{ stdout: cleanStdout }, { stdout: detailsStdout }] = await Promise.all([
-        execAsync(cleanCommand, { timeout: 30000 }),
-        execAsync(detailsCommand, { timeout: 30000 }),
+    const [{ stdout: cleanStdout }, detailsResult] = await Promise.all([
+        execAsync(cleanCommand, { timeout: 30000, maxBuffer: 10 * 1024 * 1024 }),
+        execAsync(detailsCommand, { timeout: 8000, maxBuffer: 2 * 1024 * 1024 })
+            .then(({ stdout }) => ({ stdout }))
+            .catch((error) => {
+            console.warn('Project details extraction failed during baseline upload:', error?.stderr || error?.message || error);
+            return { stdout: '{}' };
+        }),
     ]);
     const cleanData = JSON.parse((cleanStdout || '{}').trim() || '{}');
-    const detailsData = JSON.parse((detailsStdout || '{}').trim() || '{}');
+    const detailsData = JSON.parse((detailsResult.stdout || '{}').trim() || '{}');
     if (cleanData.error) {
         throw new Error(cleanData.error);
     }
@@ -238,12 +250,17 @@ async function extractUnapprovedFromDocx(filePath) {
     }
     const unapprovedCommand = `${pythonCmd} "${extractCleanScript}" "${filePath}" --mode unapproved`;
     const detailsCommand = `${pythonCmd} "${extractDetailsScript}" "${filePath}"`;
-    const [{ stdout: unapprovedStdout }, { stdout: detailsStdout }] = await Promise.all([
-        execAsync(unapprovedCommand, { timeout: 30000 }),
-        execAsync(detailsCommand, { timeout: 30000 }),
+    const [{ stdout: unapprovedStdout }, detailsResult] = await Promise.all([
+        execAsync(unapprovedCommand, { timeout: 30000, maxBuffer: 10 * 1024 * 1024 }),
+        execAsync(detailsCommand, { timeout: 8000, maxBuffer: 2 * 1024 * 1024 })
+            .then(({ stdout }) => ({ stdout }))
+            .catch((error) => {
+            console.warn('Project details extraction failed during unapproved upload:', error?.stderr || error?.message || error);
+            return { stdout: '{}' };
+        }),
     ]);
     const unapprovedData = JSON.parse((unapprovedStdout || '{}').trim() || '{}');
-    const detailsData = JSON.parse((detailsStdout || '{}').trim() || '{}');
+    const detailsData = JSON.parse((detailsResult.stdout || '{}').trim() || '{}');
     if (unapprovedData.error) {
         throw new Error(unapprovedData.error);
     }
@@ -254,6 +271,7 @@ async function extractUnapprovedFromDocx(filePath) {
         annotations: unapprovedData.annotations || [],
         extractedAllergenKey: detailsData.allergen_key || '',
         extractedProject: {
+            ...EMPTY_EXTRACTED_PROJECT,
             projectName: projectDetails.project_name || '',
             property: projectDetails.property || '',
             orientation: projectDetails.orientation || '',

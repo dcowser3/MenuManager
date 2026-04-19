@@ -4,9 +4,10 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
-    "build": "tsc && cp -r views dist/",
+    "build": "tsc && cp -r views dist/ && cp -r public dist/",
     "start": "npm run build && node dist/index.js",
-    "dev": "ts-node index.ts"
+    "dev": "ts-node index.ts",
+    "watch": "ts-node-dev --respawn --transpile-only --clear index.ts"
   },
   "dependencies": {
     "@menumanager/supabase-client": "*",
@@ -23,6 +24,7 @@
     "@types/nodemailer": "^6.4.14",
     "@types/node": "^20.10.0",
     "ts-node": "^10.9.2",
+    "ts-node-dev": "^2.0.0",
     "typescript": "^5.3.3"
   }
 }

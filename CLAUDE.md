@@ -34,6 +34,7 @@
 | Architecture | [docs/architecture.md](docs/architecture.md) | Service interactions, data flows, workflow diagrams |
 | Roadmap | [docs/roadmap.md](docs/roadmap.md) | Implementation phases, status, planned services, cost estimates |
 | Environment | [docs/environment.md](docs/environment.md) | All env vars (required + optional) with descriptions |
+| Local Dev Troubleshooting | [docs/local-dev-troubleshooting.md](docs/local-dev-troubleshooting.md) | Known service-startup failures (OOM kills, EADDRINUSE, tsc shim, broken venv) and fixes |
 | Design Decisions | [docs/design-docs/index.md](docs/design-docs/index.md) | Catalog of all design docs |
 | — ClickUp Integration | [docs/design-docs/clickup-integration.md](docs/design-docs/clickup-integration.md) | Outbound/inbound flows, webhook, architecture |
 | — Critical Error Blocking | [docs/design-docs/critical-error-blocking.md](docs/design-docs/critical-error-blocking.md) | 3-layer detection (AI prompt, normalizer, deterministic), all critical types, override flow |
@@ -49,7 +50,8 @@
 ## Agent Conventions
 
 - **Build check:** `npx tsc --noEmit --project services/<name>/tsconfig.json`
-- **Python venv:** `services/docx-redliner/venv/bin/python` (try first, fallback to `python3`)
+- **Python venv:** `services/docx-redliner/venv/bin/python` (try first, fallback to `python3`). If imports fail with empty stderr + SIGTERM, the venv is corrupted — see [local-dev-troubleshooting.md](docs/local-dev-troubleshooting.md).
+- **Every TS service declares `typescript` locally** in its own `devDependencies` — don't rely on hoisting; a partial install can leave the hoisted `tsc` shim broken.
 - **Templates:** `samples/` directory (food template has space in filename)
 - **Route ordering:** Named routes BEFORE `/:id` params to avoid Express param capture
 - **Cross-service calls:** Fire-and-forget with `.catch()` for non-critical side effects (e.g., profile save, ClickUp task creation)

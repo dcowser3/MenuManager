@@ -32,17 +32,14 @@ var __importStar = (this && this.__importStar) || (function () {
         return result;
     };
 })();
-var __importDefault = (this && this.__importDefault) || function (mod) {
-    return (mod && mod.__esModule) ? mod : { "default": mod };
-};
 Object.defineProperty(exports, "__esModule", { value: true });
-const express_1 = __importDefault(require("express"));
+const express = require("express");
 const fs_1 = require("fs");
 const path = __importStar(require("path"));
-const dotenv = __importStar(require("dotenv"));
+const dotenv = require("dotenv");
 const supabase_client_1 = require("@menumanager/supabase-client");
 dotenv.config({ path: path.join(__dirname, '..', '..', '..', '.env') });
-const app = (0, express_1.default)();
+const app = express();
 const port = 3004;
 const DB_DIR = path.join(__dirname, '..', '..', '..', 'tmp', 'db');
 const SUBMISSIONS_DB = path.join(DB_DIR, 'submissions.json');
@@ -58,14 +55,14 @@ const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-
 const DEFAULT_PROPERTY_NAMES = [
     '89Agave - Sedona',
     'Agent\'s Only - Pasadena',
-    'Anchor & Brine - Tampa',
-    'Aqimero - Philadelphia',
-    'Bayou & Bottle - Houston',
+    'Anchor & Brine - Marriott Tampa Water Street - Tampa',
+    'Aqimero - Ritz-Carlton - Philadelphia',
+    'Bayou & Bottle - Four Seasons - Houston',
     'Beacon - Tampa',
-    'Casa Chi - Chicago',
-    'Cayao - Los Cabos',
-    'Ciclo - Austin',
-    'Coraluz - Los Cabos',
+    'Casa Chi - InterContinental - Chicago',
+    'Cayao - Four Seasons Cabo Del Sol - Los Cabos',
+    'Ciclo - Four Seasons - Austin',
+    'Coraluz - Four Seasons Cabo Del Sol - Los Cabos',
     'D\'Taco Joint - Newark',
     'dLeña - Houston',
     'dLeña - Washington, D.C.',
@@ -73,40 +70,40 @@ const DEFAULT_PROPERTY_NAMES = [
     'DRINK Bar (Fareground) - Austin',
     'Ellis Bar (Fareground) - Austin',
     'Fareground - Austin',
-    'Ironwood - Scottsdale',
-    'La Hacienda - Scottsdale',
-    'Live Oak - Austin',
-    'Lona - Fort Lauderdale',
-    'Lona - Nashville',
-    'Lona - Tampa',
-    'Maya - Dubai',
+    'Ironwood - Fairmont Scottsdale Princess - Scottsdale',
+    'La Hacienda - Fairmont Scottsdale Princess - Scottsdale',
+    'Live Oak - Four Seasons - Austin',
+    'Lona - Westin - Fort Lauderdale',
+    'Lona - Noelle - Nashville',
+    'Lona - Marriott Tampa Water Street - Tampa',
+    'Maya - Le Royal Meridien - Dubai',
     'Maya - New York',
-    'Raya - Laguna Niguel',
-    'Sidecut - Whistler',
-    'Sora - Los Cabos',
+    'Raya - Ritz-Carlton Laguna Niguel - Laguna Niguel',
+    'Sidecut - Four Seasons - Whistler',
+    'Sora - Four Seasons Cabo Del Sol - Los Cabos',
     'Spa at JW - Tampa',
-    'Stoke & Rye - Avon',
+    'Stoke & Rye - Westin Riverfront - Avon',
     'Taco Pegaso - Austin',
     'Tamayo - Denver',
     'tán - New York',
     'Toro - Belgrade',
-    'Toro - Chicago',
-    'Toro - Denver',
-    'Toro - Istanbul',
+    'Toro - Fairmont Millennium Park - Chicago',
+    'Toro - Hotel Clio - Denver',
+    'Toro - Six Senses Kocatas Mansions - Istanbul',
     'Toro - Los Cabos',
     'Toro - Marrakech',
-    'Toro - Riviera Maya',
-    'Toro - Scottsdale',
-    'Toro - Snowmass',
+    'Toro - St. Regis Kanai - Riviera Maya',
+    'Toro - Fairmont Scottsdale Princess - Scottsdale',
+    'Toro - Viceroy - Snowmass',
     'Toro Del Mar - Athens',
-    'Toro Toro - Dubai',
-    'Toro Toro - Fort Worth',
-    'Toro Toro - Houston',
+    'Toro Toro - Grosvenor House - Dubai',
+    'Toro Toro - Worthington Renaissance - Fort Worth',
+    'Toro Toro - Four Seasons - Houston',
     'Toro Toro - Malta',
-    'Toro Toro - Miami',
+    'Toro Toro - InterContinental - Miami',
     'Venga Venga - Snowmass',
-    'Zengo - Doha',
-    'Zengo - Dubai',
+    'Zengo - Kempinski - Doha',
+    'Zengo - Le Royal Meridien - Dubai',
 ];
 function deriveCityCountryFromProperty(name) {
     const idx = name.lastIndexOf(' - ');
@@ -115,10 +112,9 @@ function deriveCityCountryFromProperty(name) {
     return name.slice(idx + 3).trim();
 }
 function buildDefaultPropertyCatalog() {
-    return DEFAULT_PROPERTY_NAMES.map((name, index) => ({
+    return DEFAULT_PROPERTY_NAMES.map((name) => ({
         name,
         city_country: deriveCityCountryFromProperty(name),
-        sort_order: index + 1,
         is_active: true,
     }));
 }
@@ -282,6 +278,32 @@ async function mirrorSubmissionUpdateToSupabase(localId, updates) {
         throw new Error(`Supabase update failed: ${error.message}`);
     }
 }
+async function getSubmissionRecordById(id) {
+    const normalizedId = `${id || ''}`.trim();
+    if (!normalizedId)
+        return null;
+    if ((0, supabase_client_1.isSupabaseConfigured)()) {
+        const supabase = (0, supabase_client_1.getSupabaseClient)();
+        const idColumn = UUID_REGEX.test(normalizedId) ? 'id' : 'legacy_id';
+        const { data, error } = await supabase
+            .from(SUBMISSIONS_TABLE)
+            .select('*')
+            .eq(idColumn, normalizedId)
+            .maybeSingle();
+        if (error) {
+            throw new Error(`Failed to fetch submission from Supabase: ${error.message}`);
+        }
+        if (data) {
+            return data;
+        }
+    }
+    const submissions = JSON.parse(await fs_1.promises.readFile(SUBMISSIONS_DB, 'utf-8'));
+    if (submissions[normalizedId]) {
+        return submissions[normalizedId];
+    }
+    const match = Object.values(submissions).find((submission) => (submission?.id === normalizedId || submission?.legacy_id === normalizedId));
+    return match || null;
+}
 async function readLocalPropertyCatalog() {
     try {
         const content = await fs_1.promises.readFile(PROPERTIES_DB, 'utf-8');
@@ -289,10 +311,10 @@ async function readLocalPropertyCatalog() {
         if (!Array.isArray(parsed))
             return buildDefaultPropertyCatalog();
         return parsed
-            .map((item, index) => ({
+            .map((item) => ({
             name: `${item?.name || ''}`.trim(),
             city_country: `${item?.city_country || deriveCityCountryFromProperty(`${item?.name || ''}`) || ''}`.trim(),
-            sort_order: Number.isFinite(Number(item?.sort_order)) ? Number(item.sort_order) : index + 1,
+            hotel: item?.hotel || undefined,
             is_active: item?.is_active !== false,
         }))
             .filter((item) => !!item.name);
@@ -307,16 +329,15 @@ async function getPropertyCatalog() {
             const supabase = (0, supabase_client_1.getSupabaseClient)();
             const { data, error } = await supabase
                 .from(PROPERTIES_TABLE)
-                .select('name, city_country, sort_order, is_active')
+                .select('name, city_country, hotel, is_active')
                 .eq('is_active', true)
-                .order('sort_order', { ascending: true })
                 .order('name', { ascending: true });
             if (!error && Array.isArray(data) && data.length > 0) {
                 return data
-                    .map((item, index) => ({
+                    .map((item) => ({
                     name: `${item?.name || ''}`.trim(),
                     city_country: `${item?.city_country || deriveCityCountryFromProperty(`${item?.name || ''}`) || ''}`.trim(),
-                    sort_order: Number.isFinite(Number(item?.sort_order)) ? Number(item.sort_order) : index + 1,
+                    hotel: item?.hotel || undefined,
                     is_active: item?.is_active !== false,
                 }))
                     .filter((item) => !!item.name);
@@ -329,7 +350,7 @@ async function getPropertyCatalog() {
     const local = await readLocalPropertyCatalog();
     return local
         .filter((item) => item.is_active !== false)
-        .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0) || a.name.localeCompare(b.name));
+        .sort((a, b) => a.name.localeCompare(b.name));
 }
 // Ensure DB directory and files exist
 async function initDb() {
@@ -345,7 +366,7 @@ async function initDb() {
         console.error('Failed to initialize database:', error);
     }
 }
-app.use(express_1.default.json());
+app.use(express.json());
 // Endpoint to create a new submission
 app.post('/submissions', async (req, res) => {
     try {
@@ -764,27 +785,135 @@ app.get('/submissions/by-clickup-task/:taskId', async (req, res) => {
 app.get('/submissions/:id', async (req, res) => {
     try {
         const { id } = req.params;
-        if ((0, supabase_client_1.isSupabaseConfigured)()) {
-            const supabase = (0, supabase_client_1.getSupabaseClient)();
-            const idColumn = UUID_REGEX.test(id) ? 'id' : 'legacy_id';
-            const { data, error } = await supabase
-                .from(SUBMISSIONS_TABLE)
-                .select('*')
-                .eq(idColumn, id)
-                .maybeSingle();
-            if (!error && data) {
-                return res.status(200).json(data);
-            }
-        }
-        const submissions = JSON.parse(await fs_1.promises.readFile(SUBMISSIONS_DB, 'utf-8'));
-        if (!submissions[id]) {
+        const submission = await getSubmissionRecordById(id);
+        if (!submission) {
             return res.status(404).send('Submission not found.');
         }
-        res.status(200).json(submissions[id]);
+        res.status(200).json(submission);
     }
     catch (error) {
         console.error('Error getting submission:', error);
         res.status(500).send('Error getting submission.');
+    }
+});
+app.post('/approved-dishes/extract', async (req, res) => {
+    try {
+        if (!(0, supabase_client_1.isSupabaseConfigured)()) {
+            return res.status(503).json({ error: 'Supabase not configured for approved dish extraction' });
+        }
+        const submissionId = `${req.body?.submissionId || ''}`.trim();
+        if (!submissionId) {
+            return res.status(400).json({ error: 'submissionId is required' });
+        }
+        const submission = await getSubmissionRecordById(submissionId);
+        const resolvedSubmissionId = `${submission?.id || submissionId}`.trim();
+        if (!UUID_REGEX.test(resolvedSubmissionId)) {
+            return res.status(400).json({ error: 'Resolved submission ID must be a Supabase UUID' });
+        }
+        const approvedMenuContent = `${req.body?.approvedMenuContent || submission?.approved_menu_content || submission?.menu_content || ''}`.trim();
+        if (!approvedMenuContent) {
+            return res.status(400).json({ error: 'No approved menu content available for extraction' });
+        }
+        const property = `${req.body?.property || submission?.property || ''}`.trim() || 'Unknown';
+        const servicePeriod = `${req.body?.servicePeriod || submission?.service_period || submission?.raw_payload?.servicePeriod || ''}`.trim() || undefined;
+        const result = await (0, supabase_client_1.extractAndStoreDishes)(approvedMenuContent, property, resolvedSubmissionId, {
+            servicePeriod,
+        });
+        res.json({
+            success: true,
+            submissionId: resolvedSubmissionId,
+            added: result.added,
+        });
+    }
+    catch (error) {
+        console.error('Error extracting approved dishes:', error.message);
+        res.status(500).json({ error: 'Failed to extract approved dishes', details: error.message });
+    }
+});
+app.post('/approved-dishes/backfill-approved', async (req, res) => {
+    try {
+        if (!(0, supabase_client_1.isSupabaseConfigured)()) {
+            return res.status(503).json({ error: 'Supabase not configured for approved dish backfill' });
+        }
+        const limit = Math.min(Math.max(Number(req.body?.limit || 200), 1), 1000);
+        const force = req.body?.force === true;
+        const supabase = (0, supabase_client_1.getSupabaseClient)();
+        const { data: submissions, error: submissionError } = await supabase
+            .from(SUBMISSIONS_TABLE)
+            .select('id, property, service_period, approved_menu_content, menu_content, raw_payload')
+            .eq('status', 'approved')
+            .order('updated_at', { ascending: false })
+            .limit(limit);
+        if (submissionError) {
+            throw new Error(`Failed to load approved submissions: ${submissionError.message}`);
+        }
+        const summary = {
+            scanned: 0,
+            processed: 0,
+            skipped_existing: 0,
+            skipped_empty: 0,
+            failed: 0,
+            added: 0,
+            details: [],
+        };
+        for (const submission of submissions || []) {
+            summary.scanned += 1;
+            try {
+                if (!force) {
+                    const { count, error: countError } = await supabase
+                        .from('approved_dishes')
+                        .select('id', { count: 'exact', head: true })
+                        .eq('source_submission_id', submission.id);
+                    if (countError) {
+                        throw new Error(`Failed to count existing dishes: ${countError.message}`);
+                    }
+                    if ((count || 0) > 0) {
+                        summary.skipped_existing += 1;
+                        summary.details.push({
+                            submission_id: submission.id,
+                            status: 'skipped_existing',
+                            reason: `${count} dishes already exist`,
+                        });
+                        continue;
+                    }
+                }
+                const approvedMenuContent = `${submission.approved_menu_content || submission.menu_content || ''}`.trim();
+                if (!approvedMenuContent) {
+                    summary.skipped_empty += 1;
+                    summary.details.push({
+                        submission_id: submission.id,
+                        status: 'skipped_empty',
+                        reason: 'No approved menu content available',
+                    });
+                    continue;
+                }
+                const property = `${submission.property || ''}`.trim() || 'Unknown';
+                const servicePeriod = `${submission.service_period || submission.raw_payload?.servicePeriod || ''}`.trim() || undefined;
+                const result = await (0, supabase_client_1.extractAndStoreDishes)(approvedMenuContent, property, submission.id, {
+                    servicePeriod,
+                });
+                summary.processed += 1;
+                summary.added += result.added;
+                summary.details.push({
+                    submission_id: submission.id,
+                    status: 'processed',
+                    added: result.added,
+                });
+            }
+            catch (error) {
+                summary.failed += 1;
+                summary.details.push({
+                    submission_id: submission.id,
+                    status: 'failed',
+                    reason: error.message,
+                });
+            }
+        }
+        res.json({ success: true, ...summary });
+    }
+    catch (error) {
+        console.error('Error backfilling approved dishes:', error.message);
+        res.status(500).json({ error: 'Failed to backfill approved dishes', details: error.message });
     }
 });
 // Endpoint to update a submission's status and paths

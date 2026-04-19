@@ -25,7 +25,9 @@ else
     lsof -ti:3004 | xargs kill -9 2>/dev/null
     lsof -ti:3005 | xargs kill -9 2>/dev/null
     lsof -ti:3006 | xargs kill -9 2>/dev/null
-    
-    echo "✅ Cleaned up any processes on ports 3000-3006"
+    lsof -ti:3007 | xargs kill -9 2>/dev/null
+    lsof -ti:3008 | xargs kill -9 2>/dev/null
+
+    echo "✅ Cleaned up any processes on ports 3000-3008"
 fi
 

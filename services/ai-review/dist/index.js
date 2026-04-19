@@ -36,9 +36,9 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-const express_1 = __importDefault(require("express"));
+const express = require("express");
 const openai_1 = require("openai");
-const dotenv_1 = __importDefault(require("dotenv"));
+const dotenv = require("dotenv");
 const fs_1 = require("fs");
 const fsSync = __importStar(require("fs"));
 const path = __importStar(require("path"));
@@ -46,8 +46,8 @@ const axios_1 = __importDefault(require("axios"));
 // Load .env from project root (works whether running from src or dist)
 const envPath = path.resolve(__dirname, '../../../.env');
 console.log(`Loading .env from: ${envPath}`);
-dotenv_1.default.config({ path: envPath });
-const app = (0, express_1.default)();
+dotenv.config({ path: envPath });
+const app = express();
 const port = 3002;
 const DB_SERVICE_URL = process.env.DB_SERVICE_URL || 'http://localhost:3004';
 const configuration = new openai_1.Configuration({
@@ -55,7 +55,7 @@ const configuration = new openai_1.Configuration({
 });
 const openai = new openai_1.OpenAIApi(configuration);
 const AI_REVIEW_MODEL = process.env.AI_REVIEW_MODEL || 'gpt-4o-mini';
-app.use(express_1.default.json());
+app.use(express.json());
 /**
  * QA Check Endpoint - Used by parser to run pre-check validation
  * This runs the same QA prompt that chefs should use before submitting

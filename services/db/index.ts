@@ -1,8 +1,8 @@
-import express from 'express';
+import express = require('express');
 import { promises as fs } from 'fs';
 import * as path from 'path';
-import * as dotenv from 'dotenv';
-import { getSupabaseClient, isSupabaseConfigured, logAlert } from '@menumanager/supabase-client';
+import dotenv = require('dotenv');
+import { getSupabaseClient, isSupabaseConfigured, logAlert, extractAndStoreDishes } from '@menumanager/supabase-client';
 
 dotenv.config({ path: path.join(__dirname, '..', '..', '..', '.env') });
 
@@ -262,6 +262,38 @@ async function mirrorSubmissionUpdateToSupabase(localId: string, updates: any): 
     if (error) {
         throw new Error(`Supabase update failed: ${error.message}`);
     }
+}
+
+async function getSubmissionRecordById(id: string): Promise<any | null> {
+    const normalizedId = `${id || ''}`.trim();
+    if (!normalizedId) return null;
+
+    if (isSupabaseConfigured()) {
+        const supabase = getSupabaseClient();
+        const idColumn = UUID_REGEX.test(normalizedId) ? 'id' : 'legacy_id';
+        const { data, error } = await supabase
+            .from(SUBMISSIONS_TABLE)
+            .select('*')
+            .eq(idColumn, normalizedId)
+            .maybeSingle();
+
+        if (error) {
+            throw new Error(`Failed to fetch submission from Supabase: ${error.message}`);
+        }
+        if (data) {
+            return data;
+        }
+    }
+
+    const submissions = JSON.parse(await fs.readFile(SUBMISSIONS_DB, 'utf-8'));
+    if (submissions[normalizedId]) {
+        return submissions[normalizedId];
+    }
+
+    const match = Object.values(submissions).find((submission: any) => (
+        submission?.id === normalizedId || submission?.legacy_id === normalizedId
+    ));
+    return match || null;
 }
 
 async function readLocalPropertyCatalog(): Promise<PropertyCatalogRecord[]> {
@@ -779,30 +811,151 @@ app.get('/submissions/by-clickup-task/:taskId', async (req, res) => {
 app.get('/submissions/:id', async (req, res) => {
     try {
         const { id } = req.params;
-
-        if (isSupabaseConfigured()) {
-            const supabase = getSupabaseClient();
-            const idColumn = UUID_REGEX.test(id) ? 'id' : 'legacy_id';
-            const { data, error } = await supabase
-                .from(SUBMISSIONS_TABLE)
-                .select('*')
-                .eq(idColumn, id)
-                .maybeSingle();
-            if (!error && data) {
-                return res.status(200).json(data);
-            }
-        }
-
-        const submissions = JSON.parse(await fs.readFile(SUBMISSIONS_DB, 'utf-8'));
-
-        if (!submissions[id]) {
+        const submission = await getSubmissionRecordById(id);
+        if (!submission) {
             return res.status(404).send('Submission not found.');
         }
-
-        res.status(200).json(submissions[id]);
+        res.status(200).json(submission);
     } catch (error) {
         console.error('Error getting submission:', error);
         res.status(500).send('Error getting submission.');
+    }
+});
+
+app.post('/approved-dishes/extract', async (req, res) => {
+    try {
+        if (!isSupabaseConfigured()) {
+            return res.status(503).json({ error: 'Supabase not configured for approved dish extraction' });
+        }
+
+        const submissionId = `${req.body?.submissionId || ''}`.trim();
+        if (!submissionId) {
+            return res.status(400).json({ error: 'submissionId is required' });
+        }
+
+        const submission = await getSubmissionRecordById(submissionId);
+        const resolvedSubmissionId = `${submission?.id || submissionId}`.trim();
+        if (!UUID_REGEX.test(resolvedSubmissionId)) {
+            return res.status(400).json({ error: 'Resolved submission ID must be a Supabase UUID' });
+        }
+
+        const approvedMenuContent = `${req.body?.approvedMenuContent || submission?.approved_menu_content || submission?.menu_content || ''}`.trim();
+        if (!approvedMenuContent) {
+            return res.status(400).json({ error: 'No approved menu content available for extraction' });
+        }
+
+        const property = `${req.body?.property || submission?.property || ''}`.trim() || 'Unknown';
+        const servicePeriod = `${req.body?.servicePeriod || submission?.service_period || submission?.raw_payload?.servicePeriod || ''}`.trim() || undefined;
+
+        const result = await extractAndStoreDishes(approvedMenuContent, property, resolvedSubmissionId, {
+            servicePeriod,
+        });
+
+        res.json({
+            success: true,
+            submissionId: resolvedSubmissionId,
+            added: result.added,
+        });
+    } catch (error: any) {
+        console.error('Error extracting approved dishes:', error.message);
+        res.status(500).json({ error: 'Failed to extract approved dishes', details: error.message });
+    }
+});
+
+app.post('/approved-dishes/backfill-approved', async (req, res) => {
+    try {
+        if (!isSupabaseConfigured()) {
+            return res.status(503).json({ error: 'Supabase not configured for approved dish backfill' });
+        }
+
+        const limit = Math.min(Math.max(Number(req.body?.limit || 200), 1), 1000);
+        const force = req.body?.force === true;
+        const supabase = getSupabaseClient();
+
+        const { data: submissions, error: submissionError } = await supabase
+            .from(SUBMISSIONS_TABLE)
+            .select('id, property, service_period, approved_menu_content, menu_content, raw_payload')
+            .eq('status', 'approved')
+            .order('updated_at', { ascending: false })
+            .limit(limit);
+
+        if (submissionError) {
+            throw new Error(`Failed to load approved submissions: ${submissionError.message}`);
+        }
+
+        const summary = {
+            scanned: 0,
+            processed: 0,
+            skipped_existing: 0,
+            skipped_empty: 0,
+            failed: 0,
+            added: 0,
+            details: [] as Array<{ submission_id: string; status: 'processed' | 'skipped_existing' | 'skipped_empty' | 'failed'; added?: number; reason?: string }>,
+        };
+
+        for (const submission of submissions || []) {
+            summary.scanned += 1;
+
+            try {
+                if (!force) {
+                    const { count, error: countError } = await supabase
+                        .from('approved_dishes')
+                        .select('id', { count: 'exact', head: true })
+                        .eq('source_submission_id', submission.id);
+
+                    if (countError) {
+                        throw new Error(`Failed to count existing dishes: ${countError.message}`);
+                    }
+
+                    if ((count || 0) > 0) {
+                        summary.skipped_existing += 1;
+                        summary.details.push({
+                            submission_id: submission.id,
+                            status: 'skipped_existing',
+                            reason: `${count} dishes already exist`,
+                        });
+                        continue;
+                    }
+                }
+
+                const approvedMenuContent = `${submission.approved_menu_content || submission.menu_content || ''}`.trim();
+                if (!approvedMenuContent) {
+                    summary.skipped_empty += 1;
+                    summary.details.push({
+                        submission_id: submission.id,
+                        status: 'skipped_empty',
+                        reason: 'No approved menu content available',
+                    });
+                    continue;
+                }
+
+                const property = `${submission.property || ''}`.trim() || 'Unknown';
+                const servicePeriod = `${submission.service_period || submission.raw_payload?.servicePeriod || ''}`.trim() || undefined;
+                const result = await extractAndStoreDishes(approvedMenuContent, property, submission.id, {
+                    servicePeriod,
+                });
+
+                summary.processed += 1;
+                summary.added += result.added;
+                summary.details.push({
+                    submission_id: submission.id,
+                    status: 'processed',
+                    added: result.added,
+                });
+            } catch (error: any) {
+                summary.failed += 1;
+                summary.details.push({
+                    submission_id: submission.id,
+                    status: 'failed',
+                    reason: error.message,
+                });
+            }
+        }
+
+        res.json({ success: true, ...summary });
+    } catch (error: any) {
+        console.error('Error backfilling approved dishes:', error.message);
+        res.status(500).json({ error: 'Failed to backfill approved dishes', details: error.message });
     }
 });
 

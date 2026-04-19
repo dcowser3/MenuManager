@@ -36,7 +36,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-const express_1 = __importDefault(require("express"));
+const express = require("express");
 const multer_1 = __importDefault(require("multer"));
 const fs_1 = require("fs");
 const validator_1 = require("./src/validator");
@@ -44,12 +44,12 @@ const axios_1 = __importDefault(require("axios"));
 const path = __importStar(require("path"));
 const child_process_1 = require("child_process");
 const util_1 = require("util");
-const dotenv_1 = __importDefault(require("dotenv"));
+const dotenv = require("dotenv");
 // Load .env from project root (works whether running from src or dist)
 const envPath = path.resolve(__dirname, '../../../.env');
 console.log(`Loading .env from: ${envPath}`);
-dotenv_1.default.config({ path: envPath });
-const app = (0, express_1.default)();
+dotenv.config({ path: envPath });
+const app = express();
 const port = 3001;
 const DB_SERVICE_URL = process.env.DB_SERVICE_URL || 'http://localhost:3004';
 const AI_REVIEW_URL = process.env.AI_REVIEW_URL || 'http://localhost:3002';
