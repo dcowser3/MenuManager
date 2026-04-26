@@ -27,3 +27,5 @@ venv/
 # Ignore Microsoft Word temporary files
 ~$*.docx
 ~$*.doc
+
+**/node_modules 2/
