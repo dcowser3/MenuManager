@@ -13,6 +13,7 @@ interface ExtractedDish {
     price?: string;
     allergens: string[];
     category?: string;
+    usedNextLineAsDescription?: boolean;
 }
 /**
  * Extract dishes from menu content text

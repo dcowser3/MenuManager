@@ -31,6 +31,8 @@ Menu Manager is an AI-powered service designed to automate the review process fo
 - Required service-period classification on submission (`breakfast`, `brunch`, `lunch`, `dinner`, `happy_hour`, `holiday`, `other`)
 - AI-powered two-tier review (general QA + detailed corrections)
 - Review highlights and persistent redlines surface punctuation/separator edits such as hyphen, comma, slash, and pipe changes
+- Submission normalization keeps exactly one managed allergen legend and foodborne warning footer: chef-supplied footer text is reused or corrected to the canonical wording instead of being duplicated
+- Approved-dish extraction now splits inline `Dish Name - description` menu rows into separate `dish_name` and `description` fields, captures trailing allergen codes, and skips the allergen legend / food-safety footer instead of storing them as dishes
 - DOCX template validation and redlining
 - Modification uploads with preserved redlines remain usable even if project metadata extraction cannot be parsed from the DOCX
 - Required-field validation now highlights missing submitter, project-details, and approval inputs directly in the form
@@ -111,6 +113,7 @@ npm run test:approved-dishes -- --legacy-id form-1771781530178 --write
 Notes:
 - `--id <uuid>` also works if you want to target the Supabase submission UUID directly.
 - `--approved-only` forces the test to use only `approved_menu_content`; without it the script falls back to `menu_content`, matching the DB extraction endpoint behavior.
+- The preview now shows `dish_name` and `description` separately when the menu uses inline rows like `Guacamole - avocado / lime / cilantro 12`.
 - `--write` inserts rows into `approved_dishes` for that submission, so use a test submission when possible.
 
 ## Getting Started

@@ -131,6 +131,8 @@ When a chef uploads an unapproved DOCX:
    - The preview diff tokenizes punctuation and separators separately so ingredient-separator edits are visible in the persistent redline.
 4. **DOCX generation** (`generate_from_form.py`):
    - `existing-del` → red strikethrough, `existing-ins` → yellow highlight (same formatting as `persistent-del`/`persistent-ins`).
+   - Submission-time footer normalization removes any chef-supplied allergen legend or foodborne warning from the editable body, then appends at most one managed footer block.
+   - If the uploaded menu already contains the foodborne warning, the workflow preserves it by rewriting to the canonical wording instead of adding a duplicate copy.
 
 ## Notes / Limits
 

@@ -468,7 +468,7 @@ Dish Name* ALLERGENS PRICE
 
 #### 8.3 Required Footer
 Culinary pages MUST include:
-`*CONSUMING RAW OR UNDERCOOKED MEATS, POULTRY, SEAFOOD, OR EGGS MAY INCREASE YOUR RISK OF FOODBORNE ILLNESS`
+`*CONSUMING RAW OR UNDERCOOKED MEATS, POULTRY, SEAFOOD, SHELLFISH, OR EGGS MAY INCREASE YOUR RISK OF FOODBORNE ILLNESS`
 
 ---
 
@@ -503,6 +503,9 @@ When reviewing menu text:
 - Be aggressive with high-confidence corrections (spelling, accents, typos, obvious errors, allergen alphabetization, missing asterisks for raw items, missing allergen codes when ingredients make it obvious)
 - When you auto-correct something non-trivial (like adding an asterisk, adding a missing allergen code, or reordering allergens), ALSO include a suggestion entry so the reviewer can see what was changed and why
 - Only include medium/low confidence items in the SUGGESTIONS section
+- Treat the allergen legend/footer and the standard foodborne illness warning/footer as protected boilerplate, not normal menu copy
+- Do NOT flag, duplicate, or suggest edits for those footer lines when they already match the required standard
+- If the foodborne illness warning is present but phrased differently, normalize it to the exact required footer text in the CORRECTED MENU and keep only one copy
 - ALWAYS return the corrected menu between the markers, even if no changes were made
 - Format suggestions as valid JSON array
 - Keep descriptions concise and actionable

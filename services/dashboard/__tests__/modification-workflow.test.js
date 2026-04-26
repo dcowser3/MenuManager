@@ -43,6 +43,7 @@ jest.mock('@menumanager/supabase-client', () => ({
 }));
 
 const axios = require('axios').default;
+const fs = require('fs');
 const app = require('../index').default;
 const mockedAxios = axios;
 
@@ -87,6 +88,15 @@ describe('Dashboard Modification Workflow (local, mocked externals)', () => {
         jest.spyOn(console, 'log').mockImplementation(() => {});
         jest.spyOn(console, 'warn').mockImplementation(() => {});
         jest.spyOn(console, 'error').mockImplementation(() => {});
+        fs.promises.mkdir.mockClear();
+        fs.promises.writeFile.mockClear();
+        fs.promises.unlink.mockClear();
+        fs.promises.access.mockClear();
+        fs.promises.copyFile.mockClear();
+        fs.promises.rename.mockClear();
+        fs.promises.readFile.mockClear();
+        fs.promises.readdir.mockClear();
+        fs.promises.readFile.mockResolvedValue('');
 
         mockedAxios.post = jest.fn(async (url, payload) => {
             const urlStr = String(url);
@@ -254,6 +264,82 @@ describe('Dashboard Modification Workflow (local, mocked externals)', () => {
         expect(clickupCall[1].criticalOverrides).toEqual([]);
     });
 
+    test('submission strips existing footer boilerplate and reuses it without duplication', async () => {
+        const payload = {
+            submitterName: 'Chef Test',
+            submitterEmail: 'chef@example.com',
+            submitterJobTitle: 'Executive Chef',
+            projectName: 'Footer Project',
+            property: 'Test Property',
+            width: '8.5',
+            height: '11',
+            printWidth: '8.5',
+            printHeight: '11',
+            printRegion: 'US',
+            printSize: '',
+            folded: 'no',
+            digitalWidth: '',
+            digitalHeight: '',
+            cropMarks: 'no',
+            bleedMarks: 'no',
+            fileSizeLimit: 'no',
+            fileSizeLimitMb: '',
+            fileDeliveryNotes: '',
+            orientation: 'Portrait',
+            menuType: 'standard',
+            servicePeriod: 'dinner',
+            templateType: 'food',
+            turnaroundDays: 5,
+            dateNeeded: '2026-03-03',
+            hotelName: '',
+            cityCountry: 'Denver, USA',
+            assetType: 'PRINT',
+            allergens: '',
+            containsRawUndercooked: false,
+            suppressRawNotice: true,
+            menuContent: [
+                'STARTERS',
+                'Guacamole - $12',
+                '',
+                'C crustaceans | D dairy | E egg | F fish | G gluten | N nuts | V vegetarian | VG vegan',
+                '*consuming raw or undercooked meats, poultry, seafood, or eggs may increase your risk of foodborne illness.',
+            ].join('\n'),
+            menuContentHtml: [
+                '<p>STARTERS</p>',
+                '<p>Guacamole - $12</p>',
+                '<p>C crustaceans | D dairy | E egg | F fish | G gluten | N nuts | V vegetarian | VG vegan</p>',
+                '<p>*consuming raw or undercooked meats, poultry, seafood, or eggs may increase your risk of foodborne illness.</p>',
+            ].join(''),
+            approvals: [{ approved: true, name: 'GM', position: 'GM' }],
+            criticalOverrides: [],
+            submissionMode: 'new',
+            revisionSource: 'database',
+            revisionBaseSubmissionId: '',
+            revisionBaselineDocPath: '',
+            revisionBaselineFileName: '',
+            baseApprovedMenuContent: '',
+            chefPersistentDiff: { insertions: 0, deletions: 0 },
+        };
+
+        const response = await invokeJsonHandler(submitHandler, payload);
+        expect(response.status).toBe(200);
+        expect(response.body.success).toBe(true);
+
+        const formDataWrite = fs.promises.writeFile.mock.calls.find(([filePath]) =>
+            String(filePath).endsWith('_formdata.json')
+        );
+        expect(formDataWrite).toBeTruthy();
+
+        const generatedFormData = JSON.parse(formDataWrite[1]);
+        expect(generatedFormData.menuContent).toBe('STARTERS\nGuacamole - $12');
+        expect(generatedFormData.allergens).toBe('C crustaceans | D dairy | E egg | F fish | G gluten | N nuts | V vegetarian | VG vegan');
+        expect(generatedFormData.shouldAddRawNotice).toBe(true);
+        expect(generatedFormData.menuContentHtml).toContain('<p>STARTERS</p>');
+        expect(generatedFormData.menuContentHtml).toContain('<p>Guacamole - $12</p>');
+        expect(generatedFormData.menuContentHtml).not.toContain('foodborne illness');
+        expect(generatedFormData.menuContentHtml).not.toContain('crustaceans');
+    });
+
     test('basic-check changed_only short-circuits when there are no changed lines', async () => {
         const payload = {
             menuContent: 'Guacamole - $12',
@@ -296,5 +382,35 @@ describe('Dashboard Modification Workflow (local, mocked externals)', () => {
         );
         expect(qaCall).toBeTruthy();
         expect(qaCall[1].text).toBe('Ceviche - $15');
+    });
+
+    test('basic-check strips managed footer lines before sending content to AI', async () => {
+        fs.promises.readFile.mockResolvedValueOnce('QA prompt body');
+
+        const payload = {
+            menuContent: [
+                'STARTERS',
+                'Guacamole - $12',
+                '',
+                'C crustaceans | D dairy | E egg | F fish | G gluten | N nuts | V vegetarian | VG vegan',
+                '*consuming raw or undercooked meats, poultry, seafood, shellfish, or eggs may increase your risk of foodborne illness.',
+            ].join('\n'),
+            baselineMenuContent: '',
+            reviewMode: 'full',
+            allergens: '',
+            menuType: 'standard',
+        };
+
+        const response = await invokeJsonHandler(basicCheckHandler, payload);
+        expect(response.status).toBe(200);
+        expect(response.body.success).toBe(true);
+
+        const qaCall = mockedAxios.post.mock.calls.find((c) =>
+            String(c[0]).includes('http://localhost:3002/run-qa-check')
+        );
+        expect(qaCall).toBeTruthy();
+        expect(qaCall[1].text).toBe('STARTERS\nGuacamole - $12');
+        expect(qaCall[1].prompt).toContain('IMPORTANT FOOTER RULES');
+        expect(qaCall[1].prompt).toContain('shellfish');
     });
 });

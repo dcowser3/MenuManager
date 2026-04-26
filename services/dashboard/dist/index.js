@@ -51,7 +51,8 @@ const supabase_client_1 = require("@menumanager/supabase-client");
 const nodemailer_1 = __importDefault(require("nodemailer"));
 const execAsync = (0, util_1.promisify)(child_process_1.exec);
 const DEFAULT_ALLERGEN_KEY = 'C crustaceans | D dairy | E egg | F fish | G gluten | N nuts | V vegetarian | VG vegan';
-const RAW_NOTICE_PATTERN = /\*?\s*consuming raw or undercooked meats,\s*poultry,\s*seafood,\s*shellfish,\s*or eggs may increase your risk of foodborne illness\.?/i;
+const RAW_NOTICE_TEXT = '*consuming raw or undercooked meats, poultry, seafood, shellfish, or eggs may increase your risk of foodborne illness.';
+const RAW_NOTICE_PATTERN = /\*?\s*consuming raw or undercooked meats,\s*poultry,\s*seafood(?:,\s*shellfish)?,\s*or eggs may increase your risk of foodborne illness\.?/i;
 const DB_SERVICE_URL = process.env.DB_SERVICE_URL || 'http://localhost:3004';
 const AI_REVIEW_URL = process.env.AI_REVIEW_URL || 'http://localhost:3002';
 const DIFFER_SERVICE_URL = process.env.DIFFER_SERVICE_URL || 'http://localhost:3006';
@@ -117,6 +118,101 @@ const EMPTY_EXTRACTED_PROJECT = {
     dateNeeded: '',
     size: '',
 };
+function normalizeWhitespace(value) {
+    return (value || '').replace(/\s+/g, ' ').trim();
+}
+function isLikelyAllergenLegendLine(line) {
+    const normalized = normalizeWhitespace(line);
+    if (!normalized || !normalized.includes('|'))
+        return false;
+    const parts = normalized.split('|').map((part) => part.trim()).filter(Boolean);
+    if (parts.length < 3)
+        return false;
+    const codeParts = parts.filter((part) => /^\*?[A-Z]{1,3}\s+.+/.test(part));
+    return codeParts.length >= Math.max(2, Math.floor(parts.length * 0.6));
+}
+function isLikelyRawNoticeLine(line) {
+    const normalized = normalizeWhitespace(line).toLowerCase();
+    if (!normalized)
+        return false;
+    return normalized.includes('consuming raw or undercooked') && normalized.includes('foodborne illness');
+}
+function normalizeAllergenLegend(text) {
+    const normalized = (text || '').trim();
+    if (!normalized)
+        return '';
+    const lines = normalized
+        .split('\n')
+        .map((line) => normalizeWhitespace(line))
+        .filter(Boolean);
+    if (lines.length === 1 && lines[0].includes('|')) {
+        return lines[0]
+            .split('|')
+            .map((part) => normalizeWhitespace(part))
+            .filter(Boolean)
+            .join(' | ');
+    }
+    return lines.join(' | ');
+}
+function normalizeMenuFooter(text, fallbackAllergens = '') {
+    const lines = (text || '').split('\n').map((line) => line.trim());
+    const cleanLines = [];
+    let extractedAllergenLine = '';
+    let hadRawNotice = false;
+    for (const line of lines) {
+        if (isLikelyRawNoticeLine(line)) {
+            hadRawNotice = true;
+            continue;
+        }
+        if (isLikelyAllergenLegendLine(line)) {
+            extractedAllergenLine = normalizeAllergenLegend(line);
+            continue;
+        }
+        cleanLines.push(line);
+    }
+    while (cleanLines.length && cleanLines[0] === '')
+        cleanLines.shift();
+    while (cleanLines.length && cleanLines[cleanLines.length - 1] === '')
+        cleanLines.pop();
+    const collapsed = [];
+    let prevEmpty = false;
+    for (const line of cleanLines) {
+        if (!line) {
+            if (!prevEmpty)
+                collapsed.push('');
+            prevEmpty = true;
+        }
+        else {
+            collapsed.push(line);
+            prevEmpty = false;
+        }
+    }
+    return {
+        body: collapsed.join('\n'),
+        normalizedAllergenLine: normalizeAllergenLegend(extractedAllergenLine || fallbackAllergens),
+        hadRawNotice,
+    };
+}
+function decodeHtmlText(html) {
+    return (html || '')
+        .replace(/<br\s*\/?>/gi, ' ')
+        .replace(/&nbsp;/gi, ' ')
+        .replace(/&amp;/gi, '&')
+        .replace(/&lt;/gi, '<')
+        .replace(/&gt;/gi, '>')
+        .replace(/<[^>]+>/g, ' ');
+}
+function stripManagedFooterFromHtml(html) {
+    return (html || '').replace(/<p\b[^>]*>[\s\S]*?<\/p>/gi, (block) => {
+        const text = normalizeWhitespace(decodeHtmlText(block));
+        if (!text)
+            return block;
+        if (isLikelyRawNoticeLine(text) || isLikelyAllergenLegendLine(text)) {
+            return '';
+        }
+        return block;
+    });
+}
 function slugifyStorageSegment(value) {
     const cleaned = (value || '')
         .toLowerCase()
@@ -1069,6 +1165,8 @@ app.post('/api/form/basic-check', async (req, res) => {
             }
             textForReview = changedOnlyText.text;
         }
+        const reviewFooterMetadata = normalizeMenuFooter(textForReview, allergens || '');
+        const sanitizedMenuContent = normalizeMenuFooter(menuContent, allergens || '');
         // Debug logging
         console.log('=== BASIC CHECK REQUEST ===');
         console.log('Menu content length:', menuContent.length);
@@ -1140,8 +1238,9 @@ Note: Use ONLY these allergen codes when checking allergen compliance. Do not us
         if (changedOnlyMode) {
             finalPrompt = `${qaPrompt}\n\nIMPORTANT SCOPE FOR THIS REVIEW:\nYou are reviewing ONLY changed excerpts from a menu revision.\nDo NOT flag unchanged baseline content.\nReturn issues only for the changed excerpts provided.`;
         }
+        finalPrompt = `${finalPrompt}\n\nIMPORTANT FOOTER RULES:\n- Do NOT review or suggest changes for the allergen legend/footer boilerplate.\n- Do NOT review or suggest changes for the standard foodborne illness warning/footer boilerplate.\n- The canonical foodborne illness warning is: ${RAW_NOTICE_TEXT}\n- Those footer lines are system-managed outside this review scope.`;
         const qaResponse = await axios_1.default.post(`${AI_REVIEW_URL}/run-qa-check`, {
-            text: textForReview,
+            text: reviewFooterMetadata.body,
             prompt: finalPrompt
         });
         const feedback = qaResponse.data.feedback;
@@ -1150,9 +1249,9 @@ Note: Use ONLY these allergen codes when checking allergen compliance. Do not us
         console.log(feedback);
         console.log('=== END RAW FEEDBACK ===');
         // Parse the new format: corrected menu + suggestions
-        const parsed = parseAIResponse(feedback, textForReview);
-        const correctedMenuSanitized = stripRawNoticeLines(parsed.correctedMenu);
-        const originalMenuSanitized = stripRawNoticeLines(menuContent);
+        const parsed = parseAIResponse(feedback, reviewFooterMetadata.body);
+        const correctedMenuSanitized = stripManagedFooterText(parsed.correctedMenu);
+        const originalMenuSanitized = sanitizedMenuContent.body;
         const reconciledSuggestions = reconcileCriticalSuggestionsAgainstCorrectedMenu(correctedMenuSanitized, parsed.suggestions);
         console.log('=== PARSED RESPONSE ===');
         console.log('Corrected menu length:', correctedMenuSanitized.length);
@@ -1414,17 +1513,18 @@ app.post('/api/form/submit', async (req, res) => {
         const sizeForDocx = assetType === 'BOTH'
             ? `Digital: ${digitalSizeForDocx} | Print: ${printSizeForDocx}`
             : (wantsPrint ? printSizeForDocx : digitalSizeForDocx);
-        const effectiveAllergens = (allergens || '').trim() || DEFAULT_ALLERGEN_KEY;
-        const normalizedMenuContent = stripRawNoticeLines(menuContent);
-        const normalizedMenuContentHtml = stripRawNoticeFromHtml(menuContentHtml || '');
-        const normalizedPersistentDiffHtml = stripRawNoticeFromHtml(persistentDiffHtml || '');
+        const footerMetadata = normalizeMenuFooter(menuContent, allergens || '');
+        const effectiveAllergens = footerMetadata.normalizedAllergenLine || DEFAULT_ALLERGEN_KEY;
+        const normalizedMenuContent = footerMetadata.body;
+        const normalizedMenuContentHtml = stripManagedFooterFromHtml(menuContentHtml || '');
+        const normalizedPersistentDiffHtml = stripManagedFooterFromHtml(persistentDiffHtml || '');
         const docxMenuContentHtml = submissionMode === 'modification' && normalizedPersistentDiffHtml
             ? normalizedPersistentDiffHtml
             : normalizedMenuContentHtml;
         const selectedRawFlag = `${containsRawUndercooked}` === 'true' || containsRawUndercooked === true;
         const suppressedRawFlag = `${suppressRawNotice}` === 'true' || suppressRawNotice === true;
         const detectedRawFlag = detectRawUndercookedContent(normalizedMenuContent);
-        const shouldAddRawNotice = !suppressedRawFlag && (selectedRawFlag || detectedRawFlag);
+        const shouldAddRawNotice = footerMetadata.hadRawNotice || (!suppressedRawFlag && (selectedRawFlag || detectedRawFlag));
         // Approvals are attestations from the submitter - we store them as-is
         // Frontend enforces that all required approvals are marked "Yes" before submission
         // Generate unique submission ID
@@ -1805,34 +1905,11 @@ function normalizeRawAsteriskPlacementForLine(line) {
     }
     return `${working}*`;
 }
-function stripRawNoticeLines(text) {
-    const lines = (text || '').split('\n').map((line) => line.trim());
-    // Remove raw notice lines but PRESERVE blank lines so spacing structure
-    // survives into preserveMenuStructure on the frontend.
-    const filtered = lines.filter((line) => !RAW_NOTICE_PATTERN.test(line));
-    // Collapse runs of more than one consecutive blank line into a single blank.
-    const result = [];
-    let prevEmpty = false;
-    for (const line of filtered) {
-        if (!line) {
-            if (!prevEmpty)
-                result.push('');
-            prevEmpty = true;
-        }
-        else {
-            result.push(line);
-            prevEmpty = false;
-        }
-    }
-    // Trim leading/trailing blank lines.
-    while (result.length && result[0] === '')
-        result.shift();
-    while (result.length && result[result.length - 1] === '')
-        result.pop();
-    return result.join('\n');
+function stripManagedFooterText(text, fallbackAllergens = '') {
+    return normalizeMenuFooter(text, fallbackAllergens).body;
 }
 function stripRawNoticeFromHtml(html) {
-    return (html || '').replace(/<p[^>]*>\s*\*?\s*consuming raw or undercooked meats,\s*poultry,\s*seafood,\s*shellfish,\s*or eggs may increase your risk of foodborne illness\.?\s*<\/p>/gi, '');
+    return stripManagedFooterFromHtml(html);
 }
 function detectRawUndercookedContent(text) {
     const normalized = (text || '').toLowerCase();

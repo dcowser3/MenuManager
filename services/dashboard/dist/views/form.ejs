@@ -2040,7 +2040,7 @@
         let uploadedMenuImageFileName = '';
         const DEFAULT_ALLERGEN_KEY = <%- JSON.stringify(defaultAllergenKey || '') %>;
         const RAW_NOTICE_TEXT = '*consuming raw or undercooked meats, poultry, seafood, shellfish, or eggs may increase your risk of foodborne illness.';
-        const RAW_NOTICE_REGEX = /\*?\s*consuming raw or undercooked meats,\s*poultry,\s*seafood,\s*shellfish,\s*or eggs may increase your risk of foodborne illness\.?/i;
+        const RAW_NOTICE_REGEX = /\*?\s*consuming raw or undercooked meats,\s*poultry,\s*seafood(?:,\s*shellfish)?,\s*or eggs may increase your risk of foodborne illness\.?/i;
 
         function isLikelyAllergenLegendLine(line) {
             const normalized = (line || '').trim();
@@ -3213,10 +3213,12 @@
         function getServicePeriodOptionsForProperty(propertyName) {
             const config = getPropertyCatalogEntry(propertyName);
             if (config && Array.isArray(config.sharepointServiceFolders) && config.sharepointServiceFolders.length > 0) {
-                return config.sharepointServiceFolders.map((folder) => ({
+                const propertySpecific = config.sharepointServiceFolders.map((folder) => ({
                     value: folder,
                     label: folder
                 }));
+                propertySpecific.push({ value: 'other', label: 'Other' });
+                return propertySpecific;
             }
             return DEFAULT_SERVICE_PERIOD_OPTIONS.slice();
         }

@@ -96,6 +96,7 @@ That dry-run shows:
 - whether `approved_menu_content` or fallback `menu_content` is present
 - how many dishes the parser finds
 - the current `approved_dishes` count for that submission
+- whether inline `Dish Name - description` rows are being split correctly without turning the allergen legend or raw-food warning into fake dishes
 
 To verify the write path too:
 
@@ -105,6 +106,10 @@ npm run test:approved-dishes -- --legacy-id <legacy-id> --write
 
 Useful flag:
 - `--approved-only` reproduces the strict "approved text only" case if you suspect DOCX extraction never populated `approved_menu_content`.
+
+Expected parser behavior:
+- menu rows like `Guacamole - fresh avocado / lime / cilantro D,G 12` should preview as `dish_name=Guacamole`, `description=fresh avocado / lime / cilantro`, `allergens=["D","G"]`, `price=12`
+- footer blocks such as `ALLERGEN KEY`, pipe-delimited allergen legends, and the `consuming raw or undercooked...` warning should not appear in `preview`
 
 ## Service Startup Dependencies
 

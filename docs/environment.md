@@ -20,6 +20,7 @@ All variables are configured in `.env` at the project root. See `.env.example` f
 | Variable | Description |
 |----------|-------------|
 | `INTERNAL_REVIEWER_EMAIL` | Email address that receives internal review notifications |
+| `ALERT_EMAIL` | Email address that receives system alert emails such as SharePoint upload, webhook, and extraction failures |
 | `AI_REVIEW_MODEL` | OpenAI model used by AI review service (default: `gpt-4o-mini`) |
 | `SOP_DOC_PATH` | Path to SOP document (default: `samples/sop.txt`) |
 | `DASHBOARD_URL` | Base URL for email links (default: `http://localhost:3005`) |
@@ -47,6 +48,22 @@ These are optional. If `CLICKUP_API_TOKEN` or `CLICKUP_LIST_ID` are not set, the
 | `CLICKUP_WEBHOOK_URL` | Public URL for ClickUp webhook events |
 | `CLICKUP_WEBHOOK_SECRET` | Optional webhook signing secret from ClickUp (`POST /webhook/register` response). If set, webhook signatures are strictly verified. |
 | `CLICKUP_CORRECTIONS_STATUS` | Status name that triggers correction download (default: `"corrections complete"`) |
+
+## Alerting And Monitoring
+
+Operational failures are logged to the `system_alerts` table in Supabase. When SMTP is configured and `ALERT_EMAIL` is set, services also send an email notification for alert events.
+
+Current examples include:
+
+- `sharepoint_upload_failed` from `clickup-integration` when Microsoft Graph/SharePoint rejects the approved DOCX upload, including `403` permission errors
+- `approved_dish_extraction_failed` from `clickup-integration` when approved-dish extraction fails after approval
+- `clickup_webhook_failed` from `clickup-integration` when webhook processing fails
+- `supabase_mirror_failed` from `db` when local submission changes cannot be mirrored to Supabase
+
+Notes:
+
+- Alert emails are deduplicated with a 15-minute cooldown per `alert_type`.
+- A SharePoint upload failure is monitored as a warning and does not block the rest of the approval flow.
 
 ## Document Storage Layout
 
