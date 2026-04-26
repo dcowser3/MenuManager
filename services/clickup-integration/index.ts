@@ -824,7 +824,7 @@ async function extractApprovedDishesForSubmission(input: {
     property?: string;
     servicePeriod?: string;
     approvedMenuContent?: string;
-}): Promise<void> {
+}): Promise<number> {
     const response = await axios.post(`${DB_SERVICE_URL}/approved-dishes/extract`, {
         submissionId: input.submissionId,
         property: input.property,
@@ -833,6 +833,7 @@ async function extractApprovedDishesForSubmission(input: {
     });
     const added = Number(response.data?.added || 0);
     console.log(`Approved dish extraction complete for ${input.submissionId}: ${added} dishes added`);
+    return added;
 }
 
 async function processApprovedTask(clickupTaskId: string, opts?: { skipStatusCheck?: boolean }): Promise<{
@@ -984,12 +985,29 @@ async function processApprovedTask(clickupTaskId: string, opts?: { skipStatusChe
         submission_id: submission.id,
     }).catch((err) => console.error('Failed to trigger differ comparison:', err.message));
 
-    extractApprovedDishesForSubmission({
-        submissionId: submission.id,
-        property: submission.property,
-        servicePeriod: submission.service_period || submission.raw_payload?.servicePeriod,
-        approvedMenuContent: extractedClean || submission.approved_menu_content || submission.menu_content,
-    }).catch((err: any) => console.error('Failed to extract approved dishes:', err.message));
+    try {
+        await extractApprovedDishesForSubmission({
+            submissionId: submission.id,
+            property: submission.property,
+            servicePeriod: submission.service_period || submission.raw_payload?.servicePeriod,
+            approvedMenuContent: extractedClean || submission.approved_menu_content || submission.menu_content,
+        });
+    } catch (err: any) {
+        console.error('Failed to extract approved dishes:', err.response?.data || err.message);
+        sendAdminAlert({
+            alert_type: 'approved_dish_extraction_failed',
+            severity: 'error',
+            service: 'clickup-integration',
+            submission_id: submission.id,
+            message: `Failed to extract approved dishes for "${submission.project_name}"`,
+            details: {
+                error: err.response?.data || err.message,
+                property: submission.property,
+                servicePeriod: submission.service_period || submission.raw_payload?.servicePeriod || null,
+                clickup_task_id: clickupTaskId,
+            },
+        });
+    }
 
     return { processed: true, submissionId: submission.id };
 }

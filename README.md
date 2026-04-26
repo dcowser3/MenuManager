@@ -99,6 +99,20 @@ services/
 - Before uploading into a matched SharePoint service subfolder, the service archives existing `.docx` files from that subfolder into its `old/` folder. Existing `.pdf` and `.ai` files are left in place.
 - Seeded examples now include `Tamayo - Denver`, `Toro - Hotel Clio - Denver`, `Toro - Fairmont Millennium Park - Chicago`, `Toro - Dania Beach`, and `Toro - Viceroy - Snowmass`.
 
+## Local Approved-Dish Testing
+
+You can test approved-dish extraction directly against Supabase without replaying a full ClickUp webhook:
+
+```bash
+npm run test:approved-dishes -- --legacy-id form-1771781530178
+npm run test:approved-dishes -- --legacy-id form-1771781530178 --write
+```
+
+Notes:
+- `--id <uuid>` also works if you want to target the Supabase submission UUID directly.
+- `--approved-only` forces the test to use only `approved_menu_content`; without it the script falls back to `menu_content`, matching the DB extraction endpoint behavior.
+- `--write` inserts rows into `approved_dishes` for that submission, so use a test submission when possible.
+
 ## Getting Started
 
 ### Prerequisites

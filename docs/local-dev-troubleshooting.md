@@ -83,6 +83,29 @@ lsof -ti:3001,3002,3004,3005,3006,3007,3008
 
 If PIDs print, the services are alive — just open a new terminal and continue.
 
+## Approved-Dish Extraction Checks
+
+If ClickUp approval is updating the `submissions` row but you are not seeing rows in `approved_dishes`, test the extractor directly before debugging webhook delivery:
+
+```bash
+npm run test:approved-dishes -- --legacy-id <local-or-clickup-linked-legacy-id>
+```
+
+That dry-run shows:
+- whether the submission exists in Supabase
+- whether `approved_menu_content` or fallback `menu_content` is present
+- how many dishes the parser finds
+- the current `approved_dishes` count for that submission
+
+To verify the write path too:
+
+```bash
+npm run test:approved-dishes -- --legacy-id <legacy-id> --write
+```
+
+Useful flag:
+- `--approved-only` reproduces the strict "approved text only" case if you suspect DOCX extraction never populated `approved_menu_content`.
+
 ## Service Startup Dependencies
 
 - **typescript devDep:** Every TS service must declare `"typescript"` in its own `devDependencies`, not rely on the hoisted copy. A partial install can leave the hoisted copy broken; workspace-local ones are more resilient.

@@ -8,6 +8,7 @@
   ],
   "scripts": {
     "test": "jest",
+    "test:approved-dishes": "node scripts/test-approved-dishes.js",
     "prompt:optimize": "node scripts/prompt-optimize.js",
     "prompt:rewrite": "node scripts/prompt-rewrite.js",
     "sharepoint:sync-property": "node scripts/sync-sharepoint-property.js"

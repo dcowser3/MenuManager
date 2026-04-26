@@ -33,7 +33,7 @@ When a chef submits a menu, a ClickUp task is automatically created with the gen
 - If no usable ClickUp attachment exists at approval time, falls back to the locally stored submitted DOCX so "perfect as submitted" menus can still be finalized
 - Extracts canonical approved menu text from the corrected DOCX
 - Updates submission to `status: 'approved'` with `final_path`, `approved_menu_content_raw`, and `approved_menu_content`
-- Calls `POST /approved-dishes/extract` on the DB service, which inserts approved dishes into `approved_dishes` and carries forward the submission `service_period`
+- Calls `POST /approved-dishes/extract` on the DB service, waits for the result, and alerts if approved-dish extraction fails
 - Fire-and-forget: clickup-integration sends `corrections_ready` email with the DOCX attached
 - Fire-and-forget: differ compares AI draft vs corrected file for training
 - If the property has SharePoint routing metadata, uploads the approved DOCX to the property base folder or matching service subfolder via Microsoft Graph
@@ -46,6 +46,7 @@ When a chef submits a menu, a ClickUp task is automatically created with the gen
 - **Email send:** `clickup-integration` now sends `corrections_ready` emails directly (reads DOCX from disk and attaches to email)
 - **Supabase schema:** `clickup_task_id VARCHAR(100)` column + index on submissions table, plus `service_period` on `submissions` and `approved_dishes`
 - **Property metadata:** SharePoint site URL, library, drive ID, base folder path, and discovered service-folder names now live on `properties`
+- **Local verification:** `npm run test:approved-dishes -- --legacy-id <id> [--write]` exercises the shared extraction logic directly against the target Supabase submission
 
 ## SharePoint Routing
 
