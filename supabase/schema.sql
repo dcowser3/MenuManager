@@ -26,7 +26,7 @@ CREATE TABLE submissions (
     file_delivery_notes TEXT,
     orientation VARCHAR(50),
     menu_type VARCHAR(50) DEFAULT 'standard',        -- 'standard' or 'prix_fixe'
-    service_period VARCHAR(50) DEFAULT 'other',      -- 'breakfast', 'brunch', 'lunch', 'dinner', 'happy_hour', 'holiday', 'other'
+    service_period VARCHAR(100) DEFAULT 'other',     -- Canonical or property-specific service/folder label used for routing
     template_type VARCHAR(50) DEFAULT 'food',        -- 'food', 'beverage', 'food_beverage', or 'non_beverage'
     date_needed DATE,
 
@@ -118,6 +118,12 @@ CREATE TABLE IF NOT EXISTS properties (
     name VARCHAR(255) NOT NULL UNIQUE,
     city_country VARCHAR(255),
     hotel VARCHAR(255),
+    sharepoint_site_url TEXT,
+    sharepoint_library_name VARCHAR(255),
+    sharepoint_drive_id VARCHAR(255),
+    sharepoint_base_folder_path TEXT,
+    sharepoint_service_folders TEXT[] DEFAULT '{}',
+    sharepoint_last_synced_at TIMESTAMPTZ,
     is_active BOOLEAN NOT NULL DEFAULT true,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
@@ -160,6 +166,7 @@ INSERT INTO properties (name, city_country, hotel) VALUES
     ('Tamayo - Denver', 'Denver', NULL),
     ('tán - New York', 'New York', NULL),
     ('Toro - Belgrade', 'Belgrade', NULL),
+    ('Toro - Dania Beach', 'Dania Beach', NULL),
     ('Toro - Fairmont Millennium Park - Chicago', 'Chicago', 'Fairmont Millennium Park'),
     ('Toro - Hotel Clio - Denver', 'Denver', 'Hotel Clio'),
     ('Toro - Six Senses Kocatas Mansions - Istanbul', 'Istanbul', 'Six Senses Kocatas Mansions'),
@@ -179,6 +186,116 @@ INSERT INTO properties (name, city_country, hotel) VALUES
     ('Zengo - Le Royal Meridien - Dubai', 'Dubai', 'Le Royal Meridien')
 ON CONFLICT (name) DO NOTHING;
 
+UPDATE properties
+SET
+    sharepoint_site_url = 'https://richardsandoval.sharepoint.com/sites/OwnedOperated2-Tamayo',
+    sharepoint_library_name = 'Shared Documents',
+    sharepoint_base_folder_path = 'Tamayo/Brand & Marketing/Media Library/Menu Files',
+    sharepoint_service_folders = ARRAY[
+        'Afternoon Brunch',
+        'Beverage',
+        'Brunch',
+        'Dessert',
+        'Dinner',
+        'Happy Hour',
+        'Holidays & Events',
+        'Kids',
+        'Lunch',
+        'Menu Box'
+    ]
+WHERE name = 'Tamayo - Denver';
+
+UPDATE properties
+SET
+    sharepoint_site_url = 'https://richardsandoval.sharepoint.com/sites/Toro2',
+    sharepoint_library_name = 'Shared Documents',
+    sharepoint_base_folder_path = 'Toro by Chef Richard Sandoval/Marketing - Locations/Denver/Menus',
+    sharepoint_service_folders = ARRAY[
+        'Beverage',
+        'Breakfast',
+        'Brunch',
+        'Dessert',
+        'Dinner',
+        'Happy Hour',
+        'Holidays & Events',
+        'Lunch'
+    ]
+WHERE name = 'Toro - Hotel Clio - Denver';
+
+UPDATE properties
+SET
+    sharepoint_site_url = 'https://richardsandoval.sharepoint.com/sites/Toro2',
+    sharepoint_library_name = 'Shared Documents',
+    sharepoint_base_folder_path = 'Toro by Chef Richard Sandoval/Marketing - Locations/Chicago/Menus',
+    sharepoint_service_folders = ARRAY[
+        'Beverage',
+        'Bloody Bar',
+        'Breakfast',
+        'Brunch',
+        'Dessert',
+        'Dinner',
+        'Happy Hour',
+        'Holidays & Events',
+        'Lunch'
+    ]
+WHERE name = 'Toro - Fairmont Millennium Park - Chicago';
+
+UPDATE properties
+SET
+    sharepoint_site_url = 'https://richardsandoval.sharepoint.com/sites/Toro2',
+    sharepoint_library_name = 'Shared Documents',
+    sharepoint_base_folder_path = 'Toro by Chef Richard Sandoval/Marketing - Locations/Dania Beach/Menus',
+    sharepoint_service_folders = ARRAY[
+        'Dinner',
+        'Happy Hour',
+        'Holidays & Events'
+    ]
+WHERE name = 'Toro - Dania Beach';
+
+UPDATE properties
+SET
+    sharepoint_site_url = 'https://richardsandoval.sharepoint.com/sites/Toro2',
+    sharepoint_library_name = 'Shared Documents',
+    sharepoint_base_folder_path = 'Toro by Chef Richard Sandoval/Marketing - Locations/Snowmass/Menus',
+    sharepoint_service_folders = ARRAY[
+        'Large party_Pre-Fixe menu',
+        'Winter Breakfast menu',
+        'Winter Dessert Menu',
+        'Winter Dinner Menu',
+        'Winter Kids Breakfast menu',
+        'Winter Kids Dinner Menu',
+        'Winter Wine List'
+    ]
+WHERE name = 'Toro - Viceroy - Snowmass';
+
+UPDATE properties
+SET
+    sharepoint_site_url = 'https://richardsandoval.sharepoint.com/sites/ToroToro',
+    sharepoint_library_name = 'Shared Documents',
+    sharepoint_base_folder_path = 'Toro Toro by Chef Richard Sandoval/Marketing - Locations/Fort Worth/Menus',
+    sharepoint_service_folders = ARRAY[
+        'Beverage',
+        'Brunch',
+        'Dinner',
+        'Holidays & Events',
+        'Lounge Bar',
+        'Lunch'
+    ]
+WHERE name = 'Toro Toro - Worthington Renaissance - Fort Worth';
+
+UPDATE properties
+SET
+    sharepoint_site_url = 'https://richardsandoval.sharepoint.com/sites/ToroToro',
+    sharepoint_library_name = 'Shared Documents',
+    sharepoint_base_folder_path = 'Toro Toro by Chef Richard Sandoval/Marketing - Locations/Miami/Menus',
+    sharepoint_service_folders = ARRAY[
+        'Beverage',
+        'Dessert',
+        'Dinner',
+        'Lunch'
+    ]
+WHERE name = 'Toro Toro - InterContinental - Miami';
+
 -- ============================================================================
 -- 2. APPROVED_DISHES
 -- Running list of all approved dishes extracted from approved menus
@@ -190,7 +307,7 @@ CREATE TABLE approved_dishes (
     dish_name VARCHAR(500) NOT NULL,
     dish_name_normalized VARCHAR(500) NOT NULL,      -- Lowercase, trimmed for deduplication
     property VARCHAR(255),                           -- Which property/restaurant
-    service_period VARCHAR(50),                      -- service period for the approved menu source
+    service_period VARCHAR(100),                     -- service/folder label for the approved menu source
     menu_category VARCHAR(255),                      -- e.g., "Appetizers", "Entrees", "Desserts"
     description TEXT,
     price VARCHAR(50),                               -- Keep as string to handle various formats

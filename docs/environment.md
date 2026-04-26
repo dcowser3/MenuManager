@@ -30,6 +30,9 @@ All variables are configured in `.env` at the project root. See `.env.example` f
 | `DOCUMENT_STORAGE_ROOT` | Root directory for persisted menu DOCX assets (default: `tmp/documents`) |
 | `LEARNING_MIN_OCCURRENCES` | Minimum repeated corrections needed before a learned rule is active (default: `2`) |
 | `LEARNING_MAX_OVERLAY_RULES` | Max learned rules injected into QA prompt overlay (default: `25`) |
+| `GRAPH_CLIENT_ID` | Azure app client ID used for SharePoint/Microsoft Graph access |
+| `GRAPH_TENANT_ID` | Azure tenant ID used for SharePoint/Microsoft Graph access |
+| `GRAPH_CLIENT_SECRET` | Azure app client secret used for SharePoint/Microsoft Graph access |
 
 ## ClickUp Integration
 
@@ -58,3 +61,43 @@ Subfolders currently used:
 - `approved/` — Isabella-approved corrected DOCX pulled from ClickUp webhook
 
 If `DOCUMENT_STORAGE_ROOT` is not set, the default is `tmp/documents` under the repo root.
+
+## SharePoint Property Routing
+
+Property records can now store SharePoint routing metadata:
+
+- `sharepoint_site_url`
+- `sharepoint_library_name`
+- `sharepoint_drive_id`
+- `sharepoint_base_folder_path`
+- `sharepoint_service_folders`
+- `sharepoint_last_synced_at`
+
+When a property has `sharepoint_service_folders`, the form uses those folder names for the `Service Period` dropdown. On ClickUp approval:
+
+- the newest approved DOCX is chosen from ClickUp attachments when available
+- otherwise the locally stored submitted DOCX is used as the approved source
+- `Other` remains available in the dropdown for every property and is treated as a deliberate base-folder upload choice
+- the SharePoint-uploaded DOCX is renamed to `Property_ServicePeriod_M.D.YY.docx` using `date_needed` when available
+- if the selected service folder matches a stored SharePoint subfolder, the file is uploaded there
+- before uploading into a matched service folder, existing `.docx` files in that folder are moved into `old/`
+- existing `.pdf` and `.ai` files are not moved
+- if not, the file is uploaded to the property base folder
+
+### Sync Script
+
+Use the one-time/on-demand sync script to refresh a property’s SharePoint folder list and store it through the DB service:
+
+```bash
+npm run sharepoint:sync-property -- \
+  --property "Tamayo - Denver" \
+  --site-url "https://richardsandoval.sharepoint.com/sites/OwnedOperated2-Tamayo" \
+  --library-name "Shared Documents" \
+  --base-folder-path "Tamayo/Brand & Marketing/Media Library/Menu Files"
+```
+
+Notes:
+
+- The DB service must be running because the script stores the discovered folders via `PUT /properties/:name/sharepoint-config`.
+- If Supabase is configured, the DB service mirrors the same property metadata to the `properties` table.
+- The repo now seeds route metadata for `Tamayo - Denver`, `Toro - Hotel Clio - Denver`, `Toro - Fairmont Millennium Park - Chicago`, `Toro - Dania Beach`, and `Toro - Viceroy - Snowmass`; additional properties can be added the same way or refreshed with the sync script.

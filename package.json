@@ -9,7 +9,8 @@
   "scripts": {
     "test": "jest",
     "prompt:optimize": "node scripts/prompt-optimize.js",
-    "prompt:rewrite": "node scripts/prompt-rewrite.js"
+    "prompt:rewrite": "node scripts/prompt-rewrite.js",
+    "sharepoint:sync-property": "node scripts/sync-sharepoint-property.js"
   },
   "keywords": [],
   "author": "",

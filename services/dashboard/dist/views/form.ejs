@@ -2179,7 +2179,10 @@
                     syncProjectDetailsCardErrorState();
                 };
                 propertyField.addEventListener('input', clearPropertyError);
-                propertyField.addEventListener('change', clearPropertyError);
+                propertyField.addEventListener('change', () => {
+                    clearPropertyError();
+                    updateServicePeriodOptions(propertyField.value);
+                });
             }
 
             const turnaroundField = document.getElementById('turnaroundDays');
@@ -2243,6 +2246,9 @@
                         setPropertyFieldError('');
                     }
                 }, 150);
+            });
+            propertyInput.addEventListener('change', function() {
+                updateServicePeriodOptions(propertyInput.value);
             });
         });
 
@@ -3150,34 +3156,126 @@
 
         // === Recent Project Loader ===
         <% const safePropertyOptions = typeof propertyOptions === 'undefined' ? [] : propertyOptions; %>
+        <% const safePropertyCatalog = typeof propertyCatalog === 'undefined' ? [] : propertyCatalog; %>
         const initialPropertyOptions = <%- JSON.stringify(safePropertyOptions) %>;
+        const initialPropertyCatalog = <%- JSON.stringify(safePropertyCatalog) %>;
+        const DEFAULT_SERVICE_PERIOD_OPTIONS = [
+            { value: 'breakfast', label: 'Breakfast' },
+            { value: 'brunch', label: 'Brunch' },
+            { value: 'lunch', label: 'Lunch' },
+            { value: 'dinner', label: 'Dinner' },
+            { value: 'happy_hour', label: 'Happy Hour' },
+            { value: 'holiday', label: 'Holiday' },
+            { value: 'other', label: 'Other' }
+        ];
         let recentProjectsData = [];
         let propertyCatalogData = Array.isArray(initialPropertyOptions) ? initialPropertyOptions.slice() : [];
+        let propertyCatalogMeta = [];
+        let propertyCatalogLookup = {};
         let projectSuggestResults = [];
         let projectSuggestHighlightIndex = -1;
         let propertySuggestResults = [];
         let propertySuggestHighlightIndex = -1;
 
+        function normalizeServiceFolderKey(value) {
+            return String(value || '')
+                .trim()
+                .toLowerCase()
+                .replace(/[_-]+/g, ' ')
+                .replace(/\s*&\s*/g, ' and ')
+                .replace(/\s+/g, ' ');
+        }
+
+        function rebuildPropertyCatalogState(catalog) {
+            propertyCatalogMeta = Array.isArray(catalog)
+                ? catalog
+                    .map((item) => ({
+                        name: `${item?.name || ''}`.trim(),
+                        sharepointServiceFolders: Array.isArray(item?.sharepoint_service_folders)
+                            ? item.sharepoint_service_folders.map((folder) => `${folder || ''}`.trim()).filter(Boolean)
+                            : []
+                    }))
+                    .filter((item) => item.name)
+                : [];
+
+            propertyCatalogData = propertyCatalogMeta.map((item) => item.name);
+            propertyCatalogLookup = propertyCatalogMeta.reduce((acc, item) => {
+                acc[item.name.toLowerCase()] = item;
+                return acc;
+            }, {});
+        }
+
+        function getPropertyCatalogEntry(propertyName) {
+            const key = `${propertyName || ''}`.trim().toLowerCase();
+            return key ? propertyCatalogLookup[key] || null : null;
+        }
+
+        function getServicePeriodOptionsForProperty(propertyName) {
+            const config = getPropertyCatalogEntry(propertyName);
+            if (config && Array.isArray(config.sharepointServiceFolders) && config.sharepointServiceFolders.length > 0) {
+                return config.sharepointServiceFolders.map((folder) => ({
+                    value: folder,
+                    label: folder
+                }));
+            }
+            return DEFAULT_SERVICE_PERIOD_OPTIONS.slice();
+        }
+
+        function updateServicePeriodOptions(propertyName, preferredValue) {
+            const servicePeriodSelect = document.getElementById('servicePeriod');
+            if (!servicePeriodSelect) return;
+
+            const options = getServicePeriodOptionsForProperty(propertyName);
+            const currentValue = preferredValue !== undefined ? preferredValue : servicePeriodSelect.value;
+
+            servicePeriodSelect.innerHTML = `
+                <option value="">Select service period</option>
+                ${options.map((option) => `<option value="${escapeHtml(option.value)}">${escapeHtml(option.label)}</option>`).join('')}
+            `;
+
+            if (!currentValue) {
+                servicePeriodSelect.value = '';
+                return;
+            }
+
+            const exactMatch = options.find((option) => option.value === currentValue);
+            if (exactMatch) {
+                servicePeriodSelect.value = exactMatch.value;
+                return;
+            }
+
+            const caseInsensitiveMatch = options.find((option) => option.value.toLowerCase() === currentValue.toLowerCase());
+            if (caseInsensitiveMatch) {
+                servicePeriodSelect.value = caseInsensitiveMatch.value;
+                return;
+            }
+
+            const normalizedValue = normalizeServiceFolderKey(currentValue);
+            const normalizedMatch = options.find((option) => normalizeServiceFolderKey(option.value) === normalizedValue);
+            servicePeriodSelect.value = normalizedMatch ? normalizedMatch.value : '';
+        }
+
         async function loadPropertyCatalog() {
-            if (!propertyCatalogData.length && Array.isArray(initialPropertyOptions)) {
+            if (!propertyCatalogMeta.length && Array.isArray(initialPropertyCatalog) && initialPropertyCatalog.length) {
+                rebuildPropertyCatalogState(initialPropertyCatalog);
+            } else if (!propertyCatalogData.length && Array.isArray(initialPropertyOptions)) {
                 propertyCatalogData = initialPropertyOptions.slice();
             }
             try {
                 const response = await fetch('/api/properties');
                 const data = await response.json();
                 const catalog = Array.isArray(data?.catalog) ? data.catalog : [];
-                const names = catalog
-                    .map((item) => `${item?.name || ''}`.trim())
-                    .filter(Boolean);
-                if (names.length) {
-                    propertyCatalogData = names;
+                if (catalog.length) {
+                    rebuildPropertyCatalogState(catalog);
                 }
             } catch (err) {
                 console.error('Failed to load property catalog:', err);
-                if (!propertyCatalogData.length) {
+                if (!propertyCatalogMeta.length && !propertyCatalogData.length) {
                     propertyCatalogData = [];
                 }
             }
+
+            updateServicePeriodOptions(document.getElementById('property')?.value || '', document.getElementById('servicePeriod')?.value || '');
         }
 
         async function loadRecentProjects() {
@@ -3223,7 +3321,7 @@
 
             setSelectValue('orientation', p.orientation);
             setSelectValue('menuType', p.menuType);
-            setSelectValue('servicePeriod', p.servicePeriod);
+            updateServicePeriodOptions(p.property || '', p.servicePeriod || '');
             setSelectValue('templateType', p.templateType);
             setSelectValue('assetType', p.assetType);
             if (p.turnaroundDays) {
@@ -3389,6 +3487,7 @@
             document.getElementById('property').value = selected;
             document.getElementById('propertyDropdown').classList.remove('show');
             propertySuggestHighlightIndex = -1;
+            updateServicePeriodOptions(selected);
         }
 
         function isPropertyFromCatalog(value) {
@@ -3577,7 +3676,10 @@
         function applyExtractedProjectToForm(extracted) {
             if (!extracted) return;
             if (extracted.projectName) setFieldValueAndMark('projectName', extracted.projectName);
-            if (extracted.property) setFieldValueAndMark('property', extracted.property);
+            if (extracted.property) {
+                setFieldValueAndMark('property', extracted.property);
+                updateServicePeriodOptions(extracted.property);
+            }
             if (extracted.orientation) setSelectValueAndMark('orientation', extracted.orientation);
             if (extracted.dateNeeded) applyExtractedDateNeeded(extracted.dateNeeded);
             if (extracted.size) applyExtractedSize(extracted.size);

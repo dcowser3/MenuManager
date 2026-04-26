@@ -1,6 +1,6 @@
 # Document Storage
 
-**Status:** Implemented (Local/Persistent Volume), Teams integration pending
+**Status:** Implemented (Local/Persistent Volume) with SharePoint routing for approved DOCX when property metadata is configured
 
 ## Current Behavior
 
@@ -18,6 +18,18 @@ Subfolders:
 - `original/` — DOCX generated from chef form submission
 - `baseline/` — uploaded approved baseline DOCX in revision fallback flow
 - `approved/` — corrected/approved DOCX downloaded from ClickUp webhook
+
+## SharePoint Routing
+
+Approved DOCX files can also be uploaded to SharePoint after ClickUp approval when the selected property has stored routing metadata.
+
+- The local `approved/` copy remains the canonical on-disk artifact used by the rest of the workflow.
+- SharePoint upload is an additional delivery step for the approved menu.
+- Routing uses the property base folder plus an optional matched service subfolder.
+- The SharePoint copy is renamed to a standardized `Property_ServicePeriod_M.D.YY.docx` filename.
+- When routing into a matched service subfolder, older `.docx` files are moved into `old/` before the new DOCX is uploaded.
+- Existing `.pdf` and `.ai` files remain in the active folder.
+- If the subfolder match is stale or missing, the upload falls back to the property base folder.
 
 ## Metadata Tracking
 
@@ -51,4 +63,4 @@ Without persistent storage, files on ephemeral disks may be lost on restart/rede
 
 ## Planned Next Step
 
-Replace `storage_provider: local` with a Teams/SharePoint-backed provider, while preserving the same metadata contract in `assets` so the rest of the workflow does not change.
+Broaden the property-level SharePoint routing metadata beyond Tamayo and keep the folder-sync script as the operational way to refresh folder lists when property structures change.

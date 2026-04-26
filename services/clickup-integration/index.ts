@@ -29,8 +29,12 @@ const CLICKUP_TEAM_ID = process.env.CLICKUP_TEAM_ID;
 const CLICKUP_WEBHOOK_URL = process.env.CLICKUP_WEBHOOK_URL;
 const CLICKUP_WEBHOOK_SECRET = process.env.CLICKUP_WEBHOOK_SECRET;
 const CLICKUP_CORRECTIONS_STATUS = (process.env.CLICKUP_CORRECTIONS_STATUS || 'corrections complete').toLowerCase();
+const GRAPH_CLIENT_ID = process.env.GRAPH_CLIENT_ID;
+const GRAPH_TENANT_ID = process.env.GRAPH_TENANT_ID;
+const GRAPH_CLIENT_SECRET = process.env.GRAPH_CLIENT_SECRET;
 const hasSmtpConfig = !!(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS);
 const mailFromAddress = process.env.GRAPH_MAILBOX_ADDRESS || process.env.SMTP_USER || 'no-reply@example.com';
+let cachedGraphToken: { accessToken: string; expiresAt: number } | null = null;
 
 const mailTransporter = nodemailer.createTransport({
     host: process.env.SMTP_HOST,
@@ -458,6 +462,346 @@ function normalizeStatus(value: any): string {
     return String(value || '').trim().toLowerCase();
 }
 
+function normalizeFolderMatchKey(value: string | undefined): string {
+    return String(value || '')
+        .trim()
+        .toLowerCase()
+        .replace(/[_-]+/g, ' ')
+        .replace(/\s*&\s*/g, ' and ')
+        .replace(/\s+/g, ' ');
+}
+
+function getAttachmentFilename(attachment: any): string {
+    return String(attachment?.title || attachment?.filename || attachment?.name || '').trim();
+}
+
+function getFallbackApprovedSourcePath(submission: any): string | null {
+    const candidates = [
+        submission?.original_path,
+        submission?.revision_baseline_doc_path,
+        submission?.final_path,
+    ];
+
+    for (const candidate of candidates) {
+        const filePath = `${candidate || ''}`.trim();
+        if (filePath && fs.existsSync(filePath)) {
+            return filePath;
+        }
+    }
+    return null;
+}
+
+type PropertySharePointConfig = {
+    name: string;
+    sharepoint_site_url?: string;
+    sharepoint_library_name?: string;
+    sharepoint_drive_id?: string;
+    sharepoint_base_folder_path?: string;
+    sharepoint_service_folders?: string[];
+};
+
+function parseSharePointSite(siteUrl: string): { hostname: string; sitePath: string } {
+    const parsed = new URL(siteUrl);
+    return {
+        hostname: parsed.hostname,
+        sitePath: parsed.pathname.replace(/\/+$/, ''),
+    };
+}
+
+function encodeGraphPath(value: string): string {
+    return value
+        .split('/')
+        .map((segment) => encodeURIComponent(segment))
+        .join('/');
+}
+
+async function getGraphAccessToken(): Promise<string> {
+    if (!GRAPH_CLIENT_ID || !GRAPH_TENANT_ID || !GRAPH_CLIENT_SECRET) {
+        throw new Error('Missing GRAPH_CLIENT_ID, GRAPH_TENANT_ID, or GRAPH_CLIENT_SECRET');
+    }
+
+    if (cachedGraphToken && cachedGraphToken.expiresAt > Date.now() + 60_000) {
+        return cachedGraphToken.accessToken;
+    }
+
+    const tokenUrl = `https://login.microsoftonline.com/${GRAPH_TENANT_ID}/oauth2/v2.0/token`;
+    const body = new URLSearchParams({
+        client_id: GRAPH_CLIENT_ID,
+        client_secret: GRAPH_CLIENT_SECRET,
+        scope: 'https://graph.microsoft.com/.default',
+        grant_type: 'client_credentials',
+    });
+
+    const response = await axios.post(tokenUrl, body.toString(), {
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    });
+
+    const accessToken = response.data?.access_token;
+    const expiresIn = Number(response.data?.expires_in || 3600);
+    if (!accessToken) {
+        throw new Error('Graph token response did not include access_token');
+    }
+
+    cachedGraphToken = {
+        accessToken,
+        expiresAt: Date.now() + expiresIn * 1000,
+    };
+    return accessToken;
+}
+
+async function graphRequest<T = any>(config: {
+    method?: 'GET' | 'PUT' | 'POST' | 'PATCH';
+    path: string;
+    data?: any;
+    headers?: Record<string, string>;
+    responseType?: 'json' | 'arraybuffer';
+}): Promise<T> {
+    const token = await getGraphAccessToken();
+    const response = await axios({
+        method: config.method || 'GET',
+        url: `https://graph.microsoft.com/v1.0${config.path}`,
+        data: config.data,
+        responseType: config.responseType || 'json',
+        headers: {
+            Authorization: `Bearer ${token}`,
+            ...(config.headers || {}),
+        },
+    });
+    return response.data as T;
+}
+
+function isDocxFileName(name: string | undefined): boolean {
+    return String(name || '').trim().toLowerCase().endsWith('.docx');
+}
+
+function formatSharePointDateSegment(value: string | undefined): string {
+    const candidate = `${value || ''}`.trim();
+    const parsed = candidate ? new Date(candidate) : new Date();
+    const date = Number.isNaN(parsed.getTime()) ? new Date() : parsed;
+    const month = date.getMonth() + 1;
+    const day = date.getDate();
+    const year = String(date.getFullYear()).slice(-2);
+    return `${month}.${day}.${year}`;
+}
+
+function sanitizeSharePointFilenameSegment(value: string | undefined): string {
+    return String(value || '')
+        .trim()
+        .replace(/[\\/:*?"<>|#%]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function buildSharePointApprovedFilename(submission: any): string {
+    const propertyLabel = sanitizeSharePointFilenameSegment(
+        String(submission?.property || '').split(' - ')[0] || submission?.property || 'Menu'
+    );
+    const rawService = submission?.service_period || submission?.raw_payload?.servicePeriod || 'Other';
+    const serviceLabel = sanitizeSharePointFilenameSegment(String(rawService).replace(/_/g, ' ')) || 'Other';
+    const dateLabel = formatSharePointDateSegment(submission?.date_needed);
+    return `${propertyLabel}_${serviceLabel}_${dateLabel}.docx`;
+}
+
+async function getPropertySharePointConfig(property: string): Promise<PropertySharePointConfig | null> {
+    if (!property.trim()) return null;
+    const response = await axios.get(`${DB_SERVICE_URL}/properties/validate`, {
+        params: { name: property },
+        timeout: 3000,
+    });
+
+    if (!response.data?.valid || !response.data?.property) {
+        return null;
+    }
+
+    return response.data.property as PropertySharePointConfig;
+}
+
+async function resolveSharePointDrive(config: PropertySharePointConfig): Promise<{
+    siteId: string;
+    driveId: string;
+}> {
+    if (!config.sharepoint_site_url || !config.sharepoint_library_name) {
+        throw new Error('Property is missing SharePoint site URL or library name');
+    }
+
+    const { hostname, sitePath } = parseSharePointSite(config.sharepoint_site_url);
+    const site = await graphRequest<any>({
+        path: `/sites/${hostname}:${sitePath}`,
+    });
+
+    if (config.sharepoint_drive_id) {
+        return {
+            siteId: site.id,
+            driveId: config.sharepoint_drive_id,
+        };
+    }
+
+    const drives = await graphRequest<any>({
+        path: `/sites/${site.id}/drives`,
+    });
+    const drive = (drives.value || []).find((item: any) =>
+        String(item?.name || '').trim().toLowerCase() === config.sharepoint_library_name!.trim().toLowerCase()
+    );
+
+    if (!drive?.id) {
+        throw new Error(`SharePoint library "${config.sharepoint_library_name}" not found`);
+    }
+
+    return {
+        siteId: site.id,
+        driveId: drive.id,
+    };
+}
+
+async function getDriveItemByPath(driveId: string, itemPath: string): Promise<any> {
+    return graphRequest<any>({
+        path: `/drives/${driveId}/root:/${encodeGraphPath(itemPath)}`,
+    });
+}
+
+async function listDriveChildrenByPath(driveId: string, itemPath: string): Promise<any[]> {
+    const response = await graphRequest<any>({
+        path: `/drives/${driveId}/root:/${encodeGraphPath(itemPath)}:/children`,
+    });
+    return Array.isArray(response?.value) ? response.value : [];
+}
+
+async function ensureChildFolder(driveId: string, parentPath: string, folderName: string): Promise<any> {
+    const existingChildren = await listDriveChildrenByPath(driveId, parentPath);
+    const existing = existingChildren.find((item: any) =>
+        !!item?.folder && String(item?.name || '').trim().toLowerCase() === folderName.trim().toLowerCase()
+    );
+    if (existing) return existing;
+
+    const parentItem = await getDriveItemByPath(driveId, parentPath);
+    return graphRequest<any>({
+        method: 'POST',
+        path: `/drives/${driveId}/items/${parentItem.id}/children`,
+        data: {
+            name: folderName,
+            folder: {},
+        },
+        headers: {
+            'Content-Type': 'application/json',
+        },
+    });
+}
+
+async function moveDriveItemToFolder(driveId: string, itemId: string, parentId: string, targetName: string): Promise<any> {
+    try {
+        return await graphRequest<any>({
+            method: 'PATCH',
+            path: `/drives/${driveId}/items/${itemId}`,
+            data: {
+                parentReference: { id: parentId },
+                name: targetName,
+            },
+            headers: {
+                'Content-Type': 'application/json',
+            },
+        });
+    } catch (error: any) {
+        const suffixedName = targetName.replace(/\.docx$/i, `_${Date.now()}.docx`);
+        return graphRequest<any>({
+            method: 'PATCH',
+            path: `/drives/${driveId}/items/${itemId}`,
+            data: {
+                parentReference: { id: parentId },
+                name: suffixedName,
+            },
+            headers: {
+                'Content-Type': 'application/json',
+            },
+        });
+    }
+}
+
+async function archiveExistingDocxFilesInSharePointSubfolder(driveId: string, folderPath: string): Promise<number> {
+    const children = await listDriveChildrenByPath(driveId, folderPath);
+    const docxFiles = children.filter((item: any) =>
+        !!item?.file && isDocxFileName(item?.name)
+    );
+    if (docxFiles.length === 0) return 0;
+
+    const oldFolder = await ensureChildFolder(driveId, folderPath, 'old');
+    let movedCount = 0;
+    for (const item of docxFiles) {
+        await moveDriveItemToFolder(driveId, item.id, oldFolder.id, String(item.name || 'archived.docx'));
+        movedCount += 1;
+    }
+    return movedCount;
+}
+
+async function uploadApprovedDocToSharePoint(input: {
+    property: string;
+    servicePeriod?: string;
+    localFilePath: string;
+    uploadFileName: string;
+    submission?: any;
+}): Promise<{
+    uploaded: boolean;
+    skipped?: string;
+    storagePath?: string;
+    webUrl?: string;
+    folderMatched?: string | null;
+    driveId?: string;
+    siteId?: string;
+    archivedDocxCount?: number;
+}> {
+    if (!GRAPH_CLIENT_ID || !GRAPH_TENANT_ID || !GRAPH_CLIENT_SECRET) {
+        return { uploaded: false, skipped: 'graph credentials not configured' };
+    }
+
+    const propertyConfig = await getPropertySharePointConfig(input.property);
+    if (!propertyConfig?.sharepoint_site_url || !propertyConfig?.sharepoint_library_name || !propertyConfig?.sharepoint_base_folder_path) {
+        return { uploaded: false, skipped: 'property has no sharepoint routing config' };
+    }
+
+    const serviceFolders = Array.isArray(propertyConfig.sharepoint_service_folders)
+        ? propertyConfig.sharepoint_service_folders
+        : [];
+    const matchedFolder = serviceFolders.find((folder) =>
+        normalizeFolderMatchKey(folder) === normalizeFolderMatchKey(input.servicePeriod)
+    ) || null;
+
+    const targetFolderPath = matchedFolder
+        ? `${propertyConfig.sharepoint_base_folder_path}/${matchedFolder}`
+        : propertyConfig.sharepoint_base_folder_path;
+    const { siteId, driveId } = await resolveSharePointDrive(propertyConfig);
+    let archivedDocxCount = 0;
+
+    if (matchedFolder) {
+        archivedDocxCount = await archiveExistingDocxFilesInSharePointSubfolder(driveId, targetFolderPath);
+    }
+
+    const canonicalFileName = buildSharePointApprovedFilename(input.submission || {
+        property: input.property,
+        service_period: input.servicePeriod,
+    });
+    const storagePath = `${targetFolderPath}/${canonicalFileName}`;
+    const fileBuffer = await fs.promises.readFile(input.localFilePath);
+
+    const uploadedItem = await graphRequest<any>({
+        method: 'PUT',
+        path: `/drives/${driveId}/root:/${encodeGraphPath(storagePath)}:/content`,
+        data: fileBuffer,
+        responseType: 'json',
+        headers: {
+            'Content-Type': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        },
+    });
+
+    return {
+        uploaded: true,
+        storagePath,
+        webUrl: uploadedItem?.webUrl || undefined,
+        folderMatched: matchedFolder,
+        driveId,
+        siteId,
+        archivedDocxCount,
+    };
+}
+
 async function extractApprovedMenuContent(docxPath: string): Promise<{ raw: string; cleaned: string }> {
     const scriptPath = path.resolve(__dirname, '..', '..', 'docx-redliner', 'extract_clean_menu_text.py');
     const venvPython = path.resolve(__dirname, '..', '..', 'docx-redliner', 'venv', 'bin', 'python');
@@ -510,40 +854,44 @@ async function processApprovedTask(clickupTaskId: string, opts?: { skipStatusChe
     console.log(`Found submission ${submission.id} for ClickUp task ${clickupTaskId}`);
 
     const attachments = taskResponse.data.attachments || [];
-    if (attachments.length === 0) {
-        return { processed: false, reason: 'no attachments on task', submissionId: submission.id };
-    }
-
     const latestAttachment = pickMostRecentCorrectedAttachment(attachments, submission.filename);
-    if (!latestAttachment) {
-        return { processed: false, reason: 'no usable attachment found', submissionId: submission.id };
-    }
-
     const submissionDocDir = getSubmissionDocumentDir(submission.project_name || '', submission.property || '', submission.id);
     const approvedDir = path.join(submissionDocDir, 'approved');
     await fs.promises.mkdir(approvedDir, { recursive: true });
-    const correctedPath = path.join(approvedDir, `${submission.id}-corrected.docx`);
+    const approvedPath = path.join(approvedDir, `${submission.id}-approved.docx`);
+    let approvedFileName = submission.filename || `${submission.project_name || submission.id}.docx`;
 
-    const fileResponse = await axios.get(latestAttachment.url, {
-        responseType: 'arraybuffer',
-        headers: { Authorization: CLICKUP_API_TOKEN || '' },
-    });
-    await fs.promises.writeFile(correctedPath, fileResponse.data);
-    console.log(`Downloaded corrected file to ${correctedPath}`);
+    if (latestAttachment?.url) {
+        const fileResponse = await axios.get(latestAttachment.url, {
+            responseType: 'arraybuffer',
+            headers: { Authorization: CLICKUP_API_TOKEN || '' },
+        });
+        await fs.promises.writeFile(approvedPath, fileResponse.data);
+        approvedFileName = getAttachmentFilename(latestAttachment) || approvedFileName;
+        console.log(`Downloaded approved file from ClickUp to ${approvedPath}`);
+    } else {
+        const fallbackSourcePath = getFallbackApprovedSourcePath(submission);
+        if (!fallbackSourcePath) {
+            return { processed: false, reason: 'no usable ClickUp or local approved DOCX source found', submissionId: submission.id };
+        }
+        await fs.promises.copyFile(fallbackSourcePath, approvedPath);
+        approvedFileName = path.basename(fallbackSourcePath) || approvedFileName;
+        console.log(`Copied fallback approved file from ${fallbackSourcePath} to ${approvedPath}`);
+    }
 
     let extractedRaw = '';
     let extractedClean = '';
     try {
-        const extracted = await extractApprovedMenuContent(correctedPath);
+        const extracted = await extractApprovedMenuContent(approvedPath);
         extractedRaw = extracted.raw;
         extractedClean = extracted.cleaned;
     } catch (extractError: any) {
-        console.warn(`Failed to extract approved text from corrected DOCX: ${extractError.message}`);
+        console.warn(`Failed to extract approved text from approved DOCX: ${extractError.message}`);
     }
 
     await axios.put(`${DB_SERVICE_URL}/submissions/${submission.id}`, {
         status: 'approved',
-        final_path: correctedPath,
+        final_path: approvedPath,
         approved_menu_content_raw: extractedRaw || undefined,
         approved_menu_content: extractedClean || undefined,
         approved_text_extracted_at: extractedClean ? new Date().toISOString() : undefined,
@@ -555,20 +903,69 @@ async function processApprovedTask(clickupTaskId: string, opts?: { skipStatusChe
         asset_type: 'approved_docx',
         source: 'isabella_clickup',
         storage_provider: 'local',
-        storage_path: correctedPath,
-        file_name: path.basename(correctedPath),
+        storage_path: approvedPath,
+        file_name: path.basename(approvedPath),
         meta: {
             clickup_task_id: clickupTaskId,
-            attachment_id: latestAttachment.id || null,
+            attachment_id: latestAttachment?.id || null,
         },
     }).catch((err) => console.error('Failed to save approved_docx asset metadata:', err.message));
+
+    try {
+        const sharePointUpload = await uploadApprovedDocToSharePoint({
+            property: submission.property || '',
+            servicePeriod: submission.service_period || submission.raw_payload?.servicePeriod,
+            localFilePath: approvedPath,
+            uploadFileName: approvedFileName,
+            submission,
+        });
+
+        if (sharePointUpload.uploaded) {
+            console.log(`Uploaded approved DOCX to SharePoint: ${sharePointUpload.storagePath}`);
+            if (sharePointUpload.archivedDocxCount) {
+                console.log(`Archived ${sharePointUpload.archivedDocxCount} existing DOCX file(s) into old/`);
+            }
+            axios.post(`${DB_SERVICE_URL}/assets`, {
+                submission_id: submission.id,
+                asset_type: 'sharepoint_approved_docx',
+                source: 'sharepoint_graph',
+                storage_provider: 'sharepoint',
+                storage_path: sharePointUpload.storagePath,
+                file_name: path.basename(sharePointUpload.storagePath || approvedFileName),
+                meta: {
+                    clickup_task_id: clickupTaskId,
+                    site_id: sharePointUpload.siteId,
+                    drive_id: sharePointUpload.driveId,
+                    web_url: sharePointUpload.webUrl || null,
+                    matched_folder: sharePointUpload.folderMatched,
+                    archived_docx_count: sharePointUpload.archivedDocxCount || 0,
+                },
+            }).catch((err) => console.error('Failed to save SharePoint asset metadata:', err.message));
+        } else if (sharePointUpload.skipped) {
+            console.log(`Skipped SharePoint upload for submission ${submission.id}: ${sharePointUpload.skipped}`);
+        }
+    } catch (sharePointError: any) {
+        console.error('Failed to upload approved DOCX to SharePoint:', sharePointError.response?.data || sharePointError.message);
+        sendAdminAlert({
+            alert_type: 'sharepoint_upload_failed',
+            severity: 'warning',
+            service: 'clickup-integration',
+            submission_id: submission.id,
+            message: `Failed to upload approved DOCX to SharePoint for "${submission.project_name}"`,
+            details: {
+                error: sharePointError.response?.data || sharePointError.message,
+                property: submission.property,
+                servicePeriod: submission.service_period || submission.raw_payload?.servicePeriod || null,
+            },
+        });
+    }
 
     sendCorrectionsReadyNotification({
         submitterEmail: submission.submitter_email,
         submitterName: submission.submitter_name,
         projectName: submission.project_name,
-        correctedPath,
-        filename: submission.filename,
+        correctedPath: approvedPath,
+        filename: approvedFileName,
     }).catch((err: any) => {
         console.error('Failed to send corrections_ready notification:', err.message);
         sendAdminAlert({
@@ -583,7 +980,7 @@ async function processApprovedTask(clickupTaskId: string, opts?: { skipStatusChe
 
     axios.post(`${DIFFER_SERVICE_URL}/compare`, {
         ai_draft_path: submission.ai_draft_path,
-        final_path: correctedPath,
+        final_path: approvedPath,
         submission_id: submission.id,
     }).catch((err) => console.error('Failed to trigger differ comparison:', err.message));
 

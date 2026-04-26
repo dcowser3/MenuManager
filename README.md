@@ -88,6 +88,16 @@ services/
 - The old separate free-text location field is removed; location metadata is derived from the selected property.
 - The form-side `Hotel Name` input is currently removed from chef entry flow.
 - Learning dashboards reuse the same property list for location-specific rule assignment and filtering.
+- Properties can also store SharePoint routing metadata:
+  - base SharePoint folder path
+  - resolved drive/library metadata
+  - property-specific menu subfolders
+- When a property has SharePoint folder metadata, the form `Service Period` dropdown is populated from that property’s stored folder names instead of the global default list.
+- `Other` is always included in the `Service Period` dropdown so users can intentionally route the approved file to the property base folder when no subfolder applies.
+- Approved menus can now be pushed to SharePoint after ClickUp approval using the property’s configured base folder and subfolder mapping.
+- SharePoint uploads now standardize approved DOCX names as `Property_ServicePeriod_M.D.YY.docx` using the submission `date_needed` value when available.
+- Before uploading into a matched SharePoint service subfolder, the service archives existing `.docx` files from that subfolder into its `old/` folder. Existing `.pdf` and `.ai` files are left in place.
+- Seeded examples now include `Tamayo - Denver`, `Toro - Hotel Clio - Denver`, `Toro - Fairmont Millennium Park - Chicago`, `Toro - Dania Beach`, and `Toro - Viceroy - Snowmass`.
 
 ## Getting Started
 

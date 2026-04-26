@@ -55,6 +55,7 @@ const DEFAULT_PROPERTY_NAMES = [
     'Tamayo - Denver',
     'tán - New York',
     'Toro - Belgrade',
+    'Toro - Dania Beach',
     'Toro - Fairmont Millennium Park - Chicago',
     'Toro - Hotel Clio - Denver',
     'Toro - Six Senses Kocatas Mansions - Istanbul',
@@ -79,6 +80,111 @@ type PropertyCatalogRecord = {
     city_country: string;
     hotel?: string;
     is_active: boolean;
+    sharepoint_site_url?: string;
+    sharepoint_library_name?: string;
+    sharepoint_drive_id?: string;
+    sharepoint_base_folder_path?: string;
+    sharepoint_service_folders?: string[];
+    sharepoint_last_synced_at?: string;
+};
+
+const DEFAULT_SHAREPOINT_PROPERTY_CONFIG: Record<string, Partial<PropertyCatalogRecord>> = {
+    'Tamayo - Denver': {
+        sharepoint_site_url: 'https://richardsandoval.sharepoint.com/sites/OwnedOperated2-Tamayo',
+        sharepoint_library_name: 'Shared Documents',
+        sharepoint_base_folder_path: 'Tamayo/Brand & Marketing/Media Library/Menu Files',
+        sharepoint_service_folders: [
+            'Afternoon Brunch',
+            'Beverage',
+            'Brunch',
+            'Dessert',
+            'Dinner',
+            'Happy Hour',
+            'Holidays & Events',
+            'Kids',
+            'Lunch',
+            'Menu Box',
+        ],
+    },
+    'Toro - Hotel Clio - Denver': {
+        sharepoint_site_url: 'https://richardsandoval.sharepoint.com/sites/Toro2',
+        sharepoint_library_name: 'Shared Documents',
+        sharepoint_base_folder_path: 'Toro by Chef Richard Sandoval/Marketing - Locations/Denver/Menus',
+        sharepoint_service_folders: [
+            'Beverage',
+            'Breakfast',
+            'Brunch',
+            'Dessert',
+            'Dinner',
+            'Happy Hour',
+            'Holidays & Events',
+            'Lunch',
+        ],
+    },
+    'Toro - Fairmont Millennium Park - Chicago': {
+        sharepoint_site_url: 'https://richardsandoval.sharepoint.com/sites/Toro2',
+        sharepoint_library_name: 'Shared Documents',
+        sharepoint_base_folder_path: 'Toro by Chef Richard Sandoval/Marketing - Locations/Chicago/Menus',
+        sharepoint_service_folders: [
+            'Beverage',
+            'Bloody Bar',
+            'Breakfast',
+            'Brunch',
+            'Dessert',
+            'Dinner',
+            'Happy Hour',
+            'Holidays & Events',
+            'Lunch',
+        ],
+    },
+    'Toro - Dania Beach': {
+        sharepoint_site_url: 'https://richardsandoval.sharepoint.com/sites/Toro2',
+        sharepoint_library_name: 'Shared Documents',
+        sharepoint_base_folder_path: 'Toro by Chef Richard Sandoval/Marketing - Locations/Dania Beach/Menus',
+        sharepoint_service_folders: [
+            'Dinner',
+            'Happy Hour',
+            'Holidays & Events',
+        ],
+    },
+    'Toro - Viceroy - Snowmass': {
+        sharepoint_site_url: 'https://richardsandoval.sharepoint.com/sites/Toro2',
+        sharepoint_library_name: 'Shared Documents',
+        sharepoint_base_folder_path: 'Toro by Chef Richard Sandoval/Marketing - Locations/Snowmass/Menus',
+        sharepoint_service_folders: [
+            'Large party_Pre-Fixe menu',
+            'Winter Breakfast menu',
+            'Winter Dessert Menu',
+            'Winter Dinner Menu',
+            'Winter Kids Breakfast menu',
+            'Winter Kids Dinner Menu',
+            'Winter Wine List',
+        ],
+    },
+    'Toro Toro - Worthington Renaissance - Fort Worth': {
+        sharepoint_site_url: 'https://richardsandoval.sharepoint.com/sites/ToroToro',
+        sharepoint_library_name: 'Shared Documents',
+        sharepoint_base_folder_path: 'Toro Toro by Chef Richard Sandoval/Marketing - Locations/Fort Worth/Menus',
+        sharepoint_service_folders: [
+            'Beverage',
+            'Brunch',
+            'Dinner',
+            'Holidays & Events',
+            'Lounge Bar',
+            'Lunch',
+        ],
+    },
+    'Toro Toro - InterContinental - Miami': {
+        sharepoint_site_url: 'https://richardsandoval.sharepoint.com/sites/ToroToro',
+        sharepoint_library_name: 'Shared Documents',
+        sharepoint_base_folder_path: 'Toro Toro by Chef Richard Sandoval/Marketing - Locations/Miami/Menus',
+        sharepoint_service_folders: [
+            'Beverage',
+            'Dessert',
+            'Dinner',
+            'Lunch',
+        ],
+    },
 };
 
 function deriveCityCountryFromProperty(name: string): string {
@@ -92,7 +198,96 @@ function buildDefaultPropertyCatalog(): PropertyCatalogRecord[] {
         name,
         city_country: deriveCityCountryFromProperty(name),
         is_active: true,
+        ...DEFAULT_SHAREPOINT_PROPERTY_CONFIG[name],
     }));
+}
+
+function normalizeServiceFolders(input: any): string[] {
+    if (!Array.isArray(input)) return [];
+
+    const seen = new Set<string>();
+    return input
+        .map((value) => `${value || ''}`.trim())
+        .filter(Boolean)
+        .filter((value) => {
+            const key = value.toLowerCase();
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+        });
+}
+
+function normalizePropertyCatalogRecord(input: any): PropertyCatalogRecord {
+    const name = `${input?.name || ''}`.trim();
+    const defaults = DEFAULT_SHAREPOINT_PROPERTY_CONFIG[name] || {};
+
+    return {
+        name,
+        city_country: `${input?.city_country || deriveCityCountryFromProperty(name) || ''}`.trim(),
+        hotel: input?.hotel || undefined,
+        is_active: input?.is_active !== false,
+        sharepoint_site_url: `${input?.sharepoint_site_url || defaults.sharepoint_site_url || ''}`.trim() || undefined,
+        sharepoint_library_name: `${input?.sharepoint_library_name || defaults.sharepoint_library_name || ''}`.trim() || undefined,
+        sharepoint_drive_id: `${input?.sharepoint_drive_id || defaults.sharepoint_drive_id || ''}`.trim() || undefined,
+        sharepoint_base_folder_path: `${input?.sharepoint_base_folder_path || defaults.sharepoint_base_folder_path || ''}`.trim() || undefined,
+        sharepoint_service_folders: normalizeServiceFolders(
+            input?.sharepoint_service_folders ?? defaults.sharepoint_service_folders
+        ),
+        sharepoint_last_synced_at: `${input?.sharepoint_last_synced_at || defaults.sharepoint_last_synced_at || ''}`.trim() || undefined,
+    };
+}
+
+async function writeLocalPropertyCatalog(records: PropertyCatalogRecord[]): Promise<void> {
+    await fs.writeFile(
+        PROPERTIES_DB,
+        JSON.stringify(records.map((item) => normalizePropertyCatalogRecord(item)), null, 2)
+    );
+}
+
+async function updateLocalPropertyCatalogEntry(
+    propertyName: string,
+    updates: Partial<PropertyCatalogRecord>
+): Promise<PropertyCatalogRecord | null> {
+    const catalog = await readLocalPropertyCatalog();
+    const matchIndex = catalog.findIndex((item) => item.name.toLowerCase() === propertyName.trim().toLowerCase());
+    if (matchIndex < 0) return null;
+
+    const merged = normalizePropertyCatalogRecord({
+        ...catalog[matchIndex],
+        ...updates,
+        name: catalog[matchIndex].name,
+    });
+
+    catalog[matchIndex] = merged;
+    await writeLocalPropertyCatalog(catalog);
+    return merged;
+}
+
+async function mirrorPropertyCatalogUpdateToSupabase(record: PropertyCatalogRecord): Promise<void> {
+    if (!isSupabaseConfigured()) return;
+
+    const supabase = getSupabaseClient();
+    const payload = {
+        name: record.name,
+        city_country: record.city_country,
+        hotel: record.hotel || null,
+        is_active: record.is_active !== false,
+        sharepoint_site_url: record.sharepoint_site_url || null,
+        sharepoint_library_name: record.sharepoint_library_name || null,
+        sharepoint_drive_id: record.sharepoint_drive_id || null,
+        sharepoint_base_folder_path: record.sharepoint_base_folder_path || null,
+        sharepoint_service_folders: record.sharepoint_service_folders || [],
+        sharepoint_last_synced_at: record.sharepoint_last_synced_at || null,
+        updated_at: new Date().toISOString(),
+    };
+
+    const { error } = await supabase
+        .from(PROPERTIES_TABLE)
+        .upsert(payload, { onConflict: 'name' });
+
+    if (error) {
+        throw new Error(`Supabase property upsert failed: ${error.message}`);
+    }
 }
 
 const SUPABASE_SUBMISSION_COLUMNS = new Set([
@@ -302,12 +497,7 @@ async function readLocalPropertyCatalog(): Promise<PropertyCatalogRecord[]> {
         const parsed = JSON.parse(content);
         if (!Array.isArray(parsed)) return buildDefaultPropertyCatalog();
         return parsed
-            .map((item: any) => ({
-                name: `${item?.name || ''}`.trim(),
-                city_country: `${item?.city_country || deriveCityCountryFromProperty(`${item?.name || ''}`) || ''}`.trim(),
-                hotel: item?.hotel || undefined,
-                is_active: item?.is_active !== false,
-            }))
+            .map((item: any) => normalizePropertyCatalogRecord(item))
             .filter((item: PropertyCatalogRecord) => !!item.name);
     } catch {
         return buildDefaultPropertyCatalog();
@@ -320,18 +510,13 @@ async function getPropertyCatalog(): Promise<PropertyCatalogRecord[]> {
             const supabase = getSupabaseClient();
             const { data, error } = await supabase
                 .from(PROPERTIES_TABLE)
-                .select('name, city_country, hotel, is_active')
+                .select('name, city_country, hotel, is_active, sharepoint_site_url, sharepoint_library_name, sharepoint_drive_id, sharepoint_base_folder_path, sharepoint_service_folders, sharepoint_last_synced_at')
                 .eq('is_active', true)
                 .order('name', { ascending: true });
 
             if (!error && Array.isArray(data) && data.length > 0) {
                 return data
-                    .map((item: any) => ({
-                        name: `${item?.name || ''}`.trim(),
-                        city_country: `${item?.city_country || deriveCityCountryFromProperty(`${item?.name || ''}`) || ''}`.trim(),
-                        hotel: item?.hotel || undefined,
-                        is_active: item?.is_active !== false,
-                    }))
+                    .map((item: any) => normalizePropertyCatalogRecord(item))
                     .filter((item: PropertyCatalogRecord) => !!item.name);
             }
         } catch (error: any) {
@@ -621,6 +806,47 @@ app.get('/properties/validate', async (req, res) => {
     } catch (error) {
         console.error('Error validating property:', error);
         res.status(500).json({ valid: false });
+    }
+});
+
+app.put('/properties/:name/sharepoint-config', async (req, res) => {
+    try {
+        const propertyName = `${req.params.name || ''}`.trim();
+        if (!propertyName) {
+            return res.status(400).json({ error: 'property name is required' });
+        }
+
+        const normalizedUpdates: Partial<PropertyCatalogRecord> = {
+            sharepoint_site_url: `${req.body?.sharepoint_site_url || req.body?.siteUrl || ''}`.trim() || undefined,
+            sharepoint_library_name: `${req.body?.sharepoint_library_name || req.body?.libraryName || ''}`.trim() || undefined,
+            sharepoint_drive_id: `${req.body?.sharepoint_drive_id || req.body?.driveId || ''}`.trim() || undefined,
+            sharepoint_base_folder_path: `${req.body?.sharepoint_base_folder_path || req.body?.baseFolderPath || ''}`.trim() || undefined,
+            sharepoint_service_folders: normalizeServiceFolders(req.body?.sharepoint_service_folders || req.body?.serviceFolders),
+            sharepoint_last_synced_at: `${req.body?.sharepoint_last_synced_at || req.body?.lastSyncedAt || new Date().toISOString()}`.trim(),
+        };
+
+        const updated = await updateLocalPropertyCatalogEntry(propertyName, normalizedUpdates);
+        if (!updated) {
+            return res.status(404).json({ error: `property "${propertyName}" not found` });
+        }
+
+        try {
+            await mirrorPropertyCatalogUpdateToSupabase(updated);
+        } catch (supabaseError: any) {
+            console.error(`Supabase property mirror failed for ${propertyName}:`, supabaseError.message);
+            logAlert({
+                alert_type: 'supabase_mirror_failed',
+                severity: 'warning',
+                service: 'db',
+                message: `Supabase property mirror failed for ${propertyName}`,
+                details: { error: supabaseError.message, property: propertyName },
+            });
+        }
+
+        res.json({ success: true, property: updated });
+    } catch (error) {
+        console.error('Error saving property SharePoint config:', error);
+        res.status(500).json({ error: 'Failed to save property SharePoint config' });
     }
 });
 

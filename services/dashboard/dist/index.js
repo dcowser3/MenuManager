@@ -134,8 +134,16 @@ async function getPropertyCatalogFromDb() {
         .map((item) => ({
         name: `${item?.name || ''}`.trim(),
         city_country: `${item?.city_country || ''}`.trim(),
-        sort_order: Number(item?.sort_order || 0),
+        hotel: `${item?.hotel || ''}`.trim() || undefined,
         is_active: item?.is_active !== false,
+        sharepoint_site_url: `${item?.sharepoint_site_url || ''}`.trim() || undefined,
+        sharepoint_library_name: `${item?.sharepoint_library_name || ''}`.trim() || undefined,
+        sharepoint_drive_id: `${item?.sharepoint_drive_id || ''}`.trim() || undefined,
+        sharepoint_base_folder_path: `${item?.sharepoint_base_folder_path || ''}`.trim() || undefined,
+        sharepoint_service_folders: Array.isArray(item?.sharepoint_service_folders)
+            ? item.sharepoint_service_folders.map((value) => `${value || ''}`.trim()).filter(Boolean)
+            : [],
+        sharepoint_last_synced_at: `${item?.sharepoint_last_synced_at || ''}`.trim() || undefined,
     }))
         .filter((item) => !!item.name);
 }
@@ -301,8 +309,10 @@ app.get('/submit/:token', (req, res) => {
  */
 app.get('/form', async (_req, res) => {
     let propertyOptions = [];
+    let propertyCatalog = [];
     try {
         const catalog = await getPropertyCatalogFromDb();
+        propertyCatalog = catalog;
         propertyOptions = catalog.map((item) => item.name);
     }
     catch (error) {
@@ -312,6 +322,7 @@ app.get('/form', async (_req, res) => {
         title: 'Submit New Menu',
         defaultAllergenKey: DEFAULT_ALLERGEN_KEY,
         propertyOptions,
+        propertyCatalog,
     });
 });
 /**

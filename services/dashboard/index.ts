@@ -126,8 +126,14 @@ function getSubmissionDocumentDir(projectName: string, property: string, submiss
 type PropertyCatalogRecord = {
     name: string;
     city_country: string;
-    sort_order?: number;
+    hotel?: string;
     is_active?: boolean;
+    sharepoint_site_url?: string;
+    sharepoint_library_name?: string;
+    sharepoint_drive_id?: string;
+    sharepoint_base_folder_path?: string;
+    sharepoint_service_folders?: string[];
+    sharepoint_last_synced_at?: string;
 };
 
 async function getPropertyCatalogFromDb(): Promise<PropertyCatalogRecord[]> {
@@ -137,8 +143,16 @@ async function getPropertyCatalogFromDb(): Promise<PropertyCatalogRecord[]> {
         .map((item: any) => ({
             name: `${item?.name || ''}`.trim(),
             city_country: `${item?.city_country || ''}`.trim(),
-            sort_order: Number(item?.sort_order || 0),
+            hotel: `${item?.hotel || ''}`.trim() || undefined,
             is_active: item?.is_active !== false,
+            sharepoint_site_url: `${item?.sharepoint_site_url || ''}`.trim() || undefined,
+            sharepoint_library_name: `${item?.sharepoint_library_name || ''}`.trim() || undefined,
+            sharepoint_drive_id: `${item?.sharepoint_drive_id || ''}`.trim() || undefined,
+            sharepoint_base_folder_path: `${item?.sharepoint_base_folder_path || ''}`.trim() || undefined,
+            sharepoint_service_folders: Array.isArray(item?.sharepoint_service_folders)
+                ? item.sharepoint_service_folders.map((value: any) => `${value || ''}`.trim()).filter(Boolean)
+                : [],
+            sharepoint_last_synced_at: `${item?.sharepoint_last_synced_at || ''}`.trim() || undefined,
         }))
         .filter((item: PropertyCatalogRecord) => !!item.name);
 }
@@ -342,8 +356,10 @@ app.get('/submit/:token', (req, res) => {
  */
 app.get('/form', async (_req, res) => {
     let propertyOptions: string[] = [];
+    let propertyCatalog: PropertyCatalogRecord[] = [];
     try {
         const catalog = await getPropertyCatalogFromDb();
+        propertyCatalog = catalog;
         propertyOptions = catalog.map((item) => item.name);
     } catch (error: any) {
         console.warn('Failed to prefetch property catalog for form:', error?.message || error);
@@ -352,6 +368,7 @@ app.get('/form', async (_req, res) => {
         title: 'Submit New Menu',
         defaultAllergenKey: DEFAULT_ALLERGEN_KEY,
         propertyOptions,
+        propertyCatalog,
     });
 });
 

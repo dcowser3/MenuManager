@@ -105,6 +105,25 @@ const DEFAULT_PROPERTY_NAMES = [
     'Zengo - Kempinski - Doha',
     'Zengo - Le Royal Meridien - Dubai',
 ];
+const DEFAULT_SHAREPOINT_PROPERTY_CONFIG = {
+    'Tamayo - Denver': {
+        sharepoint_site_url: 'https://richardsandoval.sharepoint.com/sites/OwnedOperated2-Tamayo',
+        sharepoint_library_name: 'Shared Documents',
+        sharepoint_base_folder_path: 'Tamayo/Brand & Marketing/Media Library/Menu Files',
+        sharepoint_service_folders: [
+            'Afternoon Brunch',
+            'Beverage',
+            'Brunch',
+            'Dessert',
+            'Dinner',
+            'Happy Hour',
+            'Holidays & Events',
+            'Kids',
+            'Lunch',
+            'Menu Box',
+        ],
+    },
+};
 function deriveCityCountryFromProperty(name) {
     const idx = name.lastIndexOf(' - ');
     if (idx < 0)
@@ -116,7 +135,80 @@ function buildDefaultPropertyCatalog() {
         name,
         city_country: deriveCityCountryFromProperty(name),
         is_active: true,
+        ...DEFAULT_SHAREPOINT_PROPERTY_CONFIG[name],
     }));
+}
+function normalizeServiceFolders(input) {
+    if (!Array.isArray(input))
+        return [];
+    const seen = new Set();
+    return input
+        .map((value) => `${value || ''}`.trim())
+        .filter(Boolean)
+        .filter((value) => {
+        const key = value.toLowerCase();
+        if (seen.has(key))
+            return false;
+        seen.add(key);
+        return true;
+    });
+}
+function normalizePropertyCatalogRecord(input) {
+    const name = `${input?.name || ''}`.trim();
+    const defaults = DEFAULT_SHAREPOINT_PROPERTY_CONFIG[name] || {};
+    return {
+        name,
+        city_country: `${input?.city_country || deriveCityCountryFromProperty(name) || ''}`.trim(),
+        hotel: input?.hotel || undefined,
+        is_active: input?.is_active !== false,
+        sharepoint_site_url: `${input?.sharepoint_site_url || defaults.sharepoint_site_url || ''}`.trim() || undefined,
+        sharepoint_library_name: `${input?.sharepoint_library_name || defaults.sharepoint_library_name || ''}`.trim() || undefined,
+        sharepoint_drive_id: `${input?.sharepoint_drive_id || defaults.sharepoint_drive_id || ''}`.trim() || undefined,
+        sharepoint_base_folder_path: `${input?.sharepoint_base_folder_path || defaults.sharepoint_base_folder_path || ''}`.trim() || undefined,
+        sharepoint_service_folders: normalizeServiceFolders(input?.sharepoint_service_folders ?? defaults.sharepoint_service_folders),
+        sharepoint_last_synced_at: `${input?.sharepoint_last_synced_at || defaults.sharepoint_last_synced_at || ''}`.trim() || undefined,
+    };
+}
+async function writeLocalPropertyCatalog(records) {
+    await fs_1.promises.writeFile(PROPERTIES_DB, JSON.stringify(records.map((item) => normalizePropertyCatalogRecord(item)), null, 2));
+}
+async function updateLocalPropertyCatalogEntry(propertyName, updates) {
+    const catalog = await readLocalPropertyCatalog();
+    const matchIndex = catalog.findIndex((item) => item.name.toLowerCase() === propertyName.trim().toLowerCase());
+    if (matchIndex < 0)
+        return null;
+    const merged = normalizePropertyCatalogRecord({
+        ...catalog[matchIndex],
+        ...updates,
+        name: catalog[matchIndex].name,
+    });
+    catalog[matchIndex] = merged;
+    await writeLocalPropertyCatalog(catalog);
+    return merged;
+}
+async function mirrorPropertyCatalogUpdateToSupabase(record) {
+    if (!(0, supabase_client_1.isSupabaseConfigured)())
+        return;
+    const supabase = (0, supabase_client_1.getSupabaseClient)();
+    const payload = {
+        name: record.name,
+        city_country: record.city_country,
+        hotel: record.hotel || null,
+        is_active: record.is_active !== false,
+        sharepoint_site_url: record.sharepoint_site_url || null,
+        sharepoint_library_name: record.sharepoint_library_name || null,
+        sharepoint_drive_id: record.sharepoint_drive_id || null,
+        sharepoint_base_folder_path: record.sharepoint_base_folder_path || null,
+        sharepoint_service_folders: record.sharepoint_service_folders || [],
+        sharepoint_last_synced_at: record.sharepoint_last_synced_at || null,
+        updated_at: new Date().toISOString(),
+    };
+    const { error } = await supabase
+        .from(PROPERTIES_TABLE)
+        .upsert(payload, { onConflict: 'name' });
+    if (error) {
+        throw new Error(`Supabase property upsert failed: ${error.message}`);
+    }
 }
 const SUPABASE_SUBMISSION_COLUMNS = new Set([
     'id',
@@ -311,12 +403,7 @@ async function readLocalPropertyCatalog() {
         if (!Array.isArray(parsed))
             return buildDefaultPropertyCatalog();
         return parsed
-            .map((item) => ({
-            name: `${item?.name || ''}`.trim(),
-            city_country: `${item?.city_country || deriveCityCountryFromProperty(`${item?.name || ''}`) || ''}`.trim(),
-            hotel: item?.hotel || undefined,
-            is_active: item?.is_active !== false,
-        }))
+            .map((item) => normalizePropertyCatalogRecord(item))
             .filter((item) => !!item.name);
     }
     catch {
@@ -329,17 +416,12 @@ async function getPropertyCatalog() {
             const supabase = (0, supabase_client_1.getSupabaseClient)();
             const { data, error } = await supabase
                 .from(PROPERTIES_TABLE)
-                .select('name, city_country, hotel, is_active')
+                .select('name, city_country, hotel, is_active, sharepoint_site_url, sharepoint_library_name, sharepoint_drive_id, sharepoint_base_folder_path, sharepoint_service_folders, sharepoint_last_synced_at')
                 .eq('is_active', true)
                 .order('name', { ascending: true });
             if (!error && Array.isArray(data) && data.length > 0) {
                 return data
-                    .map((item) => ({
-                    name: `${item?.name || ''}`.trim(),
-                    city_country: `${item?.city_country || deriveCityCountryFromProperty(`${item?.name || ''}`) || ''}`.trim(),
-                    hotel: item?.hotel || undefined,
-                    is_active: item?.is_active !== false,
-                }))
+                    .map((item) => normalizePropertyCatalogRecord(item))
                     .filter((item) => !!item.name);
             }
         }
@@ -619,6 +701,44 @@ app.get('/properties/validate', async (req, res) => {
     catch (error) {
         console.error('Error validating property:', error);
         res.status(500).json({ valid: false });
+    }
+});
+app.put('/properties/:name/sharepoint-config', async (req, res) => {
+    try {
+        const propertyName = `${req.params.name || ''}`.trim();
+        if (!propertyName) {
+            return res.status(400).json({ error: 'property name is required' });
+        }
+        const normalizedUpdates = {
+            sharepoint_site_url: `${req.body?.sharepoint_site_url || req.body?.siteUrl || ''}`.trim() || undefined,
+            sharepoint_library_name: `${req.body?.sharepoint_library_name || req.body?.libraryName || ''}`.trim() || undefined,
+            sharepoint_drive_id: `${req.body?.sharepoint_drive_id || req.body?.driveId || ''}`.trim() || undefined,
+            sharepoint_base_folder_path: `${req.body?.sharepoint_base_folder_path || req.body?.baseFolderPath || ''}`.trim() || undefined,
+            sharepoint_service_folders: normalizeServiceFolders(req.body?.sharepoint_service_folders || req.body?.serviceFolders),
+            sharepoint_last_synced_at: `${req.body?.sharepoint_last_synced_at || req.body?.lastSyncedAt || new Date().toISOString()}`.trim(),
+        };
+        const updated = await updateLocalPropertyCatalogEntry(propertyName, normalizedUpdates);
+        if (!updated) {
+            return res.status(404).json({ error: `property "${propertyName}" not found` });
+        }
+        try {
+            await mirrorPropertyCatalogUpdateToSupabase(updated);
+        }
+        catch (supabaseError) {
+            console.error(`Supabase property mirror failed for ${propertyName}:`, supabaseError.message);
+            (0, supabase_client_1.logAlert)({
+                alert_type: 'supabase_mirror_failed',
+                severity: 'warning',
+                service: 'db',
+                message: `Supabase property mirror failed for ${propertyName}`,
+                details: { error: supabaseError.message, property: propertyName },
+            });
+        }
+        res.json({ success: true, property: updated });
+    }
+    catch (error) {
+        console.error('Error saving property SharePoint config:', error);
+        res.status(500).json({ error: 'Failed to save property SharePoint config' });
     }
 });
 // Backward-compatible alias.

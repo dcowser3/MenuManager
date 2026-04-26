@@ -30,11 +30,13 @@ When a chef submits a menu, a ClickUp task is automatically created with the gen
 - Filters for status matching `CLICKUP_CORRECTIONS_STATUS` env var (default: `"corrections complete"`)
 - Looks up submission via `GET /submissions/by-clickup-task/:taskId` on the DB service
 - Downloads the latest attachment from the ClickUp task
+- If no usable ClickUp attachment exists at approval time, falls back to the locally stored submitted DOCX so "perfect as submitted" menus can still be finalized
 - Extracts canonical approved menu text from the corrected DOCX
 - Updates submission to `status: 'approved'` with `final_path`, `approved_menu_content_raw`, and `approved_menu_content`
 - Calls `POST /approved-dishes/extract` on the DB service, which inserts approved dishes into `approved_dishes` and carries forward the submission `service_period`
 - Fire-and-forget: clickup-integration sends `corrections_ready` email with the DOCX attached
 - Fire-and-forget: differ compares AI draft vs corrected file for training
+- If the property has SharePoint routing metadata, uploads the approved DOCX to the property base folder or matching service subfolder via Microsoft Graph
 
 ## Architecture
 
@@ -43,6 +45,34 @@ When a chef submits a menu, a ClickUp task is automatically created with the gen
 - **DB service:** added `GET /submissions/by-clickup-task/:taskId` lookup route, `POST /approved-dishes/extract` extraction route, and `POST /approved-dishes/backfill-approved` for already-approved submissions that missed extraction
 - **Email send:** `clickup-integration` now sends `corrections_ready` emails directly (reads DOCX from disk and attaches to email)
 - **Supabase schema:** `clickup_task_id VARCHAR(100)` column + index on submissions table, plus `service_period` on `submissions` and `approved_dishes`
+- **Property metadata:** SharePoint site URL, library, drive ID, base folder path, and discovered service-folder names now live on `properties`
+
+## SharePoint Routing
+
+The approval webhook now supports post-approval SharePoint routing for properties that have stored SharePoint metadata.
+
+Routing rules:
+
+- Match `submission.service_period` against the property’s stored `sharepoint_service_folders`
+- Always keep `Other` available in the form so users can choose the property root/base folder explicitly
+- Rename the uploaded DOCX to `Property_ServicePeriod_M.D.YY.docx` using the submission date when available
+- Upload to `{sharepoint_base_folder_path}/{matchedFolder}` when matched
+- Before uploading into a matched subfolder, move existing `.docx` files in that folder into `old/`
+- Leave existing `.pdf` and `.ai` files in place
+- Otherwise upload to `sharepoint_base_folder_path`
+- Upload failures do not block approval finalization; they log a warning alert instead
+
+### Property Sync
+
+Folder lists are intended to be refreshed on demand, not fetched live on every form load. Use:
+
+`npm run sharepoint:sync-property -- --property "<Property Name>" --site-url "<site>" --library-name "<library>" --base-folder-path "<path inside library>"`
+
+The script:
+
+- reads SharePoint children from Microsoft Graph
+- stores them through `PUT /properties/:name/sharepoint-config`
+- lets the dashboard form reuse the saved folder names for the `Service Period` dropdown
 
 ## Webhook Registration
 
