@@ -117,4 +117,4 @@ Notes:
 
 - The DB service must be running because the script stores the discovered folders via `PUT /properties/:name/sharepoint-config`.
 - If Supabase is configured, the DB service mirrors the same property metadata to the `properties` table.
-- The repo now seeds route metadata for `Tamayo - Denver`, `Toro - Hotel Clio - Denver`, `Toro - Fairmont Millennium Park - Chicago`, `Toro - Dania Beach`, and `Toro - Viceroy - Snowmass`; additional properties can be added the same way or refreshed with the sync script.
+- The repo now seeds route metadata for `Aqimero - Ritz-Carlton - Philadelphia`, `Maya - New York`, `Tamayo - Denver`, `Toro - Hotel Clio - Denver`, `Toro - Fairmont Millennium Park - Chicago`, `Toro - Dania Beach`, and `Toro - Viceroy - Snowmass`; additional properties can be added the same way or refreshed with the sync script.
