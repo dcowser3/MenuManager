@@ -16,9 +16,13 @@ import {
     SystemAlert
 } from '@menumanager/supabase-client';
 import nodemailer from 'nodemailer';
+import {
+    loadApprovalBaselineFromSubmission,
+    textToParagraphHtml,
+} from './lib/approval-baseline';
 
 const execAsync = promisify(exec);
-const DEFAULT_ALLERGEN_KEY = 'C crustaceans | D dairy | E egg | F fish | G gluten | N nuts | V vegetarian | VG vegan';
+const DEFAULT_ALLERGEN_KEY = 'G contains gluten | V vegetarian | D contains dairy | S contain shellfish | N contain nuts | VG vegan';
 const RAW_NOTICE_TEXT = '*consuming raw or undercooked meats, poultry, seafood, shellfish, or eggs may increase your risk of foodborne illness.';
 const RAW_NOTICE_PATTERN = /\*?\s*consuming raw or undercooked meats,\s*poultry,\s*seafood(?:,\s*shellfish)?,\s*or eggs may increase your risk of foodborne illness\.?/i;
 const DB_SERVICE_URL = process.env.DB_SERVICE_URL || 'http://localhost:3004';
@@ -230,6 +234,30 @@ function getSubmissionDocumentDir(projectName: string, property: string, submiss
     );
 }
 
+function coalesceString(...values: any[]): string {
+    for (const value of values) {
+        const normalized = `${value ?? ''}`.trim();
+        if (normalized) return normalized;
+    }
+    return '';
+}
+
+function getSubmissionBoolean(submission: any, key: string, rawKey?: string): boolean {
+    if (typeof submission?.[key] === 'boolean') return submission[key];
+    const rawValue = submission?.raw_payload?.[rawKey || key];
+    if (typeof rawValue === 'boolean') return rawValue;
+    return `${rawValue || ''}`.toLowerCase() === 'true';
+}
+
+function escapeHtml(value: string): string {
+    return `${value || ''}`
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
 type PropertyCatalogRecord = {
     name: string;
     city_country: string;
@@ -351,7 +379,7 @@ export async function extractBaselineFromDocx(filePath: string): Promise<{
     const detailsCommand = `${pythonCmd} "${extractDetailsScript}" "${filePath}"`;
 
     const [{ stdout: cleanStdout }, detailsResult] = await Promise.all([
-        execAsync(cleanCommand, { timeout: 30000, maxBuffer: 10 * 1024 * 1024 }),
+        execAsync(cleanCommand, { timeout: 120000, maxBuffer: 10 * 1024 * 1024 }),
         execAsync(detailsCommand, { timeout: 8000, maxBuffer: 2 * 1024 * 1024 })
             .then(({ stdout }) => ({ stdout }))
             .catch((error: any) => {
@@ -407,8 +435,8 @@ export async function extractUnapprovedFromDocx(filePath: string): Promise<{
     const detailsCommand = `${pythonCmd} "${extractDetailsScript}" "${filePath}"`;
 
     const [{ stdout: unapprovedStdout }, detailsResult] = await Promise.all([
-        execAsync(unapprovedCommand, { timeout: 30000, maxBuffer: 10 * 1024 * 1024 }),
-        execAsync(detailsCommand, { timeout: 8000, maxBuffer: 2 * 1024 * 1024 })
+        execAsync(unapprovedCommand, { timeout: 120000, maxBuffer: 10 * 1024 * 1024 }),
+        execAsync(detailsCommand, { timeout: 30000, maxBuffer: 2 * 1024 * 1024 })
             .then(({ stdout }) => ({ stdout }))
             .catch((error: any) => {
                 console.warn('Project details extraction failed during unapproved upload:', error?.stderr || error?.message || error);
@@ -519,6 +547,44 @@ app.get('/review/:submissionId', async (req, res) => {
         console.error('Error loading review:', error);
         res.status(500).render('error', { 
             message: 'Failed to load review details' 
+        });
+    }
+});
+
+app.get('/approval/:submissionId', async (req, res) => {
+    try {
+        const { submissionId } = req.params;
+        const dbResponse = await axios.get(`${DB_SERVICE_URL}/submissions/${encodeURIComponent(submissionId)}`);
+        const submission = dbResponse.data;
+
+        if (!submission) {
+            return res.status(404).render('error', {
+                message: 'Submission not found'
+            });
+        }
+
+        const baseline = await loadApprovalBaselineFromSubmission(submission, {
+            extractUnapprovedFromDocx,
+            resolveStoredPath: (storedPath) => (
+                storedPath.startsWith('../')
+                    ? path.resolve(__dirname, storedPath)
+                    : storedPath
+            ),
+        });
+        const approvalUrl = `${DASHBOARD_URL.replace(/\/+$/, '')}/approval/${submission.id || submissionId}`;
+        res.render('approval-editor', {
+            title: `Approval Editor: ${submission.project_name || submission.filename || submissionId}`,
+            submission,
+            editorHtml: baseline.editorHtml,
+            visibleText: baseline.visibleText,
+            sourceMode: baseline.sourceMode,
+            sourceLabel: baseline.sourceLabel,
+            approvalUrl,
+        });
+    } catch (error: any) {
+        console.error('Error loading approval editor:', error);
+        res.status(500).render('error', {
+            message: `Failed to load approval editor: ${error.message}`
         });
     }
 });
@@ -2107,6 +2173,97 @@ app.post('/api/form/submit', async (req, res) => {
     }
 });
 
+app.post('/api/approval/:submissionId/submit', async (req, res) => {
+    try {
+        const { submissionId } = req.params;
+        const editorHtmlRaw = `${req.body?.editorHtml || ''}`.trim();
+        const menuContentTextRaw = `${req.body?.menuContentText || ''}`.trim();
+
+        if (!editorHtmlRaw && !menuContentTextRaw) {
+            return res.status(400).json({ error: 'Approval editor content is required' });
+        }
+
+        const dbResponse = await axios.get(`${DB_SERVICE_URL}/submissions/${encodeURIComponent(submissionId)}`);
+        const submission = dbResponse.data;
+        if (!submission) {
+            return res.status(404).json({ error: 'Submission not found' });
+        }
+
+        const rawPayload = submission.raw_payload || {};
+        const projectName = coalesceString(submission.project_name, rawPayload.projectName) || 'Menu Approval';
+        const property = coalesceString(submission.property, rawPayload.property) || 'Unknown Property';
+        const orientation = coalesceString(submission.orientation, rawPayload.orientation) || 'Portrait';
+        const templateTypeRaw = coalesceString(submission.template_type, rawPayload.templateType) || 'food';
+        const templateType = templateTypeRaw === 'non_beverage' ? 'food' : templateTypeRaw;
+        const assetType = coalesceString(submission.asset_type, rawPayload.assetType).toUpperCase();
+        const printRegion = coalesceString((submission as any).print_region, rawPayload.printRegion);
+        const printSize = coalesceString((submission as any).print_size, rawPayload.printSize);
+        const printWidth = coalesceString((submission as any).print_width, rawPayload.printWidth);
+        const printHeight = coalesceString((submission as any).print_height, rawPayload.printHeight);
+        const digitalWidth = coalesceString((submission as any).digital_width, rawPayload.digitalWidth);
+        const digitalHeight = coalesceString((submission as any).digital_height, rawPayload.digitalHeight);
+        const width = coalesceString(submission.width, rawPayload.width);
+        const height = coalesceString(submission.height, rawPayload.height);
+        const wantsPrint = assetType === 'PRINT' || assetType === 'BOTH';
+        const wantsDigital = assetType === 'DIGITAL' || assetType === 'BOTH';
+        const printSizeForDocx = wantsPrint
+            ? (printRegion === 'NON_US' ? (printSize || 'N/A') : `${printWidth || width || ''} x ${printHeight || height || ''} inches`)
+            : '';
+        const digitalSizeForDocx = wantsDigital
+            ? `${digitalWidth || width || ''} x ${digitalHeight || height || ''} pixels`
+            : '';
+        const sizeForDocx = assetType === 'BOTH'
+            ? `Digital: ${digitalSizeForDocx} | Print: ${printSizeForDocx}`
+            : (wantsPrint ? printSizeForDocx : digitalSizeForDocx);
+
+        const fallbackAllergens = coalesceString((submission as any).allergens, rawPayload.allergens, DEFAULT_ALLERGEN_KEY);
+        const normalizedEditorHtml = stripManagedFooterFromHtml(editorHtmlRaw);
+        const footerMetadata = normalizeMenuFooter(menuContentTextRaw, fallbackAllergens);
+        const normalizedMenuContent = footerMetadata.body || stripManagedFooterText(coalesceString(submission.menu_content, rawPayload.menuContent), fallbackAllergens);
+        const effectiveAllergens = footerMetadata.normalizedAllergenLine || normalizeAllergenLegend(fallbackAllergens) || DEFAULT_ALLERGEN_KEY;
+        const shouldAddRawNotice = footerMetadata.hadRawNotice || detectRawUndercookedContent(normalizedMenuContent);
+
+        const approvedDir = path.join(getSubmissionDocumentDir(projectName, property, submission.id || submissionId), 'approved');
+        const approvedPath = path.join(approvedDir, `${submission.id || submissionId}-approved.docx`);
+        const approvedFileName = submission.filename || `${projectName}_Menu.docx`;
+
+        await generateDocxFromForm(submission.id || submissionId, {
+            projectName,
+            property,
+            size: sizeForDocx,
+            orientation,
+            menuType: coalesceString(submission.menu_type, rawPayload.menuType) || 'standard',
+            templateType,
+            dateNeeded: coalesceString(submission.date_needed, rawPayload.dateNeeded),
+            menuContent: normalizedMenuContent,
+            menuContentHtml: normalizedEditorHtml || textToParagraphHtml(normalizedMenuContent),
+            allergens: effectiveAllergens,
+            shouldAddRawNotice,
+        }, {
+            outputPath: approvedPath,
+        });
+
+        const finalizeResponse = await axios.post(`${CLICKUP_SERVICE_URL}/approval/finalize`, {
+            submissionId: submission.id || submissionId,
+            approvedPath,
+            approvedFileName,
+        });
+
+        res.json({
+            success: true,
+            submissionId: submission.id || submissionId,
+            approvedPath,
+            clickup: finalizeResponse.data || {},
+        });
+    } catch (error: any) {
+        console.error('Error submitting browser approval:', error.response?.data || error.message);
+        res.status(500).json({
+            error: 'Failed to submit browser approval',
+            details: error.message,
+        });
+    }
+});
+
 /**
  * NEW: Parse AI response that contains corrected menu + suggestions
  */
@@ -2484,14 +2641,23 @@ function parseFeedbackToSuggestions(feedback: string): Array<{
 /**
  * Helper: Generate Word document from form data using Python
  */
-async function generateDocxFromForm(submissionId: string, formData: any): Promise<string> {
+async function generateDocxFromForm(
+    submissionId: string,
+    formData: any,
+    options?: { outputPath?: string }
+): Promise<string> {
     const tempUploadsDir = path.join(__dirname, '..', '..', '..', 'tmp', 'uploads');
     await fs.mkdir(tempUploadsDir, { recursive: true });
 
-    const submissionDir = getSubmissionDocumentDir(formData.projectName || '', formData.property || '', submissionId);
-    const originalDir = path.join(submissionDir, 'original');
-    await fs.mkdir(originalDir, { recursive: true });
-    const outputPath = path.join(originalDir, `${submissionId}.docx`);
+    let outputPath = options?.outputPath || '';
+    if (!outputPath) {
+        const submissionDir = getSubmissionDocumentDir(formData.projectName || '', formData.property || '', submissionId);
+        const originalDir = path.join(submissionDir, 'original');
+        await fs.mkdir(originalDir, { recursive: true });
+        outputPath = path.join(originalDir, `${submissionId}.docx`);
+    } else {
+        await fs.mkdir(path.dirname(outputPath), { recursive: true });
+    }
 
     // Create Python script to generate docx
     const repoRoot = getRepoRoot();

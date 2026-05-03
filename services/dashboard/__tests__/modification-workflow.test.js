@@ -301,13 +301,13 @@ describe('Dashboard Modification Workflow (local, mocked externals)', () => {
                 'STARTERS',
                 'Guacamole - $12',
                 '',
-                'C crustaceans | D dairy | E egg | F fish | G gluten | N nuts | V vegetarian | VG vegan',
+                'G contains gluten | V vegetarian | D contains dairy | S contain shellfish | N contain nuts | VG vegan',
                 '*consuming raw or undercooked meats, poultry, seafood, or eggs may increase your risk of foodborne illness.',
             ].join('\n'),
             menuContentHtml: [
                 '<p>STARTERS</p>',
                 '<p>Guacamole - $12</p>',
-                '<p>C crustaceans | D dairy | E egg | F fish | G gluten | N nuts | V vegetarian | VG vegan</p>',
+                '<p>G contains gluten | V vegetarian | D contains dairy | S contain shellfish | N contain nuts | VG vegan</p>',
                 '<p>*consuming raw or undercooked meats, poultry, seafood, or eggs may increase your risk of foodborne illness.</p>',
             ].join(''),
             approvals: [{ approved: true, name: 'GM', position: 'GM' }],
@@ -332,7 +332,7 @@ describe('Dashboard Modification Workflow (local, mocked externals)', () => {
 
         const generatedFormData = JSON.parse(formDataWrite[1]);
         expect(generatedFormData.menuContent).toBe('STARTERS\nGuacamole - $12');
-        expect(generatedFormData.allergens).toBe('C crustaceans | D dairy | E egg | F fish | G gluten | N nuts | V vegetarian | VG vegan');
+        expect(generatedFormData.allergens).toBe('G contains gluten | V vegetarian | D contains dairy | S contain shellfish | N contain nuts | VG vegan');
         expect(generatedFormData.shouldAddRawNotice).toBe(true);
         expect(generatedFormData.menuContentHtml).toContain('<p>STARTERS</p>');
         expect(generatedFormData.menuContentHtml).toContain('<p>Guacamole - $12</p>');
@@ -392,7 +392,7 @@ describe('Dashboard Modification Workflow (local, mocked externals)', () => {
                 'STARTERS',
                 'Guacamole - $12',
                 '',
-                'C crustaceans | D dairy | E egg | F fish | G gluten | N nuts | V vegetarian | VG vegan',
+                'G contains gluten | V vegetarian | D contains dairy | S contain shellfish | N contain nuts | VG vegan',
                 '*consuming raw or undercooked meats, poultry, seafood, shellfish, or eggs may increase your risk of foodborne illness.',
             ].join('\n'),
             baselineMenuContent: '',

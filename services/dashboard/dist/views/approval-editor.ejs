@@ -1,0 +1,570 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title><%= title %></title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=Montserrat:wght@300;400;500;600&display=swap" rel="stylesheet">
+    <script src="/js/redline-preview.js"></script>
+    <style>
+        :root {
+            --color-primary: #2c2c2c;
+            --color-secondary: #8b7355;
+            --color-accent: #6b5344;
+            --color-text: #333333;
+            --color-text-light: #666666;
+            --color-text-muted: #999999;
+            --color-background: #ffffff;
+            --color-background-alt: #fafaf8;
+            --color-border: #e8e4de;
+            --color-border-light: #f0ece6;
+            --color-success: #4a7c59;
+            --color-warning: #b8860b;
+            --color-error: #8b3a3a;
+            --color-insert-bg: rgba(241, 196, 15, 0.25);
+            --color-delete-bg: rgba(139, 58, 58, 0.12);
+            --font-heading: 'Cormorant Garamond', Georgia, serif;
+            --font-body: 'Montserrat', -apple-system, BlinkMacSystemFont, sans-serif;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: var(--font-body);
+            background: var(--color-background);
+            color: var(--color-text);
+            line-height: 1.7;
+            font-weight: 400;
+            font-size: 15px;
+            letter-spacing: 0.02em;
+        }
+
+        .header {
+            background: var(--color-background);
+            color: var(--color-primary);
+            padding: 1.5rem 4vw;
+            border-bottom: 1px solid var(--color-border);
+        }
+
+        .header-inner {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .header h1 {
+            font-family: var(--font-heading);
+            font-size: 1.75rem;
+            font-weight: 500;
+            letter-spacing: 0.05em;
+            color: var(--color-primary);
+        }
+
+        .header p {
+            color: var(--color-text-light);
+            margin-top: 0.15rem;
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            letter-spacing: 0.15em;
+            font-weight: 400;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 1.5rem 2rem;
+        }
+
+        .nav {
+            margin-bottom: 1rem;
+        }
+
+        .nav a,
+        .subtle-link {
+            color: var(--color-secondary);
+            text-decoration: none;
+            transition: color 0.2s ease;
+        }
+
+        .nav a {
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            font-weight: 500;
+        }
+
+        .nav a:hover,
+        .subtle-link:hover {
+            color: var(--color-accent);
+        }
+
+        .alert {
+            display: none;
+            padding: 1rem 1.25rem;
+            margin-bottom: 1rem;
+            border: 1px solid;
+            font-size: 0.85rem;
+        }
+
+        .alert.show { display: block; }
+        .alert.success { background: rgba(74, 124, 89, 0.08); border-color: rgba(74, 124, 89, 0.2); color: var(--color-success); }
+        .alert.error { background: rgba(139, 58, 58, 0.08); border-color: rgba(139, 58, 58, 0.2); color: var(--color-error); }
+        .alert.warning { background: rgba(184, 134, 11, 0.08); border-color: rgba(184, 134, 11, 0.2); color: var(--color-warning); }
+
+        .card {
+            background: var(--color-background);
+            border: 1px solid var(--color-border);
+            padding: 1.5rem;
+            margin-bottom: 1rem;
+        }
+
+        .intro-card h2,
+        .workspace-header h2 {
+            font-family: var(--font-heading);
+            font-size: 1.25rem;
+            font-weight: 500;
+            letter-spacing: 0.03em;
+            color: var(--color-primary);
+        }
+
+        .intro-card h2 {
+            margin-bottom: 0.75rem;
+        }
+
+        .intro-card p,
+        .workspace-header p,
+        .workspace-notes {
+            color: var(--color-text-light);
+            font-size: 0.9rem;
+            line-height: 1.8;
+        }
+
+        .meta-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 0.9rem;
+            margin-top: 1rem;
+        }
+
+        .meta-card {
+            background: var(--color-background-alt);
+            border: 1px solid var(--color-border);
+            padding: 1rem 1.1rem;
+        }
+
+        .meta-label {
+            font-size: 0.66rem;
+            text-transform: uppercase;
+            letter-spacing: 0.15em;
+            color: var(--color-text-muted);
+            margin-bottom: 0.4rem;
+            font-weight: 500;
+        }
+
+        .meta-value {
+            font-size: 0.95rem;
+            line-height: 1.5;
+        }
+
+        .workspace-header {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1rem;
+            padding-bottom: 1rem;
+            border-bottom: 1px solid var(--color-border);
+        }
+
+        .workspace-header p {
+            margin-top: 0.35rem;
+        }
+
+        .toolbar {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.65rem;
+        }
+
+        .btn {
+            display: inline-block;
+            padding: 0.85rem 1.25rem;
+            text-decoration: none;
+            font-weight: 500;
+            transition: all 0.3s ease;
+            border: 2px solid;
+            cursor: pointer;
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            letter-spacing: 0.2em;
+            font-family: var(--font-body);
+            text-align: center;
+            background: transparent;
+            color: var(--color-text);
+            border-color: var(--color-border);
+        }
+
+        .btn:hover {
+            border-color: var(--color-primary);
+            color: var(--color-primary);
+        }
+
+        .btn-primary {
+            background: var(--color-primary);
+            border-color: var(--color-primary);
+            color: var(--color-background);
+        }
+
+        .btn-primary:hover {
+            background: transparent;
+            color: var(--color-primary);
+        }
+
+        .workspace-notes {
+            padding: 1rem 0 0;
+        }
+
+        .workspace-notes strong {
+            color: var(--color-primary);
+        }
+
+        .status-row {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: space-between;
+            gap: 0.75rem;
+            padding: 1rem 0;
+            color: var(--color-text-muted);
+            font-size: 0.8rem;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            border-bottom: 1px solid var(--color-border-light);
+        }
+
+        .editor-grid {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+            gap: 1.1rem;
+            padding-top: 1rem;
+        }
+
+        .panel {
+            border: 1px solid var(--color-border);
+            background: var(--color-background);
+            min-height: 64vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .panel-header {
+            padding: 0.9rem 1rem;
+            border-bottom: 1px solid var(--color-border);
+            background: var(--color-background-alt);
+            min-height: 112px;
+            display: flex;
+            flex-direction: column;
+            justify-content: flex-start;
+        }
+
+        .panel-header h3 {
+            margin: 0;
+            font-family: var(--font-heading);
+            font-size: 1.1rem;
+            font-weight: 500;
+            color: var(--color-primary);
+        }
+
+        .panel-header p {
+            margin: 0.3rem 0 0;
+            font-size: 0.82rem;
+            color: var(--color-text-light);
+            line-height: 1.6;
+        }
+
+        .editor-textarea,
+        .preview-body {
+            flex: 1;
+            padding: 1.25rem;
+            color: var(--color-text);
+            font-family: var(--font-body);
+            font-size: 1rem;
+            line-height: 1.8;
+            letter-spacing: 0.02em;
+            background: var(--color-background);
+            white-space: pre-wrap;
+            overflow-x: hidden;
+            overflow-y: auto;
+            scrollbar-gutter: stable both-edges;
+        }
+
+        .editor-textarea {
+            width: 100%;
+            border: 0;
+            resize: vertical;
+            outline: none;
+            word-break: normal;
+            overflow-wrap: break-word;
+        }
+
+        .editor-textarea:focus {
+            box-shadow: inset 0 0 0 1px var(--color-secondary);
+        }
+
+        .preview-body {
+            word-break: normal;
+            overflow-wrap: break-word;
+        }
+
+        .existing-del,
+        .persistent-del {
+            color: var(--color-error);
+            text-decoration: line-through;
+            background: var(--color-delete-bg);
+        }
+
+        .existing-ins,
+        .persistent-ins {
+            background: var(--color-insert-bg);
+        }
+
+        .footer-actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: 0.75rem;
+            padding-top: 1rem;
+            border-top: 1px solid var(--color-border-light);
+            margin-top: 1rem;
+        }
+
+        @media (max-width: 920px) {
+            .editor-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .panel {
+                min-height: 44vh;
+            }
+        }
+
+        @media (max-width: 760px) {
+            .header,
+            .container {
+                padding-left: 1rem;
+                padding-right: 1rem;
+            }
+
+            .card {
+                padding: 1rem;
+            }
+
+            .footer-actions {
+                justify-content: stretch;
+                flex-direction: column;
+            }
+
+            .footer-actions .btn {
+                width: 100%;
+                text-align: center;
+            }
+        }
+    </style>
+</head>
+<body>
+    <header class="header">
+        <div class="header-inner">
+            <h1>Approval Editor</h1>
+            <p>ClickUp Browser Approval</p>
+        </div>
+    </header>
+
+    <main class="container">
+        <nav class="nav">
+            <a href="/">Back to Dashboard</a>
+        </nav>
+
+        <div id="alertBox" class="alert"></div>
+
+        <section class="card intro-card">
+            <h2><%= submission.project_name || submission.filename || submission.id %></h2>
+            <p>
+                Edit the clean approved wording on the left and review the live tracked-change preview on the right.
+                This page now follows the same visual style as the rest of the dashboard.
+            </p>
+
+            <div class="meta-grid">
+                <div class="meta-card">
+                    <div class="meta-label">Submission</div>
+                    <div class="meta-value"><%= submission.id %></div>
+                </div>
+                <div class="meta-card">
+                    <div class="meta-label">Property</div>
+                    <div class="meta-value"><%= submission.property || 'N/A' %></div>
+                </div>
+                <div class="meta-card">
+                    <div class="meta-label">Service Period</div>
+                    <div class="meta-value"><%= submission.service_period || submission.raw_payload?.servicePeriod || 'N/A' %></div>
+                </div>
+                <div class="meta-card">
+                    <div class="meta-label">Source</div>
+                    <div class="meta-value"><%= sourceLabel %></div>
+                </div>
+                <div class="meta-card">
+                    <div class="meta-label">ClickUp Task</div>
+                    <div class="meta-value"><%= submission.clickup_task_id || 'Not linked' %></div>
+                </div>
+                <div class="meta-card">
+                    <div class="meta-label">Approval Link</div>
+                    <div class="meta-value"><a class="subtle-link" href="<%= approvalUrl %>"><%= approvalUrl %></a></div>
+                </div>
+            </div>
+        </section>
+
+        <section class="card workspace-card">
+            <div class="workspace-header">
+                <div>
+                    <h2>Approval Editor</h2>
+                    <p>Stable editing on the left. Live diff preview on the right. No inline cursor hacks.</p>
+                </div>
+                <div class="toolbar">
+                    <button id="restoreBtn" class="btn" type="button">Restore Original</button>
+                    <a class="btn" href="/download/original/<%= submission.id %>">Download Original DOCX</a>
+                </div>
+            </div>
+
+            <div class="workspace-notes">
+                <strong>How to use it:</strong> make edits in the left panel exactly as you want the approved menu to read.
+                The right panel updates in real time and shows preserved imported redlines plus any new additions and deletions.
+            </div>
+
+            <div class="status-row">
+                <div id="sourceStatus">Baseline loaded from <%= sourceMode === 'original_docx' ? 'the submitted DOCX' : sourceMode === 'approved_docx' ? 'the stored approved DOCX' : 'saved submission data' %></div>
+                <div id="diffSummary">Live changes: 0 insertions, 0 deletions</div>
+            </div>
+
+            <div class="editor-grid">
+                <section class="panel">
+                    <div class="panel-header">
+                        <h3>Edit Text</h3>
+                        <p>This is the final approved wording. Typing here should feel normal.</p>
+                    </div>
+                    <textarea id="approvalEditorInput" class="editor-textarea" spellcheck="false"><%= visibleText %></textarea>
+                </section>
+
+                <section class="panel">
+                    <div class="panel-header">
+                        <h3>Live Redline Preview</h3>
+                        <p>Yellow is new text. Red strike-through is removed text. Imported redlines stay visible where unchanged.</p>
+                    </div>
+                    <div id="approvalPreview" class="preview-body"></div>
+                </section>
+            </div>
+
+            <div class="footer-actions">
+                <button id="submitBtn" class="btn btn-primary" type="button">Submit Approval</button>
+            </div>
+        </section>
+    </main>
+
+    <script>
+        const submissionId = <%- JSON.stringify(submission.id) %>;
+        const baselineText = <%- JSON.stringify(visibleText) %>;
+        const baselineHtml = <%- JSON.stringify(editorHtml) %>;
+        const textarea = document.getElementById('approvalEditorInput');
+        const preview = document.getElementById('approvalPreview');
+        const submitBtn = document.getElementById('submitBtn');
+        const alertBox = document.getElementById('alertBox');
+        const diffSummary = document.getElementById('diffSummary');
+        const redlinePreview = window.MenuRedlinePreview;
+        let previewUpdateTimer = null;
+        let lastRenderedHtml = '';
+
+        function showAlert(message, type = 'success') {
+            alertBox.textContent = message;
+            alertBox.className = `alert show ${type}`;
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+
+        const baselineAnnotationMap = redlinePreview.buildAnnotationMapFromHtml(
+            baselineHtml,
+            baselineText,
+            { trimText: false }
+        );
+
+        function renderPersistentPreview(baseText, revisedText) {
+            const rendered = redlinePreview.renderPersistentPreview(baseText, revisedText, {
+                annotationMap: baselineAnnotationMap,
+                includeExistingAnnotations: true
+            });
+
+            lastRenderedHtml = rendered.html;
+            preview.innerHTML = rendered.html;
+            diffSummary.textContent = `Live changes: ${rendered.insertions} insertions, ${rendered.deletions} deletions`;
+        }
+
+        function buildSubmissionPreviewHtml() {
+            return (lastRenderedHtml || '')
+                .split('\n')
+                .map((lineHtml) => `<p>${lineHtml || '<br>'}</p>`)
+                .join('');
+        }
+
+        async function submitApproval() {
+            submitBtn.disabled = true;
+            submitBtn.textContent = 'Submitting...';
+
+            try {
+                const menuContentText = textarea.value.replace(/\r/g, '');
+                const editorHtml = buildSubmissionPreviewHtml();
+
+                if (!menuContentText.trim()) {
+                    throw new Error('Approval editor is empty.');
+                }
+
+                const response = await fetch(`/api/approval/${encodeURIComponent(submissionId)}/submit`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        editorHtml,
+                        menuContentText
+                    })
+                });
+
+                const data = await response.json();
+                if (!response.ok) {
+                    throw new Error(data.error || 'Failed to submit approval');
+                }
+
+                if (data.clickup && data.clickup.warning) {
+                    showAlert(`Approval submitted. ${data.clickup.warning}`, 'warning');
+                } else {
+                    showAlert('Approval submitted successfully. The approved DOCX has been generated and the downstream workflow has been triggered.', 'success');
+                }
+            } catch (error) {
+                console.error(error);
+                showAlert(`Error submitting approval: ${error.message}`, 'error');
+            } finally {
+                submitBtn.disabled = false;
+                submitBtn.textContent = 'Submit Approval';
+            }
+        }
+
+        textarea.addEventListener('input', () => {
+            clearTimeout(previewUpdateTimer);
+            previewUpdateTimer = setTimeout(() => {
+                renderPersistentPreview(baselineText, textarea.value.replace(/\r/g, ''));
+            }, 90);
+        });
+
+        document.getElementById('restoreBtn').addEventListener('click', () => {
+            textarea.value = baselineText;
+            renderPersistentPreview(baselineText, baselineText);
+            textarea.focus();
+            showAlert('Editor reset to the submitted menu text.', 'success');
+        });
+
+        submitBtn.addEventListener('click', submitApproval);
+        renderPersistentPreview(baselineText, baselineText);
+    </script>
+</body>
+</html>

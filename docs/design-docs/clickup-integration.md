@@ -8,6 +8,8 @@ When a chef submits a menu, a ClickUp task is automatically created with the gen
 
 - Dashboard fires-and-forgets a `POST localhost:3007/create-task` after form submission
 - Creates task named `"{projectName} — {property}"` with submission details in the description
+- New tasks are now created in the ClickUp status configured by `CLICKUP_INITIAL_REVIEW_STATUS` (default: `Pending Initial ISA Review`)
+- Task description now includes a direct browser approval link to `GET /approval/:submissionId`
 - Submission payload includes both `menuType` and `servicePeriod` so ClickUp context matches the original chef request
 - Uploads the generated DOCX as an attachment
 - Uploads optional menu image attachment when provided in the form (`menuImageUpload`)
@@ -33,15 +35,26 @@ When a chef submits a menu, a ClickUp task is automatically created with the gen
 - If no usable ClickUp attachment exists at approval time, falls back to the locally stored submitted DOCX so "perfect as submitted" menus can still be finalized
 - Extracts canonical approved menu text from the corrected DOCX
 - Updates submission to `status: 'approved'` with `final_path`, `approved_menu_content_raw`, and `approved_menu_content`
+- After approved DOCX processing completes, moves the ClickUp task to `CLICKUP_POST_APPROVAL_STATUS` (default: `To Do`)
 - Calls `POST /approved-dishes/extract` on the DB service, waits for the result, and alerts if approved-dish extraction fails
 - Fire-and-forget: clickup-integration sends `corrections_ready` email with the DOCX attached
 - Fire-and-forget: differ compares AI draft vs corrected file for training
 - If the property has SharePoint routing metadata, uploads the approved DOCX to the property base folder or matching service subfolder via Microsoft Graph
 
+## Browser Approval Flow (Local Prototype)
+
+- ClickUp task description includes a link back to the browser approval editor at `GET /approval/:submissionId`
+- The dashboard loads the stored submission DOCX back into a side-by-side approval workspace: clean text editing on the left and live tracked-preview rendering on the right
+- When the originally stored submission DOCX is missing locally, the approval page now falls back to the stored approved DOCX before using normalized saved submission text
+- Imported `existing-del` and `existing-ins` markup stays visible in the preview wherever that original redline content remains unchanged
+- Reviewer edits are submitted through `POST /api/approval/:submissionId/submit`
+- Dashboard generates an approved DOCX from the edited HTML and calls `POST localhost:3007/approval/finalize`
+- `clickup-integration` uploads the approved DOCX back to the ClickUp task when configured, finalizes the submission, triggers SharePoint upload, notifications, differ, and approved-dish extraction, then moves the task to `CLICKUP_POST_APPROVAL_STATUS`
+
 ## Architecture
 
 - **Service:** `services/clickup-integration/index.ts` (port 3007)
-- **Routes:** `POST /create-task`, `POST /webhook/clickup`, `POST /webhook/register`, `GET /health`
+- **Routes:** `POST /create-task`, `POST /approval/finalize`, `POST /webhook/clickup`, `POST /webhook/register`, `GET /health`
 - **DB service:** added `GET /submissions/by-clickup-task/:taskId` lookup route, `POST /approved-dishes/extract` extraction route, and `POST /approved-dishes/backfill-approved` for already-approved submissions that missed extraction
 - **Email send:** `clickup-integration` now sends `corrections_ready` emails directly (reads DOCX from disk and attaches to email)
 - **Supabase schema:** `clickup_task_id VARCHAR(100)` column + index on submissions table, plus `service_period` on `submissions` and `approved_dishes`

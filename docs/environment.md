@@ -47,7 +47,9 @@ These are optional. If `CLICKUP_API_TOKEN` or `CLICKUP_LIST_ID` are not set, the
 | `CLICKUP_ASSIGNEE_ID` | User ID to auto-assign tasks to |
 | `CLICKUP_WEBHOOK_URL` | Public URL for ClickUp webhook events |
 | `CLICKUP_WEBHOOK_SECRET` | Optional webhook signing secret from ClickUp (`POST /webhook/register` response). If set, webhook signatures are strictly verified. |
+| `CLICKUP_INITIAL_REVIEW_STATUS` | Status assigned to newly created ClickUp tasks (default: `"pending initial isa review"`) |
 | `CLICKUP_CORRECTIONS_STATUS` | Status name that triggers correction download (default: `"corrections complete"`) |
+| `CLICKUP_POST_APPROVAL_STATUS` | Status applied to the ClickUp task after approved DOCX processing finishes (default: `"to do"`) |
 
 ## Alerting And Monitoring
 

@@ -32,6 +32,7 @@ Menu Manager is an AI-powered service designed to automate the review process fo
 - AI-powered two-tier review (general QA + detailed corrections)
 - Review highlights and persistent redlines surface punctuation/separator edits such as hyphen, comma, slash, and pipe changes
 - Submission normalization keeps exactly one managed allergen legend and foodborne warning footer: chef-supplied footer text is reused or corrected to the canonical wording instead of being duplicated
+- The default allergen legend is now `G contains gluten | V vegetarian | D contains dairy | S contain shellfish | N contain nuts | VG vegan`
 - Approved-dish extraction now splits inline `Dish Name - description` menu rows into separate `dish_name` and `description` fields, captures trailing allergen codes, and skips the allergen legend / food-safety footer instead of storing them as dishes
 - DOCX template validation and redlining
 - Modification uploads with preserved redlines remain usable even if project metadata extraction cannot be parsed from the DOCX
@@ -39,6 +40,7 @@ Menu Manager is an AI-powered service designed to automate the review process fo
 - Reviewer dashboard
 - Notification system
 - Approved dishes are extracted automatically when the ClickUp-reviewed DOCX is marked approved
+- ClickUp tasks now include a browser approval link that opens a side-by-side approval editor: clean text editing on the left, live redline/highlight preview on the right, and final DOCX generation on submit
 
 ### Planned (Phase 2)
 - **Web Form Submission** - Chefs upload menus and select reviewers via web form
@@ -82,6 +84,16 @@ services/
 7. **Multi-Level Approval** - Additional reviewers if required
 8. **ClickUp Integration** - Submission creates a ClickUp task and final approval webhook pulls the corrected DOCX back in
 9. **Dishes Database** - Approved dishes extracted from the approved menu text and stored
+
+Current ClickUp BAU status handoff:
+- New tasks start in `Pending Initial ISA Review`
+- When the approved DOCX is processed, the task is moved to `To Do`
+
+Browser approval editor prototype:
+- ClickUp tasks now include an approval link to `/approval/:submissionId`
+- Isabella can edit approved text in a left-side browser editor while a right-side panel shows the live tracked-change preview with preserved imported redlines/highlights
+- The approval editor prefers locally available stored DOCX files for baseline formatting and falls back to normalized saved submission text only when no local DOCX is available
+- Submitting that page generates the approved DOCX and hands it to the same downstream finalization path used for ClickUp/SharePoint processing
 
 ## Property Catalog
 
@@ -168,6 +180,11 @@ DB_SERVICE_URL=http://localhost:3004
 AI_REVIEW_URL=http://localhost:3002
 DIFFER_SERVICE_URL=http://localhost:3006
 CLICKUP_SERVICE_URL=http://localhost:3007
+
+# ClickUp workflow statuses
+CLICKUP_INITIAL_REVIEW_STATUS=pending initial isa review
+CLICKUP_CORRECTIONS_STATUS=approved
+CLICKUP_POST_APPROVAL_STATUS=to do
 
 # Supabase
 SUPABASE_URL=https://your-project.supabase.co

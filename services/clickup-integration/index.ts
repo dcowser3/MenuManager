@@ -28,7 +28,9 @@ const CLICKUP_ASSIGNEE_ID = process.env.CLICKUP_ASSIGNEE_ID;
 const CLICKUP_TEAM_ID = process.env.CLICKUP_TEAM_ID;
 const CLICKUP_WEBHOOK_URL = process.env.CLICKUP_WEBHOOK_URL;
 const CLICKUP_WEBHOOK_SECRET = process.env.CLICKUP_WEBHOOK_SECRET;
+const CLICKUP_INITIAL_REVIEW_STATUS = (process.env.CLICKUP_INITIAL_REVIEW_STATUS || 'pending initial isa review').trim();
 const CLICKUP_CORRECTIONS_STATUS = (process.env.CLICKUP_CORRECTIONS_STATUS || 'corrections complete').toLowerCase();
+const CLICKUP_POST_APPROVAL_STATUS = (process.env.CLICKUP_POST_APPROVAL_STATUS || 'to do').trim();
 const GRAPH_CLIENT_ID = process.env.GRAPH_CLIENT_ID;
 const GRAPH_TENANT_ID = process.env.GRAPH_TENANT_ID;
 const GRAPH_CLIENT_SECRET = process.env.GRAPH_CLIENT_SECRET;
@@ -271,6 +273,14 @@ function buildTaskDescription(input: {
         lines.push('');
     }
 
+    if (input.submissionId) {
+        lines.push(
+            '## Browser Approval',
+            `- Approval Editor: ${DASHBOARD_URL.replace(/\/+$/, '')}/approval/${input.submissionId}`,
+            ''
+        );
+    }
+
     lines.push(
         '## Menu Submission',
         `- Submission ID: ${input.submissionId || 'N/A'}`,
@@ -405,6 +415,17 @@ async function uploadTaskAttachment(
     }
 
     throw lastError || new Error('Attachment upload failed');
+}
+
+async function updateClickUpTaskStatus(taskId: string, status: string): Promise<void> {
+    const normalizedStatus = String(status || '').trim();
+    if (!normalizedStatus) return;
+
+    await axios.put(
+        `https://api.clickup.com/api/v2/task/${taskId}`,
+        { status: normalizedStatus },
+        { headers: clickupHeaders }
+    );
 }
 
 function attachmentTimestamp(attachment: any): number {
@@ -836,6 +857,172 @@ async function extractApprovedDishesForSubmission(input: {
     return added;
 }
 
+async function finalizeApprovedSubmission(input: {
+    submission: any;
+    approvedPath: string;
+    approvedFileName: string;
+    clickupTaskId?: string;
+    attachmentId?: string | null;
+    approvedAssetSource?: string;
+}): Promise<{
+    processed: boolean;
+    submissionId: string;
+}> {
+    const submission = input.submission;
+    const clickupTaskId = `${input.clickupTaskId || submission?.clickup_task_id || ''}`.trim();
+    let extractedRaw = '';
+    let extractedClean = '';
+
+    try {
+        const extracted = await extractApprovedMenuContent(input.approvedPath);
+        extractedRaw = extracted.raw;
+        extractedClean = extracted.cleaned;
+    } catch (extractError: any) {
+        console.warn(`Failed to extract approved text from approved DOCX: ${extractError.message}`);
+    }
+
+    await axios.put(`${DB_SERVICE_URL}/submissions/${submission.id}`, {
+        status: 'approved',
+        final_path: input.approvedPath,
+        approved_menu_content_raw: extractedRaw || undefined,
+        approved_menu_content: extractedClean || undefined,
+        approved_text_extracted_at: extractedClean ? new Date().toISOString() : undefined,
+    });
+    console.log(`Updated submission ${submission.id} to approved`);
+
+    axios.post(`${DB_SERVICE_URL}/assets`, {
+        submission_id: submission.id,
+        asset_type: 'approved_docx',
+        source: input.approvedAssetSource || 'isabella_clickup',
+        storage_provider: 'local',
+        storage_path: input.approvedPath,
+        file_name: path.basename(input.approvedPath),
+        meta: {
+            clickup_task_id: clickupTaskId || null,
+            attachment_id: input.attachmentId || null,
+        },
+    }).catch((err) => console.error('Failed to save approved_docx asset metadata:', err.message));
+
+    try {
+        const sharePointUpload = await uploadApprovedDocToSharePoint({
+            property: submission.property || '',
+            servicePeriod: submission.service_period || submission.raw_payload?.servicePeriod,
+            localFilePath: input.approvedPath,
+            uploadFileName: input.approvedFileName,
+            submission,
+        });
+
+        if (sharePointUpload.uploaded) {
+            console.log(`Uploaded approved DOCX to SharePoint: ${sharePointUpload.storagePath}`);
+            if (sharePointUpload.archivedDocxCount) {
+                console.log(`Archived ${sharePointUpload.archivedDocxCount} existing DOCX file(s) into old/`);
+            }
+            axios.post(`${DB_SERVICE_URL}/assets`, {
+                submission_id: submission.id,
+                asset_type: 'sharepoint_approved_docx',
+                source: 'sharepoint_graph',
+                storage_provider: 'sharepoint',
+                storage_path: sharePointUpload.storagePath,
+                file_name: path.basename(sharePointUpload.storagePath || input.approvedFileName),
+                meta: {
+                    clickup_task_id: clickupTaskId || null,
+                    site_id: sharePointUpload.siteId,
+                    drive_id: sharePointUpload.driveId,
+                    web_url: sharePointUpload.webUrl || null,
+                    matched_folder: sharePointUpload.folderMatched,
+                    archived_docx_count: sharePointUpload.archivedDocxCount || 0,
+                },
+            }).catch((err) => console.error('Failed to save SharePoint asset metadata:', err.message));
+        } else if (sharePointUpload.skipped) {
+            console.log(`Skipped SharePoint upload for submission ${submission.id}: ${sharePointUpload.skipped}`);
+        }
+    } catch (sharePointError: any) {
+        console.error('Failed to upload approved DOCX to SharePoint:', sharePointError.response?.data || sharePointError.message);
+        sendAdminAlert({
+            alert_type: 'sharepoint_upload_failed',
+            severity: 'warning',
+            service: 'clickup-integration',
+            submission_id: submission.id,
+            message: `Failed to upload approved DOCX to SharePoint for "${submission.project_name}"`,
+            details: {
+                error: sharePointError.response?.data || sharePointError.message,
+                property: submission.property,
+                servicePeriod: submission.service_period || submission.raw_payload?.servicePeriod || null,
+            },
+        });
+    }
+
+    if (clickupTaskId) {
+        try {
+            await updateClickUpTaskStatus(clickupTaskId, CLICKUP_POST_APPROVAL_STATUS);
+            console.log(`Moved ClickUp task ${clickupTaskId} to "${CLICKUP_POST_APPROVAL_STATUS}" after approval processing`);
+        } catch (statusError: any) {
+            console.error('Failed to move ClickUp task after approval:', statusError.response?.data || statusError.message);
+            sendAdminAlert({
+                alert_type: 'clickup_status_transition_failed',
+                severity: 'warning',
+                service: 'clickup-integration',
+                submission_id: submission.id,
+                message: `Failed to move ClickUp task ${clickupTaskId} to "${CLICKUP_POST_APPROVAL_STATUS}" after approval`,
+                details: {
+                    error: statusError.response?.data || statusError.message,
+                    target_status: CLICKUP_POST_APPROVAL_STATUS,
+                },
+            });
+        }
+    }
+
+    sendCorrectionsReadyNotification({
+        submitterEmail: submission.submitter_email,
+        submitterName: submission.submitter_name,
+        projectName: submission.project_name,
+        correctedPath: input.approvedPath,
+        filename: input.approvedFileName,
+    }).catch((err: any) => {
+        console.error('Failed to send corrections_ready notification:', err.message);
+        sendAdminAlert({
+            alert_type: 'notification_email_failed',
+            severity: 'warning',
+            service: 'clickup-integration',
+            submission_id: submission.id,
+            message: `Failed to send corrections email to ${submission.submitter_email} for "${submission.project_name}"`,
+            details: { error: err.message },
+        });
+    });
+
+    axios.post(`${DIFFER_SERVICE_URL}/compare`, {
+        ai_draft_path: submission.ai_draft_path,
+        final_path: input.approvedPath,
+        submission_id: submission.id,
+    }).catch((err) => console.error('Failed to trigger differ comparison:', err.message));
+
+    try {
+        await extractApprovedDishesForSubmission({
+            submissionId: submission.id,
+            property: submission.property,
+            servicePeriod: submission.service_period || submission.raw_payload?.servicePeriod,
+            approvedMenuContent: extractedClean || submission.approved_menu_content || submission.menu_content,
+        });
+    } catch (err: any) {
+        console.error('Failed to extract approved dishes:', err.response?.data || err.message);
+        sendAdminAlert({
+            alert_type: 'approved_dish_extraction_failed',
+            severity: 'error',
+            service: 'clickup-integration',
+            submission_id: submission.id,
+            message: `Failed to extract approved dishes for "${submission.project_name}"`,
+            details: {
+                error: err.response?.data || err.message,
+                property: submission.property,
+                servicePeriod: submission.service_period || submission.raw_payload?.servicePeriod || null,
+                clickup_task_id: clickupTaskId || null,
+            },
+        });
+    }
+
+    return { processed: true, submissionId: submission.id };
+}
+
 async function processApprovedTask(clickupTaskId: string, opts?: { skipStatusCheck?: boolean }): Promise<{
     processed: boolean;
     reason?: string;
@@ -880,136 +1067,14 @@ async function processApprovedTask(clickupTaskId: string, opts?: { skipStatusChe
         console.log(`Copied fallback approved file from ${fallbackSourcePath} to ${approvedPath}`);
     }
 
-    let extractedRaw = '';
-    let extractedClean = '';
-    try {
-        const extracted = await extractApprovedMenuContent(approvedPath);
-        extractedRaw = extracted.raw;
-        extractedClean = extracted.cleaned;
-    } catch (extractError: any) {
-        console.warn(`Failed to extract approved text from approved DOCX: ${extractError.message}`);
-    }
-
-    await axios.put(`${DB_SERVICE_URL}/submissions/${submission.id}`, {
-        status: 'approved',
-        final_path: approvedPath,
-        approved_menu_content_raw: extractedRaw || undefined,
-        approved_menu_content: extractedClean || undefined,
-        approved_text_extracted_at: extractedClean ? new Date().toISOString() : undefined,
+    return finalizeApprovedSubmission({
+        submission,
+        approvedPath,
+        approvedFileName,
+        clickupTaskId,
+        attachmentId: latestAttachment?.id || null,
+        approvedAssetSource: 'isabella_clickup',
     });
-    console.log(`Updated submission ${submission.id} to approved`);
-
-    axios.post(`${DB_SERVICE_URL}/assets`, {
-        submission_id: submission.id,
-        asset_type: 'approved_docx',
-        source: 'isabella_clickup',
-        storage_provider: 'local',
-        storage_path: approvedPath,
-        file_name: path.basename(approvedPath),
-        meta: {
-            clickup_task_id: clickupTaskId,
-            attachment_id: latestAttachment?.id || null,
-        },
-    }).catch((err) => console.error('Failed to save approved_docx asset metadata:', err.message));
-
-    try {
-        const sharePointUpload = await uploadApprovedDocToSharePoint({
-            property: submission.property || '',
-            servicePeriod: submission.service_period || submission.raw_payload?.servicePeriod,
-            localFilePath: approvedPath,
-            uploadFileName: approvedFileName,
-            submission,
-        });
-
-        if (sharePointUpload.uploaded) {
-            console.log(`Uploaded approved DOCX to SharePoint: ${sharePointUpload.storagePath}`);
-            if (sharePointUpload.archivedDocxCount) {
-                console.log(`Archived ${sharePointUpload.archivedDocxCount} existing DOCX file(s) into old/`);
-            }
-            axios.post(`${DB_SERVICE_URL}/assets`, {
-                submission_id: submission.id,
-                asset_type: 'sharepoint_approved_docx',
-                source: 'sharepoint_graph',
-                storage_provider: 'sharepoint',
-                storage_path: sharePointUpload.storagePath,
-                file_name: path.basename(sharePointUpload.storagePath || approvedFileName),
-                meta: {
-                    clickup_task_id: clickupTaskId,
-                    site_id: sharePointUpload.siteId,
-                    drive_id: sharePointUpload.driveId,
-                    web_url: sharePointUpload.webUrl || null,
-                    matched_folder: sharePointUpload.folderMatched,
-                    archived_docx_count: sharePointUpload.archivedDocxCount || 0,
-                },
-            }).catch((err) => console.error('Failed to save SharePoint asset metadata:', err.message));
-        } else if (sharePointUpload.skipped) {
-            console.log(`Skipped SharePoint upload for submission ${submission.id}: ${sharePointUpload.skipped}`);
-        }
-    } catch (sharePointError: any) {
-        console.error('Failed to upload approved DOCX to SharePoint:', sharePointError.response?.data || sharePointError.message);
-        sendAdminAlert({
-            alert_type: 'sharepoint_upload_failed',
-            severity: 'warning',
-            service: 'clickup-integration',
-            submission_id: submission.id,
-            message: `Failed to upload approved DOCX to SharePoint for "${submission.project_name}"`,
-            details: {
-                error: sharePointError.response?.data || sharePointError.message,
-                property: submission.property,
-                servicePeriod: submission.service_period || submission.raw_payload?.servicePeriod || null,
-            },
-        });
-    }
-
-    sendCorrectionsReadyNotification({
-        submitterEmail: submission.submitter_email,
-        submitterName: submission.submitter_name,
-        projectName: submission.project_name,
-        correctedPath: approvedPath,
-        filename: approvedFileName,
-    }).catch((err: any) => {
-        console.error('Failed to send corrections_ready notification:', err.message);
-        sendAdminAlert({
-            alert_type: 'notification_email_failed',
-            severity: 'warning',
-            service: 'clickup-integration',
-            submission_id: submission.id,
-            message: `Failed to send corrections email to ${submission.submitter_email} for "${submission.project_name}"`,
-            details: { error: err.message },
-        });
-    });
-
-    axios.post(`${DIFFER_SERVICE_URL}/compare`, {
-        ai_draft_path: submission.ai_draft_path,
-        final_path: approvedPath,
-        submission_id: submission.id,
-    }).catch((err) => console.error('Failed to trigger differ comparison:', err.message));
-
-    try {
-        await extractApprovedDishesForSubmission({
-            submissionId: submission.id,
-            property: submission.property,
-            servicePeriod: submission.service_period || submission.raw_payload?.servicePeriod,
-            approvedMenuContent: extractedClean || submission.approved_menu_content || submission.menu_content,
-        });
-    } catch (err: any) {
-        console.error('Failed to extract approved dishes:', err.response?.data || err.message);
-        sendAdminAlert({
-            alert_type: 'approved_dish_extraction_failed',
-            severity: 'error',
-            service: 'clickup-integration',
-            submission_id: submission.id,
-            message: `Failed to extract approved dishes for "${submission.project_name}"`,
-            details: {
-                error: err.response?.data || err.message,
-                property: submission.property,
-                servicePeriod: submission.service_period || submission.raw_payload?.servicePeriod || null,
-                clickup_task_id: clickupTaskId,
-            },
-        });
-    }
-
-    return { processed: true, submissionId: submission.id };
 }
 
 app.post('/create-task', async (req, res) => {
@@ -1111,7 +1176,7 @@ app.post('/create-task', async (req, res) => {
                 overrideLines,
                 approvals,
             }),
-            status: 'to do',
+            status: CLICKUP_INITIAL_REVIEW_STATUS,
         };
 
         if (CLICKUP_ASSIGNEE_ID) {
@@ -1212,6 +1277,84 @@ app.post('/create-task', async (req, res) => {
     } catch (error: any) {
         console.error('Error creating ClickUp task:', error.response?.data || error.message);
         res.status(500).json({ error: 'Failed to create ClickUp task', details: error.message });
+    }
+});
+
+app.post('/approval/finalize', async (req, res) => {
+    try {
+        const submissionId = `${req.body?.submissionId || ''}`.trim();
+        const approvedPath = `${req.body?.approvedPath || ''}`.trim();
+        const requestedFileName = `${req.body?.approvedFileName || ''}`.trim();
+
+        if (!submissionId || !approvedPath) {
+            return res.status(400).json({ error: 'submissionId and approvedPath are required' });
+        }
+
+        if (!fs.existsSync(approvedPath)) {
+            return res.status(400).json({ error: 'Approved DOCX file does not exist on disk' });
+        }
+
+        const subResponse = await axios.get(`${DB_SERVICE_URL}/submissions/${encodeURIComponent(submissionId)}`);
+        const submission = subResponse.data;
+        if (!submission?.id) {
+            return res.status(404).json({ error: 'Submission not found' });
+        }
+
+        const clickupTaskId = `${submission.clickup_task_id || ''}`.trim();
+        const approvedFileName = sanitizeAttachmentFilename(
+            requestedFileName || submission.filename || path.basename(approvedPath),
+            submission.id || 'approved-menu'
+        );
+        const warnings: string[] = [];
+        let attachmentUploaded = false;
+
+        if (clickupTaskId && CLICKUP_API_TOKEN) {
+            try {
+                await uploadTaskAttachment(
+                    clickupTaskId,
+                    approvedPath,
+                    approvedFileName,
+                    'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+                );
+                attachmentUploaded = true;
+                console.log(`Browser-approved DOCX attached to ClickUp task ${clickupTaskId}`);
+            } catch (attachError: any) {
+                const errorDetail = attachError.response?.data?.err || attachError.message;
+                warnings.push(`ClickUp attachment upload failed: ${errorDetail}`);
+                console.error(`Failed to attach browser-approved DOCX to ClickUp task ${clickupTaskId}:`, errorDetail);
+                sendAdminAlert({
+                    alert_type: 'clickup_attachment_upload_failed',
+                    severity: 'warning',
+                    service: 'clickup-integration',
+                    submission_id: submission.id,
+                    message: `Failed to upload browser-approved DOCX to ClickUp for "${submission.project_name}"`,
+                    details: { error: errorDetail, clickup_task_id: clickupTaskId },
+                });
+            }
+        } else if (!clickupTaskId) {
+            warnings.push('No ClickUp task was linked to this submission; finalized locally only.');
+        } else {
+            warnings.push('ClickUp API token not configured; finalized locally only.');
+        }
+
+        const result = await finalizeApprovedSubmission({
+            submission,
+            approvedPath,
+            approvedFileName,
+            clickupTaskId: clickupTaskId || undefined,
+            approvedAssetSource: 'browser_approval_editor',
+        });
+
+        res.json({
+            success: true,
+            processed: result.processed,
+            submissionId: result.submissionId,
+            attachmentUploaded,
+            warning: warnings.length ? warnings.join(' | ') : undefined,
+        });
+    } catch (error: any) {
+        console.error('Error finalizing browser approval:', error.response?.data || error.message);
+        res.status(500).json({ error: 'Failed to finalize browser approval', details: error.message });
     }
 });
 
