@@ -2055,29 +2055,34 @@
 
         function stripBaselineFooter(menuText, fallbackAllergens = '') {
             const lines = (menuText || '').split('\n').map((l) => l.trim());
-            const cleanLines = [];
-            let extractedAllergenLine = '';
-            let hadRawNotice = false;
 
-            for (const line of lines) {
-                if (RAW_NOTICE_REGEX.test(line)) {
-                    hadRawNotice = true;
-                    continue;
-                }
-                if (line && isLikelyAllergenLegendLine(line)) {
-                    extractedAllergenLine = line;
-                    continue;
-                }
-                cleanLines.push(line);
+            let footerStart = -1;
+            let rawNoticeIdx = -1;
+            for (let i = 0; i < lines.length; i++) {
+                const lower = lines[i].toLowerCase();
+                const startsRaw = lower.includes('consuming raw or undercooked');
+                const isAllergen = isLikelyAllergenLegendLine(lines[i]);
+                if (startsRaw && rawNoticeIdx === -1) rawNoticeIdx = i;
+                if ((startsRaw || isAllergen) && footerStart === -1) footerStart = i;
             }
 
-            // Normalize blank lines the same way extractCleanTextFromReviewedArea does:
-            // trim leading/trailing empties and collapse consecutive empties to one.
-            while (cleanLines.length && cleanLines[0] === '') cleanLines.shift();
-            while (cleanLines.length && cleanLines[cleanLines.length - 1] === '') cleanLines.pop();
+            let menuLines;
+            let allergenLines = [];
+            let hadRawNotice = false;
+            if (footerStart >= 0) {
+                menuLines = lines.slice(0, footerStart);
+                const allergenEndIdx = rawNoticeIdx >= 0 ? rawNoticeIdx : lines.length;
+                allergenLines = lines.slice(footerStart, allergenEndIdx).filter(Boolean);
+                hadRawNotice = rawNoticeIdx >= 0;
+            } else {
+                menuLines = lines.slice();
+            }
+
+            while (menuLines.length && menuLines[0] === '') menuLines.shift();
+            while (menuLines.length && menuLines[menuLines.length - 1] === '') menuLines.pop();
             const normalized = [];
             let prevEmpty = false;
-            for (const cl of cleanLines) {
+            for (const cl of menuLines) {
                 if (cl === '') {
                     if (!prevEmpty) normalized.push('');
                     prevEmpty = true;
@@ -2089,7 +2094,7 @@
 
             return {
                 menu: normalized.join('\n'),
-                allergens: extractedAllergenLine || (fallbackAllergens || ''),
+                allergens: allergenLines.join(' | ') || (fallbackAllergens || ''),
                 hadRawNotice,
             };
         }
@@ -2908,10 +2913,12 @@
                 if (data.extractedProject) {
                     applyExtractedProjectToForm(data.extractedProject);
                 }
-                setAllergenInputValue(normalizedBaseline.allergens || '');
-                setContainsRawSelection(!!normalizedBaseline.hadRawNotice);
+                const detectedAllergens = normalizedBaseline.allergens || data.extractedAllergenKey || '';
+                const detectedRawNotice = !!(data.containsRawNotice || normalizedBaseline.hadRawNotice);
+                setAllergenInputValue(detectedAllergens || DEFAULT_ALLERGEN_KEY);
+                setContainsRawSelection(detectedRawNotice);
                 suppressRawNotice = false;
-                setAllergenAutoDetectedBadge(!!normalizedBaseline.allergens);
+                setAllergenAutoDetectedBadge(!!detectedAllergens);
 
                 quill.setText(baseApprovedMenuContent || '');
                 renderPersistentPreview(baseApprovedMenuContent, baseApprovedMenuContent);

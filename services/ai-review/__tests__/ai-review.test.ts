@@ -4,7 +4,7 @@ import { jest } from '@jest/globals';
 jest.mock('openai', () => ({
     Configuration: jest.fn(),
     OpenAIApi: jest.fn(() => ({
-        createChatCompletion: jest.fn().mockResolvedValue({
+        createChatCompletion: jest.fn(async () => ({
             data: {
                 choices: [
                     {
@@ -21,7 +21,7 @@ jest.mock('openai', () => ({
                     }
                 ]
             }
-        })
+        }))
     }))
 }));
 

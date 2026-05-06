@@ -43,6 +43,7 @@ const fs_1 = require("fs");
 const fsSync = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const axios_1 = __importDefault(require("axios"));
+const internal_auth_1 = require("@menumanager/internal-auth");
 // Load .env from project root (works whether running from src or dist)
 const envPath = path.resolve(__dirname, '../../../.env');
 console.log(`Loading .env from: ${envPath}`);
@@ -50,12 +51,14 @@ dotenv.config({ path: envPath });
 const app = express();
 const port = 3002;
 const DB_SERVICE_URL = process.env.DB_SERVICE_URL || 'http://localhost:3004';
+const internalApi = (0, internal_auth_1.createInternalApiClient)(axios_1.default);
 const configuration = new openai_1.Configuration({
     apiKey: process.env.OPENAI_API_KEY,
 });
 const openai = new openai_1.OpenAIApi(configuration);
 const AI_REVIEW_MODEL = process.env.AI_REVIEW_MODEL || 'gpt-4o-mini';
 app.use(express.json());
+app.use(internal_auth_1.requireInternalServiceAuth);
 /**
  * QA Check Endpoint - Used by parser to run pre-check validation
  * This runs the same QA prompt that chefs should use before submitting
@@ -156,7 +159,7 @@ Configure OPENAI_API_KEY in .env for real AI reviews.
         if (issueCount > 99) {
             // Fails Tier 1: mark as rejected_tier1 (no email notification in current workflow).
             console.log(`Submission ${submission_id} failed Tier 1.`);
-            await axios_1.default.put(`${DB_SERVICE_URL}/submissions/${submission_id}/status`, { status: 'rejected_tier1' });
+            await internalApi.put(`${DB_SERVICE_URL}/submissions/${submission_id}`, { status: 'rejected_tier1' });
             return res.status(200).send({ status: 'rejected_tier1', message: 'Submission failed Tier 1 review.' });
         }
         // --- Tier 2: Passed Tier 1, generate clean document for human review ---
@@ -165,7 +168,7 @@ Configure OPENAI_API_KEY in .env for real AI reviews.
         const draftPath = await saveAiDraft(submission_id, '', text, original_path, hasOpenAIKey);
         // Update submission in DB with new status and draft path
         // Note: Document goes directly to pending_human_review without redlining
-        await axios_1.default.put(`${DB_SERVICE_URL}/submissions/${submission_id}`, {
+        await internalApi.put(`${DB_SERVICE_URL}/submissions/${submission_id}`, {
             status: 'pending_human_review',
             ai_draft_path: draftPath
         });
@@ -228,6 +231,8 @@ function parseAICorrectedText(aiText) {
     cleaned = cleaned.replace(/\[ADD\](.*?)(?:\[\/ADD\]|\[ADD\])/gs, '$1');
     return cleaned.trim();
 }
-app.listen(port, () => {
-    console.log(`ai-review service listening at http://localhost:${port}`);
-});
+if (require.main === module) {
+    app.listen(port, () => {
+        console.log(`ai-review service listening at http://localhost:${port}`);
+    });
+}

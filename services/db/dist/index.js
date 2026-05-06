@@ -35,9 +35,12 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 const express = require("express");
 const fs_1 = require("fs");
+const fsSync = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const dotenv = require("dotenv");
 const supabase_client_1 = require("@menumanager/supabase-client");
+const submission_updates_1 = require("./lib/submission-updates");
+const internal_auth_1 = require("@menumanager/internal-auth");
 dotenv.config({ path: path.join(__dirname, '..', '..', '..', '.env') });
 const app = express();
 const port = 3004;
@@ -271,6 +274,18 @@ const DEFAULT_SHAREPOINT_PROPERTY_CONFIG = {
         ],
     },
 };
+function getRepoRoot() {
+    const candidates = [
+        path.resolve(__dirname, '..', '..'),
+        path.resolve(__dirname, '..', '..', '..'),
+    ];
+    for (const candidate of candidates) {
+        if (fsSync.existsSync(path.join(candidate, 'services')) && fsSync.existsSync(path.join(candidate, 'samples'))) {
+            return candidate;
+        }
+    }
+    return candidates[0];
+}
 function deriveCityCountryFromProperty(name) {
     const idx = name.lastIndexOf(' - ');
     if (idx < 0)
@@ -407,7 +422,7 @@ const SUPABASE_SUBMISSION_COLUMNS = new Set([
     'reviewed_at',
     'raw_payload',
 ]);
-function toSupabaseSubmissionRecord(payload) {
+function toSupabaseSubmissionRecord(payload, options) {
     const mapped = {};
     for (const [key, value] of Object.entries(payload || {})) {
         if (!SUPABASE_SUBMISSION_COLUMNS.has(key))
@@ -426,16 +441,18 @@ function toSupabaseSubmissionRecord(payload) {
             delete mapped.id;
         }
     }
-    // Preserve the complete submission payload for audit/debug parity.
-    // This guarantees no field is lost even if schema evolves later.
-    mapped.raw_payload = payload;
+    if (options?.includeRawPayload !== false) {
+        // Preserve the complete submission payload for audit/debug parity.
+        // This guarantees no field is lost even if schema evolves later.
+        mapped.raw_payload = payload;
+    }
     return mapped;
 }
 async function mirrorSubmissionCreateToSupabase(localSubmission) {
     if (!(0, supabase_client_1.isSupabaseConfigured)())
         return;
     const supabase = (0, supabase_client_1.getSupabaseClient)();
-    const record = toSupabaseSubmissionRecord(localSubmission);
+    const record = toSupabaseSubmissionRecord(localSubmission, { includeRawPayload: true });
     const legacyId = record.legacy_id;
     if (legacyId) {
         const { data: existing, error: lookupError } = await supabase
@@ -466,7 +483,7 @@ async function mirrorSubmissionUpdateToSupabase(localId, updates) {
     if (!(0, supabase_client_1.isSupabaseConfigured)())
         return;
     const supabase = (0, supabase_client_1.getSupabaseClient)();
-    const record = toSupabaseSubmissionRecord(updates);
+    const record = toSupabaseSubmissionRecord(updates, { includeRawPayload: false });
     delete record.id;
     delete record.legacy_id;
     record.updated_at = new Date().toISOString();
@@ -596,6 +613,7 @@ async function initDb() {
     }
 }
 app.use(express.json());
+app.use(internal_auth_1.requireInternalServiceAuth);
 // Endpoint to create a new submission
 app.post('/submissions', async (req, res) => {
     try {
@@ -1187,6 +1205,19 @@ app.post('/approved-dishes/backfill-approved', async (req, res) => {
 app.put('/submissions/:id', async (req, res) => {
     try {
         const { id } = req.params;
+        const { allowedFields, rejectedFields, errors } = (0, submission_updates_1.sanitizeSubmissionUpdates)(req.body || {}, {
+            repoRoot: getRepoRoot(),
+        });
+        if (rejectedFields.length > 0 || errors.length > 0) {
+            return res.status(400).json({
+                error: 'Invalid submission update payload',
+                rejectedFields,
+                details: errors,
+            });
+        }
+        if (Object.keys(allowedFields).length === 0) {
+            return res.status(400).json({ error: 'No valid submission fields to update' });
+        }
         const submissions = JSON.parse(await fs_1.promises.readFile(SUBMISSIONS_DB, 'utf-8'));
         let resolvedId = id;
         // When Supabase is enabled, callers may pass UUID `id`, but local JSON
@@ -1203,7 +1234,7 @@ app.put('/submissions/:id', async (req, res) => {
             if ((0, supabase_client_1.isSupabaseConfigured)()) {
                 // Allow UUID/legacy-id updates even when local JSON entry is missing.
                 try {
-                    await mirrorSubmissionUpdateToSupabase(id, req.body || {});
+                    await mirrorSubmissionUpdateToSupabase(id, allowedFields);
                     const supabase = (0, supabase_client_1.getSupabaseClient)();
                     const idColumn = UUID_REGEX.test(id) ? 'id' : 'legacy_id';
                     const { data } = await supabase
@@ -1211,7 +1242,7 @@ app.put('/submissions/:id', async (req, res) => {
                         .select('*')
                         .eq(idColumn, id)
                         .maybeSingle();
-                    return res.status(200).json(data || { id, ...req.body, updated_at: new Date().toISOString() });
+                    return res.status(200).json(data || { id, ...allowedFields, updated_at: new Date().toISOString() });
                 }
                 catch (supabaseError) {
                     console.error('Supabase-only submission update failed:', supabaseError.message);
@@ -1219,11 +1250,11 @@ app.put('/submissions/:id', async (req, res) => {
             }
             return res.status(404).send('Submission not found.');
         }
-        const updatedSubmission = { ...submissions[resolvedId], ...req.body, updated_at: new Date().toISOString() };
+        const updatedSubmission = { ...submissions[resolvedId], ...allowedFields, updated_at: new Date().toISOString() };
         submissions[resolvedId] = updatedSubmission;
         await fs_1.promises.writeFile(SUBMISSIONS_DB, JSON.stringify(submissions, null, 2));
         try {
-            await mirrorSubmissionUpdateToSupabase(id, updatedSubmission);
+            await mirrorSubmissionUpdateToSupabase(id, allowedFields);
         }
         catch (supabaseError) {
             console.error('Supabase mirror update failed (kept local JSON write):', supabaseError.message);
@@ -1617,13 +1648,16 @@ app.put('/prompt-proposals/:id', async (req, res) => {
         res.status(500).json({ error: 'Failed to update proposal' });
     }
 });
-app.listen(port, () => {
-    console.log(`db service listening at http://localhost:${port}`);
-    if ((0, supabase_client_1.isSupabaseConfigured)()) {
-        console.log('Supabase mirror: enabled');
-    }
-    else {
-        console.log('Supabase mirror: disabled (missing SUPABASE_URL/SUPABASE_*_KEY)');
-    }
-    initDb();
-});
+if (require.main === module) {
+    app.listen(port, () => {
+        console.log(`db service listening at http://localhost:${port}`);
+        if ((0, supabase_client_1.isSupabaseConfigured)()) {
+            console.log('Supabase mirror: enabled');
+        }
+        else {
+            console.log('Supabase mirror: disabled (missing SUPABASE_URL/SUPABASE_*_KEY)');
+        }
+        initDb();
+    });
+}
+exports.default = app;

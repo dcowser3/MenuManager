@@ -45,6 +45,7 @@ const child_process_1 = require("child_process");
 const util_1 = require("util");
 const dotenv = require("dotenv");
 const supabase_client_1 = require("@menumanager/supabase-client");
+const internal_auth_1 = require("@menumanager/internal-auth");
 dotenv.config({ path: path.join(__dirname, '..', '..', '..', '.env') });
 const app = express();
 const port = 3006;
@@ -117,6 +118,7 @@ async function ensureFile(filePath, initialContent) {
     }
 }
 app.use(express.json());
+app.use(internal_auth_1.requireInternalServiceAuth);
 app.post('/compare', async (req, res) => {
     try {
         const { submission_id, ai_draft_path, final_path, original_path } = req.body;
@@ -1189,8 +1191,10 @@ function buildPromptOverlay(activeRules) {
 function clamp(value, min, max) {
     return Math.min(Math.max(value, min), max);
 }
-app.listen(port, async () => {
-    console.log(`🔬 Differ service listening at http://localhost:${port}`);
-    console.log(`   Learning data directory: ${DIFFERENCES_DIR}`);
-    await initDiffer();
-});
+if (require.main === module) {
+    app.listen(port, async () => {
+        console.log(`🔬 Differ service listening at http://localhost:${port}`);
+        console.log(`   Learning data directory: ${DIFFERENCES_DIR}`);
+        await initDiffer();
+    });
+}

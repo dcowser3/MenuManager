@@ -1,0 +1,15 @@
+{
+  "name": "@menumanager/internal-auth",
+  "version": "1.0.0",
+  "description": "Shared internal service authentication helpers for Menu Manager",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "typescript": "^5.3.3"
+  }
+}

@@ -44,6 +44,7 @@ jest.mock('@menumanager/supabase-client', () => ({
 
 const axios = require('axios').default;
 const fs = require('fs');
+const path = require('path');
 const app = require('../index').default;
 const mockedAxios = axios;
 
@@ -83,6 +84,7 @@ function invokeJsonHandler(handler, body) {
 describe('Dashboard Modification Workflow (local, mocked externals)', () => {
     const submitHandler = getRouteHandler('post', '/api/form/submit');
     const basicCheckHandler = getRouteHandler('post', '/api/form/basic-check');
+    const baselineUploadPath = path.join(process.cwd(), 'tmp', 'uploads', 'legacy-approved.docx');
 
     beforeEach(() => {
         jest.spyOn(console, 'log').mockImplementation(() => {});
@@ -244,7 +246,7 @@ describe('Dashboard Modification Workflow (local, mocked externals)', () => {
             submissionMode: 'modification',
             revisionSource: 'uploaded_baseline',
             revisionBaseSubmissionId: null,
-            revisionBaselineDocPath: '/tmp/uploads/legacy-approved.docx',
+            revisionBaselineDocPath: baselineUploadPath,
             revisionBaselineFileName: 'legacy-approved.docx',
             baseApprovedMenuContent: 'Ceviche - $14',
             chefPersistentDiff: { insertions: 2, deletions: 1 },
@@ -259,7 +261,7 @@ describe('Dashboard Modification Workflow (local, mocked externals)', () => {
         );
         expect(clickupCall).toBeTruthy();
         expect(clickupCall[1].revisionSource).toBe('uploaded_baseline');
-        expect(clickupCall[1].revisionBaselineDocPath).toBe('/tmp/uploads/legacy-approved.docx');
+        expect(clickupCall[1].revisionBaselineDocPath).toBe(baselineUploadPath);
         expect(clickupCall[1].revisionBaselineFileName).toBe('legacy-approved.docx');
         expect(clickupCall[1].criticalOverrides).toEqual([]);
     });

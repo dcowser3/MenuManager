@@ -7,6 +7,7 @@ import * as path from 'path';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import dotenv = require('dotenv');
+import { createInternalApiClient, requireInternalServiceAuth } from '@menumanager/internal-auth';
 
 // Load .env from project root (works whether running from src or dist)
 const envPath = path.resolve(__dirname, '../../../.env');
@@ -17,12 +18,15 @@ const app = express();
 const port = 3001;
 const DB_SERVICE_URL = process.env.DB_SERVICE_URL || 'http://localhost:3004';
 const AI_REVIEW_URL = process.env.AI_REVIEW_URL || 'http://localhost:3002';
+const internalApi = createInternalApiClient(axios);
 
 // Use absolute path for uploads to avoid path resolution issues
 // __dirname in compiled code is services/parser/dist, so we need ../../../tmp/uploads to get to workspace root
 const uploadsDir = path.resolve(__dirname, '../../../tmp/uploads');
 const upload = multer({ dest: uploadsDir });
 const execAsync = promisify(exec);
+
+app.use(requireInternalServiceAuth);
 
 app.post('/parser', upload.single('file') as any, async (req, res) => {
     if (!req.file) {
@@ -42,7 +46,7 @@ app.post('/parser', upload.single('file') as any, async (req, res) => {
 
     try {
         // Create initial record in the database
-        const dbResponse = await axios.post(`${DB_SERVICE_URL}/submissions`, {
+        const dbResponse = await internalApi.post(`${DB_SERVICE_URL}/submissions`, {
             submitter_email: req.body.submitter_email || 'unknown@example.com', // You'll need to get this from the inbound-email service
             filename: req.file.originalname,
             original_path: req.file.path
@@ -54,7 +58,7 @@ app.post('/parser', upload.single('file') as any, async (req, res) => {
         // Skip template validation if flag is set
         if (!skipValidation && !validationResult.isValid) {
             // Mark DB status as rejected due to template issues
-            await axios.put(`${DB_SERVICE_URL}/submissions/${submission.id}`, {
+            await internalApi.put(`${DB_SERVICE_URL}/submissions/${submission.id}`, {
                 status: 'rejected_template',
                 template_errors: validationResult.errors
             });
@@ -84,7 +88,7 @@ app.post('/parser', upload.single('file') as any, async (req, res) => {
                 const { stdout } = await execAsync(command, { timeout: 60000 });
                 const lint = JSON.parse(stdout);
                 if (!lint.passed) {
-                    await axios.put(`${DB_SERVICE_URL}/submissions/${submission.id}`, {
+                    await internalApi.put(`${DB_SERVICE_URL}/submissions/${submission.id}`, {
                         status: 'needs_prompt_fix',
                         sop_format_issues: lint.reasons,
                         sop_format_samples: lint.samples
@@ -103,7 +107,7 @@ app.post('/parser', upload.single('file') as any, async (req, res) => {
             // If there are too many errors, it means they didn't use the QA prompt before submitting
             const qaCheckResult = await runQAPreCheck(validationResult.text, submission.id);
             if (!qaCheckResult.passed) {
-                await axios.put(`${DB_SERVICE_URL}/submissions/${submission.id}`, {
+                await internalApi.put(`${DB_SERVICE_URL}/submissions/${submission.id}`, {
                     status: 'needs_prompt_fix',
                     qa_feedback: qaCheckResult.feedback,
                     error_count: qaCheckResult.errorCount
@@ -119,7 +123,7 @@ app.post('/parser', upload.single('file') as any, async (req, res) => {
 
         // If validation passes (or skipped), POST parsed payload to /ai-review
         console.log(`${skipValidation ? 'Validation skipped' : 'Validation passed'} for submission ${submission.id}. Posting to ai-review.`);
-        await axios.post(`${AI_REVIEW_URL}/ai-review`, {
+        await internalApi.post(`${AI_REVIEW_URL}/ai-review`, {
             text: validationResult.text,
             submission_id: submission.id,
             submitter_email: submission.submitter_email,
@@ -146,9 +150,11 @@ app.post('/parser', upload.single('file') as any, async (req, res) => {
     }
 });
 
-app.listen(port, () => {
-    console.log(`parser service listening at http://localhost:${port}`);
-});
+if (require.main === module) {
+    app.listen(port, () => {
+        console.log(`parser service listening at http://localhost:${port}`);
+    });
+}
 
 /**
  * Run the actual QA prompt (from SOP) to check if the menu was pre-cleaned
@@ -183,7 +189,7 @@ async function runQAPreCheck(text: string, submissionId: string): Promise<{
         console.log(`Running QA pre-check for submission ${submissionId}...`);
 
         // Call OpenAI with the QA prompt
-        const response = await axios.post(`${AI_REVIEW_URL}/run-qa-check`, {
+        const response = await internalApi.post(`${AI_REVIEW_URL}/run-qa-check`, {
             text,
             prompt: qaPrompt
         });

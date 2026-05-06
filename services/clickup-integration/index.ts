@@ -13,6 +13,12 @@ import {
     buildAlertEmailHtml,
     SystemAlert,
 } from '@menumanager/supabase-client';
+import {
+    buildApprovedDocxAssetRecord,
+    buildApprovedSubmissionUpdate,
+    buildSharePointApprovedDocxAssetRecord,
+} from './lib/approval-finalization';
+import { createInternalApiClient, requireInternalServiceAuth } from '@menumanager/internal-auth';
 
 dotenv.config({ path: path.join(__dirname, '..', '..', '..', '.env') });
 const execAsync = promisify(exec);
@@ -21,6 +27,7 @@ const app = express();
 const port = 3007;
 const DB_SERVICE_URL = process.env.DB_SERVICE_URL || 'http://localhost:3004';
 const DIFFER_SERVICE_URL = process.env.DIFFER_SERVICE_URL || 'http://localhost:3006';
+const internalApi = createInternalApiClient(axios);
 
 const CLICKUP_API_TOKEN = process.env.CLICKUP_API_TOKEN;
 const CLICKUP_LIST_ID = process.env.CLICKUP_LIST_ID;
@@ -117,6 +124,7 @@ app.use(express.json({
         req.rawBody = buf.toString('utf8');
     }
 }));
+app.use(['/create-task', '/approval/finalize', '/webhook/backfill-pending', '/webhook/register'], requireInternalServiceAuth);
 
 function safeTimingEqual(a: string, b: string): boolean {
     try {
@@ -625,7 +633,7 @@ function buildSharePointApprovedFilename(submission: any): string {
 
 async function getPropertySharePointConfig(property: string): Promise<PropertySharePointConfig | null> {
     if (!property.trim()) return null;
-    const response = await axios.get(`${DB_SERVICE_URL}/properties/validate`, {
+    const response = await internalApi.get(`${DB_SERVICE_URL}/properties/validate`, {
         params: { name: property },
         timeout: 3000,
     });
@@ -747,6 +755,10 @@ async function archiveExistingDocxFilesInSharePointSubfolder(driveId: string, fo
     const oldFolder = await ensureChildFolder(driveId, folderPath, 'old');
     let movedCount = 0;
     for (const item of docxFiles) {
+        // TODO(security): Keep SharePoint routing on a strict "never delete" policy.
+        // This workflow may move prior DOCX files into old/, but it must never issue
+        // delete/remove calls against SharePoint content, even as part of cleanup,
+        // replacement, retry, or future refactors.
         await moveDriveItemToFolder(driveId, item.id, oldFolder.id, String(item.name || 'archived.docx'));
         movedCount += 1;
     }
@@ -846,7 +858,7 @@ async function extractApprovedDishesForSubmission(input: {
     servicePeriod?: string;
     approvedMenuContent?: string;
 }): Promise<number> {
-    const response = await axios.post(`${DB_SERVICE_URL}/approved-dishes/extract`, {
+    const response = await internalApi.post(`${DB_SERVICE_URL}/approved-dishes/extract`, {
         submissionId: input.submissionId,
         property: input.property,
         servicePeriod: input.servicePeriod,
@@ -881,27 +893,26 @@ async function finalizeApprovedSubmission(input: {
         console.warn(`Failed to extract approved text from approved DOCX: ${extractError.message}`);
     }
 
-    await axios.put(`${DB_SERVICE_URL}/submissions/${submission.id}`, {
-        status: 'approved',
-        final_path: input.approvedPath,
-        approved_menu_content_raw: extractedRaw || undefined,
-        approved_menu_content: extractedClean || undefined,
-        approved_text_extracted_at: extractedClean ? new Date().toISOString() : undefined,
-    });
+    await internalApi.put(
+        `${DB_SERVICE_URL}/submissions/${submission.id}`,
+        buildApprovedSubmissionUpdate({
+            approvedPath: input.approvedPath,
+            extractedRaw,
+            extractedClean,
+        })
+    );
     console.log(`Updated submission ${submission.id} to approved`);
 
-    axios.post(`${DB_SERVICE_URL}/assets`, {
-        submission_id: submission.id,
-        asset_type: 'approved_docx',
-        source: input.approvedAssetSource || 'isabella_clickup',
-        storage_provider: 'local',
-        storage_path: input.approvedPath,
-        file_name: path.basename(input.approvedPath),
-        meta: {
-            clickup_task_id: clickupTaskId || null,
-            attachment_id: input.attachmentId || null,
-        },
-    }).catch((err) => console.error('Failed to save approved_docx asset metadata:', err.message));
+    internalApi.post(
+        `${DB_SERVICE_URL}/assets`,
+        buildApprovedDocxAssetRecord({
+            submissionId: submission.id,
+            approvedPath: input.approvedPath,
+            source: input.approvedAssetSource || 'isabella_clickup',
+            clickupTaskId,
+            attachmentId: input.attachmentId || null,
+        })
+    ).catch((err: any) => console.error('Failed to save approved_docx asset metadata:', err.message));
 
     try {
         const sharePointUpload = await uploadApprovedDocToSharePoint({
@@ -912,27 +923,27 @@ async function finalizeApprovedSubmission(input: {
             submission,
         });
 
-        if (sharePointUpload.uploaded) {
+        if (sharePointUpload.uploaded && sharePointUpload.storagePath) {
             console.log(`Uploaded approved DOCX to SharePoint: ${sharePointUpload.storagePath}`);
             if (sharePointUpload.archivedDocxCount) {
                 console.log(`Archived ${sharePointUpload.archivedDocxCount} existing DOCX file(s) into old/`);
             }
-            axios.post(`${DB_SERVICE_URL}/assets`, {
-                submission_id: submission.id,
-                asset_type: 'sharepoint_approved_docx',
-                source: 'sharepoint_graph',
-                storage_provider: 'sharepoint',
-                storage_path: sharePointUpload.storagePath,
-                file_name: path.basename(sharePointUpload.storagePath || input.approvedFileName),
-                meta: {
-                    clickup_task_id: clickupTaskId || null,
-                    site_id: sharePointUpload.siteId,
-                    drive_id: sharePointUpload.driveId,
-                    web_url: sharePointUpload.webUrl || null,
-                    matched_folder: sharePointUpload.folderMatched,
-                    archived_docx_count: sharePointUpload.archivedDocxCount || 0,
-                },
-            }).catch((err) => console.error('Failed to save SharePoint asset metadata:', err.message));
+            internalApi.post(
+                `${DB_SERVICE_URL}/assets`,
+                buildSharePointApprovedDocxAssetRecord({
+                    submissionId: submission.id,
+                    storagePath: sharePointUpload.storagePath,
+                    approvedFileName: input.approvedFileName,
+                    clickupTaskId,
+                    siteId: sharePointUpload.siteId,
+                    driveId: sharePointUpload.driveId,
+                    webUrl: sharePointUpload.webUrl || null,
+                    matchedFolder: sharePointUpload.folderMatched,
+                    archivedDocxCount: sharePointUpload.archivedDocxCount || 0,
+                })
+            ).catch((err: any) => console.error('Failed to save SharePoint asset metadata:', err.message));
+        } else if (sharePointUpload.uploaded) {
+            console.warn(`SharePoint upload reported success for submission ${submission.id} without a storage path`);
         } else if (sharePointUpload.skipped) {
             console.log(`Skipped SharePoint upload for submission ${submission.id}: ${sharePointUpload.skipped}`);
         }
@@ -990,11 +1001,11 @@ async function finalizeApprovedSubmission(input: {
         });
     });
 
-    axios.post(`${DIFFER_SERVICE_URL}/compare`, {
+    internalApi.post(`${DIFFER_SERVICE_URL}/compare`, {
         ai_draft_path: submission.ai_draft_path,
         final_path: input.approvedPath,
         submission_id: submission.id,
-    }).catch((err) => console.error('Failed to trigger differ comparison:', err.message));
+    }).catch((err: any) => console.error('Failed to trigger differ comparison:', err.message));
 
     try {
         await extractApprovedDishesForSubmission({
@@ -1037,7 +1048,7 @@ async function processApprovedTask(clickupTaskId: string, opts?: { skipStatusChe
         return { processed: false, reason: `task status is "${currentStatus}"` };
     }
 
-    const subResponse = await axios.get(`${DB_SERVICE_URL}/submissions/by-clickup-task/${clickupTaskId}`);
+    const subResponse = await internalApi.get(`${DB_SERVICE_URL}/submissions/by-clickup-task/${clickupTaskId}`);
     const submission = subResponse.data;
     console.log(`Found submission ${submission.id} for ClickUp task ${clickupTaskId}`);
 
@@ -1261,7 +1272,7 @@ app.post('/create-task', async (req, res) => {
         }
 
         if (submissionId) {
-            await axios.put(`${DB_SERVICE_URL}/submissions/${submissionId}`, {
+            await internalApi.put(`${DB_SERVICE_URL}/submissions/${submissionId}`, {
                 clickup_task_id: taskId,
             });
             console.log(`Stored clickup_task_id ${taskId} on submission ${submissionId}`);
@@ -1294,7 +1305,7 @@ app.post('/approval/finalize', async (req, res) => {
             return res.status(400).json({ error: 'Approved DOCX file does not exist on disk' });
         }
 
-        const subResponse = await axios.get(`${DB_SERVICE_URL}/submissions/${encodeURIComponent(submissionId)}`);
+        const subResponse = await internalApi.get(`${DB_SERVICE_URL}/submissions/${encodeURIComponent(submissionId)}`);
         const submission = subResponse.data;
         if (!submission?.id) {
             return res.status(404).json({ error: 'Submission not found' });
@@ -1396,7 +1407,7 @@ app.post('/webhook/clickup', async (req: any, res) => {
 
 app.post('/webhook/backfill-pending', async (_req, res) => {
     try {
-        const pendingResponse = await axios.get(`${DB_SERVICE_URL}/submissions/pending`);
+        const pendingResponse = await internalApi.get(`${DB_SERVICE_URL}/submissions/pending`);
         const pending = Array.isArray(pendingResponse.data) ? pendingResponse.data : [];
         const candidates = pending.filter((s: any) => !!s.clickup_task_id);
 

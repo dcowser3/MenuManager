@@ -7,6 +7,7 @@ import { exec } from 'child_process';
 import { promisify } from 'util';
 import dotenv = require('dotenv');
 import { getSupabaseClient, isSupabaseConfigured } from '@menumanager/supabase-client';
+import { requireInternalServiceAuth } from '@menumanager/internal-auth';
 
 dotenv.config({ path: path.join(__dirname, '..', '..', '..', '.env') });
 
@@ -193,6 +194,7 @@ async function ensureFile(filePath: string, initialContent: string): Promise<voi
 }
 
 app.use(express.json());
+app.use(requireInternalServiceAuth);
 
 app.post('/compare', async (req, res) => {
     try {
@@ -1373,8 +1375,10 @@ function clamp(value: number, min: number, max: number): number {
     return Math.min(Math.max(value, min), max);
 }
 
-app.listen(port, async () => {
-    console.log(`🔬 Differ service listening at http://localhost:${port}`);
-    console.log(`   Learning data directory: ${DIFFERENCES_DIR}`);
-    await initDiffer();
-});
+if (require.main === module) {
+    app.listen(port, async () => {
+        console.log(`🔬 Differ service listening at http://localhost:${port}`);
+        console.log(`   Learning data directory: ${DIFFERENCES_DIR}`);
+        await initDiffer();
+    });
+}

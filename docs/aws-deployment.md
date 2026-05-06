@@ -36,6 +36,7 @@ cp .env.example .env
 
 Fill out `.env` with:
 - `OPENAI_API_KEY`
+- `INTERNAL_API_TOKEN` (same value in every service container)
 - `CLICKUP_API_TOKEN` + related ClickUp vars
 - `SUPABASE_*` (if using Supabase)
 - Set service URLs for container networking:
@@ -102,6 +103,7 @@ cp .env.example .env
 
 Fill out `.env` with:
 - `OPENAI_API_KEY`
+- `INTERNAL_API_TOKEN` (same value in every service container)
 - `CLICKUP_API_TOKEN` + related ClickUp vars
 - `SUPABASE_*` (if using Supabase)
 - Set service URLs for container networking:

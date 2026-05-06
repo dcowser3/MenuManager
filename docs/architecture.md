@@ -115,6 +115,37 @@ User reviews differences, submits approval
 - **db** depends on: Supabase (optional), local JSON files (fallback)
 - **supabase-client** is a shared library used by db service
 
+## Dashboard Module Notes
+
+The dashboard service still uses a single Express entrypoint, but the highest-risk logic is now split into focused `lib/` modules so routing stays thinner and workflow behavior is easier to test in isolation:
+
+- `lib/restricted-access.ts` — temporary PIN-gate helpers and middleware for learning/training routes
+- `lib/upload-security.ts` — upload limits, filename sanitization, HTML/text sanitization, file-signature checks, and safe-path helpers
+- `lib/request-normalization.ts` — request-body normalization for chef submission and design-approval flows
+- `lib/approval-baseline.ts` — approval editor baseline loading/fallback logic
+- `lib/approval-transitions.ts` — shared approval-state payload builders for standard approvals, design approvals, and finalize handoff requests
+- `lib/submission-workflow.ts` — menu-image upload and chef submission handlers
+- `lib/design-approval-workflow.ts` — DOCX/PDF comparison and mismatch-override handlers
+- `lib/approval-workflow.ts` — quick-approve, corrected-upload, and browser approval/finalization handlers
+
+`services/dashboard/index.ts` now primarily composes dependencies, mounts routes, and keeps shared helpers that are still used across multiple dashboard areas.
+
+## ClickUp Integration Module Notes
+
+The ClickUp integration service still uses a single Express entrypoint, but approval-finalization payload shaping is now split into `lib/approval-finalization.ts` so the approved-submission DB patch and asset metadata records are defined in one place and covered by focused tests.
+
+## DB Service Notes
+
+The DB service still fronts both local JSON persistence and the Supabase mirror, but mutable submission updates are now funneled through `lib/submission-updates.ts` so approval/status patches are allowlisted, path-bearing fields are validated against the repository `tmp/` tree, and partial mirror updates do not overwrite `raw_payload`.
+
+## Internal Service Auth Notes
+
+Shared internal HTTP authentication now lives in the `@menumanager/internal-auth` workspace package (`services/internal-auth/src/index.ts`).
+
+- Outbound callers attach `INTERNAL_API_TOKEN` on service-to-service requests through a shared axios helper.
+- Inbound middleware protects internal-only routes in `db`, `parser`, `ai-review`, and `differ`.
+- `clickup-integration` applies the same middleware only to its internal routes, while leaving the external ClickUp webhook endpoint and `GET /health` publicly reachable.
+
 ## Port Assignments
 
 | Port | Service |

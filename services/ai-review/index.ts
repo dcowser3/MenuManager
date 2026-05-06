@@ -5,6 +5,7 @@ import { promises as fs } from 'fs';
 import * as fsSync from 'fs';
 import * as path from 'path';
 import axios from 'axios';
+import { createInternalApiClient, requireInternalServiceAuth } from '@menumanager/internal-auth';
 
 // Load .env from project root (works whether running from src or dist)
 const envPath = path.resolve(__dirname, '../../../.env');
@@ -14,6 +15,7 @@ dotenv.config({ path: envPath });
 const app = express();
 const port = 3002;
 const DB_SERVICE_URL = process.env.DB_SERVICE_URL || 'http://localhost:3004';
+const internalApi = createInternalApiClient(axios);
 
 const configuration = new Configuration({
     apiKey: process.env.OPENAI_API_KEY,
@@ -22,6 +24,7 @@ const openai = new OpenAIApi(configuration);
 const AI_REVIEW_MODEL = process.env.AI_REVIEW_MODEL || 'gpt-4o-mini';
 
 app.use(express.json());
+app.use(requireInternalServiceAuth);
 
 /**
  * QA Check Endpoint - Used by parser to run pre-check validation
@@ -139,7 +142,7 @@ Configure OPENAI_API_KEY in .env for real AI reviews.
         if (issueCount > 99) {
             // Fails Tier 1: mark as rejected_tier1 (no email notification in current workflow).
             console.log(`Submission ${submission_id} failed Tier 1.`);
-            await axios.put(`${DB_SERVICE_URL}/submissions/${submission_id}/status`, { status: 'rejected_tier1' });
+            await internalApi.put(`${DB_SERVICE_URL}/submissions/${submission_id}`, { status: 'rejected_tier1' });
             return res.status(200).send({ status: 'rejected_tier1', message: 'Submission failed Tier 1 review.' });
         }
 
@@ -151,7 +154,7 @@ Configure OPENAI_API_KEY in .env for real AI reviews.
 
         // Update submission in DB with new status and draft path
         // Note: Document goes directly to pending_human_review without redlining
-        await axios.put(`${DB_SERVICE_URL}/submissions/${submission_id}`, {
+        await internalApi.put(`${DB_SERVICE_URL}/submissions/${submission_id}`, {
             status: 'pending_human_review',
             ai_draft_path: draftPath
         });
@@ -222,6 +225,8 @@ function parseAICorrectedText(aiText: string): string {
     return cleaned.trim();
 }
 
-app.listen(port, () => {
-    console.log(`ai-review service listening at http://localhost:${port}`);
-});
+if (require.main === module) {
+    app.listen(port, () => {
+        console.log(`ai-review service listening at http://localhost:${port}`);
+    });
+}

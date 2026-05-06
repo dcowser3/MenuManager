@@ -8,6 +8,7 @@
     "start": "node dist/index.js"
   },
   "dependencies": {
+    "@menumanager/internal-auth": "*",
     "@menumanager/supabase-client": "*",
     "axios": "^1.6.2",
     "dotenv": "^17.2.2",

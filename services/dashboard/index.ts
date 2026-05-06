@@ -20,6 +20,47 @@ import {
     loadApprovalBaselineFromSubmission,
     textToParagraphHtml,
 } from './lib/approval-baseline';
+import {
+    buildRestrictedDashboardCookieValue,
+    isRestrictedDashboardPinValid,
+    parseCookieHeader,
+    requireRestrictedDashboardAccess,
+    RESTRICTED_DASHBOARD_COOKIE,
+    RESTRICTED_DASHBOARD_DEFAULT_NEXT,
+    RESTRICTED_DASHBOARD_ERROR,
+    RESTRICTED_DASHBOARD_SESSION_MS,
+    sanitizeRestrictedDashboardNext,
+} from './lib/restricted-access';
+import {
+    ALLOWED_DOCX_EXTENSIONS,
+    ALLOWED_MENU_IMAGE_EXTENSIONS,
+    ALLOWED_PDF_EXTENSIONS,
+    MAX_LONG_TEXT_LENGTH,
+    MAX_UPLOAD_BYTES,
+    assertUploadedFileType,
+    hasAllowedExtension,
+    isClientInputError,
+    resolveSafeStoredPath,
+    sanitizePlainTextInput,
+    sanitizeRichTextHtml,
+    sanitizeStoredFileName,
+} from './lib/upload-security';
+import { createInternalApiClient } from '@menumanager/internal-auth';
+import { createSubmissionWorkflowHandlers } from './lib/submission-workflow';
+import { createApprovalWorkflowHandlers } from './lib/approval-workflow';
+import { createDesignApprovalWorkflowHandlers } from './lib/design-approval-workflow';
+
+export {
+    buildRestrictedDashboardCookieValue,
+    parseCookieHeader,
+    requireRestrictedDashboardAccess,
+    sanitizeRestrictedDashboardNext,
+} from './lib/restricted-access';
+export {
+    sanitizePlainTextInput,
+    sanitizeRichTextHtml,
+    sanitizeStoredFileName,
+} from './lib/upload-security';
 
 const execAsync = promisify(exec);
 const DEFAULT_ALLERGEN_KEY = 'G contains gluten | V vegetarian | D contains dairy | S contain shellfish | N contain nuts | VG vegan';
@@ -31,6 +72,7 @@ const DIFFER_SERVICE_URL = process.env.DIFFER_SERVICE_URL || 'http://localhost:3
 const CLICKUP_SERVICE_URL = process.env.CLICKUP_SERVICE_URL || 'http://localhost:3007';
 const ALERT_EMAIL = process.env.ALERT_EMAIL || '';
 const DASHBOARD_URL = process.env.DASHBOARD_URL || 'http://localhost:3005';
+const internalApi = createInternalApiClient(axios);
 
 // SMTP for admin alerts (reuses existing SMTP config)
 const hasSmtpConfig = !!(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS);
@@ -93,6 +135,28 @@ function getDocxRedlinerDir(): string {
 
 function getDocumentStorageRoot(): string {
     return process.env.DOCUMENT_STORAGE_ROOT || path.join(getRepoRoot(), 'tmp', 'documents');
+}
+
+function getTrainingStorageRoot(): string {
+    return path.join(getRepoRoot(), 'tmp', 'training');
+}
+
+function getTempUploadsDir(): string {
+    return path.join(getRepoRoot(), 'tmp', 'uploads');
+}
+
+function resolveDashboardStoredPath(candidatePath: string, label: string, allowedExtensions?: Set<string>): string {
+    const resolved = path.resolve(
+        `${candidatePath || ''}`.trim().startsWith('../')
+            ? path.resolve(__dirname, `${candidatePath || ''}`.trim())
+            : `${candidatePath || ''}`.trim()
+    );
+    return resolveSafeStoredPath(
+        resolved,
+        label,
+        [getDocumentStorageRoot(), path.join(getRepoRoot(), 'tmp')],
+        allowedExtensions
+    );
 }
 
 type ExtractedProjectDetails = {
@@ -158,28 +222,35 @@ function normalizeAllergenLegend(text: string): string {
 
 function normalizeMenuFooter(text: string, fallbackAllergens = ''): MenuFooterMetadata {
     const lines = (text || '').split('\n').map((line) => line.trim());
-    const cleanLines: string[] = [];
-    let extractedAllergenLine = '';
-    let hadRawNotice = false;
 
-    for (const line of lines) {
-        if (isLikelyRawNoticeLine(line)) {
-            hadRawNotice = true;
-            continue;
-        }
-        if (isLikelyAllergenLegendLine(line)) {
-            extractedAllergenLine = normalizeAllergenLegend(line);
-            continue;
-        }
-        cleanLines.push(line);
+    let footerStart = -1;
+    let rawNoticeIdx = -1;
+    for (let i = 0; i < lines.length; i++) {
+        const lower = lines[i].toLowerCase();
+        const startsRaw = lower.includes('consuming raw or undercooked');
+        const isAllergen = isLikelyAllergenLegendLine(lines[i]);
+        if (startsRaw && rawNoticeIdx === -1) rawNoticeIdx = i;
+        if ((startsRaw || isAllergen) && footerStart === -1) footerStart = i;
     }
 
-    while (cleanLines.length && cleanLines[0] === '') cleanLines.shift();
-    while (cleanLines.length && cleanLines[cleanLines.length - 1] === '') cleanLines.pop();
+    let menuLines: string[];
+    let allergenLines: string[] = [];
+    let hadRawNotice = false;
+    if (footerStart >= 0) {
+        menuLines = lines.slice(0, footerStart);
+        const allergenEndIdx = rawNoticeIdx >= 0 ? rawNoticeIdx : lines.length;
+        allergenLines = lines.slice(footerStart, allergenEndIdx).filter(Boolean);
+        hadRawNotice = rawNoticeIdx >= 0;
+    } else {
+        menuLines = lines;
+    }
+
+    while (menuLines.length && menuLines[0] === '') menuLines.shift();
+    while (menuLines.length && menuLines[menuLines.length - 1] === '') menuLines.pop();
 
     const collapsed: string[] = [];
     let prevEmpty = false;
-    for (const line of cleanLines) {
+    for (const line of menuLines) {
         if (!line) {
             if (!prevEmpty) collapsed.push('');
             prevEmpty = true;
@@ -189,6 +260,7 @@ function normalizeMenuFooter(text: string, fallbackAllergens = ''): MenuFooterMe
         }
     }
 
+    const extractedAllergenLine = allergenLines.join(' | ');
     return {
         body: collapsed.join('\n'),
         normalizedAllergenLine: normalizeAllergenLegend(extractedAllergenLine || fallbackAllergens),
@@ -207,14 +279,20 @@ function decodeHtmlText(html: string): string {
 }
 
 function stripManagedFooterFromHtml(html: string): string {
-    return (html || '').replace(/<p\b[^>]*>[\s\S]*?<\/p>/gi, (block) => {
-        const text = normalizeWhitespace(decodeHtmlText(block));
-        if (!text) return block;
-        if (isLikelyRawNoticeLine(text) || isLikelyAllergenLegendLine(text)) {
-            return '';
+    if (!html) return html;
+    const regex = /<p\b[^>]*>[\s\S]*?<\/p>/gi;
+    let footerStart = -1;
+    let match: RegExpExecArray | null;
+    while ((match = regex.exec(html)) !== null) {
+        const text = normalizeWhitespace(decodeHtmlText(match[0]));
+        if (!text) continue;
+        const lower = text.toLowerCase();
+        if (lower.includes('consuming raw or undercooked') || isLikelyAllergenLegendLine(text)) {
+            footerStart = match.index;
+            break;
         }
-        return block;
-    });
+    }
+    return footerStart >= 0 ? html.substring(0, footerStart) : html;
 }
 
 function slugifyStorageSegment(value: string): string {
@@ -272,7 +350,7 @@ type PropertyCatalogRecord = {
 };
 
 async function getPropertyCatalogFromDb(): Promise<PropertyCatalogRecord[]> {
-    const dbResponse = await axios.get(`${DB_SERVICE_URL}/properties`, { timeout: 3000 });
+    const dbResponse = await internalApi.get(`${DB_SERVICE_URL}/properties`, { timeout: 3000 });
     const raw = Array.isArray(dbResponse?.data?.catalog) ? dbResponse.data.catalog : [];
     return raw
         .map((item: any) => ({
@@ -347,19 +425,28 @@ const app = express();
 const port = 3005;
 
 // Configure multer for file uploads
-const upload = multer({ dest: path.join(__dirname, '..', '..', '..', 'tmp', 'uploads') });
+const upload = multer({
+    dest: getTempUploadsDir(),
+    limits: {
+        fileSize: MAX_UPLOAD_BYTES,
+        files: 4,
+    },
+});
 
 // Serve static files and use EJS for templates
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.json());
+app.use(express.urlencoded({ extended: false }));
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
+app.use(['/training', '/learning', '/api/learning'], requireRestrictedDashboardAccess);
 
 export async function extractBaselineFromDocx(filePath: string): Promise<{
     approvedMenuContent: string;
     approvedMenuContentRaw: string;
     approvedMenuContentHtml: string;
     extractedAllergenKey: string;
+    containsRawNotice: boolean;
     extractedProject: ExtractedProjectDetails;
 }> {
     const docxRedlinerDir = getDocxRedlinerDir();
@@ -396,11 +483,15 @@ export async function extractBaselineFromDocx(filePath: string): Promise<{
     }
 
     const projectDetails = detailsData.project_details || {};
+    const rawCleanedText = cleanData.cleaned_menu_content || cleanData.menu_content || '';
+    const rawCleanedHtml = cleanData.cleaned_menu_html || '';
+    const footer = normalizeMenuFooter(rawCleanedText, detailsData.allergen_key || '');
     return {
-        approvedMenuContent: cleanData.cleaned_menu_content || cleanData.menu_content || '',
+        approvedMenuContent: footer.body,
         approvedMenuContentRaw: cleanData.menu_content || '',
-        approvedMenuContentHtml: cleanData.cleaned_menu_html || '',
-        extractedAllergenKey: detailsData.allergen_key || '',
+        approvedMenuContentHtml: stripManagedFooterFromHtml(rawCleanedHtml),
+        extractedAllergenKey: footer.normalizedAllergenLine || detailsData.allergen_key || '',
+        containsRawNotice: footer.hadRawNotice,
         extractedProject: {
             projectName: projectDetails.project_name || '',
             property: projectDetails.property || '',
@@ -516,6 +607,37 @@ app.get('/design-approval', (req, res) => {
     });
 });
 
+app.get('/restricted-access', (req, res) => {
+    const nextPath = sanitizeRestrictedDashboardNext(`${req.query.next || RESTRICTED_DASHBOARD_DEFAULT_NEXT}`);
+    res.render('restricted-access', {
+        title: 'Restricted Access',
+        nextPath,
+        errorMessage: '',
+    });
+});
+
+app.post('/restricted-access', (req, res) => {
+    const nextPath = sanitizeRestrictedDashboardNext(`${req.body?.next || req.query.next || RESTRICTED_DASHBOARD_DEFAULT_NEXT}`);
+    const pin = sanitizePlainTextInput(req.body?.pin, { maxLength: 8 });
+
+    if (!isRestrictedDashboardPinValid(pin)) {
+        return res.status(401).render('restricted-access', {
+            title: 'Restricted Access',
+            nextPath,
+            errorMessage: RESTRICTED_DASHBOARD_ERROR,
+        });
+    }
+
+    res.cookie(RESTRICTED_DASHBOARD_COOKIE, buildRestrictedDashboardCookieValue(), {
+        httpOnly: true,
+        sameSite: 'strict',
+        secure: process.env.NODE_ENV === 'production',
+        maxAge: RESTRICTED_DASHBOARD_SESSION_MS,
+        path: '/',
+    });
+    res.redirect(nextPath);
+});
+
 /**
  * Review Detail Page - View specific submission
  */
@@ -524,7 +646,7 @@ app.get('/review/:submissionId', async (req, res) => {
         const { submissionId } = req.params;
         
         // Get submission details from DB
-        const dbResponse = await axios.get(`${DB_SERVICE_URL}/submissions/${submissionId}`);
+        const dbResponse = await internalApi.get(`${DB_SERVICE_URL}/submissions/${submissionId}`);
         const submission = dbResponse.data;
 
         if (!submission) {
@@ -554,7 +676,7 @@ app.get('/review/:submissionId', async (req, res) => {
 app.get('/approval/:submissionId', async (req, res) => {
     try {
         const { submissionId } = req.params;
-        const dbResponse = await axios.get(`${DB_SERVICE_URL}/submissions/${encodeURIComponent(submissionId)}`);
+        const dbResponse = await internalApi.get(`${DB_SERVICE_URL}/submissions/${encodeURIComponent(submissionId)}`);
         const submission = dbResponse.data;
 
         if (!submission) {
@@ -565,11 +687,7 @@ app.get('/approval/:submissionId', async (req, res) => {
 
         const baseline = await loadApprovalBaselineFromSubmission(submission, {
             extractUnapprovedFromDocx,
-            resolveStoredPath: (storedPath) => (
-                storedPath.startsWith('../')
-                    ? path.resolve(__dirname, storedPath)
-                    : storedPath
-            ),
+            resolveStoredPath: (storedPath) => resolveDashboardStoredPath(storedPath, 'Stored approval source document', ALLOWED_DOCX_EXTENSIONS),
         });
         const approvalUrl = `${DASHBOARD_URL.replace(/\/+$/, '')}/approval/${submission.id || submissionId}`;
         res.render('approval-editor', {
@@ -595,7 +713,7 @@ app.get('/approval/:submissionId', async (req, res) => {
 app.get('/download/original/:submissionId', async (req, res) => {
     try {
         const { submissionId } = req.params;
-        const dbResponse = await axios.get(`${DB_SERVICE_URL}/submissions/${submissionId}`);
+        const dbResponse = await internalApi.get(`${DB_SERVICE_URL}/submissions/${submissionId}`);
         const submission = dbResponse.data;
 
         if (!submission || !submission.original_path) {
@@ -603,10 +721,7 @@ app.get('/download/original/:submissionId', async (req, res) => {
         }
 
         // Handle relative paths from dist directory
-        let absolutePath = submission.original_path;
-        if (absolutePath.startsWith('../')) {
-            absolutePath = path.resolve(__dirname, absolutePath);
-        }
+        const absolutePath = resolveDashboardStoredPath(submission.original_path, 'Original submission', ALLOWED_DOCX_EXTENSIONS);
 
         console.log(`Downloading original from: ${absolutePath}`);
         res.download(absolutePath, submission.filename);
@@ -616,125 +731,68 @@ app.get('/download/original/:submissionId', async (req, res) => {
     }
 });
 
+const submissionWorkflowHandlers = createSubmissionWorkflowHandlers({
+    axios: internalApi,
+    fs,
+    DB_SERVICE_URL,
+    AI_REVIEW_URL,
+    CLICKUP_SERVICE_URL,
+    DEFAULT_ALLERGEN_KEY,
+    INTERNAL_REVIEWER_EMAIL: process.env.INTERNAL_REVIEWER_EMAIL,
+    getTempUploadsDir,
+    getSubmissionDocumentDir,
+    getPropertyCatalogFromDb,
+    resolveCityCountryFromCatalog,
+    normalizeMenuFooter,
+    stripManagedFooterFromHtml,
+    detectRawUndercookedContent,
+    generateDocxFromForm,
+    sendAdminAlert,
+    isClientInputError,
+});
+
+const approvalWorkflowHandlers = createApprovalWorkflowHandlers({
+    axios: internalApi,
+    fs,
+    pathModule: path,
+    DB_SERVICE_URL,
+    DIFFER_SERVICE_URL,
+    CLICKUP_SERVICE_URL,
+    DEFAULT_ALLERGEN_KEY,
+    getSubmissionDocumentDir,
+    extractDishesAfterApproval,
+    coalesceString,
+    normalizeMenuFooter,
+    stripManagedFooterText,
+    stripManagedFooterFromHtml,
+    normalizeAllergenLegend,
+    detectRawUndercookedContent,
+    textToParagraphHtml,
+    generateDocxFromForm,
+});
+
+const designApprovalWorkflowHandlers = createDesignApprovalWorkflowHandlers({
+    axios: internalApi,
+    fs,
+    pathModule: path,
+    execAsync,
+    DB_SERVICE_URL,
+    getDocxRedlinerDir,
+    resolveStoredPath: resolveDashboardStoredPath,
+    compareMenuTexts,
+    extractDishesAfterApproval,
+    isClientInputError,
+});
+
 /**
  * Quick Approve - AI draft is perfect, no changes needed
  */
-app.post('/approve/:submissionId', async (req, res) => {
-    try {
-        const { submissionId } = req.params;
-        
-        console.log(`Quick approve for submission ${submissionId}`);
-
-        // Get submission details
-        const dbResponse = await axios.get(`${DB_SERVICE_URL}/submissions/${submissionId}`);
-        const submission = dbResponse.data;
-
-        if (!submission) {
-            return res.status(404).json({ error: 'Submission not found' });
-        }
-
-        // Copy AI draft as final version (no changes needed)
-        const finalPath = submission.ai_draft_path.replace('-draft.', '-final.');
-        await fs.copyFile(submission.ai_draft_path, finalPath);
-
-        // Update DB with final path and status
-        await axios.put(`${DB_SERVICE_URL}/submissions/${submissionId}`, {
-            status: 'approved',
-            final_path: finalPath,
-            reviewed_at: new Date().toISOString(),
-            changes_made: false // No human changes
-        });
-
-        // Trigger differ service (will show no differences)
-        await axios.post(`${DIFFER_SERVICE_URL}/compare`, {
-            submission_id: submissionId,
-            ai_draft_path: submission.ai_draft_path,
-            final_path: finalPath
-        });
-
-        // Extract dishes from approved menu (async, non-blocking)
-        extractDishesAfterApproval(
-            submission.id || submissionId,
-            submission.menu_content,
-            submission.property || 'Unknown',
-            finalPath,
-            submission.service_period || submission.raw_payload?.servicePeriod
-        ).catch((err: any) => console.error('Background dish extraction failed:', err));
-
-        res.json({
-            success: true,
-            message: 'Submission approved'
-        });
-
-    } catch (error) {
-        console.error('Error approving submission:', error);
-        res.status(500).json({ error: 'Failed to approve submission' });
-    }
-});
+app.post('/approve/:submissionId', approvalWorkflowHandlers.quickApprove);
 
 /**
  * Upload Corrected Version - Reviewer made additional corrections
  */
-app.post('/upload/:submissionId', upload.single('finalDocument') as any, async (req, res) => {
-    try {
-        const { submissionId } = req.params;
-        
-        if (!req.file) {
-            return res.status(400).json({ error: 'No file uploaded' });
-        }
-
-        console.log(`Corrected version uploaded for submission ${submissionId}`);
-
-        // Get submission details
-        const dbResponse = await axios.get(`${DB_SERVICE_URL}/submissions/${submissionId}`);
-        const submission = dbResponse.data;
-
-        if (!submission) {
-            return res.status(404).json({ error: 'Submission not found' });
-        }
-
-        // Move uploaded file to final location
-        const finalPath = path.join(
-            __dirname, '..', '..', '..', 'tmp', 'finals',
-            `${submissionId}-final.docx`
-        );
-        await fs.mkdir(path.dirname(finalPath), { recursive: true });
-        await fs.rename(req.file.path, finalPath);
-
-        // Update DB with final path and status
-        await axios.put(`${DB_SERVICE_URL}/submissions/${submissionId}`, {
-            status: 'approved',
-            final_path: finalPath,
-            reviewed_at: new Date().toISOString(),
-            changes_made: true // Human made corrections
-        });
-
-        // Trigger differ service (will analyze differences for learning)
-        await axios.post(`${DIFFER_SERVICE_URL}/compare`, {
-            submission_id: submissionId,
-            ai_draft_path: submission.ai_draft_path,
-            final_path: finalPath
-        });
-
-        // Extract dishes from approved menu (async, non-blocking)
-        extractDishesAfterApproval(
-            submission.id || submissionId,
-            submission.menu_content,
-            submission.property || 'Unknown',
-            finalPath,
-            submission.service_period || submission.raw_payload?.servicePeriod
-        ).catch((err: any) => console.error('Background dish extraction failed:', err));
-
-        res.json({
-            success: true,
-            message: 'Corrected version uploaded'
-        });
-
-    } catch (error) {
-        console.error('Error uploading corrected version:', error);
-        res.status(500).json({ error: 'Failed to upload corrected version' });
-    }
-});
+app.post('/upload/:submissionId', upload.single('finalDocument') as any, approvalWorkflowHandlers.uploadCorrectedVersion);
 
 /**
  * API endpoint to get submission status (for AJAX polling)
@@ -742,7 +800,7 @@ app.post('/upload/:submissionId', upload.single('finalDocument') as any, async (
 app.get('/api/submission/:submissionId/status', async (req, res) => {
     try {
         const { submissionId } = req.params;
-        const dbResponse = await axios.get(`${DB_SERVICE_URL}/submissions/${submissionId}`);
+        const dbResponse = await internalApi.get(`${DB_SERVICE_URL}/submissions/${submissionId}`);
         res.json(dbResponse.data);
     } catch (error) {
         res.status(500).json({ error: 'Failed to get status' });
@@ -755,7 +813,7 @@ app.get('/api/submission/:submissionId/status', async (req, res) => {
 app.get('/training', async (req, res) => {
     try {
         // Read training sessions from tmp/training directory
-        const trainingDir = path.join(__dirname, '..', '..', '..', 'tmp', 'training');
+        const trainingDir = getTrainingStorageRoot();
         await fs.mkdir(trainingDir, { recursive: true });
 
         const files = await fs.readdir(trainingDir);
@@ -801,14 +859,16 @@ app.post('/training/upload-pair', upload.fields([
 
         const originalFile = files.original[0];
         const redlinedFile = files.redlined[0];
+        await assertUploadedFileType(originalFile.path, ['docx']);
+        await assertUploadedFileType(redlinedFile.path, ['docx']);
 
         // Create pairs directory if it doesn't exist
-        const pairsDir = path.join(__dirname, '..', '..', '..', 'tmp', 'training', 'pairs');
+        const pairsDir = path.join(getTrainingStorageRoot(), 'pairs');
         await fs.mkdir(pairsDir, { recursive: true });
 
         // Generate pair name
         const timestamp = Date.now();
-        const pairName = req.body.pairName || `pair_${timestamp}`;
+        const pairName = sanitizeStoredFileName(req.body.pairName || `pair_${timestamp}`, `pair_${timestamp}`);
 
         // Move files to pairs directory with standard naming
         const originalDest = path.join(pairsDir, `${pairName}_original.docx`);
@@ -836,8 +896,11 @@ app.post('/training/upload-pair', upload.fields([
  */
 app.get('/training/session/:sessionId', async (req, res) => {
     try {
-        const { sessionId } = req.params;
-        const trainingDir = path.join(__dirname, '..', '..', '..', 'tmp', 'training');
+        const sessionId = sanitizePlainTextInput(req.params.sessionId, { maxLength: 64 });
+        if (!/^[A-Za-z0-9_-]+$/.test(sessionId)) {
+            return res.status(400).json({ error: 'Invalid session ID' });
+        }
+        const trainingDir = getTrainingStorageRoot();
         const sessionFile = path.join(trainingDir, `session_${sessionId}.json`);
 
         const content = await fs.readFile(sessionFile, 'utf-8');
@@ -855,8 +918,11 @@ app.get('/training/session/:sessionId', async (req, res) => {
  */
 app.get('/training/download-rules/:sessionId', async (req, res) => {
     try {
-        const { sessionId } = req.params;
-        const trainingDir = path.join(__dirname, '..', '..', '..', 'tmp', 'training');
+        const sessionId = sanitizePlainTextInput(req.params.sessionId, { maxLength: 64 });
+        if (!/^[A-Za-z0-9_-]+$/.test(sessionId)) {
+            return res.status(400).send('Invalid session ID');
+        }
+        const trainingDir = getTrainingStorageRoot();
         const rulesFile = path.join(trainingDir, `learned_rules_${sessionId}.json`);
 
         res.download(rulesFile, `learned_rules_${sessionId}.json`);
@@ -871,8 +937,11 @@ app.get('/training/download-rules/:sessionId', async (req, res) => {
  */
 app.get('/training/download-prompt/:sessionId', async (req, res) => {
     try {
-        const { sessionId } = req.params;
-        const trainingDir = path.join(__dirname, '..', '..', '..', 'tmp', 'training');
+        const sessionId = sanitizePlainTextInput(req.params.sessionId, { maxLength: 64 });
+        if (!/^[A-Za-z0-9_-]+$/.test(sessionId)) {
+            return res.status(400).send('Invalid session ID');
+        }
+        const trainingDir = getTrainingStorageRoot();
         const promptFile = path.join(trainingDir, `optimized_prompt_${sessionId}.txt`);
 
         res.download(promptFile, `optimized_prompt_${sessionId}.txt`);
@@ -888,20 +957,20 @@ app.get('/training/download-prompt/:sessionId', async (req, res) => {
 app.get('/learning', async (_req, res) => {
     try {
         const [rulesResult, trainingResult, submissionsResult, correctionRulesResult, propertiesResult] = await Promise.all([
-            axios.get(`${DIFFER_SERVICE_URL}/learning/rules`, { timeout: 2500 })
-                .then((r) => ({ ok: true, data: r.data, error: '' }))
+            internalApi.get(`${DIFFER_SERVICE_URL}/learning/rules`, { timeout: 2500 })
+                .then((r: any) => ({ ok: true, data: r.data, error: '' }))
                 .catch((e: any) => ({ ok: false, data: {}, error: e?.message || 'request failed' })),
-            axios.get(`${DIFFER_SERVICE_URL}/training-data`, { timeout: 2500 })
-                .then((r) => ({ ok: true, data: r.data, error: '' }))
+            internalApi.get(`${DIFFER_SERVICE_URL}/training-data`, { timeout: 2500 })
+                .then((r: any) => ({ ok: true, data: r.data, error: '' }))
                 .catch((e: any) => ({ ok: false, data: { count: 0, data: [] }, error: e?.message || 'request failed' })),
-            axios.get(`${DIFFER_SERVICE_URL}/learning/submissions`, { timeout: 2500 })
-                .then((r) => ({ ok: true, data: r.data, error: '' }))
+            internalApi.get(`${DIFFER_SERVICE_URL}/learning/submissions`, { timeout: 2500 })
+                .then((r: any) => ({ ok: true, data: r.data, error: '' }))
                 .catch((e: any) => ({ ok: false, data: { submissions: [] }, error: e?.message || 'request failed' })),
-            axios.get(`${DB_SERVICE_URL}/correction-rules`, { timeout: 2500 })
-                .then((r) => ({ ok: true, data: r.data, error: '' }))
+            internalApi.get(`${DB_SERVICE_URL}/correction-rules`, { timeout: 2500 })
+                .then((r: any) => ({ ok: true, data: r.data, error: '' }))
                 .catch((e: any) => ({ ok: false, data: [], error: e?.message || 'request failed' })),
-            axios.get(`${DB_SERVICE_URL}/properties`, { timeout: 2500 })
-                .then((r) => ({ ok: true, data: r.data, error: '' }))
+            internalApi.get(`${DB_SERVICE_URL}/properties`, { timeout: 2500 })
+                .then((r: any) => ({ ok: true, data: r.data, error: '' }))
                 .catch((e: any) => ({ ok: false, data: { properties: [] }, error: e?.message || 'request failed' })),
         ]);
 
@@ -969,17 +1038,17 @@ app.get('/learning/submission/:submissionId', async (req, res) => {
     try {
         const { submissionId } = req.params;
         const [learningDetailResult, submissionResult, correctionRulesResult, propertiesResult] = await Promise.all([
-            axios.get(`${DIFFER_SERVICE_URL}/learning/submissions/${encodeURIComponent(submissionId)}`, { timeout: 3500 })
-                .then((r) => ({ ok: true, data: r.data, error: '' }))
+            internalApi.get(`${DIFFER_SERVICE_URL}/learning/submissions/${encodeURIComponent(submissionId)}`, { timeout: 3500 })
+                .then((r: any) => ({ ok: true, data: r.data, error: '' }))
                 .catch((e: any) => ({ ok: false, data: null, error: e?.message || 'request failed' })),
-            axios.get(`${DB_SERVICE_URL}/submissions/${encodeURIComponent(submissionId)}`, { timeout: 3500 })
-                .then((r) => ({ ok: true, data: r.data, error: '' }))
+            internalApi.get(`${DB_SERVICE_URL}/submissions/${encodeURIComponent(submissionId)}`, { timeout: 3500 })
+                .then((r: any) => ({ ok: true, data: r.data, error: '' }))
                 .catch((e: any) => ({ ok: false, data: null, error: e?.message || 'request failed' })),
-            axios.get(`${DB_SERVICE_URL}/correction-rules?submission_id=${encodeURIComponent(submissionId)}`, { timeout: 3500 })
-                .then((r) => ({ ok: true, data: r.data, error: '' }))
+            internalApi.get(`${DB_SERVICE_URL}/correction-rules?submission_id=${encodeURIComponent(submissionId)}`, { timeout: 3500 })
+                .then((r: any) => ({ ok: true, data: r.data, error: '' }))
                 .catch((e: any) => ({ ok: false, data: [], error: e?.message || 'request failed' })),
-            axios.get(`${DB_SERVICE_URL}/properties`, { timeout: 3500 })
-                .then((r) => ({ ok: true, data: r.data, error: '' }))
+            internalApi.get(`${DB_SERVICE_URL}/properties`, { timeout: 3500 })
+                .then((r: any) => ({ ok: true, data: r.data, error: '' }))
                 .catch((e: any) => ({ ok: false, data: { properties: [] }, error: e?.message || 'request failed' })),
         ]);
 
@@ -1047,7 +1116,7 @@ app.post('/api/learning/correction-rules', async (req, res) => {
             return res.status(400).json({ error: 'submission_id, correction_id, original_text, corrected_text, and rule are required' });
         }
 
-        const response = await axios.post(`${DB_SERVICE_URL}/correction-rules`, record, { timeout: 3000 });
+        const response = await internalApi.post(`${DB_SERVICE_URL}/correction-rules`, record, { timeout: 3000 });
         res.json(response.data);
     } catch (error: any) {
         console.error('Error saving correction rule:', error.message);
@@ -1061,7 +1130,7 @@ app.post('/api/learning/correction-rules', async (req, res) => {
 app.put('/api/learning/correction-rules/:id', async (req, res) => {
     try {
         const { id } = req.params;
-        const response = await axios.put(`${DB_SERVICE_URL}/correction-rules/${encodeURIComponent(id)}`, req.body || {}, { timeout: 3000 });
+        const response = await internalApi.put(`${DB_SERVICE_URL}/correction-rules/${encodeURIComponent(id)}`, req.body || {}, { timeout: 3000 });
         res.json(response.data);
     } catch (error: any) {
         console.error('Error updating correction rule:', error.message);
@@ -1075,11 +1144,11 @@ app.put('/api/learning/correction-rules/:id', async (req, res) => {
 app.get('/learning/prompt-proposal', async (_req, res) => {
     try {
         const [proposalResult, historyResult] = await Promise.all([
-            axios.get(`${DB_SERVICE_URL}/prompt-proposals/latest`, { timeout: 3500 })
-                .then((r) => ({ ok: true, data: r.data, error: '' }))
+            internalApi.get(`${DB_SERVICE_URL}/prompt-proposals/latest`, { timeout: 3500 })
+                .then((r: any) => ({ ok: true, data: r.data, error: '' }))
                 .catch((e: any) => ({ ok: false, data: null, error: e?.message || 'request failed' })),
-            axios.get(`${DB_SERVICE_URL}/prompt-proposals`, { timeout: 3500 })
-                .then((r) => ({ ok: true, data: r.data, error: '' }))
+            internalApi.get(`${DB_SERVICE_URL}/prompt-proposals`, { timeout: 3500 })
+                .then((r: any) => ({ ok: true, data: r.data, error: '' }))
                 .catch((e: any) => ({ ok: false, data: [], error: e?.message || 'request failed' })),
         ]);
 
@@ -1110,7 +1179,7 @@ app.post('/api/learning/prompt-proposal/:id/review', async (req, res) => {
         }
 
         // Update proposal status
-        const response = await axios.put(`${DB_SERVICE_URL}/prompt-proposals/${encodeURIComponent(id)}`, {
+        const response = await internalApi.put(`${DB_SERVICE_URL}/prompt-proposals/${encodeURIComponent(id)}`, {
             status,
             reviewer_name: reviewer_name || null,
             reviewer_notes: reviewer_notes || null,
@@ -1198,7 +1267,7 @@ app.post('/api/learning/location-rules', async (req, res) => {
             return res.status(400).json({ error: `shared location "${invalidShared}" is not in configured properties` });
         }
 
-        const response = await axios.post(`${DIFFER_SERVICE_URL}/learning/location-rules`, {
+        const response = await internalApi.post(`${DIFFER_SERVICE_URL}/learning/location-rules`, {
             ...payload,
             location,
             shared_locations: sharedLocations,
@@ -1216,7 +1285,7 @@ app.post('/api/learning/location-rules', async (req, res) => {
 app.get('/api/submitter-profiles/search', async (req, res) => {
     try {
         const q = req.query.q || '';
-        const dbResponse = await axios.get(`${DB_SERVICE_URL}/submitter-profiles/search`, {
+        const dbResponse = await internalApi.get(`${DB_SERVICE_URL}/submitter-profiles/search`, {
             params: { q }
         });
         res.json(dbResponse.data);
@@ -1231,7 +1300,7 @@ app.get('/api/submitter-profiles/search', async (req, res) => {
 app.get('/api/recent-projects', async (req, res) => {
     try {
         const limit = req.query.limit || 20;
-        const dbResponse = await axios.get(`${DB_SERVICE_URL}/submissions/recent-projects`, {
+        const dbResponse = await internalApi.get(`${DB_SERVICE_URL}/submissions/recent-projects`, {
             params: { limit }
         });
         res.json(dbResponse.data);
@@ -1245,7 +1314,7 @@ app.get('/api/recent-projects', async (req, res) => {
  */
 app.get('/api/properties', async (_req, res) => {
     try {
-        const dbResponse = await axios.get(`${DB_SERVICE_URL}/properties`, { timeout: 3000 });
+        const dbResponse = await internalApi.get(`${DB_SERVICE_URL}/properties`, { timeout: 3000 });
         res.json(dbResponse.data);
     } catch (error) {
         res.json({ properties: [], catalog: [] });
@@ -1259,7 +1328,7 @@ app.get('/api/submissions/search', async (req, res) => {
     try {
         const q = req.query.q || '';
         const limit = req.query.limit || 20;
-        const dbResponse = await axios.get(`${DB_SERVICE_URL}/submissions/search`, {
+        const dbResponse = await internalApi.get(`${DB_SERVICE_URL}/submissions/search`, {
             params: { q, limit }
         });
         res.json(dbResponse.data);
@@ -1274,7 +1343,7 @@ app.get('/api/submissions/search', async (req, res) => {
 app.get('/api/submissions/latest-approved', async (req, res) => {
     try {
         const { projectName, property } = req.query;
-        const dbResponse = await axios.get(`${DB_SERVICE_URL}/submissions/latest-approved`, {
+        const dbResponse = await internalApi.get(`${DB_SERVICE_URL}/submissions/latest-approved`, {
             params: { projectName, property }
         });
         res.json(dbResponse.data);
@@ -1293,24 +1362,26 @@ app.post('/api/modification/baseline-upload', upload.single('baselineDoc') as an
             return res.status(400).json({ error: 'No baseline document uploaded' });
         }
 
-        if (req.file.mimetype !== 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
+        if (!hasAllowedExtension(req.file.originalname || req.file.path, ALLOWED_DOCX_EXTENSIONS)) {
             return res.status(400).json({ error: 'Only .docx files are accepted' });
         }
+        await assertUploadedFileType(req.file.path, ['docx']);
 
         const extracted = await extractBaselineFromDocx(req.file.path);
         res.json({
             success: true,
             baselineDocPath: req.file.path,
-            baselineFileName: req.file.originalname,
+            baselineFileName: sanitizeStoredFileName(req.file.originalname, 'baseline.docx'),
             approvedMenuContent: extracted.approvedMenuContent,
             approvedMenuContentRaw: extracted.approvedMenuContentRaw,
             approvedMenuContentHtml: extracted.approvedMenuContentHtml,
             extractedAllergenKey: extracted.extractedAllergenKey,
+            containsRawNotice: extracted.containsRawNotice,
             extractedProject: extracted.extractedProject,
         });
     } catch (error: any) {
         console.error('Error extracting baseline document:', error);
-        res.status(500).json({ error: 'Failed to process baseline document', details: error.message });
+        res.status(isClientInputError(error) ? 400 : 500).json({ error: 'Failed to process baseline document', details: error.message });
     }
 });
 
@@ -1325,15 +1396,16 @@ app.post('/api/modification/unapproved-upload', upload.single('baselineDoc') as 
             return res.status(400).json({ error: 'No document uploaded' });
         }
 
-        if (req.file.mimetype !== 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
+        if (!hasAllowedExtension(req.file.originalname || req.file.path, ALLOWED_DOCX_EXTENSIONS)) {
             return res.status(400).json({ error: 'Only .docx files are accepted' });
         }
+        await assertUploadedFileType(req.file.path, ['docx']);
 
         const extracted = await extractUnapprovedFromDocx(req.file.path);
         res.json({
             success: true,
             baselineDocPath: req.file.path,
-            baselineFileName: req.file.originalname,
+            baselineFileName: sanitizeStoredFileName(req.file.originalname, 'baseline.docx'),
             visibleText: extracted.visibleText,
             unapprovedHtml: extracted.unapprovedHtml,
             annotations: extracted.annotations,
@@ -1342,7 +1414,7 @@ app.post('/api/modification/unapproved-upload', upload.single('baselineDoc') as 
         });
     } catch (error: any) {
         console.error('Error extracting unapproved document:', error);
-        res.status(500).json({ error: 'Failed to process unapproved document', details: error.message });
+        res.status(isClientInputError(error) ? 400 : 500).json({ error: 'Failed to process unapproved document', details: error.message });
     }
 });
 
@@ -1351,7 +1423,11 @@ app.post('/api/modification/unapproved-upload', upload.single('baselineDoc') as 
  */
 app.post('/api/form/basic-check', async (req, res) => {
     try {
-        const { menuContent, allergens, menuType, baselineMenuContent, reviewMode } = req.body;
+        const menuContent = sanitizePlainTextInput(req.body?.menuContent, { multiline: true, maxLength: MAX_LONG_TEXT_LENGTH });
+        const allergens = sanitizePlainTextInput(req.body?.allergens, { multiline: true, maxLength: 2000 });
+        const menuType = sanitizePlainTextInput(req.body?.menuType, { maxLength: 64 });
+        const baselineMenuContent = sanitizePlainTextInput(req.body?.baselineMenuContent, { multiline: true, maxLength: MAX_LONG_TEXT_LENGTH });
+        const reviewMode = sanitizePlainTextInput(req.body?.reviewMode, { maxLength: 64 });
 
         if (!menuContent || !menuContent.trim()) {
             return res.status(400).json({ error: 'Menu content is required' });
@@ -1467,7 +1543,7 @@ Note: Use ONLY these allergen codes when checking allergen compliance. Do not us
         }
         finalPrompt = `${finalPrompt}\n\nIMPORTANT FOOTER RULES:\n- Do NOT review or suggest changes for the allergen legend/footer boilerplate.\n- Do NOT review or suggest changes for the standard foodborne illness warning/footer boilerplate.\n- The canonical foodborne illness warning is: ${RAW_NOTICE_TEXT}\n- Those footer lines are system-managed outside this review scope.`;
 
-        const qaResponse = await axios.post(`${AI_REVIEW_URL}/run-qa-check`, {
+        const qaResponse = await internalApi.post(`${AI_REVIEW_URL}/run-qa-check`, {
             text: reviewFooterMetadata.body,
             prompt: finalPrompt
         });
@@ -1736,533 +1812,14 @@ function reconcileCriticalSuggestionsAgainstCorrectedMenu(
 /**
  * Form API: Menu image upload (optional)
  */
-app.post('/api/form/menu-image-upload', upload.single('menuImage') as any, async (req, res) => {
-    try {
-        if (!req.file) {
-            return res.status(400).json({ error: 'No image uploaded' });
-        }
-
-        const mime = req.file.mimetype || '';
-        if (!mime.startsWith('image/') && mime !== 'application/pdf') {
-            return res.status(400).json({ error: 'Only image or PDF uploads are allowed' });
-        }
-
-        res.json({
-            success: true,
-            menuImagePath: req.file.path,
-            menuImageFileName: req.file.originalname || path.basename(req.file.path),
-        });
-    } catch (error: any) {
-        console.error('Error uploading menu image:', error.message);
-        res.status(500).json({ error: 'Failed to upload menu image' });
-    }
-});
+app.post('/api/form/menu-image-upload', upload.single('menuImage') as any, submissionWorkflowHandlers.uploadMenuImage);
 
 /**
  * Form API: Submit Menu - Create docx from form and trigger review workflow
  */
-app.post('/api/form/submit', async (req, res) => {
-    try {
-        const {
-            submitterName,
-            submitterEmail,
-            submitterJobTitle,
-            projectName,
-            property,
-            width,
-            height,
-            printWidth,
-            printHeight,
-            printRegion,
-            printSize,
-            folded,
-            digitalWidth,
-            digitalHeight,
-            cropMarks,
-            bleedMarks,
-            fileSizeLimit,
-            fileSizeLimitMb,
-            fileDeliveryNotes,
-            orientation,
-            menuType,
-            servicePeriod,
-            templateType,
-            turnaroundDays,
-            dateNeeded,
-            hotelName,
-            cityCountry,
-            assetType,
-            allergens,
-            containsRawUndercooked,
-            suppressRawNotice,
-            menuContent,
-            menuContentHtml,
-            persistentDiffHtml,
-            approvals,
-            criticalOverrides,
-            submissionMode,
-            revisionBaseSubmissionId,
-            revisionSource,
-            revisionBaselineDocPath,
-            revisionBaselineFileName,
-            baseApprovedMenuContent,
-            chefPersistentDiff,
-            skipAiReview,
-            menuImagePath,
-            menuImageFileName
-        } = req.body;
+app.post('/api/form/submit', submissionWorkflowHandlers.submitMenu);
 
-        const wantsPrint = assetType === 'PRINT' || assetType === 'BOTH';
-        const wantsDigital = assetType === 'DIGITAL' || assetType === 'BOTH';
-        const normalizedTemplateType = templateType || 'food';
-        const skipAi = !!skipAiReview || normalizedTemplateType === 'non_beverage';
-        const minTurnaroundDays = submissionMode === 'modification' ? 2 : 5;
-        const parsedTurnaroundDays = Number.parseInt(`${turnaroundDays || ''}`, 10);
-        const normalizedTurnaroundDays = Number.isFinite(parsedTurnaroundDays) ? parsedTurnaroundDays : minTurnaroundDays;
-        const normalizedProperty = `${property || ''}`.trim();
-        const propertyCatalog = await getPropertyCatalogFromDb();
-        const normalizedCityCountry = resolveCityCountryFromCatalog(normalizedProperty, propertyCatalog) || `${cityCountry || ''}`.trim();
-
-        // Validate required fields
-        if (!submitterName || !submitterEmail || !submitterJobTitle || !projectName || !normalizedProperty || !orientation || !menuType || !servicePeriod || !templateType || !dateNeeded || !assetType || !menuContent) {
-            return res.status(400).json({ error: 'All fields are required' });
-        }
-        if (!normalizedCityCountry) {
-            return res.status(400).json({ error: 'Selected property must map to a configured location' });
-        }
-        const isAllowedProperty = propertyCatalog.some((item) => item.name.toLowerCase() === normalizedProperty.toLowerCase());
-        if (!isAllowedProperty) {
-            return res.status(400).json({ error: 'Property must be selected from the configured property list' });
-        }
-
-        if (normalizedTurnaroundDays < minTurnaroundDays) {
-            return res.status(400).json({
-                error: `Turnaround days must be at least ${minTurnaroundDays} for ${submissionMode === 'modification' ? 'modification' : 'new'} submissions`
-            });
-        }
-
-        if (wantsDigital && (!digitalWidth || !digitalHeight)) {
-            return res.status(400).json({ error: 'Digital width and height are required' });
-        }
-
-        if (wantsPrint) {
-            if (!printRegion || !folded || !cropMarks || !bleedMarks || !fileSizeLimit) {
-                return res.status(400).json({ error: 'All print fields are required for print assets' });
-            }
-            if (printRegion === 'US' && (!printWidth || !printHeight)) {
-                return res.status(400).json({ error: 'US print requires print width and height' });
-            }
-            if (printRegion === 'NON_US' && !printSize) {
-                return res.status(400).json({ error: 'Non-US print requires A-size selection' });
-            }
-        }
-
-        if (submissionMode === 'modification' && !revisionBaseSubmissionId && !revisionBaselineDocPath) {
-            return res.status(400).json({ error: 'Modification flow requires a prior approved submission or uploaded approved baseline document' });
-        }
-
-        // Construct size string for DOCX template backward compatibility
-        const printSizeForDocx = wantsPrint
-            ? (printRegion === 'NON_US' ? (printSize || 'N/A') : `${printWidth || width || ''} x ${printHeight || height || ''} inches`)
-            : '';
-        const digitalSizeForDocx = wantsDigital
-            ? `${digitalWidth || width || ''} x ${digitalHeight || height || ''} pixels`
-            : '';
-        const sizeForDocx = assetType === 'BOTH'
-            ? `Digital: ${digitalSizeForDocx} | Print: ${printSizeForDocx}`
-            : (wantsPrint ? printSizeForDocx : digitalSizeForDocx);
-        const footerMetadata = normalizeMenuFooter(menuContent, allergens || '');
-        const effectiveAllergens = footerMetadata.normalizedAllergenLine || DEFAULT_ALLERGEN_KEY;
-        const normalizedMenuContent = footerMetadata.body;
-        const normalizedMenuContentHtml = stripManagedFooterFromHtml(menuContentHtml || '');
-        const normalizedPersistentDiffHtml = stripManagedFooterFromHtml(persistentDiffHtml || '');
-        const docxMenuContentHtml =
-            submissionMode === 'modification' && normalizedPersistentDiffHtml
-                ? normalizedPersistentDiffHtml
-                : normalizedMenuContentHtml;
-        const selectedRawFlag = `${containsRawUndercooked}` === 'true' || containsRawUndercooked === true;
-        const suppressedRawFlag = `${suppressRawNotice}` === 'true' || suppressRawNotice === true;
-        const detectedRawFlag = detectRawUndercookedContent(normalizedMenuContent);
-        const shouldAddRawNotice = footerMetadata.hadRawNotice || (!suppressedRawFlag && (selectedRawFlag || detectedRawFlag));
-
-        // Approvals are attestations from the submitter - we store them as-is
-        // Frontend enforces that all required approvals are marked "Yes" before submission
-
-        // Generate unique submission ID
-        const submissionId = `form-${Date.now()}`;
-
-        // Create Word document from template and form data
-        const docxPath = await generateDocxFromForm(submissionId, {
-            projectName,
-            property: normalizedProperty,
-            size: sizeForDocx,
-            orientation,
-            menuType: menuType || 'standard',
-            templateType: normalizedTemplateType === 'non_beverage' ? 'food' : normalizedTemplateType,
-            dateNeeded,
-            menuContent: normalizedMenuContent,
-            menuContentHtml: docxMenuContentHtml,
-            allergens: effectiveAllergens,
-            shouldAddRawNotice
-        });
-
-        console.log(`📝 Generated document for submission ${submissionId}: ${docxPath}`);
-
-        let persistedBaselineDocPath: string | null = null;
-        if (revisionBaselineDocPath) {
-            try {
-                await fs.access(revisionBaselineDocPath);
-                const submissionDir = getSubmissionDocumentDir(projectName, normalizedProperty, submissionId);
-                const baselineDir = path.join(submissionDir, 'baseline');
-                await fs.mkdir(baselineDir, { recursive: true });
-                const baselineFile = revisionBaselineFileName || path.basename(revisionBaselineDocPath);
-                persistedBaselineDocPath = path.join(baselineDir, baselineFile);
-                if (path.resolve(revisionBaselineDocPath) !== path.resolve(persistedBaselineDocPath)) {
-                    await fs.copyFile(revisionBaselineDocPath, persistedBaselineDocPath);
-                }
-            } catch (baselineError: any) {
-                console.warn(`Failed to persist baseline doc for ${submissionId}:`, baselineError.message);
-                persistedBaselineDocPath = revisionBaselineDocPath;
-            }
-        }
-
-        let persistedMenuImagePath: string | null = null;
-        if (menuImagePath) {
-            try {
-                await fs.access(menuImagePath);
-                const submissionDir = getSubmissionDocumentDir(projectName, normalizedProperty, submissionId);
-                const assetDir = path.join(submissionDir, 'assets');
-                await fs.mkdir(assetDir, { recursive: true });
-                const imageFileName = menuImageFileName || path.basename(menuImagePath);
-                persistedMenuImagePath = path.join(assetDir, imageFileName);
-                if (path.resolve(menuImagePath) !== path.resolve(persistedMenuImagePath)) {
-                    await fs.copyFile(menuImagePath, persistedMenuImagePath);
-                }
-            } catch (imageError: any) {
-                console.warn(`Failed to persist menu image for ${submissionId}:`, imageError.message);
-                persistedMenuImagePath = menuImagePath;
-            }
-        }
-
-        const submissionStatus = skipAi ? 'submitted_no_ai_review' : 'pending_human_review';
-
-        // Create submission in database
-        const dbResponse = await axios.post(`${DB_SERVICE_URL}/submissions`, {
-            id: submissionId,
-            submitter_email: submitterEmail,
-            submitter_name: submitterName,
-            submitter_job_title: submitterJobTitle,
-            project_name: projectName,
-            property: normalizedProperty,
-            date_needed: dateNeeded,
-            filename: `${projectName}_Menu.docx`,
-            original_path: docxPath,
-            status: submissionStatus,
-            created_at: new Date().toISOString(),
-            source: 'form',
-            menu_type: menuType || 'standard',
-            service_period: servicePeriod || 'other',
-            template_type: normalizedTemplateType,
-            hotel_name: hotelName || null,
-            city_country: normalizedCityCountry,
-            asset_type: assetType,
-            width: width || (wantsPrint ? (printRegion === 'NON_US' ? printSize : printWidth) : digitalWidth),
-            height: height || (wantsPrint ? (printRegion === 'NON_US' ? printSize : printHeight) : digitalHeight),
-            print_width: printWidth || null,
-            print_height: printHeight || null,
-            print_region: printRegion || null,
-            print_size: printSize || null,
-            folded: folded === 'yes',
-            digital_width: digitalWidth || null,
-            digital_height: digitalHeight || null,
-            turnaround_days: normalizedTurnaroundDays,
-            crop_marks: cropMarks === 'yes',
-            bleed_marks: bleedMarks === 'yes',
-            file_size_limit: fileSizeLimit === 'yes',
-            file_size_limit_mb: fileSizeLimitMb || null,
-            file_delivery_notes: fileDeliveryNotes || null,
-            orientation,
-            approvals: JSON.stringify(approvals),
-            critical_overrides: JSON.stringify(criticalOverrides || []),
-            menu_content: normalizedMenuContent,
-            menu_content_html: normalizedMenuContentHtml || null,
-            allergens: effectiveAllergens,
-            submission_mode: submissionMode || 'new',
-            revision_source: revisionSource || null,
-            revision_base_submission_id: revisionBaseSubmissionId || null,
-            revision_baseline_doc_path: persistedBaselineDocPath || null,
-            revision_baseline_file_name: revisionBaselineFileName || null,
-            base_approved_menu_content: baseApprovedMenuContent || null,
-            chef_persistent_diff: chefPersistentDiff ? JSON.stringify(chefPersistentDiff) : null,
-        });
-
-        console.log(`✓ Submission created in database: ${submissionId}`);
-
-        // Record original source document metadata (storage abstraction: local now, Teams later)
-        axios.post(`${DB_SERVICE_URL}/assets`, {
-            submission_id: submissionId,
-            asset_type: 'original_docx',
-            source: 'chef_form',
-            storage_provider: 'local',
-            storage_path: docxPath,
-            file_name: `${projectName}_Menu.docx`
-        }).catch((err: any) => console.error('Failed to save original_docx asset metadata:', err.message));
-
-        if (persistedBaselineDocPath) {
-            axios.post(`${DB_SERVICE_URL}/assets`, {
-                submission_id: submissionId,
-                asset_type: 'baseline_approved_docx',
-                source: 'chef_modification_upload',
-                storage_provider: 'local',
-                storage_path: persistedBaselineDocPath,
-                file_name: revisionBaselineFileName || path.basename(persistedBaselineDocPath),
-            }).catch((err: any) => console.error('Failed to save baseline_approved_docx asset metadata:', err.message));
-        }
-
-        if (persistedMenuImagePath) {
-            axios.post(`${DB_SERVICE_URL}/assets`, {
-                submission_id: submissionId,
-                asset_type: 'menu_image',
-                source: 'chef_form',
-                storage_provider: 'local',
-                storage_path: persistedMenuImagePath,
-                file_name: menuImageFileName || path.basename(persistedMenuImagePath),
-            }).catch((err: any) => console.error('Failed to save menu_image asset metadata:', err.message));
-        }
-
-        // Save submitter profile (fire-and-forget)
-        axios.post(`${DB_SERVICE_URL}/submitter-profiles`, {
-            name: submitterName,
-            email: submitterEmail,
-            jobTitle: submitterJobTitle
-        }).catch((err: any) => console.error('Failed to save submitter profile:', err.message));
-
-        // Trigger AI review process (same as email workflow)
-        // This will:
-        // 1. Copy to ai-drafts
-        // 2. Generate redlined version
-        // 3. Set status to 'pending_human_review'
-        try {
-            if (skipAi) {
-                console.log(`Skipping AI review for submission ${submissionId} (template: ${normalizedTemplateType})`);
-            } else {
-            // Extract text from the document for AI review
-                const mammoth = require('mammoth');
-                const result = await mammoth.extractRawText({ path: docxPath });
-                const text = result.value;
-
-                await axios.post(`${AI_REVIEW_URL}/ai-review`, {
-                    text: text,
-                    submission_id: submissionId,
-                    submitter_email: submitterEmail,
-                    filename: `${projectName}_Menu.docx`,
-                    original_path: docxPath
-                });
-
-                console.log(`✓ AI review triggered for ${submissionId}`);
-            }
-        } catch (aiError: any) {
-            console.error('Error triggering AI review:', aiError.message);
-            // Update status to indicate manual review needed
-            await axios.put(`${DB_SERVICE_URL}/submissions/${submissionId}`, {
-                status: skipAi ? 'submitted_no_ai_review' : 'pending_human_review'
-            });
-            sendAdminAlert({
-                alert_type: 'ai_review_failed',
-                severity: 'warning',
-                service: 'dashboard',
-                submission_id: submissionId,
-                message: `AI review failed for "${projectName}". Submission moved to manual review.`,
-                details: { error: aiError.message },
-            });
-        }
-
-        // Create ClickUp task (synchronous so we can surface upload issues to chef)
-        let clickupWarning: string | undefined;
-        let clickupTaskId: string | undefined;
-        try {
-            const clickupResponse = await axios.post(`${CLICKUP_SERVICE_URL}/create-task`, {
-                submissionId,
-                submitterName,
-                submitterEmail,
-                submitterJobTitle,
-                projectName,
-                property: normalizedProperty,
-                width: width || (wantsPrint ? (printRegion === 'NON_US' ? printSize : printWidth) : digitalWidth),
-                height: height || (wantsPrint ? (printRegion === 'NON_US' ? printSize : printHeight) : digitalHeight),
-                printWidth,
-                printHeight,
-                printRegion,
-                printSize,
-                folded,
-                digitalWidth,
-                digitalHeight,
-                cropMarks,
-                bleedMarks,
-                fileSizeLimit,
-                fileSizeLimitMb,
-                fileDeliveryNotes,
-                orientation,
-                menuType,
-                servicePeriod,
-                templateType: normalizedTemplateType,
-                turnaroundDays: normalizedTurnaroundDays,
-                dateNeeded,
-                hotelName,
-                cityCountry: normalizedCityCountry,
-                assetType,
-                docxPath,
-                menuImagePath: persistedMenuImagePath,
-                menuImageFileName,
-                filename: `${projectName}_Menu.docx`,
-                submissionMode,
-                revisionSource,
-                revisionBaseSubmissionId,
-                revisionBaselineDocPath: persistedBaselineDocPath,
-                revisionBaselineFileName,
-                chefPersistentDiff,
-                criticalOverrides,
-                approvals,
-            });
-
-            const clickupData = clickupResponse.data || {};
-            clickupTaskId = clickupData.taskId;
-            if (clickupData.skipped) {
-                clickupWarning = 'Menu submitted, but ClickUp integration is not configured yet. If this persists, please email the Word document to the design team.';
-            } else if (clickupData.warning || clickupData.attachmentUploadFailed || clickupData.baselineUploadFailed) {
-                const supportEmail = process.env.INTERNAL_REVIEWER_EMAIL || 'the design team';
-                clickupWarning = `Menu submitted, but we could not upload the Word document to ClickUp. If this persists, please email the Word document directly to ${supportEmail}.`;
-            }
-        } catch (clickupError: any) {
-            console.error('Failed to create ClickUp task:', clickupError.response?.data || clickupError.message);
-            const supportEmail = process.env.INTERNAL_REVIEWER_EMAIL || 'the design team';
-            clickupWarning = `Menu submitted, but we could not create your ClickUp task. If this persists, please email the Word document directly to ${supportEmail}.`;
-            sendAdminAlert({
-                alert_type: 'clickup_task_failed',
-                severity: 'error',
-                service: 'dashboard',
-                submission_id: submissionId,
-                message: `ClickUp task creation failed for "${projectName}" (${normalizedProperty})`,
-                details: { error: clickupError.response?.data || clickupError.message, submitter: submitterEmail },
-            });
-        }
-
-        res.json({
-            success: true,
-            submissionId: submissionId,
-            message: 'Menu submitted successfully',
-            clickup: {
-                taskId: clickupTaskId,
-                warning: clickupWarning,
-            },
-        });
-
-    } catch (error: any) {
-        console.error('Error submitting form:', error);
-        sendAdminAlert({
-            alert_type: 'submission_failed',
-            severity: 'critical',
-            service: 'dashboard',
-            message: `Menu submission failed completely: ${error.message}`,
-            details: { error: error.message, stack: error.stack?.slice(0, 500) },
-        });
-        res.status(500).json({
-            error: 'Failed to submit menu',
-            details: error.message
-        });
-    }
-});
-
-app.post('/api/approval/:submissionId/submit', async (req, res) => {
-    try {
-        const { submissionId } = req.params;
-        const editorHtmlRaw = `${req.body?.editorHtml || ''}`.trim();
-        const menuContentTextRaw = `${req.body?.menuContentText || ''}`.trim();
-
-        if (!editorHtmlRaw && !menuContentTextRaw) {
-            return res.status(400).json({ error: 'Approval editor content is required' });
-        }
-
-        const dbResponse = await axios.get(`${DB_SERVICE_URL}/submissions/${encodeURIComponent(submissionId)}`);
-        const submission = dbResponse.data;
-        if (!submission) {
-            return res.status(404).json({ error: 'Submission not found' });
-        }
-
-        const rawPayload = submission.raw_payload || {};
-        const projectName = coalesceString(submission.project_name, rawPayload.projectName) || 'Menu Approval';
-        const property = coalesceString(submission.property, rawPayload.property) || 'Unknown Property';
-        const orientation = coalesceString(submission.orientation, rawPayload.orientation) || 'Portrait';
-        const templateTypeRaw = coalesceString(submission.template_type, rawPayload.templateType) || 'food';
-        const templateType = templateTypeRaw === 'non_beverage' ? 'food' : templateTypeRaw;
-        const assetType = coalesceString(submission.asset_type, rawPayload.assetType).toUpperCase();
-        const printRegion = coalesceString((submission as any).print_region, rawPayload.printRegion);
-        const printSize = coalesceString((submission as any).print_size, rawPayload.printSize);
-        const printWidth = coalesceString((submission as any).print_width, rawPayload.printWidth);
-        const printHeight = coalesceString((submission as any).print_height, rawPayload.printHeight);
-        const digitalWidth = coalesceString((submission as any).digital_width, rawPayload.digitalWidth);
-        const digitalHeight = coalesceString((submission as any).digital_height, rawPayload.digitalHeight);
-        const width = coalesceString(submission.width, rawPayload.width);
-        const height = coalesceString(submission.height, rawPayload.height);
-        const wantsPrint = assetType === 'PRINT' || assetType === 'BOTH';
-        const wantsDigital = assetType === 'DIGITAL' || assetType === 'BOTH';
-        const printSizeForDocx = wantsPrint
-            ? (printRegion === 'NON_US' ? (printSize || 'N/A') : `${printWidth || width || ''} x ${printHeight || height || ''} inches`)
-            : '';
-        const digitalSizeForDocx = wantsDigital
-            ? `${digitalWidth || width || ''} x ${digitalHeight || height || ''} pixels`
-            : '';
-        const sizeForDocx = assetType === 'BOTH'
-            ? `Digital: ${digitalSizeForDocx} | Print: ${printSizeForDocx}`
-            : (wantsPrint ? printSizeForDocx : digitalSizeForDocx);
-
-        const fallbackAllergens = coalesceString((submission as any).allergens, rawPayload.allergens, DEFAULT_ALLERGEN_KEY);
-        const normalizedEditorHtml = stripManagedFooterFromHtml(editorHtmlRaw);
-        const footerMetadata = normalizeMenuFooter(menuContentTextRaw, fallbackAllergens);
-        const normalizedMenuContent = footerMetadata.body || stripManagedFooterText(coalesceString(submission.menu_content, rawPayload.menuContent), fallbackAllergens);
-        const effectiveAllergens = footerMetadata.normalizedAllergenLine || normalizeAllergenLegend(fallbackAllergens) || DEFAULT_ALLERGEN_KEY;
-        const shouldAddRawNotice = footerMetadata.hadRawNotice || detectRawUndercookedContent(normalizedMenuContent);
-
-        const approvedDir = path.join(getSubmissionDocumentDir(projectName, property, submission.id || submissionId), 'approved');
-        const approvedPath = path.join(approvedDir, `${submission.id || submissionId}-approved.docx`);
-        const approvedFileName = submission.filename || `${projectName}_Menu.docx`;
-
-        await generateDocxFromForm(submission.id || submissionId, {
-            projectName,
-            property,
-            size: sizeForDocx,
-            orientation,
-            menuType: coalesceString(submission.menu_type, rawPayload.menuType) || 'standard',
-            templateType,
-            dateNeeded: coalesceString(submission.date_needed, rawPayload.dateNeeded),
-            menuContent: normalizedMenuContent,
-            menuContentHtml: normalizedEditorHtml || textToParagraphHtml(normalizedMenuContent),
-            allergens: effectiveAllergens,
-            shouldAddRawNotice,
-        }, {
-            outputPath: approvedPath,
-        });
-
-        const finalizeResponse = await axios.post(`${CLICKUP_SERVICE_URL}/approval/finalize`, {
-            submissionId: submission.id || submissionId,
-            approvedPath,
-            approvedFileName,
-        });
-
-        res.json({
-            success: true,
-            submissionId: submission.id || submissionId,
-            approvedPath,
-            clickup: finalizeResponse.data || {},
-        });
-    } catch (error: any) {
-        console.error('Error submitting browser approval:', error.response?.data || error.message);
-        res.status(500).json({
-            error: 'Failed to submit browser approval',
-            details: error.message,
-        });
-    }
-});
+app.post('/api/approval/:submissionId/submit', approvalWorkflowHandlers.submitBrowserApproval);
 
 /**
  * NEW: Parse AI response that contains corrected menu + suggestions
@@ -2709,225 +2266,9 @@ async function generateDocxFromForm(
 app.post('/api/design-approval/compare', upload.fields([
     { name: 'docxFile', maxCount: 1 },
     { name: 'pdfFile', maxCount: 1 }
-]) as any, async (req, res) => {
-    const files = req.files as { [fieldname: string]: Express.Multer.File[] };
-    const tempFiles: string[] = [];
+]) as any, designApprovalWorkflowHandlers.compare);
 
-    // Extract submitter metadata from multipart form fields
-    const submitterName = req.body.submitterName || '';
-    const submitterEmail = req.body.submitterEmail || '';
-    const submitterJobTitle = req.body.submitterJobTitle || '';
-    const existingDocxSubmissionId = req.body.existingDocxSubmissionId || '';
-    const requiredApprovalsRaw = req.body.requiredApprovals || '[]';
-    let requiredApprovals: any[] = [];
-    try {
-        requiredApprovals = JSON.parse(requiredApprovalsRaw);
-    } catch {
-        requiredApprovals = [];
-    }
-
-    try {
-        if (!files.pdfFile) {
-            return res.status(400).json({ error: 'PDF file is required' });
-        }
-
-        let docxPath = '';
-        let docxOriginalName = 'design-approval.docx';
-        let docxMime = '';
-        if (files.docxFile && files.docxFile[0]) {
-            docxPath = files.docxFile[0].path;
-            docxOriginalName = files.docxFile[0].originalname || docxOriginalName;
-            docxMime = files.docxFile[0].mimetype;
-            tempFiles.push(docxPath);
-        } else if (existingDocxSubmissionId) {
-            const subResponse = await axios.get(`${DB_SERVICE_URL}/submissions/${encodeURIComponent(existingDocxSubmissionId)}`);
-            const baselineSubmission = subResponse.data || {};
-            let candidatePath = baselineSubmission.final_path || baselineSubmission.approved_path || baselineSubmission.original_path;
-            if (!candidatePath) {
-                return res.status(400).json({ error: 'Selected submission has no available DOCX file path' });
-            }
-            if (candidatePath.startsWith('../')) {
-                candidatePath = path.resolve(__dirname, candidatePath);
-            }
-            await fs.access(candidatePath);
-            docxPath = candidatePath;
-            docxOriginalName = baselineSubmission.filename || docxOriginalName;
-            docxMime = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
-        } else {
-            return res.status(400).json({ error: 'DOCX source is required (upload or database selection)' });
-        }
-
-        const pdfFile = files.pdfFile[0];
-        tempFiles.push(pdfFile.path);
-
-        // Validate MIME types
-        const pdfMime = pdfFile.mimetype;
-
-        if (!docxMime.includes('wordprocessingml') && !docxMime.includes('octet-stream')) {
-            return res.status(400).json({ error: 'First file must be a .docx document' });
-        }
-        if (pdfMime !== 'application/pdf' && !pdfMime.includes('octet-stream')) {
-            return res.status(400).json({ error: 'Second file must be a PDF' });
-        }
-
-        const docxRedlinerDir = getDocxRedlinerDir();
-        const venvPython = path.join(docxRedlinerDir, 'venv', 'bin', 'python');
-        let pythonCmd: string;
-        try {
-            await fs.access(venvPython);
-            pythonCmd = `"${venvPython}"`;
-        } catch {
-            pythonCmd = 'python3';
-        }
-
-        // Extract project details + menu content from DOCX
-        const extractDetailsScript = path.join(docxRedlinerDir, 'extract_project_details.py');
-        const detailsResult = await execAsync(
-            `${pythonCmd} "${extractDetailsScript}" "${docxPath}"`,
-            { timeout: 30000, maxBuffer: 10 * 1024 * 1024 }
-        );
-
-        const docxData = JSON.parse(detailsResult.stdout);
-        if (docxData.error) {
-            return res.status(400).json({ error: `DOCX extraction failed: ${docxData.error}` });
-        }
-
-        // Extract text from PDF
-        const extractPdfScript = path.join(docxRedlinerDir, 'extract_pdf_text.py');
-        const pdfResult = await execAsync(
-            `${pythonCmd} "${extractPdfScript}" "${pdfFile.path}"`,
-            { timeout: 30000, maxBuffer: 10 * 1024 * 1024 }
-        );
-
-        const pdfData = JSON.parse(pdfResult.stdout);
-        if (pdfData.error) {
-            return res.status(400).json({ error: `PDF extraction failed: ${pdfData.error}` });
-        }
-
-        if (!pdfData.has_text_layer) {
-            return res.status(400).json({
-                error: 'The PDF does not contain a text layer. It may be a scanned image. Please provide a PDF with selectable text.'
-            });
-        }
-
-        // Run comparison
-        const docxText = (docxData.menu_content || '').trim();
-        const pdfText = (pdfData.full_text || '').trim();
-        const { differences: allDifferences, alignments } = compareMenuTexts(docxText, pdfText);
-        // Filter out info-level diffs (case-only, ignorable words, etc.) from the reported list
-        const differences = allDifferences.filter(d => d.severity !== 'info');
-        const isMatch = differences.length === 0;
-
-        // Create submission record in database
-        const projectDetails = docxData.project_details || {};
-        const submissionId = `design-${Date.now()}`;
-        let dbSaved = false;
-
-        try {
-            await axios.post(`${DB_SERVICE_URL}/submissions`, {
-                id: submissionId,
-                submitter_email: submitterEmail,
-                submitter_name: submitterName,
-                submitter_job_title: submitterJobTitle,
-                project_name: projectDetails.project_name || 'Design Approval',
-                property: projectDetails.property || '',
-                size: projectDetails.size || '',
-                orientation: projectDetails.orientation || '',
-                filename: docxOriginalName || 'design-approval.docx',
-                status: isMatch ? 'approved' : 'needs_correction',
-                created_at: new Date().toISOString(),
-                source: 'design_approval',
-                approvals: JSON.stringify(requiredApprovals),
-                mismatch_override: false,
-            });
-            dbSaved = true;
-            console.log(`Design approval submission saved: ${submissionId}`);
-        } catch (dbError: any) {
-            console.error('Failed to save design approval submission:', dbError.message);
-        }
-
-        // Save submitter profile (fire-and-forget)
-        if (submitterName && submitterEmail) {
-            axios.post(`${DB_SERVICE_URL}/submitter-profiles`, {
-                name: submitterName,
-                email: submitterEmail,
-                jobTitle: submitterJobTitle
-            }).catch((err: any) => console.error('Failed to save submitter profile:', err.message));
-        }
-
-        // Extract dishes from approved design (async, non-blocking)
-        if (isMatch && dbSaved) {
-            extractDishesAfterApproval(
-                submissionId,
-                docxText,
-                projectDetails.property || 'Unknown',
-                '', // no final file path for design approval
-            ).catch((err: any) => console.error('Background dish extraction failed (design approval):', err));
-        }
-
-        res.json({
-            isMatch,
-            projectDetails: docxData.project_details,
-            differences,
-            alignments,
-            docxText,
-            pdfText,
-            requiredApprovals,
-            submissionId: dbSaved ? submissionId : undefined
-        });
-
-    } catch (error: any) {
-        console.error('Error comparing documents:', error);
-        res.status(500).json({ error: error.message || 'Comparison failed' });
-    } finally {
-        // Clean up temp files
-        for (const f of tempFiles) {
-            fs.unlink(f).catch(() => {});
-        }
-    }
-});
-
-app.post('/api/design-approval/:submissionId/override', async (req, res) => {
-    try {
-        const { submissionId } = req.params;
-        const reason = (req.body?.reason || '').toString().trim();
-        if (!reason) {
-            return res.status(400).json({ error: 'Override reason is required' });
-        }
-
-        // Get submission details before updating so we have menu content for dish extraction
-        let submission: any = null;
-        try {
-            const dbResponse = await axios.get(`${DB_SERVICE_URL}/submissions/${encodeURIComponent(submissionId)}`);
-            submission = dbResponse.data;
-        } catch (err: any) {
-            console.error('Failed to fetch submission for dish extraction:', err.message);
-        }
-
-        await axios.put(`${DB_SERVICE_URL}/submissions/${encodeURIComponent(submissionId)}`, {
-            status: 'approved_override',
-            mismatch_override: true,
-            mismatch_override_reason: reason,
-            mismatch_override_at: new Date().toISOString(),
-        });
-
-        // Extract dishes from overridden approval (async, non-blocking)
-        if (submission) {
-            extractDishesAfterApproval(
-                submissionId,
-                submission.menu_content,
-                submission.property || 'Unknown',
-                submission.final_path || '',
-                submission.service_period
-            ).catch((err: any) => console.error('Background dish extraction failed (design override):', err));
-        }
-
-        res.json({ success: true });
-    } catch (error: any) {
-        console.error('Failed to save design approval override:', error.message);
-        res.status(500).json({ error: 'Failed to save override' });
-    }
-});
+app.post('/api/design-approval/:submissionId/override', designApprovalWorkflowHandlers.saveOverride);
 
 // ---- Design Approval comparison helpers ----
 

@@ -11,6 +11,7 @@ All variables are configured in `.env` at the project root. See `.env.example` f
 | `SMTP_USER` | SMTP username / email address |
 | `SMTP_PASS` | SMTP password or app-specific password |
 | `OPENAI_API_KEY` | OpenAI API key for AI review service |
+| `INTERNAL_API_TOKEN` | Shared secret required on internal service-to-service requests between dashboard, db, parser, ai-review, differ, and clickup-integration |
 | `SUPABASE_URL` | Supabase project URL |
 | `SUPABASE_ANON_KEY` | Supabase anonymous key |
 | `SUPABASE_SERVICE_KEY` | Supabase service role key |
@@ -24,6 +25,7 @@ All variables are configured in `.env` at the project root. See `.env.example` f
 | `AI_REVIEW_MODEL` | OpenAI model used by AI review service (default: `gpt-4o-mini`) |
 | `SOP_DOC_PATH` | Path to SOP document (default: `samples/sop.txt`) |
 | `DASHBOARD_URL` | Base URL for email links (default: `http://localhost:3005`) |
+| `LEARNING_DASHBOARD_PIN` | 4-digit PIN required for `/learning`, `/training`, and related learning APIs. Set this explicitly in every environment. |
 | `DB_SERVICE_URL` | Base URL for DB service (default: `http://localhost:3004`) |
 | `AI_REVIEW_URL` | Base URL for AI review service (default: `http://localhost:3002`) |
 | `DIFFER_SERVICE_URL` | Base URL for differ service (default: `http://localhost:3006`) |
@@ -67,6 +69,16 @@ Notes:
 - Alert emails are deduplicated with a 15-minute cooldown per `alert_type`.
 - A SharePoint upload failure is monitored as a warning and does not block the rest of the approval flow.
 
+## Internal Service Authentication
+
+Internal HTTP routes now require the shared `INTERNAL_API_TOKEN` header on service-to-service calls.
+
+- Protected services: `db`, `parser`, `ai-review`, and `differ`
+- Protected ClickUp integration routes: `/create-task`, `/approval/finalize`, `/webhook/backfill-pending`, and `/webhook/register`
+- Public exceptions remain for the dashboard itself, ClickUp's inbound webhook route, and `GET /health`
+
+Set the same `INTERNAL_API_TOKEN` value for every service process in the environment. If it is missing, internal requests fail closed with `503` or `401` responses instead of falling back to network trust.
+
 ## Document Storage Layout
 
 When `DOCUMENT_STORAGE_ROOT` is set (recommended for deployment), document files are persisted using:
@@ -80,6 +92,14 @@ Subfolders currently used:
 - `approved/` — Isabella-approved corrected DOCX pulled from ClickUp webhook
 
 If `DOCUMENT_STORAGE_ROOT` is not set, the default is `tmp/documents` under the repo root.
+
+## Upload Guardrails
+
+- Dashboard uploads are capped at 15 MB per file.
+- Modification baseline uploads only accept `.docx`.
+- Design approval uploads accept `.docx` plus `.pdf`.
+- Optional menu reference uploads accept `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, or `.pdf`.
+- The dashboard now verifies both file extensions and file signatures before passing uploads into downstream parsers.
 
 ## SharePoint Property Routing
 

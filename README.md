@@ -30,12 +30,14 @@ Menu Manager is an AI-powered service designed to automate the review process fo
 - Canonical property selection (type-to-search, value must match configured list)
 - Required service-period classification on submission (`breakfast`, `brunch`, `lunch`, `dinner`, `happy_hour`, `holiday`, `other`)
 - AI-powered two-tier review (general QA + detailed corrections)
+- Learning/training dashboards are now hidden from the public landing page and protected by a 4-digit PIN gate
 - Review highlights and persistent redlines surface punctuation/separator edits such as hyphen, comma, slash, and pipe changes
 - Submission normalization keeps exactly one managed allergen legend and foodborne warning footer: chef-supplied footer text is reused or corrected to the canonical wording instead of being duplicated
 - The default allergen legend is now `G contains gluten | V vegetarian | D contains dairy | S contain shellfish | N contain nuts | VG vegan`
 - Approved-dish extraction now splits inline `Dish Name - description` menu rows into separate `dish_name` and `description` fields, captures trailing allergen codes, and skips the allergen legend / food-safety footer instead of storing them as dishes
 - DOCX template validation and redlining
 - Modification uploads with preserved redlines remain usable even if project metadata extraction cannot be parsed from the DOCX
+- Public upload endpoints now enforce a 15 MB cap, validate file signatures, and sanitize stored rich-text/filename input before downstream processing
 - Required-field validation now highlights missing submitter, project-details, and approval inputs directly in the form
 - Reviewer dashboard
 - Notification system
@@ -180,6 +182,10 @@ DB_SERVICE_URL=http://localhost:3004
 AI_REVIEW_URL=http://localhost:3002
 DIFFER_SERVICE_URL=http://localhost:3006
 CLICKUP_SERVICE_URL=http://localhost:3007
+INTERNAL_API_TOKEN=replace-with-a-long-random-secret
+
+# Restricted dashboard access
+LEARNING_DASHBOARD_PIN=4826
 
 # ClickUp workflow statuses
 CLICKUP_INITIAL_REVIEW_STATUS=pending initial isa review
@@ -214,6 +220,8 @@ Or use the helper scripts:
 Notes:
 - `start-services.sh` now runs a full workspace build by default before starting services so latest TypeScript/EJS changes are always reflected.
 - To skip the build step (faster restart when nothing changed), run: `SKIP_BUILD=1 ./start-services.sh`
+- Keep `LEARNING_DASHBOARD_PIN` set in every environment so `/learning` and `/training` stay behind the temporary PIN gate.
+- Set the same `INTERNAL_API_TOKEN` for every service process. Internal API calls now fail closed if this token is missing or mismatched.
 
 ## Implementation Roadmap
 

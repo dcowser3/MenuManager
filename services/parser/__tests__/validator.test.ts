@@ -1,6 +1,16 @@
+jest.mock('mammoth', () => ({
+    __esModule: true,
+    default: {
+        extractRawText: jest.fn(),
+    },
+}));
+
 import { validateTemplate } from '../src/validator';
 import * as fs from 'fs';
 import * as path from 'path';
+import mammoth from 'mammoth';
+
+const mockedMammoth = mammoth as jest.Mocked<typeof mammoth>;
 
 describe('Parser Service - Template Validator', () => {
 
@@ -15,11 +25,16 @@ describe('Parser Service - Template Validator', () => {
     it('should return isValid=false for a document missing required headings', async () => {
         const invalidDocPath = path.join(TEST_DOCS_DIR, 'invalid.txt');
         fs.writeFileSync(invalidDocPath, 'This is a test document without the required headings.');
+
+        mockedMammoth.extractRawText.mockResolvedValue({
+            value: 'This is a test document without the required headings.',
+            messages: [],
+        } as any);
         
         const result = await validateTemplate(invalidDocPath);
         
         expect(result.isValid).toBe(false);
-        expect(result.errors).toContain('Missing heading: "PROJECT DESIGN DETAILS"');
+        expect(result.errors).toContain('Document does not appear to be a valid RSH DESIGN BRIEF template (neither FOOD nor BEVERAGE)');
         
         fs.unlinkSync(invalidDocPath);
     });
@@ -33,6 +48,29 @@ describe('Parser Service - Template Validator', () => {
             ...
         `;
         fs.writeFileSync(validDocPath, content);
+
+        mockedMammoth.extractRawText.mockResolvedValue({
+            value: `
+                FOOD MENU DESIGN BRIEF REQUEST FORM
+                PROJECT DESIGN DETAILS
+                PROJECT NAME
+                PROPERTY
+                SIZE
+                ORIENTATION
+                DATE NEEDED
+                MENU SUBMITTAL SOP
+                STEP 1: OBTAIN APPROVALS
+                STEP 2: DESIGN DEVELOPMENT
+                Please drop the menu content below on page 2
+
+                STARTERS
+                Guacamole - avocado / lime / cilantro 12
+                Tuna Tartare - avocado / ponzu / sesame 21
+                Short Rib - salsa verde / crispy shallots 36
+                Dessert - chocolate / sea salt / cream 14
+            `,
+            messages: [],
+        } as any);
 
         const result = await validateTemplate(validDocPath);
 
