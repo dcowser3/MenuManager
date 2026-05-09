@@ -535,15 +535,12 @@
                     throw new Error(data.error || 'Failed to submit approval');
                 }
 
-                if (data.clickup && data.clickup.warning) {
-                    showAlert(`Approval submitted. ${data.clickup.warning}`, 'warning');
-                } else {
-                    showAlert('Approval submitted successfully. The approved DOCX has been generated and the downstream workflow has been triggered.', 'success');
-                }
+                const targetSubmissionId = (data && data.submissionId) || submissionId;
+                submitBtn.textContent = 'Loading corrections...';
+                window.location.assign(`/learning/submission/${encodeURIComponent(targetSubmissionId)}`);
             } catch (error) {
                 console.error(error);
                 showAlert(`Error submitting approval: ${error.message}`, 'error');
-            } finally {
                 submitBtn.disabled = false;
                 submitBtn.textContent = 'Submit Approval';
             }

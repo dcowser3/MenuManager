@@ -6,14 +6,15 @@
 
 | Service | Port | Description |
 |---------|------|-------------|
-| dashboard | 3005 | Web UI, submission form, design approval (Express/EJS) |
-| db | 3001 | Database service + submitter profiles (JSON-based, migrating to Supabase) |
+| parser | 3001 | DOCX template validation and text extraction |
 | ai-review | 3002 | Two-tier AI review: general QA + detailed corrections |
-| parser | 3003 | DOCX template validation and text extraction |
-| notifier | 3004 | Email notifications via SMTP |
-| docx-redliner | 3006 | DOCX redlining / track changes (Python) |
+| notifier | 3003 | Email notifications via SMTP |
+| db | 3004 | Database service + submitter profiles (JSON-based, migrating to Supabase) |
+| dashboard | 3005 | Web UI, submission form, design approval (Express/EJS) |
+| differ | 3006 | Compares AI draft vs human-approved corrections (training) |
 | clickup-integration | 3007 | ClickUp task creation + webhook handler |
-| differ | 3008 | Compares AI draft vs human-approved corrections (training) |
+| docx-redliner | — | DOCX redlining / track changes (Python scripts invoked as subprocess by differ + clickup-integration; not a network service) |
+| internal-auth | — | Shared internal-service auth middleware + axios client (library, no server) |
 | supabase-client | — | Shared Supabase database client (library, no server) |
 
 ## Tech Stack

@@ -35,6 +35,7 @@ type SubmissionLike = {
     approved_menu_content_raw?: string;
     approved_menu_content?: string;
     menu_content?: string;
+    menu_content_html?: string;
     raw_payload?: Record<string, any>;
 };
 
@@ -198,11 +199,24 @@ export async function loadApprovalBaselineFromSubmission(
     let visibleText = '';
     let sourceMode: ApprovalBaselineSourceMode = 'saved_submission_data';
     let sourceLabel = getSourceLabel('saved_submission_data');
+    const submissionTag = submission.id || submission.filename || 'unknown';
+    const candidates = getApprovalSourceDocCandidates(submission);
+    const candidateFailures: Array<{ sourceMode: string; reason: string; stage: string }> = [];
 
-    for (const candidate of getApprovalSourceDocCandidates(submission)) {
+    if (!candidates.length) {
+        console.warn(
+            `[approval-baseline] submission=${submissionTag} no DOCX candidates on submission row ` +
+            `(revision_baseline_doc_path / original_path / final_path are all empty)`
+        );
+    }
+
+    for (const candidate of candidates) {
+        let stage: 'resolve' | 'access' | 'extract' = 'resolve';
         try {
             const absolutePath = options.resolveStoredPath(candidate.filePath);
+            stage = 'access';
             await fs.access(absolutePath);
+            stage = 'extract';
 
             if (candidate.extractionMode === 'approved') {
                 const extracted = await options.extractApprovedFromDocx(absolutePath);
@@ -218,9 +232,11 @@ export async function loadApprovalBaselineFromSubmission(
             sourceLabel = getSourceLabelForCandidate(candidate);
             break;
         } catch (extractError: any) {
+            const reason = extractError?.message || `${extractError}`;
+            candidateFailures.push({ sourceMode: candidate.sourceMode, reason, stage });
             console.warn(
-                `Failed to load approval editor from ${candidate.sourceMode}:`,
-                extractError?.message || extractError
+                `[approval-baseline] submission=${submissionTag} candidate=${candidate.sourceMode} ` +
+                `stage=${stage} path=${candidate.filePath} failed: ${reason}`
             );
         }
     }
@@ -239,7 +255,25 @@ export async function loadApprovalBaselineFromSubmission(
     }
 
     if (!editorHtml) {
-        editorHtml = textToParagraphHtml(visibleText);
+        const savedHtml = coalesceString(
+            submission.menu_content_html,
+            submission.raw_payload?.menu_content_html,
+            submission.raw_payload?.menuContentHtml
+        );
+
+        if (savedHtml) {
+            editorHtml = savedHtml;
+            console.warn(
+                `[approval-baseline] submission=${submissionTag} using saved menu_content_html ` +
+                `fallback (DOCX extraction unavailable). failures=${JSON.stringify(candidateFailures)}`
+            );
+        } else {
+            editorHtml = textToParagraphHtml(visibleText);
+            console.warn(
+                `[approval-baseline] submission=${submissionTag} degraded to plain-text fallback ` +
+                `(no DOCX and no saved menu_content_html). failures=${JSON.stringify(candidateFailures)}`
+            );
+        }
         sourceMode = 'saved_submission_data';
     }
 

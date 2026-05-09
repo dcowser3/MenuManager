@@ -3688,12 +3688,30 @@
             if (!extracted) return;
             if (extracted.projectName) setFieldValueAndMark('projectName', extracted.projectName);
             if (extracted.property) {
-                setFieldValueAndMark('property', extracted.property);
-                updateServicePeriodOptions(extracted.property);
+                if (isPropertyFromCatalog(extracted.property)) {
+                    setFieldValueAndMark('property', extracted.property);
+                    updateServicePeriodOptions(extracted.property);
+                } else {
+                    showAlert(`Extracted property "${extracted.property}" is not in the property list — please select one manually.`, 'warning');
+                }
             }
-            if (extracted.orientation) setSelectValueAndMark('orientation', extracted.orientation);
+            if (extracted.orientation) {
+                const before = document.getElementById('orientation')?.value || '';
+                setSelectValueAndMark('orientation', extracted.orientation);
+                const after = document.getElementById('orientation')?.value || '';
+                if (after.toLowerCase() !== (extracted.orientation || '').toLowerCase() && before === after) {
+                    showAlert(`Extracted orientation "${extracted.orientation}" is not a valid option — please select one manually.`, 'warning');
+                }
+            }
             if (extracted.dateNeeded) applyExtractedDateNeeded(extracted.dateNeeded);
-            if (extracted.size) applyExtractedSize(extracted.size);
+            if (extracted.size) {
+                const parsed = window.formHelpers.parseExtractedSize(extracted.size);
+                if (parsed) {
+                    applyExtractedSize(extracted.size);
+                } else {
+                    showAlert(`Extracted size "${extracted.size}" could not be parsed — please enter dimensions manually.`, 'warning');
+                }
+            }
         }
 
         function applyExtractedDateNeeded(dateStr) {

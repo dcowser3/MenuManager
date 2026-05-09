@@ -1,0 +1,37 @@
+/*
+ * Shared menu-extract display styling.
+ *
+ * Used everywhere the chef-facing app shows extracted/approved menu content
+ * so the chef sees the same look in the submission form, the side comparison,
+ * and the approval editor. Mirror the DOCX render: Calibri 10pt, centered,
+ * tight 1.15 line-height.
+ */
+.menu-extract-display {
+    font-family: Calibri, sans-serif;
+    font-size: 10pt;
+    line-height: 1.15;
+    text-align: center;
+    color: #333333;
+    background: #ffffff;
+    white-space: pre-wrap;
+    word-break: normal;
+    overflow-wrap: break-word;
+}
+
+.menu-extract-display p,
+.menu-extract-display div {
+    margin: 0;
+    padding: 0;
+}
+
+.menu-extract-display .existing-del,
+.menu-extract-display .persistent-del {
+    color: #8b3a3a;
+    text-decoration: line-through;
+    background: rgba(139, 58, 58, 0.12);
+}
+
+.menu-extract-display .existing-ins,
+.menu-extract-display .persistent-ins {
+    background: rgba(241, 196, 15, 0.25);
+}

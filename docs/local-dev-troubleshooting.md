@@ -53,6 +53,31 @@ lsof -ti:NNNN | xargs kill -9
 
 **Fix:** Quick-reset flow above. All services now declare `"typescript"` as a devDep, so a clean `npm install` will place a working `tsc` in each workspace's `.bin`.
 
+### Dashboard pages 500, db log says `Rejected internal request because INTERNAL_API_TOKEN is not configured`
+
+**Cause:** Your local `.env` doesn't define `INTERNAL_API_TOKEN`. Since the May 2026 security hardening ([commit `2d7d47d`](../docs/security-hardening-2026-05-05.md)), every cross-service HTTP call must carry a shared `x-menumanager-internal-token` header. The db service rejects unauthenticated callers with 503 (token unset on db) or 401 (token mismatch between caller and db). Most dashboard pages that read submissions then surface a generic 500 to the browser. `.env.example` has the variable, but a stale local `.env` carried over from before the hardening doesn't.
+
+**Symptom:**
+- `curl http://localhost:3004/submissions/<id>` → `503 {"error":"Internal service auth token not configured"}`
+- Dashboard approval / approved-menus / training pages return 500
+- `logs/db.log` shows `Rejected internal request because INTERNAL_API_TOKEN is not configured` on every request
+
+**Fix:**
+```bash
+# generate a random secret and append to .env (any caller and db just need to share it)
+printf '\nINTERNAL_API_TOKEN=%s\n' "$(openssl rand -hex 24)" >> .env
+
+# restart db AND any caller (dashboard, ai-review, clickup-integration, differ, notifier) so they re-read .env
+./stop-services.sh && ./start-services.sh
+```
+
+Verify with:
+```bash
+TOKEN=$(grep ^INTERNAL_API_TOKEN .env | cut -d= -f2)
+curl -s -o /dev/null -w "%{http_code}\n" -H "x-menumanager-internal-token: $TOKEN" http://localhost:3004/submissions
+# expect 200
+```
+
 ### `FileNotFoundError: ...venv/lib/python3.12/site-packages/<pkg>/__init__.py`
 
 **Cause:** The docx-redliner venv is corrupted. Happens when an earlier OOM kill or force-close hit during `pip install`.
@@ -115,5 +140,5 @@ Expected parser behavior:
 
 - **typescript devDep:** Every TS service must declare `"typescript"` in its own `devDependencies`, not rely on the hoisted copy. A partial install can leave the hoisted copy broken; workspace-local ones are more resilient.
 - **docx-redliner venv:** Node services shell out to `services/docx-redliner/venv/bin/python`. The venv must exist and have `python-docx`, `PyMuPDF`, `openai`, `python-dotenv`, `diff-match-patch` installed. `requirements.txt` is the source of truth.
-- **start-services.sh port order:** db (3004), parser (3001), ai-review (3002), dashboard (3005), differ (3008), clickup (3007). Note docx-redliner is NOT started as a service — node invokes its Python scripts as subprocesses.
+- **start-services.sh port order:** db (3004), parser (3001), ai-review (3002), dashboard (3005), differ (3006), clickup (3007). Note docx-redliner is NOT started as a service — node invokes its Python scripts as subprocesses.
 - **stop-services.sh port coverage:** Fallback kill covers 3000–3008. If you add a service on a new port, update it.
