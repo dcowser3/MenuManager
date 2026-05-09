@@ -115,9 +115,9 @@
 
         .cards-container {
             display: grid;
-            grid-template-columns: 1fr 1fr;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
             gap: 2rem;
-            max-width: 800px;
+            max-width: 1160px;
             width: 100%;
         }
 
@@ -179,6 +179,13 @@
             border-color: var(--color-primary);
         }
 
+        @media (max-width: 960px) {
+            .cards-container {
+                grid-template-columns: 1fr 1fr;
+                gap: 1.5rem;
+            }
+        }
+
         @media (max-width: 640px) {
             .cards-container {
                 grid-template-columns: 1fr;
@@ -219,6 +226,16 @@
                 <h2>Design Approval</h2>
                 <p>Compare your approved Word document against a designer-created PDF to verify accuracy.</p>
                 <span class="option-label">Compare Documents</span>
+            </a>
+
+            <a href="/approved-menus" class="option-card">
+                <svg class="option-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M7.5 3.75h6.879a2.25 2.25 0 011.591.659l2.871 2.871a2.25 2.25 0 01.659 1.591V19.5A2.25 2.25 0 0117.25 21.75H7.5A2.25 2.25 0 015.25 19.5V6A2.25 2.25 0 017.5 3.75z" />
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8.25 11.25h7.5M8.25 15h5.25" />
+                </svg>
+                <h2>Approved Menus</h2>
+                <p>Open the approved menu dashboard to download final Word documents after Isabella has signed them off.</p>
+                <span class="option-label">Browse Final Files</span>
             </a>
         </div>
     </div>

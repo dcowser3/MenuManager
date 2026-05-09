@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title><%= title %></title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=Montserrat:wght@300;400;500;600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --color-primary: #2c2c2c;
+            --color-secondary: #8b7355;
+            --color-accent: #6b5344;
+            --color-text: #333333;
+            --color-text-light: #666666;
+            --color-text-muted: #999999;
+            --color-background: #ffffff;
+            --color-background-alt: #fafaf8;
+            --color-border: #e8e4de;
+            --color-border-light: #f0ece6;
+            --color-success: #4a7c59;
+            --font-heading: 'Cormorant Garamond', Georgia, serif;
+            --font-body: 'Montserrat', -apple-system, BlinkMacSystemFont, sans-serif;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: var(--font-body);
+            background: var(--color-background);
+            color: var(--color-text);
+            line-height: 1.7;
+            font-weight: 400;
+            font-size: 15px;
+            letter-spacing: 0.02em;
+        }
+
+        .header {
+            background: var(--color-background);
+            color: var(--color-primary);
+            padding: 1.75rem 4vw;
+            border-bottom: 1px solid var(--color-border);
+        }
+
+        .header-inner {
+            max-width: 1280px;
+            margin: 0 auto;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 1.5rem;
+        }
+
+        .header h1 {
+            font-family: var(--font-heading);
+            font-size: 1.85rem;
+            font-weight: 500;
+            letter-spacing: 0.05em;
+            color: var(--color-primary);
+        }
+
+        .header p {
+            color: var(--color-text-light);
+            margin-top: 0.2rem;
+            font-size: 0.72rem;
+            text-transform: uppercase;
+            letter-spacing: 0.15em;
+            font-weight: 400;
+        }
+
+        .header-links {
+            display: flex;
+            gap: 1.25rem;
+            flex-wrap: wrap;
+            justify-content: flex-end;
+        }
+
+        .header-links a {
+            color: var(--color-text);
+            text-decoration: none;
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            letter-spacing: 0.15em;
+            font-weight: 500;
+            border-bottom: 1px solid transparent;
+            padding-bottom: 0.15rem;
+        }
+
+        .header-links a:hover {
+            color: var(--color-secondary);
+            border-bottom-color: var(--color-secondary);
+        }
+
+        .container {
+            max-width: 1280px;
+            margin: 0 auto;
+            padding: 2rem 4vw 3rem;
+        }
+
+        .nav {
+            margin-bottom: 1rem;
+        }
+
+        .nav a {
+            color: var(--color-secondary);
+            text-decoration: none;
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            font-weight: 500;
+        }
+
+        .hero {
+            display: flex;
+            justify-content: space-between;
+            align-items: end;
+            gap: 2rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .hero h2 {
+            font-family: var(--font-heading);
+            font-size: 2rem;
+            font-weight: 500;
+            letter-spacing: 0.03em;
+            color: var(--color-primary);
+        }
+
+        .hero p {
+            color: var(--color-text-light);
+            max-width: 700px;
+            margin-top: 0.4rem;
+            font-size: 0.92rem;
+        }
+
+        .search-card {
+            background: var(--color-background-alt);
+            border: 1px solid var(--color-border);
+            padding: 1rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .search-form {
+            display: flex;
+            gap: 0.75rem;
+            flex-wrap: wrap;
+            align-items: end;
+        }
+
+        .search-group {
+            flex: 1 1 320px;
+        }
+
+        .search-group label {
+            display: block;
+            font-size: 0.65rem;
+            font-weight: 500;
+            color: var(--color-text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.15em;
+            margin-bottom: 0.35rem;
+        }
+
+        .search-group input {
+            width: 100%;
+            padding: 0.8rem 0.9rem;
+            border: 1px solid var(--color-border);
+            background: var(--color-background);
+            font-family: var(--font-body);
+            font-size: 0.9rem;
+        }
+
+        .search-group input:focus {
+            outline: none;
+            border-color: var(--color-secondary);
+        }
+
+        .btn {
+            display: inline-block;
+            padding: 0.82rem 1.35rem;
+            text-decoration: none;
+            font-weight: 500;
+            transition: all 0.2s ease;
+            border: 1px solid var(--color-primary);
+            cursor: pointer;
+            font-size: 0.68rem;
+            text-transform: uppercase;
+            letter-spacing: 0.15em;
+            font-family: var(--font-body);
+            background: var(--color-primary);
+            color: var(--color-background);
+        }
+
+        .btn:hover {
+            background: transparent;
+            color: var(--color-primary);
+        }
+
+        .btn-secondary {
+            background: transparent;
+            color: var(--color-primary);
+        }
+
+        .btn-secondary:hover {
+            background: var(--color-primary);
+            color: var(--color-background);
+        }
+
+        .results-meta {
+            font-size: 0.78rem;
+            color: var(--color-text-muted);
+            margin-bottom: 1rem;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+        }
+
+        .menu-list {
+            display: grid;
+            gap: 1rem;
+        }
+
+        .menu-card {
+            border: 1px solid var(--color-border);
+            background: var(--color-background);
+            padding: 1.25rem 1.35rem;
+            display: flex;
+            justify-content: space-between;
+            gap: 1.5rem;
+            align-items: center;
+        }
+
+        .menu-card:hover {
+            background: var(--color-background-alt);
+        }
+
+        .menu-main {
+            flex: 1 1 auto;
+            min-width: 0;
+        }
+
+        .menu-main h3 {
+            font-family: var(--font-heading);
+            font-size: 1.35rem;
+            font-weight: 500;
+            color: var(--color-primary);
+            margin-bottom: 0.25rem;
+        }
+
+        .menu-property {
+            color: var(--color-secondary);
+            font-size: 0.82rem;
+            text-transform: uppercase;
+            letter-spacing: 0.12em;
+            margin-bottom: 0.75rem;
+        }
+
+        .menu-meta {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.75rem 1.25rem;
+            font-size: 0.82rem;
+            color: var(--color-text-light);
+        }
+
+        .menu-meta strong {
+            color: var(--color-text);
+            font-weight: 600;
+        }
+
+        .menu-actions {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-end;
+            gap: 0.6rem;
+            min-width: 240px;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 0.35rem 0.85rem;
+            border: 1px solid rgba(74, 124, 89, 0.25);
+            background: rgba(74, 124, 89, 0.08);
+            color: var(--color-success);
+            font-size: 0.62rem;
+            text-transform: uppercase;
+            letter-spacing: 0.16em;
+            font-weight: 600;
+        }
+
+        .empty-state {
+            border: 1px solid var(--color-border);
+            padding: 3rem 1.5rem;
+            text-align: center;
+            background: var(--color-background-alt);
+        }
+
+        .empty-state h3 {
+            font-family: var(--font-heading);
+            font-size: 1.4rem;
+            font-weight: 500;
+            color: var(--color-primary);
+            margin-bottom: 0.35rem;
+        }
+
+        .empty-state p {
+            color: var(--color-text-light);
+            font-size: 0.9rem;
+        }
+
+        @media (max-width: 860px) {
+            .hero,
+            .menu-card {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+
+            .menu-actions {
+                align-items: flex-start;
+                min-width: 0;
+                width: 100%;
+            }
+
+            .menu-actions .btn {
+                width: 100%;
+                text-align: center;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="header-inner">
+            <div>
+                <h1>Richard Sandoval Hospitality</h1>
+                <p>Approved Menu Dashboard</p>
+            </div>
+            <div class="header-links">
+                <a href="/">Home</a>
+                <a href="/form">New Submission</a>
+                <a href="/design-approval">Design Approval</a>
+            </div>
+        </div>
+    </div>
+
+    <div class="container">
+        <div class="nav">
+            <a href="/">Back to Welcome</a>
+        </div>
+
+        <div class="hero">
+            <div>
+                <h2>Approved Menus</h2>
+                <p>Browse menus that have already been approved by Isabella and download the final Word document for operations, routing, or local handoff.</p>
+            </div>
+        </div>
+
+        <div class="search-card">
+            <form method="GET" action="/approved-menus" class="search-form">
+                <div class="search-group">
+                    <label for="q">Search approved menus</label>
+                    <input id="q" name="q" type="text" value="<%= searchQuery || '' %>" placeholder="Project name, property, file name, service period, submitter...">
+                </div>
+                <button type="submit" class="btn">Search</button>
+                <% if (searchQuery) { %>
+                    <a href="/approved-menus" class="btn btn-secondary">Clear</a>
+                <% } %>
+            </form>
+        </div>
+
+        <div class="results-meta">
+            <%= approvedMenus.length %> approved <%= approvedMenus.length === 1 ? 'menu' : 'menus' %><% if (searchQuery) { %> matching "<%= searchQuery %>"<% } %>
+        </div>
+
+        <% if (approvedMenus.length > 0) { %>
+            <div class="menu-list">
+                <% approvedMenus.forEach(function(menu) { %>
+                    <div class="menu-card">
+                        <div class="menu-main">
+                            <h3><%= menu.projectName || menu.filename || 'Approved Menu' %></h3>
+                            <div class="menu-property"><%= menu.property || 'Unknown Property' %></div>
+                            <div class="menu-meta">
+                                <span><strong>Approved file:</strong> <%= menu.approvedFileName || menu.filename || 'approved-menu.docx' %></span>
+                                <span><strong>Service period:</strong> <%= menu.servicePeriod || 'N/A' %></span>
+                                <span><strong>Approved:</strong> <%= menu.reviewedAt ? new Date(menu.reviewedAt).toLocaleDateString() : 'N/A' %></span>
+                                <span><strong>Submitter:</strong> <%= menu.submitterName || menu.submitterEmail || 'N/A' %></span>
+                            </div>
+                        </div>
+                        <div class="menu-actions">
+                            <span class="badge"><%= menu.status === 'approved_override' ? 'Approved Override' : 'Approved' %></span>
+                            <a href="/download/approved/<%= menu.id %>" class="btn">Download Word Doc</a>
+                        </div>
+                    </div>
+                <% }); %>
+            </div>
+        <% } else { %>
+            <div class="empty-state">
+                <h3>No approved menus found</h3>
+                <p><%= searchQuery ? 'Try a different search term or clear the filter.' : 'Approved menus will appear here after Isabella finalizes them.' %></p>
+            </div>
+        <% } %>
+    </div>
+</body>
+</html>

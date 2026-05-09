@@ -394,7 +394,7 @@ async function uploadTaskAttachment(
     filePath: string,
     preferredFilename: string,
     contentType: string
-): Promise<void> {
+): Promise<any> {
     const fieldCandidates = ['attachment[]', 'attachment'];
     let lastError: any;
 
@@ -406,13 +406,13 @@ async function uploadTaskAttachment(
                 contentType,
             });
 
-            await axios.post(`https://api.clickup.com/api/v2/task/${taskId}/attachment`, form, {
+            const response = await axios.post(`https://api.clickup.com/api/v2/task/${taskId}/attachment`, form, {
                 headers: {
                     Authorization: CLICKUP_API_TOKEN,
                     ...form.getHeaders(),
                 },
             });
-            return;
+            return response.data;
         } catch (error: any) {
             lastError = error;
             const code = error.response?.data?.ECODE || '';
@@ -876,12 +876,17 @@ async function finalizeApprovedSubmission(input: {
     clickupTaskId?: string;
     attachmentId?: string | null;
     approvedAssetSource?: string;
+    shouldUpdateClickupStatus?: boolean;
 }): Promise<{
     processed: boolean;
     submissionId: string;
+    clickupStatusUpdated: boolean;
+    warnings: string[];
 }> {
     const submission = input.submission;
     const clickupTaskId = `${input.clickupTaskId || submission?.clickup_task_id || ''}`.trim();
+    const shouldUpdateClickupStatus = input.shouldUpdateClickupStatus !== false;
+    const warnings: string[] = [];
     let extractedRaw = '';
     let extractedClean = '';
 
@@ -964,22 +969,28 @@ async function finalizeApprovedSubmission(input: {
     }
 
     if (clickupTaskId) {
-        try {
-            await updateClickUpTaskStatus(clickupTaskId, CLICKUP_POST_APPROVAL_STATUS);
-            console.log(`Moved ClickUp task ${clickupTaskId} to "${CLICKUP_POST_APPROVAL_STATUS}" after approval processing`);
-        } catch (statusError: any) {
-            console.error('Failed to move ClickUp task after approval:', statusError.response?.data || statusError.message);
-            sendAdminAlert({
-                alert_type: 'clickup_status_transition_failed',
-                severity: 'warning',
-                service: 'clickup-integration',
-                submission_id: submission.id,
-                message: `Failed to move ClickUp task ${clickupTaskId} to "${CLICKUP_POST_APPROVAL_STATUS}" after approval`,
-                details: {
-                    error: statusError.response?.data || statusError.message,
-                    target_status: CLICKUP_POST_APPROVAL_STATUS,
-                },
-            });
+        if (shouldUpdateClickupStatus) {
+            try {
+                await updateClickUpTaskStatus(clickupTaskId, CLICKUP_POST_APPROVAL_STATUS);
+                console.log(`Moved ClickUp task ${clickupTaskId} to "${CLICKUP_POST_APPROVAL_STATUS}" after approval processing`);
+            } catch (statusError: any) {
+                const statusErrorDetail = statusError.response?.data || statusError.message;
+                warnings.push(`ClickUp status update failed: ${typeof statusErrorDetail === 'string' ? statusErrorDetail : JSON.stringify(statusErrorDetail)}`);
+                console.error('Failed to move ClickUp task after approval:', statusErrorDetail);
+                sendAdminAlert({
+                    alert_type: 'clickup_status_transition_failed',
+                    severity: 'warning',
+                    service: 'clickup-integration',
+                    submission_id: submission.id,
+                    message: `Failed to move ClickUp task ${clickupTaskId} to "${CLICKUP_POST_APPROVAL_STATUS}" after approval`,
+                    details: {
+                        error: statusErrorDetail,
+                        target_status: CLICKUP_POST_APPROVAL_STATUS,
+                    },
+                });
+            }
+        } else {
+            warnings.push(`Skipped ClickUp status update to "${CLICKUP_POST_APPROVAL_STATUS}" because the approved DOCX was not uploaded to the task.`);
         }
     }
 
@@ -1031,7 +1042,12 @@ async function finalizeApprovedSubmission(input: {
         });
     }
 
-    return { processed: true, submissionId: submission.id };
+    return {
+        processed: true,
+        submissionId: submission.id,
+        clickupStatusUpdated: !!clickupTaskId && shouldUpdateClickupStatus && !warnings.some((warning) => warning.startsWith('ClickUp status update failed')),
+        warnings,
+    };
 }
 
 async function processApprovedTask(clickupTaskId: string, opts?: { skipStatusCheck?: boolean }): Promise<{
@@ -1318,16 +1334,19 @@ app.post('/approval/finalize', async (req, res) => {
         );
         const warnings: string[] = [];
         let attachmentUploaded = false;
+        let uploadedAttachmentId: string | null = null;
+        const canUpdateClickupTask = !!(clickupTaskId && CLICKUP_API_TOKEN);
 
-        if (clickupTaskId && CLICKUP_API_TOKEN) {
+        if (canUpdateClickupTask) {
             try {
-                await uploadTaskAttachment(
+                const attachmentResponse = await uploadTaskAttachment(
                     clickupTaskId,
                     approvedPath,
                     approvedFileName,
                     'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
                 );
                 attachmentUploaded = true;
+                uploadedAttachmentId = `${attachmentResponse?.id || attachmentResponse?.attachment?.id || ''}`.trim() || null;
                 console.log(`Browser-approved DOCX attached to ClickUp task ${clickupTaskId}`);
             } catch (attachError: any) {
                 const errorDetail = attachError.response?.data?.err || attachError.message;
@@ -1353,14 +1372,18 @@ app.post('/approval/finalize', async (req, res) => {
             approvedPath,
             approvedFileName,
             clickupTaskId: clickupTaskId || undefined,
+            attachmentId: uploadedAttachmentId,
             approvedAssetSource: 'browser_approval_editor',
+            shouldUpdateClickupStatus: canUpdateClickupTask && attachmentUploaded,
         });
+        warnings.push(...(result.warnings || []));
 
         res.json({
             success: true,
             processed: result.processed,
             submissionId: result.submissionId,
             attachmentUploaded,
+            clickupStatusUpdated: result.clickupStatusUpdated,
             warning: warnings.length ? warnings.join(' | ') : undefined,
         });
     } catch (error: any) {

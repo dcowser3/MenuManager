@@ -2,7 +2,7 @@
  * Approved Dishes CRUD operations
  */
 
-import { getSupabaseClient } from './index';
+import { getSupabaseClient } from './client';
 import { ApprovedDish, CreateDishInput } from './types';
 
 const TABLE = 'approved_dishes';

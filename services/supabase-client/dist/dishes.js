@@ -14,7 +14,7 @@ exports.getAllProperties = getAllProperties;
 exports.getAllDishes = getAllDishes;
 exports.deleteDish = deleteDish;
 exports.updateDish = updateDish;
-const index_1 = require("./index");
+const client_1 = require("./client");
 const TABLE = 'approved_dishes';
 /**
  * Normalize dish name for deduplication
@@ -32,7 +32,7 @@ function normalizeDishName(name) {
  * Create a new approved dish
  */
 async function createDish(input) {
-    const supabase = (0, index_1.getSupabaseClient)();
+    const supabase = (0, client_1.getSupabaseClient)();
     const dishData = {
         ...input,
         dish_name_normalized: normalizeDishName(input.dish_name)
@@ -54,7 +54,7 @@ async function createDishes(inputs) {
     if (inputs.length === 0) {
         return [];
     }
-    const supabase = (0, index_1.getSupabaseClient)();
+    const supabase = (0, client_1.getSupabaseClient)();
     const dishData = inputs.map(input => ({
         ...input,
         dish_name_normalized: normalizeDishName(input.dish_name)
@@ -72,7 +72,7 @@ async function createDishes(inputs) {
  * Get a dish by ID
  */
 async function getDish(id) {
-    const supabase = (0, index_1.getSupabaseClient)();
+    const supabase = (0, client_1.getSupabaseClient)();
     const { data, error } = await supabase
         .from(TABLE)
         .select('*')
@@ -91,7 +91,7 @@ async function getDish(id) {
  * Search dishes by name (partial match)
  */
 async function searchDishes(query, limit = 50) {
-    const supabase = (0, index_1.getSupabaseClient)();
+    const supabase = (0, client_1.getSupabaseClient)();
     const normalizedQuery = normalizeDishName(query);
     const { data, error } = await supabase
         .from(TABLE)
@@ -109,7 +109,7 @@ async function searchDishes(query, limit = 50) {
  * Get dishes by property
  */
 async function getDishesByProperty(property, limit = 100) {
-    const supabase = (0, index_1.getSupabaseClient)();
+    const supabase = (0, client_1.getSupabaseClient)();
     const { data, error } = await supabase
         .from(TABLE)
         .select('*')
@@ -127,7 +127,7 @@ async function getDishesByProperty(property, limit = 100) {
  * Get dishes from a specific submission
  */
 async function getDishesBySubmission(submissionId) {
-    const supabase = (0, index_1.getSupabaseClient)();
+    const supabase = (0, client_1.getSupabaseClient)();
     const { data, error } = await supabase
         .from(TABLE)
         .select('*')
@@ -143,7 +143,7 @@ async function getDishesBySubmission(submissionId) {
  * Check if a dish already exists (by normalized name and property)
  */
 async function dishExists(dishName, property) {
-    const supabase = (0, index_1.getSupabaseClient)();
+    const supabase = (0, client_1.getSupabaseClient)();
     const normalizedName = normalizeDishName(dishName);
     let query = supabase
         .from(TABLE)
@@ -163,7 +163,7 @@ async function dishExists(dishName, property) {
  * Get all unique properties that have dishes
  */
 async function getAllProperties() {
-    const supabase = (0, index_1.getSupabaseClient)();
+    const supabase = (0, client_1.getSupabaseClient)();
     const { data, error } = await supabase
         .from(TABLE)
         .select('property')
@@ -180,7 +180,7 @@ async function getAllProperties() {
  * Get all dishes (paginated)
  */
 async function getAllDishes(limit = 100, offset = 0) {
-    const supabase = (0, index_1.getSupabaseClient)();
+    const supabase = (0, client_1.getSupabaseClient)();
     // Get total count
     const { count, error: countError } = await supabase
         .from(TABLE)
@@ -208,7 +208,7 @@ async function getAllDishes(limit = 100, offset = 0) {
  * Soft delete a dish
  */
 async function deleteDish(id) {
-    const supabase = (0, index_1.getSupabaseClient)();
+    const supabase = (0, client_1.getSupabaseClient)();
     const { error } = await supabase
         .from(TABLE)
         .update({ is_active: false })
@@ -221,7 +221,7 @@ async function deleteDish(id) {
  * Update a dish
  */
 async function updateDish(id, input) {
-    const supabase = (0, index_1.getSupabaseClient)();
+    const supabase = (0, client_1.getSupabaseClient)();
     const updateData = { ...input };
     // Update normalized name if dish_name changed
     if (input.dish_name) {

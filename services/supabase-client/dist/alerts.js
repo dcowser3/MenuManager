@@ -2,16 +2,16 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.logAlert = logAlert;
 exports.buildAlertEmailHtml = buildAlertEmailHtml;
-const index_1 = require("./index");
+const client_1 = require("./client");
 /**
  * Log an alert to the system_alerts Supabase table.
  * Fire-and-forget — never throws.
  */
 async function logAlert(alert) {
     try {
-        if (!(0, index_1.isSupabaseConfigured)())
+        if (!(0, client_1.isSupabaseConfigured)())
             return;
-        const supabase = (0, index_1.getSupabaseClient)();
+        const supabase = (0, client_1.getSupabaseClient)();
         const { error } = await supabase.from('system_alerts').insert({
             alert_type: alert.alert_type,
             severity: alert.severity,

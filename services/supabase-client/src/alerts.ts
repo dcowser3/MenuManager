@@ -1,4 +1,4 @@
-import { getSupabaseClient, isSupabaseConfigured } from './index';
+import { getSupabaseClient, isSupabaseConfigured } from './client';
 
 export interface SystemAlert {
     alert_type: string;

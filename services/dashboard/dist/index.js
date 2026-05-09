@@ -57,6 +57,7 @@ const internal_auth_1 = require("@menumanager/internal-auth");
 const submission_workflow_1 = require("./lib/submission-workflow");
 const approval_workflow_1 = require("./lib/approval-workflow");
 const design_approval_workflow_1 = require("./lib/design-approval-workflow");
+const approved_menus_1 = require("./lib/approved-menus");
 var restricted_access_2 = require("./lib/restricted-access");
 Object.defineProperty(exports, "buildRestrictedDashboardCookieValue", { enumerable: true, get: function () { return restricted_access_2.buildRestrictedDashboardCookieValue; } });
 Object.defineProperty(exports, "parseCookieHeader", { enumerable: true, get: function () { return restricted_access_2.parseCookieHeader; } });
@@ -135,11 +136,32 @@ function getTrainingStorageRoot() {
 function getTempUploadsDir() {
     return path.join(getRepoRoot(), 'tmp', 'uploads');
 }
+function getStoredPathCandidates(candidatePath) {
+    const trimmed = `${candidatePath || ''}`.trim();
+    if (!trimmed) {
+        return [];
+    }
+    const candidates = new Set();
+    const resolved = path.resolve(trimmed.startsWith('../')
+        ? path.resolve(__dirname, trimmed)
+        : trimmed);
+    candidates.add(resolved);
+    if (trimmed.startsWith('/app/tmp/')) {
+        candidates.add(path.join(getRepoRoot(), 'tmp', trimmed.slice('/app/tmp/'.length)));
+    }
+    return Array.from(candidates);
+}
 function resolveDashboardStoredPath(candidatePath, label, allowedExtensions) {
-    const resolved = path.resolve(`${candidatePath || ''}`.trim().startsWith('../')
-        ? path.resolve(__dirname, `${candidatePath || ''}`.trim())
-        : `${candidatePath || ''}`.trim());
-    return (0, upload_security_1.resolveSafeStoredPath)(resolved, label, [getDocumentStorageRoot(), path.join(getRepoRoot(), 'tmp')], allowedExtensions);
+    let lastError = null;
+    for (const candidate of getStoredPathCandidates(candidatePath)) {
+        try {
+            return (0, upload_security_1.resolveSafeStoredPath)(candidate, label, [getDocumentStorageRoot(), path.join(getRepoRoot(), 'tmp')], allowedExtensions);
+        }
+        catch (error) {
+            lastError = error;
+        }
+    }
+    throw lastError || new Error(`${label} path is unavailable`);
 }
 const EMPTY_EXTRACTED_PROJECT = {
     projectName: '',
@@ -512,6 +534,23 @@ app.get('/design-approval', (req, res) => {
         title: 'Design Approval'
     });
 });
+app.get('/approved-menus', async (req, res) => {
+    try {
+        const q = (0, upload_security_1.sanitizePlainTextInput)(req.query.q, { maxLength: 120 }).trim();
+        const approvedMenus = await (0, approved_menus_1.listApprovedMenus)(getRepoRoot(), q, 150);
+        res.render('approved-menus', {
+            title: 'Approved Menus',
+            approvedMenus,
+            searchQuery: q,
+        });
+    }
+    catch (error) {
+        console.error('Error loading approved menus:', error.response?.data || error.message);
+        res.status(500).render('error', {
+            message: 'Failed to load approved menus',
+        });
+    }
+});
 app.get('/restricted-access', (req, res) => {
     const nextPath = (0, restricted_access_1.sanitizeRestrictedDashboardNext)(`${req.query.next || restricted_access_1.RESTRICTED_DASHBOARD_DEFAULT_NEXT}`);
     res.render('restricted-access', {
@@ -581,6 +620,7 @@ app.get('/approval/:submissionId', async (req, res) => {
             });
         }
         const baseline = await (0, approval_baseline_1.loadApprovalBaselineFromSubmission)(submission, {
+            extractApprovedFromDocx: extractBaselineFromDocx,
             extractUnapprovedFromDocx,
             resolveStoredPath: (storedPath) => resolveDashboardStoredPath(storedPath, 'Stored approval source document', upload_security_1.ALLOWED_DOCX_EXTENSIONS),
         });
@@ -610,16 +650,52 @@ app.get('/download/original/:submissionId', async (req, res) => {
         const { submissionId } = req.params;
         const dbResponse = await internalApi.get(`${DB_SERVICE_URL}/submissions/${submissionId}`);
         const submission = dbResponse.data;
-        if (!submission || !submission.original_path) {
+        if (!submission) {
             return res.status(404).send('File not found');
         }
-        // Handle relative paths from dist directory
-        const absolutePath = resolveDashboardStoredPath(submission.original_path, 'Original submission', upload_security_1.ALLOWED_DOCX_EXTENSIONS);
-        console.log(`Downloading original from: ${absolutePath}`);
-        res.download(absolutePath, submission.filename);
+        const sourceDoc = await (0, approval_baseline_1.resolveApprovalSourceDocument)(submission, {
+            resolveStoredPath: (storedPath) => resolveDashboardStoredPath(storedPath, 'Original submission', upload_security_1.ALLOWED_DOCX_EXTENSIONS),
+        });
+        if (!sourceDoc) {
+            return res.status(404).send('File not found');
+        }
+        console.log(`Downloading original from: ${sourceDoc.absolutePath}`);
+        res.download(sourceDoc.absolutePath, sourceDoc.fileName || submission.filename || path.basename(sourceDoc.absolutePath));
     }
     catch (error) {
         console.error('Error downloading original:', error);
+        res.status(500).send('Error downloading file');
+    }
+});
+app.get('/download/approved/:submissionId', async (req, res) => {
+    try {
+        const { submissionId } = req.params;
+        const approvedMenu = await (0, approved_menus_1.getApprovedMenuDownload)(getRepoRoot(), submissionId);
+        if (!approvedMenu) {
+            return res.status(404).send('Approved file not found');
+        }
+        const candidatePaths = [approvedMenu.storagePath, approvedMenu.finalPath].filter(Boolean);
+        let absolutePath = '';
+        for (const candidatePath of candidatePaths) {
+            try {
+                const resolvedPath = resolveDashboardStoredPath(candidatePath, 'Approved submission', upload_security_1.ALLOWED_DOCX_EXTENSIONS);
+                await fs_1.promises.access(resolvedPath);
+                absolutePath = resolvedPath;
+                break;
+            }
+            catch {
+                // Try the next candidate path.
+            }
+        }
+        if (!absolutePath) {
+            return res.status(404).send('Approved file not found');
+        }
+        const downloadName = (0, upload_security_1.sanitizeStoredFileName)(approvedMenu.approvedFileName || approvedMenu.filename || path.basename(absolutePath), 'approved-menu.docx');
+        console.log(`Downloading approved file from: ${absolutePath}`);
+        res.download(absolutePath, downloadName);
+    }
+    catch (error) {
+        console.error('Error downloading approved file:', error);
         res.status(500).send('Error downloading file');
     }
 });

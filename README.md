@@ -43,6 +43,7 @@ Menu Manager is an AI-powered service designed to automate the review process fo
 - Notification system
 - Approved dishes are extracted automatically when the ClickUp-reviewed DOCX is marked approved
 - ClickUp tasks now include a browser approval link that opens a side-by-side approval editor: clean text editing on the left, live redline/highlight preview on the right, and final DOCX generation on submit
+- Approved menus now appear in a dedicated dashboard so operations can download the finalized Word document only after Isabella approves it
 
 ### Planned (Phase 2)
 - **Web Form Submission** - Chefs upload menus and select reviewers via web form
@@ -84,7 +85,7 @@ services/
 5. **Tier 2 AI Review** - Detailed corrections based on SOP rules
 6. **Human Review** - Reviewer downloads, reviews, uploads corrections
 7. **Multi-Level Approval** - Additional reviewers if required
-8. **ClickUp Integration** - Submission creates a ClickUp task and final approval webhook pulls the corrected DOCX back in
+8. **ClickUp Integration** - Submission creates a ClickUp task and final approval writes the approved DOCX back into Menu Manager for downstream delivery and download
 9. **Dishes Database** - Approved dishes extracted from the approved menu text and stored
 
 Current ClickUp BAU status handoff:
@@ -94,8 +95,12 @@ Current ClickUp BAU status handoff:
 Browser approval editor prototype:
 - ClickUp tasks now include an approval link to `/approval/:submissionId`
 - Isabella can edit approved text in a left-side browser editor while a right-side panel shows the live tracked-change preview with preserved imported redlines/highlights
-- The approval editor prefers locally available stored DOCX files for baseline formatting and falls back to normalized saved submission text only when no local DOCX is available
-- Submitting that page generates the approved DOCX and hands it to the same downstream finalization path used for ClickUp/SharePoint processing
+- For modification submissions, the approval editor now reuses the stored uploaded baseline DOCX first, using the same extraction mode chosen on the main submission form (`uploaded_baseline` vs `uploaded_unapproved`)
+- The approval editor preserves leading indentation from extracted DOCX text so alignment-sensitive sections such as allergen keys do not get flattened before review
+- If the generated submission DOCX is missing, the approval editor and `Download Original DOCX` button now fall back to the stored revision baseline DOCX and then the stored approved DOCX before using normalized saved submission text
+- Submitting that page uploads the approved DOCX back to the linked ClickUp task and only then advances the task to `To Do`, matching Isabella's manual handoff flow
+- The dashboard now surfaces a warning when the ClickUp attachment upload or post-approval status move fails, instead of silently finalizing only on the local side
+- Once a menu reaches approved state, the final DOCX is downloadable from `/approved-menus` for Carlos or other operations users
 
 ## Property Catalog
 
@@ -216,6 +221,11 @@ Or use the helper scripts:
 ./stop-services.sh    # Stop all services
 ./verify-setup.sh     # Verify configuration
 ```
+
+Developer workflow notes:
+
+- [docs/feature-delivery-workflow.md](docs/feature-delivery-workflow.md) explains the required build, test, live-verification, `dist/`, and restart process for feature work.
+- [docs/local-dev-troubleshooting.md](docs/local-dev-troubleshooting.md) covers common startup failures, bad local state, and reset steps.
 
 Notes:
 - `start-services.sh` now runs a full workspace build by default before starting services so latest TypeScript/EJS changes are always reflected.

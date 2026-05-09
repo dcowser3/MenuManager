@@ -19,6 +19,10 @@ Subfolders:
 - `baseline/` — uploaded approved baseline DOCX in revision fallback flow
 - `approved/` — corrected/approved DOCX downloaded from ClickUp webhook
 
+Approved form submissions are exposed in the dashboard’s `/approved-menus` page so operations users can download the final DOCX only after the approval flow has written the `approved/` artifact.
+
+The dashboard download route now also normalizes stored container-style paths such as `/app/tmp/...` back into the repo-local `tmp/` tree when possible, and returns a clean `404` when the approved file metadata exists but the local artifact is no longer present on disk.
+
 ## SharePoint Routing
 
 Approved DOCX files can also be uploaded to SharePoint after ClickUp approval when the selected property has stored routing metadata.

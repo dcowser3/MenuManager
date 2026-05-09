@@ -116,6 +116,19 @@ When chef uses uploaded baseline flow:
 - The uploaded prior approved DOCX is attached to the ClickUp task.
 - This gives Isabella direct visibility to verify the baseline version submitted by chef.
 
+## Approval Editor Source Reuse
+
+- The browser approval editor reuses the same stored modification baseline artifact captured during submission instead of jumping straight to `submission.original_path`.
+- Source priority is:
+  1. `revision_baseline_doc_path`
+  2. `original_path`
+  3. `final_path`
+  4. saved submission text fallback
+- Extraction mode follows the stored revision source:
+  - `uploaded_baseline` → clean baseline extraction
+  - `uploaded_unapproved` → unapproved extraction with preserved redlines
+- Approval-editor text normalization now preserves leading indentation from extracted DOCX paragraphs so alignment-sensitive content such as allergen legends is not flattened in the review UI.
+
 ## Unapproved DOCX Flow (Preserve Existing Redlines)
 
 When a chef uploads an unapproved DOCX:

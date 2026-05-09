@@ -2,7 +2,7 @@
  * Submission CRUD operations
  */
 
-import { getSupabaseClient } from './index';
+import { getSupabaseClient } from './client';
 import {
     Submission,
     CreateSubmissionInput,

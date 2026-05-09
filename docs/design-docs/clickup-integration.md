@@ -50,6 +50,10 @@ When a chef submits a menu, a ClickUp task is automatically created with the gen
 - Reviewer edits are submitted through `POST /api/approval/:submissionId/submit`
 - Dashboard generates an approved DOCX from the edited HTML and calls `POST localhost:3007/approval/finalize`
 - `clickup-integration` uploads the approved DOCX back to the ClickUp task when configured, finalizes the submission, triggers SharePoint upload, notifications, differ, and approved-dish extraction, then moves the task to `CLICKUP_POST_APPROVAL_STATUS`
+- Browser approval now preserves Isabella's manual sequencing:
+  - upload corrected DOCX to ClickUp first
+  - only move the task to `CLICKUP_POST_APPROVAL_STATUS` after that upload succeeds
+  - return a warning to the dashboard if either the attachment upload or the post-approval status transition fails
 
 ## Architecture
 

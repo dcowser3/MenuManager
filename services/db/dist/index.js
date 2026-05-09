@@ -747,6 +747,112 @@ app.get('/submissions/recent-projects', async (req, res) => {
         res.status(500).json([]);
     }
 });
+// List approved submissions for post-approval download dashboard.
+// IMPORTANT: Must come BEFORE /submissions/:id
+app.get('/submissions/approved-list', async (req, res) => {
+    try {
+        const q = (req.query.q || '').trim().toLowerCase();
+        const limit = Math.min(parseInt(req.query.limit || '100', 10), 200);
+        const approvedStatuses = new Set(['approved', 'approved_override']);
+        let sourceRows = [];
+        let approvedAssetRows = [];
+        if ((0, supabase_client_1.isSupabaseConfigured)()) {
+            const supabase = (0, supabase_client_1.getSupabaseClient)();
+            let query = supabase
+                .from(SUBMISSIONS_TABLE)
+                .select('*')
+                .in('status', Array.from(approvedStatuses))
+                .not('final_path', 'is', null)
+                .order('reviewed_at', { ascending: false })
+                .order('updated_at', { ascending: false })
+                .limit(limit);
+            if (q) {
+                const like = `%${q}%`;
+                query = query.or(`project_name.ilike.${like},property.ilike.${like},filename.ilike.${like},submitter_name.ilike.${like},service_period.ilike.${like}`);
+            }
+            const { data, error } = await query;
+            if (error) {
+                throw new Error(error.message);
+            }
+            sourceRows = (data || []).filter((row) => !row.source || row.source === 'form');
+            const submissionIds = sourceRows
+                .map((row) => `${row.id || row.legacy_id || ''}`.trim())
+                .filter(Boolean);
+            if (submissionIds.length > 0) {
+                const { data: assetData, error: assetError } = await supabase
+                    .from(ASSETS_TABLE)
+                    .select('*')
+                    .eq('asset_type', 'approved_docx')
+                    .in('submission_id', submissionIds)
+                    .order('created_at', { ascending: false });
+                if (assetError) {
+                    console.warn('Failed to fetch approved_docx assets for approved-list:', assetError.message);
+                }
+                else {
+                    approvedAssetRows = assetData || [];
+                }
+            }
+        }
+        else {
+            const submissions = JSON.parse(await fs_1.promises.readFile(SUBMISSIONS_DB, 'utf-8'));
+            sourceRows = Object.values(submissions)
+                .filter((s) => approvedStatuses.has((s.status || '').toLowerCase()))
+                .filter((s) => !!s.final_path)
+                .filter((s) => !s.source || s.source === 'form')
+                .filter((s) => {
+                if (!q)
+                    return true;
+                const haystack = [
+                    s.project_name,
+                    s.property,
+                    s.filename,
+                    s.submitter_name,
+                    s.service_period,
+                ]
+                    .filter(Boolean)
+                    .join(' ')
+                    .toLowerCase();
+                return haystack.includes(q);
+            })
+                .sort((a, b) => new Date(b.reviewed_at || b.updated_at || b.created_at).getTime() - new Date(a.reviewed_at || a.updated_at || a.created_at).getTime())
+                .slice(0, limit);
+            const assets = JSON.parse(await fs_1.promises.readFile(ASSETS_DB, 'utf-8'));
+            approvedAssetRows = assets
+                .filter((asset) => asset.asset_type === 'approved_docx')
+                .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+        }
+        const approvedAssetBySubmission = new Map();
+        for (const asset of approvedAssetRows) {
+            const key = `${asset.submission_id || ''}`.trim();
+            if (key && !approvedAssetBySubmission.has(key)) {
+                approvedAssetBySubmission.set(key, asset);
+            }
+        }
+        const results = sourceRows.map((s) => {
+            const submissionKey = `${s.id || s.legacy_id || ''}`.trim();
+            const approvedAsset = approvedAssetBySubmission.get(submissionKey);
+            return {
+                id: s.legacy_id || s.id,
+                projectName: s.project_name || '',
+                property: s.property || '',
+                filename: s.filename || '',
+                approvedFileName: approvedAsset?.file_name || s.filename || `${s.project_name || 'approved-menu'}.docx`,
+                finalPath: s.final_path || '',
+                status: s.status || '',
+                servicePeriod: s.service_period || s.raw_payload?.servicePeriod || '',
+                dateNeeded: s.date_needed || '',
+                reviewedAt: s.reviewed_at || s.updated_at || s.created_at || '',
+                submitterName: s.submitter_name || '',
+                submitterEmail: s.submitter_email || '',
+            };
+        });
+        res.json(results);
+    }
+    catch (error) {
+        console.error('Error listing approved submissions:', error);
+        res.status(500).json([]);
+    }
+});
 // Search approved submissions for "modification" flow.
 // Query can match project/property/submitter and returns newest first.
 // IMPORTANT: Must come BEFORE /submissions/:id

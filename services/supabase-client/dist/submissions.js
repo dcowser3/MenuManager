@@ -12,13 +12,13 @@ exports.getPendingReviews = getPendingReviews;
 exports.getAllSubmissions = getAllSubmissions;
 exports.approveSubmission = approveSubmission;
 exports.deleteSubmission = deleteSubmission;
-const index_1 = require("./index");
+const client_1 = require("./client");
 const TABLE = 'submissions';
 /**
  * Create a new submission
  */
 async function createSubmission(input) {
-    const supabase = (0, index_1.getSupabaseClient)();
+    const supabase = (0, client_1.getSupabaseClient)();
     const { data, error } = await supabase
         .from(TABLE)
         .insert({
@@ -39,7 +39,7 @@ async function createSubmission(input) {
  * Get a submission by ID
  */
 async function getSubmission(id) {
-    const supabase = (0, index_1.getSupabaseClient)();
+    const supabase = (0, client_1.getSupabaseClient)();
     const { data, error } = await supabase
         .from(TABLE)
         .select('*')
@@ -57,7 +57,7 @@ async function getSubmission(id) {
  * Get a submission by legacy ID (for migration)
  */
 async function getSubmissionByLegacyId(legacyId) {
-    const supabase = (0, index_1.getSupabaseClient)();
+    const supabase = (0, client_1.getSupabaseClient)();
     const { data, error } = await supabase
         .from(TABLE)
         .select('*')
@@ -75,7 +75,7 @@ async function getSubmissionByLegacyId(legacyId) {
  * Update a submission
  */
 async function updateSubmission(id, input) {
-    const supabase = (0, index_1.getSupabaseClient)();
+    const supabase = (0, client_1.getSupabaseClient)();
     const { data, error } = await supabase
         .from(TABLE)
         .update(input)
@@ -91,7 +91,7 @@ async function updateSubmission(id, input) {
  * Get submissions by status
  */
 async function getSubmissionsByStatus(status) {
-    const supabase = (0, index_1.getSupabaseClient)();
+    const supabase = (0, client_1.getSupabaseClient)();
     const { data, error } = await supabase
         .from(TABLE)
         .select('*')
@@ -112,7 +112,7 @@ async function getPendingReviews() {
  * Get all submissions (paginated)
  */
 async function getAllSubmissions(limit = 50, offset = 0) {
-    const supabase = (0, index_1.getSupabaseClient)();
+    const supabase = (0, client_1.getSupabaseClient)();
     // Get total count
     const { count, error: countError } = await supabase
         .from(TABLE)
@@ -149,7 +149,7 @@ async function approveSubmission(id, finalPath, changesMade) {
  * Delete a submission (soft delete by setting status)
  */
 async function deleteSubmission(id) {
-    const supabase = (0, index_1.getSupabaseClient)();
+    const supabase = (0, client_1.getSupabaseClient)();
     const { error } = await supabase
         .from(TABLE)
         .delete()
