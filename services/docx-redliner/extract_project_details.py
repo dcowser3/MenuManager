@@ -28,6 +28,51 @@ ALLERGEN_KEYWORDS = [
 ]
 
 
+def _normalize_allergen_label(label: str) -> str:
+    return " ".join(label.split()).strip().lower()
+
+
+def _parse_parenthesized_allergen_key(text: str) -> str:
+    """
+    Parse legends formatted as "(C) CELERY (D) DAIRY ..." and normalize them to
+    the pipe-delimited format used by the dashboard allergen-key field.
+    """
+    if not text or "(" not in text or ")" not in text:
+        return ""
+
+    # Footer copy often follows the legend in the same text extraction stream.
+    # Trim it so the last allergen label does not absorb boilerplate text.
+    text = re.split(
+        r"\b(?:ALL\s+PRICES|WE\s+WELCOME|CONSUMPTION\s+OF\s+RAW|CONSUMING\s+RAW|FOODBORNE\s+ILLNESS)\b",
+        text,
+        flags=re.IGNORECASE,
+        maxsplit=1,
+    )[0]
+
+    pairs = []
+    pattern = re.compile(
+        r"\(\s*([A-Za-z]{1,3})\s*\)\s*([A-Za-z][A-Za-z\s/&\-]*?)(?=\s*\(\s*[A-Za-z]{1,3}\s*\)|$)"
+    )
+    for match in pattern.finditer(text):
+        code = match.group(1).upper()
+        label = _normalize_allergen_label(match.group(2))
+        if not label:
+            continue
+        pairs.append((code, label))
+
+    if len(pairs) < 4:
+        return ""
+
+    keyword_hits = sum(
+        1 for _, label in pairs
+        if any(keyword in label for keyword in ALLERGEN_KEYWORDS)
+    )
+    if keyword_hits < 2:
+        return ""
+
+    return " | ".join(f"{code} {label}" for code, label in pairs)
+
+
 def detect_allergen_key(paragraphs) -> str:
     """
     Best-effort extraction of allergen legend text from DOCX content.
@@ -66,6 +111,11 @@ def detect_allergen_key(paragraphs) -> str:
             )
             if keyword_hits >= 2:
                 return " | ".join(f"{code} {label}" for code, label in parsed)
+
+    combined_text = " ".join(candidate_lines)
+    parenthesized_key = _parse_parenthesized_allergen_key(combined_text)
+    if parenthesized_key:
+        return parenthesized_key
 
     return ""
 

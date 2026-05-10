@@ -35,6 +35,7 @@ Menu Manager is an AI-powered service designed to automate the review process fo
 - Learning/training dashboards are now hidden from the public landing page and protected by a 4-digit PIN gate
 - Review highlights and persistent redlines surface punctuation/separator edits such as hyphen, comma, slash, and pipe changes
 - Submission normalization keeps exactly one managed allergen legend and foodborne warning footer: chef-supplied footer text is reused or corrected to the canonical wording instead of being duplicated
+- DOCX baseline uploads now prefill the allergen key field from either pipe-delimited legends or parenthesized legends such as `(C) CELERY (D) DAIRY`
 - The default allergen legend is now `G contains gluten | V vegetarian | D contains dairy | S contain shellfish | N contain nuts | VG vegan`
 - Approved-dish extraction now splits inline `Dish Name - description` menu rows into separate `dish_name` and `description` fields, captures trailing allergen codes, and skips the allergen legend / food-safety footer instead of storing them as dishes
 - DOCX template validation and redlining

@@ -6,7 +6,7 @@ import tempfile
 
 from docx import Document
 
-from extract_project_details import extract_project_details
+from extract_project_details import detect_allergen_key, extract_project_details
 
 
 def _save_and_extract(doc):
@@ -53,5 +53,44 @@ def test_extracts_split_property_fields_from_new_template():
     assert result["menu_content"] == "Taco - grilled fish"
 
 
+def test_detects_parenthesized_allergen_key():
+    doc = Document()
+    doc.add_paragraph("(C) CELERY (D) DAIRY (E) EGGS (F) FISH (G) GLUTEN (L) LUPIN")
+    doc.add_paragraph("(M) MUSTARD (P) PORK (PN) PEANUTS (S) SHELLFISH (SL) SULPHITES")
+    doc.add_paragraph("(SS) SESAME (SY) SOY (TN) TREE NUTS (V) VEGETARIAN")
+
+    assert detect_allergen_key(doc.paragraphs) == (
+        "C celery | D dairy | E eggs | F fish | G gluten | L lupin | "
+        "M mustard | P pork | PN peanuts | S shellfish | SL sulphites | "
+        "SS sesame | SY soy | TN tree nuts | V vegetarian"
+    )
+
+
+def test_parenthesized_allergen_key_stops_before_footer_copy():
+    doc = Document()
+    doc.add_paragraph(
+        "(C) CELERY (D) DAIRY (E) EGGS (F) FISH (G) GLUTEN (V) VEGETARIAN "
+        "ALL PRICES ARE IN AED, INCLUSIVE OF 7% MUNICIPALITY FEES, 10% SERVICE CHARGE AND 5% VAT."
+    )
+
+    assert detect_allergen_key(doc.paragraphs) == (
+        "C celery | D dairy | E eggs | F fish | G gluten | V vegetarian"
+    )
+
+
+def test_extract_project_details_returns_parenthesized_allergen_key():
+    doc = Document()
+    doc.add_paragraph("MENU")
+    doc.add_paragraph("Ice Cream & Sorbets D,E,G,PN,SY,TN 35")
+    doc.add_paragraph("(D) DAIRY (E) EGGS (G) GLUTEN (PN) PEANUTS (SY) SOY (TN) TREE NUTS")
+
+    result = _save_and_extract(doc)
+
+    assert result["allergen_key"] == "D dairy | E eggs | G gluten | PN peanuts | SY soy | TN tree nuts"
+
+
 if __name__ == "__main__":
     test_extracts_split_property_fields_from_new_template()
+    test_detects_parenthesized_allergen_key()
+    test_parenthesized_allergen_key_stops_before_footer_copy()
+    test_extract_project_details_returns_parenthesized_allergen_key()
