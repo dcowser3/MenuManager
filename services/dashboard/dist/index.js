@@ -58,6 +58,7 @@ const approval_workflow_1 = require("./lib/approval-workflow");
 const design_approval_workflow_1 = require("./lib/design-approval-workflow");
 const approved_menus_1 = require("./lib/approved-menus");
 const property_catalog_1 = require("./lib/property-catalog");
+const apply_high_confidence_suggestions_1 = require("./lib/apply-high-confidence-suggestions");
 var upload_security_2 = require("./lib/upload-security");
 Object.defineProperty(exports, "sanitizePlainTextInput", { enumerable: true, get: function () { return upload_security_2.sanitizePlainTextInput; } });
 Object.defineProperty(exports, "sanitizeRichTextHtml", { enumerable: true, get: function () { return upload_security_2.sanitizeRichTextHtml; } });
@@ -1462,9 +1463,12 @@ Note: Use ONLY these allergen codes when checking allergen compliance. Do not us
         console.log('=== END RAW FEEDBACK ===');
         // Parse the new format: corrected menu + suggestions
         const parsed = parseAIResponse(feedback, reviewFooterMetadata.body);
-        const correctedMenuSanitized = stripManagedFooterText(parsed.correctedMenu);
+        const appliedHc = (0, apply_high_confidence_suggestions_1.applyHighConfidenceSuggestionsToMenu)(parsed.correctedMenu, parsed.suggestions);
+        const correctedAfterHighConfidence = appliedHc.menuText;
+        const suggestionsAfterAutoApply = appliedHc.suggestions;
+        const correctedMenuSanitized = stripManagedFooterText(correctedAfterHighConfidence);
         const originalMenuSanitized = sanitizedMenuContent.body;
-        const reconciledSuggestions = reconcileCriticalSuggestionsAgainstCorrectedMenu(correctedMenuSanitized, parsed.suggestions);
+        const reconciledSuggestions = reconcileCriticalSuggestionsAgainstCorrectedMenu(correctedMenuSanitized, suggestionsAfterAutoApply);
         console.log('=== PARSED RESPONSE ===');
         console.log('Corrected menu length:', correctedMenuSanitized.length);
         console.log('Suggestions count:', parsed.suggestions.length);
@@ -1478,7 +1482,7 @@ Note: Use ONLY these allergen codes when checking allergen compliance. Do not us
         const hasCriticalErrors = finalSuggestions.some(s => s.severity === 'critical');
         let changedOnlyMergedMenu = menuContent;
         if (changedOnlyMode) {
-            const mergeResult = mergeChangedLineCorrections(menuContent, baselineMenuContent, parsed.correctedMenu);
+            const mergeResult = mergeChangedLineCorrections(menuContent, baselineMenuContent, correctedAfterHighConfidence);
             changedOnlyMergedMenu = mergeResult.merged;
             if (mergeResult.bailed) {
                 console.warn('changed_only merge bailed: AI corrected line count did not match extracted changed line count; falling back to original menu text');

@@ -118,16 +118,18 @@ When chef uses uploaded baseline flow:
 
 ## Approval Editor Source Reuse
 
-- The browser approval editor reuses the same stored modification baseline artifact captured during submission instead of jumping straight to `submission.original_path`.
-- Source priority is:
-  1. `revision_baseline_doc_path`
-  2. `original_path`
-  3. `final_path`
-  4. saved submission text fallback
-- Extraction mode follows the stored revision source:
+- The browser approval editor loads the **submitted** menu DOCX first (`submission.original_path`) so the textarea and downloads match the generated file from the form (including chef edits such as intentional spellings). The modification **baseline** artifact (`revision_baseline_doc_path`) remains stored for ClickUp attachments, differ, and training — it is only used when no submission DOCX path is available.
+- Source priority (shared with “Download Original DOCX” resolution) is:
+  1. `original_path`
+  2. `final_path`
+  3. `revision_baseline_doc_path`
+  4. saved submission HTML/text fallback if every DOCX path fails extraction
+- Extraction mode follows the candidate’s `revision_source` when the revision baseline path is chosen:
   - `uploaded_baseline` → clean baseline extraction
   - `uploaded_unapproved` → unapproved extraction with preserved redlines
-- Approval-editor text normalization now preserves leading indentation from extracted DOCX paragraphs so alignment-sensitive content such as allergen legends is not flattened in the review UI.
+- DOCX-derived preview HTML is normalized to strip leading/trailing empty `<p><br></p>` blocks so the live preview aligns vertically with the textarea (which trims leading blank lines).
+- After the chef edits, the live redline preview passes `baselineHtml` into `renderPersistentPreview` so unchanged and deleted tokens keep inline markup (`<strong>`, `<em>`, etc.) via `Range#cloneContents` instead of flattening to plain text.
+- Approval-editor text normalization preserves leading indentation from extracted DOCX paragraphs so alignment-sensitive content such as allergen legends is not flattened in the review UI.
 
 ## Unapproved DOCX Flow (Preserve Existing Redlines)
 

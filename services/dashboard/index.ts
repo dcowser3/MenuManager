@@ -45,6 +45,7 @@ import {
     normalizePropertyCatalogRecord,
     PropertyCatalogRecord,
 } from './lib/property-catalog';
+import { applyHighConfidenceSuggestionsToMenu } from './lib/apply-high-confidence-suggestions';
 
 export {
     sanitizePlainTextInput,
@@ -1645,11 +1646,15 @@ Note: Use ONLY these allergen codes when checking allergen compliance. Do not us
 
         // Parse the new format: corrected menu + suggestions
         const parsed = parseAIResponse(feedback, reviewFooterMetadata.body);
-        const correctedMenuSanitized = stripManagedFooterText(parsed.correctedMenu);
+        const appliedHc = applyHighConfidenceSuggestionsToMenu(parsed.correctedMenu, parsed.suggestions);
+        const correctedAfterHighConfidence = appliedHc.menuText;
+        const suggestionsAfterAutoApply = appliedHc.suggestions;
+
+        const correctedMenuSanitized = stripManagedFooterText(correctedAfterHighConfidence);
         const originalMenuSanitized = sanitizedMenuContent.body;
         const reconciledSuggestions = reconcileCriticalSuggestionsAgainstCorrectedMenu(
             correctedMenuSanitized,
-            parsed.suggestions
+            suggestionsAfterAutoApply
         );
 
         console.log('=== PARSED RESPONSE ===');
@@ -1672,7 +1677,7 @@ Note: Use ONLY these allergen codes when checking allergen compliance. Do not us
             const mergeResult = mergeChangedLineCorrections(
                 menuContent,
                 baselineMenuContent,
-                parsed.correctedMenu
+                correctedAfterHighConfidence
             );
             changedOnlyMergedMenu = mergeResult.merged;
             if (mergeResult.bailed) {
@@ -1707,20 +1712,20 @@ Note: Use ONLY these allergen codes when checking allergen compliance. Do not us
 function enforcePrixFixeCriticalChecks(
     menuContent: string,
     suggestions: Array<{
-        type: string;
-        confidence: string;
+        type?: string;
+        confidence?: string;
         severity?: string;
-        menuItem: string;
-        description: string;
-        recommendation: string;
+        menuItem?: string;
+        description?: string;
+        recommendation?: string;
     }>
 ): Array<{
-    type: string;
-    confidence: string;
+    type?: string;
+    confidence?: string;
     severity?: string;
-    menuItem: string;
-    description: string;
-    recommendation: string;
+    menuItem?: string;
+    description?: string;
+    recommendation?: string;
 }> {
     const existing = [...(suggestions || [])];
     const nonEmptyLines = (menuContent || '').split('\n').map((l) => l.trim()).filter(Boolean);
@@ -1932,20 +1937,20 @@ function isCriticalResolvedByCorrectedMenu(
 function reconcileCriticalSuggestionsAgainstCorrectedMenu(
     correctedMenu: string,
     suggestions: Array<{
-        type: string;
-        confidence: string;
+        type?: string;
+        confidence?: string;
         severity?: string;
-        menuItem: string;
-        description: string;
-        recommendation: string;
+        menuItem?: string;
+        description?: string;
+        recommendation?: string;
     }>
 ): Array<{
-    type: string;
-    confidence: string;
+    type?: string;
+    confidence?: string;
     severity?: string;
-    menuItem: string;
-    description: string;
-    recommendation: string;
+    menuItem?: string;
+    description?: string;
+    recommendation?: string;
 }> {
     if (!Array.isArray(suggestions) || suggestions.length === 0) {
         return [];

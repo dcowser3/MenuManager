@@ -32,6 +32,7 @@ Menu Manager is an AI-powered service designed to automate the review process fo
 - DOCX template uploads can prefill project details and resolve split outlet/hotel/city hints to a canonical property when the match is unique
 - Required service-period classification on submission (`breakfast`, `brunch`, `lunch`, `dinner`, `happy_hour`, `holiday`, `other`)
 - AI-powered two-tier review (general QA + detailed corrections)
+- Basic AI Check: if the model marks an objective spelling/grammar fix as high confidence but forgets to update the corrected menu text, the dashboard applies the change from the recommendation (e.g. `Change 'x' to 'y'`) so green highlights and the persistent preview stay consistent
 - Learning/training dashboards stay off the public landing page; they are reachable by direct URL like other reviewer tools (no separate PIN step)
 - Review highlights and persistent redlines surface punctuation/separator edits such as hyphen, comma, slash, and pipe changes
 - Submission normalization keeps exactly one managed allergen legend, while preserving chef-supplied legal/price/footer copy such as AED service-charge text and venue-specific foodborne warnings
@@ -100,9 +101,9 @@ Browser approval editor prototype:
 - ClickUp tasks now include an approval link to `/approval/:submissionId`
 - When the dashboard form is submitted from `localhost` outside production, ClickUp task creation is skipped, the browser automatically downloads the generated original DOCX, and the success alert shows an `Open approval editor` link for that same submission
 - Isabella can edit approved text in a left-side browser editor while a right-side panel shows the live tracked-change preview with preserved imported redlines/highlights
-- For modification submissions, the approval editor now reuses the stored uploaded baseline DOCX first, using the same extraction mode chosen on the main submission form (`uploaded_baseline` vs `uploaded_unapproved`)
-- The approval editor preserves leading indentation from extracted DOCX text so alignment-sensitive sections such as allergen keys do not get flattened before review
-- If the generated submission DOCX is missing, the approval editor and `Download Original DOCX` button now fall back to the stored revision baseline DOCX and then the stored approved DOCX before using normalized saved submission text
+- The approval editor and `Download Original DOCX` resolve the **submitted** generated DOCX (`original_path`) first so on-screen text matches the file from the form; the modification baseline DOCX is used only when that path is missing, then `final_path`, then saved text/HTML fallback
+- On modification flows, baseline extraction mode (`uploaded_baseline` vs `uploaded_unapproved`) still applies when the baseline path is the one that loads
+- The approval editor preserves leading indentation from extracted DOCX text so alignment-sensitive sections such as allergen keys do not get flattened before review, trims leading empty HTML paragraphs in the preview so it lines up with the textarea before the first edit, and keeps bold/italic (and other inline markup from the DOCX) in the live redline preview after you type by cloning ranges from the baseline HTML
 - Submitting that page uploads the approved DOCX back to the linked ClickUp task and only then advances the task to `To Do`, matching Isabella's manual handoff flow
 - The dashboard now surfaces a warning when the ClickUp attachment upload or post-approval status move fails, instead of silently finalizing only on the local side
 - Once a menu reaches approved state, the final DOCX is downloadable from `/approved-menus` for Carlos or other operations users

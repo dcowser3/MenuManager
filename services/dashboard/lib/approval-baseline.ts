@@ -109,6 +109,20 @@ export function normalizeApprovalEditorText(text: string): string {
     return normalized.join('\n');
 }
 
+/**
+ * Strip leading/trailing empty paragraphs from DOCX-derived HTML so the live preview
+ * vertically aligns with the textarea (which uses normalizeApprovalEditorText on visible text).
+ */
+export function normalizeApprovalEditorHtml(html: string): string {
+    const h = `${html || ''}`.trim();
+    if (!h) {
+        return h;
+    }
+    const lead = /^(?:\s*<p>\s*(?:<br\s*\/?>|&nbsp;|\s*)<\/p>\s*)+/i;
+    const trail = /(?:\s*<p>\s*(?:<br\s*\/?>|&nbsp;|\s*)<\/p>\s*)+$/i;
+    return h.replace(lead, '').replace(trail, '').trim();
+}
+
 function getSourceLabel(sourceMode: ApprovalBaselineSourceMode): string {
     if (sourceMode === 'original_docx') {
         return 'Submitted DOCX with preserved redlines';
@@ -130,21 +144,10 @@ function getSourceLabelForCandidate(candidate: ApprovalSourceDocumentCandidate):
 
 export function getApprovalSourceDocCandidates(submission: SubmissionLike): ApprovalSourceDocumentCandidate[] {
     const candidates: ApprovalSourceDocumentCandidate[] = [];
-    const revisionBaselinePath = coalesceString(submission.revision_baseline_doc_path);
-    if (revisionBaselinePath) {
-        const revisionSource = coalesceString(submission.revision_source);
-        candidates.push({
-            fileName: coalesceString(
-                submission.revision_baseline_file_name,
-                submission.filename,
-                `${submission.id || 'submission'}.docx`
-            ),
-            filePath: revisionBaselinePath,
-            sourceMode: 'revision_baseline_docx',
-            extractionMode: revisionSource === 'uploaded_baseline' ? 'approved' : 'unapproved',
-        });
-    }
 
+    // Prefer the submission artifact (generated DOCX at submit time) so the editor matches
+    // what chefs get from "Download" and what was produced from the form — not the
+    // modification baseline reference doc, which can be an older approved version.
     const originalPath = coalesceString(submission.original_path);
     if (originalPath) {
         candidates.push({
@@ -162,6 +165,21 @@ export function getApprovalSourceDocCandidates(submission: SubmissionLike): Appr
             filePath: finalPath,
             sourceMode: 'approved_docx',
             extractionMode: 'unapproved',
+        });
+    }
+
+    const revisionBaselinePath = coalesceString(submission.revision_baseline_doc_path);
+    if (revisionBaselinePath) {
+        const revisionSource = coalesceString(submission.revision_source);
+        candidates.push({
+            fileName: coalesceString(
+                submission.revision_baseline_file_name,
+                submission.filename,
+                `${submission.id || 'submission'}.docx`
+            ),
+            filePath: revisionBaselinePath,
+            sourceMode: 'revision_baseline_docx',
+            extractionMode: revisionSource === 'uploaded_baseline' ? 'approved' : 'unapproved',
         });
     }
 
@@ -220,11 +238,11 @@ export async function loadApprovalBaselineFromSubmission(
 
             if (candidate.extractionMode === 'approved') {
                 const extracted = await options.extractApprovedFromDocx(absolutePath);
-                editorHtml = `${extracted.approvedMenuContentHtml || ''}`.trim();
+                editorHtml = normalizeApprovalEditorHtml(`${extracted.approvedMenuContentHtml || ''}`.trim());
                 visibleText = normalizeApprovalEditorText(extracted.approvedMenuContent || '');
             } else {
                 const extracted = await options.extractUnapprovedFromDocx(absolutePath);
-                editorHtml = `${extracted.unapprovedHtml || ''}`.trim();
+                editorHtml = normalizeApprovalEditorHtml(`${extracted.unapprovedHtml || ''}`.trim());
                 visibleText = normalizeApprovalEditorText(extracted.visibleText || '');
             }
 
@@ -262,7 +280,7 @@ export async function loadApprovalBaselineFromSubmission(
         );
 
         if (savedHtml) {
-            editorHtml = savedHtml;
+            editorHtml = normalizeApprovalEditorHtml(savedHtml);
             console.warn(
                 `[approval-baseline] submission=${submissionTag} using saved menu_content_html ` +
                 `fallback (DOCX extraction unavailable). failures=${JSON.stringify(candidateFailures)}`

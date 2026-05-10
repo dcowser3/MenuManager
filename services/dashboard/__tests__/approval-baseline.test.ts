@@ -8,6 +8,7 @@ import { promises as fs } from 'fs';
 import {
     getApprovalSourceDocCandidates,
     loadApprovalBaselineFromSubmission,
+    normalizeApprovalEditorHtml,
     normalizeApprovalEditorText,
     resolveApprovalSourceDocument,
 } from '../lib/approval-baseline';
@@ -30,7 +31,7 @@ describe('approval baseline helpers', () => {
         );
     });
 
-    test('prioritizes uploaded revision baseline candidates ahead of generated submission docs', () => {
+    test('prioritizes submitted original docx ahead of revision baseline and final path', () => {
         const candidates = getApprovalSourceDocCandidates({
             id: 'form-123',
             filename: 'Spring Menu.docx',
@@ -42,17 +43,49 @@ describe('approval baseline helpers', () => {
         });
 
         expect(candidates.map((candidate) => candidate.sourceMode)).toEqual([
-            'revision_baseline_docx',
             'original_docx',
             'approved_docx',
+            'revision_baseline_docx',
         ]);
         expect(candidates[0]).toMatchObject({
+            fileName: 'Spring Menu.docx',
+            extractionMode: 'unapproved',
+        });
+        expect(candidates[2]).toMatchObject({
             fileName: 'Legacy Baseline.docx',
             extractionMode: 'approved',
         });
     });
 
-    test('uses the approved baseline extractor for uploaded baseline submissions', async () => {
+    test('loads approval baseline from submitted original docx when baseline also exists', async () => {
+        mockedFs.access.mockResolvedValue(undefined);
+        const extractApprovedFromDocx = jest.fn();
+        const extractUnapprovedFromDocx = jest.fn().mockResolvedValue({
+            visibleText: 'Chef latest from generated docx',
+            unapprovedHtml: '<p>Chef latest from generated docx</p>',
+        });
+
+        const baseline = await loadApprovalBaselineFromSubmission(
+            {
+                revision_source: 'uploaded_baseline',
+                revision_baseline_doc_path: '/tmp/baseline.docx',
+                revision_baseline_file_name: 'Legacy Baseline.docx',
+                original_path: '/tmp/original.docx',
+            },
+            {
+                extractApprovedFromDocx,
+                extractUnapprovedFromDocx,
+                resolveStoredPath: (storedPath) => storedPath,
+            }
+        );
+
+        expect(extractUnapprovedFromDocx).toHaveBeenCalledWith('/tmp/original.docx');
+        expect(extractApprovedFromDocx).not.toHaveBeenCalled();
+        expect(baseline.sourceMode).toBe('original_docx');
+        expect(baseline.visibleText).toBe('Chef latest from generated docx');
+    });
+
+    test('uses the approved baseline extractor when only the revision baseline path exists', async () => {
         mockedFs.access.mockResolvedValue(undefined);
         const extractApprovedFromDocx = jest.fn().mockResolvedValue({
             approvedMenuContent: '  ALLERGEN KEY\n    C crustaceans',
@@ -65,7 +98,6 @@ describe('approval baseline helpers', () => {
                 revision_source: 'uploaded_baseline',
                 revision_baseline_doc_path: '/tmp/baseline.docx',
                 revision_baseline_file_name: 'Legacy Baseline.docx',
-                original_path: '/tmp/original.docx',
             },
             {
                 extractApprovedFromDocx,
@@ -111,7 +143,7 @@ describe('approval baseline helpers', () => {
 
     test('resolves the same best available source doc for downloads', async () => {
         mockedFs.access.mockImplementation(async (filePath: any) => {
-            if (filePath === '/tmp/baseline.docx') return;
+            if (filePath === '/tmp/original.docx') return;
             throw new Error('ENOENT');
         });
 
@@ -130,9 +162,15 @@ describe('approval baseline helpers', () => {
         );
 
         expect(resolved).toMatchObject({
-            absolutePath: '/tmp/baseline.docx',
-            fileName: 'Legacy Baseline.docx',
-            sourceMode: 'revision_baseline_docx',
+            absolutePath: '/tmp/original.docx',
+            fileName: 'Spring Menu.docx',
+            sourceMode: 'original_docx',
         });
+    });
+
+    test('normalizeApprovalEditorHtml strips leading empty paragraphs', () => {
+        const html =
+            '<p><br></p><p><br></p><p>Guacamole <strong>Traditional</strong></p>';
+        expect(normalizeApprovalEditorHtml(html)).toBe('<p>Guacamole <strong>Traditional</strong></p>');
     });
 });

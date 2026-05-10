@@ -469,8 +469,8 @@
         function renderPersistentPreview(baseText, revisedText) {
             // No live edits yet → render the source HTML directly so the chef
             // sees the original Calibri/centered/bold formatting from the
-            // extracted DOCX. The token-diff renderer can't reproduce inline
-            // formatting, so we only fall back to it once the chef edits.
+            // extracted DOCX. After edits, renderPersistentPreview uses baselineHtml
+            // to clone inline markup (<strong>, etc.) for unchanged/deleted tokens.
             if (baselineHtml && baseText === revisedText) {
                 lastRenderedHtml = '';
                 preview.innerHTML = baselineHtml;
@@ -480,7 +480,8 @@
 
             const rendered = redlinePreview.renderPersistentPreview(baseText, revisedText, {
                 annotationMap: baselineAnnotationMap,
-                includeExistingAnnotations: true
+                includeExistingAnnotations: true,
+                baselineHtml: baselineHtml || '',
             });
 
             lastRenderedHtml = rendered.html;

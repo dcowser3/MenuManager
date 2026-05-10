@@ -205,10 +205,154 @@
         return escapeHtml(token);
     }
 
+    /**
+     * Map each character of extractCleanTextFromElement(container) to a DOM text boundary
+     * so Range#cloneContents can recover inline markup (<strong>, <em>, …).
+     */
+    function buildTrimAwareCharIndex(container) {
+        if (!container || !container.children || !container.children.length || !global.document) {
+            return null;
+        }
+
+        const lines = [];
+        const entries = [];
+
+        for (let pi = 0; pi < container.children.length; pi++) {
+            const p = container.children[pi];
+            const r = global.document.createRange();
+            r.selectNodeContents(p);
+            const full = (r.toString() || '').replace(/\u00A0/g, ' ');
+            const lead = (full.match(/^\s*/) || [''])[0].length;
+            const trail = (full.match(/\s*$/) || [''])[0].length;
+            const keepEnd = full.length - trail;
+
+            let idxInFull = 0;
+            const walker = global.document.createTreeWalker(p, NodeFilter.SHOW_TEXT, null);
+            let tn = walker.nextNode();
+            while (tn) {
+                const t = (tn.textContent || '').replace(/\u00A0/g, ' ');
+                for (let k = 0; k < t.length; k++) {
+                    const g = idxInFull + k;
+                    if (g >= lead && g < keepEnd) {
+                        entries.push({ node: tn, offset: k, ch: t[k] });
+                    }
+                }
+                idxInFull += t.length;
+                tn = walker.nextNode();
+            }
+
+            lines.push(full.slice(lead, keepEnd));
+
+            if (pi < container.children.length - 1) {
+                entries.push({ newline: true, ch: '\n' });
+            }
+        }
+
+        const plain = normalizeExtractedLines(lines.join('\n'));
+        const fromEntries = entries.map(function (e) { return e.ch; }).join('');
+        if (fromEntries !== plain) {
+            return null;
+        }
+
+        return { entries: entries, plain: plain };
+    }
+
+    var baselineStyleCache = { html: '', text: '', index: null };
+
+    function getStyleIndexForBaseline(baselineHtml, baseText) {
+        if (!baselineHtml || baseText == null || !global.document) {
+            return null;
+        }
+        if (baselineStyleCache.html === baselineHtml && baselineStyleCache.text === baseText && baselineStyleCache.index) {
+            return baselineStyleCache.index;
+        }
+        const wrap = global.document.createElement('div');
+        wrap.innerHTML = baselineHtml;
+        var idx = buildTrimAwareCharIndex(wrap);
+        if (!idx || idx.plain !== baseText) {
+            baselineStyleCache = { html: baselineHtml, text: baseText, index: null };
+            return null;
+        }
+        baselineStyleCache = { html: baselineHtml, text: baseText, index: idx };
+        return idx;
+    }
+
+    function cloneRangeHtml(entries, start, end, fallbackText) {
+        if (!entries || start >= end || start < 0 || end > entries.length) {
+            return escapeHtml(fallbackText || '');
+        }
+
+        var doc = global.document;
+        if (!doc) {
+            return escapeHtml(fallbackText || '');
+        }
+
+        var parts = [];
+        var i = start;
+        while (i < end) {
+            if (entries[i].newline) {
+                parts.push('<br>');
+                i++;
+                continue;
+            }
+            var j = i;
+            while (j < end && !entries[j].newline) {
+                j++;
+            }
+            try {
+                var range = doc.createRange();
+                range.setStart(entries[i].node, entries[i].offset);
+                range.setEnd(entries[j - 1].node, entries[j - 1].offset + 1);
+                var host = doc.createElement('div');
+                host.appendChild(range.cloneContents());
+                parts.push(host.innerHTML);
+            } catch (err) {
+                return escapeHtml(fallbackText || '');
+            }
+            i = j;
+        }
+        return parts.join('');
+    }
+
+    function wrapWithExistingAnnotationHtml(htmlChunk, charOffset, annotationMap, plainTokenLength) {
+        var plainLen = plainTokenLength || 0;
+        if (!htmlChunk) {
+            return '';
+        }
+        var stripped = htmlChunk.replace(/<[^>]+>/g, '').trim();
+        if (!stripped) {
+            return htmlChunk;
+        }
+
+        var delCount = 0;
+        var insCount = 0;
+        var len = plainLen > 0 ? plainLen : stripped.length;
+        for (var c = 0; c < len; c++) {
+            var annotation = annotationMap[charOffset + c];
+            if (annotation === 'del') delCount++;
+            else if (annotation === 'ins') insCount++;
+        }
+
+        if (delCount > 0 && delCount >= insCount) {
+            return '<span class="existing-del">' + htmlChunk + '</span>';
+        }
+        if (insCount > 0) {
+            return '<span class="existing-ins">' + htmlChunk + '</span>';
+        }
+        return htmlChunk;
+    }
+
     function renderPersistentPreview(baseText, revisedText, options) {
         const settings = options || {};
         const annotationMap = settings.annotationMap || {};
         const includeExistingAnnotations = !!settings.includeExistingAnnotations;
+        const baselineHtml = settings.baselineHtml || '';
+
+        var styleIndex = null;
+        if (baselineHtml) {
+            styleIndex = getStyleIndexForBaseline(baselineHtml, baseText);
+        }
+
         const baseTokens = tokenizeDiffText(baseText);
         const revisedTokens = tokenizeDiffText(revisedText);
         const lcs = buildTokenLcs(baseTokens, revisedTokens);
@@ -230,7 +374,14 @@
                 diffTokensEqual(baseTok, revTok);
 
             if (baseCommon && revCommon && sameToken) {
-                if (includeExistingAnnotations && baseTok) {
+                if (styleIndex) {
+                    const inner = cloneRangeHtml(styleIndex.entries, baseTok.start, baseTok.end, revTok.value);
+                    if (includeExistingAnnotations && baseTok) {
+                        html += wrapWithExistingAnnotationHtml(inner, baseTok.start, annotationMap, baseTok.value.length);
+                    } else {
+                        html += inner;
+                    }
+                } else if (includeExistingAnnotations && baseTok) {
                     html += wrapWithExistingAnnotation(revTok.value, baseTok.start, annotationMap);
                 } else {
                     html += escapeHtml(revTok.value);
@@ -242,7 +393,10 @@
 
             if (i < baseTokens.length && !baseCommon) {
                 if (baseTok && baseTok.value.trim()) {
-                    html += '<span class="persistent-del">' + escapeHtml(baseTok.value) + '</span>';
+                    const delInner = styleIndex
+                        ? cloneRangeHtml(styleIndex.entries, baseTok.start, baseTok.end, baseTok.value)
+                        : escapeHtml(baseTok.value);
+                    html += '<span class="persistent-del">' + delInner + '</span>';
                     deletions++;
                 } else {
                     html += escapeHtml(baseTok ? baseTok.value : '');
@@ -285,6 +439,7 @@
         buildAnnotationMapFromDOM,
         buildAnnotationMapFromHtml,
         wrapWithExistingAnnotation,
+        buildTrimAwareCharIndex,
         renderPersistentPreview
     };
 

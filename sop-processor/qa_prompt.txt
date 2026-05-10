@@ -23,7 +23,10 @@ If the menu is perfect, return the original text unchanged.]
 === END CORRECTED MENU ===
 
 === SUGGESTIONS ===
-[List remaining lower-confidence suggestions as JSON array. Each suggestion MUST have this exact structure:]
+[List remaining issues the chef should still review as JSON array. Each suggestion MUST have this exact structure:]
+
+**CRITICAL:** Any objective spelling, grammar, typo, or diacritics fix you are sure about MUST appear in CORRECTED MENU above. This JSON is for items the chef should still double-check; use `"confidence": "medium"` or `"low"` only (never mark spelling/grammar you already fixed in CORRECTED MENU as `"high"` here).
+
 [
   {
     "type": "Spelling|Grammar|Formatting|Allergen Code|Diacritics|Redundant Word|Singular/Plural|Raw Item|Missing Price|Incomplete Dish Name|General",
@@ -31,7 +34,7 @@ If the menu is perfect, return the original text unchanged.]
     "severity": "critical|normal",
     "menuItem": "Name of the menu item this affects",
     "description": "Clear explanation of the issue",
-    "recommendation": "Specific suggestion to fix it"
+    "recommendation": "Specific suggestion to fix it (e.g. Change 'tomats' to 'tomatoes'.)"
   }
 ]
 === END SUGGESTIONS ===
