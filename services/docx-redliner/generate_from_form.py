@@ -19,6 +19,68 @@ from docx.enum.text import WD_BREAK
 from docx.enum.text import WD_COLOR_INDEX
 
 
+_WHITESPACE_RE = re.compile(r'\s+')
+_PAREN_LEGEND_PAIR_RE = re.compile(
+    r'\(\s*([A-Za-z]{1,3})\s*\)\s*([A-Za-z][A-Za-z\s/&-]*?)(?=\s*\(\s*[A-Za-z]{1,3}\s*\)|$)'
+)
+_PAREN_LEGEND_SPLIT_RE = re.compile(
+    r'\b(?:ALL\s+PRICES|WE\s+WELCOME|CONSUMPTION\s+OF\s+RAW|CONSUMING\s+RAW|FOODBORNE\s+ILLNESS)\b',
+    re.IGNORECASE,
+)
+_LEGEND_KEYWORD_RE = re.compile(
+    r'(allergen|gluten|dairy|fish|nuts?|egg|vegan|vegetarian|crustacean|soy|sesame|celery|mustard|shellfish|sulphites?|lupin)',
+    re.IGNORECASE,
+)
+
+
+def _normalize_whitespace(value):
+    return _WHITESPACE_RE.sub(' ', value or '').strip()
+
+
+def is_managed_footer_line(text):
+    """Return True if a menu line is an allergen legend / price footer / welcome
+    blurb / raw-consumption notice. These get appended by the generator from
+    structured form fields, so any inline copy in the editor body would
+    duplicate. Mirrors the detection in services/dashboard/index.ts."""
+    normalized = _normalize_whitespace(text)
+    if not normalized:
+        return False
+
+    lower = normalized.lower()
+
+    # "ALL PRICES ARE IN AED..." style price footer.
+    if lower.startswith('all prices'):
+        return True
+    # "We welcome enquiries..." style allergy disclaimer.
+    if lower.startswith('we welcome enquiries'):
+        return True
+    # Raw / undercooked consumption notice.
+    if 'raw or undercooked' in lower and 'foodborne illness' in lower:
+        return True
+    # "Allergen Key" header line.
+    if re.match(r'^allergen\s+key(?:\s+\(optional\))?$', lower):
+        return True
+
+    # Pipe-separated legend like "G gluten | D dairy | ...".
+    if '|' in normalized:
+        parts = [p.strip() for p in normalized.split('|') if p.strip()]
+        if len(parts) >= 3:
+            code_parts = [p for p in parts if re.match(r'^\*?[A-Z]{1,3}\s+.+', p)]
+            if len(code_parts) >= max(2, len(parts) * 6 // 10):
+                return True
+
+    # Parenthesized legend like "(C) CELERY (D) DAIRY ...".
+    if '(' in normalized and ')' in normalized:
+        footer_body = _PAREN_LEGEND_SPLIT_RE.split(normalized, maxsplit=1)[0]
+        pairs = _PAREN_LEGEND_PAIR_RE.findall(footer_body)
+        if len(pairs) >= 4:
+            hits = sum(1 for _, label in pairs if _LEGEND_KEYWORD_RE.search(label))
+            if hits >= 2:
+                return True
+
+    return False
+
+
 class MenuHTMLParser(HTMLParser):
     """Parse HTML content from Quill editor and convert to structured data."""
 
@@ -71,11 +133,31 @@ class MenuHTMLParser(HTMLParser):
                 self.current_line = []
 
     def handle_data(self, data):
-        if data.strip():
-            current = self.format_stack[-1]
+        if not data:
+            return
+
+        current = self.format_stack[-1]
+
+        # Newlines inside text behave like <br> — flush the line.
+        # Otherwise python-docx would render them as <w:br/> soft breaks inside
+        # one paragraph, and consecutive \n become visible blank lines in Word.
+        chunks = data.split('\n')
+        for i, chunk in enumerate(chunks):
+            if i > 0 and self.current_line:
+                self.lines.append(self.current_line)
+                self.current_line = []
+
+            if not chunk:
+                continue
+
+            # Drop whitespace-only data when no content has started on this line
+            # (whitespace between tags at paragraph start). Preserve it mid-line
+            # so " " between adjacent <span>s isn't lost (e.g. "Carne Asada").
+            if not chunk.strip() and not self.current_line:
+                continue
 
             self.current_line.append({
-                'text': data,
+                'text': chunk,
                 'bold': current['bold'],
                 'italic': current['italic'],
                 'underline': current['underline'],
@@ -187,33 +269,43 @@ def populate_template(template_path: str, form_data: dict, output_path: str):
         parser.feed(menu_content_html)
         lines = parser.get_lines()
 
+        rendered = 0
+        skipped_footer = 0
         for line_parts in lines:
-            # Add paragraph to document
+            line_text = ''.join(part.get('text', '') for part in line_parts)
+            if is_managed_footer_line(line_text):
+                skipped_footer += 1
+                continue
+
             para = doc.add_paragraph()
             apply_menu_paragraph_style(para)
 
-            if line_parts:
-                for part in line_parts:
-                    run = para.add_run(part['text'])
-                    run.font.name = 'Calibri'
-                    run.font.size = Pt(10)
-                    run.bold = part['bold']
-                    run.italic = part['italic']
-                    run.underline = part['underline']
-                    run.font.strike = bool(part.get('strike'))
-                    if part.get('strike'):
-                        run.font.color.rgb = RGBColor(0xFF, 0x00, 0x00)
-                    if part.get('highlight'):
-                        run.font.highlight_color = WD_COLOR_INDEX.YELLOW
-            # Empty paragraph creates spacing
+            for part in line_parts:
+                run = para.add_run(part['text'])
+                run.font.name = 'Calibri'
+                run.font.size = Pt(10)
+                run.bold = part['bold']
+                run.italic = part['italic']
+                run.underline = part['underline']
+                run.font.strike = bool(part.get('strike'))
+                if part.get('strike'):
+                    run.font.color.rgb = RGBColor(0xFF, 0x00, 0x00)
+                if part.get('highlight'):
+                    run.font.highlight_color = WD_COLOR_INDEX.YELLOW
+            rendered += 1
 
-        print(f"Added {len(lines)} lines of formatted menu content")
+        print(f"Added {rendered} lines of formatted menu content (skipped {skipped_footer} inline footer lines)")
     else:
         # Fall back to plain text if no HTML
         lines = menu_content_text.split('\n')
 
+        rendered = 0
+        skipped_footer = 0
         for line in lines:
-            # Add paragraph to document
+            if line.strip() and is_managed_footer_line(line):
+                skipped_footer += 1
+                continue
+
             para = doc.add_paragraph()
             apply_menu_paragraph_style(para)
 
@@ -221,9 +313,9 @@ def populate_template(template_path: str, form_data: dict, output_path: str):
                 run = para.add_run(line)
                 run.font.name = 'Calibri'
                 run.font.size = Pt(10)
-            # Empty lines create spacing
+            rendered += 1
 
-        print(f"Added {len(lines)} lines of plain text menu content")
+        print(f"Added {rendered} lines of plain text menu content (skipped {skipped_footer} inline footer lines)")
 
     # Append allergen legend in a compact, single-line format.
     if allergens_text:

@@ -22,17 +22,6 @@ import {
     textToParagraphHtml,
 } from './lib/approval-baseline';
 import {
-    buildRestrictedDashboardCookieValue,
-    isRestrictedDashboardPinValid,
-    parseCookieHeader,
-    requireRestrictedDashboardAccess,
-    RESTRICTED_DASHBOARD_COOKIE,
-    RESTRICTED_DASHBOARD_DEFAULT_NEXT,
-    RESTRICTED_DASHBOARD_ERROR,
-    RESTRICTED_DASHBOARD_SESSION_MS,
-    sanitizeRestrictedDashboardNext,
-} from './lib/restricted-access';
-import {
     ALLOWED_DOCX_EXTENSIONS,
     ALLOWED_MENU_IMAGE_EXTENSIONS,
     ALLOWED_PDF_EXTENSIONS,
@@ -57,12 +46,6 @@ import {
     PropertyCatalogRecord,
 } from './lib/property-catalog';
 
-export {
-    buildRestrictedDashboardCookieValue,
-    parseCookieHeader,
-    requireRestrictedDashboardAccess,
-    sanitizeRestrictedDashboardNext,
-} from './lib/restricted-access';
 export {
     sanitizePlainTextInput,
     sanitizeRichTextHtml,
@@ -515,7 +498,6 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
-app.use(['/training', '/learning', '/api/learning'], requireRestrictedDashboardAccess);
 
 export async function extractBaselineFromDocx(filePath: string): Promise<{
     approvedMenuContent: string;
@@ -699,37 +681,6 @@ app.get('/approved-menus', async (req, res) => {
             message: 'Failed to load approved menus',
         });
     }
-});
-
-app.get('/restricted-access', (req, res) => {
-    const nextPath = sanitizeRestrictedDashboardNext(`${req.query.next || RESTRICTED_DASHBOARD_DEFAULT_NEXT}`);
-    res.render('restricted-access', {
-        title: 'Restricted Access',
-        nextPath,
-        errorMessage: '',
-    });
-});
-
-app.post('/restricted-access', (req, res) => {
-    const nextPath = sanitizeRestrictedDashboardNext(`${req.body?.next || req.query.next || RESTRICTED_DASHBOARD_DEFAULT_NEXT}`);
-    const pin = sanitizePlainTextInput(req.body?.pin, { maxLength: 8 });
-
-    if (!isRestrictedDashboardPinValid(pin)) {
-        return res.status(401).render('restricted-access', {
-            title: 'Restricted Access',
-            nextPath,
-            errorMessage: RESTRICTED_DASHBOARD_ERROR,
-        });
-    }
-
-    res.cookie(RESTRICTED_DASHBOARD_COOKIE, buildRestrictedDashboardCookieValue(), {
-        httpOnly: true,
-        sameSite: 'strict',
-        secure: process.env.NODE_ENV === 'production',
-        maxAge: RESTRICTED_DASHBOARD_SESSION_MS,
-        path: '/',
-    });
-    res.redirect(nextPath);
 });
 
 /**
@@ -1676,7 +1627,7 @@ Note: Use ONLY these allergen codes when checking allergen compliance. Do not us
         // Call AI Review service's QA endpoint
         let finalPrompt = qaPrompt;
         if (changedOnlyMode) {
-            finalPrompt = `${qaPrompt}\n\nIMPORTANT SCOPE FOR THIS REVIEW:\nYou are reviewing ONLY changed excerpts from a menu revision.\nDo NOT flag unchanged baseline content.\nReturn issues only for the changed excerpts provided.`;
+            finalPrompt = `${qaPrompt}\n\nIMPORTANT SCOPE FOR THIS REVIEW:\nYou are reviewing ONLY changed excerpts from a menu revision.\nDo NOT flag unchanged baseline content.\nReturn issues only for the changed excerpts provided.\nThe CORRECTED MENU section MUST contain exactly the same lines you received, in the same order, with high-confidence corrections applied to each line. Do not add, remove, merge, split, or reorder lines.`;
         }
         finalPrompt = `${finalPrompt}\n\nIMPORTANT FOOTER RULES:\n- Do NOT review or suggest changes for the allergen legend/footer boilerplate.\n- Do NOT review or suggest changes for the standard foodborne illness warning/footer boilerplate.\n- The canonical foodborne illness warning is: ${RAW_NOTICE_TEXT}\n- Those footer lines are system-managed outside this review scope.`;
 
@@ -1716,12 +1667,29 @@ Note: Use ONLY these allergen codes when checking allergen compliance. Do not us
 
         const hasCriticalErrors = finalSuggestions.some(s => s.severity === 'critical');
 
+        let changedOnlyMergedMenu = menuContent;
+        if (changedOnlyMode) {
+            const mergeResult = mergeChangedLineCorrections(
+                menuContent,
+                baselineMenuContent,
+                parsed.correctedMenu
+            );
+            changedOnlyMergedMenu = mergeResult.merged;
+            if (mergeResult.bailed) {
+                console.warn('changed_only merge bailed: AI corrected line count did not match extracted changed line count; falling back to original menu text');
+            } else {
+                console.log(`changed_only merge applied ${mergeResult.correctionsApplied} line correction(s)`);
+            }
+        }
+
         res.json({
             success: true,
             originalMenu: menuContent,
-            correctedMenu: changedOnlyMode ? menuContent : correctedMenuSanitized,
+            correctedMenu: changedOnlyMode ? changedOnlyMergedMenu : correctedMenuSanitized,
             suggestions: finalSuggestions,
-            hasChanges: changedOnlyMode ? false : correctedMenuSanitized !== originalMenuSanitized,
+            hasChanges: changedOnlyMode
+                ? changedOnlyMergedMenu !== menuContent
+                : correctedMenuSanitized !== originalMenuSanitized,
             hasCriticalErrors,
             reviewMode: changedOnlyMode ? 'changed_only' : 'full',
             changedLineCount
@@ -1837,6 +1805,49 @@ function extractChangedLinesForReview(baselineText: string, currentText: string)
         text: changedLines.join('\n'),
         changedLineCount: changedLines.length
     };
+}
+
+function mergeChangedLineCorrections(
+    fullText: string,
+    baselineText: string,
+    correctedChangedText: string
+): { merged: string; correctionsApplied: number; bailed: boolean } {
+    const baseLines = baselineText.split('\n').map(l => l.trim()).filter(Boolean);
+    const baseSet = new Set(baseLines.map(normalizeReviewLine));
+    const correctedChangedLines = (correctedChangedText || '')
+        .split('\n')
+        .map(l => l.trim())
+        .filter(Boolean);
+
+    const fullLines = fullText.split('\n');
+    const changedIndices: number[] = [];
+    for (let i = 0; i < fullLines.length; i++) {
+        const trimmed = fullLines[i].trim();
+        if (!trimmed) continue;
+        if (!baseSet.has(normalizeReviewLine(trimmed))) {
+            changedIndices.push(i);
+        }
+    }
+
+    if (changedIndices.length !== correctedChangedLines.length) {
+        return { merged: fullText, correctionsApplied: 0, bailed: true };
+    }
+
+    let correctionsApplied = 0;
+    const mergedLines = [...fullLines];
+    for (let k = 0; k < changedIndices.length; k++) {
+        const idx = changedIndices[k];
+        const original = mergedLines[idx];
+        const leadingWs = original.match(/^\s*/)?.[0] ?? '';
+        const trailingWs = original.match(/\s*$/)?.[0] ?? '';
+        const corrected = correctedChangedLines[k];
+        if (original.trim() !== corrected) {
+            mergedLines[idx] = leadingWs + corrected + trailingWs;
+            correctionsApplied++;
+        }
+    }
+
+    return { merged: mergedLines.join('\n'), correctionsApplied, bailed: false };
 }
 
 function normalizeReviewLine(line: string): string {

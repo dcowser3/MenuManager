@@ -25,7 +25,6 @@ All variables are configured in `.env` at the project root. See `.env.example` f
 | `AI_REVIEW_MODEL` | OpenAI model used by AI review service (default: `gpt-4o-mini`) |
 | `SOP_DOC_PATH` | Path to SOP document (default: `samples/sop.txt`) |
 | `DASHBOARD_URL` | Base URL for email links (default: `http://localhost:3005`) |
-| `LEARNING_DASHBOARD_PIN` | 4-digit PIN required for `/learning`, `/training`, and related learning APIs. Set this explicitly in every environment. |
 | `DB_SERVICE_URL` | Base URL for DB service (default: `http://localhost:3004`) |
 | `AI_REVIEW_URL` | Base URL for AI review service (default: `http://localhost:3002`) |
 | `DIFFER_SERVICE_URL` | Base URL for differ service (default: `http://localhost:3006`) |

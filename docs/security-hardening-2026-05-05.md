@@ -3,7 +3,7 @@
 ## Changes Landed
 
 - Removed public landing-page links to the learning and training dashboards.
-- Added a temporary 4-digit PIN gate for `/learning`, `/training`, and `/api/learning/*`.
+- A temporary PIN gate for `/learning`, `/training`, and `/api/learning/*` was added in this batch and **removed again** (2026-05-10): those routes are no longer gated by a PIN until real auth exists.
 - Added server-side sanitizers for plain-text inputs, stored filenames, and rich-text HTML content before persistence or re-rendering.
 - Added upload limits and file-signature checks for:
   - modification baseline DOCX uploads
@@ -15,7 +15,7 @@
 - Narrowed `PUT /submissions/:id` in `services/db` to an explicit allowlist of approval/processing fields, added validation for known statuses, and required mutable submission paths to stay inside the repository `tmp/` tree.
 - Stopped Supabase submission updates from overwriting `raw_payload` with partial patch payloads during incremental status/path updates.
 - Added shared internal service authentication via `INTERNAL_API_TOKEN` for service-to-service HTTP calls, covering `db`, `parser`, `ai-review`, `differ`, and the internal-only `clickup-integration` routes.
-- Added Jest regression coverage for the restricted-access helpers and new sanitizers.
+- Added Jest regression coverage for the new sanitizers.
 
 ## Highest-Risk Findings Still Open
 
@@ -28,7 +28,7 @@
 
 ## Recommended Next Refactor Order
 
-1. Add real auth/RBAC for dashboard users, then place learning/admin/config routes behind role checks instead of the temporary PIN gate.
+1. Add real auth/RBAC for dashboard users, then place learning/admin/config routes behind role checks.
 2. Stop publishing internal services directly on host ports in shared environments, or put them behind private networking only.
 3. Upgrade from the shared token to stronger service identity if needed later, such as signed requests with timestamps/nonces or mTLS.
 4. Add deeper contract tests around DB update routes and approval finalization paths across services.

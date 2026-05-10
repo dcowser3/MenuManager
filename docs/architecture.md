@@ -126,7 +126,6 @@ User reviews differences, submits approval
 
 The dashboard service still uses a single Express entrypoint, but the highest-risk logic is now split into focused `lib/` modules so routing stays thinner and workflow behavior is easier to test in isolation:
 
-- `lib/restricted-access.ts` — temporary PIN-gate helpers and middleware for learning/training routes
 - `lib/upload-security.ts` — upload limits, filename sanitization, HTML/text sanitization, file-signature checks, and safe-path helpers
 - `lib/request-normalization.ts` — request-body normalization for chef submission and design-approval flows
 - `lib/approval-baseline.ts` — approval editor baseline loading/fallback logic

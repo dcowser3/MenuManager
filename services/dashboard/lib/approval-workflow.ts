@@ -1,5 +1,5 @@
 import * as path from 'path';
-import { MAX_LONG_TEXT_LENGTH, sanitizePlainTextInput, sanitizeRichTextHtml } from './upload-security';
+import { MAX_LONG_TEXT_LENGTH, buildMenuFilename, sanitizePlainTextInput, sanitizeRichTextHtml } from './upload-security';
 import {
     buildApprovalFinalizeRequest,
     buildApprovedSubmissionUpdate,
@@ -189,7 +189,7 @@ export function createApprovalWorkflowHandlers(deps: ApprovalWorkflowDeps) {
 
             const approvedDir = deps.pathModule.join(deps.getSubmissionDocumentDir(projectName, property, submission.id || submissionId), 'approved');
             const approvedPath = deps.pathModule.join(approvedDir, `${submission.id || submissionId}-approved.docx`);
-            const approvedFileName = submission.filename || `${projectName}_Menu.docx`;
+            const approvedFileName = submission.filename || buildMenuFilename(projectName, property);
 
             await deps.generateDocxFromForm(submission.id || submissionId, {
                 projectName,

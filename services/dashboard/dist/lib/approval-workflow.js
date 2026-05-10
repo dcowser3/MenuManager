@@ -121,7 +121,7 @@ function createApprovalWorkflowHandlers(deps) {
             const shouldAddRawNotice = !footerMetadata.hadRawNotice && deps.detectRawUndercookedContent(normalizedMenuContent);
             const approvedDir = deps.pathModule.join(deps.getSubmissionDocumentDir(projectName, property, submission.id || submissionId), 'approved');
             const approvedPath = deps.pathModule.join(approvedDir, `${submission.id || submissionId}-approved.docx`);
-            const approvedFileName = submission.filename || `${projectName}_Menu.docx`;
+            const approvedFileName = submission.filename || (0, upload_security_1.buildMenuFilename)(projectName, property);
             await deps.generateDocxFromForm(submission.id || submissionId, {
                 projectName,
                 property,

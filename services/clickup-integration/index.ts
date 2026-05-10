@@ -1148,8 +1148,6 @@ app.post('/create-task', async (req, res) => {
             submissionMode,
             revisionSource,
             revisionBaseSubmissionId,
-            revisionBaselineDocPath,
-            revisionBaselineFileName,
             criticalOverrides,
             approvals,
         } = req.body;
@@ -1224,7 +1222,6 @@ app.post('/create-task', async (req, res) => {
         console.log(`ClickUp task created: ${taskId}`);
 
         let attachmentUploadFailed = false;
-        let baselineUploadFailed = false;
         const warnings: string[] = [];
 
         if (docxPath && fs.existsSync(docxPath)) {
@@ -1248,25 +1245,10 @@ app.post('/create-task', async (req, res) => {
             }
         }
 
-        if (revisionBaselineDocPath && fs.existsSync(revisionBaselineDocPath)) {
-            try {
-                await uploadTaskAttachment(
-                    taskId,
-                    revisionBaselineDocPath,
-                    sanitizeAttachmentFilename(
-                        revisionBaselineFileName || path.basename(revisionBaselineDocPath),
-                        `${submissionId || 'menu-submission'}-baseline`
-                    ),
-                    'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-                );
-                console.log(`Baseline approved DOCX attached to ClickUp task ${taskId}`);
-            } catch (baselineError: any) {
-                baselineUploadFailed = true;
-                const errorDetail = baselineError.response?.data?.err || baselineError.message;
-                warnings.push(`Baseline DOCX upload failed: ${errorDetail}`);
-                console.error(`Failed to attach baseline DOCX to ClickUp task ${taskId}:`, errorDetail);
-            }
-        }
+        // Chef-uploaded modification baseline is intentionally NOT attached to
+        // the ClickUp task — the design team works from the generated DOCX, and
+        // surfacing the chef's source file alongside it caused confusion. The
+        // file is still persisted locally and recorded in DB assets for audit.
 
         if (menuImagePath && fs.existsSync(menuImagePath)) {
             try {
@@ -1298,7 +1280,6 @@ app.post('/create-task', async (req, res) => {
             success: true,
             taskId,
             attachmentUploadFailed,
-            baselineUploadFailed,
             warning: warnings.length ? warnings.join(' | ') : undefined,
         });
     } catch (error: any) {

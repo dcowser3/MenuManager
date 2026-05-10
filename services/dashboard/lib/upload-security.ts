@@ -40,6 +40,19 @@ export function sanitizeRichTextHtml(value: unknown, maxLength = MAX_HTML_FIELD_
     return html.trim();
 }
 
+export function buildMenuFilename(projectName: string, property?: string): string {
+    const name = `${projectName || ''}`.trim() || 'Menu';
+    const propertyName = `${property || ''}`.trim();
+    if (propertyName) {
+        return `${propertyName} - ${name}.docx`;
+    }
+    // No property: avoid duplicated "Menu" when projectName already contains it.
+    if (/\bmenu\b/i.test(name)) {
+        return `${name}.docx`;
+    }
+    return `${name} Menu.docx`;
+}
+
 export function sanitizeStoredFileName(fileName: unknown, fallback = 'upload.bin'): string {
     const basename = path.basename(`${fileName || ''}`.trim() || fallback);
     const sanitized = basename

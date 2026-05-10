@@ -3,6 +3,7 @@ import {
     ALLOWED_MENU_IMAGE_EXTENSIONS,
     MAX_LONG_TEXT_LENGTH,
     assertUploadedFileType,
+    buildMenuFilename,
     hasAllowedExtension,
     sanitizePlainTextInput,
     sanitizeStoredFileName,
@@ -263,7 +264,7 @@ export function createSubmissionWorkflowHandlers(deps: SubmissionWorkflowDeps) {
                 project_name: safeProjectName,
                 property: normalizedProperty,
                 date_needed: safeDateNeeded,
-                filename: `${safeProjectName}_Menu.docx`,
+                filename: buildMenuFilename(safeProjectName, normalizedProperty),
                 original_path: docxPath,
                 status: submissionStatus,
                 created_at: new Date().toISOString(),
@@ -312,7 +313,7 @@ export function createSubmissionWorkflowHandlers(deps: SubmissionWorkflowDeps) {
                 source: 'chef_form',
                 storage_provider: 'local',
                 storage_path: docxPath,
-                file_name: sanitizeStoredFileName(`${safeProjectName}_Menu.docx`, 'submission.docx')
+                file_name: sanitizeStoredFileName(buildMenuFilename(safeProjectName, normalizedProperty), 'submission.docx')
             }).catch((err: any) => console.error('Failed to save original_docx asset metadata:', err.message));
 
             if (persistedBaselineDocPath) {
@@ -355,7 +356,7 @@ export function createSubmissionWorkflowHandlers(deps: SubmissionWorkflowDeps) {
                         text: text,
                         submission_id: submissionId,
                         submitter_email: safeSubmitterEmail,
-                        filename: `${safeProjectName}_Menu.docx`,
+                        filename: buildMenuFilename(safeProjectName, normalizedProperty),
                         original_path: docxPath
                     });
 
@@ -416,12 +417,10 @@ export function createSubmissionWorkflowHandlers(deps: SubmissionWorkflowDeps) {
                         docxPath,
                         menuImagePath: persistedMenuImagePath,
                         menuImageFileName: safeMenuImageFileName,
-                        filename: `${safeProjectName}_Menu.docx`,
+                        filename: buildMenuFilename(safeProjectName, normalizedProperty),
                         submissionMode: safeSubmissionMode,
                         revisionSource: safeRevisionSource,
                         revisionBaseSubmissionId: safeRevisionBaseSubmissionId,
-                        revisionBaselineDocPath: persistedBaselineDocPath,
-                        revisionBaselineFileName: safeRevisionBaselineFileName,
                         chefPersistentDiff,
                         criticalOverrides: normalizedCriticalOverrides,
                         approvals: normalizedApprovals,
@@ -431,7 +430,7 @@ export function createSubmissionWorkflowHandlers(deps: SubmissionWorkflowDeps) {
                     clickupTaskId = clickupData.taskId;
                     if (clickupData.skipped) {
                         clickupWarning = 'Menu submitted, but ClickUp integration is not configured yet. If this persists, please email the Word document to the design team.';
-                    } else if (clickupData.warning || clickupData.attachmentUploadFailed || clickupData.baselineUploadFailed) {
+                    } else if (clickupData.warning || clickupData.attachmentUploadFailed) {
                         const supportEmail = deps.INTERNAL_REVIEWER_EMAIL || 'the design team';
                         clickupWarning = `Menu submitted, but we could not upload the Word document to ClickUp. If this persists, please email the Word document directly to ${supportEmail}.`;
                     }

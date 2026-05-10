@@ -32,7 +32,7 @@ Menu Manager is an AI-powered service designed to automate the review process fo
 - DOCX template uploads can prefill project details and resolve split outlet/hotel/city hints to a canonical property when the match is unique
 - Required service-period classification on submission (`breakfast`, `brunch`, `lunch`, `dinner`, `happy_hour`, `holiday`, `other`)
 - AI-powered two-tier review (general QA + detailed corrections)
-- Learning/training dashboards are now hidden from the public landing page and protected by a 4-digit PIN gate
+- Learning/training dashboards stay off the public landing page; they are reachable by direct URL like other reviewer tools (no separate PIN step)
 - Review highlights and persistent redlines surface punctuation/separator edits such as hyphen, comma, slash, and pipe changes
 - Submission normalization keeps exactly one managed allergen legend, while preserving chef-supplied legal/price/footer copy such as AED service-charge text and venue-specific foodborne warnings
 - DOCX baseline uploads now prefill the allergen key field from either pipe-delimited legends or parenthesized legends such as `(C) CELERY (D) DAIRY`
@@ -192,9 +192,6 @@ DIFFER_SERVICE_URL=http://localhost:3006
 CLICKUP_SERVICE_URL=http://localhost:3007
 INTERNAL_API_TOKEN=replace-with-a-long-random-secret
 
-# Restricted dashboard access
-LEARNING_DASHBOARD_PIN=4826
-
 # ClickUp workflow statuses
 CLICKUP_INITIAL_REVIEW_STATUS=pending initial isa review
 CLICKUP_CORRECTIONS_STATUS=approved
@@ -265,7 +262,6 @@ Additional notes:
 - Docker Desktop on macOS can be unreliable when bind-mounting repos from TCC-protected folders such as `~/Documents`, `~/Desktop`, or `~/Downloads`. If services fail with `Resource deadlock avoided`, grant Docker access to the folder, switch Docker Desktop's file-sharing implementation, or move the repo to a non-protected path such as `~/code/MenuManager`.
 - In native mode, `start-services.sh` runs a full workspace build by default before starting services so latest TypeScript/EJS changes are always reflected.
 - To skip the native build step (faster restart when nothing changed), run: `SKIP_BUILD=1 ./start-services.sh`
-- Keep `LEARNING_DASHBOARD_PIN` set in every environment so `/learning` and `/training` stay behind the temporary PIN gate.
 - Set the same `INTERNAL_API_TOKEN` for every service process. Internal API calls now fail closed if this token is missing or mismatched.
 
 ## Implementation Roadmap

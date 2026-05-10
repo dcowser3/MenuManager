@@ -122,9 +122,10 @@ describe('Dashboard Modification Workflow (local, mocked externals)', () => {
                 return { data: { id: 'asset_123' } };
             }
             if (urlStr.includes('/run-qa-check')) {
+                const echoText = (payload && typeof payload.text === 'string') ? payload.text : '';
                 return {
                     data: {
-                        feedback: '=== CORRECTED MENU ===\nNO CHANGES\n=== END CORRECTED MENU ===\n=== SUGGESTIONS ===\n[]\n=== END SUGGESTIONS ==='
+                        feedback: `=== CORRECTED MENU ===\n${echoText}\n=== END CORRECTED MENU ===\n=== SUGGESTIONS ===\n[]\n=== END SUGGESTIONS ===`
                     }
                 };
             }
@@ -358,8 +359,11 @@ describe('Dashboard Modification Workflow (local, mocked externals)', () => {
         );
         expect(clickupCall).toBeTruthy();
         expect(clickupCall[1].revisionSource).toBe('uploaded_baseline');
-        expect(clickupCall[1].revisionBaselineDocPath).toBe(baselineUploadPath);
-        expect(clickupCall[1].revisionBaselineFileName).toBe('legacy-approved.docx');
+        // Chef-uploaded baseline is no longer forwarded to ClickUp — it's
+        // stored locally and recorded in DB assets, but the design team works
+        // from the generated DOCX only.
+        expect(clickupCall[1].revisionBaselineDocPath).toBeUndefined();
+        expect(clickupCall[1].revisionBaselineFileName).toBeUndefined();
         expect(clickupCall[1].criticalOverrides).toEqual([]);
     });
 
@@ -482,6 +486,68 @@ describe('Dashboard Modification Workflow (local, mocked externals)', () => {
         );
         expect(qaCall).toBeTruthy();
         expect(qaCall[1].text).toBe('Ceviche - $15');
+    });
+
+    test('basic-check changed_only merges AI high-confidence corrections back into the full menu', async () => {
+        mockedAxios.post = jest.fn(async (url, payload) => {
+            const urlStr = String(url);
+            if (urlStr.includes('/run-qa-check')) {
+                // Simulate AI correcting the misspellings on the one changed line.
+                return {
+                    data: {
+                        feedback: '=== CORRECTED MENU ===\nMarket Salad, avocado, heirloom tomatoes, halloumi cheese, cucumber, red onion D, V 70\n=== END CORRECTED MENU ===\n=== SUGGESTIONS ===\n[]\n=== END SUGGESTIONS ==='
+                    }
+                };
+            }
+            return { data: {} };
+        });
+
+        const payload = {
+            menuContent: 'Guacamole - $12\nMarket Salad, avocado, heirloom tomats, halloumi cheese, cucumbr, red onion D, V 70',
+            baselineMenuContent: 'Guacamole - $12',
+            reviewMode: 'changed_only',
+            allergens: '',
+            menuType: 'standard',
+        };
+
+        const response = await invokeJsonHandler(basicCheckHandler, payload);
+        expect(response.status).toBe(200);
+        expect(response.body.success).toBe(true);
+        expect(response.body.reviewMode).toBe('changed_only');
+        expect(response.body.changedLineCount).toBe(1);
+        expect(response.body.hasChanges).toBe(true);
+        expect(response.body.correctedMenu).toBe(
+            'Guacamole - $12\nMarket Salad, avocado, heirloom tomatoes, halloumi cheese, cucumber, red onion D, V 70'
+        );
+    });
+
+    test('basic-check changed_only bails to original menu when AI returns mismatched line count', async () => {
+        mockedAxios.post = jest.fn(async (url, payload) => {
+            const urlStr = String(url);
+            if (urlStr.includes('/run-qa-check')) {
+                // AI returned two lines for a single changed line — unsafe to merge.
+                return {
+                    data: {
+                        feedback: '=== CORRECTED MENU ===\nCeviche - $15\nExtra inserted line\n=== END CORRECTED MENU ===\n=== SUGGESTIONS ===\n[]\n=== END SUGGESTIONS ==='
+                    }
+                };
+            }
+            return { data: {} };
+        });
+
+        const payload = {
+            menuContent: 'Guacamole - $12\nCeviche - $15',
+            baselineMenuContent: 'Guacamole - $12',
+            reviewMode: 'changed_only',
+            allergens: '',
+            menuType: 'standard',
+        };
+
+        const response = await invokeJsonHandler(basicCheckHandler, payload);
+        expect(response.status).toBe(200);
+        expect(response.body.success).toBe(true);
+        expect(response.body.hasChanges).toBe(false);
+        expect(response.body.correctedMenu).toBe('Guacamole - $12\nCeviche - $15');
     });
 
     test('basic-check strips managed footer lines before sending content to AI', async () => {

@@ -36,6 +36,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.ALLOWED_MENU_IMAGE_EXTENSIONS = exports.ALLOWED_PDF_EXTENSIONS = exports.ALLOWED_DOCX_EXTENSIONS = exports.MAX_UPLOAD_BYTES = exports.MAX_JSON_FIELD_LENGTH = exports.MAX_HTML_FIELD_LENGTH = exports.MAX_LONG_TEXT_LENGTH = exports.MAX_TEXT_FIELD_LENGTH = void 0;
 exports.sanitizePlainTextInput = sanitizePlainTextInput;
 exports.sanitizeRichTextHtml = sanitizeRichTextHtml;
+exports.buildMenuFilename = buildMenuFilename;
 exports.sanitizeStoredFileName = sanitizeStoredFileName;
 exports.hasAllowedExtension = hasAllowedExtension;
 exports.isPathInsideRoot = isPathInsideRoot;
@@ -76,6 +77,18 @@ function sanitizeRichTextHtml(value, maxLength = exports.MAX_HTML_FIELD_LENGTH) 
     html = html.replace(/javascript\s*:/gi, '');
     html = html.replace(/data:text\/html/gi, '');
     return html.trim();
+}
+function buildMenuFilename(projectName, property) {
+    const name = `${projectName || ''}`.trim() || 'Menu';
+    const propertyName = `${property || ''}`.trim();
+    if (propertyName) {
+        return `${propertyName} - ${name}.docx`;
+    }
+    // No property: avoid duplicated "Menu" when projectName already contains it.
+    if (/\bmenu\b/i.test(name)) {
+        return `${name}.docx`;
+    }
+    return `${name} Menu.docx`;
 }
 function sanitizeStoredFileName(fileName, fallback = 'upload.bin') {
     const basename = path.basename(`${fileName || ''}`.trim() || fallback);
