@@ -88,7 +88,7 @@ const alertTransporter = hasSmtpConfig ? nodemailer.createTransport({
     port: Number(process.env.SMTP_PORT || 587),
     secure: false,
     auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
-}) : null;
+} as any) : null;
 
 // Alert dedup: 15-min cooldown per alert_type
 const alertCooldowns = new Map<string, number>();
@@ -219,6 +219,7 @@ type MenuFooterMetadata = {
     body: string;
     normalizedAllergenLine: string;
     hadRawNotice: boolean;
+    preservedFooterText: string;
 };
 
 function normalizeWhitespace(value: string): string {
@@ -237,7 +238,46 @@ function isLikelyAllergenLegendLine(line: string): boolean {
 function isLikelyRawNoticeLine(line: string): boolean {
     const normalized = normalizeWhitespace(line).toLowerCase();
     if (!normalized) return false;
-    return normalized.includes('consuming raw or undercooked') && normalized.includes('foodborne illness');
+    return normalized.includes('raw or undercooked') && normalized.includes('foodborne illness');
+}
+
+function parseParenthesizedAllergenLegend(line: string): string {
+    const normalized = normalizeWhitespace(line);
+    if (!normalized || !normalized.includes('(') || !normalized.includes(')')) return '';
+
+    const footerBody = normalized.split(
+        /\b(?:ALL\s+PRICES|WE\s+WELCOME|CONSUMPTION\s+OF\s+RAW|CONSUMING\s+RAW|FOODBORNE\s+ILLNESS)\b/i
+    )[0];
+    const pattern = /\(\s*([A-Za-z]{1,3})\s*\)\s*([A-Za-z][A-Za-z\s/&-]*?)(?=\s*\(\s*[A-Za-z]{1,3}\s*\)|$)/g;
+    const pairs: Array<{ code: string; label: string }> = [];
+    let match: RegExpExecArray | null;
+
+    while ((match = pattern.exec(footerBody)) !== null) {
+        const code = match[1].toUpperCase();
+        const label = normalizeWhitespace(match[2]).toLowerCase();
+        if (label) {
+            pairs.push({ code, label });
+        }
+    }
+
+    if (pairs.length < 4) return '';
+    const keywordHits = pairs.filter(({ label }) =>
+        /(allergen|gluten|dairy|fish|nuts?|egg|vegan|vegetarian|crustacean|soy|sesame|celery|mustard|shellfish|sulphites?|lupin)/i.test(label)
+    ).length;
+    if (keywordHits < 2) return '';
+
+    return pairs.map(({ code, label }) => `${code} ${label}`).join(' | ');
+}
+
+function isLikelyAllergenLegendHeader(line: string): boolean {
+    return /^allergen\s+key(?:\s+\(optional\))?$/i.test(normalizeWhitespace(line));
+}
+
+function extractAllergenLegendLine(line: string): string {
+    if (isLikelyAllergenLegendLine(line)) {
+        return normalizeAllergenLegend(line);
+    }
+    return parseParenthesizedAllergenLegend(line);
 }
 
 function normalizeAllergenLegend(text: string): string {
@@ -262,27 +302,33 @@ function normalizeAllergenLegend(text: string): string {
 
 function normalizeMenuFooter(text: string, fallbackAllergens = ''): MenuFooterMetadata {
     const lines = (text || '').split('\n').map((line) => line.trim());
-
-    let footerStart = -1;
-    let rawNoticeIdx = -1;
-    for (let i = 0; i < lines.length; i++) {
-        const lower = lines[i].toLowerCase();
-        const startsRaw = lower.includes('consuming raw or undercooked');
-        const isAllergen = isLikelyAllergenLegendLine(lines[i]);
-        if (startsRaw && rawNoticeIdx === -1) rawNoticeIdx = i;
-        if ((startsRaw || isAllergen) && footerStart === -1) footerStart = i;
-    }
-
-    let menuLines: string[];
+    const menuLines: string[] = [];
     let allergenLines: string[] = [];
+    const preservedFooterLines: string[] = [];
     let hadRawNotice = false;
-    if (footerStart >= 0) {
-        menuLines = lines.slice(0, footerStart);
-        const allergenEndIdx = rawNoticeIdx >= 0 ? rawNoticeIdx : lines.length;
-        allergenLines = lines.slice(footerStart, allergenEndIdx).filter(Boolean);
-        hadRawNotice = rawNoticeIdx >= 0;
-    } else {
-        menuLines = lines;
+    let inFooter = false;
+
+    for (const line of lines) {
+        const allergenLine = extractAllergenLegendLine(line);
+        const isHeader = isLikelyAllergenLegendHeader(line);
+        const isRawNotice = isLikelyRawNoticeLine(line);
+        const isPriceFooter = /^all\s+prices\b/i.test(normalizeWhitespace(line));
+        const isWelcomeFooter = /^we\s+welcome\s+enquiries\b/i.test(normalizeWhitespace(line));
+
+        if (allergenLine || isHeader) {
+            inFooter = true;
+            if (allergenLine) allergenLines.push(allergenLine);
+            continue;
+        }
+
+        if (isRawNotice) hadRawNotice = true;
+
+        if (inFooter || isPriceFooter || isWelcomeFooter || isRawNotice) {
+            if (line) preservedFooterLines.push(line);
+            continue;
+        }
+
+        menuLines.push(line);
     }
 
     while (menuLines.length && menuLines[0] === '') menuLines.shift();
@@ -305,6 +351,7 @@ function normalizeMenuFooter(text: string, fallbackAllergens = ''): MenuFooterMe
         body: collapsed.join('\n'),
         normalizedAllergenLine: normalizeAllergenLegend(extractedAllergenLine || fallbackAllergens),
         hadRawNotice,
+        preservedFooterText: preservedFooterLines.join('\n'),
     };
 }
 
@@ -321,18 +368,26 @@ function decodeHtmlText(html: string): string {
 function stripManagedFooterFromHtml(html: string): string {
     if (!html) return html;
     const regex = /<p\b[^>]*>[\s\S]*?<\/p>/gi;
-    let footerStart = -1;
     let match: RegExpExecArray | null;
+    let stripped = '';
+    let lastIndex = 0;
     while ((match = regex.exec(html)) !== null) {
         const text = normalizeWhitespace(decodeHtmlText(match[0]));
-        if (!text) continue;
-        const lower = text.toLowerCase();
-        if (lower.includes('consuming raw or undercooked') || isLikelyAllergenLegendLine(text)) {
-            footerStart = match.index;
-            break;
+        const isPriceFooter = /^all\s+prices\b/i.test(text);
+        const isWelcomeFooter = /^we\s+welcome\s+enquiries\b/i.test(text);
+        if (
+            isLikelyAllergenLegendLine(text) ||
+            parseParenthesizedAllergenLegend(text) ||
+            isLikelyAllergenLegendHeader(text) ||
+            isPriceFooter ||
+            isWelcomeFooter ||
+            isLikelyRawNoticeLine(text)
+        ) {
+            stripped += html.substring(lastIndex, match.index);
+            lastIndex = regex.lastIndex;
         }
     }
-    return footerStart >= 0 ? html.substring(0, footerStart) : html;
+    return stripped ? `${stripped}${html.substring(lastIndex)}` : html;
 }
 
 function slugifyStorageSegment(value: string): string {
@@ -507,8 +562,9 @@ export async function extractBaselineFromDocx(filePath: string): Promise<{
     const rawCleanedText = cleanData.cleaned_menu_content || cleanData.menu_content || '';
     const rawCleanedHtml = cleanData.cleaned_menu_html || '';
     const footer = normalizeMenuFooter(rawCleanedText, detailsData.allergen_key || '');
+    const approvedMenuContent = [footer.body, footer.preservedFooterText].filter(Boolean).join('\n');
     return {
-        approvedMenuContent: footer.body,
+        approvedMenuContent,
         approvedMenuContentRaw: cleanData.menu_content || '',
         approvedMenuContentHtml: stripManagedFooterFromHtml(rawCleanedHtml),
         extractedAllergenKey: footer.normalizedAllergenLine || detailsData.allergen_key || '',
@@ -1599,20 +1655,21 @@ This is a PRIX FIXE (pre-fix) menu. Apply these special rules:
             console.log('Injected prix fixe rules into prompt');
         }
 
-        // If custom allergens provided, inject them into the prompt
-        if (allergens && allergens.trim()) {
+        const effectiveReviewAllergens = allergens || reviewFooterMetadata.normalizedAllergenLine;
+
+        // If custom or extracted allergens are provided, inject them into the prompt
+        if (effectiveReviewAllergens && effectiveReviewAllergens.trim()) {
             const allergenSection = `
 **CUSTOM ALLERGEN KEY FOR THIS MENU:**
 Use the following allergen codes for reviewing this menu:
-${allergens}
+${effectiveReviewAllergens}
 
 Note: Use ONLY these allergen codes when checking allergen compliance. Do not use any other allergen codes not defined above.
 `;
-            // Insert after "### 7. ALLERGENS" section header
-            qaPrompt = qaPrompt.replace(
-                '### 7. ALLERGENS',
-                `### 7. ALLERGENS\n${allergenSection}`
-            );
+            // Insert after "### 7. ALLERGENS" when present; append for test/minimal prompts.
+            qaPrompt = qaPrompt.includes('### 7. ALLERGENS')
+                ? qaPrompt.replace('### 7. ALLERGENS', `### 7. ALLERGENS\n${allergenSection}`)
+                : `${qaPrompt}\n${allergenSection}`;
             console.log('Injected custom allergens into prompt');
         }
 

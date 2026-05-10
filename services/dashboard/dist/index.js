@@ -192,7 +192,38 @@ function isLikelyRawNoticeLine(line) {
     const normalized = normalizeWhitespace(line).toLowerCase();
     if (!normalized)
         return false;
-    return normalized.includes('consuming raw or undercooked') && normalized.includes('foodborne illness');
+    return normalized.includes('raw or undercooked') && normalized.includes('foodborne illness');
+}
+function parseParenthesizedAllergenLegend(line) {
+    const normalized = normalizeWhitespace(line);
+    if (!normalized || !normalized.includes('(') || !normalized.includes(')'))
+        return '';
+    const footerBody = normalized.split(/\b(?:ALL\s+PRICES|WE\s+WELCOME|CONSUMPTION\s+OF\s+RAW|CONSUMING\s+RAW|FOODBORNE\s+ILLNESS)\b/i)[0];
+    const pattern = /\(\s*([A-Za-z]{1,3})\s*\)\s*([A-Za-z][A-Za-z\s/&-]*?)(?=\s*\(\s*[A-Za-z]{1,3}\s*\)|$)/g;
+    const pairs = [];
+    let match;
+    while ((match = pattern.exec(footerBody)) !== null) {
+        const code = match[1].toUpperCase();
+        const label = normalizeWhitespace(match[2]).toLowerCase();
+        if (label) {
+            pairs.push({ code, label });
+        }
+    }
+    if (pairs.length < 4)
+        return '';
+    const keywordHits = pairs.filter(({ label }) => /(allergen|gluten|dairy|fish|nuts?|egg|vegan|vegetarian|crustacean|soy|sesame|celery|mustard|shellfish|sulphites?|lupin)/i.test(label)).length;
+    if (keywordHits < 2)
+        return '';
+    return pairs.map(({ code, label }) => `${code} ${label}`).join(' | ');
+}
+function isLikelyAllergenLegendHeader(line) {
+    return /^allergen\s+key(?:\s+\(optional\))?$/i.test(normalizeWhitespace(line));
+}
+function extractAllergenLegendLine(line) {
+    if (isLikelyAllergenLegendLine(line)) {
+        return normalizeAllergenLegend(line);
+    }
+    return parseParenthesizedAllergenLegend(line);
 }
 function normalizeAllergenLegend(text) {
     const normalized = (text || '').trim();
@@ -213,28 +244,31 @@ function normalizeAllergenLegend(text) {
 }
 function normalizeMenuFooter(text, fallbackAllergens = '') {
     const lines = (text || '').split('\n').map((line) => line.trim());
-    let footerStart = -1;
-    let rawNoticeIdx = -1;
-    for (let i = 0; i < lines.length; i++) {
-        const lower = lines[i].toLowerCase();
-        const startsRaw = lower.includes('consuming raw or undercooked');
-        const isAllergen = isLikelyAllergenLegendLine(lines[i]);
-        if (startsRaw && rawNoticeIdx === -1)
-            rawNoticeIdx = i;
-        if ((startsRaw || isAllergen) && footerStart === -1)
-            footerStart = i;
-    }
-    let menuLines;
+    const menuLines = [];
     let allergenLines = [];
+    const preservedFooterLines = [];
     let hadRawNotice = false;
-    if (footerStart >= 0) {
-        menuLines = lines.slice(0, footerStart);
-        const allergenEndIdx = rawNoticeIdx >= 0 ? rawNoticeIdx : lines.length;
-        allergenLines = lines.slice(footerStart, allergenEndIdx).filter(Boolean);
-        hadRawNotice = rawNoticeIdx >= 0;
-    }
-    else {
-        menuLines = lines;
+    let inFooter = false;
+    for (const line of lines) {
+        const allergenLine = extractAllergenLegendLine(line);
+        const isHeader = isLikelyAllergenLegendHeader(line);
+        const isRawNotice = isLikelyRawNoticeLine(line);
+        const isPriceFooter = /^all\s+prices\b/i.test(normalizeWhitespace(line));
+        const isWelcomeFooter = /^we\s+welcome\s+enquiries\b/i.test(normalizeWhitespace(line));
+        if (allergenLine || isHeader) {
+            inFooter = true;
+            if (allergenLine)
+                allergenLines.push(allergenLine);
+            continue;
+        }
+        if (isRawNotice)
+            hadRawNotice = true;
+        if (inFooter || isPriceFooter || isWelcomeFooter || isRawNotice) {
+            if (line)
+                preservedFooterLines.push(line);
+            continue;
+        }
+        menuLines.push(line);
     }
     while (menuLines.length && menuLines[0] === '')
         menuLines.shift();
@@ -258,6 +292,7 @@ function normalizeMenuFooter(text, fallbackAllergens = '') {
         body: collapsed.join('\n'),
         normalizedAllergenLine: normalizeAllergenLegend(extractedAllergenLine || fallbackAllergens),
         hadRawNotice,
+        preservedFooterText: preservedFooterLines.join('\n'),
     };
 }
 function decodeHtmlText(html) {
@@ -273,19 +308,24 @@ function stripManagedFooterFromHtml(html) {
     if (!html)
         return html;
     const regex = /<p\b[^>]*>[\s\S]*?<\/p>/gi;
-    let footerStart = -1;
     let match;
+    let stripped = '';
+    let lastIndex = 0;
     while ((match = regex.exec(html)) !== null) {
         const text = normalizeWhitespace(decodeHtmlText(match[0]));
-        if (!text)
-            continue;
-        const lower = text.toLowerCase();
-        if (lower.includes('consuming raw or undercooked') || isLikelyAllergenLegendLine(text)) {
-            footerStart = match.index;
-            break;
+        const isPriceFooter = /^all\s+prices\b/i.test(text);
+        const isWelcomeFooter = /^we\s+welcome\s+enquiries\b/i.test(text);
+        if (isLikelyAllergenLegendLine(text) ||
+            parseParenthesizedAllergenLegend(text) ||
+            isLikelyAllergenLegendHeader(text) ||
+            isPriceFooter ||
+            isWelcomeFooter ||
+            isLikelyRawNoticeLine(text)) {
+            stripped += html.substring(lastIndex, match.index);
+            lastIndex = regex.lastIndex;
         }
     }
-    return footerStart >= 0 ? html.substring(0, footerStart) : html;
+    return stripped ? `${stripped}${html.substring(lastIndex)}` : html;
 }
 function slugifyStorageSegment(value) {
     const cleaned = (value || '')
@@ -430,8 +470,9 @@ async function extractBaselineFromDocx(filePath) {
     const rawCleanedText = cleanData.cleaned_menu_content || cleanData.menu_content || '';
     const rawCleanedHtml = cleanData.cleaned_menu_html || '';
     const footer = normalizeMenuFooter(rawCleanedText, detailsData.allergen_key || '');
+    const approvedMenuContent = [footer.body, footer.preservedFooterText].filter(Boolean).join('\n');
     return {
-        approvedMenuContent: footer.body,
+        approvedMenuContent,
         approvedMenuContentRaw: cleanData.menu_content || '',
         approvedMenuContentHtml: stripManagedFooterFromHtml(rawCleanedHtml),
         extractedAllergenKey: footer.normalizedAllergenLine || detailsData.allergen_key || '',

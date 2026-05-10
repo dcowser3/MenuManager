@@ -26,6 +26,7 @@ type ApprovalWorkflowDeps = {
         body: string;
         normalizedAllergenLine: string;
         hadRawNotice: boolean;
+        preservedFooterText: string;
     };
     stripManagedFooterText: (text: string, fallbackAllergens?: string) => string;
     stripManagedFooterFromHtml: (html: string) => string;
@@ -184,7 +185,7 @@ export function createApprovalWorkflowHandlers(deps: ApprovalWorkflowDeps) {
             const footerMetadata = deps.normalizeMenuFooter(menuContentTextRaw, fallbackAllergens);
             const normalizedMenuContent = footerMetadata.body || deps.stripManagedFooterText(deps.coalesceString(submission.menu_content, rawPayload.menuContent), fallbackAllergens);
             const effectiveAllergens = footerMetadata.normalizedAllergenLine || deps.normalizeAllergenLegend(fallbackAllergens) || deps.DEFAULT_ALLERGEN_KEY;
-            const shouldAddRawNotice = footerMetadata.hadRawNotice || deps.detectRawUndercookedContent(normalizedMenuContent);
+            const shouldAddRawNotice = !footerMetadata.hadRawNotice && deps.detectRawUndercookedContent(normalizedMenuContent);
 
             const approvedDir = deps.pathModule.join(deps.getSubmissionDocumentDir(projectName, property, submission.id || submissionId), 'approved');
             const approvedPath = deps.pathModule.join(approvedDir, `${submission.id || submissionId}-approved.docx`);
@@ -201,6 +202,7 @@ export function createApprovalWorkflowHandlers(deps: ApprovalWorkflowDeps) {
                 menuContent: normalizedMenuContent,
                 menuContentHtml: normalizedEditorHtml || deps.textToParagraphHtml(normalizedMenuContent),
                 allergens: effectiveAllergens,
+                footerText: footerMetadata.preservedFooterText,
                 shouldAddRawNotice,
             }, {
                 outputPath: approvedPath,

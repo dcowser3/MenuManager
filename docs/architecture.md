@@ -59,6 +59,9 @@ Submits menu
   dashboard → POST /assets (db service) — store original_docx metadata
   dashboard → POST /submitter-profiles (db service) — fire-and-forget profile save
   dashboard → POST localhost:3007/create-task (clickup-integration) — fire-and-forget
+  Local-only test helper: localhost, non-production submissions skip ClickUp task creation and return
+    `/download/original/:id` plus `/approval/:id` so the browser can download the generated DOCX
+    and open the approval editor without sending anything to ClickUp.
     │
     └─ clickup-integration → ClickUp API: create task + upload DOCX attachment(s)
        └─ modification upload mode: attach baseline approved DOCX for Isabella verification

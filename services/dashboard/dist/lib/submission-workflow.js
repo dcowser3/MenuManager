@@ -37,6 +37,21 @@ exports.createSubmissionWorkflowHandlers = createSubmissionWorkflowHandlers;
 const path = __importStar(require("path"));
 const upload_security_1 = require("./upload-security");
 const request_normalization_1 = require("./request-normalization");
+function getRequestHostname(req) {
+    const hostHeader = `${req?.hostname || (typeof req?.get === 'function' ? req.get('host') : '') || req?.headers?.host || ''}`.trim();
+    if (!hostHeader)
+        return '';
+    if (hostHeader.startsWith('[')) {
+        return hostHeader.slice(1, hostHeader.indexOf(']')).toLowerCase();
+    }
+    return hostHeader.split(':')[0].toLowerCase();
+}
+function isLocalDashboardRequest(req) {
+    if (process.env.NODE_ENV === 'production')
+        return false;
+    const hostname = getRequestHostname(req);
+    return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1';
+}
 function createSubmissionWorkflowHandlers(deps) {
     const uploadMenuImage = async (req, res) => {
         try {
@@ -128,8 +143,9 @@ function createSubmissionWorkflowHandlers(deps) {
             const selectedRawFlag = `${containsRawUndercooked}` === 'true' || containsRawUndercooked === true;
             const suppressedRawFlag = `${suppressRawNotice}` === 'true' || suppressRawNotice === true;
             const detectedRawFlag = deps.detectRawUndercookedContent(normalizedMenuContent);
-            const shouldAddRawNotice = footerMetadata.hadRawNotice || (!suppressedRawFlag && (selectedRawFlag || detectedRawFlag));
+            const shouldAddRawNotice = !footerMetadata.hadRawNotice && !suppressedRawFlag && (selectedRawFlag || detectedRawFlag);
             const submissionId = `form-${Date.now()}`;
+            const localTestingRequest = isLocalDashboardRequest(req);
             const docxPath = await deps.generateDocxFromForm(submissionId, {
                 projectName: safeProjectName,
                 property: normalizedProperty,
@@ -141,6 +157,7 @@ function createSubmissionWorkflowHandlers(deps) {
                 menuContent: normalizedMenuContent,
                 menuContentHtml: docxMenuContentHtml,
                 allergens: effectiveAllergens,
+                footerText: footerMetadata.preservedFooterText,
                 shouldAddRawNotice
             });
             console.log(`📝 Generated document for submission ${submissionId}: ${docxPath}`);
@@ -297,73 +314,85 @@ function createSubmissionWorkflowHandlers(deps) {
             }
             let clickupWarning;
             let clickupTaskId;
-            try {
-                const clickupResponse = await deps.axios.post(`${deps.CLICKUP_SERVICE_URL}/create-task`, {
-                    submissionId,
-                    submitterName: safeSubmitterName,
-                    submitterEmail: safeSubmitterEmail,
-                    submitterJobTitle: safeSubmitterJobTitle,
-                    projectName: safeProjectName,
-                    property: normalizedProperty,
-                    width: width || (wantsPrint ? (printRegion === 'NON_US' ? printSize : printWidth) : digitalWidth),
-                    height: height || (wantsPrint ? (printRegion === 'NON_US' ? printSize : printHeight) : digitalHeight),
-                    printWidth,
-                    printHeight,
-                    printRegion,
-                    printSize,
-                    folded,
-                    digitalWidth,
-                    digitalHeight,
-                    cropMarks,
-                    bleedMarks,
-                    fileSizeLimit,
-                    fileSizeLimitMb,
-                    fileDeliveryNotes,
-                    orientation: safeOrientation,
-                    menuType: safeMenuType,
-                    servicePeriod: safeServicePeriod,
-                    templateType: normalizedTemplateType,
-                    turnaroundDays: normalizedTurnaroundDays,
-                    dateNeeded: safeDateNeeded,
-                    hotelName: safeHotelName,
-                    cityCountry: normalizedCityCountry,
-                    assetType: safeAssetType,
-                    docxPath,
-                    menuImagePath: persistedMenuImagePath,
-                    menuImageFileName: safeMenuImageFileName,
-                    filename: `${safeProjectName}_Menu.docx`,
-                    submissionMode: safeSubmissionMode,
-                    revisionSource: safeRevisionSource,
-                    revisionBaseSubmissionId: safeRevisionBaseSubmissionId,
-                    revisionBaselineDocPath: persistedBaselineDocPath,
-                    revisionBaselineFileName: safeRevisionBaselineFileName,
-                    chefPersistentDiff,
-                    criticalOverrides: normalizedCriticalOverrides,
-                    approvals: normalizedApprovals,
-                });
-                const clickupData = clickupResponse.data || {};
-                clickupTaskId = clickupData.taskId;
-                if (clickupData.skipped) {
-                    clickupWarning = 'Menu submitted, but ClickUp integration is not configured yet. If this persists, please email the Word document to the design team.';
+            if (localTestingRequest) {
+                clickupWarning = 'Local testing mode: ClickUp task creation was skipped. Use the downloaded DOCX and approval editor link to test review locally.';
+                console.log(`Skipping ClickUp task creation for local submission ${submissionId}`);
+            }
+            else {
+                try {
+                    const clickupResponse = await deps.axios.post(`${deps.CLICKUP_SERVICE_URL}/create-task`, {
+                        submissionId,
+                        submitterName: safeSubmitterName,
+                        submitterEmail: safeSubmitterEmail,
+                        submitterJobTitle: safeSubmitterJobTitle,
+                        projectName: safeProjectName,
+                        property: normalizedProperty,
+                        width: width || (wantsPrint ? (printRegion === 'NON_US' ? printSize : printWidth) : digitalWidth),
+                        height: height || (wantsPrint ? (printRegion === 'NON_US' ? printSize : printHeight) : digitalHeight),
+                        printWidth,
+                        printHeight,
+                        printRegion,
+                        printSize,
+                        folded,
+                        digitalWidth,
+                        digitalHeight,
+                        cropMarks,
+                        bleedMarks,
+                        fileSizeLimit,
+                        fileSizeLimitMb,
+                        fileDeliveryNotes,
+                        orientation: safeOrientation,
+                        menuType: safeMenuType,
+                        servicePeriod: safeServicePeriod,
+                        templateType: normalizedTemplateType,
+                        turnaroundDays: normalizedTurnaroundDays,
+                        dateNeeded: safeDateNeeded,
+                        hotelName: safeHotelName,
+                        cityCountry: normalizedCityCountry,
+                        assetType: safeAssetType,
+                        docxPath,
+                        menuImagePath: persistedMenuImagePath,
+                        menuImageFileName: safeMenuImageFileName,
+                        filename: `${safeProjectName}_Menu.docx`,
+                        submissionMode: safeSubmissionMode,
+                        revisionSource: safeRevisionSource,
+                        revisionBaseSubmissionId: safeRevisionBaseSubmissionId,
+                        revisionBaselineDocPath: persistedBaselineDocPath,
+                        revisionBaselineFileName: safeRevisionBaselineFileName,
+                        chefPersistentDiff,
+                        criticalOverrides: normalizedCriticalOverrides,
+                        approvals: normalizedApprovals,
+                    });
+                    const clickupData = clickupResponse.data || {};
+                    clickupTaskId = clickupData.taskId;
+                    if (clickupData.skipped) {
+                        clickupWarning = 'Menu submitted, but ClickUp integration is not configured yet. If this persists, please email the Word document to the design team.';
+                    }
+                    else if (clickupData.warning || clickupData.attachmentUploadFailed || clickupData.baselineUploadFailed) {
+                        const supportEmail = deps.INTERNAL_REVIEWER_EMAIL || 'the design team';
+                        clickupWarning = `Menu submitted, but we could not upload the Word document to ClickUp. If this persists, please email the Word document directly to ${supportEmail}.`;
+                    }
                 }
-                else if (clickupData.warning || clickupData.attachmentUploadFailed || clickupData.baselineUploadFailed) {
+                catch (clickupError) {
+                    console.error('Failed to create ClickUp task:', clickupError.response?.data || clickupError.message);
                     const supportEmail = deps.INTERNAL_REVIEWER_EMAIL || 'the design team';
-                    clickupWarning = `Menu submitted, but we could not upload the Word document to ClickUp. If this persists, please email the Word document directly to ${supportEmail}.`;
+                    clickupWarning = `Menu submitted, but we could not create your ClickUp task. If this persists, please email the Word document directly to ${supportEmail}.`;
+                    deps.sendAdminAlert({
+                        alert_type: 'clickup_task_failed',
+                        severity: 'error',
+                        service: 'dashboard',
+                        submission_id: submissionId,
+                        message: `ClickUp task creation failed for "${safeProjectName}" (${normalizedProperty})`,
+                        details: { error: clickupError.response?.data || clickupError.message, submitter: safeSubmitterEmail },
+                    });
                 }
             }
-            catch (clickupError) {
-                console.error('Failed to create ClickUp task:', clickupError.response?.data || clickupError.message);
-                const supportEmail = deps.INTERNAL_REVIEWER_EMAIL || 'the design team';
-                clickupWarning = `Menu submitted, but we could not create your ClickUp task. If this persists, please email the Word document directly to ${supportEmail}.`;
-                deps.sendAdminAlert({
-                    alert_type: 'clickup_task_failed',
-                    severity: 'error',
-                    service: 'dashboard',
-                    submission_id: submissionId,
-                    message: `ClickUp task creation failed for "${safeProjectName}" (${normalizedProperty})`,
-                    details: { error: clickupError.response?.data || clickupError.message, submitter: safeSubmitterEmail },
-                });
-            }
+            const localTesting = localTestingRequest
+                ? {
+                    downloadUrl: `/download/original/${encodeURIComponent(submissionId)}`,
+                    approvalUrl: `/approval/${encodeURIComponent(submissionId)}`,
+                }
+                : undefined;
             res.json({
                 success: true,
                 submissionId: submissionId,
@@ -372,6 +401,7 @@ function createSubmissionWorkflowHandlers(deps) {
                     taskId: clickupTaskId,
                     warning: clickupWarning,
                 },
+                localTesting,
             });
         }
         catch (error) {

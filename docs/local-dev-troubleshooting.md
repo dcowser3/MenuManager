@@ -175,6 +175,19 @@ If PIDs print, the services are alive — just open a new terminal and continue.
 
 ## Approved-Dish Extraction Checks
 
+## Local Submission DOCX / Approval Editor Testing
+
+When testing the chef form from `http://localhost:3005/form`, a successful submit skips ClickUp task creation and returns developer-only links to the dashboard. The browser uses them to automatically download the generated original DOCX and keep an `Open approval editor` link visible in the success alert for the same submission.
+
+This shortcut only appears for localhost requests while `NODE_ENV` is not `production`. If it does not appear:
+
+- confirm you are using `http://localhost:3005/form` rather than a tunneled or production hostname
+- confirm the dashboard process is not running with `NODE_ENV=production`
+- rebuild/restart the dashboard if you are running native `npm start`, because that serves `services/dashboard/dist/`
+- test the generated file directly with `curl -I http://localhost:3005/download/original/<submissionId>`
+
+The approval editor route remains `/approval/<submissionId>`. In local mode, submitting that approval can finalize locally through the clickup-integration service when no ClickUp task or token is configured, so the editor can be exercised without sending anything to ClickUp.
+
 If ClickUp approval is updating the `submissions` row but you are not seeing rows in `approved_dishes`, test the extractor directly before debugging webhook delivery:
 
 ```bash
@@ -204,6 +217,8 @@ Expected parser behavior:
 ## Service Startup Dependencies
 
 - **typescript devDep:** Every TS service must declare `"typescript"` in its own `devDependencies`, not rely on the hoisted copy. A partial install can leave the hoisted copy broken; workspace-local ones are more resilient.
+- **Jest dependency alignment:** Root Jest is pinned to the 29.x runner line. Keep `@types/jest` and `jest-util` on 29.x too; `@types/jest@30` pulls Jest 30 `expect`/`jest-util` packages into the root and can make the Jest 29 runner crash before test discovery.
+- **Docker test config:** The dev image copies root `jest.config.js` during build. After changing root test dependencies or Jest config, run `./dev-up.sh --rebuild` so `npm test` inside containers uses the updated package graph and config.
 - **docx-redliner venv:** Node services shell out to `services/docx-redliner/venv/bin/python`. The venv must exist and have `python-docx`, `PyMuPDF`, `openai`, `python-dotenv`, `diff-match-patch` installed. `requirements.txt` is the source of truth.
 - **start-services.sh port order:** db (3004), parser (3001), ai-review (3002), dashboard (3005), differ (3006), clickup (3007). Note docx-redliner is NOT started as a service — node invokes its Python scripts as subprocesses.
 - **stop-services.sh port coverage:** Fallback kill covers 3000–3008. If you add a service on a new port, update it.

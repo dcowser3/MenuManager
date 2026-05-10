@@ -174,6 +174,7 @@ def populate_template(template_path: str, form_data: dict, output_path: str):
     menu_content_html = form_data.get('menuContentHtml', '')
     menu_content_text = form_data.get('menuContent', '')
     allergens_text = (form_data.get('allergens', '') or '').strip()
+    footer_text = (form_data.get('footerText', '') or '').strip()
     should_add_raw_notice = bool(form_data.get('shouldAddRawNotice', False))
 
     # Force menu body to start on a fresh page regardless of template flow.
@@ -240,6 +241,14 @@ def populate_template(template_path: str, form_data: dict, output_path: str):
         allergen_run = allergen_para.add_run(normalized_allergen_line)
         allergen_run.font.name = 'Calibri'
         allergen_run.font.size = Pt(10)
+
+        if footer_text:
+            for footer_line in [line.strip() for line in footer_text.splitlines() if line.strip()]:
+                footer_para = doc.add_paragraph()
+                apply_menu_paragraph_style(footer_para)
+                footer_run = footer_para.add_run(footer_line)
+                footer_run.font.name = 'Calibri'
+                footer_run.font.size = Pt(10)
 
         if should_add_raw_notice:
             # Add the raw-consumption notice underneath the allergen legend when requested.

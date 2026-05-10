@@ -69,6 +69,7 @@ services:
       - /app/services/parser/node_modules
       - ./services/docx-redliner:/app/services/docx-redliner
       - /app/services/docx-redliner/venv
+      - ./sop-processor:/app/sop-processor
       - ./tmp:/app/tmp
       - ./samples:/app/samples:ro
       - ./.env:/app/.env:ro
@@ -86,6 +87,7 @@ services:
     volumes:
       - ./services/ai-review:/app/services/ai-review
       - /app/services/ai-review/node_modules
+      - ./sop-processor:/app/sop-processor
       - ./tmp:/app/tmp
       - ./.env:/app/.env:ro
     depends_on:
@@ -157,6 +159,7 @@ services:
       - /app/services/dashboard/node_modules
       - ./services/docx-redliner:/app/services/docx-redliner
       - /app/services/docx-redliner/venv
+      - ./sop-processor:/app/sop-processor
       - ./tmp:/app/tmp
       - ./samples:/app/samples:ro
       - ./.env:/app/.env:ro

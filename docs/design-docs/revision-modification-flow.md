@@ -143,10 +143,12 @@ When a chef uploads an unapproved DOCX:
    - Loads `unapprovedBaseHtml` into the editable review area so existing redlines are visible during editing.
    - `renderPersistentPreview()` uses annotation ranges to wrap unchanged tokens in `existing-del`/`existing-ins` spans; new changes get `persistent-del`/`persistent-ins` as usual.
    - The preview diff tokenizes punctuation and separators separately so ingredient-separator edits are visible in the persistent redline.
+   - Extracted Date Needed values only apply when they are valid `YYYY-MM-DD` values; otherwise the read-only Date Needed field remains at the turnaround-derived minimum date.
 4. **DOCX generation** (`generate_from_form.py`):
    - `existing-del` → red strikethrough, `existing-ins` → yellow highlight (same formatting as `persistent-del`/`persistent-ins`).
-   - Submission-time footer normalization removes any chef-supplied allergen legend or foodborne warning from the editable body, then appends at most one managed footer block.
-   - If the uploaded menu already contains the foodborne warning, the workflow preserves it by rewriting to the canonical wording instead of adding a duplicate copy.
+   - Submission-time footer normalization removes chef-supplied allergen legends from the editable body, normalizes the allergen key, and appends one managed allergen legend.
+   - Legal/price/footer copy after the allergen legend, including AED service-charge text and venue-specific foodborne warnings, is preserved and appended after the managed allergen legend instead of being rewritten to the canonical warning.
+   - If no foodborne warning is present but the menu is marked or detected as containing raw/undercooked items, the workflow appends the canonical foodborne warning.
 
 ## Notes / Limits
 

@@ -34,8 +34,9 @@ Menu Manager is an AI-powered service designed to automate the review process fo
 - AI-powered two-tier review (general QA + detailed corrections)
 - Learning/training dashboards are now hidden from the public landing page and protected by a 4-digit PIN gate
 - Review highlights and persistent redlines surface punctuation/separator edits such as hyphen, comma, slash, and pipe changes
-- Submission normalization keeps exactly one managed allergen legend and foodborne warning footer: chef-supplied footer text is reused or corrected to the canonical wording instead of being duplicated
+- Submission normalization keeps exactly one managed allergen legend, while preserving chef-supplied legal/price/footer copy such as AED service-charge text and venue-specific foodborne warnings
 - DOCX baseline uploads now prefill the allergen key field from either pipe-delimited legends or parenthesized legends such as `(C) CELERY (D) DAIRY`
+- DOCX-extracted Date Needed values only override the turnaround-derived date when the extracted value is a valid `YYYY-MM-DD` date; invalid date text is ignored so the read-only field stays usable
 - The default allergen legend is now `G contains gluten | V vegetarian | D contains dairy | S contain shellfish | N contain nuts | VG vegan`
 - Approved-dish extraction now splits inline `Dish Name - description` menu rows into separate `dish_name` and `description` fields, captures trailing allergen codes, and skips the allergen legend / food-safety footer instead of storing them as dishes
 - DOCX template validation and redlining
@@ -97,6 +98,7 @@ Current ClickUp BAU status handoff:
 
 Browser approval editor prototype:
 - ClickUp tasks now include an approval link to `/approval/:submissionId`
+- When the dashboard form is submitted from `localhost` outside production, ClickUp task creation is skipped, the browser automatically downloads the generated original DOCX, and the success alert shows an `Open approval editor` link for that same submission
 - Isabella can edit approved text in a left-side browser editor while a right-side panel shows the live tracked-change preview with preserved imported redlines/highlights
 - For modification submissions, the approval editor now reuses the stored uploaded baseline DOCX first, using the same extraction mode chosen on the main submission form (`uploaded_baseline` vs `uploaded_unapproved`)
 - The approval editor preserves leading indentation from extracted DOCX text so alignment-sensitive sections such as allergen keys do not get flattened before review
@@ -231,6 +233,8 @@ curl -i -H "x-menumanager-internal-token: $TOKEN" http://localhost:3006/stats
 ```
 
 Internal service routes intentionally return `401` when called directly without `x-menumanager-internal-token`. That does not block normal dashboard testing; browser requests go to the dashboard, and service-to-service calls attach the shared token from `.env`.
+
+Local form submissions from `http://localhost:3005/form` include a developer-only testing shortcut: after a successful submit, ClickUp task creation is skipped, the generated DOCX downloads automatically, and the success alert links to `/approval/<submissionId>` for the same record. This shortcut is disabled when `NODE_ENV=production` or when the request host is not localhost.
 
 Native mode is available when you specifically do not want Docker, but it is no longer the preferred default:
 

@@ -46,5 +46,24 @@ docker/Dockerfile*
 
 # Big sample / test artifacts that aren't needed at build time
 **/test-files
-sop-processor
-samples
+
+# sop-processor: ship qa_prompt.txt and sop_rules.* (read at runtime), but
+# leave the source PDF and extraction scratch out of the image.
+sop-processor/company_sop.pdf
+sop-processor/sop_raw_text.txt
+sop-processor/extract_sop.py
+sop-processor/requirements.txt
+sop-processor/README.md
+sop-processor/.DS_Store
+
+# samples: ship the two .docx templates the dashboard reads at runtime
+# (food + beverage). Demo files, PDFs, and email/training subdirs stay out.
+samples/.DS_Store
+samples/~$*
+samples/*.pdf
+samples/SAMPLE-CONTENT.txt
+samples/sop.txt
+samples/demo-*.docx
+samples/Design Approval Pairs
+samples/FW_ Zengo Doha - Menu
+samples/example_pairs

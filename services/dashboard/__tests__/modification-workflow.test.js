@@ -63,9 +63,17 @@ function getRouteHandler(method, routePath) {
     return layer.route.stack[layer.route.stack.length - 1].handle;
 }
 
-function invokeJsonHandler(handler, body) {
+function invokeJsonHandler(handler, body, options = {}) {
     return new Promise((resolve, reject) => {
-        const req = { body };
+        const headers = options.headers || {};
+        const req = {
+            body,
+            headers,
+            hostname: options.hostname,
+            get(name) {
+                return headers[String(name).toLowerCase()] || headers[name];
+            },
+        };
         const res = {
             statusCode: 200,
             status(code) {
@@ -85,6 +93,7 @@ describe('Dashboard Modification Workflow (local, mocked externals)', () => {
     const submitHandler = getRouteHandler('post', '/api/form/submit');
     const basicCheckHandler = getRouteHandler('post', '/api/form/basic-check');
     const baselineUploadPath = path.join(process.cwd(), 'tmp', 'uploads', 'legacy-approved.docx');
+    const originalNodeEnv = process.env.NODE_ENV;
 
     beforeEach(() => {
         jest.spyOn(console, 'log').mockImplementation(() => {});
@@ -103,26 +112,26 @@ describe('Dashboard Modification Workflow (local, mocked externals)', () => {
         mockedAxios.post = jest.fn(async (url, payload) => {
             const urlStr = String(url);
 
-            if (urlStr.includes('http://localhost:3004/submissions')) {
+            if (urlStr.includes('/submissions')) {
                 return { data: { id: payload.id || 'form-test-id' } };
             }
-            if (urlStr.includes('http://localhost:3004/submitter-profiles')) {
+            if (urlStr.includes('/submitter-profiles')) {
                 return { data: { ok: true } };
             }
-            if (urlStr.includes('http://localhost:3004/assets')) {
+            if (urlStr.includes('/assets')) {
                 return { data: { id: 'asset_123' } };
             }
-            if (urlStr.includes('http://localhost:3002/ai-review')) {
-                throw new Error('AI service mocked unavailable');
-            }
-            if (urlStr.includes('http://localhost:3002/run-qa-check')) {
+            if (urlStr.includes('/run-qa-check')) {
                 return {
                     data: {
                         feedback: '=== CORRECTED MENU ===\nNO CHANGES\n=== END CORRECTED MENU ===\n=== SUGGESTIONS ===\n[]\n=== END SUGGESTIONS ==='
                     }
                 };
             }
-            if (urlStr.includes('http://localhost:3007/create-task')) {
+            if (urlStr.includes('/ai-review')) {
+                throw new Error('AI service mocked unavailable');
+            }
+            if (urlStr.includes('/create-task')) {
                 return { data: { success: true } };
             }
 
@@ -133,7 +142,7 @@ describe('Dashboard Modification Workflow (local, mocked externals)', () => {
         mockedAxios.get = jest.fn(async (url) => {
             const urlStr = String(url);
 
-            if (urlStr.includes('http://localhost:3004/properties')) {
+            if (urlStr.includes('/properties')) {
                 return {
                     data: {
                         catalog: [
@@ -149,8 +158,54 @@ describe('Dashboard Modification Workflow (local, mocked externals)', () => {
     });
 
     afterEach(() => {
+        process.env.NODE_ENV = originalNodeEnv;
         jest.restoreAllMocks();
     });
+
+    function buildNewSubmissionPayload(overrides = {}) {
+        return {
+            submitterName: 'Chef Test',
+            submitterEmail: 'chef@example.com',
+            submitterJobTitle: 'Executive Chef',
+            projectName: 'Test Project',
+            property: 'Test Property',
+            width: '8.5',
+            height: '11',
+            printWidth: '8.5',
+            printHeight: '11',
+            printRegion: 'US',
+            printSize: '',
+            folded: 'no',
+            digitalWidth: '',
+            digitalHeight: '',
+            cropMarks: 'no',
+            bleedMarks: 'no',
+            fileSizeLimit: 'no',
+            fileSizeLimitMb: '',
+            fileDeliveryNotes: '',
+            orientation: 'Portrait',
+            menuType: 'standard',
+            servicePeriod: 'dinner',
+            templateType: 'food',
+            turnaroundDays: 5,
+            dateNeeded: '2026-03-01',
+            hotelName: '',
+            cityCountry: 'Denver, USA',
+            assetType: 'PRINT',
+            menuContent: 'Guacamole - $12',
+            menuContentHtml: '<p>Guacamole - $12</p>',
+            approvals: [{ approved: true, name: 'GM', position: 'GM' }],
+            criticalOverrides: [],
+            submissionMode: 'new',
+            revisionSource: 'database',
+            revisionBaseSubmissionId: '',
+            revisionBaselineDocPath: '',
+            revisionBaselineFileName: '',
+            baseApprovedMenuContent: '',
+            chefPersistentDiff: { insertions: 0, deletions: 0 },
+            ...overrides,
+        };
+    }
 
     test('accepts modification submission using DB baseline and persists revision fields', async () => {
         const payload = {
@@ -200,13 +255,55 @@ describe('Dashboard Modification Workflow (local, mocked externals)', () => {
         expect(response.body.success).toBe(true);
 
         const submissionCall = mockedAxios.post.mock.calls.find((c) =>
-            String(c[0]).includes('http://localhost:3004/submissions')
+            String(c[0]).includes('/submissions')
         );
         expect(submissionCall).toBeTruthy();
         expect(submissionCall[1].submission_mode).toBe('modification');
         expect(submissionCall[1].revision_source).toBe('database');
         expect(submissionCall[1].revision_base_submission_id).toBe('sub_approved_1');
         expect(submissionCall[1].base_approved_menu_content).toBe('Guacamole - $10');
+    });
+
+    test('returns local testing download and approval links only for localhost submissions', async () => {
+        process.env.NODE_ENV = 'development';
+        const response = await invokeJsonHandler(
+            submitHandler,
+            buildNewSubmissionPayload(),
+            { headers: { host: 'localhost:3005' } }
+        );
+
+        expect(response.status).toBe(200);
+        expect(response.body.success).toBe(true);
+        expect(response.body.localTesting).toEqual({
+            downloadUrl: `/download/original/${encodeURIComponent(response.body.submissionId)}`,
+            approvalUrl: `/approval/${encodeURIComponent(response.body.submissionId)}`,
+        });
+        expect(response.body.clickup.taskId).toBeUndefined();
+        expect(response.body.clickup.warning).toContain('Local testing mode');
+        expect(mockedAxios.post.mock.calls.some((c) =>
+            String(c[0]).includes('/create-task')
+        )).toBe(false);
+    });
+
+    test('does not return local testing links for production or non-local submissions', async () => {
+        process.env.NODE_ENV = 'production';
+        const productionResponse = await invokeJsonHandler(
+            submitHandler,
+            buildNewSubmissionPayload({ projectName: 'Production Project' }),
+            { headers: { host: 'localhost:3005' } }
+        );
+
+        process.env.NODE_ENV = 'development';
+        const remoteResponse = await invokeJsonHandler(
+            submitHandler,
+            buildNewSubmissionPayload({ projectName: 'Remote Project' }),
+            { headers: { host: 'menus.example.com' } }
+        );
+
+        expect(productionResponse.status).toBe(200);
+        expect(productionResponse.body.localTesting).toBeUndefined();
+        expect(remoteResponse.status).toBe(200);
+        expect(remoteResponse.body.localTesting).toBeUndefined();
     });
 
     test('accepts modification submission using uploaded baseline and forwards baseline file to clickup payload', async () => {
@@ -257,7 +354,7 @@ describe('Dashboard Modification Workflow (local, mocked externals)', () => {
         expect(response.body.success).toBe(true);
 
         const clickupCall = mockedAxios.post.mock.calls.find((c) =>
-            String(c[0]).includes('http://localhost:3007/create-task')
+            String(c[0]).includes('/create-task')
         );
         expect(clickupCall).toBeTruthy();
         expect(clickupCall[1].revisionSource).toBe('uploaded_baseline');
@@ -335,7 +432,8 @@ describe('Dashboard Modification Workflow (local, mocked externals)', () => {
         const generatedFormData = JSON.parse(formDataWrite[1]);
         expect(generatedFormData.menuContent).toBe('STARTERS\nGuacamole - $12');
         expect(generatedFormData.allergens).toBe('G contains gluten | V vegetarian | D contains dairy | S contain shellfish | N contain nuts | VG vegan');
-        expect(generatedFormData.shouldAddRawNotice).toBe(true);
+        expect(generatedFormData.footerText).toBe('*consuming raw or undercooked meats, poultry, seafood, or eggs may increase your risk of foodborne illness.');
+        expect(generatedFormData.shouldAddRawNotice).toBe(false);
         expect(generatedFormData.menuContentHtml).toContain('<p>STARTERS</p>');
         expect(generatedFormData.menuContentHtml).toContain('<p>Guacamole - $12</p>');
         expect(generatedFormData.menuContentHtml).not.toContain('foodborne illness');
@@ -359,7 +457,7 @@ describe('Dashboard Modification Workflow (local, mocked externals)', () => {
         expect(response.body.suggestions).toEqual([]);
 
         const qaCall = mockedAxios.post.mock.calls.find((c) =>
-            String(c[0]).includes('http://localhost:3002/run-qa-check')
+            String(c[0]).includes('/run-qa-check')
         );
         expect(qaCall).toBeUndefined();
     });
@@ -380,7 +478,7 @@ describe('Dashboard Modification Workflow (local, mocked externals)', () => {
         expect(response.body.changedLineCount).toBe(1);
 
         const qaCall = mockedAxios.post.mock.calls.find((c) =>
-            String(c[0]).includes('http://localhost:3002/run-qa-check')
+            String(c[0]).includes('/run-qa-check')
         );
         expect(qaCall).toBeTruthy();
         expect(qaCall[1].text).toBe('Ceviche - $15');
@@ -408,11 +506,114 @@ describe('Dashboard Modification Workflow (local, mocked externals)', () => {
         expect(response.body.success).toBe(true);
 
         const qaCall = mockedAxios.post.mock.calls.find((c) =>
-            String(c[0]).includes('http://localhost:3002/run-qa-check')
+            String(c[0]).includes('/run-qa-check')
         );
         expect(qaCall).toBeTruthy();
         expect(qaCall[1].text).toBe('STARTERS\nGuacamole - $12');
         expect(qaCall[1].prompt).toContain('IMPORTANT FOOTER RULES');
         expect(qaCall[1].prompt).toContain('shellfish');
+    });
+
+    test('basic-check strips parenthesized allergen key while preserving legal footer for generation', async () => {
+        fs.promises.readFile.mockResolvedValueOnce('QA prompt body');
+
+        const payload = {
+            menuContent: [
+                'DESSERT',
+                'Ice Cream & Sorbets D,E,G,PN,SY,TN 35',
+                '(C) CELERY (D) DAIRY (E) EGGS (F) FISH (G) GLUTEN (V) VEGETARIAN',
+                'ALL PRICES ARE IN AED, INCLUSIVE OF 7% MUNICIPALITY FEES, 10% SERVICE CHARGE AND 5% VAT.',
+                'We welcome enquiries from diners who wish to know whether any dishes contain particular ingredients. Please inform your order-taker of any allergy or special dietary requirements we should be made aware of when preparing your menu request. Consumption of raw or undercooked meat, seafood or poultry products such as eggs may increase your risk of foodborne illness',
+            ].join('\n'),
+            baselineMenuContent: '',
+            reviewMode: 'full',
+            allergens: '',
+            menuType: 'standard',
+        };
+
+        const response = await invokeJsonHandler(basicCheckHandler, payload);
+        expect(response.status).toBe(200);
+        expect(response.body.success).toBe(true);
+
+        const qaCall = mockedAxios.post.mock.calls.find((c) =>
+            String(c[0]).includes('/run-qa-check')
+        );
+        expect(qaCall).toBeTruthy();
+        expect(qaCall[1].text).toBe('DESSERT\nIce Cream & Sorbets D,E,G,PN,SY,TN 35');
+        expect(qaCall[1].prompt).toContain('C celery | D dairy | E eggs | F fish | G gluten | V vegetarian');
+    });
+
+    test('submit normalizes parenthesized allergen key and preserves AED footer copy', async () => {
+        const payload = {
+            submitterName: 'Chef Test',
+            submitterEmail: 'chef@example.com',
+            submitterJobTitle: 'Executive Chef',
+            projectName: 'Footer Project',
+            property: 'Test Property',
+            width: '8.5',
+            height: '11',
+            printWidth: '8.5',
+            printHeight: '11',
+            printRegion: 'US',
+            printSize: '',
+            folded: 'no',
+            digitalWidth: '',
+            digitalHeight: '',
+            cropMarks: 'no',
+            bleedMarks: 'no',
+            fileSizeLimit: 'no',
+            fileSizeLimitMb: '',
+            fileDeliveryNotes: '',
+            orientation: 'Portrait',
+            menuType: 'standard',
+            servicePeriod: 'dinner',
+            templateType: 'food',
+            turnaroundDays: 5,
+            dateNeeded: '2026-03-03',
+            hotelName: '',
+            cityCountry: 'Denver, USA',
+            assetType: 'PRINT',
+            allergens: '',
+            containsRawUndercooked: false,
+            menuContent: [
+                'DESSERT',
+                'Ice Cream & Sorbets D,E,G,PN,SY,TN 35',
+                '(C) CELERY (D) DAIRY (E) EGGS (F) FISH (G) GLUTEN (V) VEGETARIAN',
+                'ALL PRICES ARE IN AED, INCLUSIVE OF 7% MUNICIPALITY FEES, 10% SERVICE CHARGE AND 5% VAT.',
+                'We welcome enquiries from diners who wish to know whether any dishes contain particular ingredients. Please inform your order-taker of any allergy or special dietary requirements we should be made aware of when preparing your menu request. Consumption of raw or undercooked meat, seafood or poultry products such as eggs may increase your risk of foodborne illness',
+            ].join('\n'),
+            menuContentHtml: [
+                '<p>DESSERT</p>',
+                '<p>Ice Cream & Sorbets D,E,G,PN,SY,TN 35</p>',
+                '<p>(C) CELERY (D) DAIRY (E) EGGS (F) FISH (G) GLUTEN (V) VEGETARIAN</p>',
+                '<p>ALL PRICES ARE IN AED, INCLUSIVE OF 7% MUNICIPALITY FEES, 10% SERVICE CHARGE AND 5% VAT.</p>',
+                '<p>We welcome enquiries from diners who wish to know whether any dishes contain particular ingredients. Please inform your order-taker of any allergy or special dietary requirements we should be made aware of when preparing your menu request. Consumption of raw or undercooked meat, seafood or poultry products such as eggs may increase your risk of foodborne illness</p>',
+            ].join(''),
+            approvals: [{ approved: true, name: 'GM', position: 'GM' }],
+            criticalOverrides: [],
+            submissionMode: 'new',
+            revisionSource: 'database',
+            revisionBaseSubmissionId: '',
+            revisionBaselineDocPath: '',
+            revisionBaselineFileName: '',
+            baseApprovedMenuContent: '',
+            chefPersistentDiff: { insertions: 0, deletions: 0 },
+        };
+
+        const response = await invokeJsonHandler(submitHandler, payload);
+        expect(response.status).toBe(200);
+        expect(response.body.success).toBe(true);
+
+        const formDataWrite = fs.promises.writeFile.mock.calls.find(([filePath]) =>
+            String(filePath).endsWith('_formdata.json')
+        );
+        const generatedFormData = JSON.parse(formDataWrite[1]);
+        expect(generatedFormData.menuContent).toBe('DESSERT\nIce Cream & Sorbets D,E,G,PN,SY,TN 35');
+        expect(generatedFormData.allergens).toBe('C celery | D dairy | E eggs | F fish | G gluten | V vegetarian');
+        expect(generatedFormData.footerText).toContain('ALL PRICES ARE IN AED');
+        expect(generatedFormData.footerText).toContain('We welcome enquiries');
+        expect(generatedFormData.shouldAddRawNotice).toBe(false);
+        expect(generatedFormData.menuContentHtml).not.toContain('ALL PRICES ARE IN AED');
+        expect(generatedFormData.menuContentHtml).not.toContain('(C) CELERY');
     });
 });

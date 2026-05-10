@@ -1,6 +1,7 @@
 const {
     clampExtractedDateNeeded,
     findCatalogMatchesFromHints,
+    isValidDateInputValue,
     parseExtractedSize,
     tokenizePropertyHint,
 } = require('../public/js/form-helpers');
@@ -31,6 +32,18 @@ describe('clampExtractedDateNeeded', () => {
         expect(result.warning).toBeNull();
     });
 
+    test('falls back to minimum when extracted date is not an input-date value', () => {
+        const result = clampExtractedDateNeeded('May 20, 2026', '2026-04-20');
+        expect(result.value).toBe('2026-04-20');
+        expect(result.warning).toContain('May 20, 2026');
+    });
+
+    test('falls back to minimum when extracted date is an impossible ISO date', () => {
+        const result = clampExtractedDateNeeded('2026-02-31', '2026-04-20');
+        expect(result.value).toBe('2026-04-20');
+        expect(result.warning).toContain('2026-02-31');
+    });
+
     test('returns extracted date when min is empty', () => {
         const result = clampExtractedDateNeeded('2026-05-01', '');
         expect(result.value).toBe('2026-05-01');
@@ -41,6 +54,15 @@ describe('clampExtractedDateNeeded', () => {
         const result = clampExtractedDateNeeded('  2026-04-13  ', '  2026-04-20  ');
         expect(result.value).toBe('2026-04-20');
         expect(result.warning).toContain('2026-04-13');
+    });
+});
+
+describe('isValidDateInputValue', () => {
+    test('accepts valid date input values only', () => {
+        expect(isValidDateInputValue('2026-05-20')).toBe(true);
+        expect(isValidDateInputValue('05/20/2026')).toBe(false);
+        expect(isValidDateInputValue('May 20, 2026')).toBe(false);
+        expect(isValidDateInputValue('2026-02-31')).toBe(false);
     });
 });
 
