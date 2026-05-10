@@ -80,10 +80,17 @@ def extract_project_details(docx_path: str) -> dict:
     """
     doc = Document(docx_path)
 
-    # Extract project details from first table
+    # Extract project details from first table.
+    # `property` holds the legacy single-field value (old template's PROPERTY row).
+    # `outlet`/`hotel`/`city` are filled from the newer template that splits the
+    # property identity across rows (OUTLET NAME / HOTEL NAME / CITY / COUNTRY).
+    # The dashboard combines outlet+hotel+city to find the canonical catalog entry.
     project_details = {
         "project_name": "",
         "property": "",
+        "outlet": "",
+        "hotel": "",
+        "city": "",
         "size": "",
         "orientation": "",
         "date_needed": ""
@@ -92,24 +99,37 @@ def extract_project_details(docx_path: str) -> dict:
     # Exact-match mapping for standard RSH template fields
     field_mapping = {
         "PROJECT NAME": "project_name",
+        "MENU NAME": "project_name",
         "PROPERTY": "property",
+        "OUTLET NAME": "outlet",
+        "HOTEL NAME": "hotel",
+        "CITY / COUNTRY": "city",
+        "CITY/COUNTRY": "city",
         "SIZE (PIXELS = WEB) OR (INCHES = PRINT)": "size",
         "ORIENTATION (PORTRAIT OR LANDSCAPE)": "orientation",
         "DATE NEEDED": "date_needed"
     }
 
     # Normalized keyword mapping for briefs that use alternative field names.
-    # Keys are lowercase substrings to match against the cell label;
-    # checked in order so more-specific patterns are tried first.
+    # Order matters; first match wins. Outlet/hotel/city are checked before
+    # the generic "property" fallback so newer split templates extract them
+    # cleanly instead of collapsing into `property`.
     alt_field_mapping = [
         # project_name alternatives
         ("project name", "project_name"),
         ("menu name", "project_name"),
         ("event name", "project_name"),
-        # property alternatives
+        # split-property fields (newer template)
+        ("outlet name", "outlet"),
+        ("outlet", "outlet"),
+        ("hotel name", "hotel"),
+        ("hotel", "hotel"),
+        ("city / country", "city"),
+        ("city/country", "city"),
+        ("city", "city"),
+        ("country", "city"),
+        # legacy single-field property
         ("property", "property"),
-        ("hotel name", "property"),
-        ("outlet name", "property"),
         ("venue name", "property"),
         ("restaurant name", "property"),
         ("location name", "property"),

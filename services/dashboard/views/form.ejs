@@ -3200,6 +3200,8 @@
                 ? catalog
                     .map((item) => ({
                         name: `${item?.name || ''}`.trim(),
+                        hotel: `${item?.hotel || ''}`.trim(),
+                        cityCountry: `${item?.city_country || ''}`.trim(),
                         sharepointServiceFolders: Array.isArray(item?.sharepoint_service_folders)
                             ? item.sharepoint_service_folders.map((folder) => `${folder || ''}`.trim()).filter(Boolean)
                             : []
@@ -3684,17 +3686,41 @@
             if (after && after !== before) markFieldAsExtracted(fieldId);
         }
 
+        function applyExtractedProperty(extracted) {
+            // 1. Exact catalog match on legacy `property` field.
+            if (extracted.property && isPropertyFromCatalog(extracted.property)) {
+                setFieldValueAndMark('property', extracted.property);
+                updateServicePeriodOptions(extracted.property);
+                return;
+            }
+
+            // 2. Structured match using outlet/hotel/city hints from newer templates.
+            const matches = window.formHelpers.findCatalogMatchesFromHints(propertyCatalogMeta, {
+                outlet: extracted.outlet,
+                hotel: extracted.hotel,
+                city: extracted.city,
+            });
+            if (matches.length === 1) {
+                setFieldValueAndMark('property', matches[0]);
+                updateServicePeriodOptions(matches[0]);
+                return;
+            }
+
+            // 3. Could not resolve; leave blank and tell the user why.
+            const hintParts = [extracted.property, extracted.outlet, extracted.hotel, extracted.city].filter(Boolean);
+            const hintText = hintParts.length ? ` ("${hintParts.join(' / ')}")` : '';
+            if (matches.length > 1) {
+                const preview = matches.slice(0, 5).join(', ') + (matches.length > 5 ? `, +${matches.length - 5} more` : '');
+                showAlert(`Multiple properties match the extracted hints${hintText}: ${preview}. Please select one manually.`, 'warning');
+            } else if (hintParts.length) {
+                showAlert(`Extracted property hints${hintText} did not match any property in the list. Please select one manually.`, 'warning');
+            }
+        }
+
         function applyExtractedProjectToForm(extracted) {
             if (!extracted) return;
             if (extracted.projectName) setFieldValueAndMark('projectName', extracted.projectName);
-            if (extracted.property) {
-                if (isPropertyFromCatalog(extracted.property)) {
-                    setFieldValueAndMark('property', extracted.property);
-                    updateServicePeriodOptions(extracted.property);
-                } else {
-                    showAlert(`Extracted property "${extracted.property}" is not in the property list — please select one manually.`, 'warning');
-                }
-            }
+            applyExtractedProperty(extracted);
             if (extracted.orientation) {
                 const before = document.getElementById('orientation')?.value || '';
                 setSelectValueAndMark('orientation', extracted.orientation);

@@ -1,4 +1,9 @@
-const { clampExtractedDateNeeded, parseExtractedSize } = require('../public/js/form-helpers');
+const {
+    clampExtractedDateNeeded,
+    findCatalogMatchesFromHints,
+    parseExtractedSize,
+    tokenizePropertyHint,
+} = require('../public/js/form-helpers');
 
 describe('clampExtractedDateNeeded', () => {
     test('returns extracted date when it meets the minimum', () => {
@@ -92,5 +97,78 @@ describe('parseExtractedSize', () => {
         expect(parseExtractedSize('')).toBeNull();
         expect(parseExtractedSize(null)).toBeNull();
         expect(parseExtractedSize(undefined)).toBeNull();
+    });
+});
+
+describe('property catalog hint matching', () => {
+    const catalog = [
+        {
+            name: 'Maya - Le Royal Meridien - Dubai',
+            hotel: 'Le Royal Meridien',
+            cityCountry: 'Dubai',
+        },
+        {
+            name: 'Maya - Le Meridien - Dubai',
+            hotel: 'Le Meridien',
+            cityCountry: 'Dubai',
+        },
+        {
+            name: 'Toro - St. Regis Kanai - Riviera Maya',
+            hotel: 'St. Regis Kanai',
+            cityCountry: 'Riviera Maya',
+        },
+        {
+            name: 'Toro Toro - Four Seasons - Doha',
+            hotel: 'Four Seasons',
+            cityCountry: 'Doha',
+        },
+        {
+            name: 'Toro - Four Seasons - Doha',
+            hotel: 'Four Seasons',
+            cityCountry: 'Doha',
+        },
+    ];
+
+    test('tokenizes punctuation, diacritics, and short country noise', () => {
+        expect(tokenizePropertyHint('Le Royal Méridien, Dubai UAE')).toEqual(['le', 'royal', 'meridien', 'dubai']);
+    });
+
+    test('resolves the Maya Royal Meridien Dubai property from split template hints', () => {
+        expect(findCatalogMatchesFromHints(catalog, {
+            outlet: 'Maya',
+            hotel: 'Le Royal Meridien',
+            city: 'Dubai',
+        })).toEqual(['Maya - Le Royal Meridien - Dubai']);
+    });
+
+    test('does not match an outlet hint against city text', () => {
+        expect(findCatalogMatchesFromHints(catalog, {
+            outlet: 'Maya',
+            hotel: 'St. Regis Kanai',
+            city: 'Riviera Maya',
+        })).toEqual([]);
+    });
+
+    test('keeps repeated outlet tokens distinct', () => {
+        expect(findCatalogMatchesFromHints(catalog, {
+            outlet: 'Toro',
+            hotel: 'Four Seasons',
+            city: 'Doha',
+        })).toEqual(['Toro - Four Seasons - Doha']);
+        expect(findCatalogMatchesFromHints(catalog, {
+            outlet: 'Toro Toro',
+            hotel: 'Four Seasons',
+            city: 'Doha',
+        })).toEqual(['Toro Toro - Four Seasons - Doha']);
+    });
+
+    test('returns multiple matches when hints are genuinely ambiguous', () => {
+        expect(findCatalogMatchesFromHints(catalog, {
+            outlet: 'Maya',
+            city: 'Dubai',
+        })).toEqual([
+            'Maya - Le Royal Meridien - Dubai',
+            'Maya - Le Meridien - Dubai',
+        ]);
     });
 });

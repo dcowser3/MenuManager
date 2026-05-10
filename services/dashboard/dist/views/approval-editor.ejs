@@ -7,6 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=Montserrat:wght@300;400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/css/menu-display.css">
     <script src="/js/redline-preview.js"></script>
     <style>
         :root {
@@ -285,14 +286,7 @@
         .editor-textarea,
         .preview-body {
             flex: 1;
-            padding: 1.25rem;
-            color: var(--color-text);
-            font-family: var(--font-body);
-            font-size: 1rem;
-            line-height: 1.8;
-            letter-spacing: 0.02em;
-            background: var(--color-background);
-            white-space: pre-wrap;
+            padding: 1.25rem 1.5rem;
             overflow-x: hidden;
             overflow-y: auto;
             scrollbar-gutter: stable both-edges;
@@ -303,29 +297,10 @@
             border: 0;
             resize: vertical;
             outline: none;
-            word-break: normal;
-            overflow-wrap: break-word;
         }
 
         .editor-textarea:focus {
             box-shadow: inset 0 0 0 1px var(--color-secondary);
-        }
-
-        .preview-body {
-            word-break: normal;
-            overflow-wrap: break-word;
-        }
-
-        .existing-del,
-        .persistent-del {
-            color: var(--color-error);
-            text-decoration: line-through;
-            background: var(--color-delete-bg);
-        }
-
-        .existing-ins,
-        .persistent-ins {
-            background: var(--color-insert-bg);
         }
 
         .footer-actions {
@@ -448,7 +423,7 @@
                         <h3>Edit Text</h3>
                         <p>This is the final approved wording. Typing here should feel normal.</p>
                     </div>
-                    <textarea id="approvalEditorInput" class="editor-textarea" spellcheck="false"><%= visibleText %></textarea>
+                    <textarea id="approvalEditorInput" class="editor-textarea menu-extract-display" spellcheck="false"><%= visibleText %></textarea>
                 </section>
 
                 <section class="panel">
@@ -456,7 +431,7 @@
                         <h3>Live Redline Preview</h3>
                         <p>Yellow is new text. Red strike-through is removed text. Imported redlines stay visible where unchanged.</p>
                     </div>
-                    <div id="approvalPreview" class="preview-body"></div>
+                    <div id="approvalPreview" class="preview-body menu-extract-display"></div>
                 </section>
             </div>
 
@@ -492,6 +467,17 @@
         );
 
         function renderPersistentPreview(baseText, revisedText) {
+            // No live edits yet → render the source HTML directly so the chef
+            // sees the original Calibri/centered/bold formatting from the
+            // extracted DOCX. The token-diff renderer can't reproduce inline
+            // formatting, so we only fall back to it once the chef edits.
+            if (baselineHtml && baseText === revisedText) {
+                lastRenderedHtml = '';
+                preview.innerHTML = baselineHtml;
+                diffSummary.textContent = 'Live changes: 0 insertions, 0 deletions';
+                return;
+            }
+
             const rendered = redlinePreview.renderPersistentPreview(baseText, revisedText, {
                 annotationMap: baselineAnnotationMap,
                 includeExistingAnnotations: true
@@ -503,7 +489,12 @@
         }
 
         function buildSubmissionPreviewHtml() {
-            return (lastRenderedHtml || '')
+            if (!lastRenderedHtml) {
+                // No edits made → submit the unchanged baseline HTML so the
+                // approved record keeps the original DOCX formatting.
+                return baselineHtml || '';
+            }
+            return lastRenderedHtml
                 .split('\n')
                 .map((lineHtml) => `<p>${lineHtml || '<br>'}</p>`)
                 .join('');

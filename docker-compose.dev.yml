@@ -1,0 +1,167 @@
+# Local-dev compose file. One image (docker/Dockerfile.dev), seven service
+# containers, one shared network. Source code, tmp/, samples/, and .env are
+# bind-mounted from the host so edits hot-reload via ts-node-dev.
+#
+# Usage (via ./dev-up.sh wrapper, or directly):
+#   docker compose -f docker-compose.dev.yml up
+#   docker compose -f docker-compose.dev.yml up dashboard      # one service + deps
+#   docker compose -f docker-compose.dev.yml down
+#   docker compose -f docker-compose.dev.yml build --no-cache  # nuke and rebuild
+#
+# Design notes:
+#   - Each service bind-mounts its own source directory so .ts edits trigger
+#     ts-node-dev to restart the process. Anonymous volumes on each
+#     `node_modules` path "punch through" the bind mount and re-expose the
+#     deps installed into the image at build time.
+#   - Shared libs (internal-auth, supabase-client) are NOT bind-mounted. They
+#     are built into the image so consumers' `import '@menumanager/...'`
+#     resolves to a real `dist/index.js`. Edits to those libs require
+#     `./dev-up.sh --rebuild`.
+#   - docx-redliner Python scripts ARE bind-mounted so script edits take
+#     effect without rebuild. The venv at services/docx-redliner/venv lives
+#     inside the image and is preserved by an anonymous volume.
+
+x-dev-service: &dev-service
+  build:
+    context: .
+    dockerfile: docker/Dockerfile.dev
+  image: menumanager/dev:latest
+  pull_policy: never
+  init: true
+  env_file:
+    - .env
+  restart: unless-stopped
+
+x-base-env: &base-env
+  NODE_ENV: development
+  DB_SERVICE_URL: http://db:3004
+  AI_REVIEW_URL: http://ai-review:3002
+  DIFFER_SERVICE_URL: http://differ:3006
+  CLICKUP_SERVICE_URL: http://clickup-integration:3007
+  DASHBOARD_URL: http://localhost:3005
+  DOCUMENT_STORAGE_ROOT: /app/tmp/documents
+
+services:
+  db:
+    <<: *dev-service
+    container_name: mm-db
+    working_dir: /app/services/db
+    command: npx ts-node-dev --respawn --transpile-only --clear index.ts
+    ports:
+      - "3004:3004"
+    environment: *base-env
+    volumes:
+      - ./services/db:/app/services/db
+      - /app/services/db/node_modules
+      - ./tmp:/app/tmp
+      - ./.env:/app/.env:ro
+
+  parser:
+    <<: *dev-service
+    container_name: mm-parser
+    working_dir: /app/services/parser
+    command: npx ts-node-dev --respawn --transpile-only --clear index.ts
+    ports:
+      - "3001:3001"
+    environment: *base-env
+    volumes:
+      - ./services/parser:/app/services/parser
+      - /app/services/parser/node_modules
+      - ./services/docx-redliner:/app/services/docx-redliner
+      - /app/services/docx-redliner/venv
+      - ./tmp:/app/tmp
+      - ./samples:/app/samples:ro
+      - ./.env:/app/.env:ro
+    depends_on:
+      - db
+
+  ai-review:
+    <<: *dev-service
+    container_name: mm-ai-review
+    working_dir: /app/services/ai-review
+    command: npx ts-node-dev --respawn --transpile-only --clear index.ts
+    ports:
+      - "3002:3002"
+    environment: *base-env
+    volumes:
+      - ./services/ai-review:/app/services/ai-review
+      - /app/services/ai-review/node_modules
+      - ./tmp:/app/tmp
+      - ./.env:/app/.env:ro
+    depends_on:
+      - db
+
+  notifier:
+    <<: *dev-service
+    container_name: mm-notifier
+    working_dir: /app/services/notifier
+    command: npx ts-node-dev --respawn --transpile-only --clear index.ts
+    ports:
+      - "3003:3003"
+    environment: *base-env
+    volumes:
+      - ./services/notifier:/app/services/notifier
+      - /app/services/notifier/node_modules
+      - ./tmp:/app/tmp
+      - ./.env:/app/.env:ro
+
+  differ:
+    <<: *dev-service
+    container_name: mm-differ
+    working_dir: /app/services/differ
+    command: npx ts-node-dev --respawn --transpile-only --clear index.ts
+    ports:
+      - "3006:3006"
+    environment: *base-env
+    volumes:
+      - ./services/differ:/app/services/differ
+      - /app/services/differ/node_modules
+      - ./services/docx-redliner:/app/services/docx-redliner
+      - /app/services/docx-redliner/venv
+      - ./tmp:/app/tmp
+      - ./samples:/app/samples:ro
+      - ./.env:/app/.env:ro
+    depends_on:
+      - db
+
+  clickup-integration:
+    <<: *dev-service
+    container_name: mm-clickup
+    working_dir: /app/services/clickup-integration
+    command: npx ts-node-dev --respawn --transpile-only --clear index.ts
+    ports:
+      - "3007:3007"
+    environment: *base-env
+    volumes:
+      - ./services/clickup-integration:/app/services/clickup-integration
+      - /app/services/clickup-integration/node_modules
+      - ./services/docx-redliner:/app/services/docx-redliner
+      - /app/services/docx-redliner/venv
+      - ./tmp:/app/tmp
+      - ./samples:/app/samples:ro
+      - ./.env:/app/.env:ro
+    depends_on:
+      - db
+      - differ
+
+  dashboard:
+    <<: *dev-service
+    container_name: mm-dashboard
+    working_dir: /app/services/dashboard
+    command: npx ts-node-dev --respawn --transpile-only --clear index.ts
+    ports:
+      - "3005:3005"
+    environment: *base-env
+    volumes:
+      - ./services/dashboard:/app/services/dashboard
+      - /app/services/dashboard/node_modules
+      - ./services/docx-redliner:/app/services/docx-redliner
+      - /app/services/docx-redliner/venv
+      - ./tmp:/app/tmp
+      - ./samples:/app/samples:ro
+      - ./.env:/app/.env:ro
+    depends_on:
+      - db
+      - ai-review
+      - differ
+      - clickup-integration

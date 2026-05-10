@@ -28,6 +28,7 @@ Menu Manager is an AI-powered service designed to automate the review process fo
 ### Current (Phase 1)
 - Web form for chef submissions
 - Canonical property selection (type-to-search, value must match configured list)
+- DOCX template uploads can prefill project details and resolve split outlet/hotel/city hints to a canonical property when the match is unique
 - Required service-period classification on submission (`breakfast`, `brunch`, `lunch`, `dinner`, `happy_hour`, `holiday`, `other`)
 - AI-powered two-tier review (general QA + detailed corrections)
 - Learning/training dashboards are now hidden from the public landing page and protected by a 4-digit PIN gate
@@ -141,32 +142,30 @@ Notes:
 
 - Node.js v18+
 - npm v7+ (for workspace support)
+- Docker Desktop
 - SMTP server credentials
 - OpenAI API key
 - Supabase project (free tier)
 
 ### Quick Start
 
-1. **Install dependencies:**
-   ```bash
-   npm install
-   ```
-
-2. **Set up environment variables:**
+1. **Set up environment variables:**
    ```bash
    cp .env.example .env
    # Edit .env with your credentials
    ```
 
-3. **Build all services:**
+2. **Start the Docker dev stack:**
    ```bash
-   npm run build --workspaces
+   ./dev-up.sh -d
    ```
 
-4. **Start services:**
+3. **Open the dashboard:**
    ```bash
-   ./start-services.sh
+   open http://localhost:3005
    ```
+
+Docker dev mode is the default local workflow. It runs the TypeScript services with `ts-node-dev`, keeps `node_modules` and the DOCX redliner Python venv inside the image, and bind-mounts source files for hot reload.
 
 ### Environment Variables
 
@@ -205,9 +204,37 @@ SUPABASE_SERVICE_KEY=your-service-role-key
 
 ## Running Services
 
-Start individual services:
+Use Docker for day-to-day local development:
 
 ```bash
+./dev-up.sh                # Build if needed, start all services, follow logs
+./dev-up.sh -d             # Start all services detached
+./dev-up.sh dashboard      # Start dashboard and its compose dependencies
+./dev-up.sh --down         # Stop containers
+./dev-up.sh --rebuild      # Rebuild image after dependency/shared-lib changes
+./dev-up.sh --reset-venv   # Rebuild the image to refresh docx-redliner's Python venv
+./dev-up.sh --nuke         # Stop and remove containers plus anonymous volumes
+```
+
+Basic smoke checks:
+
+```bash
+curl -i http://localhost:3005/
+curl -i http://localhost:3005/form
+curl -i http://localhost:3007/health
+
+TOKEN=$(grep ^INTERNAL_API_TOKEN .env | cut -d= -f2)
+curl -i -H "x-menumanager-internal-token: $TOKEN" http://localhost:3004/properties
+curl -i -H "x-menumanager-internal-token: $TOKEN" http://localhost:3006/stats
+```
+
+Internal service routes intentionally return `401` when called directly without `x-menumanager-internal-token`. That does not block normal dashboard testing; browser requests go to the dashboard, and service-to-service calls attach the shared token from `.env`.
+
+Native mode is available when you specifically do not want Docker, but it is no longer the preferred default:
+
+```bash
+npm install
+npm run build --workspaces
 npm start --workspace=@menumanager/dashboard   # Dashboard + Form at http://localhost:3005
 npm start --workspace=@menumanager/parser      # Template validation
 npm start --workspace=@menumanager/ai-review   # AI review
@@ -217,7 +244,7 @@ npm start --workspace=@menumanager/db          # Database
 
 Or use the helper scripts:
 ```bash
-./start-services.sh   # Start all services
+./start-services.sh   # Native-mode start for all services
 ./stop-services.sh    # Stop all services
 ./verify-setup.sh     # Verify configuration
 ```
@@ -227,9 +254,11 @@ Developer workflow notes:
 - [docs/feature-delivery-workflow.md](docs/feature-delivery-workflow.md) explains the required build, test, live-verification, `dist/`, and restart process for feature work.
 - [docs/local-dev-troubleshooting.md](docs/local-dev-troubleshooting.md) covers common startup failures, bad local state, and reset steps.
 
-Notes:
-- `start-services.sh` now runs a full workspace build by default before starting services so latest TypeScript/EJS changes are always reflected.
-- To skip the build step (faster restart when nothing changed), run: `SKIP_BUILD=1 ./start-services.sh`
+Additional notes:
+
+- Docker Desktop on macOS can be unreliable when bind-mounting repos from TCC-protected folders such as `~/Documents`, `~/Desktop`, or `~/Downloads`. If services fail with `Resource deadlock avoided`, grant Docker access to the folder, switch Docker Desktop's file-sharing implementation, or move the repo to a non-protected path such as `~/code/MenuManager`.
+- In native mode, `start-services.sh` runs a full workspace build by default before starting services so latest TypeScript/EJS changes are always reflected.
+- To skip the native build step (faster restart when nothing changed), run: `SKIP_BUILD=1 ./start-services.sh`
 - Keep `LEARNING_DASHBOARD_PIN` set in every environment so `/learning` and `/training` stay behind the temporary PIN gate.
 - Set the same `INTERNAL_API_TOKEN` for every service process. Internal API calls now fail closed if this token is missing or mismatched.
 

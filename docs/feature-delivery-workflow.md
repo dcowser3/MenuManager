@@ -6,17 +6,19 @@ Read this together with [Local Dev Troubleshooting](./local-dev-troubleshooting.
 
 ## Why `dist/` Exists
 
-Most services in this repo are written in TypeScript, but local runtime uses built JavaScript:
+Most services in this repo are written in TypeScript. Native local runtime uses built JavaScript, while the default Docker dev runtime uses `ts-node-dev` against mounted source files:
 
 - source files live in `services/<service>/index.ts`, `lib/`, `views/`, and `public/`
 - `npm run build --workspace=@menumanager/<service>` compiles `.ts` into `services/<service>/dist/`
 - `npm start --workspace=@menumanager/<service>` runs the built output, not the `.ts` files
+- `./dev-up.sh` runs services in Docker with `ts-node-dev`, so service source and dashboard views hot-reload from the bind mount
 
 Important implications:
 
 - if source changes are not rebuilt, the running service will still serve old code from `dist/`
 - dashboard builds also copy `views/` and `public/` into `services/dashboard/dist/`, so template or frontend changes can look “ignored” if the workspace was not rebuilt
 - `dist/` is an artifact, not the source of truth; fix source first, then rebuild
+- for Docker dev, rebuild the image after dependency changes or shared-library changes that are not bind-mounted
 
 ## Required Feature Flow
 
@@ -44,33 +46,37 @@ Good rule of thumb:
 - changed shared library: rebuild the library and every service that consumes it
 - changed dashboard EJS or public assets: rebuild `@menumanager/dashboard`
 - changed DB route or persistence behavior: rebuild `@menumanager/db`
+- Docker dev hot-reloads bind-mounted service source, but changes to dependencies, `services/internal-auth`, `services/supabase-client`, or the Python venv require `./dev-up.sh --rebuild` or `./dev-up.sh --reset-venv`
 
 ## Restart Rules
 
 Start services from the repo root, not from inside `services/<service>/`, unless you are intentionally testing that exact cwd behavior.
 
-Preferred commands:
+Preferred Docker commands:
 
 ```bash
-npm start --workspace=@menumanager/dashboard
-npm start --workspace=@menumanager/db
+./dev-up.sh -d
+./dev-up.sh dashboard
+./dev-up.sh --down
 ```
 
-For a clean dashboard restart on port `3005`:
+For a broader Docker reset:
+
+```bash
+./dev-up.sh --down
+./dev-up.sh -d
+```
+
+Use native commands only when intentionally running outside Docker:
 
 ```bash
 kill $(lsof -tiTCP:3005 -sTCP:LISTEN)
 npm start --workspace=@menumanager/dashboard
-```
-
-For a broader stack restart:
-
-```bash
 ./stop-services.sh
 ./start-services.sh
 ```
 
-Use this only when you already know `dist/` is current:
+Native-only optimization: use this only when you already know `dist/` is current:
 
 ```bash
 SKIP_BUILD=1 ./start-services.sh
@@ -112,6 +118,7 @@ Manual verification examples:
 - `curl -i http://localhost:3005/approved-menus`
 - open the page in the browser and confirm the changed UI
 - test the actual download route for a real submission id
+- for direct internal service checks, include `x-menumanager-internal-token`; unauthenticated `401` responses are expected on protected internal routes
 
 For route and page work, the minimum bar is:
 

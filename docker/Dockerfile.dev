@@ -1,0 +1,55 @@
+# Dev image used by docker-compose. One image, every service.
+#
+# Differences from Dockerfile.service:
+#   - Includes ts-node-dev so services can hot-reload from bind-mounted source.
+#   - Builds shared libs (internal-auth, supabase-client) so their dist/index.js
+#     resolves at runtime even though consuming services run via ts-node-dev.
+#   - Does NOT bake service source into the image — compose bind-mounts it.
+
+FROM node:18-bookworm-slim
+
+WORKDIR /app
+
+# Python + venv tools for the docx-redliner subprocess scripts.
+# Compiling PyMuPDF needs build essentials; keep them in this layer to cache.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        python3 python3-venv python3-pip python3-dev \
+        build-essential \
+        ca-certificates \
+        curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# 1. Install workspace deps.
+# Copy only the package manifests + root tsconfig first so the npm-ci layer
+# caches when only source files change. tsconfig.json is needed because every
+# service's tsconfig extends ../../tsconfig.json.
+COPY package.json package-lock.json tsconfig.json ./
+COPY services/internal-auth/package.json ./services/internal-auth/
+COPY services/supabase-client/package.json ./services/supabase-client/
+COPY services/parser/package.json ./services/parser/
+COPY services/ai-review/package.json ./services/ai-review/
+COPY services/notifier/package.json ./services/notifier/
+COPY services/db/package.json ./services/db/
+COPY services/dashboard/package.json ./services/dashboard/
+COPY services/differ/package.json ./services/differ/
+COPY services/clickup-integration/package.json ./services/clickup-integration/
+
+RUN npm ci --include=dev
+
+# 2. Build the shared TS libraries so consumers can import @menumanager/*.
+COPY services/internal-auth ./services/internal-auth
+COPY services/supabase-client ./services/supabase-client
+RUN cd services/supabase-client && npx tsc \
+    && cd ../internal-auth && npx tsc
+
+# 3. Provision the docx-redliner Python venv. This lives inside the image so
+# corruption can be reset with `docker compose build --no-cache <service>`.
+COPY services/docx-redliner/requirements.txt ./services/docx-redliner/requirements.txt
+RUN python3 -m venv /app/services/docx-redliner/venv \
+    && /app/services/docx-redliner/venv/bin/pip install --no-cache-dir --upgrade pip \
+    && /app/services/docx-redliner/venv/bin/pip install --no-cache-dir \
+        -r /app/services/docx-redliner/requirements.txt
+
+# Service source, tmp/, samples/, and .env are mounted at runtime by compose.
+ENV NODE_ENV=development

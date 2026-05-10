@@ -25,7 +25,53 @@
         };
     }
 
-    const api = { clampExtractedDateNeeded, parseExtractedSize };
+    function tokenizePropertyHint(text) {
+        if (!text) return [];
+        const noise = new Set(['uae', 'usa', 'uk', 'us', 'and', 'the', 'of']);
+        return String(text)
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .toLowerCase()
+            .split(/[^a-z0-9]+/)
+            .filter((token) => token.length >= 2 && !noise.has(token));
+    }
+
+    function findCatalogMatchesFromHints(catalog, hints) {
+        if (!Array.isArray(catalog) || !catalog.length) return [];
+        const outletTokens = tokenizePropertyHint(hints && hints.outlet);
+        const hotelTokens = tokenizePropertyHint(hints && hints.hotel);
+        const cityTokens = tokenizePropertyHint(hints && hints.city);
+        if (!outletTokens.length && !hotelTokens.length && !cityTokens.length) return [];
+
+        return catalog.filter((entry) => {
+            const name = String((entry && entry.name) || '').trim();
+            const outletPart = name.split(' - ')[0] || '';
+            const outletPartTokens = tokenizePropertyHint(outletPart);
+            const nameTokens = tokenizePropertyHint(name);
+            const entryHotelTokens = tokenizePropertyHint((entry && entry.hotel) || '');
+            const entryCityTokens = tokenizePropertyHint((entry && (entry.cityCountry || entry.city_country)) || '');
+
+            if (outletTokens.length) {
+                const outletHint = outletTokens.slice().sort().join(' ');
+                const catalogOutlet = outletPartTokens.slice().sort().join(' ');
+                if (outletHint !== catalogOutlet) return false;
+            }
+            if (hotelTokens.length && !hotelTokens.every((token) => entryHotelTokens.includes(token) || nameTokens.includes(token))) {
+                return false;
+            }
+            if (cityTokens.length && !cityTokens.every((token) => entryCityTokens.includes(token) || nameTokens.includes(token))) {
+                return false;
+            }
+            return true;
+        }).map((entry) => entry.name);
+    }
+
+    const api = {
+        clampExtractedDateNeeded,
+        parseExtractedSize,
+        tokenizePropertyHint,
+        findCatalogMatchesFromHints,
+    };
     if (typeof module !== 'undefined' && module.exports) {
         module.exports = api;
     } else {

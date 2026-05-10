@@ -126,10 +126,20 @@ async function loadApprovalBaselineFromSubmission(submission, options) {
     let visibleText = '';
     let sourceMode = 'saved_submission_data';
     let sourceLabel = getSourceLabel('saved_submission_data');
-    for (const candidate of getApprovalSourceDocCandidates(submission)) {
+    const submissionTag = submission.id || submission.filename || 'unknown';
+    const candidates = getApprovalSourceDocCandidates(submission);
+    const candidateFailures = [];
+    if (!candidates.length) {
+        console.warn(`[approval-baseline] submission=${submissionTag} no DOCX candidates on submission row ` +
+            `(revision_baseline_doc_path / original_path / final_path are all empty)`);
+    }
+    for (const candidate of candidates) {
+        let stage = 'resolve';
         try {
             const absolutePath = options.resolveStoredPath(candidate.filePath);
+            stage = 'access';
             await fs_1.promises.access(absolutePath);
+            stage = 'extract';
             if (candidate.extractionMode === 'approved') {
                 const extracted = await options.extractApprovedFromDocx(absolutePath);
                 editorHtml = `${extracted.approvedMenuContentHtml || ''}`.trim();
@@ -145,14 +155,27 @@ async function loadApprovalBaselineFromSubmission(submission, options) {
             break;
         }
         catch (extractError) {
-            console.warn(`Failed to load approval editor from ${candidate.sourceMode}:`, extractError?.message || extractError);
+            const reason = extractError?.message || `${extractError}`;
+            candidateFailures.push({ sourceMode: candidate.sourceMode, reason, stage });
+            console.warn(`[approval-baseline] submission=${submissionTag} candidate=${candidate.sourceMode} ` +
+                `stage=${stage} path=${candidate.filePath} failed: ${reason}`);
         }
     }
     if (!visibleText) {
         visibleText = normalizeApprovalEditorText(coalesceString(submission.approved_menu_content_raw, submission.approved_menu_content, submission.menu_content, submission.raw_payload?.approved_menu_content_raw, submission.raw_payload?.approved_menu_content, submission.raw_payload?.menuContent));
     }
     if (!editorHtml) {
-        editorHtml = textToParagraphHtml(visibleText);
+        const savedHtml = coalesceString(submission.menu_content_html, submission.raw_payload?.menu_content_html, submission.raw_payload?.menuContentHtml);
+        if (savedHtml) {
+            editorHtml = savedHtml;
+            console.warn(`[approval-baseline] submission=${submissionTag} using saved menu_content_html ` +
+                `fallback (DOCX extraction unavailable). failures=${JSON.stringify(candidateFailures)}`);
+        }
+        else {
+            editorHtml = textToParagraphHtml(visibleText);
+            console.warn(`[approval-baseline] submission=${submissionTag} degraded to plain-text fallback ` +
+                `(no DOCX and no saved menu_content_html). failures=${JSON.stringify(candidateFailures)}`);
+        }
         sourceMode = 'saved_submission_data';
     }
     return {

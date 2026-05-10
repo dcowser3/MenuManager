@@ -1,0 +1,50 @@
+# Keep the build context small. Dockerfile.dev only needs package.json files
+# (for npm ci layer caching), the docx-redliner requirements.txt, and the
+# shared-lib source (for the build step). Service source comes in via
+# bind mounts at runtime — no need to ship it into the image.
+
+**/node_modules
+**/dist
+**/.cache
+**/.parcel-cache
+**/coverage
+**/.next
+
+# Virtualenvs and Python bytecode
+**/venv
+**/__pycache__
+**/*.pyc
+
+# Local state and secrets
+.env
+.env.*
+!.env.example
+tmp
+logs
+*.log
+
+# Editor / OS scratch
+.DS_Store
+.idea
+.vscode
+*.swp
+
+# VCS + CI
+.git
+.gitignore
+.github
+
+# Docker meta
+docker-compose*.yml
+docker/Dockerfile*
+.dockerignore
+
+# Worktrees and backups
+.claude/worktrees
+*.bak
+*.orig
+
+# Big sample / test artifacts that aren't needed at build time
+**/test-files
+sop-processor
+samples

@@ -190,6 +190,9 @@ function resolveDashboardStoredPath(candidatePath: string, label: string, allowe
 type ExtractedProjectDetails = {
     projectName: string;
     property: string;
+    outlet: string;
+    hotel: string;
+    city: string;
     orientation: string;
     dateNeeded: string;
     size: string;
@@ -198,6 +201,9 @@ type ExtractedProjectDetails = {
 const EMPTY_EXTRACTED_PROJECT: ExtractedProjectDetails = {
     projectName: '',
     property: '',
+    outlet: '',
+    hotel: '',
+    city: '',
     orientation: '',
     dateNeeded: '',
     size: '',
@@ -523,6 +529,9 @@ export async function extractBaselineFromDocx(filePath: string): Promise<{
         extractedProject: {
             projectName: projectDetails.project_name || '',
             property: projectDetails.property || '',
+            outlet: projectDetails.outlet || '',
+            hotel: projectDetails.hotel || '',
+            city: projectDetails.city || '',
             orientation: projectDetails.orientation || '',
             dateNeeded: projectDetails.date_needed || '',
             size: projectDetails.size || '',
@@ -580,6 +589,9 @@ export async function extractUnapprovedFromDocx(filePath: string): Promise<{
             ...EMPTY_EXTRACTED_PROJECT,
             projectName: projectDetails.project_name || '',
             property: projectDetails.property || '',
+            outlet: projectDetails.outlet || '',
+            hotel: projectDetails.hotel || '',
+            city: projectDetails.city || '',
             orientation: projectDetails.orientation || '',
             dateNeeded: projectDetails.date_needed || '',
             size: projectDetails.size || '',

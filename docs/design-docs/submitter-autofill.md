@@ -31,6 +31,7 @@ Available on `/form` and learning rule workflows.
 - The property value must match one of the configured properties (validated server-side).
 - The previous free-text location field is removed; location metadata is derived from selected property.
 - The `Hotel Name` input is temporarily removed from the chef form UI.
+- DOCX project-detail extraction supports newer templates that split property identity across `OUTLET NAME`, `HOTEL NAME`, and `CITY / COUNTRY`. The dashboard resolves those hints to a single canonical property when possible, and leaves the field blank with a warning when the hints are ambiguous or missing from the catalog.
 
 ## Architecture
 

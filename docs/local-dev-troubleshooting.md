@@ -2,7 +2,49 @@
 
 Known failure modes when starting services locally and how to diagnose them. Everything here comes from real incidents — read it before spending an hour re-discovering the same problem.
 
-## Quick Reset
+## Two Ways to Run Locally
+
+| Mode | Entry point | When to use |
+|------|-------------|-------------|
+| **Docker (preferred)** | `./dev-up.sh` | Default. Containerized — Python venv and `node_modules` live inside a reproducible image, so the OOM / corrupted-venv / broken-tsc-shim failure modes below don't recur. Reset by rebuilding the image. |
+| **Native** | `./start-services.sh` | Lighter on memory and faster cold-start, but you own the dependency hygiene. Most of the failure modes below only apply here. |
+
+### Docker workflow cheatsheet
+
+```bash
+./dev-up.sh                # build image (first run) + start all services, follow logs
+./dev-up.sh -d             # detached
+./dev-up.sh dashboard      # only dashboard + its deps
+./dev-up.sh --down         # stop containers
+./dev-up.sh --rebuild      # rebuild image, then start (after dep changes)
+./dev-up.sh --reset-venv   # nukes the Python venv inside the image
+./dev-up.sh --nuke         # also drops anonymous volumes (node_modules, venv)
+```
+
+Compose files: `docker-compose.dev.yml` (this dev setup) vs `docker-compose.yml` (prod-style build, untouched). Image: `docker/Dockerfile.dev`. Service source, `tmp/`, `samples/`, and `.env` are bind-mounted, so edits hot-reload via `ts-node-dev` without rebuilding.
+
+### Docker smoke checks
+
+After `./dev-up.sh -d`, confirm the stack is up:
+
+```bash
+docker compose -f docker-compose.dev.yml ps
+curl -i http://localhost:3005/
+curl -i http://localhost:3005/form
+curl -i http://localhost:3007/health
+```
+
+Internal services are protected by `INTERNAL_API_TOKEN`. Direct unauthenticated calls to `db`, `parser`, `ai-review`, and `differ` commonly return `401`; that is expected and does not prevent dashboard testing. Use the shared token for direct internal smoke checks:
+
+```bash
+TOKEN=$(grep ^INTERNAL_API_TOKEN .env | cut -d= -f2)
+curl -i -H "x-menumanager-internal-token: $TOKEN" http://localhost:3004/properties
+curl -i -H "x-menumanager-internal-token: $TOKEN" http://localhost:3006/stats
+```
+
+The dashboard and service clients attach this header automatically for service-to-service requests. If a dashboard page returns `500` while the same internal route works with the header, check the caller's `.env` and restart the caller container.
+
+## Quick Reset (native mode)
 
 If services are in a bad state and you just want to start clean:
 
@@ -23,6 +65,8 @@ cd services/docx-redliner && rm -rf venv && python3 -m venv venv \
 # 4. start
 ./start-services.sh
 ```
+
+In Docker mode, the equivalent is `./dev-up.sh --nuke && ./dev-up.sh --rebuild`.
 
 ## Failure Modes
 
@@ -67,15 +111,36 @@ lsof -ti:NNNN | xargs kill -9
 # generate a random secret and append to .env (any caller and db just need to share it)
 printf '\nINTERNAL_API_TOKEN=%s\n' "$(openssl rand -hex 24)" >> .env
 
-# restart db AND any caller (dashboard, ai-review, clickup-integration, differ, notifier) so they re-read .env
+# Docker default: restart db AND callers so they re-read .env
+./dev-up.sh --down && ./dev-up.sh -d
+
+# Native fallback:
 ./stop-services.sh && ./start-services.sh
 ```
 
 Verify with:
 ```bash
 TOKEN=$(grep ^INTERNAL_API_TOKEN .env | cut -d= -f2)
-curl -s -o /dev/null -w "%{http_code}\n" -H "x-menumanager-internal-token: $TOKEN" http://localhost:3004/submissions
+curl -s -o /dev/null -w "%{http_code}\n" -H "x-menumanager-internal-token: $TOKEN" http://localhost:3004/properties
 # expect 200
+```
+
+### Docker on macOS says `Resource deadlock avoided` or `Cannot read file '/app/services/.../tsconfig.json'`
+
+**Cause:** Docker Desktop's macOS file-sharing layer can race when bind-mounting from TCC-protected folders such as `~/Documents`, `~/Desktop`, and `~/Downloads`. The service process then sees intermittent `UNKNOWN: unknown error, read`, `Unknown system error -35`, or `Resource deadlock avoided` while reading normal source files.
+
+**Fixes, in order:**
+- Grant Docker Desktop access to the folder in System Settings > Privacy & Security > Files and Folders, then quit and relaunch Docker Desktop.
+- Switch Docker Desktop's file-sharing implementation in Settings > General, then restart Docker Desktop.
+- Move the repo out of the protected folder, for example to `~/code/MenuManager`, which avoids this whole class of file-sharing failure.
+
+Quick sanity check:
+
+```bash
+for i in $(seq 1 5); do
+  docker run --rm -v "$PWD/services/db/tsconfig.json:/test.json" alpine:3.20 cat /test.json >/dev/null || exit 1
+done
+echo "bind-mount reads ok"
 ```
 
 ### `FileNotFoundError: ...venv/lib/python3.12/site-packages/<pkg>/__init__.py`
