@@ -58,6 +58,7 @@ const submission_workflow_1 = require("./lib/submission-workflow");
 const approval_workflow_1 = require("./lib/approval-workflow");
 const design_approval_workflow_1 = require("./lib/design-approval-workflow");
 const approved_menus_1 = require("./lib/approved-menus");
+const property_catalog_1 = require("./lib/property-catalog");
 var restricted_access_2 = require("./lib/restricted-access");
 Object.defineProperty(exports, "buildRestrictedDashboardCookieValue", { enumerable: true, get: function () { return restricted_access_2.buildRestrictedDashboardCookieValue; } });
 Object.defineProperty(exports, "parseCookieHeader", { enumerable: true, get: function () { return restricted_access_2.parseCookieHeader; } });
@@ -320,24 +321,20 @@ function escapeHtml(value) {
         .replace(/'/g, '&#39;');
 }
 async function getPropertyCatalogFromDb() {
-    const dbResponse = await internalApi.get(`${DB_SERVICE_URL}/properties`, { timeout: 3000 });
-    const raw = Array.isArray(dbResponse?.data?.catalog) ? dbResponse.data.catalog : [];
-    return raw
-        .map((item) => ({
-        name: `${item?.name || ''}`.trim(),
-        city_country: `${item?.city_country || ''}`.trim(),
-        hotel: `${item?.hotel || ''}`.trim() || undefined,
-        is_active: item?.is_active !== false,
-        sharepoint_site_url: `${item?.sharepoint_site_url || ''}`.trim() || undefined,
-        sharepoint_library_name: `${item?.sharepoint_library_name || ''}`.trim() || undefined,
-        sharepoint_drive_id: `${item?.sharepoint_drive_id || ''}`.trim() || undefined,
-        sharepoint_base_folder_path: `${item?.sharepoint_base_folder_path || ''}`.trim() || undefined,
-        sharepoint_service_folders: Array.isArray(item?.sharepoint_service_folders)
-            ? item.sharepoint_service_folders.map((value) => `${value || ''}`.trim()).filter(Boolean)
-            : [],
-        sharepoint_last_synced_at: `${item?.sharepoint_last_synced_at || ''}`.trim() || undefined,
-    }))
-        .filter((item) => !!item.name);
+    try {
+        const dbResponse = await internalApi.get(`${DB_SERVICE_URL}/properties`, { timeout: 3000 });
+        const raw = Array.isArray(dbResponse?.data?.catalog) ? dbResponse.data.catalog : [];
+        const catalog = raw
+            .map((item) => (0, property_catalog_1.normalizePropertyCatalogRecord)(item))
+            .filter((item) => !!item.name);
+        if (catalog.length)
+            return catalog;
+        console.warn('DB property catalog was empty; using dashboard fallback catalog');
+    }
+    catch (error) {
+        console.warn('Failed to load DB property catalog; using dashboard fallback catalog:', error?.message || error);
+    }
+    return (0, property_catalog_1.buildFallbackPropertyCatalog)();
 }
 function resolveCityCountryFromCatalog(property, catalog) {
     const match = catalog.find((item) => item.name.toLowerCase() === property.toLowerCase());
@@ -518,16 +515,8 @@ app.get('/submit/:token', (req, res) => {
  * Form Submission Page - New menu submission via form
  */
 app.get('/form', async (_req, res) => {
-    let propertyOptions = [];
-    let propertyCatalog = [];
-    try {
-        const catalog = await getPropertyCatalogFromDb();
-        propertyCatalog = catalog;
-        propertyOptions = catalog.map((item) => item.name);
-    }
-    catch (error) {
-        console.warn('Failed to prefetch property catalog for form:', error?.message || error);
-    }
+    const propertyCatalog = await getPropertyCatalogFromDb();
+    const propertyOptions = propertyCatalog.map((item) => item.name);
     res.render('form', {
         title: 'Submit New Menu',
         defaultAllergenKey: DEFAULT_ALLERGEN_KEY,
@@ -1245,13 +1234,11 @@ app.get('/api/recent-projects', async (req, res) => {
  * Proxy: Canonical properties catalog
  */
 app.get('/api/properties', async (_req, res) => {
-    try {
-        const dbResponse = await internalApi.get(`${DB_SERVICE_URL}/properties`, { timeout: 3000 });
-        res.json(dbResponse.data);
-    }
-    catch (error) {
-        res.json({ properties: [], catalog: [] });
-    }
+    const catalog = await getPropertyCatalogFromDb();
+    res.json({
+        properties: catalog.map((item) => item.name),
+        catalog,
+    });
 });
 /**
  * Proxy: Search approved submissions for modification flow

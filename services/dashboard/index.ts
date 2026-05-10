@@ -51,6 +51,11 @@ import { createSubmissionWorkflowHandlers } from './lib/submission-workflow';
 import { createApprovalWorkflowHandlers } from './lib/approval-workflow';
 import { createDesignApprovalWorkflowHandlers } from './lib/design-approval-workflow';
 import { getApprovedMenuDownload, listApprovedMenus } from './lib/approved-menus';
+import {
+    buildFallbackPropertyCatalog,
+    normalizePropertyCatalogRecord,
+    PropertyCatalogRecord,
+} from './lib/property-catalog';
 
 export {
     buildRestrictedDashboardCookieValue,
@@ -370,38 +375,19 @@ function escapeHtml(value: string): string {
         .replace(/'/g, '&#39;');
 }
 
-type PropertyCatalogRecord = {
-    name: string;
-    city_country: string;
-    hotel?: string;
-    is_active?: boolean;
-    sharepoint_site_url?: string;
-    sharepoint_library_name?: string;
-    sharepoint_drive_id?: string;
-    sharepoint_base_folder_path?: string;
-    sharepoint_service_folders?: string[];
-    sharepoint_last_synced_at?: string;
-};
-
 async function getPropertyCatalogFromDb(): Promise<PropertyCatalogRecord[]> {
-    const dbResponse = await internalApi.get(`${DB_SERVICE_URL}/properties`, { timeout: 3000 });
-    const raw = Array.isArray(dbResponse?.data?.catalog) ? dbResponse.data.catalog : [];
-    return raw
-        .map((item: any) => ({
-            name: `${item?.name || ''}`.trim(),
-            city_country: `${item?.city_country || ''}`.trim(),
-            hotel: `${item?.hotel || ''}`.trim() || undefined,
-            is_active: item?.is_active !== false,
-            sharepoint_site_url: `${item?.sharepoint_site_url || ''}`.trim() || undefined,
-            sharepoint_library_name: `${item?.sharepoint_library_name || ''}`.trim() || undefined,
-            sharepoint_drive_id: `${item?.sharepoint_drive_id || ''}`.trim() || undefined,
-            sharepoint_base_folder_path: `${item?.sharepoint_base_folder_path || ''}`.trim() || undefined,
-            sharepoint_service_folders: Array.isArray(item?.sharepoint_service_folders)
-                ? item.sharepoint_service_folders.map((value: any) => `${value || ''}`.trim()).filter(Boolean)
-                : [],
-            sharepoint_last_synced_at: `${item?.sharepoint_last_synced_at || ''}`.trim() || undefined,
-        }))
-        .filter((item: PropertyCatalogRecord) => !!item.name);
+    try {
+        const dbResponse = await internalApi.get(`${DB_SERVICE_URL}/properties`, { timeout: 3000 });
+        const raw = Array.isArray(dbResponse?.data?.catalog) ? dbResponse.data.catalog : [];
+        const catalog = raw
+            .map((item: any) => normalizePropertyCatalogRecord(item))
+            .filter((item: PropertyCatalogRecord) => !!item.name);
+        if (catalog.length) return catalog;
+        console.warn('DB property catalog was empty; using dashboard fallback catalog');
+    } catch (error: any) {
+        console.warn('Failed to load DB property catalog; using dashboard fallback catalog:', error?.message || error);
+    }
+    return buildFallbackPropertyCatalog();
 }
 
 function resolveCityCountryFromCatalog(property: string, catalog: PropertyCatalogRecord[]): string {
@@ -621,15 +607,8 @@ app.get('/submit/:token', (req, res) => {
  * Form Submission Page - New menu submission via form
  */
 app.get('/form', async (_req, res) => {
-    let propertyOptions: string[] = [];
-    let propertyCatalog: PropertyCatalogRecord[] = [];
-    try {
-        const catalog = await getPropertyCatalogFromDb();
-        propertyCatalog = catalog;
-        propertyOptions = catalog.map((item) => item.name);
-    } catch (error: any) {
-        console.warn('Failed to prefetch property catalog for form:', error?.message || error);
-    }
+    const propertyCatalog = await getPropertyCatalogFromDb();
+    const propertyOptions = propertyCatalog.map((item) => item.name);
     res.render('form', {
         title: 'Submit New Menu',
         defaultAllergenKey: DEFAULT_ALLERGEN_KEY,
@@ -1414,12 +1393,11 @@ app.get('/api/recent-projects', async (req, res) => {
  * Proxy: Canonical properties catalog
  */
 app.get('/api/properties', async (_req, res) => {
-    try {
-        const dbResponse = await internalApi.get(`${DB_SERVICE_URL}/properties`, { timeout: 3000 });
-        res.json(dbResponse.data);
-    } catch (error) {
-        res.json({ properties: [], catalog: [] });
-    }
+    const catalog = await getPropertyCatalogFromDb();
+    res.json({
+        properties: catalog.map((item) => item.name),
+        catalog,
+    });
 });
 
 /**

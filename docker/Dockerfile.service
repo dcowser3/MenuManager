@@ -9,7 +9,9 @@ RUN npm ci
 
 COPY . .
 
-RUN npm run build --workspace=@menumanager/supabase-client && npm run build --workspaces
+RUN npm run build --workspace=@menumanager/internal-auth \
+    && npm run build --workspace=@menumanager/supabase-client \
+    && npm run build --workspaces
 
 FROM node:18-slim
 

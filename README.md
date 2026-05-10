@@ -28,6 +28,7 @@ Menu Manager is an AI-powered service designed to automate the review process fo
 ### Current (Phase 1)
 - Web form for chef submissions
 - Canonical property selection (type-to-search, value must match configured list)
+- The dashboard includes a fallback property catalog so deployed forms can still search and validate properties if the DB property endpoint is temporarily unavailable
 - DOCX template uploads can prefill project details and resolve split outlet/hotel/city hints to a canonical property when the match is unique
 - Required service-period classification on submission (`breakfast`, `brunch`, `lunch`, `dinner`, `happy_hour`, `holiday`, `other`)
 - AI-powered two-tier review (general QA + detailed corrections)
