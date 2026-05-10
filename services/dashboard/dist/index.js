@@ -118,8 +118,9 @@ function getRepoRoot() {
         path.resolve(__dirname, '..', '..', '..') // compiled from services/dashboard/dist
     ];
     for (const candidate of candidates) {
-        if (fsSync.existsSync(path.join(candidate, 'services')) &&
-            fsSync.existsSync(path.join(candidate, 'samples'))) {
+        if (fsSync.existsSync(path.join(candidate, 'package.json')) &&
+            fsSync.existsSync(path.join(candidate, 'services', 'dashboard')) &&
+            fsSync.existsSync(path.join(candidate, 'services', 'docx-redliner'))) {
             return candidate;
         }
     }

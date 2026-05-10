@@ -126,8 +126,9 @@ function getRepoRoot(): string {
 
     for (const candidate of candidates) {
         if (
-            fsSync.existsSync(path.join(candidate, 'services')) &&
-            fsSync.existsSync(path.join(candidate, 'samples'))
+            fsSync.existsSync(path.join(candidate, 'package.json')) &&
+            fsSync.existsSync(path.join(candidate, 'services', 'dashboard')) &&
+            fsSync.existsSync(path.join(candidate, 'services', 'docx-redliner'))
         ) {
             return candidate;
         }
