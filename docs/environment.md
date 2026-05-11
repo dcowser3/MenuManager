@@ -117,7 +117,7 @@ When a property has `sharepoint_service_folders`, the form uses those folder nam
 - the newest approved DOCX is chosen from ClickUp attachments when available
 - otherwise the locally stored submitted DOCX is used as the approved source
 - `Other` remains available in the dropdown for every property and is treated as a deliberate base-folder upload choice
-- the SharePoint-uploaded DOCX is renamed to `Property_ServicePeriod_M.D.YY.docx` using `date_needed` when available
+- generated and SharePoint-uploaded DOCX files use `Restaurant_ServicePeriod_M.D.YY.docx`, for example `Aqimero_Breakfast_11.6.23.docx`
 - if the selected service folder matches a stored SharePoint subfolder, the file is uploaded there
 - before uploading into a matched service folder, existing `.docx` files in that folder are moved into `old/`
 - existing `.pdf` and `.ai` files are not moved

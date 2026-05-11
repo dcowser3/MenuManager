@@ -130,7 +130,7 @@ Browser approval editor prototype:
 - When a property has SharePoint folder metadata, the form `Service Period` dropdown is populated from that property’s stored folder names instead of the global default list.
 - `Other` is always included in the `Service Period` dropdown so users can intentionally route the approved file to the property base folder when no subfolder applies.
 - Approved menus can now be pushed to SharePoint after ClickUp approval using the property’s configured base folder and subfolder mapping.
-- SharePoint uploads now standardize approved DOCX names as `Property_ServicePeriod_M.D.YY.docx` using the submission `date_needed` value when available.
+- Generated and SharePoint-uploaded menu DOCX files are named `Restaurant_ServicePeriod_M.D.YY.docx`, for example `Aqimero_Breakfast_11.6.23.docx`, using the restaurant/outlet name from the selected property and the submission `date_needed` value.
 - Before uploading into a matched SharePoint service subfolder, the service archives existing `.docx` files from that subfolder into its `old/` folder. Existing `.pdf` and `.ai` files are left in place.
 - Seeded examples now include `Aqimero - Ritz-Carlton - Philadelphia`, `Maya - New York`, `Tamayo - Denver`, `Toro - Hotel Clio - Denver`, `Toro - Fairmont Millennium Park - Chicago`, `Toro - Dania Beach`, and `Toro - Viceroy - Snowmass`.
 

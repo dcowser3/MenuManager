@@ -89,6 +89,28 @@ function invokeJsonHandler(handler, body, options = {}) {
     });
 }
 
+function postJsonOverHttp(routePath, body) {
+    return new Promise((resolve, reject) => {
+        const server = app.listen(0, async () => {
+            try {
+                const address = server.address();
+                const port = typeof address === 'object' && address ? address.port : 0;
+                const response = await fetch(`http://127.0.0.1:${port}${routePath}`, {
+                    method: 'POST',
+                    headers: { 'content-type': 'application/json' },
+                    body: JSON.stringify(body),
+                });
+                const payload = await response.json();
+                resolve({ status: response.status, body: payload });
+            } catch (error) {
+                reject(error);
+            } finally {
+                server.close();
+            }
+        });
+    });
+}
+
 describe('Dashboard Modification Workflow (local, mocked externals)', () => {
     const submitHandler = getRouteHandler('post', '/api/form/submit');
     const basicCheckHandler = getRouteHandler('post', '/api/form/basic-check');
@@ -149,6 +171,7 @@ describe('Dashboard Modification Workflow (local, mocked externals)', () => {
                         catalog: [
                             { name: 'Test Property', city_country: 'Denver, USA' },
                             { name: 'Legacy Property', city_country: 'Miami, USA' },
+                            { name: 'Aqimero - Ritz-Carlton - Philadelphia', city_country: 'Philadelphia, USA' },
                         ],
                     },
                 };
@@ -207,6 +230,41 @@ describe('Dashboard Modification Workflow (local, mocked externals)', () => {
             ...overrides,
         };
     }
+
+    test('stores generated menu filenames as restaurant, service period, and date', async () => {
+        process.env.NODE_ENV = 'production';
+        const payload = buildNewSubmissionPayload({
+            projectName: 'Seasonal Breakfast Update',
+            property: 'Aqimero - Ritz-Carlton - Philadelphia',
+            servicePeriod: 'breakfast',
+            dateNeeded: '2023-11-06',
+        });
+
+        const response = await postJsonOverHttp('/api/form/submit', payload);
+        expect(response.status).toBe(200);
+        expect(response.body.success).toBe(true);
+
+        const expectedFilename = 'Aqimero_Breakfast_11.6.23.docx';
+        const submissionCall = mockedAxios.post.mock.calls.find((c) =>
+            String(c[0]).includes('/submissions')
+        );
+        expect(submissionCall[1].filename).toBe(expectedFilename);
+
+        const assetCall = mockedAxios.post.mock.calls.find((c) =>
+            String(c[0]).includes('/assets') && c[1].asset_type === 'original_docx'
+        );
+        expect(assetCall[1].file_name).toBe(expectedFilename);
+
+        const aiReviewCall = mockedAxios.post.mock.calls.find((c) =>
+            String(c[0]).includes('/ai-review')
+        );
+        expect(aiReviewCall[1].filename).toBe(expectedFilename);
+
+        const clickupCall = mockedAxios.post.mock.calls.find((c) =>
+            String(c[0]).includes('/create-task')
+        );
+        expect(clickupCall[1].filename).toBe(expectedFilename);
+    });
 
     test('accepts modification submission using DB baseline and persists revision fields', async () => {
         const payload = {

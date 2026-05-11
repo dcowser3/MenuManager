@@ -74,7 +74,7 @@ Routing rules:
 
 - Match `submission.service_period` against the property’s stored `sharepoint_service_folders`
 - Always keep `Other` available in the form so users can choose the property root/base folder explicitly
-- Rename the uploaded DOCX to `Property_ServicePeriod_M.D.YY.docx` using the submission date when available
+- Rename generated and SharePoint-uploaded DOCX files to `Restaurant_ServicePeriod_M.D.YY.docx`, for example `Aqimero_Breakfast_11.6.23.docx`
 - Upload to `{sharepoint_base_folder_path}/{matchedFolder}` when matched
 - Before uploading into a matched subfolder, move existing `.docx` files in that folder into `old/`
 - Leave existing `.pdf` and `.ai` files in place

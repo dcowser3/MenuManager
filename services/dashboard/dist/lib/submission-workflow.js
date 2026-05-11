@@ -218,6 +218,7 @@ function createSubmissionWorkflowHandlers(deps) {
                 }
             }
             const submissionStatus = skipAi ? 'submitted_no_ai_review' : 'pending_human_review';
+            const generatedMenuFilename = (0, upload_security_1.buildMenuFilename)(safeProjectName, normalizedProperty, safeServicePeriod, safeDateNeeded);
             await deps.axios.post(`${deps.DB_SERVICE_URL}/submissions`, {
                 id: submissionId,
                 submitter_email: safeSubmitterEmail,
@@ -226,7 +227,7 @@ function createSubmissionWorkflowHandlers(deps) {
                 project_name: safeProjectName,
                 property: normalizedProperty,
                 date_needed: safeDateNeeded,
-                filename: (0, upload_security_1.buildMenuFilename)(safeProjectName, normalizedProperty),
+                filename: generatedMenuFilename,
                 original_path: docxPath,
                 status: submissionStatus,
                 created_at: new Date().toISOString(),
@@ -273,7 +274,7 @@ function createSubmissionWorkflowHandlers(deps) {
                 source: 'chef_form',
                 storage_provider: 'local',
                 storage_path: docxPath,
-                file_name: (0, upload_security_1.sanitizeStoredFileName)((0, upload_security_1.buildMenuFilename)(safeProjectName, normalizedProperty), 'submission.docx')
+                file_name: (0, upload_security_1.sanitizeStoredFileName)(generatedMenuFilename, 'submission.docx')
             }).catch((err) => console.error('Failed to save original_docx asset metadata:', err.message));
             if (persistedBaselineDocPath) {
                 deps.axios.post(`${deps.DB_SERVICE_URL}/assets`, {
@@ -312,7 +313,7 @@ function createSubmissionWorkflowHandlers(deps) {
                         text: text,
                         submission_id: submissionId,
                         submitter_email: safeSubmitterEmail,
-                        filename: (0, upload_security_1.buildMenuFilename)(safeProjectName, normalizedProperty),
+                        filename: generatedMenuFilename,
                         original_path: docxPath
                     });
                     console.log(`✓ AI review triggered for ${submissionId}`);
@@ -373,7 +374,7 @@ function createSubmissionWorkflowHandlers(deps) {
                         docxPath,
                         menuImagePath: persistedMenuImagePath,
                         menuImageFileName: safeMenuImageFileName,
-                        filename: (0, upload_security_1.buildMenuFilename)(safeProjectName, normalizedProperty),
+                        filename: generatedMenuFilename,
                         submissionMode: safeSubmissionMode,
                         revisionSource: safeRevisionSource,
                         revisionBaseSubmissionId: safeRevisionBaseSubmissionId,

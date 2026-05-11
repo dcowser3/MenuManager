@@ -78,7 +78,49 @@ function sanitizeRichTextHtml(value, maxLength = exports.MAX_HTML_FIELD_LENGTH) 
     html = html.replace(/data:text\/html/gi, '');
     return html.trim();
 }
-function buildMenuFilename(projectName, property) {
+function extractRestaurantName(projectName, property) {
+    const propertyName = `${property || ''}`.trim();
+    const projectLabel = `${projectName || ''}`.trim();
+    const source = propertyName || projectLabel || 'Menu';
+    return source.split(' - ')[0].trim() || source || 'Menu';
+}
+function sanitizeFilenameSegment(value) {
+    return `${value || ''}`
+        .trim()
+        .replace(/[\\/:*?"<>|#%]+/g, ' ')
+        .replace(/[^A-Za-z0-9._ -]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+function toFilenameTitleCase(value) {
+    return value
+        .toLowerCase()
+        .split(/\s+/)
+        .filter(Boolean)
+        .map((token) => token.charAt(0).toUpperCase() + token.slice(1))
+        .join(' ');
+}
+function formatMenuDateSegment(value) {
+    const candidate = `${value || ''}`.trim();
+    const isoDate = candidate.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (isoDate) {
+        const month = Number.parseInt(isoDate[2], 10);
+        const day = Number.parseInt(isoDate[3], 10);
+        const year = isoDate[1].slice(-2);
+        return `${month}.${day}.${year}`;
+    }
+    const parsed = candidate ? new Date(candidate) : new Date();
+    const date = Number.isNaN(parsed.getTime()) ? new Date() : parsed;
+    return `${date.getMonth() + 1}.${date.getDate()}.${String(date.getFullYear()).slice(-2)}`;
+}
+function buildMenuFilename(projectName, property, servicePeriod, dateNeeded, extension = '.docx') {
+    if (servicePeriod || dateNeeded) {
+        const restaurant = sanitizeFilenameSegment(extractRestaurantName(projectName, property)) || 'Menu';
+        const service = sanitizeFilenameSegment(toFilenameTitleCase(`${servicePeriod || 'Other'}`.replace(/_/g, ' '))) || 'Other';
+        const date = formatMenuDateSegment(dateNeeded);
+        const normalizedExtension = extension.startsWith('.') ? extension : `.${extension}`;
+        return `${restaurant}_${service}_${date}${normalizedExtension}`;
+    }
     const name = `${projectName || ''}`.trim() || 'Menu';
     const propertyName = `${property || ''}`.trim();
     if (propertyName) {

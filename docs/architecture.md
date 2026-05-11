@@ -59,6 +59,7 @@ Reviews AI suggestions
 Submits menu
   dashboard → POST /submissions (db service) — stores all form data
   dashboard → POST /assets (db service) — store original_docx metadata
+    generated DOCX names use `Restaurant_ServicePeriod_M.D.YY.docx`
   dashboard → POST /submitter-profiles (db service) — fire-and-forget profile save
   dashboard → POST localhost:3007/create-task (clickup-integration) — fire-and-forget
   Local-only test helper: localhost, non-production submissions skip ClickUp task creation and return

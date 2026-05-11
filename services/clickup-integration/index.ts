@@ -18,6 +18,7 @@ import {
     buildApprovedSubmissionUpdate,
     buildSharePointApprovedDocxAssetRecord,
 } from './lib/approval-finalization';
+import { buildSharePointApprovedFilename } from './lib/sharepoint-filenames';
 import { clickUpDueDateMillis } from './lib/clickup-due-date';
 import { createInternalApiClient, requireInternalServiceAuth } from '@menumanager/internal-auth';
 
@@ -671,34 +672,6 @@ async function graphRequest<T = any>(config: {
 
 function isDocxFileName(name: string | undefined): boolean {
     return String(name || '').trim().toLowerCase().endsWith('.docx');
-}
-
-function formatSharePointDateSegment(value: string | undefined): string {
-    const candidate = `${value || ''}`.trim();
-    const parsed = candidate ? new Date(candidate) : new Date();
-    const date = Number.isNaN(parsed.getTime()) ? new Date() : parsed;
-    const month = date.getMonth() + 1;
-    const day = date.getDate();
-    const year = String(date.getFullYear()).slice(-2);
-    return `${month}.${day}.${year}`;
-}
-
-function sanitizeSharePointFilenameSegment(value: string | undefined): string {
-    return String(value || '')
-        .trim()
-        .replace(/[\\/:*?"<>|#%]+/g, ' ')
-        .replace(/\s+/g, ' ')
-        .trim();
-}
-
-function buildSharePointApprovedFilename(submission: any): string {
-    const propertyLabel = sanitizeSharePointFilenameSegment(
-        String(submission?.property || '').split(' - ')[0] || submission?.property || 'Menu'
-    );
-    const rawService = submission?.service_period || submission?.raw_payload?.servicePeriod || 'Other';
-    const serviceLabel = sanitizeSharePointFilenameSegment(String(rawService).replace(/_/g, ' ')) || 'Other';
-    const dateLabel = formatSharePointDateSegment(submission?.date_needed);
-    return `${propertyLabel}_${serviceLabel}_${dateLabel}.docx`;
 }
 
 async function getPropertySharePointConfig(property: string): Promise<PropertySharePointConfig | null> {

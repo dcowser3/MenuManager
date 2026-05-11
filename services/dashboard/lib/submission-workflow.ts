@@ -280,6 +280,12 @@ export function createSubmissionWorkflowHandlers(deps: SubmissionWorkflowDeps) {
             }
 
             const submissionStatus = skipAi ? 'submitted_no_ai_review' : 'pending_human_review';
+            const generatedMenuFilename = buildMenuFilename(
+                safeProjectName,
+                normalizedProperty,
+                safeServicePeriod,
+                safeDateNeeded
+            );
 
             await deps.axios.post(`${deps.DB_SERVICE_URL}/submissions`, {
                 id: submissionId,
@@ -289,7 +295,7 @@ export function createSubmissionWorkflowHandlers(deps: SubmissionWorkflowDeps) {
                 project_name: safeProjectName,
                 property: normalizedProperty,
                 date_needed: safeDateNeeded,
-                filename: buildMenuFilename(safeProjectName, normalizedProperty),
+                filename: generatedMenuFilename,
                 original_path: docxPath,
                 status: submissionStatus,
                 created_at: new Date().toISOString(),
@@ -338,7 +344,7 @@ export function createSubmissionWorkflowHandlers(deps: SubmissionWorkflowDeps) {
                 source: 'chef_form',
                 storage_provider: 'local',
                 storage_path: docxPath,
-                file_name: sanitizeStoredFileName(buildMenuFilename(safeProjectName, normalizedProperty), 'submission.docx')
+                file_name: sanitizeStoredFileName(generatedMenuFilename, 'submission.docx')
             }).catch((err: any) => console.error('Failed to save original_docx asset metadata:', err.message));
 
             if (persistedBaselineDocPath) {
@@ -381,7 +387,7 @@ export function createSubmissionWorkflowHandlers(deps: SubmissionWorkflowDeps) {
                         text: text,
                         submission_id: submissionId,
                         submitter_email: safeSubmitterEmail,
-                        filename: buildMenuFilename(safeProjectName, normalizedProperty),
+                        filename: generatedMenuFilename,
                         original_path: docxPath
                     });
 
@@ -442,7 +448,7 @@ export function createSubmissionWorkflowHandlers(deps: SubmissionWorkflowDeps) {
                         docxPath,
                         menuImagePath: persistedMenuImagePath,
                         menuImageFileName: safeMenuImageFileName,
-                        filename: buildMenuFilename(safeProjectName, normalizedProperty),
+                        filename: generatedMenuFilename,
                         submissionMode: safeSubmissionMode,
                         revisionSource: safeRevisionSource,
                         revisionBaseSubmissionId: safeRevisionBaseSubmissionId,
