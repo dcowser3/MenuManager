@@ -68,4 +68,59 @@ describe('applyHighConfidenceSuggestionsToMenu', () => {
         expect(menuText).toBe(menu);
         expect(suggestions).toHaveLength(1);
     });
+    it('auto-applies exact spelling replacements even when the model mislabeled severity as critical', () => {
+        const menu = [
+            'COLD STARTERS',
+            'Ceviche de pescado, catch of the day, green aguachile, avocad, wakame 105',
+        ].join('\n');
+        const { menuText, suggestions } = (0, apply_high_confidence_suggestions_1.applyHighConfidenceSuggestionsToMenu)(menu, [
+            {
+                type: 'Spelling',
+                confidence: 'medium',
+                severity: 'critical',
+                menuItem: 'Ceviche de pescado',
+                description: "Correct the spelling of 'avocad' to 'avocado'.",
+                recommendation: "Change 'avocad' to 'avocado'.",
+            },
+        ]);
+        expect(menuText).toContain('green aguachile, avocado, wakame');
+        expect(menuText).not.toContain('avocad, wakame');
+        expect(suggestions).toHaveLength(0);
+    });
+    it('drops stale spelling suggestions when the corrected menu already has the replacement', () => {
+        const menu = [
+            'COLD STARTERS',
+            'Ceviche de pescado, catch of the day, green aguachile, avocado, wakame 105',
+        ].join('\n');
+        const { menuText, suggestions } = (0, apply_high_confidence_suggestions_1.applyHighConfidenceSuggestionsToMenu)(menu, [
+            {
+                type: 'Spelling',
+                confidence: 'medium',
+                severity: 'critical',
+                menuItem: 'Ceviche de pescado',
+                description: "Correct the spelling of 'avocad' to 'avocado'.",
+                recommendation: "Change 'avocad' to 'avocado'.",
+            },
+        ]);
+        expect(menuText).toBe(menu);
+        expect(suggestions).toHaveLength(0);
+    });
+    it('auto-applies high-confidence raw item asterisks before allergens and price', () => {
+        const menu = [
+            'COLD STARTERS',
+            'Ceviche de pescado, catch of the day, green aguachile, avocado, wakame C,D,E,F,G,M,PN,SL,SS,SY,TN 105',
+        ].join('\n');
+        const { menuText, suggestions } = (0, apply_high_confidence_suggestions_1.applyHighConfidenceSuggestionsToMenu)(menu, [
+            {
+                type: 'Raw Item',
+                confidence: 'high',
+                severity: 'normal',
+                menuItem: 'Ceviche de pescado',
+                description: 'Add asterisk to indicate the raw preparation of fish.',
+                recommendation: 'Add asterisk (*) after description.',
+            },
+        ]);
+        expect(menuText).toContain('avocado, wakame * C,D,E,F,G,M,PN,SL,SS,SY,TN 105');
+        expect(suggestions).toHaveLength(0);
+    });
 });

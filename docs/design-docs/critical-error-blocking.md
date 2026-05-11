@@ -41,6 +41,9 @@ Runs only for prix fixe menus. Programmatically scans the menu text (no AI invol
 ### Reconciliation (`reconcileCriticalSuggestionsAgainstCorrectedMenu`)
 Filters out critical suggestions where the AI's corrected menu already resolved the issue (e.g., AI fixed a missing price in the corrected text but also flagged it as critical). Only handles Missing Price and Incomplete Dish Name types.
 
+### Auto-Applied Objective Corrections (`applyHighConfidenceSuggestionsToMenu`)
+Before critical blocking is calculated, the dashboard applies exact objective spelling/grammar recommendations such as `Change 'avocad' to 'avocado'` to the corrected menu text when the target token is still present. If the corrected menu already contains the replacement, the stale suggestion is removed. High-confidence raw-item asterisk suggestions are also applied before allergen/price suffixes. This is intentionally defensive because the model can occasionally put an auto-correctable fix in SUGGESTIONS or mark it as `critical`; these items should appear as applied AI changes, not chef-blocking errors.
+
 ## User Flow
 
 1. Critical errors appear as red cards with a "CRITICAL" badge in the suggestions panel
@@ -55,6 +58,7 @@ Filters out critical suggestions where the AI's corrected menu already resolved 
 |------|-------------|
 | `sop-processor/qa_prompt.txt` | Tells AI which types are critical (lines 70–86) |
 | `services/dashboard/index.ts` → `parseAIResponse` | Severity normalizer — forces critical on known types |
+| `services/dashboard/lib/apply-high-confidence-suggestions.ts` | Applies or recognizes exact objective spelling/grammar corrections before blocking checks |
 | `services/dashboard/index.ts` → `enforcePrixFixeCriticalChecks` | Deterministic prix fixe checks |
 | `services/dashboard/index.ts` → `reconcileCriticalSuggestionsAgainstCorrectedMenu` | Removes false-positive criticals |
 | `services/dashboard/views/form.ejs` | Renders critical cards, manages overrides, gates submit button |

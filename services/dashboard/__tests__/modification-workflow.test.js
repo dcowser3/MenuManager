@@ -488,6 +488,28 @@ describe('Dashboard Modification Workflow (local, mocked externals)', () => {
         expect(qaCall[1].text).toBe('Ceviche - $15');
     });
 
+    test('basic-check full review sends all text even when modification baseline content exists', async () => {
+        const payload = {
+            menuContent: 'Guacamole - $12\nMarket Salad, avocado, halloumi cheee, cucumber V 70',
+            baselineMenuContent: 'Guacamole - $12\nMarket Salad, avocado, halloumi cheee, cucumber V 70',
+            reviewMode: 'full',
+            allergens: '',
+            menuType: 'standard',
+        };
+
+        const response = await invokeJsonHandler(basicCheckHandler, payload);
+        expect(response.status).toBe(200);
+        expect(response.body.success).toBe(true);
+        expect(response.body.reviewMode).toBe('full');
+        expect(response.body.changedLineCount).toBe(0);
+
+        const qaCall = mockedAxios.post.mock.calls.find((c) =>
+            String(c[0]).includes('/run-qa-check')
+        );
+        expect(qaCall).toBeTruthy();
+        expect(qaCall[1].text).toBe(payload.menuContent);
+    });
+
     test('basic-check changed_only merges AI high-confidence corrections back into the full menu', async () => {
         mockedAxios.post = jest.fn(async (url, payload) => {
             const urlStr = String(url);
@@ -681,5 +703,80 @@ describe('Dashboard Modification Workflow (local, mocked externals)', () => {
         expect(generatedFormData.shouldAddRawNotice).toBe(false);
         expect(generatedFormData.menuContentHtml).not.toContain('ALL PRICES ARE IN AED');
         expect(generatedFormData.menuContentHtml).not.toContain('(C) CELERY');
+    });
+
+    test('submit preserves structured footer text even when editor body was stripped for preview', async () => {
+        const payload = {
+            submitterName: 'Chef Test',
+            submitterEmail: 'chef@example.com',
+            submitterJobTitle: 'Executive Chef',
+            projectName: 'Footer Project',
+            property: 'Test Property',
+            width: '8.5',
+            height: '11',
+            printWidth: '8.5',
+            printHeight: '11',
+            printRegion: 'US',
+            printSize: '',
+            folded: 'no',
+            digitalWidth: '',
+            digitalHeight: '',
+            cropMarks: 'no',
+            bleedMarks: 'no',
+            fileSizeLimit: 'no',
+            fileSizeLimitMb: '',
+            fileDeliveryNotes: '',
+            orientation: 'Portrait',
+            menuType: 'standard',
+            servicePeriod: 'dinner',
+            templateType: 'food',
+            turnaroundDays: 2,
+            dateNeeded: '2026-03-03',
+            hotelName: '',
+            cityCountry: 'Denver, USA',
+            assetType: 'PRINT',
+            allergens: 'C celery | D dairy | E eggs | F fish | G gluten | V vegetarian',
+            containsRawUndercooked: false,
+            menuContent: [
+                'DESSERT',
+                'Ice Cream & Sorbets D,E,G,PN,SY,TN 35',
+            ].join('\n'),
+            menuContentHtml: [
+                '<p>DESSERT</p>',
+                '<p>Ice Cream & Sorbets D,E,G,PN,SY,TN 35</p>',
+            ].join(''),
+            persistentDiffHtml: [
+                '<p>DESSERT</p>',
+                '<p>Ice Cream & Sorbets D,E,G,PN,SY,TN 35</p>',
+            ].join(''),
+            preservedFooterText: [
+                'ALL PRICES ARE IN AED, INCLUSIVE OF 7% MUNICIPALITY FEES, 10% SERVICE CHARGE AND 5% VAT.',
+                'We welcome enquiries from diners who wish to know whether any dishes contain particular ingredients. Please inform your order-taker of any allergy or special dietary requirements we should be made aware of when preparing your menu request. Consumption of raw or undercooked meat, seafood or poultry products such as eggs may increase your risk of foodborne illness',
+            ].join('\n'),
+            approvals: [{ approved: true, name: 'GM', position: 'GM' }],
+            criticalOverrides: [],
+            submissionMode: 'modification',
+            revisionSource: 'uploaded_unapproved',
+            revisionBaseSubmissionId: '',
+            revisionBaselineDocPath: baselineUploadPath,
+            revisionBaselineFileName: 'unapproved.docx',
+            baseApprovedMenuContent: 'DESSERT\nIce Cream & Sorbets D,E,G,PN,SY,TN 35',
+            chefPersistentDiff: { insertions: 0, deletions: 0 },
+        };
+
+        const response = await invokeJsonHandler(submitHandler, payload);
+        expect(response.status).toBe(200);
+        expect(response.body.success).toBe(true);
+
+        const formDataWrite = fs.promises.writeFile.mock.calls.find(([filePath]) =>
+            String(filePath).endsWith('_formdata.json')
+        );
+        const generatedFormData = JSON.parse(formDataWrite[1]);
+        expect(generatedFormData.menuContent).toBe('DESSERT\nIce Cream & Sorbets D,E,G,PN,SY,TN 35');
+        expect(generatedFormData.footerText).toContain('ALL PRICES ARE IN AED');
+        expect(generatedFormData.footerText).toContain('We welcome enquiries');
+        expect(generatedFormData.shouldAddRawNotice).toBe(false);
+        expect(generatedFormData.menuContentHtml).not.toContain('ALL PRICES ARE IN AED');
+        expect(generatedFormData.menuContentHtml).not.toContain('We welcome enquiries');
     });
 });

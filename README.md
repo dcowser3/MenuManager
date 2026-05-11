@@ -32,10 +32,11 @@ Menu Manager is an AI-powered service designed to automate the review process fo
 - DOCX template uploads can prefill project details and resolve split outlet/hotel/city hints to a canonical property when the match is unique
 - Required service-period classification on submission (`breakfast`, `brunch`, `lunch`, `dinner`, `happy_hour`, `holiday`, `other`)
 - AI-powered two-tier review (general QA + detailed corrections)
-- Basic AI Check: if the model marks an objective spelling/grammar fix as high confidence but forgets to update the corrected menu text, the dashboard applies the change from the recommendation (e.g. `Change 'x' to 'y'`) so green highlights and the persistent preview stay consistent
+- Basic AI Check: if the model returns an objective spelling/grammar fix as an exact recommendation (e.g. `Change 'x' to 'y'`) but forgets to update the corrected menu text, or mislabels that fix as critical, the dashboard applies or recognizes the correction so green highlights and the persistent preview stay consistent without blocking submission. High-confidence raw-item asterisk suggestions are also applied before the line's allergen/price suffix.
 - Learning/training dashboards stay off the public landing page; they are reachable by direct URL like other reviewer tools (no separate PIN step)
 - Review highlights and persistent redlines surface punctuation/separator edits such as hyphen, comma, slash, and pipe changes
 - Submission normalization keeps exactly one managed allergen legend, while preserving chef-supplied legal/price/footer copy such as AED service-charge text and venue-specific foodborne warnings
+- Modification previews exclude managed footer boilerplate from design-facing redlines while still preserving custom restaurant footer notes/raw warnings for generated DOCX output
 - DOCX baseline uploads now prefill the allergen key field from either pipe-delimited legends or parenthesized legends such as `(C) CELERY (D) DAIRY`
 - DOCX-extracted Date Needed values only override the turnaround-derived date when the extracted value is a valid `YYYY-MM-DD` date; invalid date text is ignored so the read-only field stays usable
 - The default allergen legend is now `G contains gluten | V vegetarian | D contains dairy | S contain shellfish | N contain nuts | VG vegan`
@@ -104,6 +105,10 @@ Browser approval editor prototype:
 - When the dashboard form is submitted from `localhost` outside production, ClickUp task creation is skipped, the browser automatically downloads the generated original DOCX, and the success alert shows an `Open approval editor` link for that same submission
 - Isabella can edit approved text in a left-side browser editor while a right-side panel shows the live tracked-change preview with preserved imported redlines/highlights
 - For submitted DOCX files that already contain redlines, the left editor uses the clean accepted text with deleted runs removed, while the preview keeps the imported deletion/insertion markup visible.
+- The live approval preview keeps adjacent imported deletion/insertion pairs separated after new edits, so corrections like `jalapeno` → `jalapeño` or `neapolitan` → `Neapolitan` do not get re-styled as one combined deleted token when another word is removed.
+- Uploaded unapproved/redlined DOCX modifications now receive a full AI check on the accepted visible menu text, so pre-existing tracked edits such as misspelled inserted words are reviewed even if the chef makes no additional browser edits.
+- Re-running AI Check reuses the normalized editor text extractor so repeated checks do not add browser-generated blank lines between menu rows.
+- Modification flows keep footer/legal copy out of the persistent redline preview, but submit it as structured preserved footer text so restaurant-specific notes and raw-food warnings are retained instead of replaced by the default notice.
 - The approval editor and `Download Original DOCX` resolve the **submitted** generated DOCX (`original_path`) first so on-screen text matches the file from the form; the modification baseline DOCX is used only when that path is missing, then `final_path`, then saved text/HTML fallback
 - On modification flows, baseline extraction mode (`uploaded_baseline` vs `uploaded_unapproved`) still applies when the baseline path is the one that loads
 - The approval editor preserves leading indentation from extracted DOCX text so alignment-sensitive sections such as allergen keys do not get flattened before review, trims leading empty HTML paragraphs in the preview so it lines up with the textarea before the first edit, and keeps bold/italic (and other inline markup from the DOCX) in the live redline preview after you type by cloning ranges from the baseline HTML

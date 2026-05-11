@@ -46,7 +46,9 @@ Fills form (submitter info, project details, menu type, service period, approval
 Runs AI Check
   dashboard → POST parser (validate DOCX structure)
   dashboard → POST ai-review (two-tier: QA prompt → corrections prompt)
-  Note: in modification mode, dashboard scopes QA payload to changed lines only versus approved baseline.
+  Note: normal modification mode scopes QA payload to changed lines only versus an approved baseline.
+        Uploaded unapproved/redlined DOCX mode runs full QA on the accepted visible menu text,
+        because that uploaded document is the submission candidate and may already contain typos.
   │
   ▼
 Reviews AI suggestions

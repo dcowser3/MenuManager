@@ -51,7 +51,13 @@ For modification flows, the baseline text must come from one of:
   - Deletions: red strike-through
   - Insertions: yellow highlight
 - Separator and punctuation edits are diffed as first-class changes, so hyphen/comma/slash rewrites render as explicit insertions/deletions instead of being treated as unchanged text.
-- In modification mode, AI review is scoped to changed lines only (computed against approved baseline).
+- In normal modification mode, AI review is scoped to changed lines only (computed against approved baseline).
+- In uploaded unapproved/redlined DOCX mode, AI review runs against the full accepted visible menu text. Existing redline edits can already contain typos, so the full candidate text must be reviewed even when the chef makes no additional browser edits after upload.
+- Re-run AI Check uses the same normalized editor text extraction as the initial check; it does not read raw browser `innerText`, which can introduce extra blank lines around rendered block elements on each pass.
+- Managed footer handling is split into structured fields:
+  - Menu body is used for AI review and persistent design redlines.
+  - Allergen legends are normalized into the Allergen Key field and appended once during DOCX generation.
+  - Property-specific legal/footer notes and custom raw-food warnings are preserved as footer text and appended during generation, but excluded from the editor diff so design does not see them as deleted menu changes.
 - AI suggestion highlights remain temporary and separate from persistent chef revision markup, but they now preserve punctuation/separator mutations in the highlighted ranges instead of normalizing them away.
 
 ## Data Model Additions (JSON DB)
@@ -144,7 +150,10 @@ When a chef uploads an unapproved DOCX:
    - Allergen-key extraction supports pipe-delimited keys and parenthesized keys such as `(C) CELERY (D) DAIRY`, normalizing detected keys into the pipe-delimited form used by the dashboard field and AI review prompt.
 3. **Frontend** (`form.ejs`):
    - Loads `unapprovedBaseHtml` into the editable review area so existing redlines are visible during editing.
+   - Strips managed footer paragraphs from uploaded baseline/unapproved HTML before building the editable/diff baseline, while retaining preserved footer text separately for submission.
    - `renderPersistentPreview()` uses annotation ranges to wrap unchanged tokens in `existing-del`/`existing-ins` spans; new changes get `persistent-del`/`persistent-ins` as usual.
+   - Annotation wrapping splits tokens at imported redline boundaries, so adjacent DOCX deletion/insertion runs such as `neapolitan` + `Neapolitan` remain separately styled after a later live edit.
+   - Runs the AI check in full-review mode for uploaded unapproved DOCX content, while approved-baseline modification flows keep changed-only review.
    - The preview diff tokenizes punctuation and separators separately so ingredient-separator edits are visible in the persistent redline.
    - Extracted Date Needed values only apply when they are valid `YYYY-MM-DD` values; otherwise the read-only Date Needed field remains at the turnaround-derived minimum date.
 4. **DOCX generation** (`generate_from_form.py`):

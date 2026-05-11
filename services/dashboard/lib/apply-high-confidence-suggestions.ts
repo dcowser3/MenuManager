@@ -19,13 +19,13 @@ const AUTO_APPLY_TYPES = new Set([
     'diacritics',
     'redundant word',
     'singular/plural',
+    'raw item',
 ]);
 
 const SKIP_TYPES = new Set([
     'missing price',
     'incomplete dish name',
     'general',
-    'raw item',
     'allergen code',
     'formatting',
 ]);
@@ -40,6 +40,14 @@ function normalizeConfidence(raw: string | undefined): string {
 
 function normalizeType(raw: string | undefined): string {
     return `${raw || ''}`.trim().toLowerCase();
+}
+
+function hasExactTokenOrPhrase(line: string, value: string): boolean {
+    if (!value) return false;
+    if (/^\w+$/.test(value)) {
+        return new RegExp(`\\b${escapeRegExp(value)}\\b`).test(line);
+    }
+    return line.includes(value);
 }
 
 /**
@@ -82,14 +90,11 @@ function normalizeForMatch(input: string): string {
 }
 
 function applyReplacementOnLine(line: string, from: string, to: string): string | null {
-    if (!line.includes(from)) {
+    if (!hasExactTokenOrPhrase(line, from)) {
         return null;
     }
     if (/^\w+$/.test(from)) {
         const re = new RegExp(`\\b${escapeRegExp(from)}\\b`);
-        if (!re.test(line)) {
-            return null;
-        }
         return line.replace(re, to);
     }
     const idx = line.indexOf(from);
@@ -100,7 +105,8 @@ function applyReplacementOnLine(line: string, from: string, to: string): string 
 function pickLineIndexForMenuItem(
     lines: string[],
     menuItem: string,
-    from: string
+    from: string,
+    to: string
 ): number | null {
     const itemNorm = normalizeForMatch(menuItem || '');
     const candidates: number[] = [];
@@ -115,23 +121,52 @@ function pickLineIndexForMenuItem(
     if (candidates.length === 0) {
         return null;
     }
-    const withToken = candidates.filter((i) => lines[i].includes(from));
+    const withToken = candidates.filter((i) => hasExactTokenOrPhrase(lines[i], from));
     if (withToken.length === 1) {
         return withToken[0];
     }
     if (withToken.length > 1) {
         return withToken[0];
     }
+    const withReplacement = candidates.filter((i) => hasExactTokenOrPhrase(lines[i], to));
+    if (withReplacement.length === 1) {
+        return withReplacement[0];
+    }
     if (candidates.length === 1) {
         return candidates[0];
     }
-    return candidates.find((i) => lines[i].includes(from)) ?? null;
+    return candidates.find((i) => hasExactTokenOrPhrase(lines[i], from)) ?? null;
 }
 
-function shouldAutoApply(s: SuggestionForAutoApply): boolean {
-    if (normalizeConfidence(s.confidence) !== 'high') {
+function pickLineIndexForMenuItemOnly(lines: string[], menuItem: string): number | null {
+    const itemNorm = normalizeForMatch(menuItem || '');
+    if (!itemNorm) return null;
+
+    const candidates: number[] = [];
+    for (let i = 0; i < lines.length; i++) {
+        const trimmed = lines[i].trim();
+        if (!trimmed) continue;
+        if (normalizeForMatch(trimmed).includes(itemNorm)) {
+            candidates.push(i);
+        }
+    }
+
+    return candidates[0] ?? null;
+}
+
+function hasLetters(input: string): boolean {
+    return /[A-Za-zÀ-ÖØ-öø-ÿ]/.test(input);
+}
+
+function isObjectiveReplacementSuggestion(s: SuggestionForAutoApply, pair: { from: string; to: string }): boolean {
+    if (!hasLetters(pair.from) && !hasLetters(pair.to)) {
         return false;
     }
+    const combined = `${s.description || ''} ${s.recommendation || ''}`;
+    return /spelling|misspell|typo|incorrect spelling|correct spelling|grammar|diacritic/i.test(combined);
+}
+
+function shouldAutoApply(s: SuggestionForAutoApply, pair: { from: string; to: string } | null): boolean {
     const t = normalizeType(s.type);
     if (SKIP_TYPES.has(t)) {
         return false;
@@ -139,7 +174,50 @@ function shouldAutoApply(s: SuggestionForAutoApply): boolean {
     if (s.severity === 'critical' && (t.includes('missing price') || t.includes('incomplete'))) {
         return false;
     }
-    return AUTO_APPLY_TYPES.has(t);
+    if (!AUTO_APPLY_TYPES.has(t)) {
+        return false;
+    }
+    if (pair && !hasLetters(pair.from) && !hasLetters(pair.to)) {
+        return false;
+    }
+    return normalizeConfidence(s.confidence) === 'high' || (!!pair && isObjectiveReplacementSuggestion(s, pair));
+}
+
+function lineAlreadyHasReplacement(line: string, from: string, to: string): boolean {
+    return !hasExactTokenOrPhrase(line, from) && hasExactTokenOrPhrase(line, to);
+}
+
+function isRawAsteriskSuggestion(s: SuggestionForAutoApply): boolean {
+    if (normalizeType(s.type) !== 'raw item') {
+        return false;
+    }
+    const combined = `${s.description || ''} ${s.recommendation || ''}`.toLowerCase();
+    return normalizeConfidence(s.confidence) === 'high' && /asterisk|\*/.test(combined);
+}
+
+function applyRawAsteriskOnLine(line: string): string | null {
+    const leadingWhitespace = line.match(/^\s*/)?.[0] || '';
+    let working = line.trim();
+    if (!working || working.includes('*')) {
+        return null;
+    }
+
+    let trailingPrice = '';
+    let trailingAllergens = '';
+
+    const priceMatch = working.match(/\s+(\$?\d+(?:[.,]\d+)?(?:\s*\|\s*\$?\d+(?:[.,]\d+)?)?)\s*$/);
+    if (priceMatch) {
+        trailingPrice = priceMatch[1];
+        working = working.slice(0, priceMatch.index).trim();
+    }
+
+    const allergenMatch = working.match(/\s+([A-Z]{1,3}(?:,[A-Z]{1,3})*)\s*$/);
+    if (allergenMatch) {
+        trailingAllergens = allergenMatch[1];
+        working = working.slice(0, allergenMatch.index).trim();
+    }
+
+    return `${leadingWhitespace}${working} *${trailingAllergens ? ` ${trailingAllergens}` : ''}${trailingPrice ? ` ${trailingPrice}` : ''}`.trimEnd();
 }
 
 export function applyHighConfidenceSuggestionsToMenu(
@@ -154,19 +232,35 @@ export function applyHighConfidenceSuggestionsToMenu(
     const remaining: SuggestionForAutoApply[] = [];
 
     for (const s of suggestions) {
-        if (!shouldAutoApply(s)) {
+        if (isRawAsteriskSuggestion(s)) {
+            const lineIdx = pickLineIndexForMenuItemOnly(lines, s.menuItem || '');
+            if (lineIdx !== null) {
+                const updated = applyRawAsteriskOnLine(lines[lineIdx]);
+                if (updated !== null) {
+                    lines = [...lines];
+                    lines[lineIdx] = updated;
+                    continue;
+                }
+            }
+        }
+
+        const pair = extractChangePair(s.recommendation || '');
+        if (!shouldAutoApply(s, pair)) {
             remaining.push(s);
             continue;
         }
-        const pair = extractChangePair(s.recommendation || '');
         if (!pair) {
             remaining.push(s);
             continue;
         }
 
-        const lineIdx = pickLineIndexForMenuItem(lines, s.menuItem || '', pair.from);
+        const lineIdx = pickLineIndexForMenuItem(lines, s.menuItem || '', pair.from, pair.to);
         if (lineIdx === null) {
             remaining.push(s);
+            continue;
+        }
+
+        if (lineAlreadyHasReplacement(lines[lineIdx], pair.from, pair.to)) {
             continue;
         }
 

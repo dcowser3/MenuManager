@@ -50,6 +50,24 @@ function isLocalDashboardRequest(req: any): boolean {
     return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1';
 }
 
+function mergeFooterText(...values: string[]): string {
+    const seen = new Set<string>();
+    const lines: string[] = [];
+
+    for (const value of values) {
+        for (const line of `${value || ''}`.split('\n')) {
+            const trimmed = line.trim();
+            if (!trimmed) continue;
+            const key = trimmed.replace(/\s+/g, ' ').toLowerCase();
+            if (seen.has(key)) continue;
+            seen.add(key);
+            lines.push(trimmed);
+        }
+    }
+
+    return lines.join('\n');
+}
+
 export function createSubmissionWorkflowHandlers(deps: SubmissionWorkflowDeps) {
     const uploadMenuImage = async (req: any, res: any) => {
         try {
@@ -116,6 +134,7 @@ export function createSubmissionWorkflowHandlers(deps: SubmissionWorkflowDeps) {
                 safeMenuContent,
                 safeMenuContentHtml,
                 safePersistentDiffHtml,
+                safePreservedFooterText,
                 safeFileDeliveryNotes,
                 safeSubmissionMode,
                 safeRevisionBaseSubmissionId,
@@ -186,10 +205,15 @@ export function createSubmissionWorkflowHandlers(deps: SubmissionWorkflowDeps) {
                 ? `Digital: ${digitalSizeForDocx} | Print: ${printSizeForDocx}`
                 : (wantsPrint ? printSizeForDocx : digitalSizeForDocx);
             const footerMetadata = deps.normalizeMenuFooter(safeMenuContent, safeAllergens || '');
+            const explicitFooterMetadata = deps.normalizeMenuFooter(safePreservedFooterText || '', '');
             const effectiveAllergens = footerMetadata.normalizedAllergenLine || deps.DEFAULT_ALLERGEN_KEY;
             const normalizedMenuContent = footerMetadata.body;
             const normalizedMenuContentHtml = deps.stripManagedFooterFromHtml(safeMenuContentHtml || '');
             const normalizedPersistentDiffHtml = deps.stripManagedFooterFromHtml(safePersistentDiffHtml || '');
+            const preservedFooterText = mergeFooterText(
+                footerMetadata.preservedFooterText,
+                explicitFooterMetadata.preservedFooterText
+            );
             const docxMenuContentHtml =
                 safeSubmissionMode === 'modification' && normalizedPersistentDiffHtml
                     ? normalizedPersistentDiffHtml
@@ -197,7 +221,8 @@ export function createSubmissionWorkflowHandlers(deps: SubmissionWorkflowDeps) {
             const selectedRawFlag = `${containsRawUndercooked}` === 'true' || containsRawUndercooked === true;
             const suppressedRawFlag = `${suppressRawNotice}` === 'true' || suppressRawNotice === true;
             const detectedRawFlag = deps.detectRawUndercookedContent(normalizedMenuContent);
-            const shouldAddRawNotice = !footerMetadata.hadRawNotice && !suppressedRawFlag && (selectedRawFlag || detectedRawFlag);
+            const hadRawNotice = footerMetadata.hadRawNotice || explicitFooterMetadata.hadRawNotice;
+            const shouldAddRawNotice = !hadRawNotice && !suppressedRawFlag && (selectedRawFlag || detectedRawFlag);
 
             const submissionId = `form-${Date.now()}`;
             const localTestingRequest = isLocalDashboardRequest(req);
@@ -212,7 +237,7 @@ export function createSubmissionWorkflowHandlers(deps: SubmissionWorkflowDeps) {
                 menuContent: normalizedMenuContent,
                 menuContentHtml: docxMenuContentHtml,
                 allergens: effectiveAllergens,
-                footerText: footerMetadata.preservedFooterText,
+                footerText: preservedFooterText,
                 shouldAddRawNotice
             });
 

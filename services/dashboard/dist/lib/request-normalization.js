@@ -28,6 +28,7 @@ function normalizeSubmissionBody(body, tempUploadsDir) {
         safeMenuContent: (0, upload_security_1.sanitizePlainTextInput)(body?.menuContent, { multiline: true, maxLength: upload_security_1.MAX_LONG_TEXT_LENGTH }),
         safeMenuContentHtml: (0, upload_security_1.sanitizeRichTextHtml)(body?.menuContentHtml || ''),
         safePersistentDiffHtml: (0, upload_security_1.sanitizeRichTextHtml)(body?.persistentDiffHtml || ''),
+        safePreservedFooterText: (0, upload_security_1.sanitizePlainTextInput)(body?.preservedFooterText, { multiline: true, maxLength: 4000 }),
         safeFileDeliveryNotes: (0, upload_security_1.sanitizePlainTextInput)(body?.fileDeliveryNotes, { multiline: true, maxLength: 2000 }),
         safeSubmissionMode: (0, upload_security_1.sanitizePlainTextInput)(body?.submissionMode, { maxLength: 32 }) || 'new',
         safeRevisionBaseSubmissionId: (0, upload_security_1.sanitizePlainTextInput)(body?.revisionBaseSubmissionId, { maxLength: 128 }),

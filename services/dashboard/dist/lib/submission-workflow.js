@@ -52,6 +52,23 @@ function isLocalDashboardRequest(req) {
     const hostname = getRequestHostname(req);
     return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1';
 }
+function mergeFooterText(...values) {
+    const seen = new Set();
+    const lines = [];
+    for (const value of values) {
+        for (const line of `${value || ''}`.split('\n')) {
+            const trimmed = line.trim();
+            if (!trimmed)
+                continue;
+            const key = trimmed.replace(/\s+/g, ' ').toLowerCase();
+            if (seen.has(key))
+                continue;
+            seen.add(key);
+            lines.push(trimmed);
+        }
+    }
+    return lines.join('\n');
+}
 function createSubmissionWorkflowHandlers(deps) {
     const uploadMenuImage = async (req, res) => {
         try {
@@ -77,7 +94,7 @@ function createSubmissionWorkflowHandlers(deps) {
     const submitMenu = async (req, res) => {
         try {
             const { width, height, printWidth, printHeight, printRegion, printSize, folded, digitalWidth, digitalHeight, cropMarks, bleedMarks, fileSizeLimit, fileSizeLimitMb, fileDeliveryNotes, turnaroundDays, containsRawUndercooked, suppressRawNotice, chefPersistentDiff, skipAiReview, } = req.body;
-            const { safeSubmitterName, safeSubmitterEmail, safeSubmitterJobTitle, safeProjectName, safeProperty, safeOrientation, safeMenuType, safeServicePeriod, safeTemplateType, safeDateNeeded, safeAssetType, safeHotelName, safeCityCountryInput, safeAllergens, safeMenuContent, safeMenuContentHtml, safePersistentDiffHtml, safeFileDeliveryNotes, safeSubmissionMode, safeRevisionBaseSubmissionId, safeRevisionSource, safeRevisionBaselineFileName, safeBaseApprovedMenuContent, safeMenuImageFileName, normalizedApprovals, normalizedCriticalOverrides, safeRevisionBaselineDocPath, safeMenuImagePath, } = (0, request_normalization_1.normalizeSubmissionBody)(req.body, deps.getTempUploadsDir());
+            const { safeSubmitterName, safeSubmitterEmail, safeSubmitterJobTitle, safeProjectName, safeProperty, safeOrientation, safeMenuType, safeServicePeriod, safeTemplateType, safeDateNeeded, safeAssetType, safeHotelName, safeCityCountryInput, safeAllergens, safeMenuContent, safeMenuContentHtml, safePersistentDiffHtml, safePreservedFooterText, safeFileDeliveryNotes, safeSubmissionMode, safeRevisionBaseSubmissionId, safeRevisionSource, safeRevisionBaselineFileName, safeBaseApprovedMenuContent, safeMenuImageFileName, normalizedApprovals, normalizedCriticalOverrides, safeRevisionBaselineDocPath, safeMenuImagePath, } = (0, request_normalization_1.normalizeSubmissionBody)(req.body, deps.getTempUploadsDir());
             const wantsPrint = safeAssetType === 'PRINT' || safeAssetType === 'BOTH';
             const wantsDigital = safeAssetType === 'DIGITAL' || safeAssetType === 'BOTH';
             const normalizedTemplateType = safeTemplateType || 'food';
@@ -133,17 +150,20 @@ function createSubmissionWorkflowHandlers(deps) {
                 ? `Digital: ${digitalSizeForDocx} | Print: ${printSizeForDocx}`
                 : (wantsPrint ? printSizeForDocx : digitalSizeForDocx);
             const footerMetadata = deps.normalizeMenuFooter(safeMenuContent, safeAllergens || '');
+            const explicitFooterMetadata = deps.normalizeMenuFooter(safePreservedFooterText || '', '');
             const effectiveAllergens = footerMetadata.normalizedAllergenLine || deps.DEFAULT_ALLERGEN_KEY;
             const normalizedMenuContent = footerMetadata.body;
             const normalizedMenuContentHtml = deps.stripManagedFooterFromHtml(safeMenuContentHtml || '');
             const normalizedPersistentDiffHtml = deps.stripManagedFooterFromHtml(safePersistentDiffHtml || '');
+            const preservedFooterText = mergeFooterText(footerMetadata.preservedFooterText, explicitFooterMetadata.preservedFooterText);
             const docxMenuContentHtml = safeSubmissionMode === 'modification' && normalizedPersistentDiffHtml
                 ? normalizedPersistentDiffHtml
                 : normalizedMenuContentHtml;
             const selectedRawFlag = `${containsRawUndercooked}` === 'true' || containsRawUndercooked === true;
             const suppressedRawFlag = `${suppressRawNotice}` === 'true' || suppressRawNotice === true;
             const detectedRawFlag = deps.detectRawUndercookedContent(normalizedMenuContent);
-            const shouldAddRawNotice = !footerMetadata.hadRawNotice && !suppressedRawFlag && (selectedRawFlag || detectedRawFlag);
+            const hadRawNotice = footerMetadata.hadRawNotice || explicitFooterMetadata.hadRawNotice;
+            const shouldAddRawNotice = !hadRawNotice && !suppressedRawFlag && (selectedRawFlag || detectedRawFlag);
             const submissionId = `form-${Date.now()}`;
             const localTestingRequest = isLocalDashboardRequest(req);
             const docxPath = await deps.generateDocxFromForm(submissionId, {
@@ -157,7 +177,7 @@ function createSubmissionWorkflowHandlers(deps) {
                 menuContent: normalizedMenuContent,
                 menuContentHtml: docxMenuContentHtml,
                 allergens: effectiveAllergens,
-                footerText: footerMetadata.preservedFooterText,
+                footerText: preservedFooterText,
                 shouldAddRawNotice
             });
             console.log(`📝 Generated document for submission ${submissionId}: ${docxPath}`);

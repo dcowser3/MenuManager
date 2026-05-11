@@ -185,24 +185,40 @@
         });
     }
 
+    function getExistingAnnotationType(annotationMap, charOffset) {
+        const annotation = annotationMap ? annotationMap[charOffset] : null;
+        return annotation === 'del' || annotation === 'ins' ? annotation : null;
+    }
+
+    function wrapExistingAnnotationHtml(type, htmlChunk) {
+        if (!type || !htmlChunk) return htmlChunk || '';
+        const className = type === 'del' ? 'existing-del' : 'existing-ins';
+        return '<span class="' + className + '">' + htmlChunk + '</span>';
+    }
+
     function wrapWithExistingAnnotation(token, charOffset, annotationMap) {
-        if (!token || !token.trim()) return escapeHtml(token || '');
+        const source = token || '';
+        if (!source || !source.trim()) return escapeHtml(source);
 
-        let delCount = 0;
-        let insCount = 0;
-        for (let c = 0; c < token.length; c++) {
-            const annotation = annotationMap[charOffset + c];
-            if (annotation === 'del') delCount++;
-            else if (annotation === 'ins') insCount++;
+        let html = '';
+        let idx = 0;
+        while (idx < source.length) {
+            const type = getExistingAnnotationType(annotationMap, charOffset + idx);
+            let end = idx + 1;
+            while (
+                end < source.length &&
+                getExistingAnnotationType(annotationMap, charOffset + end) === type
+            ) {
+                end++;
+            }
+
+            const chunk = source.slice(idx, end);
+            const escaped = escapeHtml(chunk);
+            html += chunk.trim() ? wrapExistingAnnotationHtml(type, escaped) : escaped;
+            idx = end;
         }
 
-        if (delCount > 0 && delCount >= insCount) {
-            return '<span class="existing-del">' + escapeHtml(token) + '</span>';
-        }
-        if (insCount > 0) {
-            return '<span class="existing-ins">' + escapeHtml(token) + '</span>';
-        }
-        return escapeHtml(token);
+        return html;
     }
 
     function stripExistingDeletions(baseText, annotationMap) {
@@ -461,6 +477,40 @@
         return htmlChunk;
     }
 
+    function cloneAnnotatedRangeHtml(entries, start, end, annotationMap, fallbackText) {
+        if (!entries || start >= end || start < 0 || end > entries.length) {
+            return wrapWithExistingAnnotation(fallbackText || '', start, annotationMap || {});
+        }
+
+        var html = '';
+        var idx = start;
+        while (idx < end) {
+            if (entries[idx] && entries[idx].newline) {
+                html += '<br>';
+                idx++;
+                continue;
+            }
+
+            var type = getExistingAnnotationType(annotationMap, idx);
+            var segmentEnd = idx + 1;
+            while (
+                segmentEnd < end &&
+                !(entries[segmentEnd] && entries[segmentEnd].newline) &&
+                getExistingAnnotationType(annotationMap, segmentEnd) === type
+            ) {
+                segmentEnd++;
+            }
+
+            var fallbackChunk = (fallbackText || '').slice(idx - start, segmentEnd - start);
+            var chunkHtml = cloneRangeHtml(entries, idx, segmentEnd, fallbackChunk);
+            var plainChunk = (fallbackText || '').slice(idx - start, segmentEnd - start);
+            html += plainChunk.trim() ? wrapExistingAnnotationHtml(type, chunkHtml) : chunkHtml;
+            idx = segmentEnd;
+        }
+
+        return html;
+    }
+
     function renderPersistentPreview(baseText, revisedText, options) {
         const settings = options || {};
         const annotationMap = settings.annotationMap || {};
@@ -494,10 +544,16 @@
 
             if (baseCommon && revCommon && sameToken) {
                 if (styleIndex) {
-                    const inner = cloneRangeHtml(styleIndex.entries, baseTok.start, baseTok.end, revTok.value);
                     if (includeExistingAnnotations && baseTok) {
-                        html += wrapWithExistingAnnotationHtml(inner, baseTok.start, annotationMap, baseTok.value.length);
+                        html += cloneAnnotatedRangeHtml(
+                            styleIndex.entries,
+                            baseTok.start,
+                            baseTok.end,
+                            annotationMap,
+                            revTok.value
+                        );
                     } else {
+                        const inner = cloneRangeHtml(styleIndex.entries, baseTok.start, baseTok.end, revTok.value);
                         html += inner;
                     }
                 } else if (includeExistingAnnotations && baseTok) {

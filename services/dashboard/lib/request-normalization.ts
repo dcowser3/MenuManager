@@ -25,6 +25,7 @@ export type NormalizedSubmissionBody = {
     safeMenuContent: string;
     safeMenuContentHtml: string;
     safePersistentDiffHtml: string;
+    safePreservedFooterText: string;
     safeFileDeliveryNotes: string;
     safeSubmissionMode: string;
     safeRevisionBaseSubmissionId: string;
@@ -64,6 +65,7 @@ export function normalizeSubmissionBody(body: any, tempUploadsDir: string): Norm
         safeMenuContent: sanitizePlainTextInput(body?.menuContent, { multiline: true, maxLength: MAX_LONG_TEXT_LENGTH }),
         safeMenuContentHtml: sanitizeRichTextHtml(body?.menuContentHtml || ''),
         safePersistentDiffHtml: sanitizeRichTextHtml(body?.persistentDiffHtml || ''),
+        safePreservedFooterText: sanitizePlainTextInput(body?.preservedFooterText, { multiline: true, maxLength: 4000 }),
         safeFileDeliveryNotes: sanitizePlainTextInput(body?.fileDeliveryNotes, { multiline: true, maxLength: 2000 }),
         safeSubmissionMode: sanitizePlainTextInput(body?.submissionMode, { maxLength: 32 }) || 'new',
         safeRevisionBaseSubmissionId: sanitizePlainTextInput(body?.revisionBaseSubmissionId, { maxLength: 128 }),
