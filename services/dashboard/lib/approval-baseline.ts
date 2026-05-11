@@ -13,6 +13,7 @@ type ExtractedApprovedDocx = {
 
 type ExtractedUnapprovedDocx = {
     visibleText: string;
+    cleanVisibleText?: string;
     unapprovedHtml: string;
 };
 
@@ -42,6 +43,7 @@ type SubmissionLike = {
 export type ApprovalBaselineResult = {
     editorHtml: string;
     visibleText: string;
+    previewText: string;
     sourceMode: ApprovalBaselineSourceMode;
     sourceLabel: string;
 };
@@ -215,6 +217,7 @@ export async function loadApprovalBaselineFromSubmission(
 ): Promise<ApprovalBaselineResult> {
     let editorHtml = '';
     let visibleText = '';
+    let previewText = '';
     let sourceMode: ApprovalBaselineSourceMode = 'saved_submission_data';
     let sourceLabel = getSourceLabel('saved_submission_data');
     const submissionTag = submission.id || submission.filename || 'unknown';
@@ -243,7 +246,8 @@ export async function loadApprovalBaselineFromSubmission(
             } else {
                 const extracted = await options.extractUnapprovedFromDocx(absolutePath);
                 editorHtml = normalizeApprovalEditorHtml(`${extracted.unapprovedHtml || ''}`.trim());
-                visibleText = normalizeApprovalEditorText(extracted.visibleText || '');
+                previewText = normalizeApprovalEditorText(extracted.visibleText || '');
+                visibleText = normalizeApprovalEditorText(extracted.cleanVisibleText || extracted.visibleText || '');
             }
 
             sourceMode = candidate.sourceMode;
@@ -270,6 +274,9 @@ export async function loadApprovalBaselineFromSubmission(
                 submission.raw_payload?.menuContent
             )
         );
+    }
+    if (!previewText) {
+        previewText = visibleText;
     }
 
     if (!editorHtml) {
@@ -298,6 +305,7 @@ export async function loadApprovalBaselineFromSubmission(
     return {
         editorHtml,
         visibleText,
+        previewText,
         sourceMode,
         sourceLabel,
     };

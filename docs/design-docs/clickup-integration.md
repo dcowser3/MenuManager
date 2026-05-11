@@ -14,6 +14,7 @@ When a chef submits a menu, a ClickUp task is automatically created with the gen
 - Uploads the generated DOCX as an attachment
 - Uploads optional menu image attachment when provided in the form (`menuImageUpload`)
 - Stores `clickup_task_id` on the submission record
+- `due_date` is set from the form’s `YYYY-MM-DD` value using **noon UTC** on that calendar day so the task due date matches the chef’s date in US (and most other) timezones; naive `new Date("YYYY-MM-DD")` uses UTC midnight and showed up one day early in ClickUp for Americas users
 - Gracefully skips if ClickUp env vars are not configured (`{ skipped: true }`)
 
 ### Task metadata additions
@@ -29,13 +30,13 @@ When a chef submits a menu, a ClickUp task is automatically created with the gen
 ## Inbound Flow (ClickUp Webhook → Corrections)
 
 - ClickUp sends `taskStatusUpdated` events to `POST /webhook/clickup`
-- Filters for status matching `CLICKUP_CORRECTIONS_STATUS` env var (default: `"corrections complete"`)
+- Filters for review-complete statuses: `CLICKUP_CORRECTIONS_STATUSES` when set, `CLICKUP_CORRECTIONS_STATUS`, and `CLICKUP_POST_APPROVAL_STATUS` (`To Do` by default)
 - Looks up submission via `GET /submissions/by-clickup-task/:taskId` on the DB service
 - Downloads the latest attachment from the ClickUp task
 - If no usable ClickUp attachment exists at approval time, falls back to the locally stored submitted DOCX so "perfect as submitted" menus can still be finalized
 - Extracts canonical approved menu text from the corrected DOCX
 - Updates submission to `status: 'approved'` with `final_path`, `approved_menu_content_raw`, and `approved_menu_content`
-- After approved DOCX processing completes, moves the ClickUp task to `CLICKUP_POST_APPROVAL_STATUS` (default: `To Do`)
+- After approved DOCX processing completes, moves the ClickUp task to `CLICKUP_POST_APPROVAL_STATUS` (default: `To Do`) only when it is not already there
 - Calls `POST /approved-dishes/extract` on the DB service, waits for the result, and alerts if approved-dish extraction fails
 - Fire-and-forget: clickup-integration sends `corrections_ready` email with the DOCX attached
 - Fire-and-forget: differ compares AI draft vs corrected file for training
@@ -49,10 +50,10 @@ When a chef submits a menu, a ClickUp task is automatically created with the gen
 - Imported `existing-del` and `existing-ins` markup stays visible in the preview wherever that original redline content remains unchanged
 - Reviewer edits are submitted through `POST /api/approval/:submissionId/submit`
 - Dashboard generates an approved DOCX from the edited HTML and calls `POST localhost:3007/approval/finalize`
-- `clickup-integration` uploads the approved DOCX back to the ClickUp task when configured, finalizes the submission, triggers SharePoint upload, notifications, differ, and approved-dish extraction, then moves the task to `CLICKUP_POST_APPROVAL_STATUS`
+- `clickup-integration` uploads the approved DOCX back to the ClickUp task when configured, finalizes the submission, triggers SharePoint upload, notifications, differ, and approved-dish extraction, then leaves/moves the task at `CLICKUP_POST_APPROVAL_STATUS`
 - Browser approval now preserves Isabella's manual sequencing:
   - upload corrected DOCX to ClickUp first
-  - only move the task to `CLICKUP_POST_APPROVAL_STATUS` after that upload succeeds
+  - only leave/move the task at `CLICKUP_POST_APPROVAL_STATUS` after that upload succeeds
   - return a warning to the dashboard if either the attachment upload or the post-approval status transition fails
 
 ## Architecture
@@ -113,12 +114,12 @@ Run this in order before manual demo/testing:
    - webhook endpoint exact match is `/webhook/clickup`
    - webhook health status is `active`
 4. Manual event verification (required):
-   - In ClickUp, toggle one known task status:
-     - `Approved -> To Do -> Approved`
+   - In ClickUp, upload or confirm a corrected DOCX, then toggle one known task status:
+     - away from `To Do`, then back to `To Do`
    - Watch:
      - `tail -f logs/clickup-integration.log logs/differ.log`
    - Confirm:
-     - task moved to approved
+     - task moved to `to do`
      - corrected file downloaded
      - submission updated to approved
      - differ comparison completed
@@ -136,7 +137,7 @@ Why step 5 is still manual:
   - Webhook endpoint was registered without `/webhook/clickup`.
 - Webhook health is `suspended` / high `fail_count`:
   - ClickUp stopped sending events to your endpoint.
-- Local logs show task creation but no `"moved to approved"`:
+- Local logs show task creation but no `"moved to \"to do\""`:
   - Live webhook events are not reaching the integration service.
 
 ### Quick reset steps
@@ -152,10 +153,10 @@ Why step 5 is still manual:
    - `CLICKUP_WEBHOOK_SECRET` (if returned by ClickUp)
 5. Restart services so updated `.env` is loaded.
 5. Restart `clickup-integration` service.
-6. Toggle task status away from Approved and back to Approved.
+6. Toggle task status away from `To Do` and back to `To Do`.
 7. Verify:
    - ngrok: `POST /webhook/clickup` -> `200`
-   - local logs: `"ClickUp task <id> moved to \"approved\""`
+   - local logs: `"ClickUp task <id> moved to \"to do\""`
 
 ### Scripted reset
 
@@ -169,7 +170,7 @@ Examples:
   - `scripts/clickup-webhook-reset.sh`
 - Re-register after deleting old hooks:
   - `scripts/clickup-webhook-reset.sh --delete-existing`
-- Re-register and backfill missed approved tasks:
+- Re-register and backfill missed To Do/approved tasks:
   - `scripts/clickup-webhook-reset.sh --delete-existing --backfill-pending`
 - Pre-demo strict mode (recommended):
   - `scripts/clickup-webhook-reset.sh --demo-ready`
@@ -203,7 +204,7 @@ use this exact sequence:
 2. Run:
    - `scripts/demo-ready.sh`
 3. Re-run one real event:
-   - in ClickUp, toggle test task `Approved -> To Do -> Approved`
+   - in ClickUp, toggle test task away from `To Do`, then back to `To Do`
 4. Verify:
    - ngrok: `POST /webhook/clickup` -> `200`
    - `logs/clickup-integration.log` contains task approved + corrected file download lines.
@@ -219,7 +220,7 @@ Webhook events are not replayed by ClickUp. If the webhook was suspended or misc
 
 `POST /webhook/backfill-pending`
 
-This scans pending submissions with `clickup_task_id`, checks current task status in ClickUp, and processes tasks already in the configured approved status.
+This scans pending submissions with `clickup_task_id`, checks current task status in ClickUp, and processes tasks already in a review-complete status (`To Do` by default, plus configured aliases).
 
 ## Environment Variables
 

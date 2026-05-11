@@ -567,6 +567,7 @@ export async function extractBaselineFromDocx(filePath: string): Promise<{
 
 export async function extractUnapprovedFromDocx(filePath: string): Promise<{
     visibleText: string;
+    cleanVisibleText: string;
     unapprovedHtml: string;
     annotations: Array<Array<{ start: number; end: number; type: string }>>;
     extractedAllergenKey: string;
@@ -608,6 +609,7 @@ export async function extractUnapprovedFromDocx(filePath: string): Promise<{
     const projectDetails = detailsData.project_details || {};
     return {
         visibleText: unapprovedData.visible_text || '',
+        cleanVisibleText: unapprovedData.clean_visible_text || unapprovedData.visible_text || '',
         unapprovedHtml: unapprovedData.unapproved_html || '',
         annotations: unapprovedData.annotations || [],
         extractedAllergenKey: detailsData.allergen_key || '',
@@ -742,6 +744,7 @@ app.get('/approval/:submissionId', async (req, res) => {
             submission,
             editorHtml: baseline.editorHtml,
             visibleText: baseline.visibleText,
+            previewText: baseline.previewText,
             sourceMode: baseline.sourceMode,
             sourceLabel: baseline.sourceLabel,
             approvalUrl,
@@ -1495,6 +1498,7 @@ app.post('/api/modification/unapproved-upload', upload.single('baselineDoc') as 
             baselineDocPath: req.file.path,
             baselineFileName: sanitizeStoredFileName(req.file.originalname, 'baseline.docx'),
             visibleText: extracted.visibleText,
+            cleanVisibleText: extracted.cleanVisibleText,
             unapprovedHtml: extracted.unapprovedHtml,
             annotations: extracted.annotations,
             extractedAllergenKey: extracted.extractedAllergenKey,

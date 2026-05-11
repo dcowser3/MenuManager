@@ -515,6 +515,7 @@ async function extractUnapprovedFromDocx(filePath) {
     const projectDetails = detailsData.project_details || {};
     return {
         visibleText: unapprovedData.visible_text || '',
+        cleanVisibleText: unapprovedData.clean_visible_text || unapprovedData.visible_text || '',
         unapprovedHtml: unapprovedData.unapproved_html || '',
         annotations: unapprovedData.annotations || [],
         extractedAllergenKey: detailsData.allergen_key || '',
@@ -637,6 +638,7 @@ app.get('/approval/:submissionId', async (req, res) => {
             submission,
             editorHtml: baseline.editorHtml,
             visibleText: baseline.visibleText,
+            previewText: baseline.previewText,
             sourceMode: baseline.sourceMode,
             sourceLabel: baseline.sourceLabel,
             approvalUrl,
@@ -1331,6 +1333,7 @@ app.post('/api/modification/unapproved-upload', upload.single('baselineDoc'), as
             baselineDocPath: req.file.path,
             baselineFileName: (0, upload_security_1.sanitizeStoredFileName)(req.file.originalname, 'baseline.docx'),
             visibleText: extracted.visibleText,
+            cleanVisibleText: extracted.cleanVisibleText,
             unapprovedHtml: extracted.unapprovedHtml,
             annotations: extracted.annotations,
             extractedAllergenKey: extracted.extractedAllergenKey,

@@ -95,16 +95,19 @@ services/
 
 Current ClickUp BAU status handoff:
 - New tasks start in `Pending Initial ISA Review`
-- When the approved DOCX is processed, the task is moved to `To Do`
+- Isabella uploads the corrected DOCX in ClickUp and moves the task to `To Do`; that status change downloads the latest DOCX and feeds the learning dashboard
+- When the approved DOCX is processed from any other configured review-complete status, the task is moved to `To Do`; if it is already in `To Do`, the status update is skipped
+- Task due date is taken from the form "Date needed" using noon UTC on that calendar day so ClickUp does not display it one day early in US timezones (plain `YYYY-MM-DD` parsing used to mean UTC midnight)
 
 Browser approval editor prototype:
 - ClickUp tasks now include an approval link to `/approval/:submissionId`
 - When the dashboard form is submitted from `localhost` outside production, ClickUp task creation is skipped, the browser automatically downloads the generated original DOCX, and the success alert shows an `Open approval editor` link for that same submission
 - Isabella can edit approved text in a left-side browser editor while a right-side panel shows the live tracked-change preview with preserved imported redlines/highlights
+- For submitted DOCX files that already contain redlines, the left editor uses the clean accepted text with deleted runs removed, while the preview keeps the imported deletion/insertion markup visible.
 - The approval editor and `Download Original DOCX` resolve the **submitted** generated DOCX (`original_path`) first so on-screen text matches the file from the form; the modification baseline DOCX is used only when that path is missing, then `final_path`, then saved text/HTML fallback
 - On modification flows, baseline extraction mode (`uploaded_baseline` vs `uploaded_unapproved`) still applies when the baseline path is the one that loads
 - The approval editor preserves leading indentation from extracted DOCX text so alignment-sensitive sections such as allergen keys do not get flattened before review, trims leading empty HTML paragraphs in the preview so it lines up with the textarea before the first edit, and keeps bold/italic (and other inline markup from the DOCX) in the live redline preview after you type by cloning ranges from the baseline HTML
-- Submitting that page uploads the approved DOCX back to the linked ClickUp task and only then advances the task to `To Do`, matching Isabella's manual handoff flow
+- Submitting that page uploads the approved DOCX back to the linked ClickUp task and only then leaves/advances the task at `To Do`, matching Isabella's manual handoff flow
 - The dashboard now surfaces a warning when the ClickUp attachment upload or post-approval status move fails, instead of silently finalizing only on the local side
 - Once a menu reaches approved state, the final DOCX is downloadable from `/approved-menus` for Carlos or other operations users
 
@@ -195,7 +198,7 @@ INTERNAL_API_TOKEN=replace-with-a-long-random-secret
 
 # ClickUp workflow statuses
 CLICKUP_INITIAL_REVIEW_STATUS=pending initial isa review
-CLICKUP_CORRECTIONS_STATUS=approved
+CLICKUP_CORRECTIONS_STATUS=to do
 CLICKUP_POST_APPROVAL_STATUS=to do
 
 # Supabase

@@ -48,6 +48,7 @@ describe('approval baseline helpers', () => {
         const extractApprovedFromDocx = jest.fn();
         const extractUnapprovedFromDocx = jest.fn().mockResolvedValue({
             visibleText: 'Chef latest from generated docx',
+            cleanVisibleText: 'Chef latest from generated docx',
             unapprovedHtml: '<p>Chef latest from generated docx</p>',
         });
         const baseline = await (0, approval_baseline_1.loadApprovalBaselineFromSubmission)({
@@ -64,6 +65,26 @@ describe('approval baseline helpers', () => {
         expect(extractApprovedFromDocx).not.toHaveBeenCalled();
         expect(baseline.sourceMode).toBe('original_docx');
         expect(baseline.visibleText).toBe('Chef latest from generated docx');
+        expect(baseline.previewText).toBe('Chef latest from generated docx');
+    });
+    test('uses clean unapproved text for editing while preserving full preview text', async () => {
+        mockedFs.access.mockResolvedValue(undefined);
+        const extractApprovedFromDocx = jest.fn();
+        const extractUnapprovedFromDocx = jest.fn().mockResolvedValue({
+            visibleText: 'green aguachile, avocadoavocad, wakame',
+            cleanVisibleText: 'green aguachile, avocad, wakame',
+            unapprovedHtml: '<p>green aguachile, <span class="existing-del">avocado</span>avocad, wakame</p>',
+        });
+        const baseline = await (0, approval_baseline_1.loadApprovalBaselineFromSubmission)({
+            original_path: '/tmp/original.docx',
+        }, {
+            extractApprovedFromDocx,
+            extractUnapprovedFromDocx,
+            resolveStoredPath: (storedPath) => storedPath,
+        });
+        expect(baseline.visibleText).toBe('green aguachile, avocad, wakame');
+        expect(baseline.previewText).toBe('green aguachile, avocadoavocad, wakame');
+        expect(baseline.editorHtml).toContain('existing-del');
     });
     test('uses the approved baseline extractor when only the revision baseline path exists', async () => {
         mockedFs.access.mockResolvedValue(undefined);
@@ -95,6 +116,7 @@ describe('approval baseline helpers', () => {
         const extractApprovedFromDocx = jest.fn();
         const extractUnapprovedFromDocx = jest.fn().mockResolvedValue({
             visibleText: 'Chef text',
+            cleanVisibleText: 'Chef text',
             unapprovedHtml: '<p>Chef text</p>',
         });
         const baseline = await (0, approval_baseline_1.loadApprovalBaselineFromSubmission)({

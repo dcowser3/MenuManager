@@ -205,6 +205,125 @@
         return escapeHtml(token);
     }
 
+    function stripExistingDeletions(baseText, annotationMap) {
+        const source = String(baseText || '');
+        let clean = '';
+        for (let i = 0; i < source.length; i++) {
+            if (annotationMap[i] !== 'del') {
+                clean += source[i];
+            }
+        }
+        return clean;
+    }
+
+    function buildExistingDeletionAnchors(baseText, annotationMap) {
+        const source = String(baseText || '');
+        const anchors = [];
+        let cleanOffset = 0;
+        let i = 0;
+
+        while (i < source.length) {
+            if (annotationMap[i] === 'del') {
+                let text = '';
+                const offset = cleanOffset;
+                while (i < source.length && annotationMap[i] === 'del') {
+                    text += source[i];
+                    i++;
+                }
+                if (text) {
+                    anchors.push({ offset: offset, text: text });
+                }
+                continue;
+            }
+
+            cleanOffset++;
+            i++;
+        }
+
+        return anchors;
+    }
+
+    function mapBaselineOffsetToRevisedOffset(baseText, revisedText, offset) {
+        const base = String(baseText || '');
+        const revised = String(revisedText || '');
+        const target = Math.max(0, Math.min(offset || 0, base.length));
+
+        if (target <= 0) return 0;
+        if (target >= base.length) return revised.length;
+
+        const baseTokens = tokenizeDiffText(base);
+        const revisedTokens = tokenizeDiffText(revised);
+        if (!baseTokens.length || !revisedTokens.length) {
+            return Math.max(0, Math.min(target, revised.length));
+        }
+
+        const lcs = buildTokenLcs(baseTokens, revisedTokens);
+        const commonBase = baseTokens.filter(function (_token, idx) {
+            return lcs.commonBase.has(idx);
+        });
+        const commonRevised = revisedTokens.filter(function (_token, idx) {
+            return lcs.commonRev.has(idx);
+        });
+
+        let prevPair = null;
+        for (let i = 0; i < commonBase.length && i < commonRevised.length; i++) {
+            const baseTok = commonBase[i];
+            const revisedTok = commonRevised[i];
+
+            if (target >= baseTok.start && target <= baseTok.end) {
+                return Math.min(revisedTok.start + (target - baseTok.start), revisedTok.end);
+            }
+
+            if (baseTok.start >= target) {
+                return revisedTok.start;
+            }
+
+            prevPair = { baseTok: baseTok, revisedTok: revisedTok };
+        }
+
+        if (prevPair) {
+            return Math.min(
+                revised.length,
+                prevPair.revisedTok.end + Math.max(0, target - prevPair.baseTok.end)
+            );
+        }
+
+        return Math.max(0, Math.min(target, revised.length));
+    }
+
+    function reinsertExistingDeletions(cleanBaseText, revisedText, basePreviewText, annotationMap) {
+        const cleanBase = String(cleanBaseText || '');
+        const revised = String(revisedText || '');
+        const previewBase = String(basePreviewText || '');
+        const cleanFromPreview = stripExistingDeletions(previewBase, annotationMap || {});
+
+        if (!previewBase || cleanFromPreview !== cleanBase) {
+            return revised;
+        }
+
+        const anchors = buildExistingDeletionAnchors(previewBase, annotationMap || {});
+        if (!anchors.length) {
+            return revised;
+        }
+
+        const inserts = anchors.map(function (anchor, idx) {
+            return {
+                idx: idx,
+                text: anchor.text,
+                offset: mapBaselineOffsetToRevisedOffset(cleanBase, revised, anchor.offset)
+            };
+        }).sort(function (a, b) {
+            if (a.offset !== b.offset) return b.offset - a.offset;
+            return b.idx - a.idx;
+        });
+
+        let output = revised;
+        inserts.forEach(function (insert) {
+            output = output.slice(0, insert.offset) + insert.text + output.slice(insert.offset);
+        });
+        return output;
+    }
+
     /**
      * Map each character of extractCleanTextFromElement(container) to a DOM text boundary
      * so Range#cloneContents can recover inline markup (<strong>, <em>, …).
@@ -439,6 +558,9 @@
         buildAnnotationMapFromDOM,
         buildAnnotationMapFromHtml,
         wrapWithExistingAnnotation,
+        stripExistingDeletions,
+        buildExistingDeletionAnchors,
+        reinsertExistingDeletions,
         buildTrimAwareCharIndex,
         renderPersistentPreview
     };

@@ -43,7 +43,7 @@ Weekly optimization proposes prompt improvements
 
 ## 1. Data Capture (Automatic)
 
-**Trigger:** ClickUp webhook fires when a reviewer marks a menu as corrected.
+**Trigger:** ClickUp webhook fires when a reviewer uploads the corrected DOCX and moves the task to `To Do` (or another configured review-complete status).
 
 **What happens:**
 1. `clickup-integration` downloads the corrected DOCX

@@ -30,6 +30,9 @@ jest.mock('fs', () => {
         promises: {
             ...actual.promises,
             readFile: jest.fn().mockResolvedValue(Buffer.from('docx')),
+            mkdir: jest.fn().mockResolvedValue(undefined),
+            writeFile: jest.fn().mockResolvedValue(undefined),
+            copyFile: jest.fn().mockResolvedValue(undefined),
         },
     };
 });
@@ -88,8 +91,37 @@ function invokeJsonHandler(handler, { body = {}, params = {} } = {}) {
     });
 }
 
+function invokeWebhookHandler(handler, { body = {} } = {}) {
+    return new Promise((resolve, reject) => {
+        const req = {
+            body,
+            rawBody: JSON.stringify(body),
+            header: jest.fn(() => undefined),
+        };
+        const res = {
+            statusCode: 200,
+            status(code) {
+                this.statusCode = code;
+                return this;
+            },
+            send(payload) {
+                this.payload = payload;
+                return this;
+            },
+            json(payload) {
+                this.payload = payload;
+                return this;
+            },
+        };
+        Promise.resolve(handler(req, res))
+            .then(() => resolve({ status: res.statusCode || 200, body: res.payload }))
+            .catch(reject);
+    });
+}
+
 describe('browser approval finalize route', () => {
     const finalizeHandler = getRouteHandler('post', '/approval/finalize');
+    const webhookHandler = getRouteHandler('post', '/webhook/clickup');
 
     beforeEach(() => {
         jest.spyOn(console, 'log').mockImplementation(() => {});
@@ -192,5 +224,142 @@ describe('browser approval finalize route', () => {
             String(call[0]).includes('https://api.clickup.com/api/v2/task/cu_123')
         );
         expect(statusCall).toBeFalsy();
+    });
+
+    test('processes corrected ClickUp uploads when the task moves to to do', async () => {
+        axios.get.mockImplementation(async (url) => {
+            const urlStr = String(url);
+            if (urlStr === 'https://api.clickup.com/api/v2/task/cu_todo') {
+                return {
+                    data: {
+                        id: 'cu_todo',
+                        status: { status: 'to do' },
+                        attachments: [
+                            {
+                                id: 'att_corrected.docx',
+                                title: 'Corrected Menu.docx',
+                                extension: 'docx',
+                                url: 'https://clickup.example/attachment/corrected.docx',
+                                date: '1778457980067',
+                            },
+                        ],
+                    },
+                };
+            }
+            if (urlStr === 'https://clickup.example/attachment/corrected.docx') {
+                return { data: Buffer.from('corrected docx') };
+            }
+            if (urlStr.includes('/submissions/by-clickup-task/cu_todo')) {
+                return {
+                    data: {
+                        id: 'sub_todo_1',
+                        clickup_task_id: 'cu_todo',
+                        project_name: 'Dinner Menu',
+                        property: 'Maya - Dubai',
+                        service_period: 'dinner',
+                        submitter_email: 'chef@example.com',
+                        submitter_name: 'Chef Test',
+                        filename: 'Original Menu.docx',
+                        ai_draft_path: '/tmp/documents/sub_todo_1-draft.docx',
+                        raw_payload: {},
+                    },
+                };
+            }
+            if (urlStr.includes('/properties')) {
+                return { data: { catalog: [] } };
+            }
+            return { data: null };
+        });
+
+        const response = await invokeWebhookHandler(webhookHandler, {
+            body: {
+                event: 'taskStatusUpdated',
+                task_id: 'cu_todo',
+                history_items: [
+                    {
+                        field: 'status',
+                        after: { status: 'to do' },
+                    },
+                ],
+            },
+        });
+
+        expect(response.status).toBe(200);
+        expect(response.body).toBe('OK');
+
+        const compareCall = axios.post.mock.calls.find((call) =>
+            String(call[0]).includes('http://localhost:3006/compare')
+        );
+        expect(compareCall).toBeTruthy();
+        expect(compareCall[1]).toEqual(
+            expect.objectContaining({
+                submission_id: 'sub_todo_1',
+                ai_draft_path: '/tmp/documents/sub_todo_1-draft.docx',
+            })
+        );
+        expect(compareCall[1].final_path).toContain('/sub_todo_1/approved/sub_todo_1-approved.docx');
+
+        const statusCall = axios.put.mock.calls.find((call) =>
+            String(call[0]).includes('https://api.clickup.com/api/v2/task/cu_todo')
+        );
+        expect(statusCall).toBeFalsy();
+    });
+
+    test('ignores a to do webhook when the latest ClickUp DOCX was already finalized', async () => {
+        axios.get.mockImplementation(async (url) => {
+            const urlStr = String(url);
+            if (urlStr === 'https://api.clickup.com/api/v2/task/cu_done') {
+                return {
+                    data: {
+                        id: 'cu_done',
+                        status: { status: 'to do' },
+                        attachments: [
+                            {
+                                id: 'att_done.docx',
+                                title: 'Corrected Menu.docx',
+                                extension: 'docx',
+                                url: 'https://clickup.example/attachment/done.docx',
+                                date: '1778457980067',
+                            },
+                        ],
+                    },
+                };
+            }
+            if (urlStr.includes('/submissions/by-clickup-task/cu_done')) {
+                return {
+                    data: {
+                        id: 'sub_done_1',
+                        status: 'approved',
+                        final_path: '/tmp/documents/sub_done_1-approved.docx',
+                        approved_text_extracted_at: '2026-05-11T00:06:30.000Z',
+                        clickup_task_id: 'cu_done',
+                        project_name: 'Dinner Menu',
+                        property: 'Maya - Dubai',
+                        filename: 'Original Menu.docx',
+                        ai_draft_path: '/tmp/documents/sub_done_1-draft.docx',
+                        raw_payload: {},
+                    },
+                };
+            }
+            return { data: null };
+        });
+
+        await invokeWebhookHandler(webhookHandler, {
+            body: {
+                event: 'taskStatusUpdated',
+                task_id: 'cu_done',
+                history_items: [
+                    {
+                        field: 'status',
+                        after: { status: 'to do' },
+                    },
+                ],
+            },
+        });
+
+        const compareCall = axios.post.mock.calls.find((call) =>
+            String(call[0]).includes('http://localhost:3006/compare')
+        );
+        expect(compareCall).toBeFalsy();
     });
 });

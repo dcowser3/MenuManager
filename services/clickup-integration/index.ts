@@ -18,6 +18,7 @@ import {
     buildApprovedSubmissionUpdate,
     buildSharePointApprovedDocxAssetRecord,
 } from './lib/approval-finalization';
+import { clickUpDueDateMillis } from './lib/clickup-due-date';
 import { createInternalApiClient, requireInternalServiceAuth } from '@menumanager/internal-auth';
 
 dotenv.config({ path: path.join(__dirname, '..', '..', '..', '.env') });
@@ -36,8 +37,9 @@ const CLICKUP_TEAM_ID = process.env.CLICKUP_TEAM_ID;
 const CLICKUP_WEBHOOK_URL = process.env.CLICKUP_WEBHOOK_URL;
 const CLICKUP_WEBHOOK_SECRET = process.env.CLICKUP_WEBHOOK_SECRET;
 const CLICKUP_INITIAL_REVIEW_STATUS = (process.env.CLICKUP_INITIAL_REVIEW_STATUS || 'pending initial isa review').trim();
-const CLICKUP_CORRECTIONS_STATUS = (process.env.CLICKUP_CORRECTIONS_STATUS || 'corrections complete').toLowerCase();
+const CLICKUP_CORRECTIONS_STATUS = normalizeStatus(process.env.CLICKUP_CORRECTIONS_STATUS || 'to do');
 const CLICKUP_POST_APPROVAL_STATUS = (process.env.CLICKUP_POST_APPROVAL_STATUS || 'to do').trim();
+const CLICKUP_REVIEW_COMPLETE_STATUSES = buildReviewCompleteStatuses();
 const GRAPH_CLIENT_ID = process.env.GRAPH_CLIENT_ID;
 const GRAPH_TENANT_ID = process.env.GRAPH_TENANT_ID;
 const GRAPH_CLIENT_SECRET = process.env.GRAPH_CLIENT_SECRET;
@@ -452,6 +454,34 @@ function attachmentTimestamp(attachment: any): number {
     return 0;
 }
 
+function timestampFromSubmissionValue(value: any): number {
+    const parsed = Date.parse(String(value || ''));
+    return Number.isNaN(parsed) ? 0 : parsed;
+}
+
+function finalizedTimestamp(submission: any): number {
+    return Math.max(
+        timestampFromSubmissionValue(submission?.approved_text_extracted_at),
+        timestampFromSubmissionValue(submission?.approved_at),
+        timestampFromSubmissionValue(submission?.updated_at)
+    );
+}
+
+function isSubmissionAlreadyFinalizedForAttachment(submission: any, attachment: any | null): boolean {
+    if (normalizeStatus(submission?.status) !== 'approved' || !submission?.final_path) {
+        return false;
+    }
+
+    const finalizedAt = finalizedTimestamp(submission);
+    const attachmentAt = attachment ? attachmentTimestamp(attachment) : 0;
+
+    if (!attachmentAt) {
+        return true;
+    }
+
+    return finalizedAt >= attachmentAt;
+}
+
 function isDocxAttachment(attachment: any): boolean {
     const name = String(attachment?.title || attachment?.filename || attachment?.name || '').toLowerCase();
     const mime = String(attachment?.extension || attachment?.mime_type || '').toLowerCase();
@@ -489,6 +519,46 @@ function pickMostRecentCorrectedAttachment(
 
 function normalizeStatus(value: any): string {
     return String(value || '').trim().toLowerCase();
+}
+
+function parseStatusList(value: any): string[] {
+    return String(value || '')
+        .split(',')
+        .map(normalizeStatus)
+        .filter(Boolean);
+}
+
+function buildReviewCompleteStatuses(): Set<string> {
+    const statuses = new Set<string>();
+
+    for (const status of parseStatusList(process.env.CLICKUP_CORRECTIONS_STATUSES)) {
+        statuses.add(status);
+    }
+
+    if (CLICKUP_CORRECTIONS_STATUS) {
+        statuses.add(CLICKUP_CORRECTIONS_STATUS);
+    }
+
+    const postApprovalStatus = normalizeStatus(CLICKUP_POST_APPROVAL_STATUS);
+    if (postApprovalStatus) {
+        statuses.add(postApprovalStatus);
+    }
+
+    if (statuses.size === 0) {
+        statuses.add('to do');
+    }
+
+    return statuses;
+}
+
+function isReviewCompleteStatus(status: any): boolean {
+    return CLICKUP_REVIEW_COMPLETE_STATUSES.has(normalizeStatus(status));
+}
+
+function describeReviewCompleteStatuses(): string {
+    return Array.from(CLICKUP_REVIEW_COMPLETE_STATUSES)
+        .map((status) => `"${status}"`)
+        .join(', ');
 }
 
 function normalizeFolderMatchKey(value: string | undefined): string {
@@ -877,6 +947,7 @@ async function finalizeApprovedSubmission(input: {
     attachmentId?: string | null;
     approvedAssetSource?: string;
     shouldUpdateClickupStatus?: boolean;
+    skipClickupStatusReason?: string;
 }): Promise<{
     processed: boolean;
     submissionId: string;
@@ -990,7 +1061,7 @@ async function finalizeApprovedSubmission(input: {
                 });
             }
         } else {
-            warnings.push(`Skipped ClickUp status update to "${CLICKUP_POST_APPROVAL_STATUS}" because the approved DOCX was not uploaded to the task.`);
+            warnings.push(input.skipClickupStatusReason || `Skipped ClickUp status update to "${CLICKUP_POST_APPROVAL_STATUS}" because the approved DOCX was not uploaded to the task.`);
         }
     }
 
@@ -1060,8 +1131,8 @@ async function processApprovedTask(clickupTaskId: string, opts?: { skipStatusChe
     });
 
     const currentStatus = normalizeStatus(taskResponse.data?.status?.status);
-    if (!opts?.skipStatusCheck && currentStatus !== CLICKUP_CORRECTIONS_STATUS) {
-        return { processed: false, reason: `task status is "${currentStatus}"` };
+    if (!opts?.skipStatusCheck && !isReviewCompleteStatus(currentStatus)) {
+        return { processed: false, reason: `task status is "${currentStatus}", expected ${describeReviewCompleteStatuses()}` };
     }
 
     const subResponse = await internalApi.get(`${DB_SERVICE_URL}/submissions/by-clickup-task/${clickupTaskId}`);
@@ -1070,6 +1141,14 @@ async function processApprovedTask(clickupTaskId: string, opts?: { skipStatusChe
 
     const attachments = taskResponse.data.attachments || [];
     const latestAttachment = pickMostRecentCorrectedAttachment(attachments, submission.filename);
+    if (isSubmissionAlreadyFinalizedForAttachment(submission, latestAttachment)) {
+        return {
+            processed: false,
+            reason: 'submission is already approved for the latest ClickUp DOCX attachment',
+            submissionId: submission.id,
+        };
+    }
+
     const submissionDocDir = getSubmissionDocumentDir(submission.project_name || '', submission.property || '', submission.id);
     const approvedDir = path.join(submissionDocDir, 'approved');
     await fs.promises.mkdir(approvedDir, { recursive: true });
@@ -1101,6 +1180,8 @@ async function processApprovedTask(clickupTaskId: string, opts?: { skipStatusChe
         clickupTaskId,
         attachmentId: latestAttachment?.id || null,
         approvedAssetSource: 'isabella_clickup',
+        shouldUpdateClickupStatus: currentStatus !== normalizeStatus(CLICKUP_POST_APPROVAL_STATUS),
+        skipClickupStatusReason: `Skipped ClickUp status update to "${CLICKUP_POST_APPROVAL_STATUS}" because the task is already in that status.`,
     });
 }
 
@@ -1209,7 +1290,10 @@ app.post('/create-task', async (req, res) => {
         }
 
         if (dateNeeded) {
-            taskPayload.due_date = new Date(dateNeeded).getTime();
+            const dueMs = clickUpDueDateMillis(dateNeeded);
+            if (dueMs != null) {
+                taskPayload.due_date = dueMs;
+            }
         }
 
         const taskResponse = await axios.post(
@@ -1390,7 +1474,7 @@ app.post('/webhook/clickup', async (req: any, res) => {
 
         const statusChange = history_items?.find((h: any) => h.field === 'status');
         const newStatus = (statusChange?.after?.status || '').toLowerCase();
-        if (newStatus !== CLICKUP_CORRECTIONS_STATUS) return;
+        if (!isReviewCompleteStatus(newStatus)) return;
 
         console.log(`ClickUp task ${clickupTaskId} moved to "${newStatus}"`);
         const result = await processApprovedTask(String(clickupTaskId), { skipStatusCheck: true });

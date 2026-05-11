@@ -72,13 +72,13 @@ Submits menu
 
 ```
 Reviewer works in ClickUp
-  Uploads corrected DOCX → Changes status to "corrections complete"
+  Uploads corrected DOCX → Changes status to "To Do"
   │
   ▼
 ClickUp sends taskStatusUpdated webhook
   POST /webhook/clickup (clickup-integration)
   │
-  ├─ Filters: only processes status matching CLICKUP_CORRECTIONS_STATUS
+  ├─ Filters: only processes review-complete statuses (`To Do` by default, plus configured aliases)
   ├─ GET /submissions/by-clickup-task/:taskId (db service) — lookup submission
   ├─ GET ClickUp API — download latest attachment
   ├─ Python extractor: extract_clean_menu_text.py — derive canonical approved text
@@ -92,7 +92,7 @@ ClickUp sends taskStatusUpdated webhook
 
 After approval, operations users can open `/approved-menus` in the dashboard service to browse approved form submissions and download the final DOCX from `/download/approved/:submissionId`. That dashboard now reads approved-menu metadata through the shared Supabase/local-storage layer directly, so it does not depend on the DB HTTP route being current before the page can render.
 
-For browser approvals, `POST /approval/finalize` mirrors the same operational handoff: it uploads the corrected DOCX back to the ClickUp task first, then moves the task to the configured post-approval status (`To Do` by default). If the ClickUp upload fails, the task is not advanced.
+For browser approvals, `POST /approval/finalize` mirrors the same operational handoff: it uploads the corrected DOCX back to the ClickUp task first, finalizes the submission, and leaves/moves the task in the configured post-approval status (`To Do` by default). If the ClickUp upload fails, the task is not advanced.
 
 ### Design Approval Flow
 

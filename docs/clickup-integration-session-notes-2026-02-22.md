@@ -49,7 +49,7 @@
 - `CLICKUP_TEAM_ID=8572371`
 - `CLICKUP_LIST_ID=901408496144` (`F&B Menu Submissions`)
 - `CLICKUP_ASSIGNEE_ID=114079264` (Isabella)
-- `CLICKUP_CORRECTIONS_STATUS=approved`
+- `CLICKUP_CORRECTIONS_STATUS=to do`
 
 ---
 
@@ -128,9 +128,9 @@ These are the items that must be different in Azure. The compare/extraction logi
    - DOCX attached,
    - assignee applied,
    - approval section present in description.
-3. Upload corrected DOCX and set status to `Approved`.
+3. Upload corrected DOCX and set status to `To Do`.
 4. Check `logs/clickup-integration.log` for:
-   - moved to approved,
+   - moved to `to do`,
    - submission lookup,
    - corrected file download,
    - submission update to approved.
@@ -180,7 +180,7 @@ Automation added:
   - prints new secret
   - optional pending backfill trigger
 - New API endpoint: `POST /webhook/backfill-pending`
-  - reconciles pending submissions with existing ClickUp tasks already in approved status.
+  - reconciles pending submissions with existing ClickUp tasks already in a review-complete status (`To Do` by default).
 
 Note:
 - Active learned rules require repeat signals (default minimum occurrences is `2`), so a single corrected upload may appear in training data but not yet produce active rules.
@@ -291,7 +291,7 @@ Note:
 ### Important operational note
 
 - Even with script hardening, one manual validation step remains required:
-  - Trigger real ClickUp status change (`Approved -> To Do -> Approved`) and confirm log flow.
+  - Trigger a real ClickUp status change away from `To Do`, then back to `To Do`, and confirm log flow.
 - Why:
 - Webhooks are external push events; config checks cannot fully prove live event delivery without an actual event.
 
@@ -320,7 +320,7 @@ Note:
   1) `scripts/clickup-webhook-reset.sh --demo-ready`
   2) `unset CLICKUP_WEBHOOK_URL CLICKUP_WEBHOOK_SECRET`
   3) `./stop-services.sh && ./start-services.sh`
-  4) real status toggle (`Approved -> To Do -> Approved`)
+  4) real status toggle away from `To Do`, then back to `To Do`
 - Why:
   - Reset updates `.env`, but stale exported shell vars can still override runtime and cause repeated invalid-signature 401s.
 

@@ -259,6 +259,7 @@ def extract_texts(docx_path, mode="clean"):
 
     # Unapproved mode extras
     visible_lines = []
+    clean_visible_lines = []
     unapproved_html_paragraphs = []
     all_annotations = []
 
@@ -273,6 +274,7 @@ def extract_texts(docx_path, mode="clean"):
 
         if mode == "unapproved":
             visible_lines.append(paragraph_unapproved_text(paragraph))
+            clean_visible_lines.append(paragraph_clean_text(paragraph))
             unapproved_html_paragraphs.append(paragraph_unapproved_html(paragraph))
             all_annotations.append(paragraph_annotation_ranges(paragraph))
         else:
@@ -287,6 +289,8 @@ def extract_texts(docx_path, mode="clean"):
     if mode == "unapproved":
         while visible_lines and not visible_lines[-1].strip():
             visible_lines.pop()
+            if clean_visible_lines:
+                clean_visible_lines.pop()
             if all_annotations:
                 all_annotations.pop()
             if unapproved_html_paragraphs:
@@ -295,6 +299,7 @@ def extract_texts(docx_path, mode="clean"):
         return {
             "menu_content": "\n".join(raw_lines),
             "visible_text": "\n".join(visible_lines),
+            "clean_visible_text": "\n".join(clean_visible_lines),
             "unapproved_html": "".join(unapproved_html_paragraphs),
             "annotations": all_annotations,
         }

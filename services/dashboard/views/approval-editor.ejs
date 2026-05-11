@@ -444,6 +444,7 @@
     <script>
         const submissionId = <%- JSON.stringify(submission.id) %>;
         const baselineText = <%- JSON.stringify(visibleText) %>;
+        const baselinePreviewText = <%- JSON.stringify(previewText || visibleText) %>;
         const baselineHtml = <%- JSON.stringify(editorHtml) %>;
         const textarea = document.getElementById('approvalEditorInput');
         const preview = document.getElementById('approvalPreview');
@@ -462,7 +463,7 @@
 
         const baselineAnnotationMap = redlinePreview.buildAnnotationMapFromHtml(
             baselineHtml,
-            baselineText,
+            baselinePreviewText,
             { trimText: false }
         );
 
@@ -478,7 +479,13 @@
                 return;
             }
 
-            const rendered = redlinePreview.renderPersistentPreview(baseText, revisedText, {
+            const revisedPreviewText = redlinePreview.reinsertExistingDeletions(
+                baselineText,
+                revisedText,
+                baselinePreviewText,
+                baselineAnnotationMap
+            );
+            const rendered = redlinePreview.renderPersistentPreview(baselinePreviewText, revisedPreviewText, {
                 annotationMap: baselineAnnotationMap,
                 includeExistingAnnotations: true,
                 baselineHtml: baselineHtml || '',

@@ -141,6 +141,7 @@ async function resolveApprovalSourceDocument(submission, options) {
 async function loadApprovalBaselineFromSubmission(submission, options) {
     let editorHtml = '';
     let visibleText = '';
+    let previewText = '';
     let sourceMode = 'saved_submission_data';
     let sourceLabel = getSourceLabel('saved_submission_data');
     const submissionTag = submission.id || submission.filename || 'unknown';
@@ -165,7 +166,8 @@ async function loadApprovalBaselineFromSubmission(submission, options) {
             else {
                 const extracted = await options.extractUnapprovedFromDocx(absolutePath);
                 editorHtml = normalizeApprovalEditorHtml(`${extracted.unapprovedHtml || ''}`.trim());
-                visibleText = normalizeApprovalEditorText(extracted.visibleText || '');
+                previewText = normalizeApprovalEditorText(extracted.visibleText || '');
+                visibleText = normalizeApprovalEditorText(extracted.cleanVisibleText || extracted.visibleText || '');
             }
             sourceMode = candidate.sourceMode;
             sourceLabel = getSourceLabelForCandidate(candidate);
@@ -180,6 +182,9 @@ async function loadApprovalBaselineFromSubmission(submission, options) {
     }
     if (!visibleText) {
         visibleText = normalizeApprovalEditorText(coalesceString(submission.approved_menu_content_raw, submission.approved_menu_content, submission.menu_content, submission.raw_payload?.approved_menu_content_raw, submission.raw_payload?.approved_menu_content, submission.raw_payload?.menuContent));
+    }
+    if (!previewText) {
+        previewText = visibleText;
     }
     if (!editorHtml) {
         const savedHtml = coalesceString(submission.menu_content_html, submission.raw_payload?.menu_content_html, submission.raw_payload?.menuContentHtml);
@@ -198,6 +203,7 @@ async function loadApprovalBaselineFromSubmission(submission, options) {
     return {
         editorHtml,
         visibleText,
+        previewText,
         sourceMode,
         sourceLabel,
     };

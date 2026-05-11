@@ -6,7 +6,7 @@ This feature captures human reviewer corrections and feeds stable correction pat
 
 ## What Is Automated
 
-1. ClickUp webhook receives reviewer-approved corrected DOCX.
+1. ClickUp webhook receives the reviewer handoff status change (`To Do` by default) after the corrected DOCX is attached.
 2. `clickup-integration` calls `differ` (`POST /compare`) with:
    - AI draft path
    - Reviewer final DOCX path

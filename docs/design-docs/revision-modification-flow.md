@@ -127,6 +127,7 @@ When chef uses uploaded baseline flow:
 - Extraction mode follows the candidate’s `revision_source` when the revision baseline path is chosen:
   - `uploaded_baseline` → clean baseline extraction
   - `uploaded_unapproved` → unapproved extraction with preserved redlines
+- When an unapproved/redlined DOCX is used as the approval source, the editor keeps separate text baselines: clean accepted text for the left textarea, and full visible text plus `existing-del` / `existing-ins` HTML for the right preview.
 - DOCX-derived preview HTML is normalized to strip leading/trailing empty `<p><br></p>` blocks so the live preview aligns vertically with the textarea (which trims leading blank lines).
 - After the chef edits, the live redline preview passes `baselineHtml` into `renderPersistentPreview` so unchanged and deleted tokens keep inline markup (`<strong>`, `<em>`, etc.) via `Range#cloneContents` instead of flattening to plain text.
 - Approval-editor text normalization preserves leading indentation from extracted DOCX paragraphs so alignment-sensitive content such as allergen legends is not flattened in the review UI.
