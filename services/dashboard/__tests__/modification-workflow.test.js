@@ -68,6 +68,7 @@ function invokeJsonHandler(handler, body, options = {}) {
         const headers = options.headers || {};
         const req = {
             body,
+            query: options.query || {},
             headers,
             hostname: options.hostname,
             get(name) {
@@ -114,6 +115,7 @@ function postJsonOverHttp(routePath, body) {
 describe('Dashboard Modification Workflow (local, mocked externals)', () => {
     const submitHandler = getRouteHandler('post', '/api/form/submit');
     const basicCheckHandler = getRouteHandler('post', '/api/form/basic-check');
+    const submissionSearchHandler = getRouteHandler('get', '/api/submissions/search');
     const baselineUploadPath = path.join(process.cwd(), 'tmp', 'uploads', 'legacy-approved.docx');
     const originalNodeEnv = process.env.NODE_ENV;
 
@@ -423,6 +425,90 @@ describe('Dashboard Modification Workflow (local, mocked externals)', () => {
         expect(clickupCall[1].revisionBaselineDocPath).toBeUndefined();
         expect(clickupCall[1].revisionBaselineFileName).toBeUndefined();
         expect(clickupCall[1].criticalOverrides).toEqual([]);
+    });
+
+    test('approved submission search forwards DB failures instead of returning empty results', async () => {
+        mockedAxios.get = jest.fn(async (url) => {
+            const urlStr = String(url);
+            if (urlStr.includes('/submissions/search')) {
+                const error = new Error('DB unavailable');
+                error.response = { status: 503, data: { error: 'DB unavailable' } };
+                throw error;
+            }
+            return { data: [] };
+        });
+
+        const response = await invokeJsonHandler(
+            submissionSearchHandler,
+            {},
+            { query: { q: 'derian', limit: '20' } }
+        );
+
+        expect(response.status).toBe(503);
+        expect(response.body.error).toBe('Failed to search approved submissions');
+    });
+
+    test('returns uploaded-baseline modification submit response before Tier 2 AI review completes', async () => {
+        let resolveAiReview;
+        mockedAxios.post = jest.fn((url, payload) => {
+            const urlStr = String(url);
+
+            if (urlStr.includes('/submissions')) {
+                return Promise.resolve({ data: { id: payload.id || 'form-test-id' } });
+            }
+            if (urlStr.includes('/submitter-profiles')) {
+                return Promise.resolve({ data: { ok: true } });
+            }
+            if (urlStr.includes('/assets')) {
+                return Promise.resolve({ data: { id: 'asset_123' } });
+            }
+            if (urlStr.includes('/ai-review')) {
+                return new Promise((resolve) => {
+                    resolveAiReview = resolve;
+                });
+            }
+            if (urlStr.includes('/create-task')) {
+                return Promise.resolve({ data: { success: true, taskId: 'cu_123' } });
+            }
+
+            return Promise.resolve({ data: {} });
+        });
+
+        const payload = buildNewSubmissionPayload({
+            projectName: 'Legacy Project',
+            property: 'Legacy Property',
+            cityCountry: 'Miami, USA',
+            assetType: 'DIGITAL',
+            width: '1080',
+            height: '1920',
+            printWidth: '',
+            printHeight: '',
+            printRegion: '',
+            folded: '',
+            digitalWidth: '1080',
+            digitalHeight: '1920',
+            turnaroundDays: 2,
+            submissionMode: 'modification',
+            revisionSource: 'uploaded_baseline',
+            revisionBaseSubmissionId: '',
+            revisionBaselineDocPath: baselineUploadPath,
+            revisionBaselineFileName: 'legacy-approved.docx',
+            baseApprovedMenuContent: 'Guacamole - $10',
+            chefPersistentDiff: { insertions: 1, deletions: 1 },
+        });
+
+        const response = await invokeJsonHandler(submitHandler, payload);
+
+        expect(response.status).toBe(200);
+        expect(response.body.success).toBe(true);
+        expect(response.body.clickup.taskId).toBe('cu_123');
+        expect(mockedAxios.post.mock.calls.some((c) =>
+            String(c[0]).includes('/ai-review')
+        )).toBe(true);
+        expect(resolveAiReview).toBeDefined();
+
+        resolveAiReview({ data: { success: true } });
+        await Promise.resolve();
     });
 
     test('submission strips existing footer boilerplate and reuses it without duplication', async () => {

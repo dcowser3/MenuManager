@@ -43,8 +43,9 @@ Menu Manager is an AI-powered service designed to automate the review process fo
 - Approved-dish extraction now splits inline `Dish Name - description` menu rows into separate `dish_name` and `description` fields, captures trailing allergen codes, and skips the allergen legend / food-safety footer instead of storing them as dishes
 - DOCX template validation and redlining
 - Modification uploads with preserved redlines remain usable even if project metadata extraction cannot be parsed from the DOCX
-- Public upload endpoints now enforce a 15 MB cap, validate file signatures, and sanitize stored rich-text/filename input before downstream processing
+- Public upload endpoints now enforce a 15 MB cap, validate file signatures, and sanitize stored rich-text/filename input before downstream processing; menu filenames preserve Unicode letters such as accented characters and tone marks
 - Required-field validation now highlights missing submitter, project-details, and approval inputs directly in the form
+- The submission form footer lists `dcowser@richardsandoval.com` as the support contact for help.
 - Reviewer dashboard
 - Notification system
 - Approved dishes are extracted automatically when the ClickUp-reviewed DOCX is marked approved
@@ -109,6 +110,8 @@ Browser approval editor prototype:
 - Uploaded unapproved/redlined DOCX modifications now receive a full AI check on the accepted visible menu text, so pre-existing tracked edits such as misspelled inserted words are reviewed even if the chef makes no additional browser edits.
 - Re-running AI Check reuses the normalized editor text extractor so repeated checks do not add browser-generated blank lines between menu rows.
 - Modification flows keep footer/legal copy out of the persistent redline preview, but submit it as structured preserved footer text so restaurant-specific notes and raw-food warnings are retained instead of replaced by the default notice.
+- Form submission now persists uploaded approved-baseline modifications before triggering the full Tier 2 AI review asynchronously, reducing gateway timeouts on slow AI review calls; non-JSON proxy errors also show a readable submit error instead of raw HTML parsing text.
+- The modification `Find in Database` picker searches approved baselines only; submitted ClickUp tasks appear there after the approved DOCX is processed, and DB/search failures now show as search failures instead of empty results.
 - The approval editor and `Download Original DOCX` resolve the **submitted** generated DOCX (`original_path`) first so on-screen text matches the file from the form; the modification baseline DOCX is used only when that path is missing, then `final_path`, then saved text/HTML fallback
 - On modification flows, baseline extraction mode (`uploaded_baseline` vs `uploaded_unapproved`) still applies when the baseline path is the one that loads
 - The approval editor preserves leading indentation from extracted DOCX text so alignment-sensitive sections such as allergen keys do not get flattened before review, trims leading empty HTML paragraphs in the preview so it lines up with the textarea before the first edit, and keeps bold/italic (and other inline markup from the DOCX) in the live redline preview after you type by cloning ranges from the baseline HTML

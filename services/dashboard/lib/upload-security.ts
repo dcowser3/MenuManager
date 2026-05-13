@@ -49,9 +49,10 @@ function extractRestaurantName(projectName: string, property?: string): string {
 
 function sanitizeFilenameSegment(value: string): string {
     return `${value || ''}`
+        .normalize('NFC')
         .trim()
         .replace(/[\\/:*?"<>|#%]+/g, ' ')
-        .replace(/[^A-Za-z0-9._ -]+/g, ' ')
+        .replace(/[^\p{L}\p{N}._ -]+/gu, ' ')
         .replace(/\s+/g, ' ')
         .trim();
 }
@@ -108,9 +109,9 @@ export function buildMenuFilename(
 }
 
 export function sanitizeStoredFileName(fileName: unknown, fallback = 'upload.bin'): string {
-    const basename = path.basename(`${fileName || ''}`.trim() || fallback);
+    const basename = path.basename(`${fileName || ''}`.normalize('NFC').trim() || fallback);
     const sanitized = basename
-        .replace(/[^A-Za-z0-9._ -]/g, '_')
+        .replace(/[^\p{L}\p{N}._ -]/gu, '_')
         .replace(/\s+/g, ' ')
         .replace(/^\.+/, '')
         .trim();

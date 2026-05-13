@@ -86,9 +86,10 @@ function extractRestaurantName(projectName, property) {
 }
 function sanitizeFilenameSegment(value) {
     return `${value || ''}`
+        .normalize('NFC')
         .trim()
         .replace(/[\\/:*?"<>|#%]+/g, ' ')
-        .replace(/[^A-Za-z0-9._ -]+/g, ' ')
+        .replace(/[^\p{L}\p{N}._ -]+/gu, ' ')
         .replace(/\s+/g, ' ')
         .trim();
 }
@@ -133,9 +134,9 @@ function buildMenuFilename(projectName, property, servicePeriod, dateNeeded, ext
     return `${name} Menu.docx`;
 }
 function sanitizeStoredFileName(fileName, fallback = 'upload.bin') {
-    const basename = path.basename(`${fileName || ''}`.trim() || fallback);
+    const basename = path.basename(`${fileName || ''}`.normalize('NFC').trim() || fallback);
     const sanitized = basename
-        .replace(/[^A-Za-z0-9._ -]/g, '_')
+        .replace(/[^\p{L}\p{N}._ -]/gu, '_')
         .replace(/\s+/g, ' ')
         .replace(/^\.+/, '')
         .trim();

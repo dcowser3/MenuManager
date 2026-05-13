@@ -34,7 +34,7 @@ For modification flows, the baseline text must come from one of:
 ## Step 2 (Modification only): Baseline Source Selection
 
 - `Find In Database`:
-  - Search approved submissions by project/property/submitter.
+  - Search approved submissions by project/property/submitter. Submitted ClickUp tasks do not appear here until an approved DOCX has been processed and the submission status is `approved`.
   - Load approved baseline text into editor.
 - `Upload Prior Approved DOCX`:
   - Upload previously approved/redlined DOCX.
@@ -114,6 +114,7 @@ ClickUp integration:
 
 - Webhook now extracts/stores canonical approved text from Isabella upload.
 - Task creation now includes modification metadata and attaches uploaded baseline DOCX when provided.
+- Form submit persists the generated DOCX and baseline asset before triggering the full Tier 2 AI review asynchronously, so uploaded approved-baseline modification submissions are not held open by slow OpenAI review calls.
 
 ## ClickUp Behavior for Modifications
 

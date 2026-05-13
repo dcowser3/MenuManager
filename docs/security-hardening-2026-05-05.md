@@ -4,7 +4,7 @@
 
 - Removed public landing-page links to the learning and training dashboards.
 - A temporary PIN gate for `/learning`, `/training`, and `/api/learning/*` was added in this batch and **removed again** (2026-05-10): those routes are no longer gated by a PIN until real auth exists.
-- Added server-side sanitizers for plain-text inputs, stored filenames, and rich-text HTML content before persistence or re-rendering.
+- Added server-side sanitizers for plain-text inputs, stored filenames, and rich-text HTML content before persistence or re-rendering. Filename sanitizers preserve Unicode letters and numbers, including accented characters and tone marks, while removing reserved path characters.
 - Added upload limits and file-signature checks for:
   - modification baseline DOCX uploads
   - unapproved DOCX uploads

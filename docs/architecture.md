@@ -61,6 +61,8 @@ Submits menu
   dashboard → POST /assets (db service) — store original_docx metadata
     generated DOCX names use `Restaurant_ServicePeriod_M.D.YY.docx`
   dashboard → POST /submitter-profiles (db service) — fire-and-forget profile save
+  dashboard → POST ai-review /ai-review — asynchronous Tier 2 review trigger after persistence;
+    submit response does not wait for OpenAI review completion
   dashboard → POST localhost:3007/create-task (clickup-integration) — fire-and-forget
   Local-only test helper: localhost, non-production submissions skip ClickUp task creation and return
     `/download/original/:id` plus `/approval/:id` so the browser can download the generated DOCX
@@ -129,7 +131,7 @@ User reviews differences, submits approval
 
 The dashboard service still uses a single Express entrypoint, but the highest-risk logic is now split into focused `lib/` modules so routing stays thinner and workflow behavior is easier to test in isolation:
 
-- `lib/upload-security.ts` — upload limits, filename sanitization, HTML/text sanitization, file-signature checks, and safe-path helpers
+- `lib/upload-security.ts` — upload limits, filename sanitization that preserves Unicode letters/tone marks while removing reserved path characters, HTML/text sanitization, file-signature checks, and safe-path helpers
 - `lib/request-normalization.ts` — request-body normalization for chef submission and design-approval flows
 - `lib/approval-baseline.ts` — approval editor baseline loading/fallback logic
 - `lib/approval-transitions.ts` — shared approval-state payload builders for standard approvals, design approvals, and finalize handoff requests
@@ -138,6 +140,7 @@ The dashboard service still uses a single Express entrypoint, but the highest-ri
 - `lib/approval-workflow.ts` — quick-approve, corrected-upload, and browser approval/finalization handlers
 
 `services/dashboard/index.ts` now primarily composes dependencies, mounts routes, and keeps shared helpers that are still used across multiple dashboard areas.
+The submission form footer shows `dcowser@richardsandoval.com` as the support contact for submitter help.
 
 ## ClickUp Integration Module Notes
 

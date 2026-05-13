@@ -70,6 +70,44 @@ function mergeFooterText(...values) {
     return lines.join('\n');
 }
 function createSubmissionWorkflowHandlers(deps) {
+    const triggerAiReview = async (input) => {
+        try {
+            if (input.skipAi) {
+                console.log(`Skipping AI review for submission ${input.submissionId} (template: ${input.templateType})`);
+                return;
+            }
+            const mammoth = require('mammoth');
+            const result = await mammoth.extractRawText({ path: input.originalPath });
+            const text = result.value;
+            await deps.axios.post(`${deps.AI_REVIEW_URL}/ai-review`, {
+                text,
+                submission_id: input.submissionId,
+                submitter_email: input.submitterEmail,
+                filename: input.filename,
+                original_path: input.originalPath
+            });
+            console.log(`✓ AI review triggered for ${input.submissionId}`);
+        }
+        catch (aiError) {
+            console.error('Error triggering AI review:', aiError.message);
+            try {
+                await deps.axios.put(`${deps.DB_SERVICE_URL}/submissions/${input.submissionId}`, {
+                    status: input.skipAi ? 'submitted_no_ai_review' : 'pending_human_review'
+                });
+            }
+            catch (statusError) {
+                console.error('Failed to keep submission in manual review after AI review failure:', statusError.message);
+            }
+            deps.sendAdminAlert({
+                alert_type: 'ai_review_failed',
+                severity: 'warning',
+                service: 'dashboard',
+                submission_id: input.submissionId,
+                message: `AI review failed for "${input.projectName}". Submission moved to manual review.`,
+                details: { error: aiError.message },
+            });
+        }
+    };
     const uploadMenuImage = async (req, res) => {
         try {
             if (!req.file) {
@@ -301,38 +339,15 @@ function createSubmissionWorkflowHandlers(deps) {
                 email: safeSubmitterEmail,
                 jobTitle: safeSubmitterJobTitle
             }).catch((err) => console.error('Failed to save submitter profile:', err.message));
-            try {
-                if (skipAi) {
-                    console.log(`Skipping AI review for submission ${submissionId} (template: ${normalizedTemplateType})`);
-                }
-                else {
-                    const mammoth = require('mammoth');
-                    const result = await mammoth.extractRawText({ path: docxPath });
-                    const text = result.value;
-                    await deps.axios.post(`${deps.AI_REVIEW_URL}/ai-review`, {
-                        text: text,
-                        submission_id: submissionId,
-                        submitter_email: safeSubmitterEmail,
-                        filename: generatedMenuFilename,
-                        original_path: docxPath
-                    });
-                    console.log(`✓ AI review triggered for ${submissionId}`);
-                }
-            }
-            catch (aiError) {
-                console.error('Error triggering AI review:', aiError.message);
-                await deps.axios.put(`${deps.DB_SERVICE_URL}/submissions/${submissionId}`, {
-                    status: skipAi ? 'submitted_no_ai_review' : 'pending_human_review'
-                });
-                deps.sendAdminAlert({
-                    alert_type: 'ai_review_failed',
-                    severity: 'warning',
-                    service: 'dashboard',
-                    submission_id: submissionId,
-                    message: `AI review failed for "${safeProjectName}". Submission moved to manual review.`,
-                    details: { error: aiError.message },
-                });
-            }
+            void triggerAiReview({
+                submissionId,
+                submitterEmail: safeSubmitterEmail,
+                filename: generatedMenuFilename,
+                originalPath: docxPath,
+                projectName: safeProjectName,
+                skipAi,
+                templateType: normalizedTemplateType,
+            });
             let clickupWarning;
             let clickupTaskId;
             if (localTestingRequest) {

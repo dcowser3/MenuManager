@@ -1423,8 +1423,11 @@ app.get('/api/submissions/search', async (req, res) => {
             params: { q, limit }
         });
         res.json(dbResponse.data);
-    } catch (error) {
-        res.json([]);
+    } catch (error: any) {
+        console.error('Failed to search approved submissions:', error?.response?.data || error.message);
+        res.status(error?.response?.status || 500).json({
+            error: 'Failed to search approved submissions'
+        });
     }
 });
 

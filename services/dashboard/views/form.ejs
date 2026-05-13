@@ -1118,6 +1118,25 @@
             color: var(--color-text-light);
         }
 
+        .support-footer {
+            border-top: 1px solid var(--color-border-light);
+            padding: 1rem 2rem 2rem;
+            text-align: center;
+            font-size: 0.72rem;
+            color: var(--color-text-muted);
+            letter-spacing: 0.08em;
+        }
+
+        .support-footer a {
+            color: var(--color-secondary);
+            text-decoration: none;
+            font-weight: 500;
+        }
+
+        .support-footer a:hover {
+            color: var(--color-accent);
+        }
+
         /* Autocomplete */
         .autocomplete-wrapper {
             position: relative;
@@ -1987,6 +2006,10 @@
             </div>
         </div>
     </div>
+
+    <footer class="support-footer">
+        Need help? Email <a href="mailto:dcowser@richardsandoval.com">dcowser@richardsandoval.com</a>.
+    </footer>
 
     <!-- Fullscreen Menu View Modal -->
     <div id="fullscreenModal" class="fullscreen-modal" onclick="closeFullscreenIfBackdrop(event)">
@@ -2896,11 +2919,14 @@
             try {
                 const response = await fetch(`/api/submissions/search?q=${encodeURIComponent(query)}&limit=20`);
                 const results = await response.json();
+                if (!response.ok) {
+                    throw new Error(results.error || 'Search failed');
+                }
                 revisionSearchResults = results || [];
                 const resultsEl = document.getElementById('submissionSearchResults');
 
                 if (!revisionSearchResults.length) {
-                    resultsEl.innerHTML = '<div class="search-result-item">No approved submissions found.</div>';
+                    resultsEl.innerHTML = '<div class="search-result-item">No approved submissions found. New ClickUp tasks appear here only after an approved DOCX has been processed.</div>';
                     return;
                 }
 
@@ -4939,7 +4965,19 @@
                     body: JSON.stringify(formData)
                 });
 
-                const data = await response.json();
+                const responseText = await response.text();
+                let data = {};
+                if (responseText) {
+                    try {
+                        data = JSON.parse(responseText);
+                    } catch (parseError) {
+                        data = {
+                            error: response.status === 504
+                                ? 'The server timed out while submitting the menu. The team has been notified; please wait a moment before retrying.'
+                                : `The server returned an unexpected ${response.status || 'error'} response while submitting the menu.`
+                        };
+                    }
+                }
 
                 if (!response.ok) {
                     throw new Error(data.error || 'Failed to submit menu');
