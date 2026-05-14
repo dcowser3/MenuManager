@@ -258,6 +258,38 @@
             color: var(--color-primary);
         }
 
+        .btn-warning {
+            background: var(--color-warning);
+            color: var(--color-background);
+            border-color: var(--color-warning);
+        }
+
+        .btn-warning:hover {
+            background: transparent;
+            color: var(--color-warning);
+        }
+
+        .handoff-status {
+            border: 1px solid rgba(184, 134, 11, 0.25);
+            background: rgba(184, 134, 11, 0.06);
+            padding: 1.5rem;
+            margin-top: 1.5rem;
+        }
+
+        .handoff-status p {
+            color: var(--color-text-light);
+            font-size: 0.9rem;
+            margin-bottom: 1rem;
+        }
+
+        .handoff-meta {
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+            font-size: 0.78rem;
+            color: var(--color-text-light);
+            overflow-wrap: anywhere;
+            margin-bottom: 1rem;
+        }
+
         .upload-area {
             border: 1px dashed var(--color-border);
             padding: 2.5rem;
@@ -394,7 +426,38 @@
 
                 <div class="info-label">Status</div>
                 <div class="info-value status-pending">Pending Your Review</div>
+
+                <div class="info-label">ClickUp Task</div>
+                <div class="info-value"><%= submission.clickup_task_id || 'Not linked' %></div>
             </div>
+
+            <% if (!submission.clickup_task_id) { %>
+                <div class="handoff-status">
+                    <h3>ClickUp Handoff</h3>
+                    <p>
+                        This submission is saved, but no ClickUp task is linked yet. Retry the handoff after ClickUp or configuration issues are resolved.
+                    </p>
+                    <% if (clickupHandoff && clickupHandoff.status) { %>
+                        <div class="handoff-meta">
+                            Last status: <%= clickupHandoff.status %>
+                            <% if (clickupHandoff.last_attempt_at) { %>
+                                · Last attempt: <%= new Date(clickupHandoff.last_attempt_at).toLocaleString() %>
+                            <% } %>
+                            <% if (clickupHandoff.retry_count) { %>
+                                · Retries: <%= clickupHandoff.retry_count %>
+                            <% } %>
+                        </div>
+                    <% } %>
+                    <% if (clickupHandoff && clickupHandoff.last_error) { %>
+                        <div class="handoff-meta">
+                            Last error: <%= JSON.stringify(clickupHandoff.last_error) %>
+                        </div>
+                    <% } %>
+                    <button onclick="retryClickUpTask()" id="retryClickUpBtn" class="btn btn-warning">
+                        Retry ClickUp Task
+                    </button>
+                </div>
+            <% } %>
         </div>
 
         <div class="card">
@@ -509,6 +572,45 @@
             } catch (error) {
                 showAlert('Failed to approve submission', 'error');
                 showLoading(false);
+            }
+        }
+
+        async function retryClickUpTask() {
+            if (!confirm('Retry ClickUp task creation for this saved submission?')) {
+                return;
+            }
+
+            const btn = document.getElementById('retryClickUpBtn');
+            if (btn) {
+                btn.disabled = true;
+                btn.textContent = 'Retrying...';
+            }
+            showLoading(true);
+
+            try {
+                const response = await fetch('/api/submissions/' + encodeURIComponent(submissionId) + '/retry-clickup', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                const data = await response.json();
+
+                if (response.ok && data.success) {
+                    showAlert(data.taskId ? 'ClickUp task created: ' + data.taskId : 'ClickUp retry completed.', 'success');
+                    setTimeout(() => {
+                        window.location.reload();
+                    }, 1500);
+                    return;
+                }
+
+                showAlert('ClickUp retry failed: ' + (data.error || data.details?.message || 'Unknown error'), 'error');
+            } catch (error) {
+                showAlert('ClickUp retry failed', 'error');
+            } finally {
+                showLoading(false);
+                if (btn) {
+                    btn.disabled = false;
+                    btn.textContent = 'Retry ClickUp Task';
+                }
             }
         }
 

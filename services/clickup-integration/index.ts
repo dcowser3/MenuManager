@@ -84,6 +84,16 @@ function sendAdminAlert(alert: SystemAlert): void {
     }
 }
 
+function describeServiceError(error: any): Record<string, any> {
+    return Object.fromEntries(Object.entries({
+        message: error?.message,
+        code: error?.code,
+        status: error?.response?.status,
+        statusText: error?.response?.statusText,
+        response: error?.response?.data,
+    }).filter(([, value]) => value !== undefined && value !== null && value !== ''));
+}
+
 function getRepoRoot(): string {
     const candidates = [
         path.resolve(__dirname, '..', '..'),
@@ -1451,8 +1461,9 @@ app.post('/create-task', async (req, res) => {
             warning: warnings.length ? warnings.join(' | ') : undefined,
         });
     } catch (error: any) {
-        console.error('Error creating ClickUp task:', error.response?.data || error.message);
-        res.status(500).json({ error: 'Failed to create ClickUp task', details: error.message });
+        const errorDetails = describeServiceError(error);
+        console.error('Error creating ClickUp task:', errorDetails.response || errorDetails.message);
+        res.status(500).json({ error: 'Failed to create ClickUp task', details: errorDetails });
     }
 });
 

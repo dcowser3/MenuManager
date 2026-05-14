@@ -101,6 +101,8 @@ Current ClickUp BAU status handoff:
 - Isabella uploads the corrected DOCX in ClickUp and moves the task to `To Do`; that status change downloads the latest DOCX and feeds the learning dashboard
 - When the approved DOCX is processed from any other configured review-complete status, the task is moved to `To Do`; if it is already in `To Do`, the status update is skipped
 - Task due date is taken from the form "Date needed" using noon UTC on that calendar day so ClickUp does not display it one day early in US timezones (plain `YYYY-MM-DD` parsing used to mean UTC midnight)
+- If ClickUp task creation or attachment upload fails after the menu is saved, the submitter warning includes the submission reference so support can match the screenshot to logs, `system_alerts`, and the generated DOCX.
+- Pending submissions that saved successfully but have no `clickup_task_id` can be retried from the review page; retry metadata is kept in `raw_payload.clickup_handoff`.
 
 Browser approval editor prototype:
 - ClickUp tasks now include an approval link to `/approval/:submissionId`

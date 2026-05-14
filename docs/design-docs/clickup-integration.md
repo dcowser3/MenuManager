@@ -18,6 +18,8 @@ When a chef submits a menu, a ClickUp task is automatically created with the gen
 - Stores `clickup_task_id` on the submission record
 - `due_date` is set from the form’s `YYYY-MM-DD` value using **noon UTC** on that calendar day so the task due date matches the chef’s date in US (and most other) timezones; naive `new Date("YYYY-MM-DD")` uses UTC midnight and showed up one day early in ClickUp for Americas users
 - Gracefully skips if ClickUp env vars are not configured (`{ skipped: true }`)
+- If task creation or attachment upload fails after the submission and DOCX are saved, the dashboard response includes `clickup.diagnosticReference` (the submission id) and the submitter warning shows that reference. Internal `clickup_task_failed` alerts include the same reference plus ClickUp service URL, submitter, project/property, generated filename, DOCX path, and structured axios error details.
+- The dashboard records ClickUp handoff metadata under `submissions.raw_payload.clickup_handoff`, including the last create-task payload, last response/error, status, attempt timestamp, and retry count. Pending submissions without a `clickup_task_id` can be retried from `/review/:submissionId`, which rebuilds the create-task payload from the saved submission and stored asset metadata.
 
 ### Task metadata additions
 

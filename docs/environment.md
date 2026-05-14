@@ -62,6 +62,8 @@ Operational failures are logged to the `system_alerts` table in Supabase. When S
 
 Current examples include:
 
+- `clickup_task_failed` from `dashboard` when the saved submission cannot create its ClickUp task; the submitter warning includes the submission reference, and alert details include the same diagnostic reference plus structured service error details
+- `clickup_task_retry_failed` from `dashboard` when a manual retry from the review page still cannot create the ClickUp task
 - `sharepoint_upload_failed` from `clickup-integration` when Microsoft Graph/SharePoint rejects the approved DOCX upload, including `403` permission errors
 - `approved_dish_extraction_failed` from `clickup-integration` when approved-dish extraction fails after approval
 - `clickup_webhook_failed` from `clickup-integration` when webhook processing fails
