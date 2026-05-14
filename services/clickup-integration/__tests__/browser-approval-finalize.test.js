@@ -1,4 +1,8 @@
 process.env.CLICKUP_API_TOKEN = 'test-clickup-token';
+process.env.CLICKUP_LIST_ID = 'list_123';
+process.env.CLICKUP_TEAM_ID = 'team_123';
+process.env.CLICKUP_ASSIGNEE_ID = '114079264';
+process.env.CLICKUP_MARKETING_WATCHER_GROUP_NAME = 'Marketing';
 process.env.CLICKUP_POST_APPROVAL_STATUS = 'to do';
 
 jest.mock('axios', () => {
@@ -120,6 +124,7 @@ function invokeWebhookHandler(handler, { body = {} } = {}) {
 }
 
 describe('browser approval finalize route', () => {
+    const createTaskHandler = getRouteHandler('post', '/create-task');
     const finalizeHandler = getRouteHandler('post', '/approval/finalize');
     const webhookHandler = getRouteHandler('post', '/webhook/clickup');
 
@@ -167,6 +172,69 @@ describe('browser approval finalize route', () => {
 
     afterEach(() => {
         jest.restoreAllMocks();
+    });
+
+    test('creates tasks assigned to Isabella and adds Marketing group members as watchers', async () => {
+        axios.get.mockImplementation(async (url) => {
+            const urlStr = String(url);
+            if (urlStr.includes('https://api.clickup.com/api/v2/group')) {
+                return {
+                    data: {
+                        groups: [
+                            {
+                                id: 'grp_marketing',
+                                name: 'Marketing',
+                                members: [
+                                    { user: { id: 201 } },
+                                    { user: { id: 202 } },
+                                ],
+                            },
+                        ],
+                    },
+                };
+            }
+            return { data: null };
+        });
+        axios.post.mockImplementation(async (url) => {
+            const urlStr = String(url);
+            if (urlStr.includes('https://api.clickup.com/api/v2/list/list_123/task')) {
+                return { data: { id: 'cu_123' } };
+            }
+            return { data: {} };
+        });
+
+        const response = await invokeJsonHandler(createTaskHandler, {
+            body: {
+                submissionId: '',
+                submitterName: 'Chef Test',
+                submitterEmail: 'chef@example.com',
+                projectName: 'Spring Menu',
+                property: 'Toro - Chicago',
+            },
+        });
+
+        expect(response.status).toBe(200);
+        expect(response.body.success).toBe(true);
+        expect(response.body.taskId).toBe('cu_123');
+
+        const createCall = axios.post.mock.calls.find((call) =>
+            String(call[0]).includes('https://api.clickup.com/api/v2/list/list_123/task')
+        );
+        expect(createCall).toBeTruthy();
+        expect(createCall[1].assignees).toEqual([114079264]);
+
+        const groupCall = axios.get.mock.calls.find((call) =>
+            String(call[0]).includes('https://api.clickup.com/api/v2/group?')
+        );
+        expect(groupCall).toBeTruthy();
+        expect(String(groupCall[0])).toContain('team_id=team_123');
+
+        const watcherCall = axios.put.mock.calls.find((call) =>
+            String(call[0]).includes('https://api.clickup.com/api/v2/task/cu_123') &&
+            call[1]?.watchers
+        );
+        expect(watcherCall).toBeTruthy();
+        expect(watcherCall[1]).toEqual({ watchers: { add: [201, 202], rem: [] } });
     });
 
     test('uploads the approved docx back to clickup and moves the task to to do', async () => {

@@ -13,6 +13,8 @@ When a chef submits a menu, a ClickUp task is automatically created with the gen
 - Submission payload includes both `menuType` and `servicePeriod` so ClickUp context matches the original chef request
 - Uploads the generated DOCX as an attachment
 - Uploads optional menu image attachment when provided in the form (`menuImageUpload`)
+- Adds Isabella as the assignee when `CLICKUP_ASSIGNEE_ID` is configured
+- Resolves the configured Marketing ClickUp User Group to its member user IDs and adds those users as task watchers after task creation
 - Stores `clickup_task_id` on the submission record
 - `due_date` is set from the form’s `YYYY-MM-DD` value using **noon UTC** on that calendar day so the task due date matches the chef’s date in US (and most other) timezones; naive `new Date("YYYY-MM-DD")` uses UTC midnight and showed up one day early in ClickUp for Americas users
 - Gracefully skips if ClickUp env vars are not configured (`{ skipped: true }`)
@@ -24,8 +26,11 @@ When a chef submits a menu, a ClickUp task is automatically created with the gen
   - Asset-type-specific detail for `PRINT`, `DIGITAL`, or `BOTH`
   - Print region (`US` / `NON_US`), folded flag, and `A3/A4/A5` size when non-US
   - Critical override audit lines (when present)
-- Description also contains implementation note:
-  - `TODO add Marketing Team as watcher when watcher mapping/API is configured.`
+- ClickUp watcher behavior:
+  - ClickUp's task watcher update accepts user IDs, while ClickUp User Groups are resolved separately through `GET /group?team_id=...`
+  - `CLICKUP_MARKETING_WATCHER_GROUP_NAME` defaults to `Marketing`; `CLICKUP_MARKETING_WATCHER_GROUP_ID` can pin the lookup to one or more group IDs
+  - `CLICKUP_WATCHER_USER_IDS` can add explicit watcher user IDs when group lookup is unavailable
+  - Watcher lookup/update failures are logged and returned as task-creation warnings, but they do not block task creation or DOCX attachment upload
 
 ## Inbound Flow (ClickUp Webhook → Corrections)
 

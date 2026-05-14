@@ -40,6 +40,9 @@ const CLICKUP_WEBHOOK_SECRET = process.env.CLICKUP_WEBHOOK_SECRET;
 const CLICKUP_INITIAL_REVIEW_STATUS = (process.env.CLICKUP_INITIAL_REVIEW_STATUS || 'pending initial isa review').trim();
 const CLICKUP_CORRECTIONS_STATUS = normalizeStatus(process.env.CLICKUP_CORRECTIONS_STATUS || 'to do');
 const CLICKUP_POST_APPROVAL_STATUS = (process.env.CLICKUP_POST_APPROVAL_STATUS || 'to do').trim();
+const CLICKUP_MARKETING_WATCHER_GROUP_NAME = (process.env.CLICKUP_MARKETING_WATCHER_GROUP_NAME || 'Marketing').trim();
+const CLICKUP_MARKETING_WATCHER_GROUP_ID = process.env.CLICKUP_MARKETING_WATCHER_GROUP_ID || '';
+const CLICKUP_WATCHER_USER_IDS = process.env.CLICKUP_WATCHER_USER_IDS || '';
 const CLICKUP_REVIEW_COMPLETE_STATUSES = buildReviewCompleteStatuses();
 const GRAPH_CLIENT_ID = process.env.GRAPH_CLIENT_ID;
 const GRAPH_TENANT_ID = process.env.GRAPH_TENANT_ID;
@@ -121,6 +124,103 @@ const clickupHeaders = {
     Authorization: CLICKUP_API_TOKEN || '',
     'Content-Type': 'application/json',
 };
+
+function parseDelimitedList(value: string | undefined): string[] {
+    return String(value || '')
+        .split(',')
+        .map((item) => item.trim())
+        .filter(Boolean);
+}
+
+function parseClickUpUserIds(value: string | undefined): number[] {
+    return parseDelimitedList(value)
+        .map((item) => Number.parseInt(item, 10))
+        .filter((item) => Number.isInteger(item) && item > 0);
+}
+
+function uniqueNumbers(values: number[]): number[] {
+    return Array.from(new Set(values));
+}
+
+function normalizeClickUpLabel(value: any): string {
+    return String(value || '').trim().toLowerCase();
+}
+
+function clickUpGroupMemberUserId(member: any): number | null {
+    const raw = (typeof member === 'number' || typeof member === 'string')
+        ? member
+        : (member?.user?.id ?? member?.id ?? member?.userid ?? member?.user_id);
+    const parsed = Number.parseInt(String(raw || ''), 10);
+    return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
+function buildClickUpGroupUrl(groupIds: string[]): string {
+    const params = new URLSearchParams();
+    if (CLICKUP_TEAM_ID) {
+        params.set('team_id', CLICKUP_TEAM_ID);
+    }
+    for (const groupId of groupIds) {
+        params.append('group_ids', groupId);
+    }
+    return `https://api.clickup.com/api/v2/group?${params.toString()}`;
+}
+
+async function resolveMarketingWatcherUserIds(): Promise<number[]> {
+    const watcherIds = parseClickUpUserIds(CLICKUP_WATCHER_USER_IDS);
+    const groupIds = parseDelimitedList(CLICKUP_MARKETING_WATCHER_GROUP_ID);
+    const groupName = normalizeClickUpLabel(CLICKUP_MARKETING_WATCHER_GROUP_NAME);
+
+    if (!CLICKUP_TEAM_ID && (groupIds.length || groupName)) {
+        console.warn('CLICKUP_TEAM_ID is required to resolve Marketing watcher group members.');
+        return uniqueNumbers(watcherIds);
+    }
+
+    if (!CLICKUP_TEAM_ID || (!groupIds.length && !groupName)) {
+        return uniqueNumbers(watcherIds);
+    }
+
+    const response = await axios.get(buildClickUpGroupUrl(groupIds), { headers: clickupHeaders });
+    const groups = Array.isArray(response.data?.groups)
+        ? response.data.groups
+        : (Array.isArray(response.data) ? response.data : []);
+
+    const targetGroupIds = new Set(groupIds.map(normalizeClickUpLabel));
+    const matchedGroups = groups.filter((group: any) => {
+        const id = normalizeClickUpLabel(group?.id);
+        const name = normalizeClickUpLabel(group?.name);
+        const handle = normalizeClickUpLabel(group?.handle);
+        return targetGroupIds.has(id) || (groupName && (name === groupName || handle === groupName));
+    });
+
+    if (!matchedGroups.length) {
+        console.warn(`ClickUp watcher group "${CLICKUP_MARKETING_WATCHER_GROUP_NAME}" was not found.`);
+    }
+
+    for (const group of matchedGroups) {
+        const members = Array.isArray(group?.members) ? group.members : [];
+        for (const member of members) {
+            const userId = clickUpGroupMemberUserId(member);
+            if (userId) watcherIds.push(userId);
+        }
+    }
+
+    return uniqueNumbers(watcherIds);
+}
+
+async function addMarketingWatchersToTask(taskId: string): Promise<number> {
+    const watcherIds = await resolveMarketingWatcherUserIds();
+    if (!watcherIds.length) {
+        console.warn('No ClickUp watcher user IDs resolved for Marketing notifications.');
+        return 0;
+    }
+
+    await axios.put(
+        `https://api.clickup.com/api/v2/task/${taskId}`,
+        { watchers: { add: watcherIds, rem: [] } },
+        { headers: clickupHeaders }
+    );
+    return watcherIds.length;
+}
 
 app.use(express.json({
     verify: (req: any, _res, buf) => {
@@ -310,7 +410,7 @@ function buildTaskDescription(input: {
         `- Turnaround: ${input.turnaroundDays || 'N/A'} day(s)`,
         `- Date Needed: ${formatDateNeeded(input.dateNeeded)}`,
         `- Submission Mode: ${input.submissionMode || 'new'}`,
-        '- ClickUp Watchers: TODO add Marketing Team as watcher when watcher mapping/API is configured.'
+        '- ClickUp Watchers: Marketing group members are added automatically when the group is configured.'
     );
 
     if (input.submissionMode === 'modification') {
@@ -1280,6 +1380,17 @@ app.post('/create-task', async (req, res) => {
 
         let attachmentUploadFailed = false;
         const warnings: string[] = [];
+
+        try {
+            const watcherCount = await addMarketingWatchersToTask(taskId);
+            if (watcherCount > 0) {
+                console.log(`Added ${watcherCount} ClickUp watcher(s) to task ${taskId}`);
+            }
+        } catch (watcherError: any) {
+            const errorDetail = watcherError.response?.data?.err || watcherError.message;
+            warnings.push(`Marketing watcher update failed: ${errorDetail}`);
+            console.error(`Failed to add Marketing watchers to ClickUp task ${taskId}:`, errorDetail);
+        }
 
         if (docxPath && fs.existsSync(docxPath)) {
             const uploadFilename = sanitizeAttachmentFilename(

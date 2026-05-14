@@ -1,12 +1,14 @@
 # Design Approval
 
-**Status:** Complete (Updated Mar 2026)
+**Status:** Built, entry point disabled (Updated May 2026)
 
 A comparison tool that validates printed PDF proofs against the approved DOCX source.
 
+The welcome-page card is currently grayed out and labeled "Feature Coming Soon" so users cannot click into the design approval flow from the main entry point. The route and comparison implementation remain in the codebase for future re-enablement or direct internal testing.
+
 ## User Flow
 
-1. User visits `/submit/:token` (welcome page) or navigates directly to `/design-approval`
+1. User navigates directly to `/design-approval` when internal testing is needed
 2. Completes required approvals (`RSH Culinary`, `RSH Regional`)
 3. Chooses DOCX source:
    - Upload local DOCX, or

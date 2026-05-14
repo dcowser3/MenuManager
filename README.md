@@ -97,6 +97,7 @@ services/
 
 Current ClickUp BAU status handoff:
 - New tasks start in `Pending Initial ISA Review`
+- New tasks are assigned through `CLICKUP_ASSIGNEE_ID` (Isabella in production) and add Marketing group members as watchers when the ClickUp group lookup is configured
 - Isabella uploads the corrected DOCX in ClickUp and moves the task to `To Do`; that status change downloads the latest DOCX and feeds the learning dashboard
 - When the approved DOCX is processed from any other configured review-complete status, the task is moved to `To Do`; if it is already in `To Do`, the status update is skipped
 - Task due date is taken from the form "Date needed" using noon UTC on that calendar day so ClickUp does not display it one day early in US timezones (plain `YYYY-MM-DD` parsing used to mean UTC midnight)
@@ -118,6 +119,9 @@ Browser approval editor prototype:
 - Submitting that page uploads the approved DOCX back to the linked ClickUp task and only then leaves/advances the task at `To Do`, matching Isabella's manual handoff flow
 - The dashboard now surfaces a warning when the ClickUp attachment upload or post-approval status move fails, instead of silently finalizing only on the local side
 - Once a menu reaches approved state, the final DOCX is downloadable from `/approved-menus` for Carlos or other operations users
+
+Design approval entry point:
+- The DOCX-vs-PDF design approval tool remains in the codebase, but the welcome-page card is currently disabled and labeled `Feature Coming Soon`.
 
 ## Property Catalog
 

@@ -68,7 +68,7 @@ Submits menu
     `/download/original/:id` plus `/approval/:id` so the browser can download the generated DOCX
     and open the approval editor without sending anything to ClickUp.
     │
-    └─ clickup-integration → ClickUp API: create task + upload DOCX attachment(s)
+    └─ clickup-integration → ClickUp API: create task, assign reviewer, resolve Marketing watchers, upload DOCX attachment(s)
        └─ modification upload mode: attach baseline approved DOCX for Isabella verification
        clickup-integration → PATCH /submissions/:id (db service) — store clickup_task_id
 ```
@@ -102,7 +102,8 @@ For browser approvals, `POST /approval/finalize` mirrors the same operational ha
 ### Design Approval Flow
 
 ```
-User visits /submit/:token (welcome page) or /design-approval directly
+User visits /design-approval directly for internal testing
+  (the welcome-page card is currently disabled as "Feature Coming Soon")
   │
   ▼
 Uploads DOCX template + PDF proof
