@@ -112,7 +112,7 @@ Uploads DOCX template + PDF proof
 dashboard → Python scripts (extract_pdf_text.py, extract_project_details.py)
   │
   ▼
-Comparison: LCS line alignment → word-by-word diff within matched lines
+Comparison: LCS line alignment → shared diff-core token diff within matched lines
   Classifies diffs: price, allergen, diacritical, spelling, missing, extra
   │
   ▼
@@ -122,11 +122,13 @@ User reviews differences, submits approval
 
 ## Dependency Directions
 
-- **dashboard** depends on: db, ai-review, parser, clickup-integration, docx-redliner (Python scripts)
+- **dashboard** depends on: db, ai-review, parser, clickup-integration, docx-redliner (Python scripts), diff-core
 - **clickup-integration** depends on: db, differ, ClickUp API, SMTP server
+- **differ** depends on: diff-core
 - **ai-review** depends on: OpenAI API
 - **db** depends on: Supabase (optional), local JSON files (fallback)
 - **supabase-client** is a shared library used by db service
+- **diff-core** is a shared JavaScript library used by dashboard and differ for tokenization, token equality, LCS alignment, and grouped insert/delete/equal edits.
 
 ## Dashboard Module Notes
 

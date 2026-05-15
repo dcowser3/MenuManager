@@ -1,0 +1,12 @@
+{
+  "name": "@menumanager/diff-core",
+  "version": "1.0.0",
+  "description": "Shared tokenization and LCS diff helpers for Menu Manager",
+  "main": "src/index.js",
+  "types": "src/index.d.ts",
+  "scripts": {
+    "test": "jest"
+  },
+  "dependencies": {},
+  "devDependencies": {}
+}

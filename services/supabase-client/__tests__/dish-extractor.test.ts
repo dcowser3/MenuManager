@@ -112,4 +112,48 @@ describe('approved dish extraction', () => {
         });
         expect(extracted.find((dish) => /crustaceans/i.test(dish.name))).toBeUndefined();
     });
+
+    test('splits comma-delimited dish names from ingredient descriptions', () => {
+        const menuText = [
+            'APPETIZERS',
+            'Punta Mita, prawns, tomato, onion, cilantro C,F,S 95',
+            'Market Salad, avocado, heirloom tomato D,V 70',
+            'Watermelon,Jocoque,pinenut,habanerosa N,V 70',
+            'Ceviche de pescado, catch of the day, green chile F 105',
+            'Venue, Room',
+        ].join('\n');
+
+        const extracted = previewDishExtraction(menuText);
+
+        expect(extracted).toHaveLength(5);
+        expect(extracted[0]).toMatchObject({
+            name: 'Punta Mita',
+            description: 'prawns, tomato, onion, cilantro',
+            allergens: ['C', 'F', 'S'],
+            price: '95',
+            category: 'APPETIZERS',
+        });
+        expect(extracted[1]).toMatchObject({
+            name: 'Market Salad',
+            description: 'avocado, heirloom tomato',
+            allergens: ['D', 'V'],
+            price: '70',
+        });
+        expect(extracted[2]).toMatchObject({
+            name: 'Watermelon',
+            description: 'Jocoque, pinenut, habanerosa',
+            allergens: ['N', 'V'],
+            price: '70',
+        });
+        expect(extracted[3]).toMatchObject({
+            name: 'Ceviche de pescado',
+            description: 'catch of the day, green chile',
+            allergens: ['F'],
+            price: '105',
+        });
+        expect(extracted[4]).toMatchObject({
+            name: 'Venue, Room',
+            description: undefined,
+        });
+    });
 });

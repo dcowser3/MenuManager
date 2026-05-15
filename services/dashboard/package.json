@@ -10,6 +10,7 @@
     "watch": "ts-node-dev --respawn --transpile-only --clear index.ts"
   },
   "dependencies": {
+    "@menumanager/diff-core": "*",
     "@menumanager/internal-auth": "*",
     "@menumanager/supabase-client": "*",
     "axios": "^1.6.2",

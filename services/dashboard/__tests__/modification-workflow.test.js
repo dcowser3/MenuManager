@@ -45,6 +45,7 @@ jest.mock('@menumanager/supabase-client', () => ({
 const axios = require('axios').default;
 const fs = require('fs');
 const path = require('path');
+const { logAlert } = require('@menumanager/supabase-client');
 const app = require('../index').default;
 const mockedAxios = axios;
 
@@ -132,6 +133,7 @@ describe('Dashboard Modification Workflow (local, mocked externals)', () => {
         fs.promises.readFile.mockClear();
         fs.promises.readdir.mockClear();
         fs.promises.readFile.mockResolvedValue('');
+        logAlert.mockClear();
 
         mockedAxios.post = jest.fn(async (url, payload) => {
             const urlStr = String(url);
@@ -365,6 +367,42 @@ describe('Dashboard Modification Workflow (local, mocked externals)', () => {
         expect(productionResponse.body.localTesting).toBeUndefined();
         expect(remoteResponse.status).toBe(200);
         expect(remoteResponse.body.localTesting).toBeUndefined();
+    });
+
+    test('returns a submission reference and logs diagnostics when ClickUp task creation fails', async () => {
+        const defaultPost = mockedAxios.post;
+        mockedAxios.post = jest.fn(async (url, payload) => {
+            if (String(url).includes('/create-task')) {
+                const error = new Error('Request failed with status code 500');
+                error.code = 'ERR_BAD_RESPONSE';
+                error.response = {
+                    status: 500,
+                    statusText: 'Internal Server Error',
+                    data: { error: 'Failed to create ClickUp task', details: 'ClickUp timeout' },
+                };
+                throw error;
+            }
+            return defaultPost(url, payload);
+        });
+
+        const response = await invokeJsonHandler(
+            submitHandler,
+            buildNewSubmissionPayload({ projectName: 'ClickUp Failure Project' }),
+            { headers: { host: 'sandovalhospitalitymenumanager.live' } }
+        );
+
+        expect(response.status).toBe(200);
+        expect(response.body.success).toBe(true);
+        expect(response.body.clickup.taskId).toBeUndefined();
+        expect(response.body.clickup.diagnosticReference).toBe(response.body.submissionId);
+        expect(response.body.clickup.warning).toContain(`Reference: ${response.body.submissionId}`);
+
+        const clickupAlert = logAlert.mock.calls.find(([alert]) => alert.alert_type === 'clickup_task_failed');
+        expect(clickupAlert).toBeTruthy();
+        expect(clickupAlert[0].submission_id).toBe(response.body.submissionId);
+        expect(clickupAlert[0].details.diagnosticReference).toBe(response.body.submissionId);
+        expect(clickupAlert[0].details.error.status).toBe(500);
+        expect(clickupAlert[0].details.error.response.details).toBe('ClickUp timeout');
     });
 
     test('accepts modification submission using uploaded baseline and forwards baseline file to clickup payload', async () => {

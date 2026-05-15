@@ -305,7 +305,48 @@ function splitNameAndDescription(line: string): { name: string; description?: st
         }
     }
 
+    const commaSplit = splitCommaDelimitedNameAndDescription(line);
+    if (commaSplit) {
+        return commaSplit;
+    }
+
     return { name: line.trim() };
+}
+
+function splitCommaDelimitedNameAndDescription(line: string): { name: string; description: string } | null {
+    const separatorIndex = line.indexOf(',');
+    if (separatorIndex <= 0) {
+        return null;
+    }
+
+    const name = line.slice(0, separatorIndex).trim();
+    const description = line.slice(separatorIndex + 1).trim().replace(/\s*,\s*/g, ', ');
+    if (name.length < 3 || name.length > 80 || description.length < 5 || description.length > 200) {
+        return null;
+    }
+
+    const nameWords = name.split(/\s+/).filter(Boolean);
+    if (nameWords.length > 8 || /[,|/]/.test(name)) {
+        return null;
+    }
+
+    const hasIngredientListDelimiter = /[,/]/.test(description);
+    const startsLikeIngredient = /^[a-zà-ÿ]/.test(description);
+    const hasIngredientPhrase = /\b(?:with|served|catch|avocado|tomato|onion|cilantro|pepper|cheese|rice|beans|salsa|crema|prawns?|fish|tuna|chicken|pork|beef|watermelon|jocoque)\b/i.test(description);
+    const isShortTitlePair = /^[A-Z][A-Za-zÀ-ÿ'’-]*(?:\s+[A-Z][A-Za-zÀ-ÿ'’-]*)?$/.test(description);
+
+    if (isShortTitlePair && !hasIngredientListDelimiter && !startsLikeIngredient && !hasIngredientPhrase) {
+        return null;
+    }
+
+    if (!startsLikeIngredient && !hasIngredientListDelimiter && !hasIngredientPhrase) {
+        return null;
+    }
+
+    return {
+        name,
+        description,
+    };
 }
 
 /**

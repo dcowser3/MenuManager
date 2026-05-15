@@ -4,6 +4,8 @@
 #   - Includes ts-node-dev so services can hot-reload from bind-mounted source.
 #   - Builds shared libs (internal-auth, supabase-client) so their dist/index.js
 #     resolves at runtime even though consuming services run via ts-node-dev.
+#   - Includes shared JS libs (diff-core) so workspace imports and browser-served
+#     helper files resolve inside service containers.
 #   - Does NOT bake service source into the image — compose bind-mounts it.
 
 FROM node:18-bookworm-slim
@@ -27,6 +29,7 @@ RUN apt-get update \
 COPY package.json package-lock.json tsconfig.json jest.config.js ./
 COPY services/internal-auth/package.json ./services/internal-auth/
 COPY services/supabase-client/package.json ./services/supabase-client/
+COPY services/diff-core/package.json ./services/diff-core/
 COPY services/parser/package.json ./services/parser/
 COPY services/ai-review/package.json ./services/ai-review/
 COPY services/notifier/package.json ./services/notifier/
@@ -40,6 +43,7 @@ RUN npm ci --include=dev
 # 2. Build the shared TS libraries so consumers can import @menumanager/*.
 COPY services/internal-auth ./services/internal-auth
 COPY services/supabase-client ./services/supabase-client
+COPY services/diff-core ./services/diff-core
 RUN cd services/supabase-client && npx tsc \
     && cd ../internal-auth && npx tsc
 

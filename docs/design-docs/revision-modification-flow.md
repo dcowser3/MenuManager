@@ -122,6 +122,7 @@ When chef uses uploaded baseline flow:
 
 - The uploaded prior approved DOCX is attached to the ClickUp task.
 - This gives Isabella direct visibility to verify the baseline version submitted by chef.
+- The persistent preview receives the extracted baseline HTML, and `@menumanager/diff-core` maps text offsets back to rich HTML ranges so unchanged/deleted tokens keep baseline inline styles such as bold and italic.
 
 ## Approval Editor Source Reuse
 
@@ -154,6 +155,7 @@ When a chef uploads an unapproved DOCX:
    - Strips managed footer paragraphs from uploaded baseline/unapproved HTML before building the editable/diff baseline, while retaining preserved footer text separately for submission.
    - `renderPersistentPreview()` uses annotation ranges to wrap unchanged tokens in `existing-del`/`existing-ins` spans; new changes get `persistent-del`/`persistent-ins` as usual.
    - Annotation wrapping splits tokens at imported redline boundaries, so adjacent DOCX deletion/insertion runs such as `neapolitan` + `Neapolitan` remain separately styled after a later live edit.
+   - Tokenization, token equality, and LCS alignment come from `@menumanager/diff-core`, the same shared helper package used by the backend differ service.
    - Runs the AI check in full-review mode for uploaded unapproved DOCX content, while approved-baseline modification flows keep changed-only review.
    - The preview diff tokenizes punctuation and separators separately so ingredient-separator edits are visible in the persistent redline.
    - Extracted Date Needed values only apply when they are valid `YYYY-MM-DD` values; otherwise the read-only Date Needed field remains at the turnaround-derived minimum date.

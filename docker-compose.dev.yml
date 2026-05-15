@@ -40,6 +40,7 @@ x-base-env: &base-env
   CLICKUP_SERVICE_URL: http://clickup-integration:3007
   DASHBOARD_URL: http://localhost:3005
   DOCUMENT_STORAGE_ROOT: /app/tmp/documents
+  LEARNING_DATA_DIR: /app/tmp/learning
 
 services:
   db:

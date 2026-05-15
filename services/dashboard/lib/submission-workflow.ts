@@ -608,6 +608,7 @@ export function createSubmissionWorkflowHandlers(deps: SubmissionWorkflowDeps) {
                 clickup: {
                     taskId: clickupTaskId,
                     warning: clickupWarning,
+                    diagnosticReference: clickupDiagnosticReference,
                 },
                 localTesting,
             });

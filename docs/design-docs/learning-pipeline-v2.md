@@ -309,6 +309,7 @@ Since v1 data is minimal (the system is new), migration is straightforward:
 - Location-specific rules table (now reads from Supabase)
 
 **Add:**
+- **Per-submission cleanup:** each recent learned submission has a delete action for removing known test rows from differ history. The dashboard calls `DELETE /api/learning/submissions/:submissionId`, which proxies to the differ service, removes matching JSONL entries plus the detail comparison file, and rebuilds the detected-pattern snapshot.
 - **"Proposed Rules"** section: system-detected patterns awaiting review
   - Accept / Reject / Modify buttons per rule
   - Bulk accept/reject
@@ -318,6 +319,10 @@ Since v1 data is minimal (the system is new), migration is straightforward:
   - Approve / Edit & Approve / Reject buttons
   - History of past proposals with status
 - **Stats:** Corrections this week, rules pending review, last prompt update date
+
+### Learning Data Storage
+
+The differ service stores comparison history under `LEARNING_DATA_DIR` when set, otherwise under the repository-root `tmp/learning` directory. This keeps TypeScript dev runs and compiled production runs pointed at the same logical location. Production deployments that mount persistent storage should set `LEARNING_DATA_DIR` to the mounted learning-data path.
 
 ### Submission Detail (`/learning/submission/:submissionId`)
 

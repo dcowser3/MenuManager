@@ -500,6 +500,10 @@ const upload = multer({
 });
 
 // Serve static files and use EJS for templates
+app.get('/js/diff-core.js', (_req, res) => {
+    res.type('application/javascript');
+    res.sendFile(path.join(getRepoRoot(), 'services', 'diff-core', 'src', 'index.js'));
+});
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
@@ -1353,6 +1357,20 @@ app.put('/api/learning/correction-rules/:id', async (req, res) => {
     } catch (error: any) {
         console.error('Error updating correction rule:', error.message);
         res.status(error?.response?.status || 500).json(error?.response?.data || { error: 'Failed to update correction rule' });
+    }
+});
+
+/**
+ * Learning submissions: delete one differ training entry and its comparison detail.
+ */
+app.delete('/api/learning/submissions/:submissionId', async (req, res) => {
+    try {
+        const { submissionId } = req.params;
+        const response = await internalApi.delete(`${DIFFER_SERVICE_URL}/learning/submissions/${encodeURIComponent(submissionId)}`, { timeout: 3500 });
+        res.json(response.data);
+    } catch (error: any) {
+        console.error('Error deleting learning submission:', error.message);
+        res.status(error?.response?.status || 500).json(error?.response?.data || { error: 'Failed to delete learning submission' });
     }
 });
 

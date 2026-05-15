@@ -212,6 +212,7 @@ Useful flag:
 
 Expected parser behavior:
 - menu rows like `Guacamole - fresh avocado / lime / cilantro D,G 12` should preview as `dish_name=Guacamole`, `description=fresh avocado / lime / cilantro`, `allergens=["D","G"]`, `price=12`
+- comma-delimited rows like `Punta Mita, prawns, tomato, onion C,F,S 95` should preview as `dish_name=Punta Mita`, `description=prawns, tomato, onion`, `allergens=["C","F","S"]`, `price=95`
 - footer blocks such as `ALLERGEN KEY`, pipe-delimited allergen legends, and the `consuming raw or undercooked...` warning should not appear in `preview`
 
 ## Service Startup Dependencies
@@ -221,4 +222,5 @@ Expected parser behavior:
 - **Docker test config:** The dev image copies root `jest.config.js` during build. After changing root test dependencies or Jest config, run `./dev-up.sh --rebuild` so `npm test` inside containers uses the updated package graph and config.
 - **docx-redliner venv:** Node services shell out to `services/docx-redliner/venv/bin/python`. The venv must exist and have `python-docx`, `PyMuPDF`, `openai`, `python-dotenv`, `diff-match-patch` installed. `requirements.txt` is the source of truth.
 - **start-services.sh port order:** db (3004), parser (3001), ai-review (3002), dashboard (3005), differ (3006), clickup (3007). Note docx-redliner is NOT started as a service — node invokes its Python scripts as subprocesses.
+- **Shared workspace packages in Docker:** new shared packages such as `diff-core` must be included in `docker/Dockerfile.dev` before `npm ci`; otherwise dev containers may fail to resolve `@menumanager/*` imports or browser-served helper files until `./dev-up.sh --rebuild`.
 - **stop-services.sh port coverage:** Fallback kill covers 3000–3008. If you add a service on a new port, update it.

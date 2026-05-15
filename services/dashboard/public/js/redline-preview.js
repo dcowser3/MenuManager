@@ -1,4 +1,24 @@
 (function (global) {
+    const diffCore = (function () {
+        if (global.MenuDiffCore) return global.MenuDiffCore;
+        if (typeof require === 'function') {
+            try {
+                return require('@menumanager/diff-core');
+            } catch (err) {
+                return require('../../../diff-core/src');
+            }
+        }
+        return null;
+    })();
+
+    if (!diffCore) {
+        throw new Error('MenuDiffCore must be loaded before redline-preview.js');
+    }
+
+    const tokenizeDiffText = diffCore.tokenizeDiffText;
+    const diffTokensEqual = diffCore.diffTokensEqual;
+    const buildTokenLcs = diffCore.buildTokenLcs;
+
     function escapeHtml(text) {
         const div = (global.document && global.document.createElement)
             ? global.document.createElement('div')
@@ -50,80 +70,6 @@
         }
 
         return normalizeExtractedLines(lines);
-    }
-
-    function normalizeDiffTokenValue(value) {
-        const normalized = (value || '').normalize('NFC').replace(/[\u2018\u2019`]/g, "'");
-        if (/^\s+$/.test(normalized)) return ' ';
-        return normalized;
-    }
-
-    function getDiffTokenType(value) {
-        if (/^\s+$/u.test(value)) return 'whitespace';
-        if (/^[\p{L}\p{N}]+(?:['’`][\p{L}\p{N}]+)*$/u.test(value)) return 'word';
-        if (/^[-,./|:]$/u.test(value)) return 'separator';
-        return 'punctuation';
-    }
-
-    function tokenizeDiffText(text) {
-        const source = text || '';
-        const tokenPattern = /\s+|[\p{L}\p{N}]+(?:['’`][\p{L}\p{N}]+)*|[^\s]/gu;
-        const tokens = [];
-        let match;
-
-        while ((match = tokenPattern.exec(source)) !== null) {
-            const value = match[0];
-            tokens.push({
-                value,
-                start: match.index,
-                end: match.index + value.length,
-                type: getDiffTokenType(value),
-                normalized: normalizeDiffTokenValue(value)
-            });
-        }
-
-        return tokens;
-    }
-
-    function diffTokensEqual(left, right) {
-        if (!left || !right) return false;
-        return left.normalized === right.normalized;
-    }
-
-    function buildTokenLcs(baseTokens, revisedTokens) {
-        const m = baseTokens.length;
-        const n = revisedTokens.length;
-        const dp = Array(m + 1).fill(null).map(() => Array(n + 1).fill(0));
-
-        for (let i = m - 1; i >= 0; i--) {
-            for (let j = n - 1; j >= 0; j--) {
-                if (diffTokensEqual(baseTokens[i], revisedTokens[j])) {
-                    dp[i][j] = dp[i + 1][j + 1] + 1;
-                } else {
-                    dp[i][j] = Math.max(dp[i + 1][j], dp[i][j + 1]);
-                }
-            }
-        }
-
-        const commonBase = new Set();
-        const commonRev = new Set();
-        let i = 0;
-        let j = 0;
-
-        while (i < m && j < n) {
-            if (diffTokensEqual(baseTokens[i], revisedTokens[j])) {
-                commonBase.add(i);
-                commonRev.add(j);
-                i++;
-                j++;
-            } else if (dp[i + 1][j] >= dp[i][j + 1]) {
-                i++;
-            } else {
-                j++;
-            }
-        }
-
-        return { commonBase, commonRev };
     }
 
     function buildAnnotationMapFromParagraphAnnotations(baseText, annotations) {
@@ -395,11 +341,22 @@
     var baselineStyleCache = { html: '', text: '', index: null };
 
     function getStyleIndexForBaseline(baselineHtml, baseText) {
-        if (!baselineHtml || baseText == null || !global.document) {
+        if (!baselineHtml || baseText == null) {
             return null;
         }
         if (baselineStyleCache.html === baselineHtml && baselineStyleCache.text === baseText && baselineStyleCache.index) {
             return baselineStyleCache.index;
+        }
+        if (diffCore.createRichTextIndexFromHtml) {
+            var richIdx = diffCore.createRichTextIndexFromHtml(baselineHtml);
+            if (richIdx && richIdx.plain === baseText) {
+                baselineStyleCache = { html: baselineHtml, text: baseText, index: richIdx };
+                return richIdx;
+            }
+        }
+        if (!global.document) {
+            baselineStyleCache = { html: baselineHtml, text: baseText, index: null };
+            return null;
         }
         const wrap = global.document.createElement('div');
         wrap.innerHTML = baselineHtml;
@@ -415,6 +372,10 @@
     function cloneRangeHtml(entries, start, end, fallbackText) {
         if (!entries || start >= end || start < 0 || end > entries.length) {
             return escapeHtml(fallbackText || '');
+        }
+
+        if (entries._richHtml && diffCore.renderRichTextRange) {
+            return diffCore.renderRichTextRange(entries, start, end, fallbackText || '');
         }
 
         var doc = global.document;
