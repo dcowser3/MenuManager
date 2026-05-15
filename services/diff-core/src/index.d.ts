@@ -38,3 +38,4 @@ export function buildTokenLcs(baseTokens: DiffToken[], revisedTokens: DiffToken[
 export function buildTokenEdits(baseTokens: DiffToken[], revisedTokens: DiffToken[]): DiffEdit[];
 export function createRichTextIndexFromHtml(html: string): RichTextIndex;
 export function renderRichTextRange(entries: RichTextIndexEntry[], start: number, end: number, fallbackText?: string): string;
+export function projectRichTextHtml(sourceHtml: string, targetText: string): string;

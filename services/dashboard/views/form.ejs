@@ -4406,6 +4406,56 @@
             return redlinePreview.buildTokenLcs(baseTokens, revisedTokens);
         }
 
+        function normalizeTextForStyleMatch(text) {
+            return (text || '').replace(/\u00A0/g, ' ').replace(/\r\n?/g, '\n').trim();
+        }
+
+        function stripAiReviewTransientFormatting(html) {
+            if (!html || !document || !document.createElement) return html || '';
+            const wrap = document.createElement('div');
+            wrap.innerHTML = html;
+            wrap.querySelectorAll('span[style]').forEach((span) => {
+                const style = (span.getAttribute('style') || '').toLowerCase();
+                if (!style.includes('background')) return;
+                const fragment = document.createDocumentFragment();
+                while (span.firstChild) {
+                    fragment.appendChild(span.firstChild);
+                }
+                span.replaceWith(fragment);
+            });
+            return wrap.innerHTML;
+        }
+
+        function getCurrentRichMenuHtmlForText(text) {
+            const target = normalizeTextForStyleMatch(text);
+            const reviewedArea = document.getElementById('reviewedContentArea');
+            if (reviewedArea && reviewedArea.innerHTML && normalizeTextForStyleMatch(extractCleanTextFromReviewedArea(reviewedArea)) === target) {
+                return stripAiReviewTransientFormatting(reviewedArea.innerHTML);
+            }
+            if (quill && quill.root && normalizeTextForStyleMatch(quill.getText()) === target) {
+                return stripAiReviewTransientFormatting(quill.root.innerHTML);
+            }
+            return '';
+        }
+
+        function htmlLinesToParagraphs(html) {
+            return (html || '')
+                .split(/<br\s*\/?>/i)
+                .map((lineHtml) => `<p>${lineHtml || '<br>'}</p>`)
+                .join('');
+        }
+
+        function setQuillReviewedHtmlFromText(text, sourceHtml) {
+            const projectedHtml = sourceHtml && redlinePreview.projectRichTextHtml
+                ? redlinePreview.projectRichTextHtml(sourceHtml, text)
+                : '';
+            if (projectedHtml && quill && quill.clipboard) {
+                quill.clipboard.dangerouslyPasteHTML(htmlLinesToParagraphs(projectedHtml));
+            } else {
+                quill.setText(text);
+            }
+        }
+
         function computeLineDiff(original, corrected) {
             const revisedTokens = tokenizeDiffText(corrected);
             const baseTokens = tokenizeDiffText(original);
@@ -4707,7 +4757,8 @@
             const hasChanges = results.hasChanges;
 
             const correctedDisplayText = preserveMenuStructure(originalText, correctedText);
-            quill.setText(correctedDisplayText);
+            const sourceRichHtml = getCurrentRichMenuHtmlForText(originalText);
+            setQuillReviewedHtmlFromText(correctedDisplayText, sourceRichHtml);
             applyHeadingFormatting(originalText, correctedDisplayText);
 
             if (hasChanges) {

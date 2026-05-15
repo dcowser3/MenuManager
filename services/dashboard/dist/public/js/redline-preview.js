@@ -18,6 +18,7 @@
     const tokenizeDiffText = diffCore.tokenizeDiffText;
     const diffTokensEqual = diffCore.diffTokensEqual;
     const buildTokenLcs = diffCore.buildTokenLcs;
+    const projectRichTextHtml = diffCore.projectRichTextHtml;
 
     function escapeHtml(text) {
         const div = (global.document && global.document.createElement)
@@ -571,6 +572,7 @@
         tokenizeDiffText,
         diffTokensEqual,
         buildTokenLcs,
+        projectRichTextHtml,
         buildAnnotationMapFromParagraphAnnotations,
         buildAnnotationMapFromDOM,
         buildAnnotationMapFromHtml,

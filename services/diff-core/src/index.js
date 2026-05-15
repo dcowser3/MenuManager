@@ -356,6 +356,75 @@
         return html;
     }
 
+    function buildCommonTokenPairs(baseTokens, revisedTokens) {
+        const lcs = buildTokenLcs(baseTokens, revisedTokens);
+        const pairs = [];
+        let i = 0;
+        let j = 0;
+
+        while (i < baseTokens.length && j < revisedTokens.length) {
+            if (
+                lcs.commonBase.has(i) &&
+                lcs.commonRev.has(j) &&
+                diffTokensEqual(baseTokens[i], revisedTokens[j])
+            ) {
+                pairs.push({ baseIndex: i, revisedIndex: j });
+                i++;
+                j++;
+                continue;
+            }
+
+            if (i < baseTokens.length && !lcs.commonBase.has(i)) {
+                i++;
+                continue;
+            }
+            if (j < revisedTokens.length && !lcs.commonRev.has(j)) {
+                j++;
+                continue;
+            }
+
+            i++;
+            j++;
+        }
+
+        return pairs;
+    }
+
+    function projectRichTextHtml(sourceHtml, targetText) {
+        const sourceIndex = createRichTextIndexFromHtml(sourceHtml || '');
+        const sourceText = sourceIndex.plain || '';
+        const revised = String(targetText || '');
+
+        if (!sourceText || !sourceIndex.entries || !sourceIndex.entries.length) {
+            return escapeHtml(revised);
+        }
+
+        const sourceTokens = tokenizeDiffText(sourceText);
+        const targetTokens = tokenizeDiffText(revised);
+        const sourceByTargetIndex = new Map();
+
+        buildCommonTokenPairs(sourceTokens, targetTokens).forEach(function (pair) {
+            sourceByTargetIndex.set(pair.revisedIndex, sourceTokens[pair.baseIndex]);
+        });
+
+        let html = '';
+        targetTokens.forEach(function (targetToken, targetIndex) {
+            const sourceToken = sourceByTargetIndex.get(targetIndex);
+            if (sourceToken) {
+                html += renderRichTextRange(
+                    sourceIndex.entries,
+                    sourceToken.start,
+                    sourceToken.end,
+                    targetToken.value
+                );
+            } else {
+                html += escapeHtml(targetToken.value);
+            }
+        });
+
+        return html;
+    }
+
     const api = {
         normalizeDiffTokenValue,
         getDiffTokenType,
@@ -365,7 +434,8 @@
         buildTokenLcs,
         buildTokenEdits,
         createRichTextIndexFromHtml,
-        renderRichTextRange
+        renderRichTextRange,
+        projectRichTextHtml
     };
 
     if (typeof module !== 'undefined' && module.exports) {

@@ -128,7 +128,7 @@ User reviews differences, submits approval
 - **ai-review** depends on: OpenAI API
 - **db** depends on: Supabase (optional), local JSON files (fallback)
 - **supabase-client** is a shared library used by db service
-- **diff-core** is a shared JavaScript library used by dashboard and differ for tokenization, token equality, LCS alignment, and grouped insert/delete/equal edits.
+- **diff-core** is a shared JavaScript library used by dashboard and differ for tokenization, token equality, LCS alignment, grouped insert/delete/equal edits, and projecting inline HTML formatting onto corrected menu text.
 
 ## Dashboard Module Notes
 

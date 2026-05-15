@@ -50,4 +50,23 @@ describe('diff core', () => {
         expect(diffCore.renderRichTextRange(index.entries, start, end, 'Guacamole Traditional'))
             .toBe('<strong>Guacamole Traditional</strong>');
     });
+
+    test('projects source inline formatting onto corrected menu text', () => {
+        const sourceHtml = [
+            '<p><strong>COLD STARTERS</strong></p>',
+            '<p><strong>Guacamole Traditional</strong>, avocado, tomato, lime V 85</p>',
+            '<p><strong>Market Salad</strong>, avocado, heirloom tomatoes V 70</p>',
+        ].join('');
+        const correctedText = [
+            'COLD STARTERS',
+            'Guacamole Traditional, avocado, tomato, lime V 95',
+            'Market Salad, avocado, heirloom tomatoes V 70',
+        ].join('\n');
+
+        const html = diffCore.projectRichTextHtml(sourceHtml, correctedText);
+
+        expect(html).toContain('<strong>Guacamole</strong><strong> </strong><strong>Traditional</strong>');
+        expect(html).toContain('<strong>Market</strong><strong> </strong><strong>Salad</strong>');
+        expect(html).toContain('lime V 95');
+    });
 });
