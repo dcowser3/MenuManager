@@ -63,6 +63,7 @@ services:
     env_file: .env
     environment:
       - NODE_ENV=production
+      - LEARNING_DATA_DIR=/app/tmp/learning
     ports:
       - "3006:3006"
     depends_on:

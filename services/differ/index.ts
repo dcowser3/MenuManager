@@ -8,6 +8,14 @@ import { promisify } from 'util';
 import dotenv = require('dotenv');
 import { getSupabaseClient, isSupabaseConfigured } from '@menumanager/supabase-client';
 import { requireInternalServiceAuth } from '@menumanager/internal-auth';
+import { deleteLearningSubmissionFromFiles } from './lib/learning-store';
+import {
+    DiffEdit,
+    DiffToken,
+    buildTokenEdits,
+    tokenizeDiffText,
+    tokenizeWords,
+} from '@menumanager/diff-core';
 
 dotenv.config({ path: path.join(__dirname, '..', '..', '..', '.env') });
 
@@ -15,7 +23,7 @@ const app = express();
 const port = 3006;
 const execAsync = promisify(exec);
 
-const DIFFERENCES_DIR = path.join(__dirname, '..', '..', '..', 'tmp', 'learning');
+const DIFFERENCES_DIR = process.env.LEARNING_DATA_DIR || path.join(getRepoRoot(), 'tmp', 'learning');
 const TRAINING_DATA_FILE = path.join(DIFFERENCES_DIR, 'training_data.jsonl');
 const LEARNED_RULES_FILE = path.join(DIFFERENCES_DIR, 'learned_rules.json');
 const RULE_OVERRIDES_FILE = path.join(DIFFERENCES_DIR, 'rule_overrides.json');
@@ -373,6 +381,28 @@ app.get('/learning/submissions', async (_req, res) => {
     }
 });
 
+app.delete('/learning/submissions/:submissionId', async (req, res) => {
+    try {
+        const result = await deleteLearningSubmission(req.params.submissionId);
+
+        if (result.deleted_entries === 0 && !result.deleted_detail_file) {
+            return res.status(404).json({
+                error: 'Submission not found in learning data',
+                submission_id: result.submission_id,
+            });
+        }
+
+        res.json({
+            success: true,
+            ...result,
+        });
+    } catch (error: any) {
+        const status = error?.code === 'INVALID_SUBMISSION_ID' ? 400 : 500;
+        console.error('Error deleting learning submission:', error.message);
+        res.status(status).json({ error: error.message || 'Failed to delete learning submission' });
+    }
+});
+
 app.get('/learning/submissions/:submissionId', async (req, res) => {
     try {
         const submissionId = `${req.params.submissionId || ''}`.trim();
@@ -695,8 +725,8 @@ function normalizeLine(line: string): string {
 }
 
 function linesLikelySameContext(beforeLine: string, afterLine: string): boolean {
-    const beforeTokens = tokenize(beforeLine).map((t) => normalizeToken(stripDiacritics(t))).filter(Boolean);
-    const afterTokens = tokenize(afterLine).map((t) => normalizeToken(stripDiacritics(t))).filter(Boolean);
+    const beforeTokens = tokenizeWords(beforeLine).map((t) => normalizeToken(stripDiacritics(t))).filter(Boolean);
+    const afterTokens = tokenizeWords(afterLine).map((t) => normalizeToken(stripDiacritics(t))).filter(Boolean);
     if (!beforeTokens.length || !afterTokens.length) return false;
 
     const beforeSet = new Set(beforeTokens);
@@ -709,10 +739,10 @@ function linesLikelySameContext(beforeLine: string, afterLine: string): boolean 
 }
 
 function extractLineReplacements(before: string, after: string, lineIndex: number): ReplacementSignal[] {
-    const beforeTokens = tokenize(before);
-    const afterTokens = tokenize(after);
+    const beforeTokens = tokenizeWords(before);
+    const afterTokens = tokenizeWords(after);
 
-    const edits = diffTokens(beforeTokens, afterTokens);
+    const edits = buildTokenEditsFromWords(beforeTokens, afterTokens);
     const replacements: ReplacementSignal[] = [];
 
     for (let i = 0; i < edits.length; i += 1) {
@@ -724,8 +754,8 @@ function extractLineReplacements(before: string, after: string, lineIndex: numbe
 
         const pairCount = Math.min(current.tokens.length, next.tokens.length);
         for (let j = 0; j < pairCount; j += 1) {
-            const from = current.tokens[j];
-            const to = next.tokens[j];
+            const from = current.tokens[j].value;
+            const to = next.tokens[j].value;
             if (!isHighSignalReplacement(from, to)) continue;
 
             const kind = classifyReplacementKind(from, to);
@@ -744,69 +774,21 @@ function extractLineReplacements(before: string, after: string, lineIndex: numbe
     return replacements;
 }
 
-function tokenize(line: string): string[] {
-    const matches = line.match(/[\p{L}\p{N}]+(?:[’'`-][\p{L}\p{N}]+)*/gu);
-    return matches || [];
+function buildTokenEditsFromWords(beforeTokens: string[], afterTokens: string[]): DiffEdit[] {
+    return buildTokenEdits(
+        beforeTokens.map((value, idx) => wordToDiffToken(value, idx)),
+        afterTokens.map((value, idx) => wordToDiffToken(value, idx))
+    );
 }
 
-type DiffEdit = { type: 'equal' | 'delete' | 'insert'; tokens: string[] };
-
-function diffTokens(before: string[], after: string[]): DiffEdit[] {
-    // Normalize only punctuation (quotes/apostrophes), NOT case — so that
-    // capitalization changes like "meyer" → "Meyer" are detected as edits.
-    const normForDiff = (t: string) => (t || '').replace(/[''`]/g, "'").trim();
-    const beforeNorm = before.map(normForDiff);
-    const afterNorm = after.map(normForDiff);
-    const m = beforeNorm.length;
-    const n = afterNorm.length;
-
-    const dp: number[][] = Array.from({ length: m + 1 }, () => Array(n + 1).fill(0));
-    for (let i = m - 1; i >= 0; i -= 1) {
-        for (let j = n - 1; j >= 0; j -= 1) {
-            if (beforeNorm[i] === afterNorm[j]) {
-                dp[i][j] = dp[i + 1][j + 1] + 1;
-            } else {
-                dp[i][j] = Math.max(dp[i + 1][j], dp[i][j + 1]);
-            }
-        }
-    }
-
-    const edits: DiffEdit[] = [];
-    let i = 0;
-    let j = 0;
-    while (i < m && j < n) {
-        if (beforeNorm[i] === afterNorm[j]) {
-            pushEdit(edits, 'equal', before[i]);
-            i += 1;
-            j += 1;
-        } else if (dp[i + 1][j] >= dp[i][j + 1]) {
-            pushEdit(edits, 'delete', before[i]);
-            i += 1;
-        } else {
-            pushEdit(edits, 'insert', after[j]);
-            j += 1;
-        }
-    }
-
-    while (i < m) {
-        pushEdit(edits, 'delete', before[i]);
-        i += 1;
-    }
-    while (j < n) {
-        pushEdit(edits, 'insert', after[j]);
-        j += 1;
-    }
-
-    return edits;
-}
-
-function pushEdit(edits: DiffEdit[], type: DiffEdit['type'], token: string): void {
-    const last = edits[edits.length - 1];
-    if (last && last.type === type) {
-        last.tokens.push(token);
-        return;
-    }
-    edits.push({ type, tokens: [token] });
+function wordToDiffToken(value: string, idx: number): DiffToken {
+    return {
+        value,
+        start: idx,
+        end: idx + value.length,
+        type: 'word',
+        normalized: value.replace(/[\u2018\u2019`]/g, "'").trim(),
+    };
 }
 
 function normalizeToken(token: string): string {
@@ -966,14 +948,11 @@ function escapeHtml(text: string): string {
 }
 
 function buildInlineDiffHtml(beforeLine: string, afterLine: string): string {
-    const beforeTokens = tokenizeWithWhitespace(beforeLine);
-    const afterTokens = tokenizeWithWhitespace(afterLine);
-
-    const edits = diffTokensFull(beforeTokens, afterTokens);
+    const edits = buildTokenEdits(tokenizeDiffText(beforeLine), tokenizeDiffText(afterLine));
     const parts: string[] = [];
 
     for (const edit of edits) {
-        const text = escapeHtml(edit.tokens.join(''));
+        const text = escapeHtml(edit.tokens.map((token) => token.value).join(''));
         if (edit.type === 'equal') {
             parts.push(text);
         } else if (edit.type === 'delete') {
@@ -983,60 +962,6 @@ function buildInlineDiffHtml(beforeLine: string, afterLine: string): string {
         }
     }
     return parts.join('');
-}
-
-/** Tokenize preserving whitespace as separate tokens for readable diffs. */
-function tokenizeWithWhitespace(line: string): string[] {
-    const matches = line.match(/\S+|\s+/g);
-    return matches || [];
-}
-
-/** Diff two token arrays without any filtering — returns all edits. */
-function diffTokensFull(before: string[], after: string[]): Array<{ type: 'equal' | 'delete' | 'insert'; tokens: string[] }> {
-    const m = before.length;
-    const n = after.length;
-
-    const dp: number[][] = Array.from({ length: m + 1 }, () => Array(n + 1).fill(0));
-    for (let i = m - 1; i >= 0; i -= 1) {
-        for (let j = n - 1; j >= 0; j -= 1) {
-            if (before[i] === after[j]) {
-                dp[i][j] = dp[i + 1][j + 1] + 1;
-            } else {
-                dp[i][j] = Math.max(dp[i + 1][j], dp[i][j + 1]);
-            }
-        }
-    }
-
-    const edits: Array<{ type: 'equal' | 'delete' | 'insert'; tokens: string[] }> = [];
-    let i = 0;
-    let j = 0;
-
-    function push(type: 'equal' | 'delete' | 'insert', token: string) {
-        const last = edits[edits.length - 1];
-        if (last && last.type === type) {
-            last.tokens.push(token);
-        } else {
-            edits.push({ type, tokens: [token] });
-        }
-    }
-
-    while (i < m && j < n) {
-        if (before[i] === after[j]) {
-            push('equal', before[i]);
-            i += 1;
-            j += 1;
-        } else if (dp[i + 1][j] >= dp[i][j + 1]) {
-            push('delete', before[i]);
-            i += 1;
-        } else {
-            push('insert', after[j]);
-            j += 1;
-        }
-    }
-    while (i < m) { push('delete', before[i]); i += 1; }
-    while (j < n) { push('insert', after[j]); j += 1; }
-
-    return edits;
 }
 
 function extractDishCorrections(aiDraft: string, final: string): DishCorrection[] {
@@ -1159,6 +1084,21 @@ async function readTrainingEntries(): Promise<TrainingEntry[]> {
 async function readLearnedRulesSnapshot(): Promise<LearnedRulesSnapshot> {
     const content = await fs.readFile(LEARNED_RULES_FILE, 'utf-8');
     return JSON.parse(content) as LearnedRulesSnapshot;
+}
+
+export async function deleteLearningSubmission(submissionId: string): Promise<{
+    submission_id: string;
+    deleted_entries: number;
+    deleted_detail_file: boolean;
+    remaining_entries: number;
+    total_rules: number;
+}> {
+    return deleteLearningSubmissionFromFiles({
+        submissionId,
+        differencesDir: DIFFERENCES_DIR,
+        trainingDataFile: TRAINING_DATA_FILE,
+        rebuildSnapshot: rebuildLearnedRules,
+    });
 }
 
 async function readLocationRules(): Promise<LocationSpecificRule[]> {

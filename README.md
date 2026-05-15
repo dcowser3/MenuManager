@@ -35,6 +35,7 @@ Menu Manager is an AI-powered service designed to automate the review process fo
 - Basic AI Check: if the model returns an objective spelling/grammar fix as an exact recommendation (e.g. `Change 'x' to 'y'`) but forgets to update the corrected menu text, or mislabels that fix as critical, the dashboard applies or recognizes the correction so green highlights and the persistent preview stay consistent without blocking submission. High-confidence raw-item asterisk suggestions are also applied before the line's allergen/price suffix.
 - Learning/training dashboards stay off the public landing page; they are reachable by direct URL like other reviewer tools (no separate PIN step)
 - Review highlights and persistent redlines surface punctuation/separator edits such as hyphen, comma, slash, and pipe changes
+- Modification previews preserve bold/italic inline styling from uploaded prior approved DOCX baselines, including after live edits, by using the shared `diff-core` rich text range mapper.
 - Submission normalization keeps exactly one managed allergen legend, while preserving chef-supplied legal/price/footer copy such as AED service-charge text and venue-specific foodborne warnings
 - Modification previews exclude managed footer boilerplate from design-facing redlines while still preserving custom restaurant footer notes/raw warnings for generated DOCX output
 - DOCX baseline uploads now prefill the allergen key field from either pipe-delimited legends or parenthesized legends such as `(C) CELERY (D) DAIRY`
@@ -67,6 +68,7 @@ services/
 ├── clickup-integration/ # ClickUp API + webhook + corrections email
 ├── dashboard/        # Web interface for reviewers + submission form
 ├── db/               # Database service
+├── diff-core/        # Shared tokenization + LCS diff helpers
 ├── differ/           # AI vs human comparison for training
 ├── docx-redliner/    # DOCX track changes
 ├── parser/           # DOCX validation and extraction
@@ -99,12 +101,15 @@ Current ClickUp BAU status handoff:
 - Isabella uploads the corrected DOCX in ClickUp and moves the task to `To Do`; that status change downloads the latest DOCX and feeds the learning dashboard
 - When the approved DOCX is processed from any other configured review-complete status, the task is moved to `To Do`; if it is already in `To Do`, the status update is skipped
 - Task due date is taken from the form "Date needed" using noon UTC on that calendar day so ClickUp does not display it one day early in US timezones (plain `YYYY-MM-DD` parsing used to mean UTC midnight)
+- If ClickUp task creation or attachment upload fails after the menu is saved, the submitter warning includes the submission reference so support can match the screenshot to logs, `system_alerts`, and the generated DOCX.
+- Pending submissions that saved successfully but have no `clickup_task_id` can be retried from the review page; retry metadata is kept in `raw_payload.clickup_handoff`.
 
 Browser approval editor prototype:
 - ClickUp tasks now include an approval link to `/approval/:submissionId`
 - When the dashboard form is submitted from `localhost` outside production, ClickUp task creation is skipped, the browser automatically downloads the generated original DOCX, and the success alert shows an `Open approval editor` link for that same submission
 - Isabella can edit approved text in a left-side browser editor while a right-side panel shows the live tracked-change preview with preserved imported redlines/highlights
 - For submitted DOCX files that already contain redlines, the left editor uses the clean accepted text with deleted runs removed, while the preview keeps the imported deletion/insertion markup visible.
+- The browser approval preview and the backend differ service use shared `diff-core` tokenization/LCS helpers so punctuation, separator, and word alignment rules are reused instead of duplicated per page/service.
 - The live approval preview keeps adjacent imported deletion/insertion pairs separated after new edits, so corrections like `jalapeno` → `jalapeño` or `neapolitan` → `Neapolitan` do not get re-styled as one combined deleted token when another word is removed.
 - Uploaded unapproved/redlined DOCX modifications now receive a full AI check on the accepted visible menu text, so pre-existing tracked edits such as misspelled inserted words are reviewed even if the chef makes no additional browser edits.
 - Re-running AI Check reuses the normalized editor text extractor so repeated checks do not add browser-generated blank lines between menu rows.
@@ -115,6 +120,7 @@ Browser approval editor prototype:
 - Submitting that page uploads the approved DOCX back to the linked ClickUp task and only then leaves/advances the task at `To Do`, matching Isabella's manual handoff flow
 - The dashboard now surfaces a warning when the ClickUp attachment upload or post-approval status move fails, instead of silently finalizing only on the local side
 - Once a menu reaches approved state, the final DOCX is downloadable from `/approved-menus` for Carlos or other operations users
+- The learning dashboard lets reviewers delete an individual learned submission row when test data should not remain in the training history; this removes that submission from differ training data and rebuilds detected patterns without touching the property catalog.
 
 ## Property Catalog
 
@@ -130,7 +136,7 @@ Browser approval editor prototype:
 - When a property has SharePoint folder metadata, the form `Service Period` dropdown is populated from that property’s stored folder names instead of the global default list.
 - `Other` is always included in the `Service Period` dropdown so users can intentionally route the approved file to the property base folder when no subfolder applies.
 - Approved menus can now be pushed to SharePoint after ClickUp approval using the property’s configured base folder and subfolder mapping.
-- SharePoint uploads now standardize approved DOCX names as `Property_ServicePeriod_M.D.YY.docx` using the submission `date_needed` value when available.
+- Generated and SharePoint-uploaded menu DOCX files are named `Restaurant_ServicePeriod_M.D.YY.docx`, for example `Aqimero_Breakfast_11.6.23.docx`, using the restaurant/outlet name from the selected property and the submission `date_needed` value.
 - Before uploading into a matched SharePoint service subfolder, the service archives existing `.docx` files from that subfolder into its `old/` folder. Existing `.pdf` and `.ai` files are left in place.
 - Seeded examples now include `Aqimero - Ritz-Carlton - Philadelphia`, `Maya - New York`, `Tamayo - Denver`, `Toro - Hotel Clio - Denver`, `Toro - Fairmont Millennium Park - Chicago`, `Toro - Dania Beach`, and `Toro - Viceroy - Snowmass`.
 
@@ -146,7 +152,7 @@ npm run test:approved-dishes -- --legacy-id form-1771781530178 --write
 Notes:
 - `--id <uuid>` also works if you want to target the Supabase submission UUID directly.
 - `--approved-only` forces the test to use only `approved_menu_content`; without it the script falls back to `menu_content`, matching the DB extraction endpoint behavior.
-- The preview now shows `dish_name` and `description` separately when the menu uses inline rows like `Guacamole - avocado / lime / cilantro 12`.
+- The preview now shows `dish_name` and `description` separately when the menu uses inline rows like `Guacamole - avocado / lime / cilantro 12` or comma-delimited rows like `Punta Mita, prawns, tomato, onion C,F 95`.
 - `--write` inserts rows into `approved_dishes` for that submission, so use a test submission when possible.
 
 ## Getting Started

@@ -57,6 +57,7 @@ const submission_workflow_1 = require("./lib/submission-workflow");
 const approval_workflow_1 = require("./lib/approval-workflow");
 const design_approval_workflow_1 = require("./lib/design-approval-workflow");
 const approved_menus_1 = require("./lib/approved-menus");
+const clickup_handoff_1 = require("./lib/clickup-handoff");
 const property_catalog_1 = require("./lib/property-catalog");
 const apply_high_confidence_suggestions_1 = require("./lib/apply-high-confidence-suggestions");
 var upload_security_2 = require("./lib/upload-security");
@@ -426,6 +427,10 @@ const upload = (0, multer_1.default)({
     },
 });
 // Serve static files and use EJS for templates
+app.get('/js/diff-core.js', (_req, res) => {
+    res.type('application/javascript');
+    res.sendFile(path.join(getRepoRoot(), 'services', 'diff-core', 'src', 'index.js'));
+});
 app.use(express_1.default.static(path.join(__dirname, 'public')));
 app.use(express_1.default.json());
 app.use(express_1.default.urlencoded({ extended: false }));
@@ -600,13 +605,16 @@ app.get('/review/:submissionId', async (req, res) => {
                 message: 'Submission not found'
             });
         }
-        if (submission.status !== 'pending_human_review') {
+        const reviewableStatuses = new Set(['pending_human_review', 'submitted_no_ai_review']);
+        if (!reviewableStatuses.has(submission.status)) {
             return res.render('error', {
                 message: 'This submission has already been reviewed'
             });
         }
+        const clickupHandoff = (0, clickup_handoff_1.normalizeRawPayload)(submission.raw_payload).clickup_handoff || {};
         res.render('review', {
             submission,
+            clickupHandoff,
             title: `Review: ${submission.filename}`
         });
     }
@@ -615,6 +623,113 @@ app.get('/review/:submissionId', async (req, res) => {
         res.status(500).render('error', {
             message: 'Failed to load review details'
         });
+    }
+});
+app.post('/api/submissions/:submissionId/retry-clickup', async (req, res) => {
+    const { submissionId } = req.params;
+    try {
+        const dbResponse = await internalApi.get(`${DB_SERVICE_URL}/submissions/${encodeURIComponent(submissionId)}`);
+        const submission = dbResponse.data;
+        if (!submission) {
+            return res.status(404).json({ error: 'Submission not found' });
+        }
+        if (`${submission.clickup_task_id || ''}`.trim()) {
+            return res.status(409).json({
+                error: 'Submission already has a ClickUp task',
+                taskId: submission.clickup_task_id,
+            });
+        }
+        let assets = [];
+        try {
+            const assetResponse = await internalApi.get(`${DB_SERVICE_URL}/assets/by-submission/${encodeURIComponent(submission.id || submissionId)}`);
+            assets = Array.isArray(assetResponse.data) ? assetResponse.data : [];
+        }
+        catch (assetError) {
+            console.warn('Retry ClickUp could not load submission assets:', assetError.response?.data || assetError.message);
+        }
+        const clickupPayload = (0, clickup_handoff_1.buildClickUpTaskPayloadFromStoredSubmission)(submission, assets);
+        if (!clickupPayload.docxPath) {
+            return res.status(400).json({ error: 'Submission does not have an original DOCX path to send to ClickUp' });
+        }
+        const rawPayload = (0, clickup_handoff_1.normalizeRawPayload)(submission.raw_payload);
+        const previousHandoff = (0, clickup_handoff_1.normalizeRawPayload)(rawPayload.clickup_handoff);
+        const retryCount = Number(previousHandoff.retry_count || 0) + 1;
+        const attemptedAt = new Date().toISOString();
+        const retryRawPayload = (0, clickup_handoff_1.mergeClickUpHandoffMetadata)(rawPayload, {
+            status: 'retrying',
+            retry_count: retryCount,
+            last_attempt_at: attemptedAt,
+            last_payload: clickupPayload,
+            triggered_by: 'dashboard_retry',
+        });
+        await internalApi.put(`${DB_SERVICE_URL}/submissions/${encodeURIComponent(submission.id || submissionId)}`, {
+            raw_payload: retryRawPayload,
+        });
+        try {
+            const clickupResponse = await internalApi.post(`${CLICKUP_SERVICE_URL}/create-task`, clickupPayload);
+            const clickupData = clickupResponse.data || {};
+            const taskId = clickupData.taskId;
+            const completedRawPayload = (0, clickup_handoff_1.mergeClickUpHandoffMetadata)(retryRawPayload, {
+                status: clickupData.skipped ? 'skipped_not_configured' : (clickupData.warning || clickupData.attachmentUploadFailed ? 'task_created_with_warning' : 'task_created'),
+                retry_count: retryCount,
+                task_id: taskId,
+                last_response: clickupData,
+                last_attempt_at: attemptedAt,
+                last_payload: clickupPayload,
+                triggered_by: 'dashboard_retry',
+            });
+            await internalApi.put(`${DB_SERVICE_URL}/submissions/${encodeURIComponent(submission.id || submissionId)}`, {
+                raw_payload: completedRawPayload,
+                ...(taskId ? { clickup_task_id: taskId } : {}),
+            });
+            return res.json({
+                success: true,
+                taskId,
+                warning: clickupData.warning,
+                attachmentUploadFailed: clickupData.attachmentUploadFailed,
+                skipped: clickupData.skipped,
+            });
+        }
+        catch (clickupError) {
+            const errorDetails = (0, clickup_handoff_1.describeServiceError)(clickupError);
+            const failedRawPayload = (0, clickup_handoff_1.mergeClickUpHandoffMetadata)(retryRawPayload, {
+                status: 'failed',
+                retry_count: retryCount,
+                last_error: errorDetails,
+                last_attempt_at: attemptedAt,
+                last_payload: clickupPayload,
+                triggered_by: 'dashboard_retry',
+                diagnosticReference: submission.id || submissionId,
+            });
+            await internalApi.put(`${DB_SERVICE_URL}/submissions/${encodeURIComponent(submission.id || submissionId)}`, {
+                raw_payload: failedRawPayload,
+            }).catch((metadataError) => {
+                console.error('Failed to save ClickUp retry failure metadata:', metadataError.response?.data || metadataError.message);
+            });
+            sendAdminAlert({
+                alert_type: 'clickup_task_retry_failed',
+                severity: 'error',
+                service: 'dashboard',
+                submission_id: submission.id || submissionId,
+                message: `ClickUp task retry failed for "${submission.project_name}" (${submission.property})`,
+                details: {
+                    error: errorDetails,
+                    submitter: submission.submitter_email,
+                    projectName: submission.project_name,
+                    property: submission.property,
+                    filename: submission.filename,
+                    diagnosticReference: submission.id || submissionId,
+                },
+            });
+            return res.status(502).json({
+                error: 'ClickUp task retry failed',
+                details: errorDetails,
+            });
+        }
+    }
+    catch (error) {
+        console.error('Error retrying ClickUp task creation:', error.response?.data || error.message);
+        res.status(500).json({ error: 'Failed to retry ClickUp task creation', details: error.message });
     }
 });
 app.get('/approval/:submissionId', async (req, res) => {
@@ -1074,6 +1189,20 @@ app.put('/api/learning/correction-rules/:id', async (req, res) => {
     catch (error) {
         console.error('Error updating correction rule:', error.message);
         res.status(error?.response?.status || 500).json(error?.response?.data || { error: 'Failed to update correction rule' });
+    }
+});
+/**
+ * Learning submissions: delete one differ training entry and its comparison detail.
+ */
+app.delete('/api/learning/submissions/:submissionId', async (req, res) => {
+    try {
+        const { submissionId } = req.params;
+        const response = await internalApi.delete(`${DIFFER_SERVICE_URL}/learning/submissions/${encodeURIComponent(submissionId)}`, { timeout: 3500 });
+        res.json(response.data);
+    }
+    catch (error) {
+        console.error('Error deleting learning submission:', error.message);
+        res.status(error?.response?.status || 500).json(error?.response?.data || { error: 'Failed to delete learning submission' });
     }
 });
 /**

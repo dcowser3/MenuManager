@@ -189,16 +189,17 @@ describe('submission update hardening', () => {
         expect(fs.promises.writeFile).not.toHaveBeenCalled();
     });
 
-    test('sanitizeSubmissionUpdates does not allow raw_payload updates', () => {
+    test('sanitizeSubmissionUpdates allows object raw_payload updates for operational metadata', () => {
         const result = sanitizeSubmissionUpdates(
             {
-                raw_payload: { unsafe: true },
+                raw_payload: { clickup_handoff: { status: 'failed' } },
                 clickup_task_id: 'cu_123',
             },
             { repoRoot: '/Users/deriancowser/Documents/MenuManager' }
         );
 
-        expect(result.rejectedFields).toContain('raw_payload');
+        expect(result.rejectedFields).not.toContain('raw_payload');
+        expect(result.allowedFields.raw_payload).toEqual({ clickup_handoff: { status: 'failed' } });
         expect(result.allowedFields.clickup_task_id).toBe('cu_123');
     });
 

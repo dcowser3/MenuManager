@@ -189,7 +189,12 @@ export function createApprovalWorkflowHandlers(deps: ApprovalWorkflowDeps) {
 
             const approvedDir = deps.pathModule.join(deps.getSubmissionDocumentDir(projectName, property, submission.id || submissionId), 'approved');
             const approvedPath = deps.pathModule.join(approvedDir, `${submission.id || submissionId}-approved.docx`);
-            const approvedFileName = submission.filename || buildMenuFilename(projectName, property);
+            const approvedFileName = submission.filename || buildMenuFilename(
+                projectName,
+                property,
+                deps.coalesceString(submission.service_period, rawPayload.servicePeriod),
+                deps.coalesceString(submission.date_needed, rawPayload.dateNeeded)
+            );
 
             await deps.generateDocxFromForm(submission.id || submissionId, {
                 projectName,

@@ -40,7 +40,61 @@ export function sanitizeRichTextHtml(value: unknown, maxLength = MAX_HTML_FIELD_
     return html.trim();
 }
 
-export function buildMenuFilename(projectName: string, property?: string): string {
+function extractRestaurantName(projectName: string, property?: string): string {
+    const propertyName = `${property || ''}`.trim();
+    const projectLabel = `${projectName || ''}`.trim();
+    const source = propertyName || projectLabel || 'Menu';
+    return source.split(' - ')[0].trim() || source || 'Menu';
+}
+
+function sanitizeFilenameSegment(value: string): string {
+    return `${value || ''}`
+        .trim()
+        .replace(/[\\/:*?"<>|#%]+/g, ' ')
+        .replace(/[^A-Za-z0-9._ -]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function toFilenameTitleCase(value: string): string {
+    return value
+        .toLowerCase()
+        .split(/\s+/)
+        .filter(Boolean)
+        .map((token) => token.charAt(0).toUpperCase() + token.slice(1))
+        .join(' ');
+}
+
+function formatMenuDateSegment(value?: string): string {
+    const candidate = `${value || ''}`.trim();
+    const isoDate = candidate.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (isoDate) {
+        const month = Number.parseInt(isoDate[2], 10);
+        const day = Number.parseInt(isoDate[3], 10);
+        const year = isoDate[1].slice(-2);
+        return `${month}.${day}.${year}`;
+    }
+
+    const parsed = candidate ? new Date(candidate) : new Date();
+    const date = Number.isNaN(parsed.getTime()) ? new Date() : parsed;
+    return `${date.getMonth() + 1}.${date.getDate()}.${String(date.getFullYear()).slice(-2)}`;
+}
+
+export function buildMenuFilename(
+    projectName: string,
+    property?: string,
+    servicePeriod?: string,
+    dateNeeded?: string,
+    extension = '.docx'
+): string {
+    if (servicePeriod || dateNeeded) {
+        const restaurant = sanitizeFilenameSegment(extractRestaurantName(projectName, property)) || 'Menu';
+        const service = sanitizeFilenameSegment(toFilenameTitleCase(`${servicePeriod || 'Other'}`.replace(/_/g, ' '))) || 'Other';
+        const date = formatMenuDateSegment(dateNeeded);
+        const normalizedExtension = extension.startsWith('.') ? extension : `.${extension}`;
+        return `${restaurant}_${service}_${date}${normalizedExtension}`;
+    }
+
     const name = `${projectName || ''}`.trim() || 'Menu';
     const propertyName = `${property || ''}`.trim();
     if (propertyName) {

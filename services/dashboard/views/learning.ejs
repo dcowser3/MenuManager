@@ -154,6 +154,10 @@
             background: var(--danger);
             border-color: var(--danger);
         }
+        .btn:disabled {
+            opacity: .55;
+            cursor: not-allowed;
+        }
         .btn-group { display: flex; gap: .35rem; }
         .small {
             font-size: .72rem;
@@ -408,7 +412,7 @@
                 </thead>
                 <tbody>
                 <% (learningSubmissions && learningSubmissions.length ? learningSubmissions : recentSubmissions).forEach((item) => { %>
-                    <tr>
+                    <tr id="learning-submission-<%= item.submission_id %>">
                         <td><code><%= item.submission_id %></code></td>
                         <td><%= item.timestamp ? new Date(item.timestamp).toLocaleString() : 'N/A' %></td>
                         <td><%= item.changes_detected ? 'YES' : 'NO' %></td>
@@ -416,7 +420,12 @@
                         <td><%= item.replacement_count || item.learning_signals?.replacement_count || 0 %></td>
                         <td><code><%= (item.ai_draft_path || '').split('/').pop() || 'N/A' %></code></td>
                         <td><code><%= (item.final_path || '').split('/').pop() || 'N/A' %></code></td>
-                        <td><a href="/learning/submission/<%= item.submission_id %>">Open</a></td>
+                        <td>
+                            <div class="btn-group">
+                                <a href="/learning/submission/<%= item.submission_id %>">Open</a>
+                                <button class="btn danger" type="button" onclick="deleteLearningSubmission('<%= item.submission_id %>', this)">Delete</button>
+                            </div>
+                        </td>
                     </tr>
                 <% }) %>
                 </tbody>
@@ -440,6 +449,38 @@
                 window.location.reload();
             } catch (error) {
                 alert('Failed to update rule');
+            }
+        }
+
+        async function deleteLearningSubmission(submissionId, button) {
+            if (!window.confirm(`Delete learned submission ${submissionId}? This removes its training row and comparison detail from the learning dashboard.`)) {
+                return;
+            }
+
+            const originalText = button.textContent;
+            button.disabled = true;
+            button.textContent = 'Deleting';
+
+            try {
+                const response = await fetch(`/api/learning/submissions/${encodeURIComponent(submissionId)}`, {
+                    method: 'DELETE',
+                    headers: { 'Content-Type': 'application/json' },
+                });
+                const payload = await response.json().catch(() => ({}));
+                if (!response.ok) {
+                    throw new Error(payload.error || 'Failed to delete learned submission');
+                }
+
+                const row = document.getElementById(`learning-submission-${submissionId}`);
+                const tbody = row?.closest('tbody');
+                if (row) row.remove();
+                if (tbody && tbody.children.length === 0) {
+                    window.location.reload();
+                }
+            } catch (error) {
+                alert(error.message || 'Failed to delete learned submission');
+                button.disabled = false;
+                button.textContent = originalText;
             }
         }
 

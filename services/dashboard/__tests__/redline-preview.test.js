@@ -107,4 +107,37 @@ describe('redline preview helpers', () => {
         expect(rendered.insertions).toBe(0);
         expect(rendered.deletions).toBe(1);
     });
+
+    test('preserves uploaded baseline inline formatting in the persistent preview', () => {
+        const baselineHtml = [
+            '<p><strong>COLD STARTERS</strong></p>',
+            '<p><strong>Guacamole Traditional</strong>, avocado, tomato, onion, cilantro, lime V 85</p>',
+        ].join('');
+        const baselineText = [
+            'COLD STARTERS',
+            'Guacamole Traditional, avocado, tomato, onion, cilantro, lime V 85',
+        ].join('\n');
+        const revisedText = [
+            'COLD STARTERS',
+            'Guacamole Traditional, avocado, tomato, onion, cilantro, lime V 95',
+        ].join('\n');
+
+        const unchanged = redlinePreview.renderPersistentPreview(baselineText, baselineText, {
+            baselineHtml,
+        });
+        expect(unchanged.html).toBe([
+            '<strong>COLD</strong><strong> </strong><strong>STARTERS</strong>',
+            '<strong>Guacamole</strong><strong> </strong><strong>Traditional</strong>, avocado, tomato, onion, cilantro, lime V 85',
+        ].join('<br>'));
+        expect(unchanged.insertions).toBe(0);
+        expect(unchanged.deletions).toBe(0);
+
+        const edited = redlinePreview.renderPersistentPreview(baselineText, revisedText, {
+            baselineHtml,
+        });
+        expect(edited.html).toContain('<strong>COLD</strong><strong> </strong><strong>STARTERS</strong>');
+        expect(edited.html).toContain('<strong>Guacamole</strong><strong> </strong><strong>Traditional</strong>');
+        expect(edited.html).toContain('<span class="persistent-del">85</span>');
+        expect(edited.html).toContain('<span class="persistent-ins">95</span>');
+    });
 });

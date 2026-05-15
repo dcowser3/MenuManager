@@ -30,6 +30,7 @@ All variables are configured in `.env` at the project root. See `.env.example` f
 | `DIFFER_SERVICE_URL` | Base URL for differ service (default: `http://localhost:3006`) |
 | `CLICKUP_SERVICE_URL` | Base URL for ClickUp integration service (default: `http://localhost:3007`) |
 | `DOCUMENT_STORAGE_ROOT` | Root directory for persisted menu DOCX assets (default: `tmp/documents`) |
+| `LEARNING_DATA_DIR` | Root directory for differ comparison history and learned-rule snapshots (default: `tmp/learning`) |
 | `LEARNING_MIN_OCCURRENCES` | Minimum repeated corrections needed before a learned rule is active (default: `2`) |
 | `LEARNING_MAX_OVERLAY_RULES` | Max learned rules injected into QA prompt overlay (default: `25`) |
 | `GRAPH_CLIENT_ID` | Azure app client ID used for SharePoint/Microsoft Graph access |
@@ -59,6 +60,8 @@ Operational failures are logged to the `system_alerts` table in Supabase. When S
 
 Current examples include:
 
+- `clickup_task_failed` from `dashboard` when the saved submission cannot create its ClickUp task; the submitter warning includes the submission reference, and alert details include the same diagnostic reference plus structured service error details
+- `clickup_task_retry_failed` from `dashboard` when a manual retry from the review page still cannot create the ClickUp task
 - `sharepoint_upload_failed` from `clickup-integration` when Microsoft Graph/SharePoint rejects the approved DOCX upload, including `403` permission errors
 - `approved_dish_extraction_failed` from `clickup-integration` when approved-dish extraction fails after approval
 - `clickup_webhook_failed` from `clickup-integration` when webhook processing fails
@@ -93,6 +96,19 @@ Subfolders currently used:
 
 If `DOCUMENT_STORAGE_ROOT` is not set, the default is `tmp/documents` under the repo root.
 
+## Learning Data Layout
+
+When `LEARNING_DATA_DIR` is set, the differ service stores comparison history and learned-rule snapshots there. If it is not set, the default is `tmp/learning` under the repo root.
+
+Files currently used:
+
+- `training_data.jsonl` — append-only comparison history, one JSON object per learned submission
+- `<submissionId>-comparison.json` — detail file for a single learned submission
+- `learned_rules.json` — rebuilt detected-pattern snapshot
+- `rule_overrides.json` and `location_specific_rules.json` — legacy/local learning controls
+
+The learning dashboard can delete an individual learned submission through the differ service. Deletion removes matching JSONL entries and the detail comparison file, then rebuilds `learned_rules.json`.
+
 ## Upload Guardrails
 
 - Dashboard uploads are capped at 15 MB per file.
@@ -117,7 +133,7 @@ When a property has `sharepoint_service_folders`, the form uses those folder nam
 - the newest approved DOCX is chosen from ClickUp attachments when available
 - otherwise the locally stored submitted DOCX is used as the approved source
 - `Other` remains available in the dropdown for every property and is treated as a deliberate base-folder upload choice
-- the SharePoint-uploaded DOCX is renamed to `Property_ServicePeriod_M.D.YY.docx` using `date_needed` when available
+- generated and SharePoint-uploaded DOCX files use `Restaurant_ServicePeriod_M.D.YY.docx`, for example `Aqimero_Breakfast_11.6.23.docx`
 - if the selected service folder matches a stored SharePoint subfolder, the file is uploaded there
 - before uploading into a matched service folder, existing `.docx` files in that folder are moved into `old/`
 - existing `.pdf` and `.ai` files are not moved

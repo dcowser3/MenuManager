@@ -15,6 +15,7 @@ const util_1 = require("util");
 const crypto_1 = __importDefault(require("crypto"));
 const supabase_client_1 = require("@menumanager/supabase-client");
 const approval_finalization_1 = require("./lib/approval-finalization");
+const sharepoint_filenames_1 = require("./lib/sharepoint-filenames");
 const clickup_due_date_1 = require("./lib/clickup-due-date");
 const internal_auth_1 = require("@menumanager/internal-auth");
 dotenv.config({ path: path_1.default.join(__dirname, '..', '..', '..', '.env') });
@@ -489,29 +490,6 @@ async function graphRequest(config) {
 function isDocxFileName(name) {
     return String(name || '').trim().toLowerCase().endsWith('.docx');
 }
-function formatSharePointDateSegment(value) {
-    const candidate = `${value || ''}`.trim();
-    const parsed = candidate ? new Date(candidate) : new Date();
-    const date = Number.isNaN(parsed.getTime()) ? new Date() : parsed;
-    const month = date.getMonth() + 1;
-    const day = date.getDate();
-    const year = String(date.getFullYear()).slice(-2);
-    return `${month}.${day}.${year}`;
-}
-function sanitizeSharePointFilenameSegment(value) {
-    return String(value || '')
-        .trim()
-        .replace(/[\\/:*?"<>|#%]+/g, ' ')
-        .replace(/\s+/g, ' ')
-        .trim();
-}
-function buildSharePointApprovedFilename(submission) {
-    const propertyLabel = sanitizeSharePointFilenameSegment(String(submission?.property || '').split(' - ')[0] || submission?.property || 'Menu');
-    const rawService = submission?.service_period || submission?.raw_payload?.servicePeriod || 'Other';
-    const serviceLabel = sanitizeSharePointFilenameSegment(String(rawService).replace(/_/g, ' ')) || 'Other';
-    const dateLabel = formatSharePointDateSegment(submission?.date_needed);
-    return `${propertyLabel}_${serviceLabel}_${dateLabel}.docx`;
-}
 async function getPropertySharePointConfig(property) {
     if (!property.trim())
         return null;
@@ -645,7 +623,7 @@ async function uploadApprovedDocToSharePoint(input) {
     if (matchedFolder) {
         archivedDocxCount = await archiveExistingDocxFilesInSharePointSubfolder(driveId, targetFolderPath);
     }
-    const canonicalFileName = buildSharePointApprovedFilename(input.submission || {
+    const canonicalFileName = (0, sharepoint_filenames_1.buildSharePointApprovedFilename)(input.submission || {
         property: input.property,
         service_period: input.servicePeriod,
     });

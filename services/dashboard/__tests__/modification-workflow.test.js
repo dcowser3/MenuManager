@@ -45,6 +45,7 @@ jest.mock('@menumanager/supabase-client', () => ({
 const axios = require('axios').default;
 const fs = require('fs');
 const path = require('path');
+const { logAlert } = require('@menumanager/supabase-client');
 const app = require('../index').default;
 const mockedAxios = axios;
 
@@ -89,6 +90,28 @@ function invokeJsonHandler(handler, body, options = {}) {
     });
 }
 
+function postJsonOverHttp(routePath, body) {
+    return new Promise((resolve, reject) => {
+        const server = app.listen(0, async () => {
+            try {
+                const address = server.address();
+                const port = typeof address === 'object' && address ? address.port : 0;
+                const response = await fetch(`http://127.0.0.1:${port}${routePath}`, {
+                    method: 'POST',
+                    headers: { 'content-type': 'application/json' },
+                    body: JSON.stringify(body),
+                });
+                const payload = await response.json();
+                resolve({ status: response.status, body: payload });
+            } catch (error) {
+                reject(error);
+            } finally {
+                server.close();
+            }
+        });
+    });
+}
+
 describe('Dashboard Modification Workflow (local, mocked externals)', () => {
     const submitHandler = getRouteHandler('post', '/api/form/submit');
     const basicCheckHandler = getRouteHandler('post', '/api/form/basic-check');
@@ -108,6 +131,7 @@ describe('Dashboard Modification Workflow (local, mocked externals)', () => {
         fs.promises.readFile.mockClear();
         fs.promises.readdir.mockClear();
         fs.promises.readFile.mockResolvedValue('');
+        logAlert.mockClear();
 
         mockedAxios.post = jest.fn(async (url, payload) => {
             const urlStr = String(url);
@@ -149,6 +173,7 @@ describe('Dashboard Modification Workflow (local, mocked externals)', () => {
                         catalog: [
                             { name: 'Test Property', city_country: 'Denver, USA' },
                             { name: 'Legacy Property', city_country: 'Miami, USA' },
+                            { name: 'Aqimero - Ritz-Carlton - Philadelphia', city_country: 'Philadelphia, USA' },
                         ],
                     },
                 };
@@ -207,6 +232,41 @@ describe('Dashboard Modification Workflow (local, mocked externals)', () => {
             ...overrides,
         };
     }
+
+    test('stores generated menu filenames as restaurant, service period, and date', async () => {
+        process.env.NODE_ENV = 'production';
+        const payload = buildNewSubmissionPayload({
+            projectName: 'Seasonal Breakfast Update',
+            property: 'Aqimero - Ritz-Carlton - Philadelphia',
+            servicePeriod: 'breakfast',
+            dateNeeded: '2023-11-06',
+        });
+
+        const response = await postJsonOverHttp('/api/form/submit', payload);
+        expect(response.status).toBe(200);
+        expect(response.body.success).toBe(true);
+
+        const expectedFilename = 'Aqimero_Breakfast_11.6.23.docx';
+        const submissionCall = mockedAxios.post.mock.calls.find((c) =>
+            String(c[0]).includes('/submissions')
+        );
+        expect(submissionCall[1].filename).toBe(expectedFilename);
+
+        const assetCall = mockedAxios.post.mock.calls.find((c) =>
+            String(c[0]).includes('/assets') && c[1].asset_type === 'original_docx'
+        );
+        expect(assetCall[1].file_name).toBe(expectedFilename);
+
+        const aiReviewCall = mockedAxios.post.mock.calls.find((c) =>
+            String(c[0]).includes('/ai-review')
+        );
+        expect(aiReviewCall[1].filename).toBe(expectedFilename);
+
+        const clickupCall = mockedAxios.post.mock.calls.find((c) =>
+            String(c[0]).includes('/create-task')
+        );
+        expect(clickupCall[1].filename).toBe(expectedFilename);
+    });
 
     test('accepts modification submission using DB baseline and persists revision fields', async () => {
         const payload = {
@@ -305,6 +365,42 @@ describe('Dashboard Modification Workflow (local, mocked externals)', () => {
         expect(productionResponse.body.localTesting).toBeUndefined();
         expect(remoteResponse.status).toBe(200);
         expect(remoteResponse.body.localTesting).toBeUndefined();
+    });
+
+    test('returns a submission reference and logs diagnostics when ClickUp task creation fails', async () => {
+        const defaultPost = mockedAxios.post;
+        mockedAxios.post = jest.fn(async (url, payload) => {
+            if (String(url).includes('/create-task')) {
+                const error = new Error('Request failed with status code 500');
+                error.code = 'ERR_BAD_RESPONSE';
+                error.response = {
+                    status: 500,
+                    statusText: 'Internal Server Error',
+                    data: { error: 'Failed to create ClickUp task', details: 'ClickUp timeout' },
+                };
+                throw error;
+            }
+            return defaultPost(url, payload);
+        });
+
+        const response = await invokeJsonHandler(
+            submitHandler,
+            buildNewSubmissionPayload({ projectName: 'ClickUp Failure Project' }),
+            { headers: { host: 'sandovalhospitalitymenumanager.live' } }
+        );
+
+        expect(response.status).toBe(200);
+        expect(response.body.success).toBe(true);
+        expect(response.body.clickup.taskId).toBeUndefined();
+        expect(response.body.clickup.diagnosticReference).toBe(response.body.submissionId);
+        expect(response.body.clickup.warning).toContain(`Reference: ${response.body.submissionId}`);
+
+        const clickupAlert = logAlert.mock.calls.find(([alert]) => alert.alert_type === 'clickup_task_failed');
+        expect(clickupAlert).toBeTruthy();
+        expect(clickupAlert[0].submission_id).toBe(response.body.submissionId);
+        expect(clickupAlert[0].details.diagnosticReference).toBe(response.body.submissionId);
+        expect(clickupAlert[0].details.error.status).toBe(500);
+        expect(clickupAlert[0].details.error.response.details).toBe('ClickUp timeout');
     });
 
     test('accepts modification submission using uploaded baseline and forwards baseline file to clickup payload', async () => {

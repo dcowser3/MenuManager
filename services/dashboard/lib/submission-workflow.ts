@@ -9,6 +9,11 @@ import {
     sanitizeStoredFileName,
 } from './upload-security';
 import { normalizeSubmissionBody } from './request-normalization';
+import {
+    describeServiceError,
+    mergeClickUpHandoffMetadata,
+    withSubmissionReference,
+} from './clickup-handoff';
 
 type SubmissionWorkflowDeps = {
     axios: any;
@@ -280,8 +285,14 @@ export function createSubmissionWorkflowHandlers(deps: SubmissionWorkflowDeps) {
             }
 
             const submissionStatus = skipAi ? 'submitted_no_ai_review' : 'pending_human_review';
+            const generatedMenuFilename = buildMenuFilename(
+                safeProjectName,
+                normalizedProperty,
+                safeServicePeriod,
+                safeDateNeeded
+            );
 
-            await deps.axios.post(`${deps.DB_SERVICE_URL}/submissions`, {
+            const submissionRecordPayload = {
                 id: submissionId,
                 submitter_email: safeSubmitterEmail,
                 submitter_name: safeSubmitterName,
@@ -289,7 +300,7 @@ export function createSubmissionWorkflowHandlers(deps: SubmissionWorkflowDeps) {
                 project_name: safeProjectName,
                 property: normalizedProperty,
                 date_needed: safeDateNeeded,
-                filename: buildMenuFilename(safeProjectName, normalizedProperty),
+                filename: generatedMenuFilename,
                 original_path: docxPath,
                 status: submissionStatus,
                 created_at: new Date().toISOString(),
@@ -328,7 +339,9 @@ export function createSubmissionWorkflowHandlers(deps: SubmissionWorkflowDeps) {
                 revision_baseline_file_name: safeRevisionBaselineFileName || null,
                 base_approved_menu_content: safeBaseApprovedMenuContent || null,
                 chef_persistent_diff: chefPersistentDiff ? JSON.stringify(chefPersistentDiff) : null,
-            });
+            };
+
+            await deps.axios.post(`${deps.DB_SERVICE_URL}/submissions`, submissionRecordPayload);
 
             console.log(`✓ Submission created in database: ${submissionId}`);
 
@@ -338,7 +351,7 @@ export function createSubmissionWorkflowHandlers(deps: SubmissionWorkflowDeps) {
                 source: 'chef_form',
                 storage_provider: 'local',
                 storage_path: docxPath,
-                file_name: sanitizeStoredFileName(buildMenuFilename(safeProjectName, normalizedProperty), 'submission.docx')
+                file_name: sanitizeStoredFileName(generatedMenuFilename, 'submission.docx')
             }).catch((err: any) => console.error('Failed to save original_docx asset metadata:', err.message));
 
             if (persistedBaselineDocPath) {
@@ -381,7 +394,7 @@ export function createSubmissionWorkflowHandlers(deps: SubmissionWorkflowDeps) {
                         text: text,
                         submission_id: submissionId,
                         submitter_email: safeSubmitterEmail,
-                        filename: buildMenuFilename(safeProjectName, normalizedProperty),
+                        filename: generatedMenuFilename,
                         original_path: docxPath
                     });
 
@@ -404,72 +417,154 @@ export function createSubmissionWorkflowHandlers(deps: SubmissionWorkflowDeps) {
 
             let clickupWarning: string | undefined;
             let clickupTaskId: string | undefined;
+            let clickupDiagnosticReference: string | undefined;
+            const clickupTaskPayload = {
+                submissionId,
+                submitterName: safeSubmitterName,
+                submitterEmail: safeSubmitterEmail,
+                submitterJobTitle: safeSubmitterJobTitle,
+                projectName: safeProjectName,
+                property: normalizedProperty,
+                width: width || (wantsPrint ? (printRegion === 'NON_US' ? printSize : printWidth) : digitalWidth),
+                height: height || (wantsPrint ? (printRegion === 'NON_US' ? printSize : printHeight) : digitalHeight),
+                printWidth,
+                printHeight,
+                printRegion,
+                printSize,
+                folded,
+                digitalWidth,
+                digitalHeight,
+                cropMarks,
+                bleedMarks,
+                fileSizeLimit,
+                fileSizeLimitMb,
+                fileDeliveryNotes,
+                orientation: safeOrientation,
+                menuType: safeMenuType,
+                servicePeriod: safeServicePeriod,
+                templateType: normalizedTemplateType,
+                turnaroundDays: normalizedTurnaroundDays,
+                dateNeeded: safeDateNeeded,
+                hotelName: safeHotelName,
+                cityCountry: normalizedCityCountry,
+                assetType: safeAssetType,
+                docxPath,
+                menuImagePath: persistedMenuImagePath,
+                menuImageFileName: safeMenuImageFileName,
+                filename: generatedMenuFilename,
+                submissionMode: safeSubmissionMode,
+                revisionSource: safeRevisionSource,
+                revisionBaseSubmissionId: safeRevisionBaseSubmissionId,
+                chefPersistentDiff,
+                criticalOverrides: normalizedCriticalOverrides,
+                approvals: normalizedApprovals,
+            };
+            const recordClickUpHandoff = async (metadata: Record<string, any>) => {
+                const rawPayload = mergeClickUpHandoffMetadata(
+                    {
+                        ...submissionRecordPayload,
+                        form_payload: req.body,
+                    },
+                    metadata
+                );
+                try {
+                    await deps.axios.put(`${deps.DB_SERVICE_URL}/submissions/${submissionId}`, { raw_payload: rawPayload });
+                } catch (handoffError: any) {
+                    console.error('Failed to save ClickUp handoff metadata:', handoffError.response?.data || handoffError.message);
+                }
+            };
             if (localTestingRequest) {
                 clickupWarning = 'Local testing mode: ClickUp task creation was skipped. Use the downloaded DOCX and approval editor link to test review locally.';
                 console.log(`Skipping ClickUp task creation for local submission ${submissionId}`);
+                await recordClickUpHandoff({
+                    status: 'skipped_local_testing',
+                    last_attempt_at: new Date().toISOString(),
+                    last_payload: clickupTaskPayload,
+                    retry_count: 0,
+                });
             } else {
                 try {
-                    const clickupResponse = await deps.axios.post(`${deps.CLICKUP_SERVICE_URL}/create-task`, {
-                        submissionId,
-                        submitterName: safeSubmitterName,
-                        submitterEmail: safeSubmitterEmail,
-                        submitterJobTitle: safeSubmitterJobTitle,
-                        projectName: safeProjectName,
-                        property: normalizedProperty,
-                        width: width || (wantsPrint ? (printRegion === 'NON_US' ? printSize : printWidth) : digitalWidth),
-                        height: height || (wantsPrint ? (printRegion === 'NON_US' ? printSize : printHeight) : digitalHeight),
-                        printWidth,
-                        printHeight,
-                        printRegion,
-                        printSize,
-                        folded,
-                        digitalWidth,
-                        digitalHeight,
-                        cropMarks,
-                        bleedMarks,
-                        fileSizeLimit,
-                        fileSizeLimitMb,
-                        fileDeliveryNotes,
-                        orientation: safeOrientation,
-                        menuType: safeMenuType,
-                        servicePeriod: safeServicePeriod,
-                        templateType: normalizedTemplateType,
-                        turnaroundDays: normalizedTurnaroundDays,
-                        dateNeeded: safeDateNeeded,
-                        hotelName: safeHotelName,
-                        cityCountry: normalizedCityCountry,
-                        assetType: safeAssetType,
-                        docxPath,
-                        menuImagePath: persistedMenuImagePath,
-                        menuImageFileName: safeMenuImageFileName,
-                        filename: buildMenuFilename(safeProjectName, normalizedProperty),
-                        submissionMode: safeSubmissionMode,
-                        revisionSource: safeRevisionSource,
-                        revisionBaseSubmissionId: safeRevisionBaseSubmissionId,
-                        chefPersistentDiff,
-                        criticalOverrides: normalizedCriticalOverrides,
-                        approvals: normalizedApprovals,
+                    await recordClickUpHandoff({
+                        status: 'attempting',
+                        last_attempt_at: new Date().toISOString(),
+                        last_payload: clickupTaskPayload,
+                        retry_count: 0,
                     });
+                    const clickupResponse = await deps.axios.post(`${deps.CLICKUP_SERVICE_URL}/create-task`, clickupTaskPayload);
 
                     const clickupData = clickupResponse.data || {};
                     clickupTaskId = clickupData.taskId;
                     if (clickupData.skipped) {
-                        clickupWarning = 'Menu submitted, but ClickUp integration is not configured yet. If this persists, please email the Word document to the design team.';
+                        clickupDiagnosticReference = submissionId;
+                        clickupWarning = withSubmissionReference(
+                            'Menu submitted, but ClickUp integration is not configured yet. If this persists, please email the Word document to the design team.',
+                            clickupDiagnosticReference
+                        );
+                        await recordClickUpHandoff({
+                            status: 'skipped_not_configured',
+                            last_response: clickupData,
+                            last_payload: clickupTaskPayload,
+                            last_attempt_at: new Date().toISOString(),
+                            retry_count: 0,
+                        });
                     } else if (clickupData.warning || clickupData.attachmentUploadFailed) {
                         const supportEmail = deps.INTERNAL_REVIEWER_EMAIL || 'the design team';
-                        clickupWarning = `Menu submitted, but we could not upload the Word document to ClickUp. If this persists, please email the Word document directly to ${supportEmail}.`;
+                        clickupDiagnosticReference = submissionId;
+                        clickupWarning = withSubmissionReference(
+                            `Menu submitted, but we could not upload the Word document to ClickUp. If this persists, please email the Word document directly to ${supportEmail}.`,
+                            clickupDiagnosticReference
+                        );
+                        await recordClickUpHandoff({
+                            status: 'task_created_with_warning',
+                            task_id: clickupTaskId,
+                            last_response: clickupData,
+                            last_payload: clickupTaskPayload,
+                            last_attempt_at: new Date().toISOString(),
+                            retry_count: 0,
+                        });
+                    } else {
+                        await recordClickUpHandoff({
+                            status: 'task_created',
+                            task_id: clickupTaskId,
+                            last_response: clickupData,
+                            last_payload: clickupTaskPayload,
+                            last_attempt_at: new Date().toISOString(),
+                            retry_count: 0,
+                        });
                     }
                 } catch (clickupError: any) {
-                    console.error('Failed to create ClickUp task:', clickupError.response?.data || clickupError.message);
+                    const errorDetails = describeServiceError(clickupError);
+                    console.error('Failed to create ClickUp task:', errorDetails.response || errorDetails.message);
                     const supportEmail = deps.INTERNAL_REVIEWER_EMAIL || 'the design team';
-                    clickupWarning = `Menu submitted, but we could not create your ClickUp task. If this persists, please email the Word document directly to ${supportEmail}.`;
+                    clickupDiagnosticReference = submissionId;
+                    clickupWarning = withSubmissionReference(
+                        `Menu submitted, but we could not create your ClickUp task. If this persists, please email the Word document directly to ${supportEmail}.`,
+                        clickupDiagnosticReference
+                    );
+                    await recordClickUpHandoff({
+                        status: 'failed',
+                        last_error: errorDetails,
+                        last_payload: clickupTaskPayload,
+                        last_attempt_at: new Date().toISOString(),
+                        retry_count: 0,
+                        diagnosticReference: clickupDiagnosticReference,
+                    });
                     deps.sendAdminAlert({
                         alert_type: 'clickup_task_failed',
                         severity: 'error',
                         service: 'dashboard',
                         submission_id: submissionId,
                         message: `ClickUp task creation failed for "${safeProjectName}" (${normalizedProperty})`,
-                        details: { error: clickupError.response?.data || clickupError.message, submitter: safeSubmitterEmail },
+                        details: {
+                            error: errorDetails,
+                            submitter: safeSubmitterEmail,
+                            projectName: safeProjectName,
+                            property: normalizedProperty,
+                            filename: generatedMenuFilename,
+                            docxPath,
+                            clickupServiceUrl: deps.CLICKUP_SERVICE_URL,
+                            diagnosticReference: clickupDiagnosticReference,
+                        },
                     });
                 }
             }
@@ -488,6 +583,7 @@ export function createSubmissionWorkflowHandlers(deps: SubmissionWorkflowDeps) {
                 clickup: {
                     taskId: clickupTaskId,
                     warning: clickupWarning,
+                    diagnosticReference: clickupDiagnosticReference,
                 },
                 localTesting,
             });
