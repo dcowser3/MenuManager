@@ -11,7 +11,7 @@ COPY . .
 
 RUN npm run build --workspace=@menumanager/internal-auth \
     && npm run build --workspace=@menumanager/supabase-client \
-    && npm run build --workspaces
+    && npm run build --workspaces --if-present
 
 FROM node:18-slim
 

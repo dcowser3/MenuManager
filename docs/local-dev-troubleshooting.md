@@ -223,4 +223,5 @@ Expected parser behavior:
 - **docx-redliner venv:** Node services shell out to `services/docx-redliner/venv/bin/python`. The venv must exist and have `python-docx`, `PyMuPDF`, `openai`, `python-dotenv`, `diff-match-patch` installed. `requirements.txt` is the source of truth.
 - **start-services.sh port order:** db (3004), parser (3001), ai-review (3002), dashboard (3005), differ (3006), clickup (3007). Note docx-redliner is NOT started as a service — node invokes its Python scripts as subprocesses.
 - **Shared workspace packages in Docker:** new shared packages such as `diff-core` must be included in `docker/Dockerfile.dev` before `npm ci`; otherwise dev containers may fail to resolve `@menumanager/*` imports or browser-served helper files until `./dev-up.sh --rebuild`.
+- **Workspace builds:** shared JavaScript-only packages such as `diff-core` do not have a `build` script. Use `npm run build --workspaces --if-present` in native scripts and production Docker builds so npm skips packages that do not need compilation.
 - **stop-services.sh port coverage:** Fallback kill covers 3000–3008. If you add a service on a new port, update it.

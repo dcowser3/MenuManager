@@ -259,7 +259,7 @@ Native mode is available when you specifically do not want Docker, but it is no 
 
 ```bash
 npm install
-npm run build --workspaces
+npm run build --workspaces --if-present
 npm start --workspace=@menumanager/dashboard   # Dashboard + Form at http://localhost:3005
 npm start --workspace=@menumanager/parser      # Template validation
 npm start --workspace=@menumanager/ai-review   # AI review
