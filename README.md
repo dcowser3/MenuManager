@@ -41,6 +41,7 @@ Menu Manager is an AI-powered service designed to automate the review process fo
 - Modification previews exclude managed footer boilerplate from design-facing redlines while still preserving custom restaurant footer notes/raw warnings for generated DOCX output
 - DOCX baseline uploads now prefill the allergen key field from either pipe-delimited legends or parenthesized legends such as `(C) CELERY (D) DAIRY`
 - DOCX-extracted Date Needed values only override the turnaround-derived date when the extracted value is a valid `YYYY-MM-DD` date; invalid date text is ignored so the read-only field stays usable
+- Turnaround values are calculated in business days for the read-only `Date Needed` field, so weekends are skipped
 - The default allergen legend is now `G contains gluten | V vegetarian | D contains dairy | S contain shellfish | N contain nuts | VG vegan`
 - Approved-dish extraction now splits inline `Dish Name - description` menu rows into separate `dish_name` and `description` fields, captures trailing allergen codes, and skips the allergen legend / food-safety footer instead of storing them as dishes
 - DOCX template validation and redlining
@@ -100,7 +101,7 @@ services/
 
 Current ClickUp BAU status handoff:
 - New tasks start in `Pending Initial ISA Review`
-- New tasks are assigned through `CLICKUP_ASSIGNEE_ID` (Isabella in production) and add Marketing group members as watchers when the ClickUp group lookup is configured
+- New tasks are assigned through `CLICKUP_ASSIGNEE_ID` (Isabella in production) and add Marketing group members as watchers when the ClickUp group lookup is configured; submissions from `isabella@richardsandoval.com` route directly to `To Do` and assign the resolved Marketing users instead
 - Isabella uploads the corrected DOCX in ClickUp and moves the task to `To Do`; that status change downloads the latest DOCX and feeds the learning dashboard
 - When the approved DOCX is processed from any other configured review-complete status, the task is moved to `To Do`; if it is already in `To Do`, the status update is skipped
 - Task due date is taken from the form "Date needed" using noon UTC on that calendar day so ClickUp does not display it one day early in US timezones (plain `YYYY-MM-DD` parsing used to mean UTC midnight)
@@ -145,6 +146,8 @@ Design approval entry point:
 - `Other` is always included in the `Service Period` dropdown so users can intentionally route the approved file to the property base folder when no subfolder applies.
 - Approved menus can now be pushed to SharePoint after ClickUp approval using the property’s configured base folder and subfolder mapping.
 - Generated and SharePoint-uploaded menu DOCX files are named `Restaurant_ServicePeriod_M.D.YY.docx`, for example `Aqimero_Breakfast_11.6.23.docx`, using the restaurant/outlet name from the selected property and the submission `date_needed` value.
+- Approved-menu downloads keep that generated submission filename even when the stored approved artifact uses an internal `*-approved.docx` path.
+- Prix fixe prices with `PP`/`pp` suffixes, such as `50.00pp`, are recognized as valid per-person top-level prices.
 - Before uploading into a matched SharePoint service subfolder, the service archives existing `.docx` files from that subfolder into its `old/` folder. Existing `.pdf` and `.ai` files are left in place.
 - Seeded examples now include `Aqimero - Ritz-Carlton - Philadelphia`, `Maya - New York`, `Tamayo - Denver`, `Toro - Hotel Clio - Denver`, `Toro - Fairmont Millennium Park - Chicago`, `Toro - Dania Beach`, and `Toro - Viceroy - Snowmass`.
 
@@ -161,6 +164,7 @@ Notes:
 - `--id <uuid>` also works if you want to target the Supabase submission UUID directly.
 - `--approved-only` forces the test to use only `approved_menu_content`; without it the script falls back to `menu_content`, matching the DB extraction endpoint behavior.
 - The preview now shows `dish_name` and `description` separately when the menu uses inline rows like `Guacamole - avocado / lime / cilantro 12` or comma-delimited rows like `Punta Mita, prawns, tomato, onion C,F 95`.
+- Price-bearing dish rows are not treated as category headers even when they start with words like `Chicken`, and extraction recognizes extended allergen codes such as `SS`, `SL`, `SY`, `PN`, and `TN`.
 - `--write` inserts rows into `approved_dishes` for that submission, so use a test submission when possible.
 
 ## Getting Started

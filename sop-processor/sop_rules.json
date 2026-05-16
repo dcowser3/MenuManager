@@ -115,9 +115,11 @@
       "rule_id": "PRC-001",
       "category": "Pricing",
       "severity": "High",
-      "description": "Prices must be whole numbers. Dollar signs ($) and cents (.00) are not allowed.",
+      "description": "Standard menu prices must be whole numbers. Dollar signs ($) and cents (.00) are not allowed. Prix fixe prices may use 00.00PP format, where PP/pp means per person.",
       "details": {
         "format": "integer",
+        "prix_fixe_format": "00.00PP",
+        "prix_fixe_suffix_case_insensitive": true,
         "disallowed_characters": [
           "$",
           "."

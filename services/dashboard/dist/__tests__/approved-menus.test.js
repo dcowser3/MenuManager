@@ -31,7 +31,7 @@ describe('approved menu helpers', () => {
                         status: 'approved',
                         project_name: 'Spring Dinner',
                         property: 'Test Property',
-                        filename: 'Spring Dinner_Menu.docx',
+                        filename: 'Aqimero_Dinner_5.8.26.docx',
                         final_path: '/Users/deriancowser/Documents/MenuManager/tmp/documents/Test Property/Spring Dinner/form-200/approved/form-200-approved.docx',
                         service_period: 'dinner',
                         reviewed_at: '2026-05-08T10:00:00.000Z',
@@ -65,7 +65,7 @@ describe('approved menu helpers', () => {
                         submission_id: 'form-200',
                         asset_type: 'approved_docx',
                         storage_path: '/Users/deriancowser/Documents/MenuManager/tmp/documents/Test Property/Spring Dinner/form-200/approved/form-200-approved.docx',
-                        file_name: 'Spring Dinner Approved.docx',
+                        file_name: 'form-200-approved.docx',
                         created_at: '2026-05-08T10:05:00.000Z',
                     },
                 ]);
@@ -83,7 +83,7 @@ describe('approved menu helpers', () => {
                 id: 'form-200',
                 projectName: 'Spring Dinner',
                 property: 'Test Property',
-                approvedFileName: 'Spring Dinner Approved.docx',
+                approvedFileName: 'Aqimero_Dinner_5.8.26.docx',
                 status: 'approved',
                 servicePeriod: 'dinner',
                 submitterName: 'Carlos',
@@ -94,11 +94,11 @@ describe('approved menu helpers', () => {
         const approvedMenu = await (0, approved_menus_1.getApprovedMenuDownload)(repoRoot, 'form-200');
         expect(approvedMenu).toEqual({
             id: 'form-200',
-            filename: 'Spring Dinner_Menu.docx',
+            filename: 'Aqimero_Dinner_5.8.26.docx',
             finalPath: '/Users/deriancowser/Documents/MenuManager/tmp/documents/Test Property/Spring Dinner/form-200/approved/form-200-approved.docx',
             storagePath: '/Users/deriancowser/Documents/MenuManager/tmp/documents/Test Property/Spring Dinner/form-200/approved/form-200-approved.docx',
             status: 'approved',
-            approvedFileName: 'Spring Dinner Approved.docx',
+            approvedFileName: 'Aqimero_Dinner_5.8.26.docx',
         });
     });
     test('ignores non-form or non-approved submissions for download', async () => {

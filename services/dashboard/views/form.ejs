@@ -2571,12 +2571,6 @@
             return `${year}-${month}-${day}`;
         }
 
-        function addDays(date, days) {
-            const d = new Date(date.getFullYear(), date.getMonth(), date.getDate());
-            d.setDate(d.getDate() + days);
-            return d;
-        }
-
         function getTurnaroundDaysValue() {
             const raw = parseInt((document.getElementById('turnaroundDays').value || '').trim(), 10);
             const minDays = getMinimumTurnaroundDays();
@@ -2589,7 +2583,7 @@
         function setDateNeededMinimumFromTurnaround(forceDateToMinimum = false) {
             const dateInput = document.getElementById('dateNeeded');
             const days = getTurnaroundDaysValue();
-            const minDate = addDays(new Date(), days);
+            const minDate = window.formHelpers.addBusinessDays(new Date(), days);
             const minDateStr = formatDateForInput(minDate);
             dateInput.min = minDateStr;
             dateInput.value = minDateStr;

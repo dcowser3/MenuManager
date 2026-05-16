@@ -43,6 +43,7 @@ const CLICKUP_POST_APPROVAL_STATUS = (process.env.CLICKUP_POST_APPROVAL_STATUS |
 const CLICKUP_MARKETING_WATCHER_GROUP_NAME = (process.env.CLICKUP_MARKETING_WATCHER_GROUP_NAME || 'Marketing').trim();
 const CLICKUP_MARKETING_WATCHER_GROUP_ID = process.env.CLICKUP_MARKETING_WATCHER_GROUP_ID || '';
 const CLICKUP_WATCHER_USER_IDS = process.env.CLICKUP_WATCHER_USER_IDS || '';
+const ISABELLA_SUBMITTER_EMAIL = 'isabella@richardsandoval.com';
 const CLICKUP_REVIEW_COMPLETE_STATUSES = buildReviewCompleteStatuses();
 const GRAPH_CLIENT_ID = process.env.GRAPH_CLIENT_ID;
 const GRAPH_TENANT_ID = process.env.GRAPH_TENANT_ID;
@@ -162,6 +163,10 @@ function clickUpGroupMemberUserId(member: any): number | null {
         : (member?.user?.id ?? member?.id ?? member?.userid ?? member?.user_id);
     const parsed = Number.parseInt(String(raw || ''), 10);
     return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
+function isIsabellaSubmission(email: any): boolean {
+    return normalizeClickUpLabel(email) === ISABELLA_SUBMITTER_EMAIL;
 }
 
 function buildClickUpGroupUrl(groupIds: string[]): string {
@@ -1327,6 +1332,19 @@ app.post('/create-task', async (req, res) => {
             return `${idx + 1}. [${issueType}] ${item || 'No item specified'}${desc ? ` - ${desc}` : ''}`;
         });
 
+        const warnings: string[] = [];
+        const routeToMarketing = isIsabellaSubmission(submitterEmail);
+        let marketingAssigneeIds: number[] = [];
+        if (routeToMarketing) {
+            try {
+                marketingAssigneeIds = await resolveMarketingWatcherUserIds();
+            } catch (marketingError: any) {
+                const errorDetail = marketingError.response?.data?.err || marketingError.message;
+                warnings.push(`Marketing assignee resolution failed: ${errorDetail}`);
+                console.error('Failed to resolve Marketing assignees for Isabella submission:', errorDetail);
+            }
+        }
+
         const taskPayload: any = {
             name: buildTaskName({ property, menuType, servicePeriod, projectName, assetType, submissionMode }),
             description: buildTaskDescription({
@@ -1365,10 +1383,16 @@ app.post('/create-task', async (req, res) => {
                 overrideLines,
                 approvals,
             }),
-            status: CLICKUP_INITIAL_REVIEW_STATUS,
+            status: routeToMarketing ? (CLICKUP_CORRECTIONS_STATUS || 'to do') : CLICKUP_INITIAL_REVIEW_STATUS,
         };
 
-        if (CLICKUP_ASSIGNEE_ID) {
+        if (routeToMarketing) {
+            if (marketingAssigneeIds.length) {
+                taskPayload.assignees = marketingAssigneeIds;
+            } else {
+                warnings.push('No Marketing user IDs resolved for Isabella submission assignment.');
+            }
+        } else if (CLICKUP_ASSIGNEE_ID) {
             taskPayload.assignees = [parseInt(CLICKUP_ASSIGNEE_ID, 10)];
         }
 
@@ -1389,7 +1413,6 @@ app.post('/create-task', async (req, res) => {
         console.log(`ClickUp task created: ${taskId}`);
 
         let attachmentUploadFailed = false;
-        const warnings: string[] = [];
 
         try {
             const watcherCount = await addMarketingWatchersToTask(taskId);

@@ -8,6 +8,26 @@
             parsed.getDate() === day;
     }
 
+    function isBusinessDay(date) {
+        const day = date.getDay();
+        return day !== 0 && day !== 6;
+    }
+
+    function addBusinessDays(date, days) {
+        const d = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+        const count = Math.max(0, Number.parseInt(String(days || 0), 10) || 0);
+        let added = 0;
+
+        while (added < count) {
+            d.setDate(d.getDate() + 1);
+            if (isBusinessDay(d)) {
+                added += 1;
+            }
+        }
+
+        return d;
+    }
+
     function clampExtractedDateNeeded(extractedStr, minStr) {
         const extracted = String(extractedStr || '').trim();
         const min = String(minStr || '').trim();
@@ -82,6 +102,7 @@
     }
 
     const api = {
+        addBusinessDays,
         clampExtractedDateNeeded,
         isValidDateInputValue,
         parseExtractedSize,

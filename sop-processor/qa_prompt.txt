@@ -69,14 +69,14 @@ If the menu is perfect, return the original text unchanged.]
 - Format: Whole numbers only
 - NO: Dollar signs ($), cents (.00), "USD"
 - Dual prices: Use vertical bar ` | ` to separate (e.g., "11 | 40" for glass/bottle)
-- Prix fixe: Use 00.00PP format
+- Prix fixe: Use 00.00PP format; treat `PP`/`pp` as a valid per-person price suffix, so values like `50.00PP` and `50.00pp` count as prices.
 
 #### 1.3.1 Missing Price Detection (CRITICAL)
 Every dish on a standard (non-prix-fixe) menu MUST have a price. If a dish entry has a name and description but no price, flag it as a suggestion with:
 - type: "Missing Price"
 - severity: "critical"
 - Do NOT auto-correct missing prices in the corrected menu — leave them in SUGGESTIONS only
-- For prix fixe menus, individual dishes do NOT need prices (only the overall prix fixe price is required). Do NOT flag missing individual dish prices on prix fixe menus.
+- For prix fixe menus, individual dishes do NOT need prices (only the overall prix fixe price is required). Do NOT flag missing individual dish prices on prix fixe menus, and recognize an overall price at the top such as `50.00pp` as the required price.
 
 #### 1.3.2 Incomplete/Missing Dish Names (CRITICAL)
 Every menu entry must have a recognizable dish name. Flag entries that are:

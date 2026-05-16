@@ -237,6 +237,58 @@ describe('browser approval finalize route', () => {
         expect(watcherCall[1]).toEqual({ watchers: { add: [201, 202], rem: [] } });
     });
 
+    test('routes Isabella submissions directly to To Do with Marketing as assignees', async () => {
+        axios.get.mockImplementation(async (url) => {
+            const urlStr = String(url);
+            if (urlStr.includes('https://api.clickup.com/api/v2/group')) {
+                return {
+                    data: {
+                        groups: [
+                            {
+                                id: 'grp_marketing',
+                                name: 'Marketing',
+                                members: [
+                                    { user: { id: 201 } },
+                                    { user: { id: 202 } },
+                                ],
+                            },
+                        ],
+                    },
+                };
+            }
+            return { data: null };
+        });
+        axios.post.mockImplementation(async (url) => {
+            const urlStr = String(url);
+            if (urlStr.includes('https://api.clickup.com/api/v2/list/list_123/task')) {
+                return { data: { id: 'cu_isa' } };
+            }
+            return { data: {} };
+        });
+
+        const response = await invokeJsonHandler(createTaskHandler, {
+            body: {
+                submissionId: 'form-isa',
+                submitterName: 'Isabella Sandoval',
+                submitterEmail: 'isabella@richardsandoval.com',
+                projectName: 'Final Review Menu',
+                property: 'Toro - Chicago',
+            },
+        });
+
+        expect(response.status).toBe(200);
+        expect(response.body.success).toBe(true);
+        expect(response.body.taskId).toBe('cu_isa');
+
+        const createCall = axios.post.mock.calls.find((call) =>
+            String(call[0]).includes('https://api.clickup.com/api/v2/list/list_123/task')
+        );
+        expect(createCall).toBeTruthy();
+        expect(createCall[1].status).toBe('to do');
+        expect(createCall[1].assignees).toEqual([201, 202]);
+        expect(createCall[1].assignees).not.toContain(114079264);
+    });
+
     test('uploads the approved docx back to clickup and moves the task to to do', async () => {
         const response = await invokeJsonHandler(finalizeHandler, {
             body: {

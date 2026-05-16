@@ -1718,7 +1718,8 @@ app.post('/api/form/basic-check', async (req, res) => {
 This is a PRIX FIXE (pre-fix) menu. Apply these special rules:
 
 1. **PRICING STRUCTURE**: Prix fixe menus should have:
-   - A single prix fixe price at the TOP of the menu (format: 00.00PP or just a whole number)
+   - A single prix fixe price at the TOP of the menu (format: 00.00PP, 00.00pp, or just a whole number)
+   - Treat PP/pp as "per person" and count prices like "50.00pp" as valid top-level prices
    - Optional wine/alcohol pairing price listed alongside (e.g., "185 | 85 wine pairing")
    - Individual dishes do NOT need their own prices - this is CORRECT for prix fixe menus
    - Do NOT flag missing prices on individual courses/dishes

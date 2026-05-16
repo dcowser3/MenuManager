@@ -16,7 +16,7 @@ The AI review enforces "hard stops" for critical issues that block submission.
 | **Course Progression** | Prix fixe menus | AI flags it; backend forces `critical` via normalizer | No |
 | **Pricing Structure** | Prix fixe menus | AI flags it; backend forces `critical` via normalizer | No |
 
-**Prix fixe exemption:** Individual dishes on prix fixe menus do NOT need prices — only the top-level prix fixe price is required.
+**Prix fixe exemption:** Individual dishes on prix fixe menus do NOT need prices — only the top-level prix fixe price is required. The top-level price can use the per-person suffix `PP`/`pp`, so values like `50.00pp` count as valid prices.
 
 ## Three Detection Layers
 
@@ -34,7 +34,7 @@ A backend safety net that forces `critical` severity on known types regardless o
 
 ### Layer 3: Deterministic Checks (`enforcePrixFixeCriticalChecks`)
 Runs only for prix fixe menus. Programmatically scans the menu text (no AI involved):
-- **Top price:** Checks if any of the first 5 non-empty lines match a price pattern
+- **Top price:** Checks if any of the first 5 non-empty lines match a price pattern, including `PP`/`pp` per-person prices
 - **Course numbers:** Finds heading lines (Appetizers, Specialties, Desserts, etc.) and checks if the previous line is a standalone number or the heading starts with a number
 - Adds critical suggestions if missing; removes false-positive course numbering suggestions if numbers ARE present
 

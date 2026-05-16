@@ -37,7 +37,7 @@ These rules are **illustrative examples, not exhaustive lists**. When reviewing 
 - **Format**: Whole numbers only
 - **NO**: Dollar signs ($), cents (.00), "USD"
 - **Dual prices**: Use vertical bar ` | ` to separate (e.g., "11 | 40" for glass/bottle)
-- **Prix fixe**: Use 00.00PP format
+- **Prix fixe**: Use 00.00PP format; `PP`/`pp` means per person and is a valid suffix for prix fixe prices
 
 ### 1.4 Allergens
 - **Font**: Calibri (Body), 12pt, superscript

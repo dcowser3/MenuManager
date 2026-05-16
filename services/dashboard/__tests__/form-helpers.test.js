@@ -1,10 +1,25 @@
 const {
+    addBusinessDays,
     clampExtractedDateNeeded,
     findCatalogMatchesFromHints,
     isValidDateInputValue,
     parseExtractedSize,
     tokenizePropertyHint,
 } = require('../public/js/form-helpers');
+
+describe('addBusinessDays', () => {
+    test('skips Saturday and Sunday when calculating turnaround', () => {
+        const friday = new Date(2026, 4, 15);
+        expect(addBusinessDays(friday, 1)).toEqual(new Date(2026, 4, 18));
+        expect(addBusinessDays(friday, 5)).toEqual(new Date(2026, 4, 22));
+    });
+
+    test('returns the same local date for zero or invalid day counts', () => {
+        const date = new Date(2026, 4, 13);
+        expect(addBusinessDays(date, 0)).toEqual(new Date(2026, 4, 13));
+        expect(addBusinessDays(date, 'abc')).toEqual(new Date(2026, 4, 13));
+    });
+});
 
 describe('clampExtractedDateNeeded', () => {
     test('returns extracted date when it meets the minimum', () => {

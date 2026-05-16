@@ -15,6 +15,7 @@ When a chef submits a menu, a ClickUp task is automatically created with the gen
 - Uploads optional menu image attachment when provided in the form (`menuImageUpload`)
 - Adds Isabella as the assignee when `CLICKUP_ASSIGNEE_ID` is configured
 - Resolves the configured Marketing ClickUp User Group to its member user IDs and adds those users as task watchers after task creation
+- If the submitter email is `isabella@richardsandoval.com`, creates the task directly in `To Do` and assigns the resolved Marketing users instead of the Isabella assignee
 - Stores `clickup_task_id` on the submission record
 - `due_date` is set from the form’s `YYYY-MM-DD` value using **noon UTC** on that calendar day so the task due date matches the chef’s date in US (and most other) timezones; naive `new Date("YYYY-MM-DD")` uses UTC midnight and showed up one day early in ClickUp for Americas users
 - Gracefully skips if ClickUp env vars are not configured (`{ skipped: true }`)

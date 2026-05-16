@@ -37,6 +37,7 @@ const CLICKUP_POST_APPROVAL_STATUS = (process.env.CLICKUP_POST_APPROVAL_STATUS |
 const CLICKUP_MARKETING_WATCHER_GROUP_NAME = (process.env.CLICKUP_MARKETING_WATCHER_GROUP_NAME || 'Marketing').trim();
 const CLICKUP_MARKETING_WATCHER_GROUP_ID = process.env.CLICKUP_MARKETING_WATCHER_GROUP_ID || '';
 const CLICKUP_WATCHER_USER_IDS = process.env.CLICKUP_WATCHER_USER_IDS || '';
+const ISABELLA_SUBMITTER_EMAIL = 'isabella@richardsandoval.com';
 const CLICKUP_REVIEW_COMPLETE_STATUSES = buildReviewCompleteStatuses();
 const GRAPH_CLIENT_ID = process.env.GRAPH_CLIENT_ID;
 const GRAPH_TENANT_ID = process.env.GRAPH_TENANT_ID;
@@ -72,6 +73,15 @@ function sendAdminAlert(alert) {
             html: (0, supabase_client_1.buildAlertEmailHtml)(alert, DASHBOARD_URL),
         }).catch((err) => console.error('Failed to send alert email:', err.message));
     }
+}
+function describeServiceError(error) {
+    return Object.fromEntries(Object.entries({
+        message: error?.message,
+        code: error?.code,
+        status: error?.response?.status,
+        statusText: error?.response?.statusText,
+        response: error?.response?.data,
+    }).filter(([, value]) => value !== undefined && value !== null && value !== ''));
 }
 function getRepoRoot() {
     const candidates = [
@@ -125,6 +135,9 @@ function clickUpGroupMemberUserId(member) {
         : (member?.user?.id ?? member?.id ?? member?.userid ?? member?.user_id);
     const parsed = Number.parseInt(String(raw || ''), 10);
     return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+}
+function isIsabellaSubmission(email) {
+    return normalizeClickUpLabel(email) === ISABELLA_SUBMITTER_EMAIL;
 }
 function buildClickUpGroupUrl(groupIds) {
     const params = new URLSearchParams();
@@ -979,6 +992,19 @@ app.post('/create-task', async (req, res) => {
             const desc = (o.description || '').toString().trim();
             return `${idx + 1}. [${issueType}] ${item || 'No item specified'}${desc ? ` - ${desc}` : ''}`;
         });
+        const warnings = [];
+        const routeToMarketing = isIsabellaSubmission(submitterEmail);
+        let marketingAssigneeIds = [];
+        if (routeToMarketing) {
+            try {
+                marketingAssigneeIds = await resolveMarketingWatcherUserIds();
+            }
+            catch (marketingError) {
+                const errorDetail = marketingError.response?.data?.err || marketingError.message;
+                warnings.push(`Marketing assignee resolution failed: ${errorDetail}`);
+                console.error('Failed to resolve Marketing assignees for Isabella submission:', errorDetail);
+            }
+        }
         const taskPayload = {
             name: buildTaskName({ property, menuType, servicePeriod, projectName, assetType, submissionMode }),
             description: buildTaskDescription({
@@ -1017,9 +1043,17 @@ app.post('/create-task', async (req, res) => {
                 overrideLines,
                 approvals,
             }),
-            status: CLICKUP_INITIAL_REVIEW_STATUS,
+            status: routeToMarketing ? (CLICKUP_CORRECTIONS_STATUS || 'to do') : CLICKUP_INITIAL_REVIEW_STATUS,
         };
-        if (CLICKUP_ASSIGNEE_ID) {
+        if (routeToMarketing) {
+            if (marketingAssigneeIds.length) {
+                taskPayload.assignees = marketingAssigneeIds;
+            }
+            else {
+                warnings.push('No Marketing user IDs resolved for Isabella submission assignment.');
+            }
+        }
+        else if (CLICKUP_ASSIGNEE_ID) {
             taskPayload.assignees = [parseInt(CLICKUP_ASSIGNEE_ID, 10)];
         }
         if (dateNeeded) {
@@ -1032,7 +1066,6 @@ app.post('/create-task', async (req, res) => {
         const taskId = taskResponse.data.id;
         console.log(`ClickUp task created: ${taskId}`);
         let attachmentUploadFailed = false;
-        const warnings = [];
         try {
             const watcherCount = await addMarketingWatchersToTask(taskId);
             if (watcherCount > 0) {
@@ -1089,8 +1122,9 @@ app.post('/create-task', async (req, res) => {
         });
     }
     catch (error) {
-        console.error('Error creating ClickUp task:', error.response?.data || error.message);
-        res.status(500).json({ error: 'Failed to create ClickUp task', details: error.message });
+        const errorDetails = describeServiceError(error);
+        console.error('Error creating ClickUp task:', errorDetails.response || errorDetails.message);
+        res.status(500).json({ error: 'Failed to create ClickUp task', details: errorDetails });
     }
 });
 app.post('/approval/finalize', async (req, res) => {

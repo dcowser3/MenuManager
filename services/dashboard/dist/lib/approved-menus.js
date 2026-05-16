@@ -71,12 +71,13 @@ function buildApprovedMenuList(sourceRows, approvedAssetRows) {
     return sourceRows.map((row) => {
         const id = `${row.id || row.legacy_id || ''}`.trim();
         const approvedAsset = approvedAssetBySubmission.get(id);
+        const submittedFileName = `${row.filename || ''}`.trim();
         return {
             id,
             projectName: `${row.project_name || ''}`.trim(),
             property: `${row.property || ''}`.trim(),
-            filename: `${row.filename || ''}`.trim(),
-            approvedFileName: `${approvedAsset?.file_name || row.filename || 'approved-menu.docx'}`.trim(),
+            filename: submittedFileName,
+            approvedFileName: submittedFileName || `${approvedAsset?.file_name || 'approved-menu.docx'}`.trim(),
             reviewedAt: `${row.reviewed_at || row.updated_at || ''}`.trim(),
             servicePeriod: `${row.service_period || ''}`.trim(),
             submitterName: `${row.submitter_name || ''}`.trim(),
@@ -202,6 +203,6 @@ async function getApprovedMenuDownload(repoRoot, submissionId) {
         finalPath: `${submission.final_path || ''}`.trim(),
         storagePath: `${approvedAsset?.storage_path || ''}`.trim(),
         status,
-        approvedFileName: `${approvedAsset?.file_name || submission.filename || 'approved-menu.docx'}`.trim(),
+        approvedFileName: `${submission.filename || approvedAsset?.file_name || 'approved-menu.docx'}`.trim(),
     };
 }
