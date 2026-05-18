@@ -37,8 +37,7 @@ describe('clampExtractedDateNeeded', () => {
     test('clamps past date to the minimum and returns a warning', () => {
         const result = clampExtractedDateNeeded('2026-04-13', '2026-04-20');
         expect(result.value).toBe('2026-04-20');
-        expect(result.warning).toContain('2026-04-13');
-        expect(result.warning).toContain('2026-04-20');
+        expect(result.warning).toBe('The date in your Word doc is sooner than the selected turnaround allows, so we kept the earliest available date instead.');
     });
 
     test('falls back to minimum when extracted date is empty', () => {
@@ -50,13 +49,13 @@ describe('clampExtractedDateNeeded', () => {
     test('falls back to minimum when extracted date is not an input-date value', () => {
         const result = clampExtractedDateNeeded('May 20, 2026', '2026-04-20');
         expect(result.value).toBe('2026-04-20');
-        expect(result.warning).toContain('May 20, 2026');
+        expect(result.warning).toBe('We weren\'t able to use the date from your Word doc. That\'s okay. We kept the automatically calculated date instead.');
     });
 
     test('falls back to minimum when extracted date is an impossible ISO date', () => {
         const result = clampExtractedDateNeeded('2026-02-31', '2026-04-20');
         expect(result.value).toBe('2026-04-20');
-        expect(result.warning).toContain('2026-02-31');
+        expect(result.warning).toBe('We weren\'t able to use the date from your Word doc. That\'s okay. We kept the automatically calculated date instead.');
     });
 
     test('returns extracted date when min is empty', () => {
@@ -68,7 +67,7 @@ describe('clampExtractedDateNeeded', () => {
     test('trims whitespace from inputs', () => {
         const result = clampExtractedDateNeeded('  2026-04-13  ', '  2026-04-20  ');
         expect(result.value).toBe('2026-04-20');
-        expect(result.warning).toContain('2026-04-13');
+        expect(result.warning).toBe('The date in your Word doc is sooner than the selected turnaround allows, so we kept the earliest available date instead.');
     });
 });
 

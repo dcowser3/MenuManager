@@ -46,7 +46,9 @@ const axios = require('axios').default;
 const fs = require('fs');
 const path = require('path');
 const { logAlert } = require('@menumanager/supabase-client');
-const app = require('../index').default;
+const dashboardModule = require('../index');
+const app = dashboardModule.default;
+const { shouldNotifyFormAttemptFailure } = dashboardModule;
 const mockedAxios = axios;
 
 function getRouteHandler(method, routePath) {
@@ -116,6 +118,7 @@ function postJsonOverHttp(routePath, body) {
 describe('Dashboard Modification Workflow (local, mocked externals)', () => {
     const submitHandler = getRouteHandler('post', '/api/form/submit');
     const basicCheckHandler = getRouteHandler('post', '/api/form/basic-check');
+    const attemptLogHandler = getRouteHandler('post', '/api/form/attempt-log');
     const submissionSearchHandler = getRouteHandler('get', '/api/submissions/search');
     const baselineUploadPath = path.join(process.cwd(), 'tmp', 'uploads', 'legacy-approved.docx');
     const originalNodeEnv = process.env.NODE_ENV;
@@ -268,6 +271,60 @@ describe('Dashboard Modification Workflow (local, mocked externals)', () => {
             String(c[0]).includes('/create-task')
         );
         expect(clickupCall[1].filename).toBe(expectedFilename);
+    });
+
+    test('accepts compact form attempt telemetry before a submission exists', async () => {
+        const response = await invokeJsonHandler(attemptLogHandler, {
+            attemptId: 'attempt-test',
+            eventType: 'submit_failed',
+            submitterEmail: 'chef@example.com',
+            projectName: 'Tamayo Beverage Menu 2026',
+            property: 'Tamayo - Denver',
+            submissionMode: 'modification',
+            revisionSource: 'uploaded_unapproved',
+            menuTextLength: 7204,
+            requestBodyLength: 300001,
+            errorMessage: '413 Payload Too Large',
+        });
+
+        expect(response.status).toBe(200);
+        expect(response.body.success).toBe(true);
+    });
+
+    test('form attempt failure email notifications are production-only', () => {
+        process.env.NODE_ENV = 'development';
+        expect(shouldNotifyFormAttemptFailure({
+            eventType: 'submit_failed',
+            statusCode: 413,
+        })).toBe(false);
+
+        process.env.NODE_ENV = 'production';
+        expect(shouldNotifyFormAttemptFailure({
+            eventType: 'submit_failed',
+            statusCode: 413,
+        })).toBe(true);
+        expect(shouldNotifyFormAttemptFailure({
+            eventType: 'basic_check_completed',
+            statusCode: 200,
+        })).toBe(false);
+    });
+
+    test('accepts rich submission bodies larger than the Express default JSON limit', async () => {
+        process.env.NODE_ENV = 'production';
+        const largeHtml = `<p>${'Guacamole with roasted poblano salsa. '.repeat(4500)}</p>`;
+        const payload = buildNewSubmissionPayload({
+            menuContent: 'Guacamole - $12',
+            menuContentHtml: largeHtml,
+        });
+
+        const response = await postJsonOverHttp('/api/form/submit', payload);
+
+        expect(response.status).toBe(200);
+        expect(response.body.success).toBe(true);
+        const submissionCall = mockedAxios.post.mock.calls.find((c) =>
+            String(c[0]).includes('/submissions')
+        );
+        expect(submissionCall[1].menu_content_html).toContain('Guacamole with roasted poblano salsa');
     });
 
     test('accepts modification submission using DB baseline and persists revision fields', async () => {

@@ -305,6 +305,40 @@ describe('redline preview helpers', () => {
         expect(rendered.deletions).toBe(1);
     });
 
+    test('tracks deletion of an imported highlighted dish from the editable text', () => {
+        const baselineText = [
+            'COLD STARTERS',
+            'Punta Mita, prawns C,F,S 95',
+            'Queso Fundido, melted cheese D,G,V 95',
+            'Tuna Tostada, avocado 100',
+        ].join('\n');
+        const revisedText = [
+            'COLD STARTERS',
+            'Punta Mita, prawns C,F,S 95',
+            'Tuna Tostada, avocado 100',
+        ].join('\n');
+        const annotationMap = {};
+
+        ['Punta Mita, prawns C,F,S 95', 'Queso Fundido, melted cheese D,G,V 95'].forEach((text) => {
+            const start = baselineText.indexOf(text);
+            expect(start).toBeGreaterThanOrEqual(0);
+            for (let i = start; i < start + text.length; i++) {
+                annotationMap[i] = 'ins';
+            }
+        });
+
+        const rendered = redlinePreview.renderPersistentPreview(baselineText, revisedText, {
+            annotationMap,
+            includeExistingAnnotations: true,
+        });
+
+        expect(revisedText).not.toContain('Queso Fundido');
+        expect(rendered.html).toContain('<span class="existing-ins">Punta</span>');
+        expect(rendered.html).toContain('<span class="persistent-del">Queso</span>');
+        expect(rendered.html).toContain('<span class="persistent-del">Fundido</span>');
+        expect(rendered.deletions).toBeGreaterThan(0);
+    });
+
     test('preserves uploaded baseline inline formatting in the persistent preview', () => {
         const baselineHtml = [
             '<p><strong>COLD STARTERS</strong></p>',

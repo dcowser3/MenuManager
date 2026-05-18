@@ -11,6 +11,7 @@ dotenv.config({ path: path.join(__dirname, '..', '..', '..', '.env') });
 
 const app = express();
 const port = 3004;
+const JSON_BODY_LIMIT = process.env.DB_JSON_BODY_LIMIT || process.env.JSON_BODY_LIMIT || '5mb';
 
 const DB_DIR = path.join(__dirname, '..', '..', '..', 'tmp', 'db');
 const SUBMISSIONS_DB = path.join(DB_DIR, 'submissions.json');
@@ -794,7 +795,18 @@ async function initDb() {
     }
 }
 
-app.use(express.json());
+app.use(express.json({ limit: JSON_BODY_LIMIT }));
+app.use((error: any, _req: express.Request, res: express.Response, next: express.NextFunction) => {
+    if (error?.type === 'entity.too.large') {
+        return res.status(413).json({
+            error: `Request payload is too large. DB service JSON bodies are limited to ${JSON_BODY_LIMIT}.`,
+        });
+    }
+    if (error instanceof SyntaxError && 'body' in error) {
+        return res.status(400).json({ error: 'Request body must be valid JSON' });
+    }
+    return next(error);
+});
 app.use(requireInternalServiceAuth);
 
 // Endpoint to create a new submission

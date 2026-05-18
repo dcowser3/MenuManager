@@ -35,13 +35,13 @@
         if (!isValidDateInputValue(extracted)) {
             return {
                 value: min,
-                warning: `Date in document (${extracted}) is not a valid date field value. Using ${min} instead.`,
+                warning: `We weren't able to use the date from your Word doc. That's okay. We kept the automatically calculated date instead.`,
             };
         }
         if (!min || extracted >= min) return { value: extracted, warning: null };
         return {
             value: min,
-            warning: `Date in document (${extracted}) is earlier than the minimum turnaround allows. Using ${min} instead.`,
+            warning: `The date in your Word doc is sooner than the selected turnaround allows, so we kept the earliest available date instead.`,
         };
     }
 

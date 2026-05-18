@@ -22,6 +22,7 @@ All variables are configured in `.env` at the project root. See `.env.example` f
 |----------|-------------|
 | `INTERNAL_REVIEWER_EMAIL` | Email address that receives internal review notifications |
 | `ALERT_EMAIL` | Email address that receives system alert emails such as SharePoint upload, webhook, and extraction failures |
+| `FORM_ATTEMPT_ALERT_EMAIL` | Email address that receives production public-form failure alerts such as `413` submit errors (default: `dcowser@richardsandoval.com`) |
 | `AI_REVIEW_MODEL` | OpenAI model used by AI review service (default: `gpt-4o-mini`) |
 | `SOP_DOC_PATH` | Path to SOP document (default: `samples/sop.txt`) |
 | `DASHBOARD_URL` | Base URL for email links (default: `http://localhost:3005`) |
@@ -30,6 +31,9 @@ All variables are configured in `.env` at the project root. See `.env.example` f
 | `DIFFER_SERVICE_URL` | Base URL for differ service (default: `http://localhost:3006`) |
 | `CLICKUP_SERVICE_URL` | Base URL for ClickUp integration service (default: `http://localhost:3007`) |
 | `DOCUMENT_STORAGE_ROOT` | Root directory for persisted menu DOCX assets (default: `tmp/documents`) |
+| `JSON_BODY_LIMIT` | Shared Express JSON/urlencoded body limit for services that need larger rich-text payloads (default where used: `5mb`) |
+| `DASHBOARD_JSON_BODY_LIMIT` | Dashboard-specific override for chef form JSON/urlencoded bodies (default: `JSON_BODY_LIMIT` or `5mb`) |
+| `DB_JSON_BODY_LIMIT` | DB-service-specific override for internal submission and raw-payload JSON bodies (default: `JSON_BODY_LIMIT` or `5mb`) |
 | `LEARNING_DATA_DIR` | Root directory for differ comparison history and learned-rule snapshots (default: `tmp/learning`) |
 | `LEARNING_MIN_OCCURRENCES` | Minimum repeated corrections needed before a learned rule is active (default: `2`) |
 | `LEARNING_MAX_OVERLAY_RULES` | Max learned rules injected into QA prompt overlay (default: `25`) |
@@ -61,9 +65,14 @@ These are optional. If `CLICKUP_API_TOKEN` or `CLICKUP_LIST_ID` are not set, the
 
 Operational failures are logged to the `system_alerts` table in Supabase. When SMTP is configured and `ALERT_EMAIL` is set, services also send an email notification for alert events.
 
+Public form journeys also write compact telemetry to `form_attempt_logs` when Supabase is configured and the table from `supabase/schema.sql` has been applied. These rows are keyed by browser-generated `attempt_id` and capture step-level events such as baseline uploads, Basic AI Check completion, final submit failures, request body size estimates, critical AI suggestions, and parser-level `413` failures. The logs intentionally store lengths and structured summaries rather than full menu content.
+
+In production, public-form failure events also send an email through the dashboard SMTP transport to `FORM_ATTEMPT_ALERT_EMAIL` (or `dcowser@richardsandoval.com` when unset). Local development and non-production environments do not send these form failure emails.
+
 Current examples include:
 
 - `clickup_task_failed` from `dashboard` when the saved submission cannot create its ClickUp task; the submitter warning includes the submission reference, and alert details include the same diagnostic reference plus structured service error details
+- `form_payload_too_large` from `dashboard` when Express rejects a public form JSON body before the route handler can create a submission row
 - `clickup_task_retry_failed` from `dashboard` when a manual retry from the review page still cannot create the ClickUp task
 - `sharepoint_upload_failed` from `clickup-integration` when Microsoft Graph/SharePoint rejects the approved DOCX upload, including `403` permission errors
 - `approved_dish_extraction_failed` from `clickup-integration` when approved-dish extraction fails after approval
@@ -115,6 +124,7 @@ The learning dashboard can delete an individual learned submission through the d
 ## Upload Guardrails
 
 - Dashboard uploads are capped at 15 MB per file.
+- Dashboard chef form JSON bodies and DB submission/raw-payload JSON bodies default to a 5 MB cap so preserved rich HTML and redline previews do not fail at Express's 100 KB default.
 - Modification baseline uploads only accept `.docx`.
 - Design approval uploads accept `.docx` plus `.pdf`.
 - Optional menu reference uploads accept `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, or `.pdf`.

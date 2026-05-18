@@ -47,6 +47,7 @@ import {
     mergeClickUpHandoffMetadata,
     normalizeRawPayload,
 } from './lib/clickup-handoff';
+import { logFormAttemptEvent } from './lib/form-attempt-logging';
 import {
     buildFallbackPropertyCatalog,
     normalizePropertyCatalogRecord,
@@ -69,7 +70,9 @@ const AI_REVIEW_URL = process.env.AI_REVIEW_URL || 'http://localhost:3002';
 const DIFFER_SERVICE_URL = process.env.DIFFER_SERVICE_URL || 'http://localhost:3006';
 const CLICKUP_SERVICE_URL = process.env.CLICKUP_SERVICE_URL || 'http://localhost:3007';
 const ALERT_EMAIL = process.env.ALERT_EMAIL || '';
+const FORM_ATTEMPT_ALERT_EMAIL = process.env.FORM_ATTEMPT_ALERT_EMAIL || 'dcowser@richardsandoval.com';
 const DASHBOARD_URL = process.env.DASHBOARD_URL || 'http://localhost:3005';
+const JSON_BODY_LIMIT = process.env.DASHBOARD_JSON_BODY_LIMIT || process.env.JSON_BODY_LIMIT || '5mb';
 const internalApi = createInternalApiClient(axios);
 
 // SMTP for admin alerts (reuses existing SMTP config)
@@ -84,6 +87,8 @@ const alertTransporter = hasSmtpConfig ? nodemailer.createTransport({
 // Alert dedup: 15-min cooldown per alert_type
 const alertCooldowns = new Map<string, number>();
 const ALERT_COOLDOWN_MS = 15 * 60 * 1000;
+const formAttemptEmailCooldowns = new Map<string, number>();
+const FORM_ATTEMPT_EMAIL_COOLDOWN_MS = 10 * 60 * 1000;
 
 /**
  * Send an admin alert: logs to Supabase + sends email (both fire-and-forget).
@@ -107,6 +112,93 @@ function sendAdminAlert(alert: SystemAlert): void {
             html: buildAlertEmailHtml(alert, DASHBOARD_URL),
         }).catch((err: any) => console.error('Failed to send alert email:', err.message));
     }
+}
+
+export function shouldNotifyFormAttemptFailure(event: Record<string, any>): boolean {
+    if (process.env.NODE_ENV !== 'production') return false;
+    const eventType = `${event.eventType || event.event_type || ''}`;
+    const statusCode = Number.parseInt(`${event.statusCode || event.status_code || ''}`, 10);
+    return (
+        /failed|exception|payload_too_large|too_large/i.test(eventType) ||
+        statusCode >= 400
+    );
+}
+
+function escapeEmailHtml(value: unknown): string {
+    return `${value ?? ''}`
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function formAttemptValue(event: Record<string, any>, camelKey: string, snakeKey: string = camelKey): any {
+    return event[camelKey] ?? event[snakeKey] ?? '';
+}
+
+function sendFormAttemptFailureEmail(event: Record<string, any>): void {
+    if (!shouldNotifyFormAttemptFailure(event)) return;
+    if (!alertTransporter || !FORM_ATTEMPT_ALERT_EMAIL) return;
+
+    const attemptId = `${formAttemptValue(event, 'attemptId', 'attempt_id') || 'unknown'}`;
+    const eventType = `${formAttemptValue(event, 'eventType', 'event_type') || 'form_attempt_failed'}`;
+    const cooldownKey = `${attemptId}:${eventType}`;
+    const lastSent = formAttemptEmailCooldowns.get(cooldownKey) || 0;
+    if (Date.now() - lastSent < FORM_ATTEMPT_EMAIL_COOLDOWN_MS) return;
+    formAttemptEmailCooldowns.set(cooldownKey, Date.now());
+
+    const projectName = formAttemptValue(event, 'projectName', 'project_name') || 'Unknown project';
+    const property = formAttemptValue(event, 'property') || 'Unknown property';
+    const submitterEmail = formAttemptValue(event, 'submitterEmail', 'submitter_email') || 'Unknown submitter';
+    const statusCode = formAttemptValue(event, 'statusCode', 'status_code') || '';
+    const errorMessage = formAttemptValue(event, 'errorMessage', 'error_message') || '';
+    const details = event.details || {};
+    const subjectStatus = statusCode ? ` ${statusCode}` : '';
+    const subject = `[Menu Manager] Form submit error${subjectStatus}: ${projectName}`;
+
+    const rows = [
+        ['Event', eventType],
+        ['Attempt', attemptId],
+        ['Submitter', submitterEmail],
+        ['Property', property],
+        ['Project', projectName],
+        ['Mode', formAttemptValue(event, 'submissionMode', 'submission_mode')],
+        ['Revision Source', formAttemptValue(event, 'revisionSource', 'revision_source')],
+        ['Route', formAttemptValue(event, 'route')],
+        ['Status', statusCode],
+        ['Request Body Bytes', formAttemptValue(event, 'requestBodyLength', 'request_body_length')],
+        ['Menu Text Length', formAttemptValue(event, 'menuTextLength', 'menu_text_length')],
+        ['Menu HTML Length', formAttemptValue(event, 'menuHtmlLength', 'menu_html_length')],
+        ['Persistent Diff HTML Length', formAttemptValue(event, 'persistentDiffHtmlLength', 'persistent_diff_html_length')],
+        ['Critical Suggestions', formAttemptValue(event, 'criticalSuggestionsCount', 'critical_suggestions_count')],
+    ];
+
+    const htmlRows = rows
+        .filter(([, value]) => value !== undefined && value !== null && `${value}` !== '')
+        .map(([label, value]) => `<tr><td style="padding:6px 12px;background:#f5f5f5;font-weight:bold;width:190px">${escapeEmailHtml(label)}</td><td style="padding:6px 12px">${escapeEmailHtml(value)}</td></tr>`)
+        .join('');
+
+    const criticalSuggestions = formAttemptValue(event, 'criticalSuggestions', 'critical_suggestions');
+    const criticalHtml = Array.isArray(criticalSuggestions) && criticalSuggestions.length
+        ? `<h3>Critical Suggestions</h3><pre style="background:#f5f5f5;padding:12px;overflow:auto;font-size:12px">${escapeEmailHtml(JSON.stringify(criticalSuggestions, null, 2))}</pre>`
+        : '';
+
+    alertTransporter.sendMail({
+        from: `"Menu Manager Alerts" <${process.env.SMTP_USER}>`,
+        to: FORM_ATTEMPT_ALERT_EMAIL,
+        subject,
+        html: `
+            <div style="font-family:sans-serif;max-width:720px">
+                <h2 style="color:#d32f2f;margin-bottom:4px">Production form submission error</h2>
+                <p>A public form attempt failed before completion.</p>
+                <table style="border-collapse:collapse;width:100%;margin:12px 0">${htmlRows}</table>
+                ${errorMessage ? `<div style="background:#fff3e0;border-left:4px solid #e65100;padding:12px;margin:12px 0"><strong>Error:</strong><br>${escapeEmailHtml(errorMessage)}</div>` : ''}
+                ${criticalHtml}
+                <details style="margin:12px 0"><summary style="cursor:pointer;font-weight:bold">Details</summary><pre style="background:#f5f5f5;padding:12px;overflow:auto;font-size:12px">${escapeEmailHtml(JSON.stringify(details, null, 2))}</pre></details>
+            </div>
+        `,
+    }).catch((err: any) => console.error('Failed to send form attempt alert email:', err.message));
 }
 
 function getRepoRoot(): string {
@@ -506,8 +598,57 @@ app.get('/js/diff-core.js', (_req, res) => {
     res.sendFile(path.join(getRepoRoot(), 'services', 'diff-core', 'src', 'index.js'));
 });
 app.use(express.static(path.join(__dirname, 'public')));
-app.use(express.json());
-app.use(express.urlencoded({ extended: false }));
+app.use(express.json({ limit: JSON_BODY_LIMIT }));
+app.use(express.urlencoded({ extended: false, limit: JSON_BODY_LIMIT }));
+app.use((error: any, _req: express.Request, res: express.Response, next: express.NextFunction) => {
+    if (error?.type === 'entity.too.large') {
+        const req = _req as express.Request;
+        const attemptEvent = {
+            attemptId: req.get('x-menumanager-attempt-id'),
+            eventType: 'payload_too_large',
+            route: req.originalUrl || req.url,
+            statusCode: 413,
+            requestBodyLength: req.get('content-length'),
+            submitterEmail: req.get('x-menumanager-submitter-email'),
+            projectName: req.get('x-menumanager-project'),
+            property: req.get('x-menumanager-property'),
+            submissionMode: req.get('x-menumanager-submit-mode'),
+            revisionSource: req.get('x-menumanager-revision-source'),
+            details: {
+                configuredLimit: JSON_BODY_LIMIT,
+                contentLength: req.get('content-length') || null,
+                method: req.method,
+            },
+            errorMessage: `Request body exceeded ${JSON_BODY_LIMIT}`,
+        };
+        void logFormAttemptEvent(attemptEvent);
+        sendFormAttemptFailureEmail(attemptEvent);
+        sendAdminAlert({
+            alert_type: 'form_payload_too_large',
+            severity: 'warning',
+            service: 'dashboard',
+            message: `Form request body exceeded ${JSON_BODY_LIMIT} on ${req.originalUrl || req.url}`,
+            details: {
+                attemptId: req.get('x-menumanager-attempt-id') || null,
+                route: req.originalUrl || req.url,
+                contentLength: req.get('content-length') || null,
+                submitterEmail: req.get('x-menumanager-submitter-email') || null,
+                projectName: req.get('x-menumanager-project') || null,
+                property: req.get('x-menumanager-property') || null,
+                submissionMode: req.get('x-menumanager-submit-mode') || null,
+                revisionSource: req.get('x-menumanager-revision-source') || null,
+                configuredLimit: JSON_BODY_LIMIT,
+            },
+        });
+        return res.status(413).json({
+            error: `Submission payload is too large. Reduce pasted rich formatting or contact support if the menu content must exceed ${JSON_BODY_LIMIT}.`,
+        });
+    }
+    if (error instanceof SyntaxError && 'body' in error) {
+        return res.status(400).json({ error: 'Request body must be valid JSON' });
+    }
+    return next(error);
+});
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
 
@@ -1726,9 +1867,31 @@ app.post('/api/modification/unapproved-upload', upload.single('baselineDoc') as 
 });
 
 /**
+ * Form API: Lightweight telemetry for multi-step form attempts.
+ * This captures client-side failures that happen after Basic AI Check but before
+ * a final submission row exists.
+ */
+app.post('/api/form/attempt-log', async (req, res) => {
+    try {
+        const attemptEvent = {
+            ...(req.body || {}),
+            attemptId: req.body?.attemptId || req.get('x-menumanager-attempt-id'),
+            route: req.body?.route || req.get('referer') || '/form',
+        };
+        await logFormAttemptEvent(attemptEvent);
+        sendFormAttemptFailureEmail(attemptEvent);
+        res.json({ success: true });
+    } catch (error: any) {
+        console.error('Error logging form attempt:', error.message);
+        res.status(500).json({ error: 'Failed to log form attempt' });
+    }
+});
+
+/**
  * Form API: Basic AI Check - Run QA check on menu content
  */
 app.post('/api/form/basic-check', async (req, res) => {
+    const attemptId = req.body?.attemptId || req.get('x-menumanager-attempt-id');
     try {
         const menuContent = sanitizePlainTextInput(req.body?.menuContent, { multiline: true, maxLength: MAX_LONG_TEXT_LENGTH });
         const allergens = sanitizePlainTextInput(req.body?.allergens, { multiline: true, maxLength: 2000 });
@@ -1749,6 +1912,30 @@ app.post('/api/form/basic-check', async (req, res) => {
             changedLineCount = changedOnlyText.changedLineCount;
 
             if (changedLineCount === 0) {
+                void logFormAttemptEvent({
+                    attemptId,
+                    eventType: 'basic_check_completed',
+                    route: '/api/form/basic-check',
+                    statusCode: 200,
+                    submitterEmail: req.body?.submitterEmail,
+                    submitterName: req.body?.submitterName,
+                    projectName: req.body?.projectName,
+                    property: req.body?.property,
+                    servicePeriod: req.body?.servicePeriod,
+                    templateType: req.body?.templateType,
+                    submissionMode: req.body?.submissionMode,
+                    revisionSource: req.body?.revisionSource,
+                    revisionBaselineFileName: req.body?.revisionBaselineFileName,
+                    menuTextLength: menuContent.length,
+                    menuHtmlLength: req.body?.menuHtmlLength,
+                    persistentDiffHtmlLength: req.body?.persistentDiffHtmlLength,
+                    baseMenuTextLength: baselineMenuContent.length,
+                    correctedMenuTextLength: menuContent.length,
+                    requestBodyLength: req.get('content-length'),
+                    suggestionsCount: 0,
+                    criticalSuggestionsCount: 0,
+                    details: { reviewMode: 'changed_only', changedLineCount: 0 },
+                });
                 return res.json({
                     success: true,
                     originalMenu: menuContent,
@@ -1891,6 +2078,7 @@ Note: Use ONLY these allergen codes when checking allergen compliance. Do not us
         }
 
         const hasCriticalErrors = finalSuggestions.some(s => s.severity === 'critical');
+        const criticalSuggestions = finalSuggestions.filter(s => s.severity === 'critical');
 
         let changedOnlyMergedMenu = menuContent;
         if (changedOnlyMode) {
@@ -1907,6 +2095,38 @@ Note: Use ONLY these allergen codes when checking allergen compliance. Do not us
             }
         }
 
+        void logFormAttemptEvent({
+            attemptId,
+            eventType: 'basic_check_completed',
+            route: '/api/form/basic-check',
+            statusCode: 200,
+            submitterEmail: req.body?.submitterEmail,
+            submitterName: req.body?.submitterName,
+            projectName: req.body?.projectName,
+            property: req.body?.property,
+            servicePeriod: req.body?.servicePeriod,
+            templateType: req.body?.templateType,
+            submissionMode: req.body?.submissionMode,
+            revisionSource: req.body?.revisionSource,
+            revisionBaselineFileName: req.body?.revisionBaselineFileName,
+            menuTextLength: menuContent.length,
+            menuHtmlLength: req.body?.menuHtmlLength,
+            persistentDiffHtmlLength: req.body?.persistentDiffHtmlLength,
+            baseMenuTextLength: baselineMenuContent.length,
+            correctedMenuTextLength: (changedOnlyMode ? changedOnlyMergedMenu : correctedMenuSanitized).length,
+            requestBodyLength: req.get('content-length'),
+            suggestionsCount: finalSuggestions.length,
+            criticalSuggestionsCount: criticalSuggestions.length,
+            criticalSuggestions,
+            details: {
+                reviewMode: changedOnlyMode ? 'changed_only' : 'full',
+                changedLineCount,
+                hasChanges: changedOnlyMode
+                    ? changedOnlyMergedMenu !== menuContent
+                    : correctedMenuSanitized !== originalMenuSanitized,
+            },
+        });
+
         res.json({
             success: true,
             originalMenu: menuContent,
@@ -1922,6 +2142,27 @@ Note: Use ONLY these allergen codes when checking allergen compliance. Do not us
 
     } catch (error: any) {
         console.error('Error running basic check:', error);
+        void logFormAttemptEvent({
+            attemptId,
+            eventType: 'basic_check_failed',
+            route: '/api/form/basic-check',
+            statusCode: 500,
+            submitterEmail: req.body?.submitterEmail,
+            submitterName: req.body?.submitterName,
+            projectName: req.body?.projectName,
+            property: req.body?.property,
+            servicePeriod: req.body?.servicePeriod,
+            templateType: req.body?.templateType,
+            submissionMode: req.body?.submissionMode,
+            revisionSource: req.body?.revisionSource,
+            revisionBaselineFileName: req.body?.revisionBaselineFileName,
+            menuTextLength: `${req.body?.menuContent || ''}`.length,
+            menuHtmlLength: req.body?.menuHtmlLength,
+            persistentDiffHtmlLength: req.body?.persistentDiffHtmlLength,
+            baseMenuTextLength: `${req.body?.baselineMenuContent || ''}`.length,
+            requestBodyLength: req.get('content-length'),
+            errorMessage: error.message,
+        });
         res.status(500).json({
             error: 'Failed to run basic AI check',
             details: error.message

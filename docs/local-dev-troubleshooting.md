@@ -190,6 +190,21 @@ This shortcut only appears for localhost requests while `NODE_ENV` is not `produ
 
 The approval editor route remains `/approval/<submissionId>`. In local mode, submitting that approval can finalize locally through the clickup-integration service when no ClickUp task or token is configured, so the editor can be exercised without sending anything to ClickUp.
 
+## 413 On Chef Submission
+
+**Symptom:** `/api/form/submit` returns `413 Payload Too Large`, often after pasting a formatted menu or submitting a modification with a large persistent redline preview.
+
+**Likely cause:** Rich HTML fields can exceed Express's default 100 KB JSON parser limit before the submit handler runs, or the dashboard can pass the public route but hit the same limit when saving the submission/raw payload to the DB service.
+
+**Checks and fixes:**
+
+- Dashboard and DB default to 5 MB JSON bodies. If production still returns 413, confirm the running services include the configured parser limits and were restarted/redeployed.
+- For larger deployment-specific payloads, set `JSON_BODY_LIMIT`, or use `DASHBOARD_JSON_BODY_LIMIT` and `DB_JSON_BODY_LIMIT` separately.
+- If the app logs do not show the request reaching dashboard, check the fronting proxy/load balancer request-body limit as well.
+- Check Supabase `form_attempt_logs` by `attempt_id`, submitter, property/project, or recent `event_type` values such as `basic_check_client_received`, `submit_failed`, `submit_client_exception`, and `payload_too_large`. These rows can exist even when no final `submissions` row was created.
+- `system_alerts` also records `form_payload_too_large` when the dashboard JSON parser rejects a submit before route handlers run.
+- In production only, these public-form failure events send an email to `FORM_ATTEMPT_ALERT_EMAIL` (default `dcowser@richardsandoval.com`) through the dashboard SMTP settings. If no email arrives, check SMTP credentials and the dashboard logs for `Failed to send form attempt alert email`.
+
 If ClickUp approval is updating the `submissions` row but you are not seeing rows in `approved_dishes`, test the extractor directly before debugging webhook delivery:
 
 ```bash

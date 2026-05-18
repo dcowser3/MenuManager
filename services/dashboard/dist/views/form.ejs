@@ -612,6 +612,25 @@
             border-color: rgba(184, 134, 11, 0.28);
         }
 
+        .alert-growl-container {
+            position: fixed;
+            top: 1rem;
+            right: 1rem;
+            z-index: 2000;
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+            width: min(420px, calc(100vw - 2rem));
+            pointer-events: none;
+        }
+
+        .alert-growl {
+            display: block;
+            margin-bottom: 0;
+            box-shadow: 0 12px 32px rgba(44, 44, 44, 0.16);
+            pointer-events: auto;
+        }
+
         /* Spinner */
         .spinner {
             border: 2px solid var(--color-border);
@@ -997,6 +1016,118 @@
 
         .fullscreen-modal.show {
             display: flex;
+        }
+
+        .baseline-conflict-modal {
+            display: none;
+            position: fixed;
+            inset: 0;
+            z-index: 1200;
+            background: rgba(44, 44, 44, 0.78);
+            padding: 1.5rem;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .baseline-conflict-modal.show {
+            display: flex;
+        }
+
+        .baseline-conflict-dialog {
+            width: min(640px, 100%);
+            background: var(--color-background);
+            border: 1px solid rgba(184, 134, 11, 0.45);
+            box-shadow: 0 24px 60px rgba(0, 0, 0, 0.28);
+            padding: 1.75rem;
+        }
+
+        .baseline-conflict-kicker {
+            color: var(--color-warning);
+            font-size: 0.68rem;
+            font-weight: 600;
+            letter-spacing: 0.16em;
+            text-transform: uppercase;
+            margin-bottom: 0.55rem;
+        }
+
+        .baseline-conflict-dialog h2 {
+            font-family: var(--font-heading);
+            font-size: 1.85rem;
+            font-weight: 500;
+            letter-spacing: 0.02em;
+            color: var(--color-primary);
+            margin-bottom: 0.65rem;
+            line-height: 1.1;
+        }
+
+        .baseline-conflict-dialog p {
+            color: var(--color-text);
+            font-size: 0.92rem;
+            line-height: 1.6;
+            margin-bottom: 0.85rem;
+        }
+
+        .baseline-conflict-detail {
+            background: var(--color-background-alt);
+            border: 1px solid var(--color-border);
+            padding: 0.9rem 1rem;
+            color: var(--color-text-light);
+            font-size: 0.82rem;
+            line-height: 1.5;
+            margin: 1rem 0 1.25rem;
+        }
+
+        .baseline-conflict-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.75rem;
+            justify-content: flex-end;
+        }
+
+        .baseline-conflict-actions .btn {
+            padding: 0.8rem 1rem;
+            min-width: 180px;
+        }
+
+        .btn-secondary {
+            background: var(--color-background);
+            color: var(--color-primary);
+            border-color: var(--color-primary);
+        }
+
+        .btn-secondary:hover:not(:disabled) {
+            background: var(--color-primary);
+            color: var(--color-background);
+        }
+
+        .btn-quiet {
+            background: transparent;
+            color: var(--color-text-light);
+            border-color: var(--color-border);
+        }
+
+        .btn-quiet:hover:not(:disabled) {
+            color: var(--color-primary);
+            border-color: var(--color-primary);
+        }
+
+        @media (max-width: 640px) {
+            .baseline-conflict-dialog {
+                padding: 1.25rem;
+            }
+
+            .baseline-conflict-dialog h2 {
+                font-size: 1.45rem;
+            }
+
+            .baseline-conflict-actions {
+                flex-direction: column;
+            }
+
+            .baseline-conflict-actions .btn {
+                width: 100%;
+                min-width: 0;
+            }
         }
 
         .fullscreen-content {
@@ -2109,6 +2240,20 @@
         </div>
     </div>
 
+    <div id="baselineFreshnessModal" class="baseline-conflict-modal" role="dialog" aria-modal="true" aria-labelledby="baselineFreshnessTitle" aria-describedby="baselineFreshnessMessage">
+        <div class="baseline-conflict-dialog">
+            <div class="baseline-conflict-kicker">Existing approved menu found</div>
+            <h2 id="baselineFreshnessTitle">Use the existing approved menu?</h2>
+            <p id="baselineFreshnessMessage"></p>
+            <div id="baselineFreshnessDetail" class="baseline-conflict-detail"></div>
+            <div class="baseline-conflict-actions">
+                <button type="button" id="baselineFreshnessCancelBtn" class="btn btn-quiet">Cancel</button>
+                <button type="button" id="baselineFreshnessContinueBtn" class="btn btn-secondary">Continue Anyway</button>
+                <button type="button" id="baselineFreshnessLoadBtn" class="btn btn-primary">Load Existing Menu</button>
+            </div>
+        </div>
+    </div>
+
     <script>
         let aiCheckResults = null;
         let quill = null;
@@ -2146,10 +2291,98 @@
         let preservedManagedFooterText = '';
         let baselineFreshnessOverrideKey = '';
         let baselineFreshnessCheckTimer = null;
+        let baselineFreshnessDialogState = null;
+        let latestBaselineFreshnessIssue = null;
+        let formAttemptId = getOrCreateFormAttemptId();
         const DEFAULT_ALLERGEN_KEY = <%- JSON.stringify(defaultAllergenKey || '') %>;
         const RAW_NOTICE_TEXT = '*consuming raw or undercooked meats, poultry, seafood, shellfish, or eggs may increase your risk of foodborne illness.';
         const RAW_NOTICE_REGEX = /\*?\s*consuming raw or undercooked meats,\s*poultry,\s*seafood(?:,\s*shellfish)?,\s*or eggs may increase your risk of foodborne illness\.?/i;
         const redlinePreview = window.MenuRedlinePreview;
+
+        function getOrCreateFormAttemptId() {
+            const storageKey = 'menumanager_form_attempt_id';
+            try {
+                const existing = window.sessionStorage && window.sessionStorage.getItem(storageKey);
+                if (existing) return existing;
+                const generated = generateFormAttemptId();
+                if (window.sessionStorage) window.sessionStorage.setItem(storageKey, generated);
+                return generated;
+            } catch (error) {
+                return generateFormAttemptId();
+            }
+        }
+
+        function generateFormAttemptId() {
+            return (window.crypto && window.crypto.randomUUID)
+                ? window.crypto.randomUUID()
+                : `attempt-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+        }
+
+        function resetFormAttemptId() {
+            const generated = generateFormAttemptId();
+            formAttemptId = generated;
+            try {
+                if (window.sessionStorage) {
+                    window.sessionStorage.setItem('menumanager_form_attempt_id', generated);
+                }
+            } catch (error) {
+                // Non-critical telemetry only.
+            }
+        }
+
+        function byteLength(value) {
+            const text = typeof value === 'string' ? value : JSON.stringify(value || '');
+            if (window.TextEncoder) return new TextEncoder().encode(text).length;
+            return unescape(encodeURIComponent(text)).length;
+        }
+
+        function getAttemptHeaders(extra) {
+            return {
+                'x-menumanager-attempt-id': formAttemptId,
+                'x-menumanager-submit-mode': submissionMode || '',
+                'x-menumanager-revision-source': revisionSource || '',
+                'x-menumanager-submitter-email': document.getElementById('submitterEmail')?.value?.trim() || '',
+                'x-menumanager-project': document.getElementById('projectName')?.value?.trim() || '',
+                'x-menumanager-property': document.getElementById('property')?.value?.trim() || '',
+                ...(extra || {})
+            };
+        }
+
+        function getAttemptMetadata(extra) {
+            return {
+                attemptId: formAttemptId,
+                submitterEmail: document.getElementById('submitterEmail')?.value?.trim() || '',
+                submitterName: document.getElementById('submitterName')?.value?.trim() || '',
+                projectName: document.getElementById('projectName')?.value?.trim() || '',
+                property: document.getElementById('property')?.value?.trim() || '',
+                servicePeriod: document.getElementById('servicePeriod')?.value || '',
+                templateType: document.getElementById('templateType')?.value || '',
+                submissionMode,
+                revisionSource: submissionMode === 'modification' ? revisionSource : '',
+                revisionBaselineFileName: submissionMode === 'modification' ? revisionBaselineFileName : '',
+                baseMenuTextLength: (baseApprovedMenuContent || '').length,
+                ...(extra || {})
+            };
+        }
+
+        async function logFormAttempt(eventType, extra) {
+            const payload = getAttemptMetadata({ eventType, ...(extra || {}) });
+            const body = JSON.stringify(payload);
+            try {
+                if (navigator.sendBeacon) {
+                    const blob = new Blob([body], { type: 'application/json' });
+                    if (navigator.sendBeacon('/api/form/attempt-log', blob)) return;
+                }
+                await fetch('/api/form/attempt-log', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', ...getAttemptHeaders() },
+                    body,
+                    keepalive: true
+                });
+            } catch (error) {
+                console.warn('Failed to log form attempt event:', error);
+            }
+        }
 
 	        function isLikelyAllergenLegendLine(line) {
 	            const normalized = (line || '').trim();
@@ -3155,6 +3388,58 @@
             return { type: 'existing', property, servicePeriod, selected: null, latest };
         }
 
+        function getBaselineFreshnessCopy(issue) {
+            const fallback = {
+                title: 'Use the existing approved menu?',
+                message: 'There is an approved menu for this property and service period. Loading it as the baseline keeps this submission connected to the current approved version.',
+                detail: '',
+                loadLabel: 'Use Existing Menu',
+                continueLabel: 'Continue Anyway'
+            };
+            if (!issue) return fallback;
+
+            const latestLabel = formatBaselineLabel(issue.latest);
+            if (issue.type === 'mismatch') {
+                return {
+                    title: 'This baseline does not match the form',
+                    message: `The loaded baseline is for ${issue.selected.property || 'another property'} / ${issue.selected.servicePeriod || 'another service'}, but the form is set to ${issue.property} / ${issue.servicePeriod}.`,
+                    detail: `Latest approved menu for this form: ${latestLabel}`,
+                    loadLabel: 'Load Matching Menu',
+                    continueLabel: 'Keep Current Baseline'
+                };
+            }
+            if (issue.type === 'stale') {
+                return {
+                    title: 'A newer approved menu exists',
+                    message: `A newer approved ${issue.servicePeriod} menu exists for ${issue.property}. Loading it prevents design from reviewing changes against an older baseline.`,
+                    detail: `Newest approved menu: ${latestLabel}`,
+                    loadLabel: 'Load Newer Menu',
+                    continueLabel: 'Keep Older Baseline'
+                };
+            }
+            return {
+                title: 'An approved menu already exists',
+                message: `An approved ${issue.servicePeriod} menu already exists for ${issue.property}. If this is a revision, load the existing menu and make changes from that baseline.`,
+                detail: `Existing approved menu: ${latestLabel}`,
+                loadLabel: 'Use Existing Menu',
+                continueLabel: 'Continue as Brand New'
+            };
+        }
+
+        function closeBaselineFreshnessDialog(result) {
+            const modal = document.getElementById('baselineFreshnessModal');
+            if (modal) {
+                modal.classList.remove('show');
+            }
+            if (!baselineFreshnessDialogState || typeof baselineFreshnessDialogState.resolve !== 'function') {
+                baselineFreshnessDialogState = null;
+                return;
+            }
+            const resolve = baselineFreshnessDialogState.resolve;
+            baselineFreshnessDialogState = null;
+            resolve(result);
+        }
+
         function showBaselineFreshnessWarning(issue, options = {}) {
             if (!issue) return true;
             const key = baselineFreshnessKey(issue);
@@ -3162,38 +3447,58 @@
                 return true;
             }
 
-            let message = '';
-            if (issue.type === 'mismatch') {
-                message = `The loaded baseline is for ${issue.selected.property || 'another property'} / ${issue.selected.servicePeriod || 'another service'}, but the form is set to ${issue.property} / ${issue.servicePeriod}.`;
-            } else if (issue.type === 'stale') {
-                message = `A newer approved ${issue.servicePeriod} menu exists for ${issue.property}: ${formatBaselineLabel(issue.latest)}.`;
-            } else {
-                message = `An approved ${issue.servicePeriod} menu already exists for ${issue.property}: ${formatBaselineLabel(issue.latest)}.`;
+            if (baselineFreshnessDialogState && baselineFreshnessDialogState.key === key) {
+                return baselineFreshnessDialogState.promise;
             }
 
-            showAlert(message, 'warning', {
-                persistent: true,
-                actions: [
-                    {
-                        label: 'Load latest',
-                        onClick: () => loadLatestApprovedBaseline(issue.latest)
-                    },
-                    {
-                        label: issue.type === 'existing' ? 'Continue as new' : 'Keep current',
-                        onClick: () => {
-                            baselineFreshnessOverrideKey = key;
-                            showAlert('Baseline warning acknowledged for this property and service.', 'info');
-                        }
-                    }
-                ]
+            const modal = document.getElementById('baselineFreshnessModal');
+            const titleEl = document.getElementById('baselineFreshnessTitle');
+            const messageEl = document.getElementById('baselineFreshnessMessage');
+            const detailEl = document.getElementById('baselineFreshnessDetail');
+            const loadBtn = document.getElementById('baselineFreshnessLoadBtn');
+            const continueBtn = document.getElementById('baselineFreshnessContinueBtn');
+            const cancelBtn = document.getElementById('baselineFreshnessCancelBtn');
+            if (!modal || !titleEl || !messageEl || !detailEl || !loadBtn || !continueBtn || !cancelBtn) {
+                return false;
+            }
+
+            if (baselineFreshnessDialogState) {
+                closeBaselineFreshnessDialog(false);
+            }
+
+            const copy = getBaselineFreshnessCopy(issue);
+            titleEl.textContent = copy.title;
+            messageEl.textContent = copy.message;
+            detailEl.textContent = copy.detail;
+            loadBtn.textContent = copy.loadLabel;
+            continueBtn.textContent = copy.continueLabel;
+
+            let resolveDialog;
+            const promise = new Promise((resolve) => {
+                resolveDialog = resolve;
             });
-            return false;
+            baselineFreshnessDialogState = { key, resolve: resolveDialog, promise };
+
+            loadBtn.onclick = () => {
+                closeBaselineFreshnessDialog(false);
+                loadLatestApprovedBaseline(issue.latest);
+            };
+            continueBtn.onclick = () => {
+                baselineFreshnessOverrideKey = key;
+                closeBaselineFreshnessDialog(true);
+                showAlert('Existing-menu warning acknowledged for this property and service.', 'info');
+            };
+            cancelBtn.onclick = () => closeBaselineFreshnessDialog(false);
+
+            modal.classList.add('show');
+            setTimeout(() => loadBtn.focus(), 0);
+            return promise;
         }
 
         async function ensureBaselineFreshnessBeforeContinue() {
             try {
                 const issue = await getBaselineFreshnessIssue();
-                return showBaselineFreshnessWarning(issue);
+                return await showBaselineFreshnessWarning(issue, { force: true });
             } catch (error) {
                 console.error('Baseline freshness check failed:', error);
                 showAlert('Could not verify the latest approved menu for this property and service. Please continue carefully.', 'warning');
@@ -3206,9 +3511,9 @@
             baselineFreshnessCheckTimer = setTimeout(async () => {
                 try {
                     const issue = await getBaselineFreshnessIssue();
-                    if (issue) showBaselineFreshnessWarning(issue);
+                    latestBaselineFreshnessIssue = issue;
                 } catch (error) {
-                    console.error('Baseline freshness check failed:', error);
+                    console.warn('Baseline freshness check skipped:', error.message);
                 }
             }, 350);
         }
@@ -3267,8 +3572,15 @@
             btn.textContent = 'Extracting...';
 
             try {
+                await logFormAttempt('baseline_upload_started', {
+                    route: '/api/modification/baseline-upload',
+                    revisionSource: 'uploaded_baseline',
+                    revisionBaselineFileName: file.name,
+                    details: { fileName: file.name, fileSize: file.size }
+                });
                 const response = await fetch('/api/modification/baseline-upload', {
                     method: 'POST',
+                    headers: getAttemptHeaders({ 'x-menumanager-revision-source': 'uploaded_baseline' }),
                     body: form,
                 });
                 const data = await response.json();
@@ -3304,9 +3616,25 @@
                 selectedNote.classList.add('show');
 
                 enterRevisionTrackingMode();
+                await logFormAttempt('baseline_upload_completed', {
+                    route: '/api/modification/baseline-upload',
+                    statusCode: response.status,
+                    revisionSource: 'uploaded_baseline',
+                    revisionBaselineFileName,
+                    menuTextLength: baseApprovedMenuContent.length,
+                    menuHtmlLength: baseApprovedMenuContentHtml.length,
+                    details: { fileName: file.name, fileSize: file.size }
+                });
                 showAlert('Baseline extracted. Revision tracking mode is active.', 'success');
             } catch (error) {
                 console.error(error);
+                await logFormAttempt('baseline_upload_failed', {
+                    route: '/api/modification/baseline-upload',
+                    revisionSource: 'uploaded_baseline',
+                    revisionBaselineFileName: file.name,
+                    errorMessage: error.message,
+                    details: { fileName: file.name, fileSize: file.size }
+                });
                 showAlert('Failed to process baseline DOCX: ' + error.message, 'error');
             } finally {
                 btn.disabled = false;
@@ -3330,8 +3658,15 @@
             btn.textContent = 'Extracting...';
 
             try {
+                await logFormAttempt('unapproved_upload_started', {
+                    route: '/api/modification/unapproved-upload',
+                    revisionSource: 'uploaded_unapproved',
+                    revisionBaselineFileName: file.name,
+                    details: { fileName: file.name, fileSize: file.size }
+                });
                 const response = await fetch('/api/modification/unapproved-upload', {
                     method: 'POST',
+                    headers: getAttemptHeaders({ 'x-menumanager-revision-source': 'uploaded_unapproved' }),
                     body: form,
                 });
                 const data = await response.json();
@@ -3373,9 +3708,30 @@
                 selectedNote.classList.add('show');
 
                 enterRevisionTrackingMode();
+                await logFormAttempt('unapproved_upload_completed', {
+                    route: '/api/modification/unapproved-upload',
+                    statusCode: response.status,
+                    revisionSource: 'uploaded_unapproved',
+                    revisionBaselineFileName,
+                    menuTextLength: baseApprovedMenuContent.length,
+                    menuHtmlLength: unapprovedBaseHtml.length,
+                    persistentDiffHtmlLength: document.getElementById('persistentPreviewBody')?.innerHTML?.length || 0,
+                    details: {
+                        fileName: file.name,
+                        fileSize: file.size,
+                        annotationCount: unapprovedAnnotations.length
+                    }
+                });
                 showAlert('Unapproved DOCX loaded. Existing redlines are preserved. Revision tracking mode is active.', 'success');
             } catch (error) {
                 console.error(error);
+                await logFormAttempt('unapproved_upload_failed', {
+                    route: '/api/modification/unapproved-upload',
+                    revisionSource: 'uploaded_unapproved',
+                    revisionBaselineFileName: file.name,
+                    errorMessage: error.message,
+                    details: { fileName: file.name, fileSize: file.size }
+                });
                 showAlert('Failed to process unapproved DOCX: ' + error.message, 'error');
             } finally {
                 btn.disabled = false;
@@ -4092,9 +4448,9 @@
             const hintText = hintParts.length ? ` ("${hintParts.join(' / ')}")` : '';
             if (matches.length > 1) {
                 const preview = matches.slice(0, 5).join(', ') + (matches.length > 5 ? `, +${matches.length - 5} more` : '');
-                showAlert(`Multiple properties match the extracted hints${hintText}: ${preview}. Please select one manually.`, 'warning');
+                showUploadNotice(`We found more than one possible property from your Word doc${hintText}: ${preview}. That's okay. Please select the right property from the dropdown.`);
             } else if (hintParts.length) {
-                showAlert(`Extracted property hints${hintText} did not match any property in the list. Please select one manually.`, 'warning');
+                showUploadNotice(`We weren't able to fill in the property from your Word doc${hintText}. That's okay. Please select the property from the dropdown.`);
             }
         }
 
@@ -4127,7 +4483,7 @@
             const { value, warning } = window.formHelpers.clampExtractedDateNeeded(dateStr, dateInput.min);
             dateInput.value = value;
             markFieldAsExtracted('dateNeeded');
-            if (warning) showAlert(warning, 'warning');
+            if (warning) showUploadNotice(warning);
         }
 
         function applyExtractedSize(sizeText) {
@@ -4320,14 +4676,37 @@
 
         document.addEventListener('keydown', function(e) {
             if (e.key === 'Escape') {
+                if (baselineFreshnessDialogState) {
+                    closeBaselineFreshnessDialog(false);
+                    return;
+                }
                 closeFullscreenView();
             }
         });
 
+        function showUploadNotice(message) {
+            showAlert(message, 'warning', {
+                autoDismissMs: 7000,
+                growl: true,
+                temporary: true
+            });
+        }
+
+        function getGrowlAlertContainer() {
+            let container = document.getElementById('alertGrowlContainer');
+            if (!container) {
+                container = document.createElement('div');
+                container.id = 'alertGrowlContainer';
+                container.className = 'alert-growl-container';
+                document.body.appendChild(container);
+            }
+            return container;
+        }
+
         function showAlert(message, type = 'info', options = {}) {
-            const container = document.getElementById('alertContainer');
+            const container = options.growl ? getGrowlAlertContainer() : document.getElementById('alertContainer');
             const alert = document.createElement('div');
-            alert.className = `alert alert-${type} show`;
+            alert.className = `alert alert-${type} show${options.growl ? ' alert-growl' : ''}`;
             alert.style.position = 'relative';
 
             const msgSpan = document.createElement('span');
@@ -4335,7 +4714,7 @@
             alert.appendChild(msgSpan);
 
             // Dismiss button for persistent alerts
-            if (type === 'warning' || type === 'error' || options.persistent) {
+            if (((type === 'warning' || type === 'error') && !options.temporary) || options.persistent) {
                 const dismiss = document.createElement('span');
                 dismiss.textContent = ' ✕';
                 dismiss.style.cssText = 'cursor:pointer;margin-left:12px;font-weight:bold;opacity:.7';
@@ -4380,9 +4759,10 @@
 
             container.appendChild(alert);
 
-            // Auto-dismiss success/info after 5s; warnings/errors persist
-            if ((type === 'success' || type === 'info') && !options.persistent) {
-                setTimeout(() => alert.remove(), 5000);
+            const autoDismissMs = Number(options.autoDismissMs || 0) ||
+                (((type === 'success' || type === 'info') && !options.persistent) ? 5000 : 0);
+            if (autoDismissMs > 0 && !options.persistent) {
+                setTimeout(() => alert.remove(), autoDismissMs);
             }
         }
 
@@ -4552,18 +4932,36 @@
             const menuType = document.getElementById('menuType').value;
             const reviewMode = submissionMode === 'modification' && !unapprovedMode ? 'changed_only' : 'full';
             const baselineForAiReview = submissionMode === 'modification' && !unapprovedMode ? baseApprovedMenuContent : '';
+            const richHtmlForMetrics = isEditMode && document.getElementById('step2').classList.contains('hidden') === false
+                ? (document.getElementById('reviewedContentArea')?.innerHTML || '')
+                : (quill.root.innerHTML || '');
+            const persistentDiffHtmlForMetrics = document.getElementById('persistentPreviewBody')?.innerHTML || '';
+            const basicCheckPayload = {
+                menuContent,
+                allergens,
+                menuType,
+                baselineMenuContent: baselineForAiReview,
+                reviewMode,
+                ...getAttemptMetadata({
+                    menuTextLength: menuContent.length,
+                    menuHtmlLength: richHtmlForMetrics.length,
+                    persistentDiffHtmlLength: persistentDiffHtmlForMetrics.length
+                })
+            };
 
             try {
+                await logFormAttempt('basic_check_started', {
+                    route: '/api/form/basic-check',
+                    menuTextLength: menuContent.length,
+                    menuHtmlLength: richHtmlForMetrics.length,
+                    persistentDiffHtmlLength: persistentDiffHtmlForMetrics.length,
+                    requestBodyLength: byteLength(JSON.stringify(basicCheckPayload)),
+                    details: { reviewMode }
+                });
                 const response = await fetch('/api/form/basic-check', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        menuContent,
-                        allergens,
-                        menuType,
-                        baselineMenuContent: baselineForAiReview,
-                        reviewMode
-                    })
+                    headers: { 'Content-Type': 'application/json', ...getAttemptHeaders() },
+                    body: JSON.stringify(basicCheckPayload)
                 });
 
                 const data = await response.json();
@@ -4575,6 +4973,23 @@
                 aiCheckHasRun = true;
                 setAiSuggestionsVisibility(true);
                 aiCheckResults = data;
+                await logFormAttempt('basic_check_client_received', {
+                    route: '/api/form/basic-check',
+                    statusCode: response.status,
+                    menuTextLength: menuContent.length,
+                    menuHtmlLength: richHtmlForMetrics.length,
+                    persistentDiffHtmlLength: persistentDiffHtmlForMetrics.length,
+                    correctedMenuTextLength: (data.correctedMenu || '').length,
+                    requestBodyLength: byteLength(JSON.stringify(basicCheckPayload)),
+                    suggestionsCount: (data.suggestions || []).length,
+                    criticalSuggestionsCount: (data.suggestions || []).filter((s) => s.severity === 'critical').length,
+                    criticalSuggestions: (data.suggestions || []).filter((s) => s.severity === 'critical'),
+                    details: {
+                        reviewMode: data.reviewMode || reviewMode,
+                        changedLineCount: data.changedLineCount || 0,
+                        hasChanges: !!data.hasChanges
+                    }
+                });
                 showStep2(data);
                 if (data.reviewMode === 'changed_only') {
                     showAlert(`AI reviewed changed content only (${data.changedLineCount || 0} changed lines).`, 'success');
@@ -4584,6 +4999,14 @@
 
             } catch (error) {
                 console.error('Error:', error);
+                await logFormAttempt('basic_check_client_failed', {
+                    route: '/api/form/basic-check',
+                    menuTextLength: menuContent.length,
+                    menuHtmlLength: richHtmlForMetrics.length,
+                    persistentDiffHtmlLength: persistentDiffHtmlForMetrics.length,
+                    requestBodyLength: byteLength(JSON.stringify(basicCheckPayload)),
+                    errorMessage: error.message
+                });
                 showAlert('Error running AI check: ' + error.message, 'error');
                 [topBtn, bottomBtn].forEach(button => {
                     if (!button) return;
@@ -4898,18 +5321,34 @@
             const menuType = document.getElementById('menuType').value;
             const reviewMode = submissionMode === 'modification' && !unapprovedMode ? 'changed_only' : 'full';
             const baselineForAiReview = submissionMode === 'modification' && !unapprovedMode ? baseApprovedMenuContent : '';
+            const richHtmlForMetrics = reviewedArea?.innerHTML || '';
+            const persistentDiffHtmlForMetrics = document.getElementById('persistentPreviewBody')?.innerHTML || '';
+            const basicCheckPayload = {
+                menuContent,
+                allergens,
+                menuType,
+                baselineMenuContent: baselineForAiReview,
+                reviewMode,
+                ...getAttemptMetadata({
+                    menuTextLength: menuContent.length,
+                    menuHtmlLength: richHtmlForMetrics.length,
+                    persistentDiffHtmlLength: persistentDiffHtmlForMetrics.length
+                })
+            };
 
             try {
+                await logFormAttempt('basic_check_started', {
+                    route: '/api/form/basic-check',
+                    menuTextLength: menuContent.length,
+                    menuHtmlLength: richHtmlForMetrics.length,
+                    persistentDiffHtmlLength: persistentDiffHtmlForMetrics.length,
+                    requestBodyLength: byteLength(JSON.stringify(basicCheckPayload)),
+                    details: { reviewMode, rerun: true }
+                });
                 const response = await fetch('/api/form/basic-check', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        menuContent,
-                        allergens,
-                        menuType,
-                        baselineMenuContent: baselineForAiReview,
-                        reviewMode
-                    })
+                    headers: { 'Content-Type': 'application/json', ...getAttemptHeaders() },
+                    body: JSON.stringify(basicCheckPayload)
                 });
 
                 const data = await response.json();
@@ -4923,6 +5362,24 @@
                 setAiSuggestionsVisibility(true);
                 aiCheckResults = data;
                 criticalErrorOverrides = {};
+                await logFormAttempt('basic_check_client_received', {
+                    route: '/api/form/basic-check',
+                    statusCode: response.status,
+                    menuTextLength: menuContent.length,
+                    menuHtmlLength: richHtmlForMetrics.length,
+                    persistentDiffHtmlLength: persistentDiffHtmlForMetrics.length,
+                    correctedMenuTextLength: (data.correctedMenu || '').length,
+                    requestBodyLength: byteLength(JSON.stringify(basicCheckPayload)),
+                    suggestionsCount: (data.suggestions || []).length,
+                    criticalSuggestionsCount: (data.suggestions || []).filter((s) => s.severity === 'critical').length,
+                    criticalSuggestions: (data.suggestions || []).filter((s) => s.severity === 'critical'),
+                    details: {
+                        reviewMode: data.reviewMode || reviewMode,
+                        changedLineCount: data.changedLineCount || 0,
+                        hasChanges: !!data.hasChanges,
+                        rerun: true
+                    }
+                });
 
                 // Re-render step 2 with new results
                 showStep2(data);
@@ -4930,6 +5387,15 @@
 
             } catch (error) {
                 console.error('Error re-running check:', error);
+                await logFormAttempt('basic_check_client_failed', {
+                    route: '/api/form/basic-check',
+                    menuTextLength: menuContent.length,
+                    menuHtmlLength: richHtmlForMetrics.length,
+                    persistentDiffHtmlLength: persistentDiffHtmlForMetrics.length,
+                    requestBodyLength: byteLength(JSON.stringify(basicCheckPayload)),
+                    errorMessage: error.message,
+                    details: { rerun: true }
+                });
                 showAlert('Error re-running AI check: ' + error.message, 'error');
             } finally {
                 rerunBtn.disabled = false;
@@ -5310,11 +5776,29 @@
                 await uploadMenuImageIfNeeded();
                 formData.menuImagePath = uploadedMenuImagePath || '';
                 formData.menuImageFileName = uploadedMenuImageFileName || '';
+                const submitBody = JSON.stringify(formData);
+                const submitBodyLength = byteLength(submitBody);
+                await logFormAttempt('submit_started', {
+                    route: '/api/form/submit',
+                    menuTextLength: menuContentText.length,
+                    menuHtmlLength: menuContentHtml.length,
+                    persistentDiffHtmlLength: persistentDiffHtml.length,
+                    requestBodyLength: submitBodyLength,
+                    suggestionsCount: (aiCheckResults?.suggestions || []).length,
+                    criticalSuggestionsCount: (aiCheckResults?.suggestions || []).filter((s) => s.severity === 'critical').length,
+                    criticalSuggestions: (aiCheckResults?.suggestions || []).filter((s) => s.severity === 'critical'),
+                    details: {
+                        skipAiReview: !!skipAiReview,
+                        unapprovedMode: !!formData.unapprovedMode,
+                        hasMenuImage: !!formData.menuImagePath,
+                        overriddenCriticalCount: criticalOverrides.length
+                    }
+                });
 
                 const response = await fetch('/api/form/submit', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(formData)
+                    headers: { 'Content-Type': 'application/json', ...getAttemptHeaders() },
+                    body: submitBody
                 });
 
                 const responseText = await response.text();
@@ -5332,8 +5816,45 @@
                 }
 
                 if (!response.ok) {
+                    await logFormAttempt('submit_failed', {
+                        route: '/api/form/submit',
+                        statusCode: response.status,
+                        menuTextLength: menuContentText.length,
+                        menuHtmlLength: menuContentHtml.length,
+                        persistentDiffHtmlLength: persistentDiffHtml.length,
+                        requestBodyLength: submitBodyLength,
+                        suggestionsCount: (aiCheckResults?.suggestions || []).length,
+                        criticalSuggestionsCount: (aiCheckResults?.suggestions || []).filter((s) => s.severity === 'critical').length,
+                        criticalSuggestions: (aiCheckResults?.suggestions || []).filter((s) => s.severity === 'critical'),
+                        errorMessage: data.error || 'Failed to submit menu',
+                        details: {
+                            responseText: responseText.slice(0, 1000),
+                            skipAiReview: !!skipAiReview,
+                            unapprovedMode: !!formData.unapprovedMode,
+                            overriddenCriticalCount: criticalOverrides.length
+                        }
+                    });
                     throw new Error(data.error || 'Failed to submit menu');
                 }
+                await logFormAttempt('submit_completed', {
+                    route: '/api/form/submit',
+                    statusCode: response.status,
+                    menuTextLength: menuContentText.length,
+                    menuHtmlLength: menuContentHtml.length,
+                    persistentDiffHtmlLength: persistentDiffHtml.length,
+                    requestBodyLength: submitBodyLength,
+                    suggestionsCount: (aiCheckResults?.suggestions || []).length,
+                    criticalSuggestionsCount: (aiCheckResults?.suggestions || []).filter((s) => s.severity === 'critical').length,
+                    criticalSuggestions: (aiCheckResults?.suggestions || []).filter((s) => s.severity === 'critical'),
+                    details: {
+                        submissionId: data.submissionId || null,
+                        clickupTaskId: data.clickup?.taskId || null,
+                        localTesting: !!data.localTesting,
+                        skipAiReview: !!skipAiReview,
+                        unapprovedMode: !!formData.unapprovedMode,
+                        overriddenCriticalCount: criticalOverrides.length
+                    }
+                });
 
                 const localTesting = data.localTesting || null;
                 if (localTesting && localTesting.downloadUrl) {
@@ -5355,6 +5876,22 @@
 
             } catch (error) {
                 console.error('Error:', error);
+                await logFormAttempt('submit_client_exception', {
+                    route: '/api/form/submit',
+                    menuTextLength: menuContentText.length,
+                    menuHtmlLength: menuContentHtml.length,
+                    persistentDiffHtmlLength: persistentDiffHtml.length,
+                    requestBodyLength: typeof formData !== 'undefined' ? byteLength(JSON.stringify(formData)) : null,
+                    suggestionsCount: (aiCheckResults?.suggestions || []).length,
+                    criticalSuggestionsCount: (aiCheckResults?.suggestions || []).filter((s) => s.severity === 'critical').length,
+                    criticalSuggestions: (aiCheckResults?.suggestions || []).filter((s) => s.severity === 'critical'),
+                    errorMessage: error.message,
+                    details: {
+                        skipAiReview: !!skipAiReview,
+                        unapprovedMode: !!formData.unapprovedMode,
+                        overriddenCriticalCount: criticalOverrides.length
+                    }
+                });
                 showAlert('Error submitting menu: ' + error.message, 'error', {
                     onRetry: () => submitForm()
                 });
@@ -5365,6 +5902,7 @@
 
         function prepareForNextSubmission() {
             const retainedAllergens = getAllergenInputValue();
+            resetFormAttemptId();
 
             aiCheckHasRun = false;
             aiCheckResults = null;
@@ -5473,15 +6011,6 @@
                 reviewedArea.classList.add('editable');
                 reviewedArea.contentEditable = 'true';
 
-                // Prevent new text from inheriting existing redline/insertion styles.
-                // Making annotation spans non-editable keeps the cursor outside them
-                // so typing adjacent to a redline doesn't inherit strikethrough/highlight.
-                if (unapprovedMode) {
-                    reviewedArea.querySelectorAll('.existing-del, .existing-ins').forEach(span => {
-                        span.contentEditable = 'false';
-                    });
-                }
-
                 reviewedArea.focus();
                 reviewedArea.addEventListener('input', handleReviewedAreaInput);
                 // Hide re-run button while editing
@@ -5494,12 +6023,6 @@
                 reviewedArea.contentEditable = 'false';
                 reviewedArea.removeEventListener('input', handleReviewedAreaInput);
 
-                // Remove contentEditable overrides from annotation spans
-                if (unapprovedMode) {
-                    reviewedArea.querySelectorAll('.existing-del, .existing-ins').forEach(span => {
-                        span.removeAttribute('contenteditable');
-                    });
-                }
                 recalculateHighlights();
                 // Show re-run button after editing
                 document.getElementById('rerunCheckBtn').classList.add('show');

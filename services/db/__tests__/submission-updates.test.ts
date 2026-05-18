@@ -66,11 +66,38 @@ function invokeJsonHandler(handler: any, { body = {}, params = {}, query = {} } 
     });
 }
 
+function postJsonOverHttp(routePath: string, body: any, headers: Record<string, string> = {}) {
+    return new Promise<{ status: number; body: any }>((resolve, reject) => {
+        const server = (app as any).listen(0, async () => {
+            try {
+                const address = server.address();
+                const port = typeof address === 'object' && address ? address.port : 0;
+                const response = await fetch(`http://127.0.0.1:${port}${routePath}`, {
+                    method: 'POST',
+                    headers: { 'content-type': 'application/json', ...headers },
+                    body: JSON.stringify(body),
+                });
+                const responseText = await response.text();
+                resolve({
+                    status: response.status,
+                    body: responseText ? JSON.parse(responseText) : null,
+                });
+            } catch (error) {
+                reject(error);
+            } finally {
+                server.close();
+            }
+        });
+    });
+}
+
 describe('submission update hardening', () => {
     const updateHandler = getRouteHandler('put', '/submissions/:id');
     const approvedListHandler = getRouteHandler('get', '/submissions/approved-list');
+    const originalInternalApiToken = process.env.INTERNAL_API_TOKEN;
 
     beforeEach(() => {
+        process.env.INTERNAL_API_TOKEN = 'test-token';
         jest.spyOn(console, 'error').mockImplementation(() => {});
         (fs.promises.readFile as jest.Mock).mockImplementation(async (target: string) => {
             const normalized = String(target);
@@ -126,6 +153,7 @@ describe('submission update hardening', () => {
     });
 
     afterEach(() => {
+        process.env.INTERNAL_API_TOKEN = originalInternalApiToken;
         jest.restoreAllMocks();
     });
 
@@ -201,6 +229,33 @@ describe('submission update hardening', () => {
         expect(result.rejectedFields).not.toContain('raw_payload');
         expect(result.allowedFields.raw_payload).toEqual({ clickup_handoff: { status: 'failed' } });
         expect(result.allowedFields.clickup_task_id).toBe('cu_123');
+    });
+
+    test('accepts submission create bodies larger than the Express default JSON limit', async () => {
+        const largeHtml = `<p>${'Guacamole with roasted poblano salsa. '.repeat(4500)}</p>`;
+
+        const response = await postJsonOverHttp('/submissions', {
+            id: 'form-large',
+            source: 'form',
+            status: 'pending_human_review',
+            submitter_email: 'chef@example.com',
+            menu_content_html: largeHtml,
+            raw_payload: {
+                form_payload: {
+                    menuContentHtml: largeHtml,
+                },
+            },
+        }, {
+            'x-menumanager-internal-token': 'test-token',
+        });
+
+        expect(response.status).toBe(201);
+        expect(response.body.id).toBe('form-large');
+        expect(response.body.menu_content_html).toContain('Guacamole with roasted poblano salsa');
+        expect(fs.promises.writeFile).toHaveBeenCalledWith(
+            expect.stringContaining('submissions.json'),
+            expect.stringContaining('form-large')
+        );
     });
 
     test('lists approved form submissions with approved doc filenames for download dashboard', async () => {

@@ -31,7 +31,8 @@ Available on `/form` and learning rule workflows.
 - The property value must match one of the configured properties (validated server-side).
 - The previous free-text location field is removed; location metadata is derived from selected property.
 - The `Hotel Name` input is temporarily removed from the chef form UI.
-- DOCX project-detail extraction supports newer templates that split property identity across `OUTLET NAME`, `HOTEL NAME`, and `CITY / COUNTRY`. The dashboard resolves those hints to a single canonical property when possible, and leaves the field blank with a warning when the hints are ambiguous or missing from the catalog.
+- DOCX project-detail extraction supports newer templates that split property identity across `OUTLET NAME`, `HOTEL NAME`, and `CITY / COUNTRY`. The dashboard resolves those hints to a single canonical property when possible, and leaves the field blank with a temporary, plain-language notice when the hints are ambiguous or missing from the catalog. The notice tells submitters that the upload is still fine and they can choose the property from the dropdown.
+- DOCX date extraction only fills Date Needed when the upload provides a valid date that satisfies turnaround rules. Invalid or too-soon dates keep the automatically calculated date and show a temporary plain-language notice instead of a persistent technical warning.
 - The dashboard carries a baked-in canonical fallback catalog for form rendering and `/api/properties`, so search and DOCX property matching still work if the DB property endpoint is temporarily unavailable or empty. DB metadata remains preferred when available. The fallback stays aligned with the DB default catalog for active selectable properties, including separate dLeña Houston and Washington, D.C. entries.
 
 ## Architecture

@@ -49,7 +49,7 @@ For modification flows, the baseline text must come from one of:
 ## Step 3: Editing + Review
 
 - Chef edits menu as usual.
-- Before AI review or final submission, the form checks the selected property/service period against the latest approved baseline. If the user selected an older or mismatched baseline, or starts a new menu where an approved baseline already exists, the form warns and offers to load the latest approved menu or continue intentionally.
+- Before AI review or final submission, the form checks the selected property/service period against the latest approved baseline. If the user selected an older or mismatched baseline, or starts a new menu where an approved baseline already exists, the form opens a full-screen decision dialog with explicit actions to load the existing approved menu, keep the selected baseline, continue as brand new, or return to the form. Background freshness checks update state only and do not stack warning banners while the chef is editing fields.
 - Right-side persistent preview shows live diff against approved baseline:
   - Deletions: red strike-through
   - Insertions: yellow highlight
@@ -80,6 +80,12 @@ Submission fields:
 - `base_approved_menu_content` (nullable)
 - `chef_persistent_diff` (summary for now)
 - `critical_overrides`
+
+Attempt telemetry:
+
+- Supabase `form_attempt_logs` records baseline upload, preserve-redlines extraction, Basic AI Check, final submit, and parser-level `413` events.
+- Rows are keyed by browser-generated `attempt_id` and store mode/source metadata, payload length estimates, critical AI suggestions, and failure details.
+- Full menu bodies are intentionally not duplicated into this log; final successful submissions remain the source of truth for content.
 
 Approved-text fields set by ClickUp webhook:
 
@@ -158,6 +164,7 @@ When a chef uploads an unapproved DOCX:
    - Allergen-key extraction supports pipe-delimited keys and parenthesized keys such as `(C) CELERY (D) DAIRY`, normalizing detected keys into the pipe-delimited form used by the dashboard field and AI review prompt.
 3. **Frontend** (`form.ejs`):
    - Loads `unapprovedBaseHtml` into the editable review area so existing redlines are visible during editing.
+   - Imported `existing-del` / `existing-ins` spans remain editable; deleting highlighted or struck text changes the normalized editor text, and the persistent preview records that deletion against the original visible baseline.
    - Strips managed footer paragraphs from uploaded baseline/unapproved HTML before building the editable/diff baseline, while retaining preserved footer text separately for submission.
    - `renderPersistentPreview()` uses annotation ranges to wrap unchanged tokens in `existing-del`/`existing-ins` spans; new changes get `persistent-del`/`persistent-ins` as usual.
    - Annotation wrapping splits tokens at imported redline boundaries, so adjacent DOCX deletion/insertion runs such as `neapolitan` + `Neapolitan` remain separately styled after a later live edit.

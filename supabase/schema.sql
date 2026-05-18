@@ -581,6 +581,44 @@ CREATE INDEX IF NOT EXISTS idx_system_alerts_unacknowledged ON system_alerts(ack
     WHERE acknowledged = false;
 
 -- ============================================================================
+-- 10. FORM_ATTEMPT_LOGS
+-- Lightweight telemetry for multi-step public form submissions
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS form_attempt_logs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    attempt_id VARCHAR(100) NOT NULL,
+    event_type VARCHAR(80) NOT NULL,           -- basic_check_started, submit_failed, payload_too_large, etc.
+    route VARCHAR(160),
+    status_code INTEGER,
+    submitter_email VARCHAR(255),
+    submitter_name VARCHAR(255),
+    project_name VARCHAR(255),
+    property VARCHAR(255),
+    service_period VARCHAR(100),
+    template_type VARCHAR(100),
+    submission_mode VARCHAR(50),
+    revision_source VARCHAR(100),
+    revision_baseline_file_name VARCHAR(255),
+    menu_text_length INTEGER,
+    menu_html_length INTEGER,
+    persistent_diff_html_length INTEGER,
+    base_menu_text_length INTEGER,
+    corrected_menu_text_length INTEGER,
+    request_body_length INTEGER,
+    suggestions_count INTEGER,
+    critical_suggestions_count INTEGER,
+    critical_suggestions JSONB,
+    error_message TEXT,
+    details JSONB,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_form_attempt_logs_attempt ON form_attempt_logs(attempt_id);
+CREATE INDEX IF NOT EXISTS idx_form_attempt_logs_created ON form_attempt_logs(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_form_attempt_logs_submitter ON form_attempt_logs(submitter_email);
+CREATE INDEX IF NOT EXISTS idx_form_attempt_logs_project ON form_attempt_logs(property, project_name);
+
+-- ============================================================================
 -- ROW LEVEL SECURITY (RLS) - Enable later when auth is added
 -- ============================================================================
 -- ALTER TABLE submissions ENABLE ROW LEVEL SECURITY;

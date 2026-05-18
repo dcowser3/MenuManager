@@ -34,4 +34,45 @@ describe('dashboard form modification source chooser', () => {
         expect(template).not.toContain('id="modWorkflowEditHere" value="edit_here" checked');
         expect(template).not.toContain('id="modSourceDatabase" value="database" checked');
     });
+
+    test('keeps imported redline and highlight spans editable in revision mode', () => {
+        const template = fs.readFileSync(
+            path.join(__dirname, '..', 'views', 'form.ejs'),
+            'utf8'
+        );
+
+        expect(template).toContain('reviewedArea.contentEditable = \'true\';');
+        expect(template).not.toContain('span.contentEditable = \'false\';');
+        expect(template).not.toContain('querySelectorAll(\'.existing-del, .existing-ins\').forEach(span => {');
+    });
+
+    test('uses a full-screen decision dialog for existing approved menu conflicts', () => {
+        const template = fs.readFileSync(
+            path.join(__dirname, '..', 'views', 'form.ejs'),
+            'utf8'
+        );
+
+        expect(template).toContain('id="baselineFreshnessModal"');
+        expect(template).toContain('role="dialog" aria-modal="true"');
+        expect(template).toContain('id="baselineFreshnessCancelBtn" class="btn btn-quiet">Cancel</button>');
+        expect(template).toContain('Continue as Brand New');
+        expect(template).toContain('Use Existing Menu');
+        expect(template).toContain('latestBaselineFreshnessIssue = issue;');
+        expect(template).not.toContain('if (issue) showBaselineFreshnessWarning(issue);');
+    });
+
+    test('shows docx extraction warnings as temporary growl notices with friendly copy', () => {
+        const template = fs.readFileSync(
+            path.join(__dirname, '..', 'views', 'form.ejs'),
+            'utf8'
+        );
+
+        expect(template).toContain('function showUploadNotice(message)');
+        expect(template).toContain('autoDismissMs: 7000');
+        expect(template).toContain('growl: true');
+        expect(template).toContain('temporary: true');
+        expect(template).toContain('We weren\'t able to fill in the property from your Word doc');
+        expect(template).toContain('Please select the property from the dropdown.');
+        expect(template).toContain('if (warning) showUploadNotice(warning);');
+    });
 });

@@ -143,6 +143,8 @@ The dashboard service still uses a single Express entrypoint, but the highest-ri
 - `lib/approval-workflow.ts` — quick-approve, corrected-upload, and browser approval/finalization handlers
 
 `services/dashboard/index.ts` now primarily composes dependencies, mounts routes, and keeps shared helpers that are still used across multiple dashboard areas.
+The dashboard accepts chef form JSON/urlencoded bodies up to `DASHBOARD_JSON_BODY_LIMIT` (or `JSON_BODY_LIMIT`, default `5mb`) so rich menu HTML and persistent redline previews can pass through the public submit route without tripping Express's default 100 KB parser cap.
+The public form also emits compact `form_attempt_logs` telemetry keyed by a browser-generated attempt id. Baseline upload, preserve-redlines extraction, Basic AI Check, final submit, and parser-level `413` events record mode/source metadata, payload length estimates, and critical AI suggestions without persisting full menu bodies.
 The submission form footer shows `dcowser@richardsandoval.com` as the support contact for submitter help.
 
 ## ClickUp Integration Module Notes
@@ -152,6 +154,7 @@ The ClickUp integration service still uses a single Express entrypoint, but appr
 ## DB Service Notes
 
 The DB service still fronts both local JSON persistence and the Supabase mirror, but mutable submission updates are now funneled through `lib/submission-updates.ts` so approval/status patches are allowlisted, path-bearing fields are validated against the repository `tmp/` tree, and partial mirror updates do not overwrite `raw_payload`.
+Internal DB JSON bodies use `DB_JSON_BODY_LIMIT` (or `JSON_BODY_LIMIT`, default `5mb`) because form submissions and ClickUp handoff metadata can include sanitized rich HTML and raw payload snapshots.
 
 ## Internal Service Auth Notes
 
