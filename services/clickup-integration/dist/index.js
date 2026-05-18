@@ -286,6 +286,40 @@ function buildTaskName(input) {
         parts.push('Modification');
     return parts.join(' - ');
 }
+function modificationWorkflowLabel(revisionSource, revisionBaseSubmissionId) {
+    const normalizedSource = `${revisionSource || ''}`.trim();
+    const effectiveSource = normalizedSource || (revisionBaseSubmissionId ? 'database' : 'uploaded_baseline');
+    switch (effectiveSource) {
+        case 'database':
+            return "Modification to Existing Menu - I'll make menu changes here (Find in Database)";
+        case 'uploaded_baseline':
+            return "Modification to Existing Menu - I'll make menu changes here (Upload Prior Approved DOCX)";
+        case 'uploaded_unapproved':
+            return 'Modification to Existing Menu - I already made my menu edits on a doc (Upload Approved DOCX, Preserve Redlines)';
+        default:
+            return `Modification to Existing Menu - ${effectiveSource}`;
+    }
+}
+function revisionSourceLabel(revisionSource, revisionBaseSubmissionId) {
+    const normalizedSource = `${revisionSource || ''}`.trim();
+    const effectiveSource = normalizedSource || (revisionBaseSubmissionId ? 'database' : 'uploaded_baseline');
+    switch (effectiveSource) {
+        case 'database':
+            return 'Find in Database';
+        case 'uploaded_baseline':
+            return 'Uploaded prior approved DOCX';
+        case 'uploaded_unapproved':
+            return 'Uploaded DOCX with edits already made (preserve redlines)';
+        default:
+            return effectiveSource;
+    }
+}
+function submissionModeLabel(input) {
+    if (input.submissionMode === 'modification') {
+        return modificationWorkflowLabel(input.revisionSource, input.revisionBaseSubmissionId);
+    }
+    return 'Brand New Menu Submission';
+}
 function buildTaskDescription(input) {
     const lines = [];
     // Overrides and attestations at the top for reviewer visibility
@@ -305,9 +339,9 @@ function buildTaskDescription(input) {
     if (input.submissionId) {
         lines.push('## Browser Approval', `- Approval Editor: ${DASHBOARD_URL.replace(/\/+$/, '')}/approval/${input.submissionId}`, '');
     }
-    lines.push('## Menu Submission', `- Submission ID: ${input.submissionId || 'N/A'}`, `- Submitter: ${input.submitterName || 'N/A'} (${input.submitterEmail || 'N/A'})`, `- Job Title: ${input.submitterJobTitle || 'N/A'}`, `- Property: ${input.property || 'N/A'}`, `- Project: ${input.projectName || 'N/A'}`, `- Hotel: ${input.hotelName || 'N/A'}`, `- Location: ${input.cityCountry || 'N/A'}`, `- Menu Type: ${input.menuType || 'standard'}`, `- Service Period: ${input.servicePeriod || 'other'}`, `- Template: ${input.templateType || 'food'}`, `- Asset Type: ${input.assetType || 'N/A'}`, `- Dimensions: ${input.width || 'N/A'} x ${input.height || 'N/A'} ${input.assetType === 'PRINT' ? 'in' : (input.assetType === 'BOTH' ? 'mixed' : 'px')}`, `- Orientation: ${input.orientation || 'N/A'}`, `- Turnaround: ${input.turnaroundDays || 'N/A'} day(s)`, `- Date Needed: ${formatDateNeeded(input.dateNeeded)}`, `- Submission Mode: ${input.submissionMode || 'new'}`, '- ClickUp Watchers: Marketing group members are added automatically when the group is configured.');
+    lines.push('## Menu Submission', `- Submission ID: ${input.submissionId || 'N/A'}`, `- Submitter: ${input.submitterName || 'N/A'} (${input.submitterEmail || 'N/A'})`, `- Job Title: ${input.submitterJobTitle || 'N/A'}`, `- Property: ${input.property || 'N/A'}`, `- Project: ${input.projectName || 'N/A'}`, `- Hotel: ${input.hotelName || 'N/A'}`, `- Location: ${input.cityCountry || 'N/A'}`, `- Menu Type: ${input.menuType || 'standard'}`, `- Service Period: ${input.servicePeriod || 'other'}`, `- Template: ${input.templateType || 'food'}`, `- Asset Type: ${input.assetType || 'N/A'}`, `- Dimensions: ${input.width || 'N/A'} x ${input.height || 'N/A'} ${input.assetType === 'PRINT' ? 'in' : (input.assetType === 'BOTH' ? 'mixed' : 'px')}`, `- Orientation: ${input.orientation || 'N/A'}`, `- Turnaround: ${input.turnaroundDays || 'N/A'} day(s)`, `- Date Needed: ${formatDateNeeded(input.dateNeeded)}`, `- Submission Mode: ${submissionModeLabel(input)}`, '- ClickUp Watchers: Marketing group members are added automatically when the group is configured.');
     if (input.submissionMode === 'modification') {
-        lines.push(`- Revision Source: ${input.revisionSource || (input.revisionBaseSubmissionId ? 'database' : 'uploaded-baseline')}`);
+        lines.push(`- Revision Source: ${revisionSourceLabel(input.revisionSource, input.revisionBaseSubmissionId)}`);
         if (input.revisionBaseSubmissionId) {
             lines.push(`- Base Submission ID: ${input.revisionBaseSubmissionId}`);
         }

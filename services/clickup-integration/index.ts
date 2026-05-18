@@ -341,6 +341,50 @@ function buildTaskName(input: {
     return parts.join(' - ');
 }
 
+function modificationWorkflowLabel(revisionSource?: string, revisionBaseSubmissionId?: string): string {
+    const normalizedSource = `${revisionSource || ''}`.trim();
+    const effectiveSource = normalizedSource || (revisionBaseSubmissionId ? 'database' : 'uploaded_baseline');
+
+    switch (effectiveSource) {
+        case 'database':
+            return "Modification to Existing Menu - I'll make menu changes here (Find in Database)";
+        case 'uploaded_baseline':
+            return "Modification to Existing Menu - I'll make menu changes here (Upload Prior Approved DOCX)";
+        case 'uploaded_unapproved':
+            return 'Modification to Existing Menu - I already made my menu edits on a doc (Upload Approved DOCX, Preserve Redlines)';
+        default:
+            return `Modification to Existing Menu - ${effectiveSource}`;
+    }
+}
+
+function revisionSourceLabel(revisionSource?: string, revisionBaseSubmissionId?: string): string {
+    const normalizedSource = `${revisionSource || ''}`.trim();
+    const effectiveSource = normalizedSource || (revisionBaseSubmissionId ? 'database' : 'uploaded_baseline');
+
+    switch (effectiveSource) {
+        case 'database':
+            return 'Find in Database';
+        case 'uploaded_baseline':
+            return 'Uploaded prior approved DOCX';
+        case 'uploaded_unapproved':
+            return 'Uploaded DOCX with edits already made (preserve redlines)';
+        default:
+            return effectiveSource;
+    }
+}
+
+function submissionModeLabel(input: {
+    submissionMode?: string;
+    revisionSource?: string;
+    revisionBaseSubmissionId?: string;
+}): string {
+    if (input.submissionMode === 'modification') {
+        return modificationWorkflowLabel(input.revisionSource, input.revisionBaseSubmissionId);
+    }
+
+    return 'Brand New Menu Submission';
+}
+
 function buildTaskDescription(input: {
     submissionId?: string;
     submitterName?: string;
@@ -424,12 +468,12 @@ function buildTaskDescription(input: {
         `- Orientation: ${input.orientation || 'N/A'}`,
         `- Turnaround: ${input.turnaroundDays || 'N/A'} day(s)`,
         `- Date Needed: ${formatDateNeeded(input.dateNeeded)}`,
-        `- Submission Mode: ${input.submissionMode || 'new'}`,
+        `- Submission Mode: ${submissionModeLabel(input)}`,
         '- ClickUp Watchers: Marketing group members are added automatically when the group is configured.'
     );
 
     if (input.submissionMode === 'modification') {
-        lines.push(`- Revision Source: ${input.revisionSource || (input.revisionBaseSubmissionId ? 'database' : 'uploaded-baseline')}`);
+        lines.push(`- Revision Source: ${revisionSourceLabel(input.revisionSource, input.revisionBaseSubmissionId)}`);
         if (input.revisionBaseSubmissionId) {
             lines.push(`- Base Submission ID: ${input.revisionBaseSubmissionId}`);
         }

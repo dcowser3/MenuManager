@@ -308,6 +308,41 @@ describe('browser approval finalize route', () => {
         expect(createCall[1].assignees).not.toContain(114079264);
     });
 
+    test('describes modification workflow source with human-readable ClickUp labels', async () => {
+        axios.post.mockImplementation(async (url) => {
+            const urlStr = String(url);
+            if (urlStr.includes('https://api.clickup.com/api/v2/list/list_123/task')) {
+                return { data: { id: 'cu_mod' } };
+            }
+            return { data: {} };
+        });
+
+        const response = await invokeJsonHandler(createTaskHandler, {
+            body: {
+                submitterName: 'Chef Test',
+                submitterEmail: 'chef@example.com',
+                projectName: 'Updated Dinner Menu',
+                property: 'Toro - Chicago',
+                submissionMode: 'modification',
+                revisionSource: 'uploaded_baseline',
+            },
+        });
+
+        expect(response.status).toBe(200);
+        expect(response.body.success).toBe(true);
+
+        const createCall = axios.post.mock.calls.find((call) =>
+            String(call[0]).includes('https://api.clickup.com/api/v2/list/list_123/task')
+        );
+        expect(createCall).toBeTruthy();
+        expect(createCall[1].description).toContain(
+            "- Submission Mode: Modification to Existing Menu - I'll make menu changes here (Upload Prior Approved DOCX)"
+        );
+        expect(createCall[1].description).toContain('- Revision Source: Uploaded prior approved DOCX');
+        expect(createCall[1].description).not.toContain('- Submission Mode: modification');
+        expect(createCall[1].description).not.toContain('- Revision Source: uploaded_baseline');
+    });
+
     test('uploads the approved docx back to clickup and moves the task to to do', async () => {
         const response = await invokeJsonHandler(finalizeHandler, {
             body: {

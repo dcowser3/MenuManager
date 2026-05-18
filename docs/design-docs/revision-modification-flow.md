@@ -28,20 +28,20 @@ For modification flows, the baseline text must come from one of:
 
 ## Step 1: Mode Selection
 
-- `Brand New Menu Submission` (default)
-- `Modification to Existing Menu`
+- `Brand New Menu Submission`
+- `Modification to Existing Menu` (default)
 
 ## Step 2 (Modification only): Baseline Source Selection
 
-- `Find In Database`:
+- `I'll make menu changes here`:
+  - No modification source is preselected; the chef must choose a path before loading a baseline.
+  - The database option is labeled `Choose from database (recommended)`.
   - Search approved submissions by project/property/service period/submitter. Submitted ClickUp tasks do not appear here until an approved DOCX has been processed and the submission status is `approved`.
   - Results are newest-first, with exact property + service-period matches prioritized when those fields are already selected.
   - Each result indicates whether it is the latest approved baseline for its property/service period.
   - Load approved baseline text into editor.
-- `Upload Prior Approved DOCX`:
-  - Upload previously approved/redlined DOCX.
-  - System extracts clean menu text + project details to prefill fields.
-- `Upload Unapproved DOCX (Preserve Redlines)`:
+  - If the approved menu is not in the database yet, the chef can choose `My menu is not in database yet` and upload a previously approved/redlined DOCX instead. The system extracts clean menu text + project details to prefill fields.
+- `I already made my menu edits on a doc` (`Upload Approved DOCX (Preserve Redlines)`):
   - Upload DOCX still under review with existing tracked changes / highlights.
   - System extracts all visible text (including deletions) and preserves existing redlines as `existing-del` / `existing-ins` CSS classes.
   - Python script returns per-paragraph annotation ranges so the persistent preview can render both layers: existing redlines + new chef changes.

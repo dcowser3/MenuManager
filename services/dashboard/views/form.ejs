@@ -1317,19 +1317,84 @@
             display: flex;
             gap: 0.75rem;
             flex-wrap: wrap;
-            margin-bottom: 0.5rem;
+            margin-bottom: 1.35rem;
         }
 
-        .modification-source-option {
+        .modification-search .modification-source-option {
+            display: flex;
+            align-items: flex-start;
+            gap: 0.6rem;
+            flex: 1 1 320px;
             border: 1px solid var(--color-border);
             background: var(--color-background);
-            padding: 0.45rem 0.65rem;
-            font-size: 0.78rem;
+            padding: 1rem 1.1rem;
+            min-height: 72px;
+            font-size: 0.96rem;
+            font-weight: 500;
+            line-height: 1.25;
+            text-transform: none;
+            letter-spacing: 0;
+            color: var(--color-text);
             cursor: pointer;
         }
 
+        .modification-source-option-text {
+            display: flex;
+            flex-direction: column;
+            gap: 0.3rem;
+        }
+
+        .modification-source-option-subtext {
+            font-size: 0.74rem;
+            font-weight: 400;
+            line-height: 1.35;
+            letter-spacing: 0;
+            text-transform: none;
+            color: var(--color-text-muted);
+        }
+
         .modification-source-option input {
-            margin-right: 0.4rem;
+            width: auto;
+            padding: 0;
+            border: 0;
+            margin: 0.15rem 0 0;
+            flex: 0 0 auto;
+        }
+
+        .modification-search .modification-source-option:has(input:checked) {
+            border-color: var(--color-primary);
+            background: color-mix(in srgb, var(--color-primary) 6%, var(--color-background));
+            color: var(--color-text);
+        }
+
+        .approved-baseline-source-options {
+            display: flex;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+            margin: 0.1rem 0 1rem 1.25rem;
+            padding-left: 0.75rem;
+            border-left: 2px solid var(--color-border-light);
+        }
+
+        .modification-search .approved-baseline-source-option {
+            display: flex;
+            align-items: center;
+            border: 1px solid var(--color-border-light);
+            background: var(--color-background-alt);
+            padding: 0.35rem 0.55rem;
+            min-height: 36px;
+            font-size: 0.66rem;
+            text-transform: none;
+            letter-spacing: 0;
+            cursor: pointer;
+        }
+
+        .approved-baseline-source-option input {
+            width: auto;
+            padding: 0;
+            border: 0;
+            margin: 0 0.4rem 0 0;
+            transform: scale(0.9);
         }
 
         .modification-source-panel {
@@ -1488,48 +1553,62 @@
                 <h2>Project Details</h2>
                 <div class="submission-mode">
                     <label class="submission-mode-option">
-                        <input type="radio" name="submissionMode" id="submissionModeNew" value="new" checked onchange="onSubmissionModeChange()">
+                        <input type="radio" name="submissionMode" id="submissionModeNew" value="new" onchange="onSubmissionModeChange()">
                         Brand New Menu Submission
                     </label>
                     <label class="submission-mode-option">
-                        <input type="radio" name="submissionMode" id="submissionModeModification" value="modification" onchange="onSubmissionModeChange()">
+                        <input type="radio" name="submissionMode" id="submissionModeModification" value="modification" checked onchange="onSubmissionModeChange()">
                         Modification to Existing Menu
                     </label>
                 </div>
-                <div id="modificationSearchSection" class="modification-search">
+                <div id="modificationSearchSection" class="modification-search show">
                     <div class="modification-source-options">
                         <label class="modification-source-option">
-                            <input type="radio" name="modificationSource" id="modSourceDatabase" value="database" checked onchange="onModificationSourceChange()">
-                            Find In Database
+                            <input type="radio" name="modificationWorkflow" id="modWorkflowEditHere" value="edit_here" onchange="onModificationWorkflowChange('edit_here')">
+                            <span class="modification-source-option-text">
+                                <span>I'll make menu changes here</span>
+                                <span class="modification-source-option-subtext">Upload Prior Approved DOCX</span>
+                            </span>
                         </label>
                         <label class="modification-source-option">
-                            <input type="radio" name="modificationSource" id="modSourceUpload" value="upload" onchange="onModificationSourceChange()">
-                            Upload Prior Approved DOCX
-                        </label>
-                        <label class="modification-source-option">
-                            <input type="radio" name="modificationSource" id="modSourceUnapproved" value="unapproved" onchange="onModificationSourceChange()">
-                            Upload Unapproved DOCX (Preserve Redlines)
+                            <input type="radio" name="modificationWorkflow" id="modSourceUnapproved" value="unapproved" onchange="onModificationSourceChange()">
+                            <span class="modification-source-option-text">
+                                <span>I already made my menu edits on a doc</span>
+                                <span class="modification-source-option-subtext">Upload Approved DOCX (Preserve Redlines)</span>
+                            </span>
                         </label>
                     </div>
-                    <div id="modSourceDatabasePanel" class="modification-source-panel show">
-                        <label for="submissionSearchQuery">Find previous approved submission</label>
-                        <input
-                            type="text"
-                            id="submissionSearchQuery"
-                            placeholder="Search by project, property, submitter..."
-                            oninput="onSubmissionSearchInput(this.value)"
-                        >
-                        <div id="submissionSearchResults" class="search-results"></div>
-                    </div>
-                    <div id="modSourceUploadPanel" class="modification-source-panel">
-                        <label for="baselineDocUpload">Upload approved/redlined DOCX received from the team</label>
-                        <div class="baseline-upload-row">
-                            <input type="file" id="baselineDocUpload" accept=".docx">
-                            <button type="button" class="baseline-upload-btn" id="baselineUploadBtn" onclick="uploadBaselineDoc()">Extract Baseline</button>
+                    <div id="modSourceEditHerePanel" class="modification-source-panel">
+                        <div class="approved-baseline-source-options" role="radiogroup" aria-label="Approved menu source">
+                            <label class="approved-baseline-source-option">
+                                <input type="radio" name="approvedBaselineSource" id="modSourceDatabase" value="database" onchange="onModificationSourceChange()">
+                                Choose from database (recommended)
+                            </label>
+                            <label class="approved-baseline-source-option">
+                                <input type="radio" name="approvedBaselineSource" id="modSourceUpload" value="upload" onchange="onModificationSourceChange()">
+                                My menu is not in database yet
+                            </label>
+                        </div>
+                        <div id="modSourceDatabasePanel" class="modification-source-panel">
+                            <label for="submissionSearchQuery">Find previous approved submission</label>
+                            <input
+                                type="text"
+                                id="submissionSearchQuery"
+                                placeholder="Search by project, property, submitter..."
+                                oninput="onSubmissionSearchInput(this.value)"
+                            >
+                            <div id="submissionSearchResults" class="search-results"></div>
+                        </div>
+                        <div id="modSourceUploadPanel" class="modification-source-panel">
+                            <label for="baselineDocUpload">Upload prior approved DOCX</label>
+                            <div class="baseline-upload-row">
+                                <input type="file" id="baselineDocUpload" accept=".docx">
+                                <button type="button" class="baseline-upload-btn" id="baselineUploadBtn" onclick="uploadBaselineDoc()">Extract Baseline</button>
+                            </div>
                         </div>
                     </div>
                     <div id="modSourceUnapprovedPanel" class="modification-source-panel">
-                        <label for="unapprovedDocUpload">Upload unapproved DOCX with existing redlines/highlights</label>
+                        <label for="unapprovedDocUpload">Upload DOCX with your menu edits already made</label>
                         <div class="baseline-upload-row">
                             <input type="file" id="unapprovedDocUpload" accept=".docx">
                             <button type="button" class="baseline-upload-btn" id="unapprovedUploadBtn" onclick="uploadUnapprovedDoc()">Extract with Redlines</button>
@@ -1984,7 +2063,7 @@
                         <div id="suggestionsDisplay" class="suggestions-list"></div>
                         <div class="ai-temp-note">AI highlights are temporary. Chef revision redlines are persistent.</div>
                     </div>
-                    <div id="persistentPreviewSection" class="persistent-preview">
+                    <div id="persistentPreviewSection" class="persistent-preview show">
                         <h4>Persistent Revision Preview (What Design Will Receive)</h4>
                         <div id="persistentPreviewBody" class="persistent-preview-body"></div>
                     </div>
@@ -2037,7 +2116,7 @@
         let aiChanges = [];
         let originalAiCorrectedText = '';
         let criticalErrorOverrides = {};
-        let submissionMode = 'new';
+        let submissionMode = 'modification';
         const turnaroundUserState = {
             new: { isUserSet: false, value: '' },
             modification: { isUserSet: false, value: '' }
@@ -2852,9 +2931,16 @@
             updateRevisionPreCheckLayout();
         }
 
+        function onModificationWorkflowChange(workflow) {
+            onModificationSourceChange();
+        }
+
         function onModificationSourceChange() {
-            const useUpload = document.getElementById('modSourceUpload').checked;
+            const useEditHere = document.getElementById('modWorkflowEditHere').checked;
             const useUnapproved = document.getElementById('modSourceUnapproved').checked;
+            const useDatabase = useEditHere && document.getElementById('modSourceDatabase').checked;
+            const useUpload = useEditHere && document.getElementById('modSourceUpload').checked;
+            const editHerePanel = document.getElementById('modSourceEditHerePanel');
             const dbPanel = document.getElementById('modSourceDatabasePanel');
             const uploadPanel = document.getElementById('modSourceUploadPanel');
             const unapprovedPanel = document.getElementById('modSourceUnapprovedPanel');
@@ -2864,11 +2950,14 @@
                 revisionSource = 'uploaded_unapproved';
             } else if (useUpload) {
                 revisionSource = 'uploaded_baseline';
-            } else {
+            } else if (useDatabase) {
                 revisionSource = 'database';
+            } else {
+                revisionSource = '';
             }
 
             // Hide all panels first
+            editHerePanel.classList.remove('show');
             dbPanel.classList.remove('show');
             uploadPanel.classList.remove('show');
             unapprovedPanel.classList.remove('show');
@@ -2889,12 +2978,20 @@
                 revisionSearchResults = [];
                 baseApprovedMenuContentHtml = '';
                 document.getElementById('submissionSearchResults').innerHTML = '';
-            } else if (useUpload) {
-                uploadPanel.classList.add('show');
-                revisionBaseSubmissionId = null;
-                revisionSearchResults = [];
-                baseApprovedMenuContentHtml = '';
-                document.getElementById('submissionSearchResults').innerHTML = '';
+            } else if (useEditHere) {
+                editHerePanel.classList.add('show');
+                if (useUpload) {
+                    uploadPanel.classList.add('show');
+                    revisionBaseSubmissionId = null;
+                    revisionSearchResults = [];
+                    baseApprovedMenuContentHtml = '';
+                    document.getElementById('submissionSearchResults').innerHTML = '';
+                } else if (useDatabase) {
+                    dbPanel.classList.add('show');
+                    revisionBaselineDocPath = '';
+                    revisionBaselineFileName = '';
+                    baseApprovedMenuContentHtml = '';
+                }
                 // Reset unapproved state when switching away
                 unapprovedMode = false;
                 unapprovedAnnotations = [];
@@ -2903,7 +3000,6 @@
                 unapprovedAnnotationMap = {};
                 preservedManagedFooterText = '';
             } else {
-                dbPanel.classList.add('show');
                 revisionBaselineDocPath = '';
                 revisionBaselineFileName = '';
                 baseApprovedMenuContentHtml = '';
@@ -2990,6 +3086,7 @@
                 onSubmissionModeChange();
             }
             document.getElementById('modSourceDatabase').checked = true;
+            document.getElementById('modWorkflowEditHere').checked = true;
             onModificationSourceChange();
 
             revisionBaseSubmissionId = selected.id;
@@ -4416,7 +4513,7 @@
         async function runBasicCheck() {
             if (!validateStep1()) return;
             if (submissionMode === 'modification' && !revisionBaseSubmissionId && !revisionBaselineDocPath) {
-                showAlert('Select a previous approved submission or upload an approved baseline DOCX first.', 'error');
+                showAlert('Choose a modification source and load a baseline DOCX first.', 'error');
                 return;
             }
 
@@ -5079,7 +5176,7 @@
             }
 
             if (submissionMode === 'modification' && !revisionBaseSubmissionId && !revisionBaselineDocPath) {
-                showAlert('Select a previous approved submission or upload an approved baseline DOCX before submitting.', 'error');
+                showAlert('Choose a modification source and load a baseline DOCX before submitting.', 'error');
                 return;
             }
 
@@ -5287,7 +5384,8 @@
             }
 
             // Return to new submission mode and clear revision-only state.
-            document.getElementById('submissionModeNew').checked = true;
+            document.getElementById('submissionModeModification').checked = true;
+            document.getElementById('submissionModeNew').checked = false;
             onSubmissionModeChange();
 
             // Keep form metadata populated but clear menu content for next submission.
