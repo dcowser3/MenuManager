@@ -4,17 +4,19 @@ process.env.CLICKUP_TEAM_ID = 'team_123';
 process.env.CLICKUP_ASSIGNEE_ID = '114079264';
 process.env.CLICKUP_MARKETING_WATCHER_GROUP_NAME = 'Marketing';
 process.env.CLICKUP_POST_APPROVAL_STATUS = 'to do';
+process.env.GRAPH_CLIENT_ID = 'graph-client-id';
+process.env.GRAPH_TENANT_ID = 'graph-tenant-id';
+process.env.GRAPH_CLIENT_SECRET = 'graph-client-secret';
 
 jest.mock('axios', () => {
-    const client = {
-        post: jest.fn(),
-        get: jest.fn(),
-        put: jest.fn(),
-        create: jest.fn(),
-        interceptors: {
-            request: {
-                use: jest.fn(),
-            },
+    const client = jest.fn();
+    client.post = jest.fn();
+    client.get = jest.fn();
+    client.put = jest.fn();
+    client.create = jest.fn();
+    client.interceptors = {
+        request: {
+            use: jest.fn(),
         },
     };
     client.create.mockReturnValue(client);
@@ -135,6 +137,20 @@ describe('browser approval finalize route', () => {
         axios.get.mockReset();
         axios.post.mockReset();
         axios.put.mockReset();
+        axios.mockReset();
+
+        axios.mockImplementation(async (config) => {
+            const urlStr = String(config?.url || '');
+            if (urlStr.includes('https://graph.microsoft.com/v1.0/drives/drive_selected/')) {
+                if (urlStr.includes(':/children')) {
+                    return { data: { value: [] } };
+                }
+                if (urlStr.includes(':/content')) {
+                    return { data: { webUrl: 'https://sharepoint.example/Toro_Dinner_11.6.23.docx' } };
+                }
+            }
+            return { data: {} };
+        });
 
         axios.get.mockImplementation(async (url) => {
             const urlStr = String(url);
@@ -161,6 +177,9 @@ describe('browser approval finalize route', () => {
 
         axios.post.mockImplementation(async (url) => {
             const urlStr = String(url);
+            if (urlStr.includes('login.microsoftonline.com')) {
+                return { data: { access_token: 'graph-token', expires_in: 3600 } };
+            }
             if (urlStr.includes('/attachment')) {
                 return { data: { id: 'att_456' } };
             }
@@ -313,6 +332,150 @@ describe('browser approval finalize route', () => {
         );
         expect(statusCall).toBeTruthy();
         expect(statusCall[1]).toEqual({ status: 'to do' });
+    });
+
+    test('uploads approved docx to a pre-synced SharePoint drive and keeps the local fallback asset', async () => {
+        axios.get.mockImplementation(async (url) => {
+            const urlStr = String(url);
+            if (urlStr.includes('/submissions/sub_approval_1')) {
+                return {
+                    data: {
+                        id: 'sub_approval_1',
+                        clickup_task_id: 'cu_123',
+                        project_name: 'Spring Menu',
+                        property: 'Toro - Fairmont Millennium Park - Chicago',
+                        service_period: 'Dinner',
+                        date_needed: '2023-11-06',
+                        submitter_email: 'chef@example.com',
+                        submitter_name: 'Chef Test',
+                        filename: 'Spring Menu.docx',
+                        raw_payload: {},
+                    },
+                };
+            }
+            if (urlStr.includes('/properties/validate')) {
+                return {
+                    data: {
+                        valid: true,
+                        property: {
+                            name: 'Toro - Fairmont Millennium Park - Chicago',
+                            sharepoint_drive_id: 'drive_selected',
+                            sharepoint_base_folder_path: 'Toro by Chef Richard Sandoval/Marketing - Locations/Chicago/Menus',
+                            sharepoint_service_folders: ['Dinner', 'Lunch'],
+                        },
+                    },
+                };
+            }
+            return { data: null };
+        });
+
+        const response = await invokeJsonHandler(finalizeHandler, {
+            body: {
+                submissionId: 'sub_approval_1',
+                approvedPath: '/tmp/documents/sub_approval_1-approved.docx',
+                approvedFileName: 'Spring Menu.docx',
+            },
+        });
+
+        expect(response.status).toBe(200);
+        expect(response.body.attachmentUploaded).toBe(true);
+        expect(response.body.clickupStatusUpdated).toBe(true);
+
+        const graphUrls = axios.mock.calls.map((call) => String(call[0]?.url || ''));
+        expect(graphUrls.some((url) => url.includes('/sites/'))).toBe(false);
+        expect(graphUrls.some((url) =>
+            url.includes('/drives/drive_selected/root:/') && url.includes('/Dinner:/children')
+        )).toBe(true);
+        expect(graphUrls.some((url) =>
+            url.includes('/drives/drive_selected/root:/') && url.includes('/Toro_Dinner_11.6.23.docx:/content')
+        )).toBe(true);
+
+        const localAssetCall = axios.post.mock.calls.find((call) =>
+            String(call[0]).includes('http://localhost:3004/assets') &&
+            call[1]?.asset_type === 'approved_docx'
+        );
+        expect(localAssetCall).toBeTruthy();
+
+        const sharePointAssetCall = axios.post.mock.calls.find((call) =>
+            String(call[0]).includes('http://localhost:3004/assets') &&
+            call[1]?.asset_type === 'sharepoint_approved_docx'
+        );
+        expect(sharePointAssetCall).toBeTruthy();
+        expect(sharePointAssetCall[1]).toEqual(expect.objectContaining({
+            storage_provider: 'sharepoint',
+            storage_path: expect.stringContaining('Toro_Dinner_11.6.23.docx'),
+            file_name: 'Toro_Dinner_11.6.23.docx',
+        }));
+    });
+
+    test('resolves the default SharePoint document library when Graph names it Documents', async () => {
+        axios.mockImplementation(async (config) => {
+            const urlStr = String(config?.url || '');
+            if (urlStr.includes('/sites/richardsandoval.sharepoint.com:/sites/Toro2')) {
+                return { data: { id: 'site_alias' } };
+            }
+            if (urlStr.includes('/sites/site_alias/drives')) {
+                return { data: { value: [{ id: 'drive_documents', name: 'Documents' }] } };
+            }
+            if (urlStr.includes('https://graph.microsoft.com/v1.0/drives/drive_documents/')) {
+                if (urlStr.includes(':/children')) {
+                    return { data: { value: [] } };
+                }
+                if (urlStr.includes(':/content')) {
+                    return { data: { webUrl: 'https://sharepoint.example/Toro_Dinner_11.6.23.docx' } };
+                }
+            }
+            return { data: {} };
+        });
+        axios.get.mockImplementation(async (url) => {
+            const urlStr = String(url);
+            if (urlStr.includes('/submissions/sub_approval_1')) {
+                return {
+                    data: {
+                        id: 'sub_approval_1',
+                        clickup_task_id: 'cu_123',
+                        project_name: 'Spring Menu',
+                        property: 'Toro - Fairmont Millennium Park - Chicago',
+                        service_period: 'Dinner',
+                        date_needed: '2023-11-06',
+                        submitter_email: 'chef@example.com',
+                        submitter_name: 'Chef Test',
+                        filename: 'Spring Menu.docx',
+                        raw_payload: {},
+                    },
+                };
+            }
+            if (urlStr.includes('/properties/validate')) {
+                return {
+                    data: {
+                        valid: true,
+                        property: {
+                            name: 'Toro - Fairmont Millennium Park - Chicago',
+                            sharepoint_site_url: 'https://richardsandoval.sharepoint.com/sites/Toro2',
+                            sharepoint_library_name: 'Shared Documents',
+                            sharepoint_base_folder_path: 'Toro by Chef Richard Sandoval/Marketing - Locations/Chicago/Menus',
+                            sharepoint_service_folders: ['Dinner', 'Lunch'],
+                        },
+                    },
+                };
+            }
+            return { data: null };
+        });
+
+        const response = await invokeJsonHandler(finalizeHandler, {
+            body: {
+                submissionId: 'sub_approval_1',
+                approvedPath: '/tmp/documents/sub_approval_1-approved.docx',
+                approvedFileName: 'Spring Menu.docx',
+            },
+        });
+
+        expect(response.status).toBe(200);
+        const graphUrls = axios.mock.calls.map((call) => String(call[0]?.url || ''));
+        expect(graphUrls.some((url) => url.includes('/sites/site_alias/drives'))).toBe(true);
+        expect(graphUrls.some((url) =>
+            url.includes('/drives/drive_documents/root:/') && url.includes('/Toro_Dinner_11.6.23.docx:/content')
+        )).toBe(true);
     });
 
     test('does not move the clickup task when the approved docx upload fails', async () => {

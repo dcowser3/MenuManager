@@ -33,6 +33,7 @@ function usage() {
         '',
         'Optional:',
         '  --db-service-url "http://localhost:3004"',
+        '  --site-id "<selected-site-id>"',
         '  --drive-id "<existing-drive-id>"',
     ].join('\n'));
 }
@@ -54,6 +55,15 @@ function encodeGraphPath(folderPath) {
         .split('/')
         .map((segment) => encodeURIComponent(segment))
         .join('/');
+}
+
+function normalizeSharePointLibraryName(value) {
+    const normalized = String(value || '').trim().toLowerCase();
+    return normalized === 'shared documents' ? 'documents' : normalized;
+}
+
+function sharePointLibraryNameMatches(actual, expected) {
+    return normalizeSharePointLibraryName(actual) === normalizeSharePointLibraryName(expected);
 }
 
 async function getGraphAccessToken() {
@@ -108,6 +118,7 @@ async function main() {
     const libraryName = `${args['library-name'] || ''}`.trim();
     const baseFolderPath = `${args['base-folder-path'] || ''}`.trim();
     const dbServiceUrl = `${args['db-service-url'] || process.env.DB_SERVICE_URL || 'http://localhost:3004'}`.trim();
+    const existingSiteId = `${args['site-id'] || ''}`.trim();
     const existingDriveId = `${args['drive-id'] || ''}`.trim();
 
     if (!property || !siteUrl || !libraryName || !baseFolderPath) {
@@ -116,14 +127,17 @@ async function main() {
     }
 
     const token = await getGraphAccessToken();
-    const { hostname, sitePath } = normalizeSitePath(siteUrl);
-    const site = await graphRequest(token, `/sites/${hostname}:${sitePath}`);
+    let site = existingSiteId ? { id: existingSiteId } : null;
+    if (!site) {
+        const { hostname, sitePath } = normalizeSitePath(siteUrl);
+        site = await graphRequest(token, `/sites/${hostname}:${sitePath}`);
+    }
 
     let driveId = existingDriveId;
     if (!driveId) {
         const drives = await graphRequest(token, `/sites/${site.id}/drives`);
         const drive = (drives.value || []).find((item) =>
-            String(item?.name || '').trim().toLowerCase() === libraryName.toLowerCase()
+            sharePointLibraryNameMatches(item?.name, libraryName)
         );
 
         if (!drive?.id) {
@@ -147,7 +161,12 @@ async function main() {
         `${dbServiceUrl.replace(/\/+$/, '')}/properties/${encodeURIComponent(property)}/sharepoint-config`,
         {
             method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+                'Content-Type': 'application/json',
+                ...(process.env.INTERNAL_API_TOKEN
+                    ? { 'x-menumanager-internal-token': process.env.INTERNAL_API_TOKEN }
+                    : {}),
+            },
             body: JSON.stringify({
                 sharepoint_site_url: siteUrl,
                 sharepoint_library_name: libraryName,

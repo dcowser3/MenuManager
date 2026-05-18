@@ -30,6 +30,7 @@ Approved DOCX files can also be uploaded to SharePoint after ClickUp approval wh
 - The local `approved/` copy remains the canonical on-disk artifact used by the rest of the workflow.
 - SharePoint upload is an additional delivery step for the approved menu.
 - Routing uses the property base folder plus an optional matched service subfolder.
+- Routing is compatible with Microsoft Graph `Sites.Selected`; after sync stores a property `sharepoint_drive_id`, the upload step uses that drive directly.
 - Generated and SharePoint-uploaded DOCX files use `Restaurant_ServicePeriod_M.D.YY.docx`, for example `Aqimero_Breakfast_11.6.23.docx`.
 - When routing into a matched service subfolder, older `.docx` files are moved into `old/` before the new DOCX is uploaded.
 - Existing `.pdf` and `.ai` files remain in the active folder.

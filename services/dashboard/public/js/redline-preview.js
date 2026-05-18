@@ -719,8 +719,55 @@
     function styleIndexTextMatches(indexPlain, baseText) {
         const source = String(indexPlain == null ? '' : indexPlain);
         const target = String(baseText == null ? '' : baseText);
-        return source.length === target.length &&
-            normalizeStyleIndexText(source) === normalizeStyleIndexText(target);
+        if (source.length === target.length) {
+            return normalizeStyleIndexText(source) === normalizeStyleIndexText(target);
+        }
+
+        if (source.length < target.length) {
+            return normalizeStyleIndexText(target.slice(0, source.length)) === normalizeStyleIndexText(source);
+        }
+
+        return false;
+    }
+
+    function buildStyleTokenMap(indexPlain, baseText) {
+        const sourceTokens = tokenizeDiffText(indexPlain || '');
+        const baseTokens = tokenizeDiffText(baseText || '');
+        if (!sourceTokens.length || !baseTokens.length) return null;
+
+        const lcs = buildTokenLcs(sourceTokens, baseTokens);
+        const sourceByBaseStart = {};
+        let sourceIdx = 0;
+        let baseIdx = 0;
+        let mapped = 0;
+
+        while (sourceIdx < sourceTokens.length && baseIdx < baseTokens.length) {
+            const sourceCommon = lcs.commonBase.has(sourceIdx);
+            const baseCommon = lcs.commonRev.has(baseIdx);
+            if (
+                sourceCommon &&
+                baseCommon &&
+                diffTokensEqual(sourceTokens[sourceIdx], baseTokens[baseIdx])
+            ) {
+                sourceByBaseStart[baseTokens[baseIdx].start] = sourceTokens[sourceIdx];
+                mapped++;
+                sourceIdx++;
+                baseIdx++;
+                continue;
+            }
+            if (!sourceCommon) {
+                sourceIdx++;
+                continue;
+            }
+            if (!baseCommon) {
+                baseIdx++;
+                continue;
+            }
+            sourceIdx++;
+            baseIdx++;
+        }
+
+        return mapped ? sourceByBaseStart : null;
     }
 
     function getStyleIndexForBaseline(baselineHtml, baseText) {
@@ -736,6 +783,14 @@
                 baselineStyleCache = { html: baselineHtml, text: baseText, index: richIdx };
                 return richIdx;
             }
+            if (richIdx) {
+                const sourceByBaseStart = buildStyleTokenMap(richIdx.plain, baseText);
+                if (sourceByBaseStart) {
+                    richIdx.sourceByBaseStart = sourceByBaseStart;
+                    baselineStyleCache = { html: baselineHtml, text: baseText, index: richIdx };
+                    return richIdx;
+                }
+            }
         }
         if (!global.document) {
             baselineStyleCache = { html: baselineHtml, text: baseText, index: null };
@@ -750,6 +805,34 @@
         }
         baselineStyleCache = { html: baselineHtml, text: baseText, index: idx };
         return idx;
+    }
+
+    function getStyleSourceToken(styleIndex, baseToken) {
+        if (!styleIndex || !baseToken) return null;
+        if (styleIndex.sourceByBaseStart) {
+            return styleIndex.sourceByBaseStart[baseToken.start] || null;
+        }
+        return baseToken;
+    }
+
+    function cloneStyledTokenHtml(styleIndex, baseToken, fallbackText, annotationMap, includeExistingAnnotations) {
+        const sourceToken = getStyleSourceToken(styleIndex, baseToken);
+        if (!sourceToken) {
+            return includeExistingAnnotations
+                ? wrapWithExistingAnnotation(fallbackText || '', baseToken ? baseToken.start : 0, annotationMap || {})
+                : escapeHtml(fallbackText || '');
+        }
+
+        const inner = cloneRangeHtml(styleIndex.entries, sourceToken.start, sourceToken.end, fallbackText);
+        if (includeExistingAnnotations) {
+            return wrapWithExistingAnnotationHtml(
+                inner,
+                baseToken.start,
+                annotationMap || {},
+                String(fallbackText || '').length
+            );
+        }
+        return inner;
     }
 
     function cloneRangeHtml(entries, start, end, fallbackText) {
@@ -797,6 +880,9 @@
         var plainLen = plainTokenLength || 0;
         if (!htmlChunk) {
             return '';
+        }
+        if (/\b(existing-del|existing-ins)\b/.test(htmlChunk)) {
+            return htmlChunk;
         }
         var stripped = htmlChunk.replace(/<[^>]+>/g, '').trim();
         if (!stripped) {
@@ -888,18 +974,13 @@
 
             if (baseCommon && revCommon && sameToken) {
                 if (styleIndex) {
-                    if (includeExistingAnnotations && baseTok) {
-                        html += cloneAnnotatedRangeHtml(
-                            styleIndex.entries,
-                            baseTok.start,
-                            baseTok.end,
-                            annotationMap,
-                            revTok.value
-                        );
-                    } else {
-                        const inner = cloneRangeHtml(styleIndex.entries, baseTok.start, baseTok.end, revTok.value);
-                        html += inner;
-                    }
+                    html += cloneStyledTokenHtml(
+                        styleIndex,
+                        baseTok,
+                        revTok.value,
+                        annotationMap,
+                        includeExistingAnnotations && baseTok
+                    );
                 } else if (includeExistingAnnotations && baseTok) {
                     html += wrapWithExistingAnnotation(revTok.value, baseTok.start, annotationMap);
                 } else {
@@ -913,7 +994,7 @@
             if (i < baseTokens.length && !baseCommon) {
                 if (baseTok && baseTok.value.trim()) {
                     const delInner = styleIndex
-                        ? cloneRangeHtml(styleIndex.entries, baseTok.start, baseTok.end, baseTok.value)
+                        ? cloneStyledTokenHtml(styleIndex, baseTok, baseTok.value, annotationMap, false)
                         : escapeHtml(baseTok.value);
                     html += '<span class="persistent-del">' + delInner + '</span>';
                     deletions++;

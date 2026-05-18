@@ -125,7 +125,7 @@ When chef uses uploaded baseline flow:
 
 - The uploaded prior approved DOCX is attached to the ClickUp task.
 - This gives Isabella direct visibility to verify the baseline version submitted by chef.
-- The persistent preview receives the extracted baseline HTML, and `@menumanager/diff-core` maps text offsets back to rich HTML ranges so unchanged/deleted tokens keep baseline inline styles such as bold and italic. DOCX non-breaking spaces are treated as equivalent to normal spaces for style-index matching so one whitespace glyph does not flatten the whole preview.
+- The persistent preview receives the extracted baseline HTML, and `@menumanager/diff-core` maps text offsets back to rich HTML ranges so unchanged/deleted tokens keep baseline inline styles such as bold and italic. DOCX non-breaking spaces are treated as equivalent to normal spaces for style-index matching, and body-only rich HTML can still style the menu body when preserved footer text is present in the baseline text.
 
 ## Approval Editor Source Reuse
 

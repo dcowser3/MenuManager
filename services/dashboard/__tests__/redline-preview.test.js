@@ -351,4 +351,63 @@ describe('redline preview helpers', () => {
         expect(rendered.insertions).toBe(0);
         expect(rendered.deletions).toBe(0);
     });
+
+    test('preserves body formatting when baseline text includes stripped footer copy', () => {
+        const baselineHtml = [
+            '<p><strong>COLD STARTERS</strong></p>',
+            '<p><strong>Guacamole Traditional, </strong>avocado, tomato, onion, cilantro, lime V 85</p>',
+        ].join('');
+        const baselineText = [
+            'COLD STARTERS',
+            'Guacamole Traditional, avocado, tomato, onion, cilantro, lime V 85',
+            'ALL PRICES ARE IN AED, INCLUSIVE OF FEES.',
+        ].join('\n');
+        const revisedText = baselineText.replace(
+            'Guacamole Traditional,',
+            'Guacamole Traditional, roasted tomato,'
+        );
+
+        const rendered = redlinePreview.renderPersistentPreview(baselineText, revisedText, {
+            baselineHtml,
+        });
+
+        expect(rendered.html).toContain('<strong>COLD</strong><strong> </strong><strong>STARTERS</strong>');
+        expect(rendered.html).toContain('<strong>Guacamole</strong><strong> </strong><strong>Traditional</strong>');
+        expect(rendered.html).toContain('<span class="persistent-ins">roasted</span>');
+        expect(rendered.html).toContain('ALL PRICES ARE IN AED');
+    });
+
+    test('preserves unapproved formatting when browser text offsets differ from extracted HTML', () => {
+        const baselineHtml = [
+            '<p><br></p>',
+            '<p><strong>COLD STARTERS</strong></p>',
+            '<p><strong>Guacamole Traditional, </strong>avocado, tomato, onion, cilantro, lime V 85</p>',
+            '<p><span class="existing-ins"><strong>Watermelon,</strong></span><span class="existing-ins"> Jocoque</span></p>',
+        ].join('');
+        const baselineText = [
+            '',
+            '',
+            'COLD STARTERS',
+            'Guacamole Traditional, avocado, tomato, onion, cilantro, lime V 85',
+            'Watermelon, Jocoque',
+        ].join('\n');
+        const revisedText = baselineText.replace('Jocoque', 'Jocoque, pine nut');
+        const annotationMap = {};
+        const insertedStart = baselineText.indexOf('Watermelon');
+        for (let i = insertedStart; i < baselineText.length; i++) {
+            annotationMap[i] = 'ins';
+        }
+
+        const rendered = redlinePreview.renderPersistentPreview(baselineText, revisedText, {
+            baselineHtml,
+            annotationMap,
+            includeExistingAnnotations: true,
+        });
+
+        expect(rendered.html).toContain('<strong>COLD</strong><strong> </strong><strong>STARTERS</strong>');
+        expect(rendered.html).toContain('<strong>Guacamole</strong><strong> </strong><strong>Traditional</strong>');
+        expect(rendered.html).toContain('<span class="existing-ins"><strong>Watermelon</strong></span>');
+        expect(rendered.html).not.toContain('<span class="existing-ins"><span class="existing-ins">');
+        expect(rendered.html).toContain('<span class="persistent-ins">pine</span>');
+    });
 });

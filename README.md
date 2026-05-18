@@ -36,7 +36,7 @@ Menu Manager is an AI-powered service designed to automate the review process fo
 - Learning/training dashboards stay off the public landing page; they are reachable by direct URL like other reviewer tools (no separate PIN step)
 - Review highlights and persistent redlines surface punctuation/separator edits such as hyphen, comma, slash, and pipe changes
 - New-menu AI review preserves pasted inline formatting such as bold dish names by projecting source HTML styles onto the corrected text with shared `diff-core` token alignment before applying green AI-change highlights.
-- Modification previews preserve bold/italic inline styling from uploaded prior approved DOCX baselines, including DOCX non-breaking-space text and live edits, by using the shared `diff-core` rich text range mapper.
+- Modification previews preserve bold/italic inline styling from uploaded prior approved DOCX baselines, including DOCX non-breaking-space text, body-only rich HTML with preserved footer text, and live edits, by using the shared `diff-core` rich text range mapper.
 - Submission normalization keeps exactly one managed allergen legend, while preserving chef-supplied legal/price/footer copy such as AED service-charge text and venue-specific foodborne warnings
 - Modification previews exclude managed footer boilerplate from design-facing redlines while still preserving custom restaurant footer notes/raw warnings for generated DOCX output
 - DOCX baseline uploads now prefill the allergen key field from either pipe-delimited legends or parenthesized legends such as `(C) CELERY (D) DAIRY`
@@ -148,6 +148,8 @@ Design approval entry point:
 - When a property has SharePoint folder metadata, the form `Service Period` dropdown is populated from that property’s stored folder names instead of the global default list.
 - `Other` is always included in the `Service Period` dropdown so users can intentionally route the approved file to the property base folder when no subfolder applies.
 - Approved menus can now be pushed to SharePoint after ClickUp approval using the property’s configured base folder and subfolder mapping.
+- SharePoint routing supports Microsoft Graph `Sites.Selected`; once a property has a synced drive ID, uploads use that drive directly while the approved-menus dashboard remains available as the local fallback.
+- SharePoint library matching treats `Shared Documents` and Graph's `Documents` drive name as the same default document library.
 - Generated and SharePoint-uploaded menu DOCX files are named `Restaurant_ServicePeriod_M.D.YY.docx`, for example `Aqimero_Breakfast_11.6.23.docx`, using the restaurant/outlet name from the selected property and the submission `date_needed` value.
 - Approved-menu downloads keep that generated submission filename even when the stored approved artifact uses an internal `*-approved.docx` path.
 - Prix fixe prices with `PP`/`pp` suffixes, such as `50.00pp`, are recognized as valid per-person top-level prices.

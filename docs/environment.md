@@ -131,10 +131,13 @@ Property records can now store SharePoint routing metadata:
 - `sharepoint_service_folders`
 - `sharepoint_last_synced_at`
 
+The Microsoft Graph app uses application permissions with `Sites.Selected`. IT must grant the app write access to each configured SharePoint site. After a property is synced and stores `sharepoint_drive_id`, approval routing uploads directly through that drive ID instead of re-resolving the site/library every time.
+
 When a property has `sharepoint_service_folders`, the form uses those folder names for the `Service Period` dropdown. On ClickUp approval:
 
 - the newest approved DOCX is chosen from ClickUp attachments when available
 - otherwise the locally stored submitted DOCX is used as the approved source
+- `Shared Documents` and Graph's `Documents` drive name are treated as the same default SharePoint document library
 - `Other` remains available in the dropdown for every property and is treated as a deliberate base-folder upload choice
 - generated and SharePoint-uploaded DOCX files use `Restaurant_ServicePeriod_M.D.YY.docx`, for example `Aqimero_Breakfast_11.6.23.docx`
 - if the selected service folder matches a stored SharePoint subfolder, the file is uploaded there
@@ -156,6 +159,7 @@ npm run sharepoint:sync-property -- \
 
 Notes:
 
-- The DB service must be running because the script stores the discovered folders via `PUT /properties/:name/sharepoint-config`.
+- If a selected-site tenant blocks path-based site lookup but IT provides the Graph site ID, pass `--site-id "<site-id>"` to skip URL resolution while discovering the drive and service folders.
+- The DB service must be running because the script stores the discovered folders via `PUT /properties/:name/sharepoint-config`; when `INTERNAL_API_TOKEN` is set, the script sends it as the internal auth header.
 - If Supabase is configured, the DB service mirrors the same property metadata to the `properties` table.
 - The repo now seeds route metadata for `Aqimero - Ritz-Carlton - Philadelphia`, `Maya - New York`, `Tamayo - Denver`, `Toro - Hotel Clio - Denver`, `Toro - Fairmont Millennium Park - Chicago`, `Toro - Dania Beach`, and `Toro - Viceroy - Snowmass`; additional properties can be added the same way or refreshed with the sync script.

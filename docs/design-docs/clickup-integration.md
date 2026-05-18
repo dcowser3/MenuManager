@@ -83,12 +83,15 @@ Routing rules:
 
 - Match `submission.service_period` against the property’s stored `sharepoint_service_folders`
 - Always keep `Other` available in the form so users can choose the property root/base folder explicitly
+- Treat `Shared Documents` and Graph's `Documents` drive name as the same default SharePoint document library
 - Rename generated and SharePoint-uploaded DOCX files to `Restaurant_ServicePeriod_M.D.YY.docx`, for example `Aqimero_Breakfast_11.6.23.docx`
 - Upload to `{sharepoint_base_folder_path}/{matchedFolder}` when matched
 - Before uploading into a matched subfolder, move existing `.docx` files in that folder into `old/`
 - Leave existing `.pdf` and `.ai` files in place
 - Otherwise upload to `sharepoint_base_folder_path`
 - Upload failures do not block approval finalization; they log a warning alert instead
+- The Graph app is expected to use `Sites.Selected` grants. Once a property has a synced `sharepoint_drive_id`, uploads go straight to that drive so selected-site routing does not depend on broad site enumeration.
+- The approved-menus dashboard and `/download/approved/:submissionId` continue to use the local approved DOCX as an operational fallback.
 
 ### Property Sync
 
@@ -99,7 +102,8 @@ Folder lists are intended to be refreshed on demand, not fetched live on every f
 The script:
 
 - reads SharePoint children from Microsoft Graph
-- stores them through `PUT /properties/:name/sharepoint-config`
+- accepts `--site-id "<site-id>"` when a selected-site grant should skip URL-based site resolution
+- stores them through `PUT /properties/:name/sharepoint-config` with the configured internal service token
 - lets the dashboard form reuse the saved folder names for the `Service Period` dropdown
 
 ## Webhook Registration

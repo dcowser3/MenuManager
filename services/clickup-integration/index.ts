@@ -730,6 +730,15 @@ function encodeGraphPath(value: string): string {
         .join('/');
 }
 
+function normalizeSharePointLibraryName(value: string | undefined): string {
+    const normalized = String(value || '').trim().toLowerCase();
+    return normalized === 'shared documents' ? 'documents' : normalized;
+}
+
+function sharePointLibraryNameMatches(actual: string | undefined, expected: string | undefined): boolean {
+    return normalizeSharePointLibraryName(actual) === normalizeSharePointLibraryName(expected);
+}
+
 async function getGraphAccessToken(): Promise<string> {
     if (!GRAPH_CLIENT_ID || !GRAPH_TENANT_ID || !GRAPH_CLIENT_SECRET) {
         throw new Error('Missing GRAPH_CLIENT_ID, GRAPH_TENANT_ID, or GRAPH_CLIENT_SECRET');
@@ -804,11 +813,17 @@ async function getPropertySharePointConfig(property: string): Promise<PropertySh
 }
 
 async function resolveSharePointDrive(config: PropertySharePointConfig): Promise<{
-    siteId: string;
+    siteId?: string;
     driveId: string;
 }> {
+    if (config.sharepoint_drive_id) {
+        return {
+            driveId: config.sharepoint_drive_id,
+        };
+    }
+
     if (!config.sharepoint_site_url || !config.sharepoint_library_name) {
-        throw new Error('Property is missing SharePoint site URL or library name');
+        throw new Error('Property is missing SharePoint drive ID, or site URL and library name');
     }
 
     const { hostname, sitePath } = parseSharePointSite(config.sharepoint_site_url);
@@ -816,18 +831,11 @@ async function resolveSharePointDrive(config: PropertySharePointConfig): Promise
         path: `/sites/${hostname}:${sitePath}`,
     });
 
-    if (config.sharepoint_drive_id) {
-        return {
-            siteId: site.id,
-            driveId: config.sharepoint_drive_id,
-        };
-    }
-
     const drives = await graphRequest<any>({
         path: `/sites/${site.id}/drives`,
     });
     const drive = (drives.value || []).find((item: any) =>
-        String(item?.name || '').trim().toLowerCase() === config.sharepoint_library_name!.trim().toLowerCase()
+        sharePointLibraryNameMatches(item?.name, config.sharepoint_library_name)
     );
 
     if (!drive?.id) {
@@ -938,13 +946,17 @@ async function uploadApprovedDocToSharePoint(input: {
     driveId?: string;
     siteId?: string;
     archivedDocxCount?: number;
+    fileName?: string;
 }> {
     if (!GRAPH_CLIENT_ID || !GRAPH_TENANT_ID || !GRAPH_CLIENT_SECRET) {
         return { uploaded: false, skipped: 'graph credentials not configured' };
     }
 
     const propertyConfig = await getPropertySharePointConfig(input.property);
-    if (!propertyConfig?.sharepoint_site_url || !propertyConfig?.sharepoint_library_name || !propertyConfig?.sharepoint_base_folder_path) {
+    const canResolveDrive = !!propertyConfig?.sharepoint_drive_id || (
+        !!propertyConfig?.sharepoint_site_url && !!propertyConfig?.sharepoint_library_name
+    );
+    if (!propertyConfig?.sharepoint_base_folder_path || !canResolveDrive) {
         return { uploaded: false, skipped: 'property has no sharepoint routing config' };
     }
 
@@ -990,6 +1002,7 @@ async function uploadApprovedDocToSharePoint(input: {
         driveId,
         siteId,
         archivedDocxCount,
+        fileName: canonicalFileName,
     };
 }
 
@@ -1097,7 +1110,7 @@ async function finalizeApprovedSubmission(input: {
                 buildSharePointApprovedDocxAssetRecord({
                     submissionId: submission.id,
                     storagePath: sharePointUpload.storagePath,
-                    approvedFileName: input.approvedFileName,
+                    approvedFileName: sharePointUpload.fileName || input.approvedFileName,
                     clickupTaskId,
                     siteId: sharePointUpload.siteId,
                     driveId: sharePointUpload.driveId,
