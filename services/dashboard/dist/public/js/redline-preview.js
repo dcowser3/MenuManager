@@ -61,7 +61,15 @@
 
     function extractCleanTextFromElement(element) {
         const lines = [];
-        if (!element || !element.children) return '';
+        if (!element) return '';
+        if (!element.children || !element.children.length) {
+            const text = (element.innerText || element.textContent || '')
+                .replace(/\u00A0/g, ' ')
+                .replace(/\r\n?/g, '\n');
+            return normalizeExtractedLines(text.split('\n').map(function (line) {
+                return line.trim();
+            }));
+        }
 
         for (const child of element.children) {
             const text = (child.innerText || '')
@@ -71,6 +79,140 @@
         }
 
         return normalizeExtractedLines(lines);
+    }
+
+    function htmlLinesToParagraphs(html) {
+        const source = String(html || '');
+        const lines = source.split(/<br\s*\/?>/i);
+        if (!lines.length) return '<p><br></p>';
+
+        return lines
+            .map(function (lineHtml) {
+                return '<p>' + (lineHtml || '<br>') + '</p>';
+            })
+            .join('');
+    }
+
+    function unwrapElement(element) {
+        const parent = element && element.parentNode;
+        if (!parent || !global.document) return;
+        const fragment = global.document.createDocumentFragment();
+        while (element.firstChild) {
+            fragment.appendChild(element.firstChild);
+        }
+        parent.replaceChild(fragment, element);
+    }
+
+    function isPersistentRedlineElement(element) {
+        return !!(
+            element &&
+            element.classList &&
+            (
+                element.classList.contains('existing-del') ||
+                element.classList.contains('existing-ins') ||
+                element.classList.contains('persistent-del') ||
+                element.classList.contains('persistent-ins')
+            )
+        );
+    }
+
+    function stripBackgroundDeclarations(styleValue) {
+        return String(styleValue || '')
+            .split(';')
+            .map(function (part) { return part.trim(); })
+            .filter(function (part) {
+                return part && !/^background(?:-color)?\s*:/i.test(part);
+            })
+            .join('; ');
+    }
+
+    function stripTransientReviewHighlights(html) {
+        const source = String(html || '');
+
+        if (global.document && global.document.createElement) {
+            const container = global.document.createElement('div');
+            container.innerHTML = source;
+
+            container.querySelectorAll('[style]').forEach(function (node) {
+                const style = node.getAttribute('style') || '';
+                if (!/background/i.test(style) || isPersistentRedlineElement(node)) return;
+
+                const nextStyle = stripBackgroundDeclarations(style);
+                if (nextStyle) {
+                    node.setAttribute('style', nextStyle);
+                } else {
+                    node.removeAttribute('style');
+                }
+
+                if (
+                    node.tagName &&
+                    node.tagName.toLowerCase() === 'span' &&
+                    !node.getAttribute('class') &&
+                    !node.getAttribute('style')
+                ) {
+                    unwrapElement(node);
+                }
+            });
+
+            return container.innerHTML;
+        }
+
+        return source
+            .replace(
+                /<span\b([^>]*)\sstyle=(["'])(?=[^"']*background)[^"']*\2([^>]*)>([\s\S]*?)<\/span>/gi,
+                function (_match, before, _quote, after, inner) {
+                    if (/\b(existing-del|existing-ins|persistent-del|persistent-ins)\b/.test(before + after)) {
+                        return _match;
+                    }
+                    return inner;
+                }
+            )
+            .replace(/\sstyle=(["'])(?=[^"']*background)[^"']*\1/gi, '');
+    }
+
+    function stripExistingAnnotationsForEditor(html) {
+        const source = stripTransientReviewHighlights(html);
+
+        if (global.document && global.document.createElement) {
+            const container = global.document.createElement('div');
+            container.innerHTML = source;
+
+            container.querySelectorAll('.existing-del, .persistent-del').forEach(function (node) {
+                node.remove();
+            });
+            container.querySelectorAll('.existing-ins, .persistent-ins').forEach(function (node) {
+                unwrapElement(node);
+            });
+            container.querySelectorAll('[contenteditable]').forEach(function (node) {
+                node.removeAttribute('contenteditable');
+            });
+
+            return container.innerHTML;
+        }
+
+        return source
+            .replace(/<span\b(?=[^>]*class=["'][^"']*\b(?:existing-del|persistent-del)\b)[^>]*>[\s\S]*?<\/span>/gi, '')
+            .replace(/<span\b(?=[^>]*class=["'][^"']*\b(?:existing-ins|persistent-ins)\b)[^>]*>([\s\S]*?)<\/span>/gi, '$1')
+            .replace(/\scontenteditable=(["']).*?\1/gi, '');
+    }
+
+    function buildEditableHtmlFromBaseline(sourceHtml, cleanText) {
+        const text = String(cleanText || '');
+        let inlineHtml = '';
+
+        if (sourceHtml && projectRichTextHtml) {
+            try {
+                inlineHtml = projectRichTextHtml(stripExistingAnnotationsForEditor(sourceHtml), text);
+            } catch (err) {
+                inlineHtml = '';
+            }
+        }
+
+        if (!inlineHtml) {
+            inlineHtml = escapeHtml(text).replace(/\n/g, '<br>');
+        }
+
+        return stripExistingAnnotationsForEditor(htmlLinesToParagraphs(inlineHtml)) || '<p><br></p>';
     }
 
     function buildAnnotationMapFromParagraphAnnotations(baseText, annotations) {
@@ -206,6 +348,200 @@
         return anchors;
     }
 
+    function buildExistingAnnotationGroups(basePreviewText, annotationMap) {
+        const source = String(basePreviewText || '');
+        const groups = [];
+        let cleanOffset = 0;
+        let i = 0;
+
+        while (i < source.length) {
+            const type = getExistingAnnotationType(annotationMap || {}, i);
+            if (!type) {
+                cleanOffset++;
+                i++;
+                continue;
+            }
+
+            const start = i;
+            const cleanStart = cleanOffset;
+            let delText = '';
+            let insText = '';
+            while (i < source.length && getExistingAnnotationType(annotationMap || {}, i)) {
+                const currentType = getExistingAnnotationType(annotationMap || {}, i);
+                if (currentType === 'del') {
+                    delText += source[i];
+                } else {
+                    insText += source[i];
+                    cleanOffset++;
+                }
+                i++;
+            }
+
+            groups.push({
+                index: groups.length,
+                start: start,
+                end: i,
+                cleanStart: cleanStart,
+                cleanEnd: cleanOffset,
+                delText: delText,
+                insText: insText,
+                previewText: source.slice(start, i)
+            });
+        }
+
+        return groups;
+    }
+
+    function groupWasRevertedToOriginal(group, cleanBaseText, revisedText) {
+        const revised = String(revisedText || '');
+        const offset = mapBaselineOffsetToRevisedOffset(cleanBaseText, revised, group.cleanStart);
+
+        if (group.delText) {
+            const oldAtOffset = revised.slice(offset, offset + group.delText.length);
+            const acceptedAfterOriginal = group.insText
+                ? revised.slice(
+                    offset + group.delText.length,
+                    offset + group.delText.length + group.insText.length
+                )
+                : '';
+            return oldAtOffset === group.delText && acceptedAfterOriginal !== group.insText;
+        }
+
+        if (group.insText) {
+            return revised.slice(offset, offset + group.insText.length) !== group.insText;
+        }
+
+        return false;
+    }
+
+    function buildResolvedBasePreview(basePreviewText, annotationMap, groups, revertedIndexes) {
+        const source = String(basePreviewText || '');
+        const reverted = revertedIndexes || new Set();
+        const nextMap = {};
+        let text = '';
+        let sourceIdx = 0;
+
+        groups.forEach(function (group) {
+            while (sourceIdx < group.start) {
+                if (getExistingAnnotationType(annotationMap || {}, sourceIdx)) {
+                    nextMap[text.length] = annotationMap[sourceIdx];
+                }
+                text += source[sourceIdx];
+                sourceIdx++;
+            }
+
+            if (reverted.has(group.index)) {
+                text += group.delText || '';
+            } else {
+                for (let i = group.start; i < group.end; i++) {
+                    if (getExistingAnnotationType(annotationMap || {}, i)) {
+                        nextMap[text.length] = annotationMap[i];
+                    }
+                    text += source[i];
+                }
+            }
+            sourceIdx = group.end;
+        });
+
+        while (sourceIdx < source.length) {
+            if (getExistingAnnotationType(annotationMap || {}, sourceIdx)) {
+                nextMap[text.length] = annotationMap[sourceIdx];
+            }
+            text += source[sourceIdx];
+            sourceIdx++;
+        }
+
+        return { text: text, annotationMap: nextMap };
+    }
+
+    function reinsertExistingDeletionsForGroups(cleanBaseText, revisedText, groups, revertedIndexes) {
+        const cleanBase = String(cleanBaseText || '');
+        const reverted = revertedIndexes || new Set();
+        const inserts = [];
+
+        groups.forEach(function (group) {
+            if (!group.delText || reverted.has(group.index)) {
+                return;
+            }
+
+            const offset = mapBaselineOffsetToRevisedOffset(cleanBase, revisedText, group.cleanStart);
+            if (String(revisedText || '').slice(offset, offset + group.delText.length) === group.delText) {
+                return;
+            }
+
+            inserts.push({
+                idx: group.index,
+                text: group.delText,
+                offset: offset
+            });
+        });
+
+        inserts.sort(function (a, b) {
+            if (a.offset !== b.offset) return b.offset - a.offset;
+            return b.idx - a.idx;
+        });
+
+        let output = String(revisedText || '');
+        inserts.forEach(function (insert) {
+            output = output.slice(0, insert.offset) + insert.text + output.slice(insert.offset);
+        });
+        return output;
+    }
+
+    function collapseRevertedGroupsInHtml(html, revertedIndexes) {
+        if (!html || !revertedIndexes || !revertedIndexes.size || !global.document || !global.document.createElement) {
+            return html || '';
+        }
+
+        const container = global.document.createElement('div');
+        container.innerHTML = html;
+        let groupIndex = 0;
+
+        Array.from(container.querySelectorAll('p, div, li')).forEach(function (block) {
+            let node = block.firstChild;
+            while (node) {
+                if (
+                    node.nodeType === 1 &&
+                    node.classList &&
+                    (node.classList.contains('existing-del') || node.classList.contains('existing-ins'))
+                ) {
+                    const groupNodes = [];
+                    let cursor = node;
+                    while (
+                        cursor &&
+                        cursor.nodeType === 1 &&
+                        cursor.classList &&
+                        (cursor.classList.contains('existing-del') || cursor.classList.contains('existing-ins'))
+                    ) {
+                        groupNodes.push(cursor);
+                        cursor = cursor.nextSibling;
+                    }
+
+                    if (revertedIndexes.has(groupIndex)) {
+                        const fragment = global.document.createDocumentFragment();
+                        groupNodes.forEach(function (groupNode) {
+                            if (!groupNode.classList.contains('existing-del')) return;
+                            while (groupNode.firstChild) {
+                                fragment.appendChild(groupNode.firstChild);
+                            }
+                        });
+                        block.insertBefore(fragment, groupNodes[0]);
+                        groupNodes.forEach(function (groupNode) {
+                            if (groupNode.parentNode) groupNode.parentNode.removeChild(groupNode);
+                        });
+                    }
+
+                    groupIndex++;
+                    node = cursor;
+                    continue;
+                }
+                node = node.nextSibling;
+            }
+        });
+
+        return container.innerHTML;
+    }
+
     function mapBaselineOffsetToRevisedOffset(baseText, revisedText, offset) {
         const base = String(baseText || '');
         const revised = String(revisedText || '');
@@ -287,6 +623,39 @@
         return output;
     }
 
+    function resolveExistingAnnotationRevisions(cleanBaseText, revisedText, basePreviewText, annotationMap, options) {
+        const settings = options || {};
+        const cleanBase = String(cleanBaseText || '');
+        const revised = String(revisedText || '');
+        const previewBase = String(basePreviewText || '');
+        const annotations = annotationMap || {};
+        const groups = buildExistingAnnotationGroups(previewBase, annotations);
+        const revertedIndexes = new Set();
+
+        groups.forEach(function (group) {
+            if (groupWasRevertedToOriginal(group, cleanBase, revised)) {
+                revertedIndexes.add(group.index);
+            }
+        });
+
+        if (!revertedIndexes.size) {
+            return {
+                basePreviewText: previewBase,
+                revisedPreviewText: reinsertExistingDeletionsForGroups(cleanBase, revised, groups, revertedIndexes),
+                annotationMap: annotations,
+                baselineHtml: settings.baselineHtml || ''
+            };
+        }
+
+        const resolvedBase = buildResolvedBasePreview(previewBase, annotations, groups, revertedIndexes);
+        return {
+            basePreviewText: resolvedBase.text,
+            revisedPreviewText: reinsertExistingDeletionsForGroups(cleanBase, revised, groups, revertedIndexes),
+            annotationMap: resolvedBase.annotationMap,
+            baselineHtml: collapseRevertedGroupsInHtml(settings.baselineHtml || '', revertedIndexes)
+        };
+    }
+
     /**
      * Map each character of extractCleanTextFromElement(container) to a DOM text boundary
      * so Range#cloneContents can recover inline markup (<strong>, <em>, …).
@@ -341,6 +710,19 @@
 
     var baselineStyleCache = { html: '', text: '', index: null };
 
+    function normalizeStyleIndexText(text) {
+        return String(text == null ? '' : text)
+            .replace(/\u00A0/g, ' ')
+            .replace(/\r\n?/g, '\n');
+    }
+
+    function styleIndexTextMatches(indexPlain, baseText) {
+        const source = String(indexPlain == null ? '' : indexPlain);
+        const target = String(baseText == null ? '' : baseText);
+        return source.length === target.length &&
+            normalizeStyleIndexText(source) === normalizeStyleIndexText(target);
+    }
+
     function getStyleIndexForBaseline(baselineHtml, baseText) {
         if (!baselineHtml || baseText == null) {
             return null;
@@ -350,7 +732,7 @@
         }
         if (diffCore.createRichTextIndexFromHtml) {
             var richIdx = diffCore.createRichTextIndexFromHtml(baselineHtml);
-            if (richIdx && richIdx.plain === baseText) {
+            if (richIdx && styleIndexTextMatches(richIdx.plain, baseText)) {
                 baselineStyleCache = { html: baselineHtml, text: baseText, index: richIdx };
                 return richIdx;
             }
@@ -362,7 +744,7 @@
         const wrap = global.document.createElement('div');
         wrap.innerHTML = baselineHtml;
         var idx = buildTrimAwareCharIndex(wrap);
-        if (!idx || idx.plain !== baseText) {
+        if (!idx || !styleIndexTextMatches(idx.plain, baseText)) {
             baselineStyleCache = { html: baselineHtml, text: baseText, index: null };
             return null;
         }
@@ -576,10 +958,16 @@
         buildAnnotationMapFromParagraphAnnotations,
         buildAnnotationMapFromDOM,
         buildAnnotationMapFromHtml,
+        htmlLinesToParagraphs,
+        stripTransientReviewHighlights,
+        stripExistingAnnotationsForEditor,
+        buildEditableHtmlFromBaseline,
         wrapWithExistingAnnotation,
         stripExistingDeletions,
         buildExistingDeletionAnchors,
+        buildExistingAnnotationGroups,
         reinsertExistingDeletions,
+        resolveExistingAnnotationRevisions,
         buildTrimAwareCharIndex,
         renderPersistentPreview
     };

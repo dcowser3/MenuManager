@@ -24,6 +24,7 @@ const EDITABLE_SUBMISSION_FIELDS = new Set([
     'mismatch_override',
     'mismatch_override_reason',
     'mismatch_override_at',
+    'raw_payload',
 ]);
 exports.EDITABLE_SUBMISSION_FIELDS = EDITABLE_SUBMISSION_FIELDS;
 const ALLOWED_SUBMISSION_STATUSES = new Set([
@@ -134,6 +135,14 @@ function sanitizeSubmissionUpdates(updates, options) {
                 continue;
             }
             allowedFields[key] = normalizedTaskId;
+            continue;
+        }
+        if (key === 'raw_payload') {
+            if (!value || typeof value !== 'object' || Array.isArray(value)) {
+                errors.push('raw_payload must be an object');
+                continue;
+            }
+            allowedFields[key] = value;
             continue;
         }
         if (value === null) {

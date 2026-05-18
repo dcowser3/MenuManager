@@ -284,7 +284,7 @@
             line-height: 1.6;
         }
 
-        .editor-textarea,
+        .editor-surface,
         .preview-body {
             flex: 1;
             padding: 1.25rem 1.5rem;
@@ -293,14 +293,14 @@
             scrollbar-gutter: stable both-edges;
         }
 
-        .editor-textarea {
+        .editor-surface {
             width: 100%;
             border: 0;
-            resize: vertical;
             outline: none;
+            min-height: 100%;
         }
 
-        .editor-textarea:focus {
+        .editor-surface:focus {
             box-shadow: inset 0 0 0 1px var(--color-secondary);
         }
 
@@ -424,7 +424,14 @@
                         <h3>Edit Text</h3>
                         <p>This is the final approved wording. Typing here should feel normal.</p>
                     </div>
-                    <textarea id="approvalEditorInput" class="editor-textarea menu-extract-display" spellcheck="false"><%= visibleText %></textarea>
+                    <div
+                        id="approvalEditorInput"
+                        class="editor-surface menu-extract-display"
+                        contenteditable="true"
+                        role="textbox"
+                        aria-multiline="true"
+                        spellcheck="false"
+                    ></div>
                 </section>
 
                 <section class="panel">
@@ -447,12 +454,13 @@
         const baselineText = <%- JSON.stringify(visibleText) %>;
         const baselinePreviewText = <%- JSON.stringify(previewText || visibleText) %>;
         const baselineHtml = <%- JSON.stringify(editorHtml) %>;
-        const textarea = document.getElementById('approvalEditorInput');
+        const editor = document.getElementById('approvalEditorInput');
         const preview = document.getElementById('approvalPreview');
         const submitBtn = document.getElementById('submitBtn');
         const alertBox = document.getElementById('alertBox');
         const diffSummary = document.getElementById('diffSummary');
         const redlinePreview = window.MenuRedlinePreview;
+        const displayBaselineHtml = redlinePreview.stripTransientReviewHighlights(baselineHtml);
         let previewUpdateTimer = null;
         let lastRenderedHtml = '';
 
@@ -463,33 +471,40 @@
         }
 
         const baselineAnnotationMap = redlinePreview.buildAnnotationMapFromHtml(
-            baselineHtml,
+            displayBaselineHtml,
             baselinePreviewText,
             { trimText: false }
         );
+        const baselineEditorHtml = redlinePreview.buildEditableHtmlFromBaseline(displayBaselineHtml, baselineText);
+        editor.innerHTML = baselineEditorHtml;
+
+        function getEditorText() {
+            return redlinePreview.extractCleanTextFromElement(editor).replace(/\r/g, '');
+        }
 
         function renderPersistentPreview(baseText, revisedText) {
             // No live edits yet → render the source HTML directly so the chef
             // sees the original Calibri/centered/bold formatting from the
             // extracted DOCX. After edits, renderPersistentPreview uses baselineHtml
             // to clone inline markup (<strong>, etc.) for unchanged/deleted tokens.
-            if (baselineHtml && baseText === revisedText) {
+            if (displayBaselineHtml && baseText === revisedText) {
                 lastRenderedHtml = '';
-                preview.innerHTML = baselineHtml;
+                preview.innerHTML = displayBaselineHtml;
                 diffSummary.textContent = 'Live changes: 0 insertions, 0 deletions';
                 return;
             }
 
-            const revisedPreviewText = redlinePreview.reinsertExistingDeletions(
+            const resolvedPreview = redlinePreview.resolveExistingAnnotationRevisions(
                 baselineText,
                 revisedText,
                 baselinePreviewText,
-                baselineAnnotationMap
+                baselineAnnotationMap,
+                { baselineHtml: displayBaselineHtml || '' }
             );
-            const rendered = redlinePreview.renderPersistentPreview(baselinePreviewText, revisedPreviewText, {
-                annotationMap: baselineAnnotationMap,
+            const rendered = redlinePreview.renderPersistentPreview(resolvedPreview.basePreviewText, resolvedPreview.revisedPreviewText, {
+                annotationMap: resolvedPreview.annotationMap,
                 includeExistingAnnotations: true,
-                baselineHtml: baselineHtml || '',
+                baselineHtml: resolvedPreview.baselineHtml || '',
             });
 
             lastRenderedHtml = rendered.html;
@@ -501,7 +516,7 @@
             if (!lastRenderedHtml) {
                 // No edits made → submit the unchanged baseline HTML so the
                 // approved record keeps the original DOCX formatting.
-                return baselineHtml || '';
+                return displayBaselineHtml || '';
             }
             return lastRenderedHtml
                 .split('\n')
@@ -514,7 +529,7 @@
             submitBtn.textContent = 'Submitting...';
 
             try {
-                const menuContentText = textarea.value.replace(/\r/g, '');
+                const menuContentText = getEditorText();
                 const editorHtml = buildSubmissionPreviewHtml();
 
                 if (!menuContentText.trim()) {
@@ -546,17 +561,17 @@
             }
         }
 
-        textarea.addEventListener('input', () => {
+        editor.addEventListener('input', () => {
             clearTimeout(previewUpdateTimer);
             previewUpdateTimer = setTimeout(() => {
-                renderPersistentPreview(baselineText, textarea.value.replace(/\r/g, ''));
+                renderPersistentPreview(baselineText, getEditorText());
             }, 90);
         });
 
         document.getElementById('restoreBtn').addEventListener('click', () => {
-            textarea.value = baselineText;
+            editor.innerHTML = baselineEditorHtml;
             renderPersistentPreview(baselineText, baselineText);
-            textarea.focus();
+            editor.focus();
             showAlert('Editor reset to the submitted menu text.', 'success');
         });
 

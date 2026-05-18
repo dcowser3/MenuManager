@@ -34,6 +34,67 @@ describe('redline preview helpers', () => {
         ].join('\n'));
     });
 
+    test('extracts text from an edited rich surface without child blocks', () => {
+        const element = {
+            children: [],
+            textContent: '  COLD STARTERS\n\nGuacamole Traditional 85  ',
+        };
+
+        expect(redlinePreview.extractCleanTextFromElement(element)).toBe([
+            'COLD STARTERS',
+            '',
+            'Guacamole Traditional 85',
+        ].join('\n'));
+    });
+
+    test('builds clean editable HTML that preserves bold source formatting', () => {
+        const baselineHtml = [
+            '<p><strong>Dinner Menu</strong></p>',
+            '<p><strong>Smoked Guacamole</strong>, tomato, red onion VG 18</p>',
+        ].join('');
+        const cleanText = [
+            'Dinner Menu',
+            'Smoked Guacamole, tomato, red onion VG 18',
+        ].join('\n');
+
+        const editableHtml = redlinePreview.buildEditableHtmlFromBaseline(baselineHtml, cleanText);
+
+        expect(editableHtml).toContain('<p><strong>Dinner</strong><strong> </strong><strong>Menu</strong></p>');
+        expect(editableHtml).toContain('<strong>Smoked</strong><strong> </strong><strong>Guacamole</strong>');
+        expect(editableHtml).toContain(', tomato, red onion VG 18');
+    });
+
+    test('strips transient AI review highlights without removing real redlines or bold', () => {
+        const baselineHtml = [
+            '<p><strong>Margaritas</strong></p>',
+            '<p><span style="background-color: rgba(74, 124, 89, 0.2);">Fresh</span>',
+            '<span style="background-color: rgba(74, 124, 89, 0.2);">Fruit</span> 15</p>',
+            '<p><span class="existing-del">old</span><span class="existing-ins">new</span></p>',
+        ].join('');
+
+        const displayHtml = redlinePreview.stripTransientReviewHighlights(baselineHtml);
+
+        expect(displayHtml).toContain('<strong>Margaritas</strong>');
+        expect(displayHtml).toContain('FreshFruit 15');
+        expect(displayHtml).not.toContain('rgba(74, 124, 89');
+        expect(displayHtml).toContain('<span class="existing-del">old</span>');
+        expect(displayHtml).toContain('<span class="existing-ins">new</span>');
+    });
+
+    test('builds editable HTML without imported redline styling', () => {
+        const baselineHtml = [
+            '<p><strong>Sword <span class="existing-del">Fishh</span><span class="existing-ins">Fish</span> Dip</strong>, chips D 22</p>',
+        ].join('');
+        const cleanText = 'Sword Fish Dip, chips D 22';
+
+        const editableHtml = redlinePreview.buildEditableHtmlFromBaseline(baselineHtml, cleanText);
+
+        expect(editableHtml).not.toContain('existing-del');
+        expect(editableHtml).not.toContain('existing-ins');
+        expect(editableHtml).not.toContain('Fishh');
+        expect(editableHtml).toContain('<strong>Fish</strong>');
+    });
+
     test('re-inserts imported deletions for preview without requiring them in editor text', () => {
         const previewText = 'green aguachile, avocadoavocad, wakame';
         const cleanText = 'green aguachile, avocad, wakame';
@@ -56,6 +117,142 @@ describe('redline preview helpers', () => {
                 annotationMap
             )
         ).toBe('green aguachile, avocadoavocado, wakame');
+    });
+
+    test('collapses an imported redline when reviewer edits accepted text back to the original value', () => {
+        const baselinePreviewText = 'Jamon Iberico, shredded tomato sauce G 2425';
+        const baselineText = 'Jamon Iberico, shredded tomato sauce G 25';
+        const revisedText = 'Jamon Iberico, shredded tomato sauce G 24';
+        const annotationMap = {};
+        const deletedStart = baselinePreviewText.indexOf('24');
+        const insertedStart = baselinePreviewText.indexOf('25', deletedStart + 2);
+
+        for (let i = deletedStart; i < deletedStart + 2; i++) {
+            annotationMap[i] = 'del';
+        }
+        for (let i = insertedStart; i < insertedStart + 2; i++) {
+            annotationMap[i] = 'ins';
+        }
+
+        const resolved = redlinePreview.resolveExistingAnnotationRevisions(
+            baselineText,
+            revisedText,
+            baselinePreviewText,
+            annotationMap
+        );
+        const rendered = redlinePreview.renderPersistentPreview(resolved.basePreviewText, resolved.revisedPreviewText, {
+            annotationMap: resolved.annotationMap,
+            includeExistingAnnotations: true,
+        });
+
+        expect(resolved.basePreviewText).toBe(revisedText);
+        expect(resolved.revisedPreviewText).toBe(revisedText);
+        expect(rendered.html).toContain('sauce G 24');
+        expect(rendered.html).not.toContain('existing-del');
+        expect(rendered.html).not.toContain('existing-ins');
+        expect(rendered.html).not.toContain('persistent-del');
+        expect(rendered.html).not.toContain('persistent-ins');
+        expect(rendered.insertions).toBe(0);
+        expect(rendered.deletions).toBe(0);
+    });
+
+    test('collapses a reverted imported redline when accepted text is a prefix of the original value', () => {
+        const baselinePreviewText = 'Sword Fish DippDip, homemade pickled chili';
+        const baselineText = 'Sword Fish Dip, homemade pickled chili';
+        const revisedText = 'Sword Fish Dipp, homemade pickled chili';
+        const annotationMap = {};
+        const deletedStart = baselinePreviewText.indexOf('Dipp');
+        const insertedStart = baselinePreviewText.indexOf('Dip', deletedStart + 4);
+
+        for (let i = deletedStart; i < deletedStart + 4; i++) {
+            annotationMap[i] = 'del';
+        }
+        for (let i = insertedStart; i < insertedStart + 3; i++) {
+            annotationMap[i] = 'ins';
+        }
+
+        const resolved = redlinePreview.resolveExistingAnnotationRevisions(
+            baselineText,
+            revisedText,
+            baselinePreviewText,
+            annotationMap
+        );
+        const rendered = redlinePreview.renderPersistentPreview(resolved.basePreviewText, resolved.revisedPreviewText, {
+            annotationMap: resolved.annotationMap,
+            includeExistingAnnotations: true,
+        });
+
+        expect(resolved.basePreviewText).toBe(revisedText);
+        expect(resolved.revisedPreviewText).toBe(revisedText);
+        expect(rendered.html).toContain('Sword Fish Dipp, homemade');
+        expect(rendered.html).not.toContain('existing-del');
+        expect(rendered.html).not.toContain('existing-ins');
+        expect(rendered.html).not.toContain('persistent-del');
+        expect(rendered.html).not.toContain('persistent-ins');
+        expect(rendered.insertions).toBe(0);
+        expect(rendered.deletions).toBe(0);
+    });
+
+    test('does not collapse when reviewer keeps both original and accepted text', () => {
+        const baselinePreviewText = 'Sword Fish DippDip, homemade pickled chili';
+        const baselineText = 'Sword Fish Dip, homemade pickled chili';
+        const revisedText = 'Sword Fish DippDip, homemade pickled chili';
+        const annotationMap = {};
+        const deletedStart = baselinePreviewText.indexOf('Dipp');
+        const insertedStart = baselinePreviewText.indexOf('Dip', deletedStart + 4);
+
+        for (let i = deletedStart; i < deletedStart + 4; i++) {
+            annotationMap[i] = 'del';
+        }
+        for (let i = insertedStart; i < insertedStart + 3; i++) {
+            annotationMap[i] = 'ins';
+        }
+
+        const resolved = redlinePreview.resolveExistingAnnotationRevisions(
+            baselineText,
+            revisedText,
+            baselinePreviewText,
+            annotationMap
+        );
+        const rendered = redlinePreview.renderPersistentPreview(resolved.basePreviewText, resolved.revisedPreviewText, {
+            annotationMap: resolved.annotationMap,
+            includeExistingAnnotations: true,
+        });
+
+        expect(resolved.basePreviewText).toBe(baselinePreviewText);
+        expect(rendered.html).toContain('<span class="existing-del">Dipp</span><span class="existing-ins">Dip</span>');
+    });
+
+    test('keeps imported redlines when accepted inserted text is unchanged', () => {
+        const baselinePreviewText = 'Jamon Iberico, shredded tomato sauce G 2425';
+        const baselineText = 'Jamon Iberico, shredded tomato sauce G 25';
+        const annotationMap = {};
+        const deletedStart = baselinePreviewText.indexOf('24');
+        const insertedStart = baselinePreviewText.indexOf('25', deletedStart + 2);
+
+        for (let i = deletedStart; i < deletedStart + 2; i++) {
+            annotationMap[i] = 'del';
+        }
+        for (let i = insertedStart; i < insertedStart + 2; i++) {
+            annotationMap[i] = 'ins';
+        }
+
+        const resolved = redlinePreview.resolveExistingAnnotationRevisions(
+            baselineText,
+            baselineText,
+            baselinePreviewText,
+            annotationMap
+        );
+        const rendered = redlinePreview.renderPersistentPreview(resolved.basePreviewText, resolved.revisedPreviewText, {
+            annotationMap: resolved.annotationMap,
+            includeExistingAnnotations: true,
+        });
+
+        expect(resolved.basePreviewText).toBe(baselinePreviewText);
+        expect(resolved.revisedPreviewText).toBe(baselinePreviewText);
+        expect(rendered.html).toContain('<span class="existing-del">24</span><span class="existing-ins">25</span>');
+        expect(rendered.insertions).toBe(0);
+        expect(rendered.deletions).toBe(0);
     });
 
     test('keeps adjacent imported deletion/insertion pairs separated after a new edit', () => {
@@ -139,5 +336,19 @@ describe('redline preview helpers', () => {
         expect(edited.html).toContain('<strong>Guacamole</strong><strong> </strong><strong>Traditional</strong>');
         expect(edited.html).toContain('<span class="persistent-del">85</span>');
         expect(edited.html).toContain('<span class="persistent-ins">95</span>');
+    });
+
+    test('preserves baseline formatting when DOCX text contains non-breaking spaces', () => {
+        const baselineHtml = '<p><strong>Raspberry Sorbet</strong>, strawberry sauce V 16</p>';
+        const baselineText = 'Raspberry Sorbet, strawberry\u00A0sauce V 16';
+
+        const rendered = redlinePreview.renderPersistentPreview(baselineText, baselineText, {
+            baselineHtml,
+        });
+
+        expect(rendered.html).toContain('<strong>Raspberry</strong><strong> </strong><strong>Sorbet</strong>');
+        expect(rendered.html).toContain('strawberry sauce V 16');
+        expect(rendered.insertions).toBe(0);
+        expect(rendered.deletions).toBe(0);
     });
 });

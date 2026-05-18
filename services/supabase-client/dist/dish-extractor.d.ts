@@ -15,6 +15,9 @@ interface ExtractedDish {
     category?: string;
     usedNextLineAsDescription?: boolean;
 }
+export declare function normalizeDishPriceForProperty(price: string | undefined, property?: string): string | undefined;
+export declare function isPrixFixeServicePeriod(servicePeriod: string | undefined): boolean;
+export declare function normalizeDishPriceForStorage(price: string | undefined, property?: string, servicePeriod?: string): string | undefined;
 /**
  * Extract dishes from menu content text
  */

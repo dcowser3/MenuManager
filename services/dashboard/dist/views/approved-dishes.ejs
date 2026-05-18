@@ -1,0 +1,717 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title><%= title %></title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=Montserrat:wght@300;400;500;600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --color-primary: #2c2c2c;
+            --color-secondary: #8b7355;
+            --color-accent: #6b5344;
+            --color-text: #333333;
+            --color-text-light: #666666;
+            --color-text-muted: #999999;
+            --color-background: #ffffff;
+            --color-background-alt: #fafaf8;
+            --color-border: #e8e4de;
+            --color-border-light: #f0ece6;
+            --color-success: #4a7c59;
+            --font-heading: 'Cormorant Garamond', Georgia, serif;
+            --font-body: 'Montserrat', -apple-system, BlinkMacSystemFont, sans-serif;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: var(--font-body);
+            background: var(--color-background);
+            color: var(--color-text);
+            line-height: 1.7;
+            font-weight: 400;
+            font-size: 15px;
+            letter-spacing: 0.02em;
+        }
+
+        .header {
+            background: var(--color-background);
+            color: var(--color-primary);
+            padding: 1.75rem 4vw;
+            border-bottom: 1px solid var(--color-border);
+        }
+
+        .header-inner {
+            max-width: 1280px;
+            margin: 0 auto;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 1.5rem;
+        }
+
+        .header h1 {
+            font-family: var(--font-heading);
+            font-size: 1.85rem;
+            font-weight: 500;
+            letter-spacing: 0.05em;
+            color: var(--color-primary);
+        }
+
+        .header p {
+            color: var(--color-text-light);
+            margin-top: 0.2rem;
+            font-size: 0.72rem;
+            text-transform: uppercase;
+            letter-spacing: 0.15em;
+            font-weight: 400;
+        }
+
+        .header-links {
+            display: flex;
+            gap: 1.25rem;
+            flex-wrap: wrap;
+            justify-content: flex-end;
+        }
+
+        .header-links a {
+            color: var(--color-text);
+            text-decoration: none;
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            letter-spacing: 0.15em;
+            font-weight: 500;
+            border-bottom: 1px solid transparent;
+            padding-bottom: 0.15rem;
+        }
+
+        .header-links a:hover {
+            color: var(--color-secondary);
+            border-bottom-color: var(--color-secondary);
+        }
+
+        .container {
+            max-width: 1760px;
+            margin: 0 auto;
+            padding: 1.5rem 2vw 2.5rem;
+        }
+
+        .nav {
+            margin-bottom: 1rem;
+        }
+
+        .nav a {
+            color: var(--color-secondary);
+            text-decoration: none;
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            font-weight: 500;
+        }
+
+        .hero {
+            display: flex;
+            justify-content: space-between;
+            align-items: end;
+            gap: 2rem;
+            margin-bottom: 1rem;
+        }
+
+        .hero h2 {
+            font-family: var(--font-heading);
+            font-size: 1.8rem;
+            font-weight: 500;
+            letter-spacing: 0.03em;
+            color: var(--color-primary);
+        }
+
+        .hero p {
+            color: var(--color-text-light);
+            max-width: 700px;
+            margin-top: 0.25rem;
+            font-size: 0.84rem;
+        }
+
+        .search-card {
+            background: var(--color-background-alt);
+            border: 1px solid var(--color-border);
+            padding: 0.75rem;
+            margin-bottom: 1.25rem;
+        }
+
+        .search-form {
+            display: flex;
+            gap: 0.75rem;
+            flex-wrap: wrap;
+            align-items: end;
+        }
+
+        .search-group {
+            flex: 1 1 260px;
+        }
+
+        .search-group label {
+            display: block;
+            font-size: 0.58rem;
+            font-weight: 500;
+            color: var(--color-text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.15em;
+            margin-bottom: 0.25rem;
+        }
+
+        .search-group input,
+        .search-group select {
+            width: 100%;
+            padding: 0.58rem 0.75rem;
+            border: 1px solid var(--color-border);
+            background: var(--color-background);
+            color: var(--color-text);
+            font-family: var(--font-body);
+            font-size: 0.78rem;
+        }
+
+        .search-group input:focus,
+        .search-group select:focus {
+            outline: none;
+            border-color: var(--color-secondary);
+        }
+
+        .btn {
+            display: inline-block;
+            padding: 0.6rem 1.15rem;
+            text-decoration: none;
+            font-weight: 500;
+            transition: all 0.2s ease;
+            border: 1px solid var(--color-primary);
+            cursor: pointer;
+            font-size: 0.6rem;
+            text-transform: uppercase;
+            letter-spacing: 0.15em;
+            font-family: var(--font-body);
+            background: var(--color-primary);
+            color: var(--color-background);
+            white-space: nowrap;
+        }
+
+        .btn:hover {
+            background: transparent;
+            color: var(--color-primary);
+        }
+
+        .btn-secondary {
+            background: transparent;
+            color: var(--color-primary);
+        }
+
+        .btn-secondary:hover {
+            background: var(--color-primary);
+            color: var(--color-background);
+        }
+
+        .results-meta {
+            font-size: 0.68rem;
+            color: var(--color-text-muted);
+            margin-bottom: 0.65rem;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+        }
+
+        .brand-grid {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 1rem;
+        }
+
+        .brand-card,
+        .brand-link,
+        .dish-group {
+            border: 1px solid var(--color-border);
+            background: var(--color-background);
+        }
+
+        .brand-card {
+            display: block;
+            padding: 0.9rem 1rem;
+            color: var(--color-text);
+            text-decoration: none;
+        }
+
+        .brand-card:hover {
+            background: var(--color-background-alt);
+            border-color: var(--color-secondary);
+        }
+
+        .brand-card h3,
+        .dish-group h3 {
+            font-family: var(--font-heading);
+            font-size: 1.15rem;
+            font-weight: 500;
+            color: var(--color-primary);
+            margin-bottom: 0.15rem;
+        }
+
+        .brand-meta {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.35rem 0.9rem;
+            color: var(--color-text-light);
+            font-size: 0.68rem;
+        }
+
+        .brand-layout {
+            display: grid;
+            grid-template-columns: 210px minmax(0, 1fr);
+            gap: 1rem;
+            align-items: start;
+        }
+
+        .brand-list {
+            display: grid;
+            gap: 0.4rem;
+        }
+
+        .brand-link {
+            display: block;
+            padding: 0.55rem 0.7rem;
+            color: var(--color-text);
+            text-decoration: none;
+        }
+
+        .brand-link.active {
+            border-color: var(--color-secondary);
+            background: var(--color-background-alt);
+        }
+
+        .brand-link strong {
+            display: block;
+            color: var(--color-primary);
+            font-size: 0.74rem;
+            font-weight: 600;
+            line-height: 1.25;
+        }
+
+        .brand-link span {
+            display: block;
+            color: var(--color-text-muted);
+            font-size: 0.58rem;
+            text-transform: uppercase;
+            letter-spacing: 0.12em;
+            margin-top: 0.1rem;
+        }
+
+        .dish-groups {
+            display: grid;
+            gap: 0.8rem;
+        }
+
+        .dish-group {
+            overflow: hidden;
+        }
+
+        .dish-group-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+            gap: 1rem;
+            padding: 0.65rem 0.85rem;
+            background: var(--color-background-alt);
+            border-bottom: 1px solid var(--color-border);
+        }
+
+        .dish-count {
+            color: var(--color-text-muted);
+            font-size: 0.58rem;
+            text-transform: uppercase;
+            letter-spacing: 0.14em;
+            white-space: nowrap;
+        }
+
+        .dish-table {
+            width: 100%;
+            border-collapse: collapse;
+            table-layout: fixed;
+            font-size: 0.72rem;
+            line-height: 1.25;
+        }
+
+        .dish-table th,
+        .dish-table td {
+            text-align: left;
+            vertical-align: top;
+            padding: 0.32rem 0.65rem;
+            border-bottom: 1px solid var(--color-border-light);
+        }
+
+        .dish-table th {
+            color: var(--color-text-muted);
+            font-size: 0.56rem;
+            text-transform: uppercase;
+            letter-spacing: 0.14em;
+            font-weight: 600;
+            background: var(--color-background);
+        }
+
+        .dish-sort {
+            appearance: none;
+            background: transparent;
+            border: 0;
+            color: inherit;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 0.35rem;
+            width: 100%;
+            padding: 0;
+            font: inherit;
+            letter-spacing: inherit;
+            text-align: left;
+            text-transform: inherit;
+        }
+
+        .dish-sort:hover {
+            color: var(--color-primary);
+        }
+
+        .dish-sort-indicator {
+            color: var(--color-secondary);
+            font-size: 0.55rem;
+            min-width: 0.55rem;
+            text-align: right;
+        }
+
+        .dish-filter-row th {
+            padding-top: 0.2rem;
+            padding-bottom: 0.25rem;
+            background: var(--color-background-alt);
+        }
+
+        .dish-column-filter {
+            width: 100%;
+            border: 1px solid var(--color-border-light);
+            background: var(--color-background);
+            color: var(--color-text);
+            font-family: var(--font-body);
+            font-size: 0.62rem;
+            letter-spacing: 0;
+            padding: 0.22rem 0.35rem;
+        }
+
+        .dish-column-filter:focus {
+            outline: none;
+            border-color: var(--color-secondary);
+        }
+
+        .dish-table th:nth-child(1),
+        .dish-table td:nth-child(1) {
+            width: 20%;
+        }
+
+        .dish-table th:nth-child(2),
+        .dish-table td:nth-child(2) {
+            width: 38%;
+        }
+
+        .dish-table th:nth-child(3),
+        .dish-table td:nth-child(3) {
+            width: 13%;
+        }
+
+        .dish-table th:nth-child(4),
+        .dish-table td:nth-child(4) {
+            width: 12%;
+        }
+
+        .dish-table th:nth-child(5),
+        .dish-table td:nth-child(5) {
+            width: 7%;
+        }
+
+        .dish-table th:nth-child(6),
+        .dish-table td:nth-child(6) {
+            width: 10%;
+        }
+
+        .dish-table tr:last-child td {
+            border-bottom: 0;
+        }
+
+        .dish-name {
+            color: var(--color-primary);
+            font-weight: 600;
+        }
+
+        .dish-description {
+            color: var(--color-text-light);
+            font-size: 0.7rem;
+        }
+
+        .muted {
+            color: var(--color-text-muted);
+        }
+
+        .badge-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.2rem;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 0.1rem 0.32rem;
+            border: 1px solid rgba(74, 124, 89, 0.25);
+            background: rgba(74, 124, 89, 0.08);
+            color: var(--color-success);
+            font-size: 0.5rem;
+            text-transform: uppercase;
+            letter-spacing: 0.12em;
+            font-weight: 600;
+        }
+
+        .empty-state {
+            border: 1px solid var(--color-border);
+            padding: 3rem 1.5rem;
+            text-align: center;
+            background: var(--color-background-alt);
+        }
+
+        .empty-state h3 {
+            font-family: var(--font-heading);
+            font-size: 1.4rem;
+            font-weight: 500;
+            color: var(--color-primary);
+            margin-bottom: 0.35rem;
+        }
+
+        .empty-state p {
+            color: var(--color-text-light);
+            font-size: 0.9rem;
+        }
+
+        @media (max-width: 960px) {
+            .brand-grid {
+                grid-template-columns: 1fr 1fr;
+            }
+
+            .brand-layout {
+                grid-template-columns: 1fr;
+            }
+
+            .brand-list {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+        }
+
+        @media (max-width: 720px) {
+            .header-inner,
+            .hero,
+            .dish-group-header {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+
+            .brand-grid,
+            .brand-list {
+                grid-template-columns: 1fr;
+            }
+
+            .search-form .btn {
+                width: 100%;
+                text-align: center;
+            }
+
+            .dish-table,
+            .dish-table thead,
+            .dish-table tbody,
+            .dish-table tr,
+            .dish-table th,
+            .dish-table td {
+                display: block;
+                width: 100%;
+            }
+
+            .dish-table thead {
+                display: none;
+            }
+
+            .dish-table tr {
+                border-bottom: 1px solid var(--color-border-light);
+                padding: 0.85rem 1rem;
+            }
+
+            .dish-table tr:last-child {
+                border-bottom: 0;
+            }
+
+            .dish-table td {
+                border-bottom: 0;
+                padding: 0.2rem 0;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="header-inner">
+            <div>
+                <h1>Richard Sandoval Hospitality</h1>
+                <p>Approved Dish Dashboard</p>
+            </div>
+            <div class="header-links">
+                <a href="/">Home</a>
+                <a href="/form">New Submission</a>
+                <a href="/approved-menus">Approved Menus</a>
+            </div>
+        </div>
+    </div>
+
+    <div class="container">
+        <div class="nav">
+            <a href="/">Back to Welcome</a>
+        </div>
+
+        <div class="hero">
+            <div>
+                <h2><%= selectedBrand ? selectedBrand.brand : 'Approved Dishes' %></h2>
+                <p>
+                    <% if (selectedBrand) { %>
+                        <%= selectedBrand.dishCount %> approved <%= selectedBrand.dishCount === 1 ? 'dish' : 'dishes' %> across <%= selectedBrand.locationCount %> <%= selectedBrand.locationCount === 1 ? 'location' : 'locations' %>.
+                    <% } else { %>
+                        Browse approved dishes by brand and property.
+                    <% } %>
+                </p>
+            </div>
+        </div>
+
+        <div class="search-card">
+            <form method="GET" action="<%= selectedBrand ? ('/approved-dishes/' + selectedBrand.slug) : '/approved-dishes' %>" class="search-form">
+                <div class="search-group">
+                    <label for="q">Search approved dishes</label>
+                    <input id="q" name="q" type="text" value="<%= searchQuery || '' %>" placeholder="Dish name, description, property, category, allergen...">
+                </div>
+                <% if (selectedBrand) { %>
+                    <div class="search-group">
+                        <label for="location">Location</label>
+                        <select id="location" name="location">
+                            <option value="">All locations</option>
+                            <% (locationOptions || []).forEach(function(location) { %>
+                                <option value="<%= location %>" <%= selectedLocation === location ? 'selected' : '' %>><%= location %></option>
+                            <% }); %>
+                        </select>
+                    </div>
+                <% } %>
+                <button type="submit" class="btn">Search</button>
+                <% if (searchQuery || selectedLocation) { %>
+                    <a href="<%= selectedBrand ? ('/approved-dishes/' + selectedBrand.slug) : '/approved-dishes' %>" class="btn btn-secondary">Clear</a>
+                <% } %>
+            </form>
+        </div>
+
+        <% if (!selectedBrand) { %>
+            <div class="results-meta">
+                <%= brandSummaries.length %> <%= brandSummaries.length === 1 ? 'brand' : 'brands' %><% if (searchQuery) { %> matching "<%= searchQuery %>"<% } %>
+            </div>
+
+            <% if (brandSummaries.length > 0) { %>
+                <div class="brand-grid">
+                    <% brandSummaries.forEach(function(brand) { %>
+                        <a href="/approved-dishes/<%= brand.slug %>" class="brand-card">
+                            <h3><%= brand.brand %></h3>
+                            <div class="brand-meta">
+                                <span><%= brand.dishCount %> <%= brand.dishCount === 1 ? 'dish' : 'dishes' %></span>
+                                <span><%= brand.locationCount %> <%= brand.locationCount === 1 ? 'location' : 'locations' %></span>
+                            </div>
+                        </a>
+                    <% }); %>
+                </div>
+            <% } else { %>
+                <div class="empty-state">
+                    <h3>No approved dishes found</h3>
+                    <p><%= searchQuery ? 'Try a different search term or clear the filter.' : 'Approved dishes will appear here after menu approvals extract into the database.' %></p>
+                </div>
+            <% } %>
+        <% } else { %>
+            <div class="brand-layout">
+                <aside class="brand-list" aria-label="Approved dish brands">
+                    <% brandSummaries.forEach(function(brand) { %>
+                        <a href="/approved-dishes/<%= brand.slug %>" class="brand-link <%= brand.slug === selectedBrand.slug ? 'active' : '' %>">
+                            <strong><%= brand.brand %></strong>
+                            <span><%= brand.dishCount %> <%= brand.dishCount === 1 ? 'dish' : 'dishes' %></span>
+                        </a>
+                    <% }); %>
+                </aside>
+
+                <main>
+                    <div class="results-meta">
+                        <%= dishes.length %> approved <%= dishes.length === 1 ? 'dish' : 'dishes' %><% if (selectedLocation) { %> at <%= selectedLocation %><% } %><% if (searchQuery) { %> matching "<%= searchQuery %>"<% } %>
+                    </div>
+
+                    <% if (locationGroups.length > 0) { %>
+                        <div class="dish-groups">
+                            <% locationGroups.forEach(function(group) { %>
+                                <section class="dish-group">
+                                    <div class="dish-group-header">
+                                        <h3><%= group.location %></h3>
+                                        <span class="dish-count"><%= group.dishes.length %> <%= group.dishes.length === 1 ? 'dish' : 'dishes' %></span>
+                                    </div>
+                                    <table class="dish-table">
+                                        <thead>
+                                            <tr>
+                                                <th><button type="button" class="dish-sort" data-column="0">Dish <span class="dish-sort-indicator" aria-hidden="true"></span></button></th>
+                                                <th><button type="button" class="dish-sort" data-column="1">Description <span class="dish-sort-indicator" aria-hidden="true"></span></button></th>
+                                                <th><button type="button" class="dish-sort" data-column="2">Category <span class="dish-sort-indicator" aria-hidden="true"></span></button></th>
+                                                <th><button type="button" class="dish-sort" data-column="3">Service <span class="dish-sort-indicator" aria-hidden="true"></span></button></th>
+                                                <th><button type="button" class="dish-sort" data-column="4">Price <span class="dish-sort-indicator" aria-hidden="true"></span></button></th>
+                                                <th><button type="button" class="dish-sort" data-column="5">Allergens <span class="dish-sort-indicator" aria-hidden="true"></span></button></th>
+                                            </tr>
+                                            <tr class="dish-filter-row">
+                                                <th><input class="dish-column-filter" data-column="0" type="search" aria-label="Filter dish" placeholder="Filter"></th>
+                                                <th><input class="dish-column-filter" data-column="1" type="search" aria-label="Filter description" placeholder="Filter"></th>
+                                                <th><input class="dish-column-filter" data-column="2" type="search" aria-label="Filter category" placeholder="Filter"></th>
+                                                <th><input class="dish-column-filter" data-column="3" type="search" aria-label="Filter service" placeholder="Filter"></th>
+                                                <th><input class="dish-column-filter" data-column="4" type="search" aria-label="Filter price" placeholder="Filter"></th>
+                                                <th><input class="dish-column-filter" data-column="5" type="search" aria-label="Filter allergens" placeholder="Filter"></th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            <% group.dishes.forEach(function(dish) { %>
+                                                <tr>
+                                                    <td class="dish-name"><%= dish.dishName %></td>
+                                                    <td class="dish-description"><%= dish.description || '' %></td>
+                                                    <td><%= dish.menuCategory || '' %></td>
+                                                    <td><%= dish.servicePeriod || '' %></td>
+                                                    <td><%= dish.price || '' %></td>
+                                                    <td>
+                                                        <% if (dish.allergens.length > 0) { %>
+                                                            <div class="badge-list">
+                                                                <% dish.allergens.forEach(function(allergen) { %>
+                                                                    <span class="badge"><%= allergen %></span>
+                                                                <% }); %>
+                                                            </div>
+                                                        <% } else { %>
+                                                            <span class="muted">None</span>
+                                                        <% } %>
+                                                    </td>
+                                                </tr>
+                                            <% }); %>
+                                        </tbody>
+                                    </table>
+                                </section>
+                            <% }); %>
+                        </div>
+                    <% } else { %>
+                        <div class="empty-state">
+                            <h3>No approved dishes found</h3>
+                            <p>Try a different search term or location filter.</p>
+                        </div>
+                    <% } %>
+                </main>
+            </div>
+        <% } %>
+    </div>
+    <script src="/js/approved-dishes.js"></script>
+</body>
+</html>

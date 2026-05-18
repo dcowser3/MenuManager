@@ -72,6 +72,7 @@ When a chef submits a menu, a ClickUp task is automatically created with the gen
 - **Email send:** `clickup-integration` now sends `corrections_ready` emails directly (reads DOCX from disk and attaches to email)
 - **Supabase schema:** `clickup_task_id VARCHAR(100)` column + index on submissions table, plus `service_period` on `submissions` and `approved_dishes`
 - **Property metadata:** SharePoint site URL, library, drive ID, base folder path, and discovered service-folder names now live on `properties`
+- **Approved-dish extraction:** ClickUp webhook finalization, DB extract/backfill routes, dashboard design approval, local extraction tests, and ClickUp history imports all route through the shared `@menumanager/supabase-client` extractor and pass service period when available.
 - **Local verification:** `npm run test:approved-dishes -- --legacy-id <id> [--write]` exercises the shared extraction logic directly against the target Supabase submission
 
 ## SharePoint Routing
@@ -229,6 +230,35 @@ Webhook events are not replayed by ClickUp. If the webhook was suspended or misc
 `POST /webhook/backfill-pending`
 
 This scans pending submissions with `clickup_task_id`, checks current task status in ClickUp, and processes tasks already in a review-complete status (`To Do` by default, plus configured aliases).
+
+### Historical completed-menu import dry run
+
+For a bulk import from ClickUp history, start with the dashboard dry-run script inside Docker:
+
+```bash
+./dev-up.sh --rebuild -d
+docker compose -f docker-compose.dev.yml exec -T dashboard npm run clickup:completed-dry-run -- --status complete
+```
+
+The script scans completed ClickUp tasks, downloads each newest DOCX attachment, extracts clean menu text with the docx-redliner venv, previews approved-dish extraction, infers property/service period, and marks the newest task for each property + service-period group. It writes `tmp/clickup-history-import/completed-dry-run.json` and `.csv`; review warning rows before any write-mode import. Historical bare `dLeña` ClickUp tasks are treated as inactive `dLeña - Washington, D.C.` work unless the task or file explicitly says Houston, so they are not silently imported into the current `dLeña - Houston` baseline. If the task title and DOCX filename imply conflicting service periods, for example a `Dessert Menu` task with a `Dinner Menu` attachment, the row receives `service_task_filename_conflict`, is ignored when choosing the newest valid property/service task, and is excluded from `--apply --only-clean`.
+
+The approved-dish extractor joins common wrapped dish rows before parsing, keeps continuation ingredients in `description`, handles parenthesized trailing prices, compact `PP` prices, single trailing allergen codes after prices, cup/bowl pricing, high comma-separated wine prices, all-caps two-line table-style dish rows, section price-only beverage groups including bare numeric prices in beverage sections, and price-bearing rows followed by separate two-line dishes. It skips obvious non-dish metadata such as service hours, weekday labels, per-guest/package labels, event instructions, attribution lines, course labels, taco-count notes, side-count options, short beverage headings, grill/service labels, oatmeal topping continuations, DOCX form markers, and `add ...` modifiers. Section-level enhancement and pairing prices are carried onto following unpriced rows as numeric item prices. Per-person/prix fixe set-menu prices are not treated as individual dish prices; following unpriced dishes are marked `prix fixe` in the price field. Storage also applies `prix fixe` to missing item prices for service periods that imply package menus, including event, brunch/buffet, holiday, restaurant-week, private-group, half-board, and set-menu service periods. When a terse dish name is enriched from its section, the inferred word is added in parentheses, e.g. `Kale (Salad)`. Bulk history imports still need spot checks because beverage lists and special-event menus can contain legitimate names that look unusual out of context.
+
+After an import, run the read-only approved-dish audit inside Docker:
+
+```bash
+docker compose -f docker-compose.dev.yml exec -T dashboard npm run clickup:audit-approved-dishes
+```
+
+The audit reads imported `approved_dishes` rows from Supabase and writes `tmp/clickup-history-import/dish-extraction-audit.json` plus `.csv`. It flags suspicious rows such as missing prices, prices left in names, service hours, package/course labels, instruction or attribution text, section headings stored as dishes, one-word wrapped ingredients, leftover allergen clusters in descriptions, and exact duplicate dish/category/description rows within the same imported submission. Missing-price rows include `price_audit_class`, `source_line`, `previous_line`, and `next_line` columns so reviewers can separate recoverable parser misses from package/set-menu items that do not have item-level prices. Treat the report as review guidance rather than a delete list; a few beverage or event-menu names can be legitimately unusual. A zero-row audit is the preferred gate before moving from spot checks to broader ClickUp history imports. Approved-dish prices are stored as normalized values without currency symbols; enhancement section prices are stored as the numeric enhancement amount, while unpriced dishes in prix fixe or per-person set menus are marked `prix fixe`.
+
+After reviewing the dry-run report, import only clean rows with:
+
+```bash
+docker compose -f docker-compose.dev.yml exec -T dashboard npm run clickup:completed-dry-run -- --status complete --apply --only-clean
+```
+
+`--apply --only-clean` requires extraction to run, upserts approved `submissions` by `legacy_id = clickup-<taskId>` / `clickup_task_id`, hard-replaces that submission's `approved_dishes`, and keeps warning rows out of Supabase. Imported rows use `source = clickup_history_import`; approved-baseline search and latest property/service lookup include that source.
 
 ## Environment Variables
 

@@ -22,6 +22,7 @@ function buildDesignApprovalSubmissionRecord(input) {
         property: input.property || '',
         size: input.size || '',
         orientation: input.orientation || '',
+        service_period: input.servicePeriod || '',
         filename: input.fileName || 'design-approval.docx',
         status: input.status,
         created_at: (input.now || new Date()).toISOString(),

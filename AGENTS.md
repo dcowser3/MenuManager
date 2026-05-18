@@ -45,6 +45,8 @@ Node.js 18+ / TypeScript • Express.js microservices • EJS templates • Supa
 
 These apply to almost every change — keep them in mind without needing a deeper read.
 
+- **Docker-first local verification:** Use `./dev-up.sh` / `docker-compose.dev.yml` for local service startup, route/API/browser verification, and service-dependent debugging by default. Native `npm start --workspace=...`, `node dist/index.js`, and `./start-services.sh` are fallback-only paths for deliberately non-Docker work.
+- **Docker reset:** If services, tests, or dependency state act strange, prefer `./dev-up.sh --down && ./dev-up.sh -d`; after dependency/shared-library/Python changes use `./dev-up.sh --rebuild`, `./dev-up.sh --reset-venv`, or `./dev-up.sh --nuke` as appropriate.
 - **Build check:** `npx tsc --noEmit --project services/<name>/tsconfig.json`
 - **Every TS service declares `typescript` locally** in its own `devDependencies` — don't rely on hoisting; a partial install can leave the hoisted `tsc` shim broken.
 - **Python venv:** `services/docx-redliner/venv/bin/python` (try first, fallback to `python3`). In Docker mode the venv lives in the image — reset with `./dev-up.sh --reset-venv`.
@@ -64,7 +66,7 @@ Load these only when the task touches the area.
 ### Running locally / dev environment / startup failures
 → [docs/local-dev-troubleshooting.md](docs/local-dev-troubleshooting.md)
 
-Two modes documented there: **Docker** (`./dev-up.sh`, uses [docker-compose.dev.yml](docker-compose.dev.yml) + [docker/Dockerfile.dev](docker/Dockerfile.dev), preferred) and **native** (`./start-services.sh`). The doc covers OOM kills, EADDRINUSE, broken tsc shim, corrupted Python venv, missing `INTERNAL_API_TOKEN` — all real failure modes you'll re-derive without it.
+Docker is the default local workflow: `./dev-up.sh` uses [docker-compose.dev.yml](docker-compose.dev.yml) + [docker/Dockerfile.dev](docker/Dockerfile.dev). Native mode (`./start-services.sh`) is documented there only as an intentional fallback. The doc covers Docker smoke checks, OOM kills, EADDRINUSE, broken tsc shim, corrupted Python venv, missing `INTERNAL_API_TOKEN` — all real failure modes you'll re-derive without it.
 
 ### Architecture / how services interact
 → [docs/architecture.md](docs/architecture.md) — service interactions, data flows, workflow diagrams.

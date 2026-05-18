@@ -44,6 +44,8 @@ The welcome-page card is currently grayed out and labeled "Feature Coming Soon" 
 ## Data Notes
 
 - Design approval comparisons are saved as submissions (`source: design_approval`)
+- When a design proof matches, the saved submission stores an inferred service period from the DOCX project name or uploaded filename when one can be recognized.
+- Approved-dish extraction for matched design approvals uses the same shared extractor as ClickUp approvals, DB backfills, local tests, and ClickUp history imports. The inferred service period is passed through so package/set-menu prices can be normalized consistently.
 - Required approvals are stored in submission metadata
 - Override writes:
   - `status: approved_override`

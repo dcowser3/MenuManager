@@ -2045,6 +2045,7 @@
         let revisionSearchDebounce = null;
         let revisionSearchResults = [];
         let revisionBaseSubmissionId = null;
+        let selectedRevisionBaseline = null;
         let revisionSource = 'database';
         let revisionBaselineDocPath = '';
         let revisionBaselineFileName = '';
@@ -2064,6 +2065,8 @@
         let uploadedMenuImagePath = '';
         let uploadedMenuImageFileName = '';
         let preservedManagedFooterText = '';
+        let baselineFreshnessOverrideKey = '';
+        let baselineFreshnessCheckTimer = null;
         const DEFAULT_ALLERGEN_KEY = <%- JSON.stringify(defaultAllergenKey || '') %>;
         const RAW_NOTICE_TEXT = '*consuming raw or undercooked meats, poultry, seafood, shellfish, or eggs may increase your risk of foodborne illness.';
         const RAW_NOTICE_REGEX = /\*?\s*consuming raw or undercooked meats,\s*poultry,\s*seafood(?:,\s*shellfish)?,\s*or eggs may increase your risk of foodborne illness\.?/i;
@@ -2278,10 +2281,20 @@
                     syncProjectDetailsCardErrorState();
                 };
                 propertyField.addEventListener('input', clearPropertyError);
-                propertyField.addEventListener('change', () => {
-                    clearPropertyError();
-                    updateServicePeriodOptions(propertyField.value);
+            propertyField.addEventListener('change', () => {
+                clearPropertyError();
+                updateServicePeriodOptions(propertyField.value);
+                baselineFreshnessOverrideKey = '';
+                scheduleBaselineFreshnessCheck();
+            });
+
+            const servicePeriodField = document.getElementById('servicePeriod');
+            if (servicePeriodField) {
+                servicePeriodField.addEventListener('change', () => {
+                    baselineFreshnessOverrideKey = '';
+                    scheduleBaselineFreshnessCheck();
                 });
+            }
             }
 
             const turnaroundField = document.getElementById('turnaroundDays');
@@ -2348,6 +2361,8 @@
             });
             propertyInput.addEventListener('change', function() {
                 updateServicePeriodOptions(propertyInput.value);
+                baselineFreshnessOverrideKey = '';
+                scheduleBaselineFreshnessCheck();
             });
         });
 
@@ -2804,6 +2819,7 @@
                 }
                 previewSection.classList.remove('show');
                 revisionBaseSubmissionId = null;
+                selectedRevisionBaseline = null;
                 revisionSource = 'database';
                 revisionBaselineDocPath = '';
                 revisionBaselineFileName = '';
@@ -2831,6 +2847,7 @@
                 suppressRawNotice = false;
                 setAllergenAutoDetectedBadge(false);
                 applyTurnaroundDefaults(true, false);
+                baselineFreshnessOverrideKey = '';
             }
             updateRevisionPreCheckLayout();
         }
@@ -2857,6 +2874,8 @@
             unapprovedPanel.classList.remove('show');
 
             // Reset common state
+            revisionBaseSubmissionId = null;
+            selectedRevisionBaseline = null;
             selectedNote.classList.remove('show');
             selectedNote.textContent = '';
             setContainsRawSelection(false);
@@ -2910,9 +2929,200 @@
             revisionSearchDebounce = setTimeout(() => searchApprovedSubmissions(query), 250);
         }
 
+        function normalizeBaselineMatchValue(value) {
+            return `${value || ''}`.trim().toLowerCase().replace(/[_-]+/g, ' ').replace(/\s+/g, ' ');
+        }
+
+        function publicSubmissionId(record) {
+            return `${record?.id || record?.legacyId || ''}`.trim();
+        }
+
+        function getCurrentPropertyService() {
+            return {
+                property: document.getElementById('property')?.value.trim() || '',
+                servicePeriod: document.getElementById('servicePeriod')?.value || ''
+            };
+        }
+
+        function baselineFreshnessKey(issue) {
+            const latestId = publicSubmissionId(issue?.latest || {});
+            const selectedId = publicSubmissionId(issue?.selected || {}) || revisionBaseSubmissionId || '';
+            return [
+                issue?.type || '',
+                normalizeBaselineMatchValue(issue?.property || ''),
+                normalizeBaselineMatchValue(issue?.servicePeriod || ''),
+                selectedId,
+                latestId
+            ].join('|');
+        }
+
+        function formatApprovedDate(value) {
+            if (!value) return 'unknown date';
+            const date = new Date(value);
+            return Number.isNaN(date.getTime()) ? 'unknown date' : date.toLocaleDateString();
+        }
+
+        function formatBaselineLabel(record) {
+            if (!record) return 'approved menu';
+            const name = record.projectName || record.approvedFileName || record.filename || 'approved menu';
+            const approvedAt = record.reviewedAt || record.updatedAt || '';
+            return `${name}${approvedAt ? ` (${formatApprovedDate(approvedAt)})` : ''}`;
+        }
+
+        async function fetchLatestApprovedForCurrentService(property, servicePeriod) {
+            if (!property || !servicePeriod) return null;
+            const params = new URLSearchParams({ property, servicePeriod });
+            const response = await fetch(`/api/submissions/latest-approved?${params.toString()}`);
+            if (response.status === 404) return null;
+            const data = await response.json();
+            if (!response.ok) {
+                throw new Error(data.error || 'Latest approved lookup failed');
+            }
+            return data;
+        }
+
+        function applyApprovedBaseline(selected, options = {}) {
+            if (!selected) return;
+
+            document.getElementById('submissionModeModification').checked = true;
+            document.getElementById('submissionModeNew').checked = false;
+            if (submissionMode !== 'modification') {
+                onSubmissionModeChange();
+            }
+            document.getElementById('modSourceDatabase').checked = true;
+            onModificationSourceChange();
+
+            revisionBaseSubmissionId = selected.id;
+            selectedRevisionBaseline = selected;
+            revisionSource = 'database';
+            revisionBaselineDocPath = '';
+            revisionBaselineFileName = '';
+            const normalizedBaseline = stripBaselineFooter(selected.approvedMenuContent || '', selected.allergens || '');
+            baseApprovedMenuContent = normalizedBaseline.menu || '';
+            baseApprovedMenuContentHtml = '';
+            preservedManagedFooterText = normalizedBaseline.footerText || '';
+            persistentDiffSummary = { insertions: 0, deletions: 0 };
+            baselineFreshnessOverrideKey = '';
+            setAllergenInputValue(normalizedBaseline.allergens || '');
+            setContainsRawSelection(!!normalizedBaseline.hadRawNotice);
+            suppressRawNotice = false;
+            setAllergenAutoDetectedBadge(!!normalizedBaseline.allergens);
+
+            applyProjectPrefill(selected);
+
+            quill.setText(baseApprovedMenuContent || '');
+            renderPersistentPreview(baseApprovedMenuContent, baseApprovedMenuContent);
+
+            const selectedNote = document.getElementById('revisionSelectedNote');
+            const latestNote = selected.isLatestForPropertyService === false ? ' (older than latest for this service)' : '';
+            selectedNote.textContent = `Loaded approved baseline: ${selected.projectName || 'Untitled'} (${selected.id})${latestNote}`;
+            selectedNote.classList.add('show');
+            document.getElementById('submissionSearchResults').innerHTML = '';
+            enterRevisionTrackingMode();
+            if (!options.silent) {
+                showAlert('Approved baseline loaded. Revision tracking mode is active.', 'success');
+            }
+            scheduleBaselineFreshnessCheck();
+        }
+
+        async function loadLatestApprovedBaseline(latest) {
+            const latestId = publicSubmissionId(latest);
+            if (!latestId) return;
+            applyApprovedBaseline(latest);
+        }
+
+        async function getBaselineFreshnessIssue() {
+            const { property, servicePeriod } = getCurrentPropertyService();
+            if (!property || !servicePeriod) return null;
+
+            const latest = await fetchLatestApprovedForCurrentService(property, servicePeriod);
+            if (!latest) return null;
+
+            const selectedId = `${revisionBaseSubmissionId || ''}`.trim();
+            const selected = selectedRevisionBaseline;
+            const currentPropertyKey = normalizeBaselineMatchValue(property);
+            const currentServiceKey = normalizeBaselineMatchValue(servicePeriod);
+
+            if (submissionMode === 'modification' && selectedId && selected) {
+                const selectedPropertyKey = normalizeBaselineMatchValue(selected.property);
+                const selectedServiceKey = normalizeBaselineMatchValue(selected.servicePeriod);
+                if (selectedPropertyKey !== currentPropertyKey || selectedServiceKey !== currentServiceKey) {
+                    return { type: 'mismatch', property, servicePeriod, selected, latest };
+                }
+                if (publicSubmissionId(latest) && publicSubmissionId(latest) !== selectedId) {
+                    return { type: 'stale', property, servicePeriod, selected, latest };
+                }
+                return null;
+            }
+
+            return { type: 'existing', property, servicePeriod, selected: null, latest };
+        }
+
+        function showBaselineFreshnessWarning(issue, options = {}) {
+            if (!issue) return true;
+            const key = baselineFreshnessKey(issue);
+            if (baselineFreshnessOverrideKey === key && !options.force) {
+                return true;
+            }
+
+            let message = '';
+            if (issue.type === 'mismatch') {
+                message = `The loaded baseline is for ${issue.selected.property || 'another property'} / ${issue.selected.servicePeriod || 'another service'}, but the form is set to ${issue.property} / ${issue.servicePeriod}.`;
+            } else if (issue.type === 'stale') {
+                message = `A newer approved ${issue.servicePeriod} menu exists for ${issue.property}: ${formatBaselineLabel(issue.latest)}.`;
+            } else {
+                message = `An approved ${issue.servicePeriod} menu already exists for ${issue.property}: ${formatBaselineLabel(issue.latest)}.`;
+            }
+
+            showAlert(message, 'warning', {
+                persistent: true,
+                actions: [
+                    {
+                        label: 'Load latest',
+                        onClick: () => loadLatestApprovedBaseline(issue.latest)
+                    },
+                    {
+                        label: issue.type === 'existing' ? 'Continue as new' : 'Keep current',
+                        onClick: () => {
+                            baselineFreshnessOverrideKey = key;
+                            showAlert('Baseline warning acknowledged for this property and service.', 'info');
+                        }
+                    }
+                ]
+            });
+            return false;
+        }
+
+        async function ensureBaselineFreshnessBeforeContinue() {
+            try {
+                const issue = await getBaselineFreshnessIssue();
+                return showBaselineFreshnessWarning(issue);
+            } catch (error) {
+                console.error('Baseline freshness check failed:', error);
+                showAlert('Could not verify the latest approved menu for this property and service. Please continue carefully.', 'warning');
+                return true;
+            }
+        }
+
+        function scheduleBaselineFreshnessCheck() {
+            clearTimeout(baselineFreshnessCheckTimer);
+            baselineFreshnessCheckTimer = setTimeout(async () => {
+                try {
+                    const issue = await getBaselineFreshnessIssue();
+                    if (issue) showBaselineFreshnessWarning(issue);
+                } catch (error) {
+                    console.error('Baseline freshness check failed:', error);
+                }
+            }, 350);
+        }
+
         async function searchApprovedSubmissions(query) {
             try {
-                const response = await fetch(`/api/submissions/search?q=${encodeURIComponent(query)}&limit=20`);
+                const { property, servicePeriod } = getCurrentPropertyService();
+                const params = new URLSearchParams({ q: query, limit: '20' });
+                if (property) params.set('property', property);
+                if (servicePeriod) params.set('servicePeriod', servicePeriod);
+                const response = await fetch(`/api/submissions/search?${params.toString()}`);
                 const results = await response.json();
                 if (!response.ok) {
                     throw new Error(results.error || 'Search failed');
@@ -2928,7 +3138,8 @@
                 resultsEl.innerHTML = revisionSearchResults.map((r, idx) => `
                     <div class="search-result-item" onclick="selectRevisionResult(${idx})">
                         <strong>${escapeHtml(r.projectName || '(Untitled)')}</strong> - ${escapeHtml(r.property || 'Unknown Property')}<br>
-                        <span style="color: var(--color-text-muted);">ID: ${escapeHtml(r.id)} | Updated: ${new Date(r.updatedAt).toLocaleString()}</span>
+                        <span style="color: var(--color-text-muted);">Service: ${escapeHtml(r.servicePeriod || 'N/A')} | Approved: ${escapeHtml(formatApprovedDate(r.reviewedAt || r.updatedAt))} | ID: ${escapeHtml(r.id)}</span>
+                        ${r.isLatestForPropertyService === null ? '' : `<span style="display:inline-block;margin-left:0.4rem;color:${r.isLatestForPropertyService === false ? 'var(--color-warning)' : 'var(--color-success)'};font-weight:600;">${r.isLatestForPropertyService === false ? 'Older version' : 'Latest for service'}</span>`}
                     </div>
                 `).join('');
             } catch (error) {
@@ -2940,34 +3151,7 @@
         function selectRevisionResult(index) {
             const selected = revisionSearchResults[index];
             if (!selected) return;
-
-            revisionBaseSubmissionId = selected.id;
-            revisionSource = 'database';
-            revisionBaselineDocPath = '';
-            revisionBaselineFileName = '';
-            const normalizedBaseline = stripBaselineFooter(selected.approvedMenuContent || '', selected.allergens || '');
-            baseApprovedMenuContent = normalizedBaseline.menu || '';
-            baseApprovedMenuContentHtml = '';
-            preservedManagedFooterText = normalizedBaseline.footerText || '';
-            persistentDiffSummary = { insertions: 0, deletions: 0 };
-            setAllergenInputValue(normalizedBaseline.allergens || '');
-            setContainsRawSelection(!!normalizedBaseline.hadRawNotice);
-            suppressRawNotice = false;
-            setAllergenAutoDetectedBadge(!!normalizedBaseline.allergens);
-
-            // Reuse the same project prefill path used by "Load from Recent"
-            // so modification search fills the full project detail set.
-            applyProjectPrefill(selected);
-
-            quill.setText(baseApprovedMenuContent || '');
-            renderPersistentPreview(baseApprovedMenuContent, baseApprovedMenuContent);
-
-            const selectedNote = document.getElementById('revisionSelectedNote');
-            selectedNote.textContent = `Loaded approved baseline: ${selected.projectName || 'Untitled'} (${selected.id})`;
-            selectedNote.classList.add('show');
-            document.getElementById('submissionSearchResults').innerHTML = '';
-            enterRevisionTrackingMode();
-            showAlert('Approved baseline loaded. Revision tracking mode is active.', 'success');
+            applyApprovedBaseline(selected);
         }
 
         async function uploadBaselineDoc() {
@@ -3431,6 +3615,8 @@
             setSelectValue('orientation', p.orientation);
             setSelectValue('menuType', p.menuType);
             updateServicePeriodOptions(p.property || '', p.servicePeriod || '');
+            baselineFreshnessOverrideKey = '';
+            scheduleBaselineFreshnessCheck();
             setSelectValue('templateType', p.templateType);
             setSelectValue('assetType', p.assetType);
             if (p.turnaroundDays) {
@@ -3597,6 +3783,8 @@
             document.getElementById('propertyDropdown').classList.remove('show');
             propertySuggestHighlightIndex = -1;
             updateServicePeriodOptions(selected);
+            baselineFreshnessOverrideKey = '';
+            scheduleBaselineFreshnessCheck();
         }
 
         function isPropertyFromCatalog(value) {
@@ -4069,7 +4257,20 @@
 
             if (Array.isArray(options.actions)) {
                 options.actions.forEach((action) => {
-                    if (!action || !action.href || !action.label) return;
+                    if (!action || !action.label) return;
+                    if (typeof action.onClick === 'function') {
+                        const button = document.createElement('button');
+                        button.type = 'button';
+                        button.textContent = action.label;
+                        button.style.cssText = 'margin-left:12px;padding:2px 10px;border:1px solid currentColor;background:transparent;color:inherit;cursor:pointer;font-size:.8em;border-radius:3px;font-weight:600';
+                        button.onclick = () => {
+                            alert.remove();
+                            action.onClick();
+                        };
+                        alert.appendChild(button);
+                        return;
+                    }
+                    if (!action.href) return;
                     const link = document.createElement('a');
                     link.href = action.href;
                     link.textContent = action.label;
@@ -4216,6 +4417,10 @@
             if (!validateStep1()) return;
             if (submissionMode === 'modification' && !revisionBaseSubmissionId && !revisionBaselineDocPath) {
                 showAlert('Select a previous approved submission or upload an approved baseline DOCX first.', 'error');
+                return;
+            }
+
+            if (!(await ensureBaselineFreshnessBeforeContinue())) {
                 return;
             }
 
@@ -4875,6 +5080,10 @@
 
             if (submissionMode === 'modification' && !revisionBaseSubmissionId && !revisionBaselineDocPath) {
                 showAlert('Select a previous approved submission or upload an approved baseline DOCX before submitting.', 'error');
+                return;
+            }
+
+            if (!(await ensureBaselineFreshnessBeforeContinue())) {
                 return;
             }
 

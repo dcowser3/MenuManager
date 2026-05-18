@@ -56,6 +56,7 @@ const internal_auth_1 = require("@menumanager/internal-auth");
 const submission_workflow_1 = require("./lib/submission-workflow");
 const approval_workflow_1 = require("./lib/approval-workflow");
 const design_approval_workflow_1 = require("./lib/design-approval-workflow");
+const approved_dishes_1 = require("./lib/approved-dishes");
 const approved_menus_1 = require("./lib/approved-menus");
 const clickup_handoff_1 = require("./lib/clickup-handoff");
 const property_catalog_1 = require("./lib/property-catalog");
@@ -588,6 +589,65 @@ app.get('/approved-menus', async (req, res) => {
         console.error('Error loading approved menus:', error.response?.data || error.message);
         res.status(500).render('error', {
             message: 'Failed to load approved menus',
+        });
+    }
+});
+app.get('/approved-dishes', async (req, res) => {
+    try {
+        const q = (0, upload_security_1.sanitizePlainTextInput)(req.query.q, { maxLength: 120 }).trim();
+        const brandSummaries = await (0, approved_dishes_1.listApprovedDishBrands)(getRepoRoot(), q);
+        res.render('approved-dishes', {
+            title: 'Approved Dishes',
+            brandSummaries,
+            selectedBrand: null,
+            locationGroups: [],
+            dishes: [],
+            locationOptions: [],
+            selectedLocation: '',
+            searchQuery: q,
+        });
+    }
+    catch (error) {
+        console.error('Error loading approved dishes:', error.response?.data || error.message);
+        res.status(500).render('error', {
+            message: 'Failed to load approved dishes',
+        });
+    }
+});
+app.get('/approved-dishes/:brandSlug', async (req, res) => {
+    try {
+        const q = (0, upload_security_1.sanitizePlainTextInput)(req.query.q, { maxLength: 120 }).trim();
+        const location = (0, upload_security_1.sanitizePlainTextInput)(req.query.location, { maxLength: 255 }).trim();
+        const { brandSummaries, brandDetail } = await (0, approved_dishes_1.getApprovedDishBrowseData)(getRepoRoot(), req.params.brandSlug, { query: q, location });
+        if (!brandDetail) {
+            return res.status(404).render('error', {
+                message: 'Approved dish brand not found',
+            });
+        }
+        const visibleBrandSummaries = brandSummaries
+            .slice()
+            .sort((a, b) => {
+            if (a.slug === brandDetail.summary.slug)
+                return -1;
+            if (b.slug === brandDetail.summary.slug)
+                return 1;
+            return a.brand.localeCompare(b.brand);
+        });
+        res.render('approved-dishes', {
+            title: `${brandDetail.summary.brand} Approved Dishes`,
+            brandSummaries: visibleBrandSummaries,
+            selectedBrand: brandDetail.summary,
+            locationGroups: brandDetail.locationGroups,
+            dishes: brandDetail.dishes,
+            locationOptions: brandDetail.summary.locations,
+            selectedLocation: location,
+            searchQuery: q,
+        });
+    }
+    catch (error) {
+        console.error('Error loading approved dishes:', error.response?.data || error.message);
+        res.status(500).render('error', {
+            message: 'Failed to load approved dishes',
         });
     }
 });
@@ -1387,8 +1447,10 @@ app.get('/api/submissions/search', async (req, res) => {
     try {
         const q = req.query.q || '';
         const limit = req.query.limit || 20;
+        const property = req.query.property || '';
+        const servicePeriod = req.query.servicePeriod || '';
         const dbResponse = await internalApi.get(`${DB_SERVICE_URL}/submissions/search`, {
-            params: { q, limit }
+            params: { q, limit, property, servicePeriod }
         });
         res.json(dbResponse.data);
     }
@@ -1404,9 +1466,9 @@ app.get('/api/submissions/search', async (req, res) => {
  */
 app.get('/api/submissions/latest-approved', async (req, res) => {
     try {
-        const { projectName, property } = req.query;
+        const { projectName, property, servicePeriod } = req.query;
         const dbResponse = await internalApi.get(`${DB_SERVICE_URL}/submissions/latest-approved`, {
-            params: { projectName, property }
+            params: { projectName, property, servicePeriod }
         });
         res.json(dbResponse.data);
     }

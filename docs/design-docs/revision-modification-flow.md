@@ -34,7 +34,9 @@ For modification flows, the baseline text must come from one of:
 ## Step 2 (Modification only): Baseline Source Selection
 
 - `Find In Database`:
-  - Search approved submissions by project/property/submitter. Submitted ClickUp tasks do not appear here until an approved DOCX has been processed and the submission status is `approved`.
+  - Search approved submissions by project/property/service period/submitter. Submitted ClickUp tasks do not appear here until an approved DOCX has been processed and the submission status is `approved`.
+  - Results are newest-first, with exact property + service-period matches prioritized when those fields are already selected.
+  - Each result indicates whether it is the latest approved baseline for its property/service period.
   - Load approved baseline text into editor.
 - `Upload Prior Approved DOCX`:
   - Upload previously approved/redlined DOCX.
@@ -47,6 +49,7 @@ For modification flows, the baseline text must come from one of:
 ## Step 3: Editing + Review
 
 - Chef edits menu as usual.
+- Before AI review or final submission, the form checks the selected property/service period against the latest approved baseline. If the user selected an older or mismatched baseline, or starts a new menu where an approved baseline already exists, the form warns and offers to load the latest approved menu or continue intentionally.
 - Right-side persistent preview shows live diff against approved baseline:
   - Deletions: red strike-through
   - Insertions: yellow highlight
@@ -99,7 +102,7 @@ Fields include provider/path/source to allow future migration from local filesys
 Dashboard service:
 
 - `GET /api/submissions/search`
-- `GET /api/submissions/latest-approved`
+- `GET /api/submissions/latest-approved` (property + service-period canonical lookup, with project/property fallback for older callers)
 - `POST /api/modification/baseline-upload`
 - `POST /api/modification/unapproved-upload`
 
@@ -122,11 +125,11 @@ When chef uses uploaded baseline flow:
 
 - The uploaded prior approved DOCX is attached to the ClickUp task.
 - This gives Isabella direct visibility to verify the baseline version submitted by chef.
-- The persistent preview receives the extracted baseline HTML, and `@menumanager/diff-core` maps text offsets back to rich HTML ranges so unchanged/deleted tokens keep baseline inline styles such as bold and italic.
+- The persistent preview receives the extracted baseline HTML, and `@menumanager/diff-core` maps text offsets back to rich HTML ranges so unchanged/deleted tokens keep baseline inline styles such as bold and italic. DOCX non-breaking spaces are treated as equivalent to normal spaces for style-index matching so one whitespace glyph does not flatten the whole preview.
 
 ## Approval Editor Source Reuse
 
-- The browser approval editor loads the **submitted** menu DOCX first (`submission.original_path`) so the textarea and downloads match the generated file from the form (including chef edits such as intentional spellings). The modification **baseline** artifact (`revision_baseline_doc_path`) remains stored for ClickUp attachments, differ, and training — it is only used when no submission DOCX path is available.
+- The browser approval editor loads the **submitted** menu DOCX first (`submission.original_path`) so the rich editor and downloads match the generated file from the form (including chef edits such as intentional spellings). The modification **baseline** artifact (`revision_baseline_doc_path`) remains stored for ClickUp attachments, differ, and training — it is only used when no submission DOCX path is available.
 - Source priority (shared with “Download Original DOCX” resolution) is:
   1. `original_path`
   2. `final_path`
@@ -135,8 +138,11 @@ When chef uses uploaded baseline flow:
 - Extraction mode follows the candidate’s `revision_source` when the revision baseline path is chosen:
   - `uploaded_baseline` → clean baseline extraction
   - `uploaded_unapproved` → unapproved extraction with preserved redlines
-- When an unapproved/redlined DOCX is used as the approval source, the editor keeps separate text baselines: clean accepted text for the left textarea, and full visible text plus `existing-del` / `existing-ins` HTML for the right preview.
-- DOCX-derived preview HTML is normalized to strip leading/trailing empty `<p><br></p>` blocks so the live preview aligns vertically with the textarea (which trims leading blank lines).
+- When an unapproved/redlined DOCX is used as the approval source, the editor keeps separate text baselines: clean accepted text for the left rich editor, and full visible text plus `existing-del` / `existing-ins` HTML for the right preview.
+- DOCX-derived preview HTML is normalized to strip leading/trailing empty `<p><br></p>` blocks so the live preview aligns vertically with the editor (which trims leading blank lines).
+- The left rich editor is initialized by projecting the DOCX baseline HTML onto the clean accepted text, removing imported deletion spans, unwrapping imported insertion spans, and preserving inline markup such as `<strong>` and `<em>`.
+- When the editor must fall back to saved `menu_content_html`, temporary green AI-review highlight spans are unwrapped before display/submission so the approval editor only shows formatting plus imported/live redlines.
+- Imported redline groups are resolved against live edits: if the reviewer changes accepted text back to the original deleted value, that imported redline is collapsed to plain text and no live insertion/deletion is shown for that group.
 - After the chef edits, the live redline preview passes `baselineHtml` into `renderPersistentPreview` so unchanged and deleted tokens keep inline markup (`<strong>`, `<em>`, etc.) via `Range#cloneContents` instead of flattening to plain text.
 - Approval-editor text normalization preserves leading indentation from extracted DOCX paragraphs so alignment-sensitive content such as allergen legends is not flattened in the review UI.
 

@@ -4,6 +4,26 @@ exports.createDesignApprovalWorkflowHandlers = createDesignApprovalWorkflowHandl
 const upload_security_1 = require("./upload-security");
 const request_normalization_1 = require("./request-normalization");
 const approval_transitions_1 = require("./approval-transitions");
+function inferDesignApprovalServicePeriod(projectName, fileName) {
+    const source = `${projectName || ''} ${fileName || ''}`.toLowerCase();
+    const patterns = [
+        { pattern: /\bbreakfast\b/, label: 'Breakfast' },
+        { pattern: /\bbrunch\b/, label: 'Brunch' },
+        { pattern: /\blunch\b/, label: 'Lunch' },
+        { pattern: /\bdinner\b/, label: 'Dinner' },
+        { pattern: /\bhappy\s+hour\b/, label: 'Happy Hour' },
+        { pattern: /\bbeverage|drink|cocktail|bar\b/, label: 'Beverage' },
+        { pattern: /\bwine\b/, label: 'Wine' },
+        { pattern: /\bdesserts?\b/, label: 'Dessert' },
+        { pattern: /\bkids?\b/, label: 'Kids' },
+        { pattern: /\bprix|set\s+menu|half\s+board\b/, label: 'Set Menu' },
+        { pattern: /\bnew\s*year|nye\b/, label: 'NYE' },
+        { pattern: /\bvalentine\b/, label: "Valentine's" },
+        { pattern: /\beaster\b/, label: 'Easter' },
+        { pattern: /\bevent\b/, label: 'Event' },
+    ];
+    return patterns.find((item) => item.pattern.test(source))?.label || '';
+}
 function createDesignApprovalWorkflowHandlers(deps) {
     const compare = async (req, res) => {
         const files = req.files;
@@ -78,6 +98,7 @@ function createDesignApprovalWorkflowHandlers(deps) {
             const differences = allDifferences.filter((d) => d.severity !== 'info');
             const isMatch = differences.length === 0;
             const projectDetails = docxData.project_details || {};
+            const servicePeriod = inferDesignApprovalServicePeriod(projectDetails.project_name || '', docxOriginalName || '');
             const submissionId = `design-${Date.now()}`;
             let dbSaved = false;
             try {
@@ -93,6 +114,7 @@ function createDesignApprovalWorkflowHandlers(deps) {
                     fileName: docxOriginalName || 'design-approval.docx',
                     status: isMatch ? 'approved' : 'needs_correction',
                     requiredApprovals,
+                    servicePeriod,
                 }));
                 dbSaved = true;
                 console.log(`Design approval submission saved: ${submissionId}`);
@@ -108,7 +130,7 @@ function createDesignApprovalWorkflowHandlers(deps) {
                 }).catch((err) => console.error('Failed to save submitter profile:', err.message));
             }
             if (isMatch && dbSaved) {
-                deps.extractDishesAfterApproval(submissionId, docxText, projectDetails.property || 'Unknown', '').catch((err) => console.error('Background dish extraction failed (design approval):', err));
+                deps.extractDishesAfterApproval(submissionId, docxText, projectDetails.property || 'Unknown', docxPath, servicePeriod).catch((err) => console.error('Background dish extraction failed (design approval):', err));
             }
             res.json({
                 isMatch,

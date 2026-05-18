@@ -23,6 +23,7 @@ const SUBMITTER_PROFILES_TABLE = 'submitter_profiles';
 const ASSETS_TABLE = 'assets';
 const PROPERTIES_TABLE = 'properties';
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const APPROVED_SUBMISSION_STATUSES = ['approved', 'approved_override'];
 const DEFAULT_PROPERTY_NAMES = [
     '89Agave - Sedona',
     'Agent\'s Only - Pasadena',
@@ -617,6 +618,168 @@ async function getPropertyCatalog(): Promise<PropertyCatalogRecord[]> {
         .sort((a, b) => a.name.localeCompare(b.name));
 }
 
+function normalizeApprovedLookupValue(value: any): string {
+    return `${value || ''}`
+        .trim()
+        .toLowerCase()
+        .replace(/[_-]+/g, ' ')
+        .replace(/\s+/g, ' ');
+}
+
+function getSubmissionServicePeriod(submission: any): string {
+    return `${submission?.service_period || submission?.raw_payload?.servicePeriod || ''}`.trim();
+}
+
+function getApprovedTimestamp(submission: any): number {
+    const candidates = [
+        submission?.reviewed_at,
+        submission?.approved_text_extracted_at,
+        submission?.updated_at,
+        submission?.created_at,
+    ];
+
+    for (const value of candidates) {
+        const parsed = Date.parse(`${value || ''}`);
+        if (!Number.isNaN(parsed)) {
+            return parsed;
+        }
+    }
+
+    return 0;
+}
+
+function getPublicSubmissionId(submission: any): string {
+    return `${submission?.legacy_id || submission?.id || ''}`.trim();
+}
+
+function isApprovedBaselineSource(submission: any): boolean {
+    const source = `${submission?.source || ''}`.trim();
+    return !source || source === 'form' || source === 'clickup_history_import';
+}
+
+function mapApprovedSubmissionForClient(submission: any, latestForPropertyService?: any | null): any {
+    const publicId = getPublicSubmissionId(submission);
+    const latestPublicId = latestForPropertyService ? getPublicSubmissionId(latestForPropertyService) : '';
+
+    return {
+        id: publicId,
+        projectName: submission.project_name || '',
+        property: submission.property || '',
+        width: submission.width || '',
+        height: submission.height || '',
+        printWidth: submission.print_width || submission.raw_payload?.printWidth || '',
+        printHeight: submission.print_height || submission.raw_payload?.printHeight || '',
+        printRegion: submission.print_region || submission.raw_payload?.printRegion || '',
+        printSize: submission.print_size || submission.raw_payload?.printSize || '',
+        folded: submission.folded || submission.raw_payload?.folded || '',
+        digitalWidth: submission.digital_width || submission.raw_payload?.digitalWidth || '',
+        digitalHeight: submission.digital_height || submission.raw_payload?.digitalHeight || '',
+        cropMarks: submission.crop_marks || '',
+        bleedMarks: submission.bleed_marks || '',
+        fileSizeLimit: submission.file_size_limit || '',
+        fileSizeLimitMb: submission.file_size_limit_mb || '',
+        fileDeliveryNotes: submission.file_delivery_notes || '',
+        orientation: submission.orientation || '',
+        menuType: submission.menu_type || 'standard',
+        servicePeriod: getSubmissionServicePeriod(submission),
+        templateType: submission.template_type || 'food',
+        hotelName: submission.hotel_name || '',
+        cityCountry: submission.city_country || '',
+        assetType: submission.asset_type || '',
+        submitterName: submission.submitter_name || '',
+        submitterEmail: submission.submitter_email || '',
+        dateNeeded: submission.date_needed || '',
+        turnaroundDays: submission.turnaround_days || submission.raw_payload?.turnaroundDays || '',
+        updatedAt: submission.updated_at || submission.created_at,
+        reviewedAt: submission.reviewed_at || submission.approved_text_extracted_at || submission.updated_at || submission.created_at || '',
+        approvedMenuContent: submission.approved_menu_content || submission.menu_content || '',
+        allergens: submission.allergens || '',
+        status: submission.status,
+        isLatestForPropertyService: latestForPropertyService ? latestPublicId === publicId : null,
+        latestForPropertyService: latestForPropertyService ? {
+            id: latestPublicId,
+            projectName: latestForPropertyService.project_name || '',
+            property: latestForPropertyService.property || '',
+            servicePeriod: getSubmissionServicePeriod(latestForPropertyService),
+            reviewedAt: latestForPropertyService.reviewed_at || latestForPropertyService.approved_text_extracted_at || latestForPropertyService.updated_at || latestForPropertyService.created_at || '',
+            updatedAt: latestForPropertyService.updated_at || latestForPropertyService.created_at || '',
+            filename: latestForPropertyService.filename || '',
+        } : null,
+    };
+}
+
+async function findLatestApprovedByPropertyService(property: string, servicePeriod: string): Promise<any | null> {
+    const propertyKey = normalizeApprovedLookupValue(property);
+    const serviceKey = normalizeApprovedLookupValue(servicePeriod);
+    if (!propertyKey || !serviceKey) {
+        return null;
+    }
+
+    let candidates: any[] = [];
+    if (isSupabaseConfigured()) {
+        const supabase = getSupabaseClient();
+        const { data, error } = await supabase
+            .from(SUBMISSIONS_TABLE)
+            .select('*')
+            .in('status', APPROVED_SUBMISSION_STATUSES)
+            .not('final_path', 'is', null)
+            .ilike('property', property)
+            .limit(200);
+
+        if (error) {
+            throw new Error(error.message);
+        }
+        candidates = data || [];
+    } else {
+        const submissions = JSON.parse(await fs.readFile(SUBMISSIONS_DB, 'utf-8'));
+        candidates = Object.values(submissions) as any[];
+    }
+
+    return candidates
+        .filter((submission) => APPROVED_SUBMISSION_STATUSES.includes(`${submission.status || ''}`.trim().toLowerCase()))
+        .filter((submission) => !!submission.final_path)
+        .filter(isApprovedBaselineSource)
+        .filter((submission) => normalizeApprovedLookupValue(submission.property) === propertyKey)
+        .filter((submission) => normalizeApprovedLookupValue(getSubmissionServicePeriod(submission)) === serviceKey)
+        .sort((a, b) => getApprovedTimestamp(b) - getApprovedTimestamp(a))[0] || null;
+}
+
+async function findLatestApprovedByProjectProperty(projectName: string, property: string): Promise<any | null> {
+    const projectKey = normalizeApprovedLookupValue(projectName);
+    const propertyKey = normalizeApprovedLookupValue(property);
+    if (!projectKey || !propertyKey) {
+        return null;
+    }
+
+    let candidates: any[] = [];
+    if (isSupabaseConfigured()) {
+        const supabase = getSupabaseClient();
+        const { data, error } = await supabase
+            .from(SUBMISSIONS_TABLE)
+            .select('*')
+            .in('status', APPROVED_SUBMISSION_STATUSES)
+            .not('final_path', 'is', null)
+            .ilike('property', property)
+            .limit(200);
+
+        if (error) {
+            throw new Error(error.message);
+        }
+        candidates = data || [];
+    } else {
+        const submissions = JSON.parse(await fs.readFile(SUBMISSIONS_DB, 'utf-8'));
+        candidates = Object.values(submissions) as any[];
+    }
+
+    return candidates
+        .filter((submission) => APPROVED_SUBMISSION_STATUSES.includes(`${submission.status || ''}`.trim().toLowerCase()))
+        .filter((submission) => !!submission.final_path)
+        .filter(isApprovedBaselineSource)
+        .filter((submission) => normalizeApprovedLookupValue(submission.property) === propertyKey)
+        .filter((submission) => normalizeApprovedLookupValue(submission.project_name) === projectKey)
+        .sort((a, b) => getApprovedTimestamp(b) - getApprovedTimestamp(a))[0] || null;
+}
+
 // Ensure DB directory and files exist
 async function initDb() {
     try {
@@ -780,7 +943,7 @@ app.get('/submissions/approved-list', async (req, res) => {
     try {
         const q = ((req.query.q as string) || '').trim().toLowerCase();
         const limit = Math.min(parseInt((req.query.limit as string) || '100', 10), 200);
-        const approvedStatuses = new Set(['approved', 'approved_override']);
+        const approvedStatuses = new Set(APPROVED_SUBMISSION_STATUSES);
         let sourceRows: any[] = [];
         let approvedAssetRows: any[] = [];
 
@@ -804,7 +967,7 @@ app.get('/submissions/approved-list', async (req, res) => {
             if (error) {
                 throw new Error(error.message);
             }
-            sourceRows = (data || []).filter((row: any) => !row.source || row.source === 'form');
+            sourceRows = (data || []).filter(isApprovedBaselineSource);
 
             const submissionIds = sourceRows
                 .map((row: any) => `${row.id || row.legacy_id || ''}`.trim())
@@ -828,7 +991,7 @@ app.get('/submissions/approved-list', async (req, res) => {
             sourceRows = (Object.values(submissions) as any[])
                 .filter((s) => approvedStatuses.has((s.status || '').toLowerCase()))
                 .filter((s) => !!s.final_path)
-                .filter((s) => !s.source || s.source === 'form')
+                .filter(isApprovedBaselineSource)
                 .filter((s) => {
                     if (!q) return true;
                     const haystack = [
@@ -893,6 +1056,8 @@ app.get('/submissions/search', async (req, res) => {
     try {
         const q = ((req.query.q as string) || '').trim().toLowerCase();
         const limit = Math.min(parseInt((req.query.limit as string) || '20', 10), 50);
+        const preferredProperty = `${req.query.property || ''}`.trim();
+        const preferredServicePeriod = `${req.query.servicePeriod || ''}`.trim();
         if (q.length < 2) {
             return res.json([]);
         }
@@ -904,8 +1069,10 @@ app.get('/submissions/search', async (req, res) => {
             const { data, error } = await supabase
                 .from(SUBMISSIONS_TABLE)
                 .select('*')
-                .eq('status', 'approved')
-                .or(`project_name.ilike.${like},property.ilike.${like},submitter_name.ilike.${like},submitter_email.ilike.${like},hotel_name.ilike.${like},city_country.ilike.${like}`)
+                .in('status', APPROVED_SUBMISSION_STATUSES)
+                .not('final_path', 'is', null)
+                .or(`project_name.ilike.${like},property.ilike.${like},service_period.ilike.${like},filename.ilike.${like},submitter_name.ilike.${like},submitter_email.ilike.${like},hotel_name.ilike.${like},city_country.ilike.${like}`)
+                .order('reviewed_at', { ascending: false })
                 .order('updated_at', { ascending: false })
                 .limit(limit);
             if (error) {
@@ -914,13 +1081,16 @@ app.get('/submissions/search', async (req, res) => {
             sourceRows = data || [];
         } else {
             const submissions = JSON.parse(await fs.readFile(SUBMISSIONS_DB, 'utf-8'));
-            const approvedStatuses = new Set(['approved']);
+            const approvedStatuses = new Set(APPROVED_SUBMISSION_STATUSES);
             sourceRows = (Object.values(submissions) as any[])
                 .filter((s) => approvedStatuses.has((s.status || '').toLowerCase()))
+                .filter((s) => !!s.final_path)
                 .filter((s) => {
                     const haystack = [
                         s.project_name,
                         s.property,
+                        s.service_period,
+                        s.filename,
                         s.submitter_name,
                         s.submitter_email,
                         s.hotel_name,
@@ -931,43 +1101,36 @@ app.get('/submissions/search', async (req, res) => {
                         .toLowerCase();
                     return haystack.includes(q);
                 })
-                .sort((a, b) => new Date(b.updated_at || b.created_at).getTime() - new Date(a.updated_at || a.created_at).getTime())
+                .sort((a, b) => getApprovedTimestamp(b) - getApprovedTimestamp(a))
                 .slice(0, limit);
         }
 
-        const results = sourceRows.map((s) => ({
-            id: s.legacy_id || s.id,
-            projectName: s.project_name || '',
-            property: s.property || '',
-            width: s.width || '',
-            height: s.height || '',
-            printWidth: s.print_width || s.raw_payload?.printWidth || '',
-            printHeight: s.print_height || s.raw_payload?.printHeight || '',
-            printRegion: s.print_region || s.raw_payload?.printRegion || '',
-            printSize: s.print_size || s.raw_payload?.printSize || '',
-            folded: s.folded || s.raw_payload?.folded || '',
-            digitalWidth: s.digital_width || s.raw_payload?.digitalWidth || '',
-            digitalHeight: s.digital_height || s.raw_payload?.digitalHeight || '',
-            cropMarks: s.crop_marks || '',
-            bleedMarks: s.bleed_marks || '',
-            fileSizeLimit: s.file_size_limit || '',
-            fileSizeLimitMb: s.file_size_limit_mb || '',
-            fileDeliveryNotes: s.file_delivery_notes || '',
-            orientation: s.orientation || '',
-            menuType: s.menu_type || 'standard',
-            servicePeriod: s.service_period || s.raw_payload?.servicePeriod || '',
-            templateType: s.template_type || 'food',
-            hotelName: s.hotel_name || '',
-            cityCountry: s.city_country || '',
-            assetType: s.asset_type || '',
-            submitterName: s.submitter_name || '',
-            submitterEmail: s.submitter_email || '',
-            dateNeeded: s.date_needed || '',
-            turnaroundDays: s.turnaround_days || s.raw_payload?.turnaroundDays || '',
-            updatedAt: s.updated_at || s.created_at,
-            approvedMenuContent: s.approved_menu_content || s.menu_content || '',
-            allergens: s.allergens || '',
-            status: s.status,
+        const preferredPropertyKey = normalizeApprovedLookupValue(preferredProperty);
+        const preferredServiceKey = normalizeApprovedLookupValue(preferredServicePeriod);
+        sourceRows = sourceRows.sort((a, b) => {
+            const aExact = preferredPropertyKey && preferredServiceKey &&
+                normalizeApprovedLookupValue(a.property) === preferredPropertyKey &&
+                normalizeApprovedLookupValue(getSubmissionServicePeriod(a)) === preferredServiceKey;
+            const bExact = preferredPropertyKey && preferredServiceKey &&
+                normalizeApprovedLookupValue(b.property) === preferredPropertyKey &&
+                normalizeApprovedLookupValue(getSubmissionServicePeriod(b)) === preferredServiceKey;
+            if (aExact !== bExact) {
+                return aExact ? -1 : 1;
+            }
+            return getApprovedTimestamp(b) - getApprovedTimestamp(a);
+        });
+
+        const latestCache = new Map<string, any | null>();
+        const results = await Promise.all(sourceRows.map(async (s) => {
+            const property = `${s.property || ''}`.trim();
+            const servicePeriod = getSubmissionServicePeriod(s);
+            const cacheKey = `${normalizeApprovedLookupValue(property)}|${normalizeApprovedLookupValue(servicePeriod)}`;
+            let latest = latestCache.get(cacheKey);
+            if (!latestCache.has(cacheKey)) {
+                latest = await findLatestApprovedByPropertyService(property, servicePeriod);
+                latestCache.set(cacheKey, latest);
+            }
+            return mapApprovedSubmissionForClient(s, latest);
         }));
 
         res.json(results);
@@ -1062,47 +1225,27 @@ app.get('/submissions/properties', async (_req, res) => {
     }
 });
 
-// Latest approved submission for a project/property pair.
+// Latest approved submission for a property/service pair. Falls back to the
+// legacy project/property lookup when servicePeriod is not provided.
 // IMPORTANT: Must come BEFORE /submissions/:id
 app.get('/submissions/latest-approved', async (req, res) => {
     try {
-        const projectName = ((req.query.projectName as string) || '').trim().toLowerCase();
-        const property = ((req.query.property as string) || '').trim().toLowerCase();
-        if (!projectName || !property) {
-            return res.status(400).json({ error: 'projectName and property are required' });
+        const projectName = ((req.query.projectName as string) || '').trim();
+        const property = ((req.query.property as string) || '').trim();
+        const servicePeriod = ((req.query.servicePeriod as string) || '').trim();
+        if (!property || (!servicePeriod && !projectName)) {
+            return res.status(400).json({ error: 'property and servicePeriod are required' });
         }
 
-        let match: any = null;
-        if (isSupabaseConfigured()) {
-            const supabase = getSupabaseClient();
-            const { data, error } = await supabase
-                .from(SUBMISSIONS_TABLE)
-                .select('*')
-                .eq('status', 'approved')
-                .ilike('project_name', projectName)
-                .ilike('property', property)
-                .order('updated_at', { ascending: false })
-                .limit(1);
-            if (error) {
-                throw new Error(error.message);
-            }
-            match = (data || [])[0] || null;
-        } else {
-            const submissions = JSON.parse(await fs.readFile(SUBMISSIONS_DB, 'utf-8'));
-            match = (Object.values(submissions) as any[])
-                .filter((s) => (s.status || '').toLowerCase() === 'approved')
-                .filter((s) =>
-                    (s.project_name || '').trim().toLowerCase() === projectName &&
-                    (s.property || '').trim().toLowerCase() === property
-                )
-                .sort((a, b) => new Date(b.updated_at || b.created_at).getTime() - new Date(a.updated_at || a.created_at).getTime())[0];
-        }
+        const match = servicePeriod
+            ? await findLatestApprovedByPropertyService(property, servicePeriod)
+            : await findLatestApprovedByProjectProperty(projectName, property);
 
         if (!match) {
             return res.status(404).json({ error: 'No approved submission found' });
         }
 
-        res.json(match);
+        res.json(mapApprovedSubmissionForClient(match, match));
     } catch (error) {
         console.error('Error finding latest approved submission:', error);
         res.status(500).json({ error: 'Failed to find approved submission' });

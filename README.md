@@ -36,7 +36,7 @@ Menu Manager is an AI-powered service designed to automate the review process fo
 - Learning/training dashboards stay off the public landing page; they are reachable by direct URL like other reviewer tools (no separate PIN step)
 - Review highlights and persistent redlines surface punctuation/separator edits such as hyphen, comma, slash, and pipe changes
 - New-menu AI review preserves pasted inline formatting such as bold dish names by projecting source HTML styles onto the corrected text with shared `diff-core` token alignment before applying green AI-change highlights.
-- Modification previews preserve bold/italic inline styling from uploaded prior approved DOCX baselines, including after live edits, by using the shared `diff-core` rich text range mapper.
+- Modification previews preserve bold/italic inline styling from uploaded prior approved DOCX baselines, including DOCX non-breaking-space text and live edits, by using the shared `diff-core` rich text range mapper.
 - Submission normalization keeps exactly one managed allergen legend, while preserving chef-supplied legal/price/footer copy such as AED service-charge text and venue-specific foodborne warnings
 - Modification previews exclude managed footer boilerplate from design-facing redlines while still preserving custom restaurant footer notes/raw warnings for generated DOCX output
 - DOCX baseline uploads now prefill the allergen key field from either pipe-delimited legends or parenthesized legends such as `(C) CELERY (D) DAIRY`
@@ -54,12 +54,13 @@ Menu Manager is an AI-powered service designed to automate the review process fo
 - Approved dishes are extracted automatically when the ClickUp-reviewed DOCX is marked approved
 - ClickUp tasks now include a browser approval link that opens a side-by-side approval editor: clean text editing on the left, live redline/highlight preview on the right, and final DOCX generation on submit
 - Approved menus now appear in a dedicated dashboard so operations can download the finalized Word document only after Isabella approves it
+- Approved dishes now appear in a dashboard at `/approved-dishes`, grouped by derived brand and subdivided by canonical property/location; brand tables include per-column filtering and sortable headers
 
 ### Planned (Phase 2)
 - **Web Form Submission** - Chefs upload menus and select reviewers via web form
 - **Multi-Level Approval** - Configurable approval chains with email notifications
 - **ClickUp Integration** - Automatic task creation for reviewers and final handoff
-- **Approved Dishes Database** - Searchable database of all approved dishes
+- **Approved Dishes Database** - Expanded editing and maintenance tools for extracted approved dishes
 
 ## Project Architecture
 
@@ -111,8 +112,8 @@ Current ClickUp BAU status handoff:
 Browser approval editor prototype:
 - ClickUp tasks now include an approval link to `/approval/:submissionId`
 - When the dashboard form is submitted from `localhost` outside production, ClickUp task creation is skipped, the browser automatically downloads the generated original DOCX, and the success alert shows an `Open approval editor` link for that same submission
-- Isabella can edit approved text in a left-side browser editor while a right-side panel shows the live tracked-change preview with preserved imported redlines/highlights
-- For submitted DOCX files that already contain redlines, the left editor uses the clean accepted text with deleted runs removed, while the preview keeps the imported deletion/insertion markup visible.
+- Isabella can edit approved text in a left-side rich browser editor while a right-side panel shows the live tracked-change preview with preserved imported redlines/highlights
+- For submitted DOCX files that already contain redlines, the left editor uses the clean accepted text with deleted runs removed, accepted inserted runs unwrapped, and DOCX inline formatting such as bold dish names preserved; the preview keeps the imported deletion/insertion markup visible.
 - The browser approval preview and the backend differ service use shared `diff-core` tokenization/LCS helpers so punctuation, separator, and word alignment rules are reused instead of duplicated per page/service.
 - The live approval preview keeps adjacent imported deletion/insertion pairs separated after new edits, so corrections like `jalapeno` → `jalapeño` or `neapolitan` → `Neapolitan` do not get re-styled as one combined deleted token when another word is removed.
 - Uploaded unapproved/redlined DOCX modifications now receive a full AI check on the accepted visible menu text, so pre-existing tracked edits such as misspelled inserted words are reviewed even if the chef makes no additional browser edits.
@@ -120,9 +121,11 @@ Browser approval editor prototype:
 - Modification flows keep footer/legal copy out of the persistent redline preview, but submit it as structured preserved footer text so restaurant-specific notes and raw-food warnings are retained instead of replaced by the default notice.
 - Form submission now persists uploaded approved-baseline modifications before triggering the full Tier 2 AI review asynchronously, reducing gateway timeouts on slow AI review calls; non-JSON proxy errors also show a readable submit error instead of raw HTML parsing text.
 - The modification `Find in Database` picker searches approved baselines only; submitted ClickUp tasks appear there after the approved DOCX is processed, and DB/search failures now show as search failures instead of empty results.
+- The modification `Find in Database` picker flags whether each approved baseline is the latest for its property/service period, prioritizes exact property/service matches when those fields are selected, and warns before review/submission when a newer or mismatched baseline exists.
 - The approval editor and `Download Original DOCX` resolve the **submitted** generated DOCX (`original_path`) first so on-screen text matches the file from the form; the modification baseline DOCX is used only when that path is missing, then `final_path`, then saved text/HTML fallback
 - On modification flows, baseline extraction mode (`uploaded_baseline` vs `uploaded_unapproved`) still applies when the baseline path is the one that loads
-- The approval editor preserves leading indentation from extracted DOCX text so alignment-sensitive sections such as allergen keys do not get flattened before review, trims leading empty HTML paragraphs in the preview so it lines up with the textarea before the first edit, and keeps bold/italic (and other inline markup from the DOCX) in the live redline preview after you type by cloning ranges from the baseline HTML
+- The approval editor preserves leading indentation from extracted DOCX text so alignment-sensitive sections such as allergen keys do not get flattened before review, trims leading empty HTML paragraphs in the preview so it lines up with the editor before the first edit, keeps bold/italic (and other inline markup from the DOCX) in both the left rich editor and the live redline preview after you type by mapping ranges from the baseline HTML, and strips temporary green AI-review highlights from saved fallback HTML while preserving real imported redlines.
+- If a reviewer edits accepted text back to the original deleted side of an imported redline (for example `24 → 25` changed back to `24`), the approval preview resolves that imported redline to plain text instead of stacking stale deletion/insertion markup.
 - Submitting that page uploads the approved DOCX back to the linked ClickUp task and only then leaves/advances the task at `To Do`, matching Isabella's manual handoff flow
 - The dashboard now surfaces a warning when the ClickUp attachment upload or post-approval status move fails, instead of silently finalizing only on the local side
 - Once a menu reaches approved state, the final DOCX is downloadable from `/approved-menus` for Carlos or other operations users
@@ -163,9 +166,46 @@ npm run test:approved-dishes -- --legacy-id form-1771781530178 --write
 Notes:
 - `--id <uuid>` also works if you want to target the Supabase submission UUID directly.
 - `--approved-only` forces the test to use only `approved_menu_content`; without it the script falls back to `menu_content`, matching the DB extraction endpoint behavior.
+- The dashboard route `/approved-dishes` lists brands that have approved dishes. Brand pages such as `/approved-dishes/toro-toro` group rows by location and expose search plus location filters.
 - The preview now shows `dish_name` and `description` separately when the menu uses inline rows like `Guacamole - avocado / lime / cilantro 12` or comma-delimited rows like `Punta Mita, prawns, tomato, onion C,F 95`.
 - Price-bearing dish rows are not treated as category headers even when they start with words like `Chicken`, and extraction recognizes extended allergen codes such as `SS`, `SL`, `SY`, `PN`, and `TN`.
+- Menu-title section headers such as `Ladies Night Menu` populate `menu_category` until a more specific section header appears.
+- Wrapped dish rows are joined before parsing so continuation ingredients such as `gochujang` stay in the description instead of becoming standalone dish names; service hours, weekday labels, per-guest/package labels, course labels, event instructions, attribution lines, short beverage headings such as `RED`/`GIN`, grill/service labels, oatmeal topping continuations, and modifier rows such as `add chicken` are skipped as non-dish metadata. Beverage sections can reuse bare price-only rows such as `18` for the following drink rows. When a terse dish name is enriched from its section, the inferred word is added in parentheses, e.g. `Kale (Salad)`.
+- ClickUp approval finalization, DB extract/backfill routes, dashboard design approval, local approved-dish tests, and ClickUp history imports all use the shared approved-dish extractor and pass service period when available.
 - `--write` inserts rows into `approved_dishes` for that submission, so use a test submission when possible.
+
+## ClickUp Completed-Menu Import Dry Run
+
+Run completed-task import discovery inside Docker so it uses the same Node dependencies and DOCX redliner venv as the app:
+
+```bash
+./dev-up.sh --rebuild -d  # required after supabase-client/shared-lib changes
+docker compose -f docker-compose.dev.yml exec -T dashboard npm run clickup:completed-dry-run -- --status complete
+```
+
+The dry run writes:
+- `tmp/clickup-history-import/completed-dry-run.json`
+- `tmp/clickup-history-import/completed-dry-run.csv`
+
+It downloads each newest DOCX attachment, extracts clean menu text, previews dish extraction, infers property/service period, and marks which task is newest for each property + service period. Review rows with warnings before running any write-mode importer. Historical bare `dLeña` ClickUp tasks are treated as inactive Washington, D.C. work unless the source explicitly says Houston, so the current `dLeña - Houston` baseline stays clean. If the ClickUp task title and DOCX filename imply conflicting service periods, such as a `Dessert Menu` task with a `Dinner Menu` attachment, the row is warned with `service_task_filename_conflict` and excluded from clean import.
+
+Before treating a bulk import as final, spot-check the generated report and Supabase rows for false-positive dish names, especially wrapped lines, service-hour text, package/course labels, modifiers, and beverage list entries that may be valid names in one menu but metadata in another.
+
+After importing a batch, run the approved-dish audit to find likely extraction misses in Supabase:
+
+```bash
+docker compose -f docker-compose.dev.yml exec -T dashboard npm run clickup:audit-approved-dishes
+```
+
+The audit is read-only. It writes `tmp/clickup-history-import/dish-extraction-audit.json` and `.csv`, flagging rows such as missing prices, prices left in `dish_name`, service hours, package/course labels, instruction text, category headings stored as dishes, one-word wrapped ingredients, leftover allergen clusters in descriptions, and duplicate dish/category/description rows within one imported submission. Missing-price rows include `price_audit_class`, `source_line`, `previous_line`, and `next_line` columns so reviewers can separate recoverable parser misses from package/set-menu items that do not have item-level prices. Treat a zero-row audit as the gate before moving from spot checks to broader ClickUp history imports. Prices are stored as normalized values without currency symbols; enhancement section prices are stored as the numeric enhancement amount, while dishes without item-level prices inside prix fixe, event, brunch/buffet, holiday, restaurant-week, half-board, or per-person set menus are marked `prix fixe`. The extractor also handles compact `PP` prices, single trailing allergen codes after prices, cup/bowl pricing, high comma-separated wine prices, all-caps two-line table-style dish rows, section price-only beverage groups including bare numeric prices in beverage sections, price-bearing rows followed by separate two-line dishes, and common DOCX instruction/footer rows.
+
+To import only rows with no warnings, run:
+
+```bash
+docker compose -f docker-compose.dev.yml exec -T dashboard npm run clickup:completed-dry-run -- --status complete --apply --only-clean
+```
+
+Apply mode upserts approved submissions by ClickUp task id, replaces that submission's existing approved dish rows, and leaves all warning rows in the JSON/CSV review report. Imported `clickup_history_import` submissions are included in approved-baseline search and latest property/service lookup.
 
 ## Getting Started
 

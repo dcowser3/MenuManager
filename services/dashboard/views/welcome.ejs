@@ -115,10 +115,16 @@
 
         .cards-container {
             display: grid;
-            grid-template-columns: repeat(3, minmax(0, 1fr));
+            grid-template-columns: repeat(4, minmax(0, 1fr));
             gap: 2rem;
-            max-width: 1160px;
+            max-width: 1280px;
             width: 100%;
+        }
+
+        @media (max-width: 1180px) {
+            .cards-container {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
         }
 
         .option-card {
@@ -205,13 +211,6 @@
             border-color: var(--color-primary);
         }
 
-        @media (max-width: 960px) {
-            .cards-container {
-                grid-template-columns: 1fr 1fr;
-                gap: 1.5rem;
-            }
-        }
-
         @media (max-width: 640px) {
             .cards-container {
                 grid-template-columns: 1fr;
@@ -262,6 +261,16 @@
                 <h2>Approved Menus</h2>
                 <p>Open the approved menu dashboard to download final Word documents after Isabella has signed them off.</p>
                 <span class="option-label">Browse Final Files</span>
+            </a>
+
+            <a href="/approved-dishes" class="option-card">
+                <svg class="option-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4.5 6.75h15M4.5 12h15M4.5 17.25h15" />
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8.25 4.5v15M15.75 4.5v15" />
+                </svg>
+                <h2>Approved Dishes</h2>
+                <p>View approved dishes by brand and property from the dish database.</p>
+                <span class="option-label">Browse Dishes</span>
             </a>
         </div>
     </div>

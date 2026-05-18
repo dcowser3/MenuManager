@@ -34,6 +34,7 @@ describe('approval transition builders', () => {
             fileName: 'summer.docx',
             status: 'needs_correction',
             requiredApprovals: [{ role: 'GM', approved: true }],
+            servicePeriod: 'Dinner',
             now,
         })).toEqual({
             id: 'design-123',
@@ -44,6 +45,7 @@ describe('approval transition builders', () => {
             property: 'Toro - Chicago',
             size: '8.5 x 11',
             orientation: 'Portrait',
+            service_period: 'Dinner',
             filename: 'summer.docx',
             status: 'needs_correction',
             created_at: '2026-05-05T12:30:00.000Z',

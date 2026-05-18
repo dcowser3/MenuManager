@@ -42,6 +42,18 @@ describe('dashboard property catalog fallback', () => {
         }));
     });
 
+    test('keeps dLena Washington DC enabled in the fallback catalog', () => {
+        const catalog = buildFallbackPropertyCatalog();
+
+        expect(catalog).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                name: 'dLeña - Washington, D.C.',
+                city_country: 'Washington, D.C.',
+                is_active: true,
+            }),
+        ]));
+    });
+
     test('normalizes sparse DB records with derived metadata', () => {
         expect(normalizePropertyCatalogRecord({ name: 'Zengo - Le Royal Meridien - Dubai' })).toEqual(expect.objectContaining({
             city_country: 'Dubai',

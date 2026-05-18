@@ -2,12 +2,14 @@
 
 Known failure modes when starting services locally and how to diagnose them. Everything here comes from real incidents — read it before spending an hour re-discovering the same problem.
 
-## Two Ways to Run Locally
+## Default: Docker
+
+Use Docker for local service startup, route/API/browser verification, and service-dependent debugging unless you are intentionally testing native startup. The dev stack keeps Python venv and `node_modules` inside a reproducible image, which avoids the OOM / corrupted-venv / broken-tsc-shim failure modes that waste time in native mode.
 
 | Mode | Entry point | When to use |
 |------|-------------|-------------|
-| **Docker (preferred)** | `./dev-up.sh` | Default. Containerized — Python venv and `node_modules` live inside a reproducible image, so the OOM / corrupted-venv / broken-tsc-shim failure modes below don't recur. Reset by rebuilding the image. |
-| **Native** | `./start-services.sh` | Lighter on memory and faster cold-start, but you own the dependency hygiene. Most of the failure modes below only apply here. |
+| **Docker (default)** | `./dev-up.sh` | Normal Codex/local workflow. Reset by rebuilding the image or nuking volumes. |
+| **Native (fallback)** | `./start-services.sh` | Only when deliberately testing host-machine startup or Docker Desktop is unavailable. You own dependency hygiene. |
 
 ### Docker workflow cheatsheet
 
@@ -200,6 +202,8 @@ That dry-run shows:
 - how many dishes the parser finds
 - the current `approved_dishes` count for that submission
 - whether inline `Dish Name - description` rows are being split correctly without turning the allergen legend or raw-food warning into fake dishes
+- whether ClickUp-style comma-delimited rows with leading words like `Chicken` remain dishes instead of category headers, including extended allergen codes like `SS`, `SL`, `SY`, `PN`, and `TN`
+- whether menu-title section headers such as `Ladies Night Menu` are captured as `menu_category` when they precede dish rows
 
 To verify the write path too:
 

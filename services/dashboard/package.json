@@ -7,7 +7,9 @@
     "build": "tsc && cp -r views dist/ && cp -r public dist/",
     "start": "npm run build && node dist/index.js",
     "dev": "ts-node index.ts",
-    "watch": "ts-node-dev --respawn --transpile-only --clear index.ts"
+    "watch": "ts-node-dev --respawn --transpile-only --clear index.ts",
+    "clickup:completed-dry-run": "node scripts/clickup-completed-import.js",
+    "clickup:audit-approved-dishes": "node scripts/audit-approved-dishes.js"
   },
   "dependencies": {
     "@menumanager/diff-core": "*",

@@ -31,6 +31,28 @@ type DesignApprovalWorkflowDeps = {
     isClientInputError: (error: any) => boolean;
 };
 
+function inferDesignApprovalServicePeriod(projectName: string, fileName: string): string {
+    const source = `${projectName || ''} ${fileName || ''}`.toLowerCase();
+    const patterns = [
+        { pattern: /\bbreakfast\b/, label: 'Breakfast' },
+        { pattern: /\bbrunch\b/, label: 'Brunch' },
+        { pattern: /\blunch\b/, label: 'Lunch' },
+        { pattern: /\bdinner\b/, label: 'Dinner' },
+        { pattern: /\bhappy\s+hour\b/, label: 'Happy Hour' },
+        { pattern: /\bbeverage|drink|cocktail|bar\b/, label: 'Beverage' },
+        { pattern: /\bwine\b/, label: 'Wine' },
+        { pattern: /\bdesserts?\b/, label: 'Dessert' },
+        { pattern: /\bkids?\b/, label: 'Kids' },
+        { pattern: /\bprix|set\s+menu|half\s+board\b/, label: 'Set Menu' },
+        { pattern: /\bnew\s*year|nye\b/, label: 'NYE' },
+        { pattern: /\bvalentine\b/, label: "Valentine's" },
+        { pattern: /\beaster\b/, label: 'Easter' },
+        { pattern: /\bevent\b/, label: 'Event' },
+    ];
+
+    return patterns.find((item) => item.pattern.test(source))?.label || '';
+}
+
 export function createDesignApprovalWorkflowHandlers(deps: DesignApprovalWorkflowDeps) {
     const compare = async (req: any, res: any) => {
         const files = req.files as { [fieldname: string]: Express.Multer.File[] };
@@ -124,6 +146,10 @@ export function createDesignApprovalWorkflowHandlers(deps: DesignApprovalWorkflo
             const isMatch = differences.length === 0;
 
             const projectDetails = docxData.project_details || {};
+            const servicePeriod = inferDesignApprovalServicePeriod(
+                projectDetails.project_name || '',
+                docxOriginalName || ''
+            );
             const submissionId = `design-${Date.now()}`;
             let dbSaved = false;
 
@@ -142,6 +168,7 @@ export function createDesignApprovalWorkflowHandlers(deps: DesignApprovalWorkflo
                         fileName: docxOriginalName || 'design-approval.docx',
                         status: isMatch ? 'approved' : 'needs_correction',
                         requiredApprovals,
+                        servicePeriod,
                     })
                 );
                 dbSaved = true;
@@ -163,7 +190,8 @@ export function createDesignApprovalWorkflowHandlers(deps: DesignApprovalWorkflo
                     submissionId,
                     docxText,
                     projectDetails.property || 'Unknown',
-                    '',
+                    docxPath,
+                    servicePeriod,
                 ).catch((err: any) => console.error('Background dish extraction failed (design approval):', err));
             }
 
