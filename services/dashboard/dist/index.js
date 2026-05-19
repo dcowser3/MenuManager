@@ -1881,6 +1881,7 @@ Note: Use ONLY these allergen codes when checking allergen compliance. Do not us
             finalPrompt = `${qaPrompt}\n\nIMPORTANT SCOPE FOR THIS REVIEW:\nYou are reviewing ONLY changed excerpts from a menu revision.\nDo NOT flag unchanged baseline content.\nReturn issues only for the changed excerpts provided.\nThe CORRECTED MENU section MUST contain exactly the same lines you received, in the same order, with high-confidence corrections applied to each line. Do not add, remove, merge, split, or reorder lines.`;
         }
         finalPrompt = `${finalPrompt}\n\nIMPORTANT FOOTER RULES:\n- Do NOT review or suggest changes for the allergen legend/footer boilerplate.\n- Do NOT review or suggest changes for the standard foodborne illness warning/footer boilerplate.\n- The canonical foodborne illness warning is: ${RAW_NOTICE_TEXT}\n- Those footer lines are system-managed outside this review scope.`;
+        finalPrompt = `${finalPrompt}\n\nIMPORTANT ADD-ON PRICE RULES:\n- For add-on or enhancement rows with options separated by pipes or slashes, treat a number immediately after an option as that option's price.\n- Do NOT flag an add-on option as missing a price when the option appears on the same row with a numeric price, such as \"add chorizo 5 | mushrooms V 4\".`;
         let qaResponse;
         try {
             qaResponse = await internalApi.post(`${AI_REVIEW_URL}/run-qa-check`, {
@@ -2289,10 +2290,15 @@ function findCorrectedLineForMenuItem(correctedMenu, menuItem) {
     const itemNorm = normalizeForSuggestionMatch(menuItem || '');
     if (!itemNorm)
         return null;
+    const itemVariants = new Set([itemNorm]);
+    const addOnMatch = itemNorm.match(/^(?:add|enhance|extra)\s+(.+)$/);
+    if (addOnMatch && addOnMatch[1]) {
+        itemVariants.add(addOnMatch[1].trim());
+    }
     const lines = (correctedMenu || '').split('\n').map(l => l.trim()).filter(Boolean);
     for (const line of lines) {
         const lineNorm = normalizeForSuggestionMatch(line);
-        if (lineNorm.includes(itemNorm)) {
+        if ([...itemVariants].some((variant) => variant && lineNorm.includes(variant))) {
             return line;
         }
     }

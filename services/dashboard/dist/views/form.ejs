@@ -5286,8 +5286,11 @@
             const projectedHtml = sourceHtml && redlinePreview.projectRichTextHtml
                 ? redlinePreview.projectRichTextHtml(sourceHtml, text)
                 : '';
-            if (projectedHtml && quill && quill.clipboard) {
-                quill.clipboard.dangerouslyPasteHTML(htmlLinesToParagraphs(projectedHtml));
+            const reviewedHtml = projectedHtml
+                ? redlinePreview.restoreLeadingBoldFromSource(sourceHtml, htmlLinesToParagraphs(projectedHtml))
+                : '';
+            if (reviewedHtml && quill && quill.clipboard) {
+                quill.clipboard.dangerouslyPasteHTML(reviewedHtml);
             } else {
                 quill.setText(text);
             }

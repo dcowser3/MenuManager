@@ -85,11 +85,19 @@ function parsePositiveInteger(value: string | undefined, fallback: number): numb
     return Math.floor(parsed);
 }
 
+function parseBooleanFlag(value: any): boolean {
+    return /^(1|true|yes|on)$/i.test(String(value || '').trim());
+}
+
 const BASIC_AI_CHECK_TIMEOUT_MS = parsePositiveInteger(
     process.env.BASIC_AI_CHECK_TIMEOUT_MS || process.env.AI_REVIEW_QA_TIMEOUT_MS,
     120000
 );
 const BASIC_AI_CHECK_JOB_TTL_MS = parsePositiveInteger(process.env.BASIC_AI_CHECK_JOB_TTL_MS, 15 * 60 * 1000);
+const BASIC_AI_CHECK_DEBUG_ENABLED = process.env.BASIC_AI_CHECK_DEBUG_ENABLED !== undefined
+    ? parseBooleanFlag(process.env.BASIC_AI_CHECK_DEBUG_ENABLED)
+    : process.env.NODE_ENV !== 'production';
+const BASIC_AI_CHECK_DEBUG_MAX_CHARS = parsePositiveInteger(process.env.BASIC_AI_CHECK_DEBUG_MAX_CHARS, 60000);
 
 type BasicCheckJob = {
     id: string;
@@ -102,6 +110,19 @@ type BasicCheckJob = {
 };
 
 const basicCheckJobs = new Map<string, BasicCheckJob>();
+
+function truncateDiagnosticText(value: any): string {
+    const text = typeof value === 'string' ? value : JSON.stringify(value ?? '', null, 2);
+    if (text.length <= BASIC_AI_CHECK_DEBUG_MAX_CHARS) return text;
+    return `${text.slice(0, BASIC_AI_CHECK_DEBUG_MAX_CHARS)}\n...[truncated ${text.length - BASIC_AI_CHECK_DEBUG_MAX_CHARS} chars]`;
+}
+
+function wantsBasicCheckDiagnostics(req: any): boolean {
+    if (!BASIC_AI_CHECK_DEBUG_ENABLED) return false;
+    return parseBooleanFlag(req.body?.debugBasicCheck)
+        || parseBooleanFlag(req.query?.debugBasicCheck)
+        || parseBooleanFlag(req.get?.('x-menumanager-debug-basic-check'));
+}
 
 function sanitizeBasicCheckFailure(errorDetails: ReturnType<typeof describeServiceError>): Record<string, any> {
     const status = errorDetails.status;
@@ -2107,6 +2128,7 @@ Note: Use ONLY these allergen codes when checking allergen compliance. Do not us
             finalPrompt = `${qaPrompt}\n\nIMPORTANT SCOPE FOR THIS REVIEW:\nYou are reviewing ONLY changed excerpts from a menu revision.\nDo NOT flag unchanged baseline content.\nReturn issues only for the changed excerpts provided.\nThe CORRECTED MENU section MUST contain exactly the same lines you received, in the same order, with high-confidence corrections applied to each line. Do not add, remove, merge, split, or reorder lines.`;
         }
         finalPrompt = `${finalPrompt}\n\nIMPORTANT FOOTER RULES:\n- Do NOT review or suggest changes for the allergen legend/footer boilerplate.\n- Do NOT review or suggest changes for the standard foodborne illness warning/footer boilerplate.\n- The canonical foodborne illness warning is: ${RAW_NOTICE_TEXT}\n- Those footer lines are system-managed outside this review scope.`;
+        finalPrompt = `${finalPrompt}\n\nIMPORTANT ADD-ON PRICE RULES:\n- For add-on or enhancement rows with options separated by pipes or slashes, treat a number immediately after an option as that option's price.\n- Do NOT flag an add-on option as missing a price when the option appears on the same row with a numeric price, such as \"add chorizo 5 | mushrooms V 4\".`;
 
         let qaResponse;
         try {
@@ -2583,11 +2605,16 @@ function looksLikePriceOnLine(line: string): boolean {
 function findCorrectedLineForMenuItem(correctedMenu: string, menuItem: string): string | null {
     const itemNorm = normalizeForSuggestionMatch(menuItem || '');
     if (!itemNorm) return null;
+    const itemVariants = new Set<string>([itemNorm]);
+    const addOnMatch = itemNorm.match(/^(?:add|enhance|extra)\s+(.+)$/);
+    if (addOnMatch && addOnMatch[1]) {
+        itemVariants.add(addOnMatch[1].trim());
+    }
 
     const lines = (correctedMenu || '').split('\n').map(l => l.trim()).filter(Boolean);
     for (const line of lines) {
         const lineNorm = normalizeForSuggestionMatch(line);
-        if (lineNorm.includes(itemNorm)) {
+        if ([...itemVariants].some((variant) => variant && lineNorm.includes(variant))) {
             return line;
         }
     }

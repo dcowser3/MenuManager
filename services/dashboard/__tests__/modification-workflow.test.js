@@ -753,6 +753,48 @@ describe('Dashboard Modification Workflow (local, mocked externals)', () => {
         expect(qaCall[2]).toEqual({ timeout: 120000 });
     });
 
+    test('basic-check suppresses missing-price false positive for priced add-on option rows', async () => {
+        mockedAxios.post = jest.fn(async (url, payload) => {
+            const urlStr = String(url);
+            if (urlStr.includes('/run-qa-check')) {
+                const echoText = (payload && typeof payload.text === 'string') ? payload.text : '';
+                return {
+                    data: {
+                        feedback: `=== CORRECTED MENU ===\n${echoText}\n=== END CORRECTED MENU ===\n=== SUGGESTIONS ===\n${JSON.stringify([
+                            {
+                                type: 'Missing Price',
+                                confidence: 'high',
+                                severity: 'critical',
+                                menuItem: 'add mushrooms',
+                                description: 'This entry lacks a price.',
+                                recommendation: "Insert the price for 'add mushrooms'.",
+                            },
+                        ])}\n=== END SUGGESTIONS ===`
+                    }
+                };
+            }
+            return { data: {} };
+        });
+
+        const payload = {
+            menuContent: [
+                'Queso Fundido, melted cheese, chili morita sauce, flour tortillas D,G,V 16',
+                'add chorizo 5 | mushrooms V 4',
+            ].join('\n'),
+            baselineMenuContent: '',
+            reviewMode: 'full',
+            allergens: '',
+            menuType: 'standard',
+        };
+
+        const response = await invokeJsonHandler(basicCheckHandler, payload);
+
+        expect(response.status).toBe(200);
+        expect(response.body.success).toBe(true);
+        expect(response.body.suggestions).toEqual([]);
+        expect(response.body.hasCriticalErrors).toBe(false);
+    });
+
     test('basic-check falls back to manual review when AI service call fails', async () => {
         mockedAxios.post = jest.fn(async (url) => {
             const urlStr = String(url);

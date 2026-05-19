@@ -196,6 +196,121 @@
             .replace(/\scontenteditable=(["']).*?\1/gi, '');
     }
 
+    function getBlockChildren(container) {
+        if (!container || !container.children) return [];
+        return Array.from(container.children).filter(function (child) {
+            return /^(p|div|li)$/i.test(child.tagName || '');
+        });
+    }
+
+    function normalizeInlineText(value) {
+        return String(value || '').replace(/\u00A0/g, ' ').replace(/\s+/g, ' ').trim();
+    }
+
+    function getLeadingBoldHint(block) {
+        const lineText = normalizeInlineText(block && block.textContent);
+        if (!lineText || !block.querySelectorAll) return null;
+
+        const boldNodes = Array.from(block.querySelectorAll('strong, b'));
+        for (const node of boldNodes) {
+            const boldText = normalizeInlineText(node.textContent);
+            if (boldText && lineText.startsWith(boldText)) {
+                return { lineText, boldText };
+            }
+        }
+
+        return null;
+    }
+
+    function wrapLeadingTextInStrong(element, charCount) {
+        if (!element || !global.document || charCount <= 0) return;
+        let remaining = charCount;
+
+        function visit(node) {
+            if (!node || remaining <= 0) return;
+
+            if (node.nodeType === 3) {
+                const text = node.nodeValue || '';
+                if (!text) return;
+                const take = Math.min(remaining, text.length);
+                const before = text.slice(0, take);
+                const after = text.slice(take);
+                const strong = global.document.createElement('strong');
+                strong.textContent = before;
+                const parent = node.parentNode;
+                if (!parent) return;
+                parent.insertBefore(strong, node);
+                if (after) {
+                    node.nodeValue = after;
+                } else {
+                    parent.removeChild(node);
+                }
+                remaining -= take;
+                return;
+            }
+
+            if (node.nodeType !== 1) return;
+            if (/^(strong|b)$/i.test(node.tagName || '')) {
+                remaining -= (node.textContent || '').length;
+                return;
+            }
+
+            Array.from(node.childNodes || []).forEach(visit);
+        }
+
+        Array.from(element.childNodes || []).forEach(visit);
+    }
+
+    function restoreLeadingBoldFromSource(sourceHtml, targetHtml) {
+        if (!sourceHtml || !targetHtml) {
+            return targetHtml || '';
+        }
+
+        if (!global.document || !global.document.createElement) {
+            const sourceBlocks = stripExistingAnnotationsForEditor(sourceHtml).match(/<p\b[^>]*>[\s\S]*?<\/p>/gi) || [];
+            let targetIndex = 0;
+            return String(targetHtml).replace(/<p\b([^>]*)>([\s\S]*?)<\/p>/gi, function (match, attrs, innerHtml) {
+                const sourceBlock = sourceBlocks[targetIndex++] || '';
+                const leadingBold = sourceBlock.match(/<p\b[^>]*>\s*<(?:strong|b)\b[^>]*>([\s\S]*?)<\/(?:strong|b)>/i);
+                if (!leadingBold) return match;
+                const sourceText = leadingBold[1].replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
+                const targetText = innerHtml.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
+                if (!sourceText || !targetText) return match;
+                const commaIndex = targetText.indexOf(',');
+                const boldLength = commaIndex >= 0 ? commaIndex + 1 : Math.min(sourceText.length, targetText.length);
+                const prefix = targetText.slice(0, boldLength);
+                if (!innerHtml.startsWith(prefix)) return match;
+                return `<p${attrs}><strong>${escapeHtml(prefix)}</strong>${innerHtml.slice(prefix.length)}</p>`;
+            });
+        }
+
+        const sourceContainer = global.document.createElement('div');
+        sourceContainer.innerHTML = stripExistingAnnotationsForEditor(sourceHtml);
+        const targetContainer = global.document.createElement('div');
+        targetContainer.innerHTML = targetHtml;
+
+        const sourceBlocks = getBlockChildren(sourceContainer);
+        const targetBlocks = getBlockChildren(targetContainer);
+        if (!sourceBlocks.length || !targetBlocks.length) return targetHtml;
+
+        targetBlocks.forEach(function (targetBlock, index) {
+            const hint = getLeadingBoldHint(sourceBlocks[index]);
+            if (!hint) return;
+            const targetText = normalizeInlineText(targetBlock.textContent);
+            if (!targetText) return;
+
+            const targetComma = targetText.indexOf(',');
+            const sourceComma = hint.lineText.indexOf(',');
+            const boldLength = sourceComma >= 0 && targetComma >= 0
+                ? targetComma + 1
+                : Math.min(hint.boldText.length, targetText.length);
+
+            wrapLeadingTextInStrong(targetBlock, boldLength);
+        });
+
+        return targetContainer.innerHTML;
+    }
+
     function buildEditableHtmlFromBaseline(sourceHtml, cleanText) {
         const text = String(cleanText || '');
         let inlineHtml = '';
@@ -1042,6 +1157,7 @@
         htmlLinesToParagraphs,
         stripTransientReviewHighlights,
         stripExistingAnnotationsForEditor,
+        restoreLeadingBoldFromSource,
         buildEditableHtmlFromBaseline,
         wrapWithExistingAnnotation,
         stripExistingDeletions,

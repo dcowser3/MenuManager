@@ -64,6 +64,22 @@ describe('redline preview helpers', () => {
         expect(editableHtml).toContain(', tomato, red onion VG 18');
     });
 
+    test('restores leading dish-name bold after AI text projection', () => {
+        const sourceHtml = [
+            '<p><strong>Mexican Chopped Salad,</strong> mixed greens, panela cheese D,N 16</p>',
+            '<p><strong>Tortilla Soup,</strong> shredded chicken, crema fresca espuma D,G 13</p>',
+        ].join('');
+        const projectedHtml = [
+            '<p>Mexican Chopped Salad, mixed greens, panela cheese D,N 16</p>',
+            '<p>Tortilla Soup, shredded chicken, crema fresca espuma D,G 13</p>',
+        ].join('');
+
+        const restored = redlinePreview.restoreLeadingBoldFromSource(sourceHtml, projectedHtml);
+
+        expect(restored).toContain('<strong>Mexican Chopped Salad,</strong> mixed greens');
+        expect(restored).toContain('<strong>Tortilla Soup,</strong> shredded chicken');
+    });
+
     test('strips transient AI review highlights without removing real redlines or bold', () => {
         const baselineHtml = [
             '<p><strong>Margaritas</strong></p>',

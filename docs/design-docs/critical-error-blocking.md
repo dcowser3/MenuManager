@@ -1,7 +1,7 @@
 # Critical Error Blocking
 
 **Status:** Complete (Feb 2026)
-**Last updated:** Mar 2026
+**Last updated:** May 2026
 
 The AI review enforces "hard stops" for critical issues that block submission.
 
@@ -40,6 +40,8 @@ Runs only for prix fixe menus. Programmatically scans the menu text (no AI invol
 
 ### Reconciliation (`reconcileCriticalSuggestionsAgainstCorrectedMenu`)
 Filters out critical suggestions where the AI's corrected menu already resolved the issue (e.g., AI fixed a missing price in the corrected text but also flagged it as critical). Only handles Missing Price and Incomplete Dish Name types.
+
+Missing-price reconciliation also handles add-on/enhancement rows. If the AI reports an item such as `add mushrooms`, the matcher checks both the full phrase and the option name without the leading add-on verb, so a same-line option like `add chorizo 5 | mushrooms V 4` counts as priced and does not block submission.
 
 ### Auto-Applied Objective Corrections (`applyHighConfidenceSuggestionsToMenu`)
 Before critical blocking is calculated, the dashboard applies exact objective spelling/grammar recommendations such as `Change 'avocad' to 'avocado'` to the corrected menu text when the target token is still present. If the corrected menu already contains the replacement, the stale suggestion is removed. High-confidence raw-item asterisk suggestions are also applied before allergen/price suffixes. This is intentionally defensive because the model can occasionally put an auto-correctable fix in SUGGESTIONS or mark it as `critical`; these items should appear as applied AI changes, not chef-blocking errors.
