@@ -4966,7 +4966,11 @@
                     }
                 });
                 showStep2(data);
-                if (data.reviewMode === 'changed_only') {
+                if (data.aiUnavailable) {
+                    showAlert(data.reviewSkippedReason || 'AI check is temporarily unavailable. You can still submit this menu for manual review.', 'warning', {
+                        persistent: true
+                    });
+                } else if (data.reviewMode === 'changed_only') {
                     showAlert(`AI reviewed changed content only (${data.changedLineCount || 0} changed lines).`, 'success');
                 } else {
                     showAlert('AI check complete! Review the suggestions below.', 'success');
@@ -5358,7 +5362,13 @@
 
                 // Re-render step 2 with new results
                 showStep2(data);
-                showAlert('AI check re-run complete! Review updated suggestions.', 'success');
+                if (data.aiUnavailable) {
+                    showAlert(data.reviewSkippedReason || 'AI check is temporarily unavailable. You can still submit this menu for manual review.', 'warning', {
+                        persistent: true
+                    });
+                } else {
+                    showAlert('AI check re-run complete! Review updated suggestions.', 'success');
+                }
 
             } catch (error) {
                 console.error('Error re-running check:', error);
@@ -5541,7 +5551,16 @@
                 results.suggestions = sortedSuggestions;
             }
 
-            if (hasChanges) {
+            if (results.aiUnavailable) {
+                suggestionsDisplay.innerHTML = `
+                    <div class="suggestion-item" style="border-left: 3px solid var(--color-warning); background: rgba(184, 134, 11, 0.08);">
+                        <div class="suggestion-type" style="color: var(--color-warning);">AI Check Unavailable</div>
+                        <div class="suggestion-detail">
+                            ${escapeHtml(results.reviewSkippedReason || 'No automated suggestions were applied. The menu will continue to human review.')}
+                        </div>
+                    </div>
+                `;
+            } else if (hasChanges) {
                 let html = `
                     <div class="suggestion-item" style="border-left: 3px solid var(--color-success); background: rgba(74, 124, 89, 0.05);">
                         <div class="suggestion-type" style="color: var(--color-success);">Auto-Corrected</div>

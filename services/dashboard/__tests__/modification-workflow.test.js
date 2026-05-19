@@ -749,6 +749,36 @@ describe('Dashboard Modification Workflow (local, mocked externals)', () => {
         expect(qaCall[1].text).toBe(payload.menuContent);
     });
 
+    test('basic-check falls back to manual review when AI service call fails', async () => {
+        mockedAxios.post = jest.fn(async (url) => {
+            const urlStr = String(url);
+            if (urlStr.includes('/run-qa-check')) {
+                const error = new Error('AI call failed');
+                error.response = { status: 503, statusText: 'Service Unavailable', data: { error: 'OpenAI unavailable' } };
+                throw error;
+            }
+            return { data: {} };
+        });
+
+        const payload = {
+            menuContent: 'Guacamole - $12\nCeviche - $15',
+            baselineMenuContent: '',
+            reviewMode: 'full',
+            allergens: '',
+            menuType: 'standard',
+        };
+
+        const response = await invokeJsonHandler(basicCheckHandler, payload);
+        expect(response.status).toBe(200);
+        expect(response.body.success).toBe(true);
+        expect(response.body.aiUnavailable).toBe(true);
+        expect(response.body.manualReviewRequired).toBe(true);
+        expect(response.body.correctedMenu).toBe(payload.menuContent);
+        expect(response.body.suggestions).toEqual([]);
+        expect(response.body.hasCriticalErrors).toBe(false);
+        expect(response.body.reviewSkippedReason).toContain('manual review');
+    });
+
     test('basic-check changed_only merges AI high-confidence corrections back into the full menu', async () => {
         mockedAxios.post = jest.fn(async (url, payload) => {
             const urlStr = String(url);

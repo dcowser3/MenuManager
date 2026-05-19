@@ -33,6 +33,7 @@ Menu Manager is an AI-powered service designed to automate the review process fo
 - Required service-period classification on submission (`breakfast`, `brunch`, `lunch`, `dinner`, `happy_hour`, `holiday`, `other`)
 - AI-powered two-tier review (general QA + detailed corrections)
 - Basic AI Check: if the model returns an objective spelling/grammar fix as an exact recommendation (e.g. `Change 'x' to 'y'`) but forgets to update the corrected menu text, or mislabels that fix as critical, the dashboard applies or recognizes the correction so green highlights and the persistent preview stay consistent without blocking submission. High-confidence raw-item asterisk suggestions are also applied before the line's allergen/price suffix.
+- If the Basic AI Check service call fails, the public form keeps the original menu unchanged, shows an AI-unavailable warning, and allows the submission to continue to manual review instead of blocking the chef on a red error.
 - Learning/training dashboards stay off the public landing page; they are reachable by direct URL like other reviewer tools (no separate PIN step)
 - Review highlights and persistent redlines surface punctuation/separator edits such as hyphen, comma, slash, and pipe changes
 - New-menu AI review preserves pasted inline formatting such as bold dish names by projecting source HTML styles onto the corrected text with shared `diff-core` token alignment before applying green AI-change highlights.

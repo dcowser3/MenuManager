@@ -2041,10 +2041,61 @@ Note: Use ONLY these allergen codes when checking allergen compliance. Do not us
         }
         finalPrompt = `${finalPrompt}\n\nIMPORTANT FOOTER RULES:\n- Do NOT review or suggest changes for the allergen legend/footer boilerplate.\n- Do NOT review or suggest changes for the standard foodborne illness warning/footer boilerplate.\n- The canonical foodborne illness warning is: ${RAW_NOTICE_TEXT}\n- Those footer lines are system-managed outside this review scope.`;
 
-        const qaResponse = await internalApi.post(`${AI_REVIEW_URL}/run-qa-check`, {
-            text: reviewFooterMetadata.body,
-            prompt: finalPrompt
-        });
+        let qaResponse;
+        try {
+            qaResponse = await internalApi.post(`${AI_REVIEW_URL}/run-qa-check`, {
+                text: reviewFooterMetadata.body,
+                prompt: finalPrompt
+            });
+        } catch (aiError: any) {
+            const errorDetails = describeServiceError(aiError);
+            const fallbackMessage = 'AI check is temporarily unavailable. No automated suggestions were applied, but you can still submit this menu for manual review.';
+            console.error('AI basic check unavailable:', errorDetails);
+
+            void logFormAttemptEvent({
+                attemptId,
+                eventType: 'basic_check_ai_unavailable',
+                route: '/api/form/basic-check',
+                statusCode: 200,
+                submitterEmail: req.body?.submitterEmail,
+                submitterName: req.body?.submitterName,
+                projectName: req.body?.projectName,
+                property: req.body?.property,
+                servicePeriod: req.body?.servicePeriod,
+                templateType: req.body?.templateType,
+                submissionMode: req.body?.submissionMode,
+                revisionSource: req.body?.revisionSource,
+                revisionBaselineFileName: req.body?.revisionBaselineFileName,
+                menuTextLength: menuContent.length,
+                menuHtmlLength: req.body?.menuHtmlLength,
+                persistentDiffHtmlLength: req.body?.persistentDiffHtmlLength,
+                baseMenuTextLength: baselineMenuContent.length,
+                correctedMenuTextLength: menuContent.length,
+                requestBodyLength: req.get('content-length'),
+                suggestionsCount: 0,
+                criticalSuggestionsCount: 0,
+                errorMessage: errorDetails.message || 'AI call failed',
+                details: {
+                    reviewMode: changedOnlyMode ? 'changed_only' : 'full',
+                    changedLineCount,
+                    aiError: errorDetails,
+                },
+            });
+
+            return res.json({
+                success: true,
+                originalMenu: menuContent,
+                correctedMenu: menuContent,
+                suggestions: [],
+                hasChanges: false,
+                hasCriticalErrors: false,
+                reviewMode: changedOnlyMode ? 'changed_only' : 'full',
+                changedLineCount,
+                aiUnavailable: true,
+                manualReviewRequired: true,
+                reviewSkippedReason: fallbackMessage,
+            });
+        }
 
         const feedback = qaResponse.data.feedback;
 
