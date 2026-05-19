@@ -612,25 +612,6 @@
             border-color: rgba(184, 134, 11, 0.28);
         }
 
-        .alert-growl-container {
-            position: fixed;
-            top: 1rem;
-            right: 1rem;
-            z-index: 2000;
-            display: flex;
-            flex-direction: column;
-            gap: 0.75rem;
-            width: min(420px, calc(100vw - 2rem));
-            pointer-events: none;
-        }
-
-        .alert-growl {
-            display: block;
-            margin-bottom: 0;
-            box-shadow: 0 12px 32px rgba(44, 44, 44, 0.16);
-            pointer-events: auto;
-        }
-
         /* Spinner */
         .spinner {
             border: 2px solid var(--color-border);
@@ -1705,7 +1686,7 @@
                             <input type="radio" name="modificationWorkflow" id="modSourceUnapproved" value="unapproved" onchange="onModificationSourceChange()">
                             <span class="modification-source-option-text">
                                 <span>I already made my menu edits on a doc</span>
-                                <span class="modification-source-option-subtext">Upload Approved DOCX (Preserve Redlines)</span>
+                                <span class="modification-source-option-subtext">Upload Unapproved DOCX (Preserve Redlines)</span>
                             </span>
                         </label>
                     </div>
@@ -1733,7 +1714,7 @@
                         <div id="modSourceUploadPanel" class="modification-source-panel">
                             <label for="baselineDocUpload">Upload prior approved DOCX</label>
                             <div class="baseline-upload-row">
-                                <input type="file" id="baselineDocUpload" accept=".docx">
+                                <input type="file" id="baselineDocUpload" accept=".docx" onchange="uploadBaselineDoc()">
                                 <button type="button" class="baseline-upload-btn" id="baselineUploadBtn" onclick="uploadBaselineDoc()">Extract Baseline</button>
                             </div>
                         </div>
@@ -1741,7 +1722,7 @@
                     <div id="modSourceUnapprovedPanel" class="modification-source-panel">
                         <label for="unapprovedDocUpload">Upload DOCX with your menu edits already made</label>
                         <div class="baseline-upload-row">
-                            <input type="file" id="unapprovedDocUpload" accept=".docx">
+                            <input type="file" id="unapprovedDocUpload" accept=".docx" onchange="uploadUnapprovedDoc()">
                             <button type="button" class="baseline-upload-btn" id="unapprovedUploadBtn" onclick="uploadUnapprovedDoc()">Extract with Redlines</button>
                         </div>
                     </div>
@@ -4443,15 +4424,7 @@
                 return;
             }
 
-            // 3. Could not resolve; leave blank and tell the user why.
-            const hintParts = [extracted.property, extracted.outlet, extracted.hotel, extracted.city].filter(Boolean);
-            const hintText = hintParts.length ? ` ("${hintParts.join(' / ')}")` : '';
-            if (matches.length > 1) {
-                const preview = matches.slice(0, 5).join(', ') + (matches.length > 5 ? `, +${matches.length - 5} more` : '');
-                showUploadNotice(`We found more than one possible property from your Word doc${hintText}: ${preview}. That's okay. Please select the right property from the dropdown.`);
-            } else if (hintParts.length) {
-                showUploadNotice(`We weren't able to fill in the property from your Word doc${hintText}. That's okay. Please select the property from the dropdown.`);
-            }
+            // Could not resolve confidently; leave the field for the chef to select.
         }
 
         function applyExtractedProjectToForm(extracted) {
@@ -4459,20 +4432,13 @@
             if (extracted.projectName) setFieldValueAndMark('projectName', extracted.projectName);
             applyExtractedProperty(extracted);
             if (extracted.orientation) {
-                const before = document.getElementById('orientation')?.value || '';
                 setSelectValueAndMark('orientation', extracted.orientation);
-                const after = document.getElementById('orientation')?.value || '';
-                if (after.toLowerCase() !== (extracted.orientation || '').toLowerCase() && before === after) {
-                    showAlert(`Extracted orientation "${extracted.orientation}" is not a valid option — please select one manually.`, 'warning');
-                }
             }
             if (extracted.dateNeeded) applyExtractedDateNeeded(extracted.dateNeeded);
             if (extracted.size) {
                 const parsed = window.formHelpers.parseExtractedSize(extracted.size);
                 if (parsed) {
                     applyExtractedSize(extracted.size);
-                } else {
-                    showAlert(`Extracted size "${extracted.size}" could not be parsed — please enter dimensions manually.`, 'warning');
                 }
             }
         }
@@ -4480,10 +4446,12 @@
         function applyExtractedDateNeeded(dateStr) {
             const dateInput = document.getElementById('dateNeeded');
             setDateNeededMinimumFromTurnaround(false);
-            const { value, warning } = window.formHelpers.clampExtractedDateNeeded(dateStr, dateInput.min);
+            const extractedDate = `${dateStr || ''}`.trim();
+            const { value } = window.formHelpers.clampExtractedDateNeeded(dateStr, dateInput.min);
             dateInput.value = value;
-            markFieldAsExtracted('dateNeeded');
-            if (warning) showUploadNotice(warning);
+            if (window.formHelpers.isValidDateInputValue(extractedDate) && (!dateInput.min || extractedDate >= dateInput.min)) {
+                markFieldAsExtracted('dateNeeded');
+            }
         }
 
         function applyExtractedSize(sizeText) {
@@ -4684,29 +4652,10 @@
             }
         });
 
-        function showUploadNotice(message) {
-            showAlert(message, 'warning', {
-                autoDismissMs: 7000,
-                growl: true,
-                temporary: true
-            });
-        }
-
-        function getGrowlAlertContainer() {
-            let container = document.getElementById('alertGrowlContainer');
-            if (!container) {
-                container = document.createElement('div');
-                container.id = 'alertGrowlContainer';
-                container.className = 'alert-growl-container';
-                document.body.appendChild(container);
-            }
-            return container;
-        }
-
         function showAlert(message, type = 'info', options = {}) {
-            const container = options.growl ? getGrowlAlertContainer() : document.getElementById('alertContainer');
+            const container = document.getElementById('alertContainer');
             const alert = document.createElement('div');
-            alert.className = `alert alert-${type} show${options.growl ? ' alert-growl' : ''}`;
+            alert.className = `alert alert-${type} show`;
             alert.style.position = 'relative';
 
             const msgSpan = document.createElement('span');
@@ -4757,10 +4706,11 @@
                 });
             }
 
-            container.appendChild(alert);
-
             const autoDismissMs = Number(options.autoDismissMs || 0) ||
                 (((type === 'success' || type === 'info') && !options.persistent) ? 5000 : 0);
+
+            container.appendChild(alert);
+
             if (autoDismissMs > 0 && !options.persistent) {
                 setTimeout(() => alert.remove(), autoDismissMs);
             }

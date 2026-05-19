@@ -1,6 +1,16 @@
 import crypto from 'crypto';
 
 export const INTERNAL_SERVICE_AUTH_HEADER = 'x-menumanager-internal-token';
+export const DEFAULT_INTERNAL_API_TIMEOUT_MS = 5000;
+
+function parsePositiveInteger(value: string | undefined, fallback: number): number {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+        return fallback;
+    }
+
+    return Math.floor(parsed);
+}
 
 function safeTimingEqual(a: string, b: string): boolean {
     try {
@@ -15,6 +25,10 @@ function safeTimingEqual(a: string, b: string): boolean {
 
 export function getInternalServiceToken(): string {
     return `${process.env.INTERNAL_API_TOKEN || ''}`.trim();
+}
+
+export function getInternalApiTimeoutMs(): number {
+    return parsePositiveInteger(process.env.INTERNAL_API_TIMEOUT_MS, DEFAULT_INTERNAL_API_TIMEOUT_MS);
 }
 
 export function buildInternalServiceHeaders(headers: Record<string, any> = {}): Record<string, any> {
@@ -36,17 +50,31 @@ export function withInternalServiceAuth<T extends { headers?: Record<string, any
     };
 }
 
+export function withInternalServiceDefaults<T extends { headers?: Record<string, any>; timeout?: number }>(config?: T): T {
+    const authenticatedConfig = withInternalServiceAuth(config);
+    if (authenticatedConfig.timeout !== undefined && authenticatedConfig.timeout !== null) {
+        return authenticatedConfig;
+    }
+
+    return {
+        ...authenticatedConfig,
+        timeout: getInternalApiTimeoutMs(),
+    };
+}
+
 export function attachInternalServiceAuth(client: any): any {
     if (!client?.interceptors?.request?.use) {
         return client;
     }
 
-    client.interceptors.request.use((config: any) => withInternalServiceAuth(config || {}));
+    client.interceptors.request.use((config: any) => withInternalServiceDefaults(config || {}));
     return client;
 }
 
 export function createInternalApiClient(axiosModule: any): any {
-    const client = typeof axiosModule?.create === 'function' ? axiosModule.create() : axiosModule;
+    const client = typeof axiosModule?.create === 'function'
+        ? axiosModule.create({ timeout: getInternalApiTimeoutMs() })
+        : axiosModule;
     return attachInternalServiceAuth(client);
 }
 

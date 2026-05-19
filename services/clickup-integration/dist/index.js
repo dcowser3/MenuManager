@@ -295,7 +295,7 @@ function modificationWorkflowLabel(revisionSource, revisionBaseSubmissionId) {
         case 'uploaded_baseline':
             return "Modification to Existing Menu - I'll make menu changes here (Upload Prior Approved DOCX)";
         case 'uploaded_unapproved':
-            return 'Modification to Existing Menu - I already made my menu edits on a doc (Upload Approved DOCX, Preserve Redlines)';
+            return 'Modification to Existing Menu - I already made my menu edits on a doc (Upload Unapproved DOCX, Preserve Redlines)';
         default:
             return `Modification to Existing Menu - ${effectiveSource}`;
     }

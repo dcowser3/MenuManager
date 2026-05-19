@@ -11,7 +11,7 @@ When a chef submits a menu, a ClickUp task is automatically created with the gen
 - New tasks are now created in the ClickUp status configured by `CLICKUP_INITIAL_REVIEW_STATUS` (default: `Pending Initial ISA Review`)
 - Task description now includes a direct browser approval link to `GET /approval/:submissionId`
 - Submission payload includes both `menuType` and `servicePeriod` so ClickUp context matches the original chef request
-- Modification submissions use human-readable ClickUp description labels that include the chosen workflow route, such as `I'll make menu changes here (Find in Database)`, `I'll make menu changes here (Upload Prior Approved DOCX)`, or `I already made my menu edits on a doc (Upload Approved DOCX, Preserve Redlines)`.
+- Modification submissions use human-readable ClickUp description labels that include the chosen workflow route, such as `I'll make menu changes here (Find in Database)`, `I'll make menu changes here (Upload Prior Approved DOCX)`, or `I already made my menu edits on a doc (Upload Unapproved DOCX, Preserve Redlines)`.
 - Uploads the generated DOCX as an attachment
 - Uploads optional menu image attachment when provided in the form (`menuImageUpload`)
 - Adds Isabella as the assignee when `CLICKUP_ASSIGNEE_ID` is configured

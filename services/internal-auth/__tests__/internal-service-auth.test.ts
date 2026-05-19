@@ -1,16 +1,21 @@
 import {
+    DEFAULT_INTERNAL_API_TIMEOUT_MS,
     INTERNAL_SERVICE_AUTH_HEADER,
     buildInternalServiceHeaders,
     createInternalApiClient,
+    getInternalApiTimeoutMs,
     requireInternalServiceAuth,
     withInternalServiceAuth,
+    withInternalServiceDefaults,
 } from '../src';
 
 describe('internal service auth helpers', () => {
     const originalToken = process.env.INTERNAL_API_TOKEN;
+    const originalTimeout = process.env.INTERNAL_API_TIMEOUT_MS;
 
     beforeEach(() => {
         process.env.INTERNAL_API_TOKEN = 'test-internal-token';
+        delete process.env.INTERNAL_API_TIMEOUT_MS;
     });
 
     afterEach(() => {
@@ -18,6 +23,11 @@ describe('internal service auth helpers', () => {
             delete process.env.INTERNAL_API_TOKEN;
         } else {
             process.env.INTERNAL_API_TOKEN = originalToken;
+        }
+        if (originalTimeout === undefined) {
+            delete process.env.INTERNAL_API_TIMEOUT_MS;
+        } else {
+            process.env.INTERNAL_API_TIMEOUT_MS = originalTimeout;
         }
         jest.restoreAllMocks();
     });
@@ -42,6 +52,37 @@ describe('internal service auth helpers', () => {
         });
     });
 
+    test('getInternalApiTimeoutMs uses a default and accepts valid overrides', () => {
+        expect(getInternalApiTimeoutMs()).toBe(DEFAULT_INTERNAL_API_TIMEOUT_MS);
+
+        process.env.INTERNAL_API_TIMEOUT_MS = '1250';
+        expect(getInternalApiTimeoutMs()).toBe(1250);
+
+        process.env.INTERNAL_API_TIMEOUT_MS = 'invalid';
+        expect(getInternalApiTimeoutMs()).toBe(DEFAULT_INTERNAL_API_TIMEOUT_MS);
+    });
+
+    test('withInternalServiceDefaults adds default timeout unless explicitly configured', () => {
+        expect(withInternalServiceDefaults({ headers: { foo: 'bar' } })).toEqual({
+            timeout: DEFAULT_INTERNAL_API_TIMEOUT_MS,
+            headers: {
+                foo: 'bar',
+                [INTERNAL_SERVICE_AUTH_HEADER]: 'test-internal-token',
+            },
+        });
+
+        expect(withInternalServiceDefaults({
+            timeout: 12000,
+            headers: { foo: 'bar' },
+        })).toEqual({
+            timeout: 12000,
+            headers: {
+                foo: 'bar',
+                [INTERNAL_SERVICE_AUTH_HEADER]: 'test-internal-token',
+            },
+        });
+    });
+
     test('createInternalApiClient attaches a request interceptor', () => {
         const use = jest.fn();
         const client = {
@@ -54,10 +95,12 @@ describe('internal service auth helpers', () => {
         };
 
         expect(createInternalApiClient(axiosModule)).toBe(client);
+        expect(axiosModule.create).toHaveBeenCalledWith({ timeout: DEFAULT_INTERNAL_API_TIMEOUT_MS });
         expect(use).toHaveBeenCalledTimes(1);
 
         const interceptor = use.mock.calls[0][0];
         expect(interceptor({ headers: { hello: 'world' } })).toEqual({
+            timeout: DEFAULT_INTERNAL_API_TIMEOUT_MS,
             headers: {
                 hello: 'world',
                 [INTERNAL_SERVICE_AUTH_HEADER]: 'test-internal-token',

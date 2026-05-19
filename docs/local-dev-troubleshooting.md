@@ -46,6 +46,8 @@ curl -i -H "x-menumanager-internal-token: $TOKEN" http://localhost:3006/stats
 
 The dashboard and service clients attach this header automatically for service-to-service requests. If a dashboard page returns `500` while the same internal route works with the header, check the caller's `.env` and restart the caller container.
 
+Internal service clients default to a 5-second timeout (`INTERNAL_API_TIMEOUT_MS`) unless a route sets a more specific timeout. If a dashboard route waits indefinitely, first confirm Docker Desktop is responding with `docker version`; a half-stuck Docker engine can hold ports open while no service process can answer.
+
 ## Quick Reset (native mode)
 
 If services are in a bad state and you just want to start clean:

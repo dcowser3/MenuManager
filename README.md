@@ -40,7 +40,7 @@ Menu Manager is an AI-powered service designed to automate the review process fo
 - Submission normalization keeps exactly one managed allergen legend, while preserving chef-supplied legal/price/footer copy such as AED service-charge text and venue-specific foodborne warnings
 - Modification previews exclude managed footer boilerplate from design-facing redlines while still preserving custom restaurant footer notes/raw warnings for generated DOCX output
 - DOCX baseline uploads now prefill the allergen key field from either pipe-delimited legends or parenthesized legends such as `(C) CELERY (D) DAIRY`
-- DOCX-extracted property/date issues appear as temporary, plain-language notices; property misses tell submitters they can simply choose one from the dropdown, and invalid dates keep the automatically calculated date
+- DOCX project-detail extraction fills fields only when values are clean and confident; missing, ambiguous, or invalid extracted metadata is ignored quietly so submitters can complete the fields themselves
 - Turnaround values are calculated in business days for the read-only `Date Needed` field, so weekends are skipped
 - The default allergen legend is now `G contains gluten | V vegetarian | D contains dairy | S contain shellfish | N contain nuts | VG vegan`
 - Approved-dish extraction now splits inline `Dish Name - description` menu rows into separate `dish_name` and `description` fields, captures trailing allergen codes, and skips the allergen legend / food-safety footer instead of storing them as dishes
@@ -126,8 +126,9 @@ Browser approval editor prototype:
 - Modification flows keep footer/legal copy out of the persistent redline preview, but submit it as structured preserved footer text so restaurant-specific notes and raw-food warnings are retained instead of replaced by the default notice.
 - Form submission now persists uploaded approved-baseline modifications before triggering the full Tier 2 AI review asynchronously, reducing gateway timeouts on slow AI review calls; non-JSON proxy errors also show a readable submit error instead of raw HTML parsing text.
 - The dashboard form now defaults to `Modification to Existing Menu`; the modification source chooser still starts blank so chefs must intentionally choose how to load the baseline.
-- The `I already made my menu edits on a doc` option shows `Upload Approved DOCX (Preserve Redlines)` as helper text so the redline-preserving upload path is still clear.
-- The modification source chooser starts blank so chefs must pick a path. The `I'll make menu changes here` path recommends choosing an approved baseline from the database; submitted ClickUp tasks appear there after the approved DOCX is processed, and DB/search failures now show as search failures instead of empty results. If the approved menu is not in the database yet, the same path lets the chef upload a prior approved DOCX instead.
+- The `I already made my menu edits on a doc` option shows `Upload Unapproved DOCX (Preserve Redlines)` as helper text so the redline-preserving upload path is still clear.
+- The modification source chooser starts blank so chefs must pick a path. The `I'll make menu changes here` path recommends choosing an approved baseline from the database; submitted ClickUp tasks appear there after the approved DOCX is processed, and DB/search failures now show as search failures instead of empty results. If the approved menu is not in the database yet, the same path lets the chef choose a prior approved DOCX and extracts it automatically.
+- Both modification DOCX upload paths start extraction as soon as the chef selects a file, so the chef does not need to click a second extract button.
 - The modification database baseline picker flags whether each approved baseline is the latest for its property/service period, prioritizes exact property/service matches when those fields are selected, and opens a full-screen existing-menu decision dialog before AI review/submission when a newer, mismatched, or already-approved baseline exists.
 - The approval editor and `Download Original DOCX` resolve the **submitted** generated DOCX (`original_path`) first so on-screen text matches the file from the form; the modification baseline DOCX is used only when that path is missing, then `final_path`, then saved text/HTML fallback
 - On modification flows, baseline extraction mode (`uploaded_baseline` vs `uploaded_unapproved`) still applies when the baseline path is the one that loads
@@ -267,6 +268,7 @@ AI_REVIEW_URL=http://localhost:3002
 DIFFER_SERVICE_URL=http://localhost:3006
 CLICKUP_SERVICE_URL=http://localhost:3007
 INTERNAL_API_TOKEN=replace-with-a-long-random-secret
+INTERNAL_API_TIMEOUT_MS=
 
 # ClickUp workflow statuses
 CLICKUP_INITIAL_REVIEW_STATUS=pending initial isa review
@@ -338,7 +340,7 @@ Additional notes:
 - Docker Desktop on macOS can be unreliable when bind-mounting repos from TCC-protected folders such as `~/Documents`, `~/Desktop`, or `~/Downloads`. If services fail with `Resource deadlock avoided`, grant Docker access to the folder, switch Docker Desktop's file-sharing implementation, or move the repo to a non-protected path such as `~/code/MenuManager`.
 - In native mode, `start-services.sh` runs a full workspace build by default before starting services so latest TypeScript/EJS changes are always reflected.
 - To skip the native build step (faster restart when nothing changed), run: `SKIP_BUILD=1 ./start-services.sh`
-- Set the same `INTERNAL_API_TOKEN` for every service process. Internal API calls now fail closed if this token is missing or mismatched.
+- Set the same `INTERNAL_API_TOKEN` for every service process. Internal API calls now fail closed if this token is missing or mismatched, and they use `INTERNAL_API_TIMEOUT_MS` (default `5000`) when no route-specific timeout is set.
 
 ## Implementation Roadmap
 

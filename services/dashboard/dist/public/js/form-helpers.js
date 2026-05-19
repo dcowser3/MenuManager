@@ -35,13 +35,13 @@
         if (!isValidDateInputValue(extracted)) {
             return {
                 value: min,
-                warning: `We weren't able to use the date from your Word doc. That's okay. We kept the automatically calculated date instead.`,
+                warning: null,
             };
         }
         if (!min || extracted >= min) return { value: extracted, warning: null };
         return {
             value: min,
-            warning: `The date in your Word doc is sooner than the selected turnaround allows, so we kept the earliest available date instead.`,
+            warning: null,
         };
     }
 

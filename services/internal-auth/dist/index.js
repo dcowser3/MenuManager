@@ -3,15 +3,25 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.INTERNAL_SERVICE_AUTH_HEADER = void 0;
+exports.DEFAULT_INTERNAL_API_TIMEOUT_MS = exports.INTERNAL_SERVICE_AUTH_HEADER = void 0;
 exports.getInternalServiceToken = getInternalServiceToken;
+exports.getInternalApiTimeoutMs = getInternalApiTimeoutMs;
 exports.buildInternalServiceHeaders = buildInternalServiceHeaders;
 exports.withInternalServiceAuth = withInternalServiceAuth;
+exports.withInternalServiceDefaults = withInternalServiceDefaults;
 exports.attachInternalServiceAuth = attachInternalServiceAuth;
 exports.createInternalApiClient = createInternalApiClient;
 exports.requireInternalServiceAuth = requireInternalServiceAuth;
 const crypto_1 = __importDefault(require("crypto"));
 exports.INTERNAL_SERVICE_AUTH_HEADER = 'x-menumanager-internal-token';
+exports.DEFAULT_INTERNAL_API_TIMEOUT_MS = 5000;
+function parsePositiveInteger(value, fallback) {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+        return fallback;
+    }
+    return Math.floor(parsed);
+}
 function safeTimingEqual(a, b) {
     try {
         const left = Buffer.from(a);
@@ -26,6 +36,9 @@ function safeTimingEqual(a, b) {
 }
 function getInternalServiceToken() {
     return `${process.env.INTERNAL_API_TOKEN || ''}`.trim();
+}
+function getInternalApiTimeoutMs() {
+    return parsePositiveInteger(process.env.INTERNAL_API_TIMEOUT_MS, exports.DEFAULT_INTERNAL_API_TIMEOUT_MS);
 }
 function buildInternalServiceHeaders(headers = {}) {
     const token = getInternalServiceToken();
@@ -43,15 +56,27 @@ function withInternalServiceAuth(config) {
         headers: buildInternalServiceHeaders(config?.headers || {}),
     };
 }
+function withInternalServiceDefaults(config) {
+    const authenticatedConfig = withInternalServiceAuth(config);
+    if (authenticatedConfig.timeout !== undefined && authenticatedConfig.timeout !== null) {
+        return authenticatedConfig;
+    }
+    return {
+        ...authenticatedConfig,
+        timeout: getInternalApiTimeoutMs(),
+    };
+}
 function attachInternalServiceAuth(client) {
     if (!client?.interceptors?.request?.use) {
         return client;
     }
-    client.interceptors.request.use((config) => withInternalServiceAuth(config || {}));
+    client.interceptors.request.use((config) => withInternalServiceDefaults(config || {}));
     return client;
 }
 function createInternalApiClient(axiosModule) {
-    const client = typeof axiosModule?.create === 'function' ? axiosModule.create() : axiosModule;
+    const client = typeof axiosModule?.create === 'function'
+        ? axiosModule.create({ timeout: getInternalApiTimeoutMs() })
+        : axiosModule;
     return attachInternalServiceAuth(client);
 }
 function requireInternalServiceAuth(req, res, next) {

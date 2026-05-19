@@ -30,6 +30,7 @@ All variables are configured in `.env` at the project root. See `.env.example` f
 | `AI_REVIEW_URL` | Base URL for AI review service (default: `http://localhost:3002`) |
 | `DIFFER_SERVICE_URL` | Base URL for differ service (default: `http://localhost:3006`) |
 | `CLICKUP_SERVICE_URL` | Base URL for ClickUp integration service (default: `http://localhost:3007`) |
+| `INTERNAL_API_TIMEOUT_MS` | Default timeout in milliseconds for internal service-to-service HTTP calls (default: `5000`; individual long-running calls may override it) |
 | `DOCUMENT_STORAGE_ROOT` | Root directory for persisted menu DOCX assets (default: `tmp/documents`) |
 | `JSON_BODY_LIMIT` | Shared Express JSON/urlencoded body limit for services that need larger rich-text payloads (default where used: `5mb`) |
 | `DASHBOARD_JSON_BODY_LIMIT` | Dashboard-specific override for chef form JSON/urlencoded bodies (default: `JSON_BODY_LIMIT` or `5mb`) |
@@ -93,6 +94,8 @@ Internal HTTP routes now require the shared `INTERNAL_API_TOKEN` header on servi
 - Public exceptions remain for the dashboard itself, ClickUp's inbound webhook route, and `GET /health`
 
 Set the same `INTERNAL_API_TOKEN` value for every service process in the environment. If it is missing, internal requests fail closed with `503` or `401` responses instead of falling back to network trust.
+
+Internal service clients also apply `INTERNAL_API_TIMEOUT_MS` (default `5000`) when a request does not specify a timeout. This prevents dashboard routes from waiting indefinitely on a sick dependency; routes that need more time can still pass an explicit timeout.
 
 ## Document Storage Layout
 

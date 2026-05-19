@@ -25,12 +25,14 @@ describe('dashboard form modification source chooser', () => {
         expect(template).toContain('Choose from database (recommended)');
         expect(template).toContain('My menu is not in database yet');
         expect(template).toContain('I already made my menu edits on a doc');
-        expect(template).toContain('Upload Approved DOCX (Preserve Redlines)');
+        expect(template).toContain('Upload Unapproved DOCX (Preserve Redlines)');
         expect(template).toContain('name="approvedBaselineSource"');
         expect(template).toContain('id="modWorkflowEditHere" value="edit_here" onchange=');
         expect(template).toContain('id="modSourceDatabase" value="database" onchange=');
+        expect(template).toContain('id="baselineDocUpload" accept=".docx" onchange="uploadBaselineDoc()"');
+        expect(template).toContain('id="unapprovedDocUpload" accept=".docx" onchange="uploadUnapprovedDoc()"');
         expect(template).not.toContain('id="modSourceUpload" value="upload" onchange="onModificationSourceChange()">\n                            Upload Prior Approved DOCX');
-        expect(template).not.toContain('Upload Unapproved DOCX (Preserve Redlines)');
+        expect(template).not.toContain('Upload Approved DOCX (Preserve Redlines)');
         expect(template).not.toContain('id="modWorkflowEditHere" value="edit_here" checked');
         expect(template).not.toContain('id="modSourceDatabase" value="database" checked');
     });
@@ -61,18 +63,20 @@ describe('dashboard form modification source chooser', () => {
         expect(template).not.toContain('if (issue) showBaselineFreshnessWarning(issue);');
     });
 
-    test('shows docx extraction warnings as temporary growl notices with friendly copy', () => {
+    test('keeps docx metadata extraction misses silent', () => {
         const template = fs.readFileSync(
             path.join(__dirname, '..', 'views', 'form.ejs'),
             'utf8'
         );
 
-        expect(template).toContain('function showUploadNotice(message)');
-        expect(template).toContain('autoDismissMs: 7000');
-        expect(template).toContain('growl: true');
-        expect(template).toContain('temporary: true');
-        expect(template).toContain('We weren\'t able to fill in the property from your Word doc');
-        expect(template).toContain('Please select the property from the dropdown.');
-        expect(template).toContain('if (warning) showUploadNotice(warning);');
+        expect(template).not.toContain('function showUploadNotice(message)');
+        expect(template).not.toContain('alert-growl-progress');
+        expect(template).not.toContain('alertGrowlCountdown');
+        expect(template).not.toContain('We weren\'t able to fill in the property from your Word doc');
+        expect(template).not.toContain('Extracted orientation "');
+        expect(template).not.toContain('could not be parsed — please enter dimensions manually');
+        expect(template).not.toContain('showUploadNotice(warning)');
+        expect(template).toContain('window.formHelpers.isValidDateInputValue(extractedDate)');
+        expect(template).not.toContain('markFieldAsExtracted(\'dateNeeded\');\n        }');
     });
 });
