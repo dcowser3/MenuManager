@@ -76,6 +76,19 @@ const DASHBOARD_URL = process.env.DASHBOARD_URL || 'http://localhost:3005';
 const JSON_BODY_LIMIT = process.env.DASHBOARD_JSON_BODY_LIMIT || process.env.JSON_BODY_LIMIT || '5mb';
 const internalApi = createInternalApiClient(axios);
 
+function parsePositiveInteger(value: string | undefined, fallback: number): number {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+        return fallback;
+    }
+    return Math.floor(parsed);
+}
+
+const BASIC_AI_CHECK_TIMEOUT_MS = parsePositiveInteger(
+    process.env.BASIC_AI_CHECK_TIMEOUT_MS || process.env.AI_REVIEW_QA_TIMEOUT_MS,
+    120000
+);
+
 // SMTP for admin alerts (reuses existing SMTP config)
 const hasSmtpConfig = !!(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS);
 const alertTransporter = hasSmtpConfig ? nodemailer.createTransport({
@@ -2046,6 +2059,8 @@ Note: Use ONLY these allergen codes when checking allergen compliance. Do not us
             qaResponse = await internalApi.post(`${AI_REVIEW_URL}/run-qa-check`, {
                 text: reviewFooterMetadata.body,
                 prompt: finalPrompt
+            }, {
+                timeout: BASIC_AI_CHECK_TIMEOUT_MS
             });
         } catch (aiError: any) {
             const errorDetails = describeServiceError(aiError);

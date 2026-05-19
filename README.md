@@ -262,6 +262,7 @@ SMTP_PASS=
 # AI Review
 OPENAI_API_KEY=
 AI_REVIEW_MODEL=gpt-4o-mini
+BASIC_AI_CHECK_TIMEOUT_MS=120000
 
 # Service URLs (override in cloud deployments)
 DB_SERVICE_URL=http://localhost:3004

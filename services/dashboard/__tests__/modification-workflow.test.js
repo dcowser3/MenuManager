@@ -747,6 +747,7 @@ describe('Dashboard Modification Workflow (local, mocked externals)', () => {
         );
         expect(qaCall).toBeTruthy();
         expect(qaCall[1].text).toBe(payload.menuContent);
+        expect(qaCall[2]).toEqual({ timeout: 120000 });
     });
 
     test('basic-check falls back to manual review when AI service call fails', async () => {
