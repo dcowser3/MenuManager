@@ -750,7 +750,7 @@ describe('Dashboard Modification Workflow (local, mocked externals)', () => {
         );
         expect(qaCall).toBeTruthy();
         expect(qaCall[1].text).toBe(payload.menuContent);
-        expect(qaCall[2]).toEqual({ timeout: 25000 });
+        expect(qaCall[2]).toEqual({ timeout: 120000 });
     });
 
     test('basic-check falls back to manual review when AI service call fails', async () => {
@@ -780,6 +780,10 @@ describe('Dashboard Modification Workflow (local, mocked externals)', () => {
         expect(response.body.correctedMenu).toBe(payload.menuContent);
         expect(response.body.suggestions).toEqual([]);
         expect(response.body.hasCriticalErrors).toBe(false);
+        expect(response.body.aiFailure).toMatchObject({
+            reason: 'ai_review_service_error',
+            status: 503,
+        });
         expect(response.body.reviewSkippedReason).toContain('manual review');
     });
 

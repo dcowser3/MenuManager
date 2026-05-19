@@ -2378,9 +2378,13 @@
             }
         }
 
-        function buildBasicCheckFallback(menuContent, reviewMode, changedLineCount, reason, statusCode) {
+        const BASIC_CHECK_CLIENT_TIMEOUT_MS = 150000;
+
+        function buildBasicCheckFallback(menuContent, reviewMode, changedLineCount, reason, statusCode, options) {
+            const meta = options || {};
             return {
                 success: true,
+                checkId: meta.checkId || '',
                 originalMenu: menuContent,
                 correctedMenu: menuContent,
                 suggestions: [],
@@ -2391,6 +2395,7 @@
                 aiUnavailable: true,
                 manualReviewRequired: true,
                 gatewayFallbackStatus: statusCode || 0,
+                aiFailure: meta.aiFailure || null,
                 reviewSkippedReason: reason || 'AI check is temporarily unavailable. No automated suggestions were applied, but you can still submit this menu for manual review.'
             };
         }
@@ -2423,7 +2428,8 @@
                     fallbackContext.reviewMode,
                     fallbackContext.changedLineCount,
                     'AI check could not reach the server. No automated suggestions were applied, but you can still submit this menu for manual review.',
-                    0
+                    0,
+                    { aiFailure: { reason: 'basic_check_start_network_error' } }
                 );
             }
             const startData = await parseJsonResponse(startResponse);
@@ -2434,7 +2440,8 @@
                     fallbackContext.reviewMode,
                     fallbackContext.changedLineCount,
                     'AI check timed out at the gateway. No automated suggestions were applied, but you can still submit this menu for manual review.',
-                    startResponse.status
+                    startResponse.status,
+                    { aiFailure: { reason: 'basic_check_start_gateway_error', status: startResponse.status } }
                 );
             }
 
@@ -2444,7 +2451,7 @@
 
             const startedAt = Date.now();
             const pollUrl = startData.pollUrl || `/api/form/basic-check/status/${encodeURIComponent(startData.checkId)}`;
-            while (Date.now() - startedAt < 90000) {
+            while (Date.now() - startedAt < BASIC_CHECK_CLIENT_TIMEOUT_MS) {
                 await delay(1500);
                 let statusResponse;
                 try {
@@ -2458,7 +2465,8 @@
                         fallbackContext.reviewMode,
                         fallbackContext.changedLineCount,
                         'AI check status could not be reached. No automated suggestions were applied, but you can still submit this menu for manual review.',
-                        0
+                        0,
+                        { checkId: startData.checkId, aiFailure: { reason: 'basic_check_status_network_error' } }
                     );
                 }
 
@@ -2470,7 +2478,8 @@
                         fallbackContext.reviewMode,
                         fallbackContext.changedLineCount,
                         'AI check timed out at the gateway. No automated suggestions were applied, but you can still submit this menu for manual review.',
-                        statusResponse.status
+                        statusResponse.status,
+                        { checkId: startData.checkId, aiFailure: { reason: 'basic_check_status_gateway_error', status: statusResponse.status } }
                     );
                 }
 
@@ -2495,7 +2504,8 @@
                         fallbackContext.reviewMode,
                         fallbackContext.changedLineCount,
                         statusData.error || 'AI check failed. No automated suggestions were applied, but you can still submit this menu for manual review.',
-                        statusData.statusCode || 500
+                        statusData.statusCode || 500,
+                        { checkId: statusData.checkId || startData.checkId, aiFailure: statusData.result?.aiFailure || { reason: 'basic_check_job_failed' } }
                     );
                 }
             }
@@ -2505,7 +2515,8 @@
                 fallbackContext.reviewMode,
                 fallbackContext.changedLineCount,
                 'AI check is taking too long. No automated suggestions were applied, but you can still submit this menu for manual review.',
-                0
+                0,
+                { checkId: startData.checkId, aiFailure: { reason: 'basic_check_client_poll_timeout' } }
             );
         }
 

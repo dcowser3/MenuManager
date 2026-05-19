@@ -46,7 +46,7 @@ curl -i -H "x-menumanager-internal-token: $TOKEN" http://localhost:3006/stats
 
 The dashboard and service clients attach this header automatically for service-to-service requests. If a dashboard page returns `500` while the same internal route works with the header, check the caller's `.env` and restart the caller container.
 
-Internal service clients default to a 5-second timeout (`INTERNAL_API_TIMEOUT_MS`) unless a route sets a more specific timeout. Basic AI Check overrides this with `BASIC_AI_CHECK_TIMEOUT_MS` (default `25000`) so slow OpenAI responses fail open to manual review before common proxy gateway timeouts return `502`/`504`. The public form starts Basic AI Check with `/api/form/basic-check/start` and polls `/api/form/basic-check/status/:checkId`; submit remains blocked while the job is pending. If a dashboard route waits indefinitely, first confirm Docker Desktop is responding with `docker version`; a half-stuck Docker engine can hold ports open while no service process can answer.
+Internal service clients default to a 5-second timeout (`INTERNAL_API_TIMEOUT_MS`) unless a route sets a more specific timeout. Basic AI Check overrides this with `BASIC_AI_CHECK_TIMEOUT_MS` (default `120000`) because it runs as a background job instead of a long gateway-facing request. The public form starts Basic AI Check with `/api/form/basic-check/start` and polls `/api/form/basic-check/status/:checkId`; submit remains blocked while the job is pending. If a dashboard route waits indefinitely, first confirm Docker Desktop is responding with `docker version`; a half-stuck Docker engine can hold ports open while no service process can answer.
 
 ## Quick Reset (native mode)
 

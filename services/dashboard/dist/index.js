@@ -89,9 +89,38 @@ function parsePositiveInteger(value, fallback) {
     }
     return Math.floor(parsed);
 }
-const BASIC_AI_CHECK_TIMEOUT_MS = parsePositiveInteger(process.env.BASIC_AI_CHECK_TIMEOUT_MS || process.env.AI_REVIEW_QA_TIMEOUT_MS, 25000);
+const BASIC_AI_CHECK_TIMEOUT_MS = parsePositiveInteger(process.env.BASIC_AI_CHECK_TIMEOUT_MS || process.env.AI_REVIEW_QA_TIMEOUT_MS, 120000);
 const BASIC_AI_CHECK_JOB_TTL_MS = parsePositiveInteger(process.env.BASIC_AI_CHECK_JOB_TTL_MS, 15 * 60 * 1000);
 const basicCheckJobs = new Map();
+function sanitizeBasicCheckFailure(errorDetails) {
+    const status = errorDetails.status;
+    const code = errorDetails.code;
+    const message = `${errorDetails.message || ''}`.slice(0, 300);
+    const combined = `${code || ''} ${message}`.toLowerCase();
+    let reason = 'ai_review_failed';
+    if (combined.includes('timeout') || code === 'ECONNABORTED') {
+        reason = 'ai_review_timeout';
+    }
+    else if (code === 'ENOTFOUND' || code === 'ECONNREFUSED') {
+        reason = 'ai_review_unreachable';
+    }
+    else if (status === 401 || status === 403) {
+        reason = 'ai_review_auth_failed';
+    }
+    else if (status === 429) {
+        reason = 'ai_review_rate_limited';
+    }
+    else if (typeof status === 'number' && status >= 500) {
+        reason = 'ai_review_service_error';
+    }
+    return Object.fromEntries(Object.entries({
+        reason,
+        code,
+        status,
+        statusText: errorDetails.statusText,
+        message: message || undefined,
+    }).filter(([, value]) => value !== undefined && value !== null && value !== ''));
+}
 function cleanupBasicCheckJobs() {
     const cutoff = Date.now() - BASIC_AI_CHECK_JOB_TTL_MS;
     for (const [id, job] of basicCheckJobs.entries()) {
@@ -1720,6 +1749,7 @@ app.post('/api/form/attempt-log', async (req, res) => {
  */
 async function handleBasicCheck(req, res) {
     const attemptId = req.body?.attemptId || req.get('x-menumanager-attempt-id');
+    const basicCheckId = (0, upload_security_1.sanitizePlainTextInput)(req.get?.('x-menumanager-basic-check-id'), { maxLength: 100 }) || undefined;
     try {
         const menuContent = (0, upload_security_1.sanitizePlainTextInput)(req.body?.menuContent, { multiline: true, maxLength: upload_security_1.MAX_LONG_TEXT_LENGTH });
         const allergens = (0, upload_security_1.sanitizePlainTextInput)(req.body?.allergens, { multiline: true, maxLength: 2000 });
@@ -1862,8 +1892,9 @@ Note: Use ONLY these allergen codes when checking allergen compliance. Do not us
         }
         catch (aiError) {
             const errorDetails = (0, clickup_handoff_1.describeServiceError)(aiError);
+            const aiFailure = sanitizeBasicCheckFailure(errorDetails);
             const fallbackMessage = 'AI check is temporarily unavailable. No automated suggestions were applied, but you can still submit this menu for manual review.';
-            console.error('AI basic check unavailable:', errorDetails);
+            console.error('AI basic check unavailable:', { checkId: basicCheckId, ...aiFailure });
             void (0, form_attempt_logging_1.logFormAttemptEvent)({
                 attemptId,
                 eventType: 'basic_check_ai_unavailable',
@@ -1888,13 +1919,15 @@ Note: Use ONLY these allergen codes when checking allergen compliance. Do not us
                 criticalSuggestionsCount: 0,
                 errorMessage: errorDetails.message || 'AI call failed',
                 details: {
+                    checkId: basicCheckId,
                     reviewMode: changedOnlyMode ? 'changed_only' : 'full',
                     changedLineCount,
-                    aiError: errorDetails,
+                    aiFailure,
                 },
             });
             return res.json({
                 success: true,
+                checkId: basicCheckId,
                 originalMenu: menuContent,
                 correctedMenu: menuContent,
                 suggestions: [],
@@ -1904,6 +1937,7 @@ Note: Use ONLY these allergen codes when checking allergen compliance. Do not us
                 changedLineCount,
                 aiUnavailable: true,
                 manualReviewRequired: true,
+                aiFailure,
                 reviewSkippedReason: fallbackMessage,
             });
         }
@@ -2084,6 +2118,7 @@ app.post('/api/form/basic-check/start', (req, res) => {
     });
     const headers = {
         'x-menumanager-attempt-id': req.get('x-menumanager-attempt-id') || req.body?.attemptId || '',
+        'x-menumanager-basic-check-id': checkId,
         'content-length': req.get('content-length') || '',
     };
     void runBasicCheckJob(checkId, req.body || {}, headers);
