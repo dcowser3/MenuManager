@@ -51,7 +51,7 @@ Menu Manager is an AI-powered service designed to automate the review process fo
 - Public form attempts now emit lightweight `form_attempt_logs` telemetry for baseline uploads, Basic AI Check, final submit, and parser-level `413` failures so failed preserve-redlines submissions can be diagnosed even when no final submission row exists
 - Production public-form failure events also email `FORM_ATTEMPT_ALERT_EMAIL`, defaulting to `dcowser@richardsandoval.com`, through the dashboard SMTP transport
 - Required-field validation now highlights missing submitter, project-details, and approval inputs directly in the form
-- The submission form footer lists `dcowser@richardsandoval.com` as the support contact for help.
+- The submission form footer and blocking/red form errors list `PUBLIC_FORM_SUPPORT_EMAIL` (default `dcowser@richardsandoval.com`) as the support contact for help.
 - Reviewer dashboard
 - Notification system
 - Approved dishes are extracted automatically when the ClickUp-reviewed DOCX is marked approved

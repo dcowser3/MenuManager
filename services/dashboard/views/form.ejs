@@ -600,6 +600,19 @@
             border-color: rgba(139, 58, 58, 0.2);
         }
 
+        .alert-support {
+            display: block;
+            margin-top: 0.5rem;
+            line-height: 1.45;
+            color: inherit;
+        }
+
+        .alert-support a {
+            color: inherit;
+            font-weight: 600;
+            text-decoration: underline;
+        }
+
         .alert-info {
             background: rgba(139, 115, 85, 0.08);
             color: var(--color-secondary);
@@ -2190,7 +2203,7 @@
                     Menu was edited after AI check. Re-run AI Check before submitting.
                 </div>
                 <div id="criticalErrorBanner" class="critical-error-banner">
-                    Resolve or override all critical errors before submitting.
+                    Resolve or override all critical errors before submitting. If you are stuck, email <a href="mailto:<%= supportEmail %>"><%= supportEmail %></a>.
                 </div>
                 <button id="submitBtn" class="btn btn-success" onclick="submitMenu()">
                     Submit Menu for Review
@@ -2200,7 +2213,7 @@
     </div>
 
     <footer class="support-footer">
-        Need help? Email <a href="mailto:dcowser@richardsandoval.com">dcowser@richardsandoval.com</a>.
+        Need help? Email <a href="mailto:<%= supportEmail %>"><%= supportEmail %></a>.
     </footer>
 
     <!-- Fullscreen Menu View Modal -->
@@ -4661,6 +4674,18 @@
             const msgSpan = document.createElement('span');
             msgSpan.textContent = message;
             alert.appendChild(msgSpan);
+
+            if (type === 'error') {
+                const support = document.createElement('span');
+                support.className = 'alert-support';
+                support.appendChild(document.createTextNode('If this keeps happening or blocks your submission, email '));
+                const supportLink = document.createElement('a');
+                supportLink.href = 'mailto:<%= supportEmail %>';
+                supportLink.textContent = '<%= supportEmail %>';
+                support.appendChild(supportLink);
+                support.appendChild(document.createTextNode('.'));
+                alert.appendChild(support);
+            }
 
             // Dismiss button for persistent alerts
             if (((type === 'warning' || type === 'error') && !options.temporary) || options.persistent) {

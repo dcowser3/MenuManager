@@ -79,4 +79,16 @@ describe('dashboard form modification source chooser', () => {
         expect(template).toContain('window.formHelpers.isValidDateInputValue(extractedDate)');
         expect(template).not.toContain('markFieldAsExtracted(\'dateNeeded\');\n        }');
     });
+
+    test('shows support email guidance in blocking form errors', () => {
+        const template = fs.readFileSync(
+            path.join(__dirname, '..', 'views', 'form.ejs'),
+            'utf8'
+        );
+
+        expect(template).toContain('If this keeps happening or blocks your submission, email');
+        expect(template).toContain('supportLink.href = \'mailto:<%= supportEmail %>\';');
+        expect(template).toContain('If you are stuck, email <a href="mailto:<%= supportEmail %>"><%= supportEmail %></a>.');
+        expect(template).toContain('Need help? Email <a href="mailto:<%= supportEmail %>"><%= supportEmail %></a>.');
+    });
 });

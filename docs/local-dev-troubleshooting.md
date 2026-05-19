@@ -206,6 +206,7 @@ The approval editor route remains `/approval/<submissionId>`. In local mode, sub
 - Check Supabase `form_attempt_logs` by `attempt_id`, submitter, property/project, or recent `event_type` values such as `basic_check_client_received`, `submit_failed`, `submit_client_exception`, and `payload_too_large`. These rows can exist even when no final `submissions` row was created.
 - `system_alerts` also records `form_payload_too_large` when the dashboard JSON parser rejects a submit before route handlers run.
 - In production only, these public-form failure events send an email to `FORM_ATTEMPT_ALERT_EMAIL` (default `dcowser@richardsandoval.com`) through the dashboard SMTP settings. If no email arrives, check SMTP credentials and the dashboard logs for `Failed to send form attempt alert email`.
+- Submitters also see `PUBLIC_FORM_SUPPORT_EMAIL` in blocking/red form errors so they have a direct fallback while SMTP alerting is being configured.
 
 If ClickUp approval is updating the `submissions` row but you are not seeing rows in `approved_dishes`, test the extractor directly before debugging webhook delivery:
 

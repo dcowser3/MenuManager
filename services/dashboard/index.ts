@@ -71,6 +71,7 @@ const DIFFER_SERVICE_URL = process.env.DIFFER_SERVICE_URL || 'http://localhost:3
 const CLICKUP_SERVICE_URL = process.env.CLICKUP_SERVICE_URL || 'http://localhost:3007';
 const ALERT_EMAIL = process.env.ALERT_EMAIL || '';
 const FORM_ATTEMPT_ALERT_EMAIL = process.env.FORM_ATTEMPT_ALERT_EMAIL || 'dcowser@richardsandoval.com';
+const PUBLIC_FORM_SUPPORT_EMAIL = process.env.PUBLIC_FORM_SUPPORT_EMAIL || 'dcowser@richardsandoval.com';
 const DASHBOARD_URL = process.env.DASHBOARD_URL || 'http://localhost:3005';
 const JSON_BODY_LIMIT = process.env.DASHBOARD_JSON_BODY_LIMIT || process.env.JSON_BODY_LIMIT || '5mb';
 const internalApi = createInternalApiClient(axios);
@@ -641,7 +642,7 @@ app.use((error: any, _req: express.Request, res: express.Response, next: express
             },
         });
         return res.status(413).json({
-            error: `Submission payload is too large. Reduce pasted rich formatting or contact support if the menu content must exceed ${JSON_BODY_LIMIT}.`,
+            error: `Submission payload is too large. Reduce pasted rich formatting or email ${PUBLIC_FORM_SUPPORT_EMAIL} if the menu content must exceed ${JSON_BODY_LIMIT}.`,
         });
     }
     if (error instanceof SyntaxError && 'body' in error) {
@@ -808,6 +809,7 @@ app.get('/form', async (_req, res) => {
         defaultAllergenKey: DEFAULT_ALLERGEN_KEY,
         propertyOptions,
         propertyCatalog,
+        supportEmail: PUBLIC_FORM_SUPPORT_EMAIL,
     });
 });
 
