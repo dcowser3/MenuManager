@@ -33,6 +33,7 @@ Menu Manager is an AI-powered service designed to automate the review process fo
 - Required service-period classification on submission (`breakfast`, `brunch`, `lunch`, `dinner`, `happy_hour`, `holiday`, `other`)
 - AI-powered two-tier review (general QA + detailed corrections)
 - Basic AI Check: if the model returns an objective spelling/grammar fix as an exact recommendation (e.g. `Change 'x' to 'y'`) but forgets to update the corrected menu text, or mislabels that fix as critical, the dashboard applies or recognizes the correction so green highlights and the persistent preview stay consistent without blocking submission. High-confidence raw-item asterisk suggestions are also applied before the line's allergen/price suffix.
+- Basic AI Check now runs as an async dashboard job: the form starts a check, keeps submit blocked while it polls status, then unlocks only after AI results arrive or an explicit AI-unavailable/manual-review fallback is returned.
 - If the Basic AI Check service call fails, the public form keeps the original menu unchanged, shows an AI-unavailable warning, and allows the submission to continue to manual review instead of blocking the chef on a red error.
 - Learning/training dashboards stay off the public landing page; they are reachable by direct URL like other reviewer tools (no separate PIN step)
 - Review highlights and persistent redlines surface punctuation/separator edits such as hyphen, comma, slash, and pipe changes
@@ -121,7 +122,7 @@ Browser approval editor prototype:
 - For submitted DOCX files that already contain redlines, the left editor uses the clean accepted text with deleted runs removed, accepted inserted runs unwrapped, and DOCX inline formatting such as bold dish names preserved; the preview keeps the imported deletion/insertion markup visible.
 - The browser approval preview and the backend differ service use shared `diff-core` tokenization/LCS helpers so punctuation, separator, and word alignment rules are reused instead of duplicated per page/service.
 - The live approval preview keeps adjacent imported deletion/insertion pairs separated after new edits, so corrections like `jalapeno` → `jalapeño` or `neapolitan` → `Neapolitan` do not get re-styled as one combined deleted token when another word is removed.
-- Uploaded unapproved/redlined DOCX modifications now receive a full AI check on the accepted visible menu text, so pre-existing tracked edits such as misspelled inserted words are reviewed even if the chef makes no additional browser edits.
+- Uploaded unapproved/redlined DOCX modifications now receive a full AI check on the accepted visible menu text, so pre-existing tracked edits such as misspelled inserted words are reviewed even if the chef makes no additional browser edits. Imported deletions/crossed-out dishes are excluded from the AI-review payload while remaining visible in the editor and persistent preview.
 - Uploaded unapproved/redlined DOCX modifications keep imported redline/highlight text editable in the left revision editor, so chefs can delete highlighted dishes or struck text and the persistent preview/DOCX diff still records the text change.
 - Re-running AI Check reuses the normalized editor text extractor so repeated checks do not add browser-generated blank lines between menu rows.
 - Modification flows keep footer/legal copy out of the persistent redline preview, but submit it as structured preserved footer text so restaurant-specific notes and raw-food warnings are retained instead of replaced by the default notice.
@@ -262,7 +263,8 @@ SMTP_PASS=
 # AI Review
 OPENAI_API_KEY=
 AI_REVIEW_MODEL=gpt-4o-mini
-BASIC_AI_CHECK_TIMEOUT_MS=120000
+BASIC_AI_CHECK_TIMEOUT_MS=25000
+BASIC_AI_CHECK_JOB_TTL_MS=900000
 
 # Service URLs (override in cloud deployments)
 DB_SERVICE_URL=http://localhost:3004

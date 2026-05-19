@@ -4,6 +4,7 @@ import axios from 'axios';
 import { promises as fs } from 'fs';
 import * as fsSync from 'fs';
 import * as path from 'path';
+import crypto from 'crypto';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 
@@ -86,8 +87,30 @@ function parsePositiveInteger(value: string | undefined, fallback: number): numb
 
 const BASIC_AI_CHECK_TIMEOUT_MS = parsePositiveInteger(
     process.env.BASIC_AI_CHECK_TIMEOUT_MS || process.env.AI_REVIEW_QA_TIMEOUT_MS,
-    120000
+    25000
 );
+const BASIC_AI_CHECK_JOB_TTL_MS = parsePositiveInteger(process.env.BASIC_AI_CHECK_JOB_TTL_MS, 15 * 60 * 1000);
+
+type BasicCheckJob = {
+    id: string;
+    status: 'pending' | 'completed' | 'failed';
+    createdAt: number;
+    updatedAt: number;
+    statusCode?: number;
+    result?: any;
+    error?: string;
+};
+
+const basicCheckJobs = new Map<string, BasicCheckJob>();
+
+function cleanupBasicCheckJobs(): void {
+    const cutoff = Date.now() - BASIC_AI_CHECK_JOB_TTL_MS;
+    for (const [id, job] of basicCheckJobs.entries()) {
+        if (job.updatedAt < cutoff) {
+            basicCheckJobs.delete(id);
+        }
+    }
+}
 
 // SMTP for admin alerts (reuses existing SMTP config)
 const hasSmtpConfig = !!(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS);
@@ -1905,7 +1928,7 @@ app.post('/api/form/attempt-log', async (req, res) => {
 /**
  * Form API: Basic AI Check - Run QA check on menu content
  */
-app.post('/api/form/basic-check', async (req, res) => {
+async function handleBasicCheck(req: any, res: any) {
     const attemptId = req.body?.attemptId || req.get('x-menumanager-attempt-id');
     try {
         const menuContent = sanitizePlainTextInput(req.body?.menuContent, { multiline: true, maxLength: MAX_LONG_TEXT_LENGTH });
@@ -2236,6 +2259,113 @@ Note: Use ONLY these allergen codes when checking allergen compliance. Do not us
             details: error.message
         });
     }
+}
+
+async function runBasicCheckJob(checkId: string, body: any, headers: Record<string, any>): Promise<void> {
+    const started = Date.now();
+    const job = basicCheckJobs.get(checkId);
+    if (!job) return;
+
+    const req = {
+        body,
+        headers,
+        get(name: string) {
+            const lower = String(name || '').toLowerCase();
+            return headers[lower] || headers[name] || '';
+        },
+    };
+    const res = {
+        statusCode: 200,
+        status(code: number) {
+            this.statusCode = code;
+            return this;
+        },
+        json(payload: any) {
+            const current = basicCheckJobs.get(checkId);
+            if (!current) return this;
+            current.status = this.statusCode >= 400 ? 'failed' : 'completed';
+            current.statusCode = this.statusCode;
+            current.result = payload;
+            current.error = this.statusCode >= 400 ? (payload?.error || 'Basic AI check failed') : undefined;
+            current.updatedAt = Date.now();
+            return this;
+        },
+    };
+
+    try {
+        await handleBasicCheck(req, res);
+    } catch (error: any) {
+        const current = basicCheckJobs.get(checkId);
+        if (!current) return;
+        current.status = 'failed';
+        current.statusCode = 500;
+        current.error = error?.message || 'Basic AI check failed';
+        current.result = { error: current.error };
+        current.updatedAt = Date.now();
+    } finally {
+        const current = basicCheckJobs.get(checkId);
+        if (current?.status === 'pending' && Date.now() - started > BASIC_AI_CHECK_TIMEOUT_MS) {
+            current.status = 'failed';
+            current.statusCode = 504;
+            current.error = 'Basic AI check timed out';
+            current.result = { error: current.error };
+            current.updatedAt = Date.now();
+        }
+    }
+}
+
+app.post('/api/form/basic-check', handleBasicCheck);
+
+app.post('/api/form/basic-check/start', (req, res) => {
+    cleanupBasicCheckJobs();
+    const checkId = crypto.randomUUID();
+    const now = Date.now();
+    basicCheckJobs.set(checkId, {
+        id: checkId,
+        status: 'pending',
+        createdAt: now,
+        updatedAt: now,
+    });
+
+    const headers = {
+        'x-menumanager-attempt-id': req.get('x-menumanager-attempt-id') || req.body?.attemptId || '',
+        'content-length': req.get('content-length') || '',
+    };
+
+    void runBasicCheckJob(checkId, req.body || {}, headers);
+
+    res.status(202).json({
+        success: true,
+        checkId,
+        status: 'pending',
+        pollUrl: `/api/form/basic-check/status/${checkId}`,
+    });
+});
+
+app.get('/api/form/basic-check/status/:checkId', (req, res) => {
+    cleanupBasicCheckJobs();
+    const checkId = sanitizePlainTextInput(req.params.checkId, { maxLength: 100 });
+    const job = basicCheckJobs.get(checkId);
+    if (!job) {
+        return res.status(404).json({ error: 'Basic AI check not found or expired' });
+    }
+
+    if (job.status === 'pending') {
+        return res.json({
+            success: true,
+            checkId,
+            status: 'pending',
+        });
+    }
+
+    res.json({
+        success: job.status === 'completed',
+        checkId,
+        status: job.status,
+        statusCode: job.statusCode || (job.status === 'completed' ? 200 : 500),
+        result: job.result,
+        error: job.error,
+    });
 });
 
 function enforcePrixFixeCriticalChecks(

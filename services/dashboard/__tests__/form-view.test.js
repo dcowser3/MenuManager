@@ -48,6 +48,18 @@ describe('dashboard form modification source chooser', () => {
         expect(template).not.toContain('querySelectorAll(\'.existing-del, .existing-ins\').forEach(span => {');
     });
 
+    test('excludes imported deletions from uploaded-unapproved AI review text', () => {
+        const template = fs.readFileSync(
+            path.join(__dirname, '..', 'views', 'form.ejs'),
+            'utf8'
+        );
+
+        expect(template).toContain('function extractAiReviewTextFromReviewedArea(element)');
+        expect(template).toContain("clone.querySelectorAll('.existing-del, .persistent-del, del, s, [style*=\"line-through\"]')");
+        expect(template).toContain('menuContent = extractAiReviewTextFromReviewedArea(reviewedArea);');
+        expect(template).toContain('const menuContent = extractAiReviewTextFromReviewedArea(reviewedArea);');
+    });
+
     test('uses a full-screen decision dialog for existing approved menu conflicts', () => {
         const template = fs.readFileSync(
             path.join(__dirname, '..', 'views', 'form.ejs'),

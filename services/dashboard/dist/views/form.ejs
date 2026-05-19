@@ -2378,6 +2378,137 @@
             }
         }
 
+        function buildBasicCheckFallback(menuContent, reviewMode, changedLineCount, reason, statusCode) {
+            return {
+                success: true,
+                originalMenu: menuContent,
+                correctedMenu: menuContent,
+                suggestions: [],
+                hasChanges: false,
+                hasCriticalErrors: false,
+                reviewMode: reviewMode || 'full',
+                changedLineCount: changedLineCount || 0,
+                aiUnavailable: true,
+                manualReviewRequired: true,
+                gatewayFallbackStatus: statusCode || 0,
+                reviewSkippedReason: reason || 'AI check is temporarily unavailable. No automated suggestions were applied, but you can still submit this menu for manual review.'
+            };
+        }
+
+        function delay(ms) {
+            return new Promise((resolve) => setTimeout(resolve, ms));
+        }
+
+        async function parseJsonResponse(response) {
+            const responseText = await response.text();
+            if (!responseText) return {};
+            try {
+                return JSON.parse(responseText);
+            } catch (error) {
+                return {};
+            }
+        }
+
+        async function requestBasicCheckWithFallback(payload, fallbackContext) {
+            let startResponse;
+            try {
+                startResponse = await fetch('/api/form/basic-check/start', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', ...getAttemptHeaders() },
+                    body: JSON.stringify(payload)
+                });
+            } catch (error) {
+                return buildBasicCheckFallback(
+                    fallbackContext.menuContent,
+                    fallbackContext.reviewMode,
+                    fallbackContext.changedLineCount,
+                    'AI check could not reach the server. No automated suggestions were applied, but you can still submit this menu for manual review.',
+                    0
+                );
+            }
+            const startData = await parseJsonResponse(startResponse);
+
+            if (startResponse.status === 502 || startResponse.status === 503 || startResponse.status === 504) {
+                return buildBasicCheckFallback(
+                    fallbackContext.menuContent,
+                    fallbackContext.reviewMode,
+                    fallbackContext.changedLineCount,
+                    'AI check timed out at the gateway. No automated suggestions were applied, but you can still submit this menu for manual review.',
+                    startResponse.status
+                );
+            }
+
+            if (!startResponse.ok || !startData.checkId) {
+                throw new Error(startData.error || `Failed to start AI check (${startResponse.status || 'server error'})`);
+            }
+
+            const startedAt = Date.now();
+            const pollUrl = startData.pollUrl || `/api/form/basic-check/status/${encodeURIComponent(startData.checkId)}`;
+            while (Date.now() - startedAt < 90000) {
+                await delay(1500);
+                let statusResponse;
+                try {
+                    statusResponse = await fetch(pollUrl, {
+                        method: 'GET',
+                        headers: getAttemptHeaders()
+                    });
+                } catch (error) {
+                    return buildBasicCheckFallback(
+                        fallbackContext.menuContent,
+                        fallbackContext.reviewMode,
+                        fallbackContext.changedLineCount,
+                        'AI check status could not be reached. No automated suggestions were applied, but you can still submit this menu for manual review.',
+                        0
+                    );
+                }
+
+                const statusData = await parseJsonResponse(statusResponse);
+
+                if (statusResponse.status === 502 || statusResponse.status === 503 || statusResponse.status === 504) {
+                    return buildBasicCheckFallback(
+                        fallbackContext.menuContent,
+                        fallbackContext.reviewMode,
+                        fallbackContext.changedLineCount,
+                        'AI check timed out at the gateway. No automated suggestions were applied, but you can still submit this menu for manual review.',
+                        statusResponse.status
+                    );
+                }
+
+                if (!statusResponse.ok) {
+                    throw new Error(statusData.error || `Failed to read AI check status (${statusResponse.status || 'server error'})`);
+                }
+
+                if (statusData.status === 'pending') {
+                    continue;
+                }
+
+                if (statusData.status === 'completed' && statusData.result) {
+                    return {
+                        ...statusData.result,
+                        basicCheckStatus: statusData.statusCode || 200
+                    };
+                }
+
+                if (statusData.status === 'failed') {
+                    return buildBasicCheckFallback(
+                        fallbackContext.menuContent,
+                        fallbackContext.reviewMode,
+                        fallbackContext.changedLineCount,
+                        statusData.error || 'AI check failed. No automated suggestions were applied, but you can still submit this menu for manual review.',
+                        statusData.statusCode || 500
+                    );
+                }
+            }
+
+            return buildBasicCheckFallback(
+                fallbackContext.menuContent,
+                fallbackContext.reviewMode,
+                fallbackContext.changedLineCount,
+                'AI check is taking too long. No automated suggestions were applied, but you can still submit this menu for manual review.',
+                0
+            );
+        }
+
 	        function isLikelyAllergenLegendLine(line) {
 	            const normalized = (line || '').trim();
 	            if (!normalized || !normalized.includes('|')) return false;
@@ -4893,7 +5024,7 @@
             let menuContent = '';
             if (isEditMode && document.getElementById('step2').classList.contains('hidden') === false) {
                 const reviewedArea = document.getElementById('reviewedContentArea');
-                menuContent = extractCleanTextFromReviewedArea(reviewedArea);
+                menuContent = extractAiReviewTextFromReviewedArea(reviewedArea);
             } else {
                 const delta = quill.getContents();
                 delta.ops.forEach((op) => {
@@ -4933,24 +5064,18 @@
                     requestBodyLength: byteLength(JSON.stringify(basicCheckPayload)),
                     details: { reviewMode }
                 });
-                const response = await fetch('/api/form/basic-check', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', ...getAttemptHeaders() },
-                    body: JSON.stringify(basicCheckPayload)
+                const data = await requestBasicCheckWithFallback(basicCheckPayload, {
+                    menuContent,
+                    reviewMode,
+                    changedLineCount: 0
                 });
-
-                const data = await response.json();
-
-                if (!response.ok) {
-                    throw new Error(data.error || 'Failed to run AI check');
-                }
 
                 aiCheckHasRun = true;
                 setAiSuggestionsVisibility(true);
                 aiCheckResults = data;
                 await logFormAttempt('basic_check_client_received', {
                     route: '/api/form/basic-check',
-                    statusCode: response.status,
+                    statusCode: data.gatewayFallbackStatus || data.basicCheckStatus || 200,
                     menuTextLength: menuContent.length,
                     menuHtmlLength: richHtmlForMetrics.length,
                     persistentDiffHtmlLength: persistentDiffHtmlForMetrics.length,
@@ -5130,6 +5255,9 @@
             if (reviewedArea && reviewedArea.innerHTML && normalizeTextForStyleMatch(extractCleanTextFromReviewedArea(reviewedArea)) === target) {
                 return stripAiReviewTransientFormatting(reviewedArea.innerHTML);
             }
+            if (unapprovedMode && reviewedArea && reviewedArea.innerHTML && normalizeTextForStyleMatch(extractAiReviewTextFromReviewedArea(reviewedArea)) === target) {
+                return redlinePreview.stripExistingAnnotationsForEditor(stripAiReviewTransientFormatting(reviewedArea.innerHTML));
+            }
             if (quill && quill.root && normalizeTextForStyleMatch(quill.getText()) === target) {
                 return stripAiReviewTransientFormatting(quill.root.innerHTML);
             }
@@ -5295,7 +5423,7 @@
             // Get current edited text using the same normalized extractor as the initial AI check.
             // Raw innerText adds browser-generated newlines around block elements on each render.
             const reviewedArea = document.getElementById('reviewedContentArea');
-            const menuContent = extractCleanTextFromReviewedArea(reviewedArea);
+            const menuContent = extractAiReviewTextFromReviewedArea(reviewedArea);
             const allergens = getAllergenInputValue();
             const menuType = document.getElementById('menuType').value;
             const reviewMode = submissionMode === 'modification' && !unapprovedMode ? 'changed_only' : 'full';
@@ -5324,17 +5452,11 @@
                     requestBodyLength: byteLength(JSON.stringify(basicCheckPayload)),
                     details: { reviewMode, rerun: true }
                 });
-                const response = await fetch('/api/form/basic-check', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', ...getAttemptHeaders() },
-                    body: JSON.stringify(basicCheckPayload)
+                const data = await requestBasicCheckWithFallback(basicCheckPayload, {
+                    menuContent,
+                    reviewMode,
+                    changedLineCount: 0
                 });
-
-                const data = await response.json();
-
-                if (!response.ok) {
-                    throw new Error(data.error || 'Failed to run AI check');
-                }
 
                 aiCheckHasRun = true;
                 requiresAiRerun = false;
@@ -5343,7 +5465,7 @@
                 criticalErrorOverrides = {};
                 await logFormAttempt('basic_check_client_received', {
                     route: '/api/form/basic-check',
-                    statusCode: response.status,
+                    statusCode: data.gatewayFallbackStatus || data.basicCheckStatus || 200,
                     menuTextLength: menuContent.length,
                     menuHtmlLength: richHtmlForMetrics.length,
                     persistentDiffHtmlLength: persistentDiffHtmlForMetrics.length,
@@ -5534,7 +5656,7 @@
                 ? unapprovedDiffBaseline
                 : (baseApprovedMenuContent || originalText);
             renderPersistentPreview(aiCheckBase, correctedDisplayText);
-            lastAiCheckedMenuText = extractCleanTextFromReviewedArea(document.getElementById('reviewedContentArea'));
+            lastAiCheckedMenuText = extractAiReviewTextFromReviewedArea(document.getElementById('reviewedContentArea'));
             requiresAiRerun = false;
 
             const suggestionsDisplay = document.getElementById('suggestionsDisplay');
@@ -6027,6 +6149,17 @@
             return redlinePreview.extractCleanTextFromElement(element);
         }
 
+        function extractAiReviewTextFromReviewedArea(element) {
+            if (!unapprovedMode || !element || !element.cloneNode) {
+                return extractCleanTextFromReviewedArea(element);
+            }
+            const clone = element.cloneNode(true);
+            clone.querySelectorAll('.existing-del, .persistent-del, del, s, [style*="line-through"]').forEach((node) => {
+                node.remove();
+            });
+            return extractCleanTextFromReviewedArea(clone);
+        }
+
         function normalizeExtractedLines(rawLines) {
             return redlinePreview.normalizeExtractedLines(rawLines);
         }
@@ -6034,7 +6167,8 @@
         function handleReviewedAreaInput() {
             const reviewedArea = document.getElementById('reviewedContentArea');
             const currentText = extractCleanTextFromReviewedArea(reviewedArea);
-            if (lastAiCheckedMenuText && currentText !== lastAiCheckedMenuText) {
+            const aiReviewText = extractAiReviewTextFromReviewedArea(reviewedArea);
+            if (lastAiCheckedMenuText && aiReviewText !== lastAiCheckedMenuText) {
                 markAiCheckStale();
             }
             renderAllergenLegend();

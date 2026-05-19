@@ -25,7 +25,8 @@ All variables are configured in `.env` at the project root. See `.env.example` f
 | `FORM_ATTEMPT_ALERT_EMAIL` | Email address that receives production public-form failure alerts such as `413` submit errors (default: `dcowser@richardsandoval.com`) |
 | `PUBLIC_FORM_SUPPORT_EMAIL` | Email address shown to submitters in the form footer and blocking/red form errors (default: `dcowser@richardsandoval.com`) |
 | `AI_REVIEW_MODEL` | OpenAI model used by AI review service (default: `gpt-4o-mini`) |
-| `BASIC_AI_CHECK_TIMEOUT_MS` | Dashboard timeout in milliseconds for public-form Basic AI Check calls to ai-review (default: `120000`; falls back to `AI_REVIEW_QA_TIMEOUT_MS` if set) |
+| `BASIC_AI_CHECK_TIMEOUT_MS` | Dashboard timeout in milliseconds for public-form Basic AI Check calls to ai-review (default: `25000`; falls back to `AI_REVIEW_QA_TIMEOUT_MS` if set) |
+| `BASIC_AI_CHECK_JOB_TTL_MS` | How long dashboard keeps completed/failed Basic AI Check job results available for polling before cleanup (default: `900000`) |
 | `SOP_DOC_PATH` | Path to SOP document (default: `samples/sop.txt`) |
 | `DASHBOARD_URL` | Base URL for email links (default: `http://localhost:3005`) |
 | `DB_SERVICE_URL` | Base URL for DB service (default: `http://localhost:3004`) |
@@ -97,7 +98,7 @@ Internal HTTP routes now require the shared `INTERNAL_API_TOKEN` header on servi
 
 Set the same `INTERNAL_API_TOKEN` value for every service process in the environment. If it is missing, internal requests fail closed with `503` or `401` responses instead of falling back to network trust.
 
-Internal service clients also apply `INTERNAL_API_TIMEOUT_MS` (default `5000`) when a request does not specify a timeout. This prevents dashboard routes from waiting indefinitely on a sick dependency; routes that need more time can still pass an explicit timeout. The public-form Basic AI Check uses `BASIC_AI_CHECK_TIMEOUT_MS` (default `120000`) because OpenAI review calls commonly exceed the 5-second internal default.
+Internal service clients also apply `INTERNAL_API_TIMEOUT_MS` (default `5000`) when a request does not specify a timeout. This prevents dashboard routes from waiting indefinitely on a sick dependency; routes that need more time can still pass an explicit timeout. The public-form Basic AI Check uses `BASIC_AI_CHECK_TIMEOUT_MS` (default `25000`) so slow OpenAI review calls fail open to manual review before common proxy gateway timeouts return a `502`/`504`. The browser-facing check flow is async: `/api/form/basic-check/start` returns a check id quickly, and the form polls `/api/form/basic-check/status/:checkId` while submit remains blocked.
 
 ## Document Storage Layout
 

@@ -72,6 +72,7 @@ function invokeJsonHandler(handler, body, options = {}) {
         const req = {
             body,
             query: options.query || {},
+            params: options.params || {},
             headers,
             hostname: options.hostname,
             get(name) {
@@ -118,6 +119,8 @@ function postJsonOverHttp(routePath, body) {
 describe('Dashboard Modification Workflow (local, mocked externals)', () => {
     const submitHandler = getRouteHandler('post', '/api/form/submit');
     const basicCheckHandler = getRouteHandler('post', '/api/form/basic-check');
+    const basicCheckStartHandler = getRouteHandler('post', '/api/form/basic-check/start');
+    const basicCheckStatusHandler = getRouteHandler('get', '/api/form/basic-check/status/:checkId');
     const attemptLogHandler = getRouteHandler('post', '/api/form/attempt-log');
     const submissionSearchHandler = getRouteHandler('get', '/api/submissions/search');
     const baselineUploadPath = path.join(process.cwd(), 'tmp', 'uploads', 'legacy-approved.docx');
@@ -747,7 +750,7 @@ describe('Dashboard Modification Workflow (local, mocked externals)', () => {
         );
         expect(qaCall).toBeTruthy();
         expect(qaCall[1].text).toBe(payload.menuContent);
-        expect(qaCall[2]).toEqual({ timeout: 120000 });
+        expect(qaCall[2]).toEqual({ timeout: 25000 });
     });
 
     test('basic-check falls back to manual review when AI service call fails', async () => {
@@ -778,6 +781,35 @@ describe('Dashboard Modification Workflow (local, mocked externals)', () => {
         expect(response.body.suggestions).toEqual([]);
         expect(response.body.hasCriticalErrors).toBe(false);
         expect(response.body.reviewSkippedReason).toContain('manual review');
+    });
+
+    test('basic-check async start returns a pollable completed result', async () => {
+        const payload = {
+            menuContent: 'Guacamole - $12',
+            baselineMenuContent: '',
+            reviewMode: 'full',
+            allergens: '',
+            menuType: 'standard',
+        };
+
+        const startResponse = await invokeJsonHandler(basicCheckStartHandler, payload, {
+            headers: { 'x-menumanager-attempt-id': 'attempt-async-test' },
+        });
+        expect(startResponse.status).toBe(202);
+        expect(startResponse.body.status).toBe('pending');
+        expect(startResponse.body.checkId).toBeTruthy();
+        expect(startResponse.body.pollUrl).toBe(`/api/form/basic-check/status/${startResponse.body.checkId}`);
+
+        await new Promise((resolve) => setImmediate(resolve));
+        await new Promise((resolve) => setImmediate(resolve));
+
+        const statusResponse = await invokeJsonHandler(basicCheckStatusHandler, {}, {
+            params: { checkId: startResponse.body.checkId },
+        });
+        expect(statusResponse.status).toBe(200);
+        expect(statusResponse.body.status).toBe('completed');
+        expect(statusResponse.body.result.success).toBe(true);
+        expect(statusResponse.body.result.correctedMenu).toBe(payload.menuContent);
     });
 
     test('basic-check changed_only merges AI high-confidence corrections back into the full menu', async () => {

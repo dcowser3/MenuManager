@@ -55,7 +55,7 @@ For modification flows, the baseline text must come from one of:
   - Insertions: yellow highlight
 - Separator and punctuation edits are diffed as first-class changes, so hyphen/comma/slash rewrites render as explicit insertions/deletions instead of being treated as unchanged text.
 - In normal modification mode, AI review is scoped to changed lines only (computed against approved baseline).
-- In uploaded unapproved/redlined DOCX mode, AI review runs against the full accepted visible menu text. Existing redline edits can already contain typos, so the full candidate text must be reviewed even when the chef makes no additional browser edits after upload.
+- In uploaded unapproved/redlined DOCX mode, AI review runs against the full accepted visible menu text. Existing redline edits can already contain typos, so the full candidate text must be reviewed even when the chef makes no additional browser edits after upload. Imported deletion/cross-out spans (`existing-del`, `persistent-del`, DOCX strikethrough equivalents) are removed from the AI-review text so deleted dishes are not corrected.
 - Re-run AI Check uses the same normalized editor text extraction as the initial check; it does not read raw browser `innerText`, which can introduce extra blank lines around rendered block elements on each pass.
 - Managed footer handling is split into structured fields:
   - Menu body is used for AI review and persistent design redlines.
@@ -169,7 +169,7 @@ When a chef uploads an unapproved DOCX:
    - `renderPersistentPreview()` uses annotation ranges to wrap unchanged tokens in `existing-del`/`existing-ins` spans; new changes get `persistent-del`/`persistent-ins` as usual.
    - Annotation wrapping splits tokens at imported redline boundaries, so adjacent DOCX deletion/insertion runs such as `neapolitan` + `Neapolitan` remain separately styled after a later live edit.
    - Tokenization, token equality, and LCS alignment come from `@menumanager/diff-core`, the same shared helper package used by the backend differ service.
-   - Runs the AI check in full-review mode for uploaded unapproved DOCX content, while approved-baseline modification flows keep changed-only review.
+   - Runs the AI check in full-review mode for uploaded unapproved DOCX content, while approved-baseline modification flows keep changed-only review. The AI-review extractor removes imported deletion/cross-out spans before sending text to AI, but leaves those spans in the editor and persistent preview.
    - The preview diff tokenizes punctuation and separators separately so ingredient-separator edits are visible in the persistent redline.
    - Extracted Date Needed values only apply when they are valid `YYYY-MM-DD` values; otherwise the read-only Date Needed field remains at the turnaround-derived minimum date.
 4. **DOCX generation** (`generate_from_form.py`):
