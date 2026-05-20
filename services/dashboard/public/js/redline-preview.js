@@ -196,6 +196,107 @@
             .replace(/\scontenteditable=(["']).*?\1/gi, '');
     }
 
+    function normalizeRevisionComparisonText(text) {
+        return normalizeExtractedLines(String(text || '').split('\n').map(function (line) {
+            return line.trim().replace(/\s+([,.;:!?])/g, '$1');
+        }));
+    }
+
+    function htmlToCleanText(html) {
+        const source = String(html || '');
+
+        if (global.document && global.document.createElement) {
+            const container = global.document.createElement('div');
+            container.innerHTML = source;
+            return normalizeRevisionComparisonText(extractCleanTextFromElement(container));
+        }
+
+        const withLines = source
+            .replace(/<\/(?:p|div|li)>/gi, '\n')
+            .replace(/<br\s*\/?>/gi, '\n');
+        const withoutTags = withLines
+            .replace(/<[^>]+>/g, '')
+            .replace(/&nbsp;/gi, ' ')
+            .replace(/&amp;/gi, '&')
+            .replace(/&lt;/gi, '<')
+            .replace(/&gt;/gi, '>')
+            .replace(/&quot;/gi, '"')
+            .replace(/&#39;/gi, "'");
+
+        return normalizeRevisionComparisonText(withoutTags);
+    }
+
+    function removeAnnotatedSpans(html, classPattern) {
+        const source = String(html || '');
+
+        if (global.document && global.document.createElement) {
+            const container = global.document.createElement('div');
+            container.innerHTML = source;
+            container.querySelectorAll('span').forEach(function (node) {
+                const className = node.getAttribute('class') || '';
+                if (classPattern.test(className)) {
+                    node.remove();
+                }
+            });
+            return container.innerHTML;
+        }
+
+        return source.replace(
+            /<span\b(?=[^>]*class=["']([^"']*)["'])[^>]*>[\s\S]*?<\/span>/gi,
+            function (match, className) {
+                return classPattern.test(className || '') ? '' : match;
+            }
+        );
+    }
+
+    function unwrapAnnotatedSpans(html, classPattern) {
+        const source = String(html || '');
+
+        if (global.document && global.document.createElement) {
+            const container = global.document.createElement('div');
+            container.innerHTML = source;
+            container.querySelectorAll('span').forEach(function (node) {
+                const className = node.getAttribute('class') || '';
+                if (classPattern.test(className)) {
+                    unwrapElement(node);
+                }
+            });
+            container.querySelectorAll('[contenteditable]').forEach(function (node) {
+                node.removeAttribute('contenteditable');
+            });
+            return container.innerHTML;
+        }
+
+        return source
+            .replace(
+                /<span\b(?=[^>]*class=["']([^"']*)["'])[^>]*>([\s\S]*?)<\/span>/gi,
+                function (match, className, inner) {
+                    return classPattern.test(className || '') ? inner : match;
+                }
+            )
+            .replace(/\scontenteditable=(["']).*?\1/gi, '');
+    }
+
+    function buildRevisionComparisonFromAnnotatedHtml(html) {
+        const source = stripTransientReviewHighlights(html || '');
+        const deletionClassPattern = /\b(?:existing-del|persistent-del)\b/;
+        const insertionClassPattern = /\b(?:existing-ins|persistent-ins)\b/;
+
+        const originalHtml = unwrapAnnotatedSpans(
+            removeAnnotatedSpans(source, insertionClassPattern),
+            deletionClassPattern
+        );
+        const editorHtml = stripExistingAnnotationsForEditor(source);
+        const currentHtml = editorHtml;
+
+        return {
+            originalText: htmlToCleanText(originalHtml),
+            currentText: htmlToCleanText(currentHtml),
+            editorHtml: editorHtml || '<p><br></p>',
+            originalHtml: originalHtml || '<p><br></p>'
+        };
+    }
+
     function getBlockChildren(container) {
         if (!container || !container.children) return [];
         return Array.from(container.children).filter(function (child) {
@@ -950,13 +1051,91 @@
         return inner;
     }
 
+    function decodeBasicHtmlText(text) {
+        return String(text || '')
+            .replace(/&nbsp;/gi, ' ')
+            .replace(/&amp;/gi, '&')
+            .replace(/&lt;/gi, '<')
+            .replace(/&gt;/gi, '>')
+            .replace(/&quot;/gi, '"')
+            .replace(/&#39;/gi, "'");
+    }
+
+    function htmlToRangePlainText(html) {
+        return decodeBasicHtmlText(
+            String(html || '')
+                .replace(/<br\s*\/?>/gi, '\n')
+                .replace(/<[^>]+>/g, '')
+        ).replace(/\u00A0/g, ' ');
+    }
+
+    function previewHtmlToPlainText(html) {
+        return decodeBasicHtmlText(
+            String(html || '')
+                .replace(/<\/(?:p|div|li)>/gi, '\n')
+                .replace(/<br\s*\/?>/gi, '\n')
+                .replace(/<[^>]+>/g, '')
+        )
+            .replace(/\u00A0/g, ' ')
+            .replace(/\n{3,}/g, '\n\n')
+            .replace(/^\n+|\n+$/g, '');
+    }
+
+    function clonedRangeMatchesFallback(html, fallbackText) {
+        if (fallbackText == null) return true;
+        return htmlToRangePlainText(html) === String(fallbackText || '').replace(/\u00A0/g, ' ');
+    }
+
+    function computeInsertedTokenRanges(original, corrected) {
+        const revisedTokens = tokenizeDiffText(corrected);
+        const baseTokens = tokenizeDiffText(original);
+        const lcs = buildTokenLcs(baseTokens, revisedTokens);
+        const ranges = [];
+
+        let idx = 0;
+        while (idx < revisedTokens.length) {
+            if (lcs.commonRev.has(idx)) {
+                idx++;
+                continue;
+            }
+
+            const start = revisedTokens[idx].start;
+            let end = revisedTokens[idx].end;
+            let hasVisibleToken = revisedTokens[idx].type !== 'whitespace';
+
+            idx++;
+            while (idx < revisedTokens.length && !lcs.commonRev.has(idx)) {
+                end = revisedTokens[idx].end;
+                if (revisedTokens[idx].type !== 'whitespace') {
+                    hasVisibleToken = true;
+                }
+                idx++;
+            }
+
+            if (!hasVisibleToken) {
+                continue;
+            }
+
+            ranges.push({
+                start,
+                length: end - start,
+                word: String(corrected || '').slice(start, end)
+            });
+        }
+
+        return ranges;
+    }
+
     function cloneRangeHtml(entries, start, end, fallbackText) {
         if (!entries || start >= end || start < 0 || end > entries.length) {
             return escapeHtml(fallbackText || '');
         }
 
         if (entries._richHtml && diffCore.renderRichTextRange) {
-            return diffCore.renderRichTextRange(entries, start, end, fallbackText || '');
+            const html = diffCore.renderRichTextRange(entries, start, end, fallbackText || '');
+            return clonedRangeMatchesFallback(html, fallbackText)
+                ? html
+                : escapeHtml(fallbackText || '');
         }
 
         var doc = global.document;
@@ -988,7 +1167,10 @@
             }
             i = j;
         }
-        return parts.join('');
+        const html = parts.join('');
+        return clonedRangeMatchesFallback(html, fallbackText)
+            ? html
+            : escapeHtml(fallbackText || '');
     }
 
     function wrapWithExistingAnnotationHtml(htmlChunk, charOffset, annotationMap, plainTokenLength) {
@@ -1056,6 +1238,93 @@
         return html;
     }
 
+    function buildLineRanges(text) {
+        const source = String(text || '');
+        const ranges = [];
+        let start = 0;
+
+        source.split('\n').forEach(function (line) {
+            ranges.push({ text: line, start: start, end: start + line.length });
+            start += line.length + 1;
+        });
+
+        return ranges;
+    }
+
+    function getMeaningfulTokenValues(text) {
+        return tokenizeDiffText(text)
+            .map(function (token) {
+                return String(token.value || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+            })
+            .filter(function (value) {
+                return value.length > 1;
+            });
+    }
+
+    function areLinesSimilarEnoughForTokenDiff(baseLine, revisedLine) {
+        const baseValues = Array.from(new Set(getMeaningfulTokenValues(baseLine)));
+        const revisedValues = Array.from(new Set(getMeaningfulTokenValues(revisedLine)));
+        if (!baseValues.length || !revisedValues.length) {
+            return true;
+        }
+
+        const revisedSet = new Set(revisedValues);
+        const shared = baseValues.filter(function (value) {
+            return revisedSet.has(value);
+        }).length;
+        const overlap = shared / Math.min(baseValues.length, revisedValues.length);
+
+        return overlap >= 0.35;
+    }
+
+    function shouldAlignLinesForTokenDiff(baseLine, revisedLine) {
+        const baseText = String(baseLine || '');
+        const revisedText = String(revisedLine || '');
+        const baseTrimmed = baseText.trim();
+        const revisedTrimmed = revisedText.trim();
+
+        if (!baseTrimmed || !revisedTrimmed) {
+            return !baseTrimmed && !revisedTrimmed;
+        }
+
+        return areLinesSimilarEnoughForTokenDiff(baseText, revisedText);
+    }
+
+    function buildLineLcs(baseLines, revisedLines) {
+        const rows = baseLines.length + 1;
+        const cols = revisedLines.length + 1;
+        const table = Array.from({ length: rows }, function () {
+            return Array(cols).fill(0);
+        });
+
+        for (let i = baseLines.length - 1; i >= 0; i--) {
+            for (let j = revisedLines.length - 1; j >= 0; j--) {
+                if (shouldAlignLinesForTokenDiff(baseLines[i].text, revisedLines[j].text)) {
+                    table[i][j] = table[i + 1][j + 1] + 1;
+                } else {
+                    table[i][j] = Math.max(table[i + 1][j], table[i][j + 1]);
+                }
+            }
+        }
+
+        const matches = [];
+        let i = 0;
+        let j = 0;
+        while (i < baseLines.length && j < revisedLines.length) {
+            if (shouldAlignLinesForTokenDiff(baseLines[i].text, revisedLines[j].text)) {
+                matches.push({ baseIndex: i, revisedIndex: j });
+                i++;
+                j++;
+            } else if (table[i + 1][j] >= table[i][j + 1]) {
+                i++;
+            } else {
+                j++;
+            }
+        }
+
+        return matches;
+    }
+
     function renderPersistentPreview(baseText, revisedText, options) {
         const settings = options || {};
         const annotationMap = settings.annotationMap || {};
@@ -1067,77 +1336,168 @@
             styleIndex = getStyleIndexForBaseline(baselineHtml, baseText);
         }
 
-        const baseTokens = tokenizeDiffText(baseText);
-        const revisedTokens = tokenizeDiffText(revisedText);
-        const lcs = buildTokenLcs(baseTokens, revisedTokens);
-
         let insertions = 0;
         let deletions = 0;
         let html = '';
-        let i = 0;
-        let j = 0;
 
-        while (i < baseTokens.length || j < revisedTokens.length) {
-            const baseTok = i < baseTokens.length ? baseTokens[i] : null;
-            const revTok = j < revisedTokens.length ? revisedTokens[j] : null;
-            const baseCommon = i < baseTokens.length && lcs.commonBase.has(i);
-            const revCommon = j < revisedTokens.length && lcs.commonRev.has(j);
-            const sameToken =
-                baseTok !== null &&
-                revTok !== null &&
-                diffTokensEqual(baseTok, revTok);
+        function renderWholeLineDeletion(baseSegment, baseOffset) {
+            if (!String(baseSegment || '').trim()) {
+                return escapeHtml(baseSegment || '');
+            }
+            const delInner = styleIndex && styleIndex.entries
+                ? cloneRangeHtml(styleIndex.entries, baseOffset, baseOffset + baseSegment.length, baseSegment)
+                : escapeHtml(baseSegment);
+            deletions++;
+            return '<span class="persistent-del">' + delInner + '</span>';
+        }
 
-            if (baseCommon && revCommon && sameToken) {
-                if (styleIndex) {
-                    html += cloneStyledTokenHtml(
-                        styleIndex,
-                        baseTok,
-                        revTok.value,
-                        annotationMap,
-                        includeExistingAnnotations && baseTok
-                    );
-                } else if (includeExistingAnnotations && baseTok) {
-                    html += wrapWithExistingAnnotation(revTok.value, baseTok.start, annotationMap);
-                } else {
-                    html += escapeHtml(revTok.value);
+        function renderWholeLineInsertion(revisedSegment) {
+            if (!String(revisedSegment || '').trim()) {
+                return escapeHtml(revisedSegment || '');
+            }
+            insertions++;
+            return '<span class="persistent-ins">' + escapeHtml(revisedSegment) + '</span>';
+        }
+
+        function appendPreviewLine(lines, lineHtml) {
+            lines.push(lineHtml || '');
+        }
+
+        function appendUnmatchedLines(lines, baseStart, baseEnd, revisedStart, revisedEnd) {
+            for (let revisedIndex = revisedStart; revisedIndex < revisedEnd; revisedIndex++) {
+                if (String(revisedLines[revisedIndex].text || '').trim()) {
+                    appendPreviewLine(lines, renderWholeLineInsertion(revisedLines[revisedIndex].text));
                 }
-                i++;
-                j++;
-                continue;
             }
 
-            if (i < baseTokens.length && !baseCommon) {
-                if (baseTok && baseTok.value.trim()) {
-                    const delInner = styleIndex
-                        ? cloneStyledTokenHtml(styleIndex, baseTok, baseTok.value, annotationMap, false)
-                        : escapeHtml(baseTok.value);
-                    html += '<span class="persistent-del">' + delInner + '</span>';
-                    deletions++;
-                } else {
-                    html += escapeHtml(baseTok ? baseTok.value : '');
+            for (let baseIndex = baseStart; baseIndex < baseEnd; baseIndex++) {
+                if (String(baseLines[baseIndex].text || '').trim()) {
+                    appendPreviewLine(lines, renderWholeLineDeletion(baseLines[baseIndex].text, baseLines[baseIndex].start));
                 }
-                i++;
-                continue;
+            }
+        }
+
+        function renderTokenDiff(baseSegment, revisedSegment, baseOffset) {
+            if (
+                String(baseSegment || '').trim() &&
+                String(revisedSegment || '').trim() &&
+                !areLinesSimilarEnoughForTokenDiff(baseSegment, revisedSegment)
+            ) {
+                return [
+                    renderWholeLineInsertion(revisedSegment),
+                    renderWholeLineDeletion(baseSegment, baseOffset)
+                ].join('<br>');
             }
 
-            if (j < revisedTokens.length && !revCommon) {
-                if (revTok && revTok.value.trim()) {
-                    html += '<span class="persistent-ins">' + escapeHtml(revTok.value) + '</span>';
-                    insertions++;
-                } else {
-                    html += escapeHtml(revTok ? revTok.value : '');
+            const baseTokens = tokenizeDiffText(baseSegment);
+            const revisedTokens = tokenizeDiffText(revisedSegment);
+            const lcs = buildTokenLcs(baseTokens, revisedTokens);
+            let segmentHtml = '';
+            let i = 0;
+            let j = 0;
+
+            function globalBaseToken(token) {
+                if (!token) return token;
+                return {
+                    ...token,
+                    start: baseOffset + token.start,
+                    end: baseOffset + token.end,
+                };
+            }
+
+            while (i < baseTokens.length || j < revisedTokens.length) {
+                const baseTok = i < baseTokens.length ? baseTokens[i] : null;
+                const revTok = j < revisedTokens.length ? revisedTokens[j] : null;
+                const baseCommon = i < baseTokens.length && lcs.commonBase.has(i);
+                const revCommon = j < revisedTokens.length && lcs.commonRev.has(j);
+                const sameToken =
+                    baseTok !== null &&
+                    revTok !== null &&
+                    diffTokensEqual(baseTok, revTok);
+                const adjustedBaseTok = globalBaseToken(baseTok);
+
+                if (baseCommon && revCommon && sameToken) {
+                    if (styleIndex) {
+                        segmentHtml += cloneStyledTokenHtml(
+                            styleIndex,
+                            adjustedBaseTok,
+                            revTok.value,
+                            annotationMap,
+                            includeExistingAnnotations && adjustedBaseTok
+                        );
+                    } else if (includeExistingAnnotations && adjustedBaseTok) {
+                        segmentHtml += wrapWithExistingAnnotation(revTok.value, adjustedBaseTok.start, annotationMap);
+                    } else {
+                        segmentHtml += escapeHtml(revTok.value);
+                    }
+                    i++;
+                    j++;
+                    continue;
                 }
-                j++;
-                continue;
+
+                if (i < baseTokens.length && !baseCommon) {
+                    if (baseTok && baseTok.value.trim()) {
+                        const delInner = styleIndex
+                            ? cloneStyledTokenHtml(styleIndex, adjustedBaseTok, baseTok.value, annotationMap, false)
+                            : escapeHtml(baseTok.value);
+                        segmentHtml += '<span class="persistent-del">' + delInner + '</span>';
+                        deletions++;
+                    } else {
+                        segmentHtml += escapeHtml(baseTok ? baseTok.value : '');
+                    }
+                    i++;
+                    continue;
+                }
+
+                if (j < revisedTokens.length && !revCommon) {
+                    if (revTok && revTok.value.trim()) {
+                        segmentHtml += '<span class="persistent-ins">' + escapeHtml(revTok.value) + '</span>';
+                        insertions++;
+                    } else {
+                        segmentHtml += escapeHtml(revTok ? revTok.value : '');
+                    }
+                    j++;
+                    continue;
+                }
+
+                if (j < revisedTokens.length) {
+                    segmentHtml += escapeHtml(revTok ? revTok.value : '');
+                    j++;
+                }
+                if (i < baseTokens.length) {
+                    i++;
+                }
             }
 
-            if (j < revisedTokens.length) {
-                html += escapeHtml(revTok ? revTok.value : '');
-                j++;
-            }
-            if (i < baseTokens.length) {
-                i++;
-            }
+            return segmentHtml;
+        }
+
+        const baseLines = buildLineRanges(baseText);
+        const revisedLines = buildLineRanges(revisedText);
+        if (baseLines.length > 1 || revisedLines.length > 1) {
+            const lineMatches = buildLineLcs(baseLines, revisedLines);
+            const renderedLines = [];
+            let baseIndex = 0;
+            let revisedIndex = 0;
+
+            lineMatches.forEach(function (match) {
+                appendUnmatchedLines(renderedLines, baseIndex, match.baseIndex, revisedIndex, match.revisedIndex);
+                appendPreviewLine(
+                    renderedLines,
+                    renderTokenDiff(
+                        baseLines[match.baseIndex].text,
+                        revisedLines[match.revisedIndex].text,
+                        baseLines[match.baseIndex].start
+                    )
+                );
+                baseIndex = match.baseIndex + 1;
+                revisedIndex = match.revisedIndex + 1;
+            });
+
+            appendUnmatchedLines(renderedLines, baseIndex, baseLines.length, revisedIndex, revisedLines.length);
+            html = renderedLines.join('<br>');
+        } else {
+            html = renderTokenDiff(baseText, revisedText, 0);
         }
 
         return { html, insertions, deletions };
@@ -1157,6 +1517,9 @@
         htmlLinesToParagraphs,
         stripTransientReviewHighlights,
         stripExistingAnnotationsForEditor,
+        buildRevisionComparisonFromAnnotatedHtml,
+        previewHtmlToPlainText,
+        computeInsertedTokenRanges,
         restoreLeadingBoldFromSource,
         buildEditableHtmlFromBaseline,
         wrapWithExistingAnnotation,

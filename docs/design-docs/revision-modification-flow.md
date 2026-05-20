@@ -44,7 +44,7 @@ For modification flows, the baseline text must come from one of:
 - `I already made my menu edits on a doc` (`Upload Unapproved DOCX (Preserve Redlines)`):
   - Select a DOCX still under review with existing tracked changes / highlights; extraction starts automatically after file selection.
   - System extracts all visible text (including deletions) and preserves existing redlines as `existing-del` / `existing-ins` CSS classes.
-  - Python script returns per-paragraph annotation ranges so the persistent preview can render both layers: existing redlines + new chef changes.
+  - Python script returns per-paragraph annotation ranges and annotated HTML; the dashboard derives a synthetic original/current pair so the persistent preview can render uploaded and new edits through one dynamic diff.
 
 ## Step 3: Editing + Review
 
@@ -62,6 +62,7 @@ For modification flows, the baseline text must come from one of:
   - Allergen legends are normalized into the Allergen Key field and appended once during DOCX generation.
   - Property-specific legal/footer notes and custom raw-food warnings are preserved as footer text and appended during generation, but excluded from the editor diff so design does not see them as deleted menu changes.
 - AI suggestion highlights remain temporary and separate from persistent chef revision markup, but they now preserve punctuation/separator mutations in the highlighted ranges instead of normalizing them away.
+- In uploaded unapproved/redlined DOCX mode, the form derives a synthetic original/current pair from the uploaded redline HTML. The left AI-reviewed menu stays clean and shows the accepted/current text with temporary green AI highlights only; the right persistent preview recreates uploaded and later edits through the same dynamic diff used by other modification routes.
 
 ## Data Model Additions (JSON DB)
 
@@ -144,7 +145,7 @@ When chef uses uploaded baseline flow:
 - Extraction mode follows the candidate’s `revision_source` when the revision baseline path is chosen:
   - `uploaded_baseline` → clean baseline extraction
   - `uploaded_unapproved` → unapproved extraction with preserved redlines
-- When an unapproved/redlined DOCX is used as the approval source, the editor keeps separate text baselines: clean accepted text for the left rich editor, and full visible text plus `existing-del` / `existing-ins` HTML for the right preview.
+- When an unapproved/redlined DOCX is used as the approval source, the editor keeps separate text baselines: synthetic original text for the right preview, and clean accepted/current text for the left rich editor.
 - DOCX-derived preview HTML is normalized to strip leading/trailing empty `<p><br></p>` blocks so the live preview aligns vertically with the editor (which trims leading blank lines).
 - The left rich editor is initialized by projecting the DOCX baseline HTML onto the clean accepted text, removing imported deletion spans, unwrapping imported insertion spans, and preserving inline markup such as `<strong>` and `<em>`.
 - When the editor must fall back to saved `menu_content_html`, temporary green AI-review highlight spans are unwrapped before display/submission so the approval editor only shows formatting plus imported/live redlines.
@@ -163,13 +164,17 @@ When a chef uploads an unapproved DOCX:
    - Project metadata and allergen-key extraction are best-effort; if `extract_project_details.py` times out or fails, the upload still succeeds and the redline editor opens with blank metadata/allergen fields rather than returning `500`.
    - Allergen-key extraction supports pipe-delimited keys and parenthesized keys such as `(C) CELERY (D) DAIRY`, normalizing detected keys into the pipe-delimited form used by the dashboard field and AI review prompt.
 3. **Frontend** (`form.ejs`):
-   - Loads `unapprovedBaseHtml` into the editable review area so existing redlines are visible during editing.
-   - Imported `existing-del` / `existing-ins` spans remain editable; deleting highlighted or struck text changes the normalized editor text, and the persistent preview records that deletion against the original visible baseline.
+   - Builds a reusable revision comparison from `unapprovedBaseHtml`: `originalText` removes imported insertions and keeps imported deletions, while `currentText` keeps imported insertions and removes imported deletions.
+   - Renders the left editor from clean `editorHtml`, with imported annotation wrappers removed and bold/italic markup preserved.
+   - Renders the right persistent preview by diffing synthetic `originalText` against the current left-editor text, rather than by replaying imported annotation ranges.
    - Strips managed footer paragraphs from uploaded baseline/unapproved HTML before building the editable/diff baseline, while retaining preserved footer text separately for submission.
-   - `renderPersistentPreview()` uses annotation ranges to wrap unchanged tokens in `existing-del`/`existing-ins` spans; new changes get `persistent-del`/`persistent-ins` as usual.
+   - `renderPersistentPreview()` uses the same dynamic `originalText` vs current text contract for uploaded-unapproved and regular modification routes; row-level diffing keeps normal same-row edits token-level, but treats clearly unrelated aligned rows as full-row insert/delete pairs so whole inserted/deleted menu rows do not interleave. New changes get `persistent-del`/`persistent-ins` as usual.
    - Annotation wrapping splits tokens at imported redline boundaries, so adjacent DOCX deletion/insertion runs such as `neapolitan` + `Neapolitan` remain separately styled after a later live edit.
    - Tokenization, token equality, and LCS alignment come from `@menumanager/diff-core`, the same shared helper package used by the backend differ service.
-   - Runs the AI check in full-review mode for uploaded unapproved DOCX content, while approved-baseline modification flows keep changed-only review. The AI-review extractor removes imported deletion/cross-out spans before sending text to AI, but leaves those spans in the editor and persistent preview.
+   - Runs the AI check in full-review mode for uploaded unapproved DOCX content, while approved-baseline modification flows keep changed-only review. The AI-review extractor reads clean current left-editor text.
+   - After AI review, the corrected accepted text is projected into the rich editor first; AI highlight offsets and the right preview then use the actual rich-editor text so browser/Quill normalization cannot drop the final character of a highlighted range.
+   - The right preview compares the synthetic original to the corrected accepted text, so uploaded redlines and AI changes share one reusable diff path.
+   - Root cause note: apparent row-combining bugs came from offset/range drift after rich HTML projection, a same-line-count positional diff shortcut that could cascade after one Quill blank-line shift, and unsafe preview text serialization that stripped `<br>` instead of converting it to a newline. The preview now validates cloned rich ranges against their fallback text, line-matches multi-row diffs even when line counts are equal, computes AI highlight ranges after Quill has normalized the editor HTML, and uses a preview-HTML-to-text serializer that preserves row breaks.
    - The preview diff tokenizes punctuation and separators separately so ingredient-separator edits are visible in the persistent redline.
    - Extracted Date Needed values only apply when they are valid `YYYY-MM-DD` values; otherwise the read-only Date Needed field remains at the turnaround-derived minimum date.
 4. **DOCX generation** (`generate_from_form.py`):

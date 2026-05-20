@@ -27,6 +27,8 @@ All variables are configured in `.env` at the project root. See `.env.example` f
 | `AI_REVIEW_MODEL` | OpenAI model used by AI review service (default: `gpt-4o-mini`) |
 | `BASIC_AI_CHECK_TIMEOUT_MS` | Dashboard timeout in milliseconds for background public-form Basic AI Check calls to ai-review (default: `120000`; falls back to `AI_REVIEW_QA_TIMEOUT_MS` if set) |
 | `BASIC_AI_CHECK_JOB_TTL_MS` | How long dashboard keeps completed/failed Basic AI Check job results available for polling before cleanup (default: `900000`) |
+| `BASIC_AI_CHECK_DEBUG_ENABLED` | Allows opt-in Basic AI Check diagnostics responses when the request includes `debugBasicCheck`; defaults to enabled outside production and disabled in production |
+| `BASIC_AI_CHECK_DEBUG_MAX_CHARS` | Maximum characters retained per diagnostic text field such as AI prompt, reviewed text, and raw feedback (default: `60000`) |
 | `SOP_DOC_PATH` | Path to SOP document (default: `samples/sop.txt`) |
 | `DASHBOARD_URL` | Base URL for email links (default: `http://localhost:3005`) |
 | `DB_SERVICE_URL` | Base URL for DB service (default: `http://localhost:3004`) |
@@ -98,7 +100,7 @@ Internal HTTP routes now require the shared `INTERNAL_API_TOKEN` header on servi
 
 Set the same `INTERNAL_API_TOKEN` value for every service process in the environment. If it is missing, internal requests fail closed with `503` or `401` responses instead of falling back to network trust.
 
-Internal service clients also apply `INTERNAL_API_TIMEOUT_MS` (default `5000`) when a request does not specify a timeout. This prevents dashboard routes from waiting indefinitely on a sick dependency; routes that need more time can still pass an explicit timeout. The browser-facing Basic AI Check flow is async: `/api/form/basic-check/start` returns a check id quickly, and the form polls `/api/form/basic-check/status/:checkId` while submit remains blocked. The background AI call uses `BASIC_AI_CHECK_TIMEOUT_MS` (default `120000`) so real menu reviews have time to complete without holding a gateway request open.
+Internal service clients also apply `INTERNAL_API_TIMEOUT_MS` (default `5000`) when a request does not specify a timeout. This prevents dashboard routes from waiting indefinitely on a sick dependency; routes that need more time can still pass an explicit timeout. The browser-facing Basic AI Check flow is async: `/api/form/basic-check/start` returns a check id quickly, and the form polls `/api/form/basic-check/status/:checkId` while submit remains blocked. The background AI call uses `BASIC_AI_CHECK_TIMEOUT_MS` (default `120000`) so real menu reviews have time to complete without holding a gateway request open. For local diagnosis, append `?debugBasicCheck=1` to `/form`; the completed poll response includes the reviewed text, prompt, raw AI feedback, parsed suggestions, and reconciliation drops, and the browser stores the same object on `window.lastBasicCheckDiagnostics`. In production, set `BASIC_AI_CHECK_DEBUG_ENABLED=true` before using that opt-in because diagnostics can include full menu text.
 
 ## Document Storage Layout
 

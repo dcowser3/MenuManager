@@ -9,6 +9,7 @@
   "scripts": {
     "test": "jest",
     "test:approved-dishes": "node scripts/test-approved-dishes.js",
+    "smoke:basic-ai-check": "node scripts/basic-ai-check-smoke.js",
     "prompt:optimize": "node scripts/prompt-optimize.js",
     "prompt:rewrite": "node scripts/prompt-rewrite.js",
     "sharepoint:sync-property": "node scripts/sync-sharepoint-property.js"

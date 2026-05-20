@@ -116,6 +116,12 @@ function postJsonOverHttp(routePath, body) {
     });
 }
 
+async function flushAsyncJobs(times = 3) {
+    for (let i = 0; i < times; i++) {
+        await new Promise((resolve) => setImmediate(resolve));
+    }
+}
+
 describe('Dashboard Modification Workflow (local, mocked externals)', () => {
     const submitHandler = getRouteHandler('post', '/api/form/submit');
     const basicCheckHandler = getRouteHandler('post', '/api/form/basic-check');
@@ -787,21 +793,66 @@ describe('Dashboard Modification Workflow (local, mocked externals)', () => {
             menuType: 'standard',
         };
 
-        const response = await invokeJsonHandler(basicCheckHandler, payload);
+        const response = await invokeJsonHandler(basicCheckHandler, payload, {
+            headers: { 'x-menumanager-debug-basic-check': '1' },
+        });
 
         expect(response.status).toBe(200);
         expect(response.body.success).toBe(true);
         expect(response.body.suggestions).toEqual([]);
         expect(response.body.hasCriticalErrors).toBe(false);
+        expect(response.body.basicCheckDiagnostics.aiRequest.text).toContain('add chorizo 5 | mushrooms V 4');
+        expect(response.body.basicCheckDiagnostics.aiRequest.prompt).toContain('IMPORTANT ADD-ON PRICE RULES');
+        expect(response.body.basicCheckDiagnostics.aiResponse.rawFeedback).toContain('"menuItem":"add mushrooms"');
+        expect(response.body.basicCheckDiagnostics.reconciliation.droppedSuggestions).toHaveLength(1);
+        expect(response.body.basicCheckDiagnostics.reconciliation.droppedSuggestions[0]).toMatchObject({
+            reason: 'critical_resolved_in_corrected_menu',
+            matchedLine: 'add chorizo 5 | mushrooms V 4',
+        });
     });
 
-    test('basic-check falls back to manual review when AI service call fails', async () => {
+    test.each([
+        [
+            '503 service error',
+            () => {
+                const error = new Error('AI call failed');
+                error.response = { status: 503, statusText: 'Service Unavailable', data: { error: 'OpenAI unavailable' } };
+                return error;
+            },
+            { reason: 'ai_review_service_error', status: 503 },
+        ],
+        [
+            '502 gateway HTML error',
+            () => {
+                const error = new Error('Request failed with status code 502');
+                error.response = { status: 502, statusText: 'Bad Gateway', data: '<html>Bad Gateway</html>' };
+                return error;
+            },
+            { reason: 'ai_review_service_error', status: 502 },
+        ],
+        [
+            'connection refused',
+            () => {
+                const error = new Error('connect ECONNREFUSED 127.0.0.1:3002');
+                error.code = 'ECONNREFUSED';
+                return error;
+            },
+            { reason: 'ai_review_unreachable', code: 'ECONNREFUSED' },
+        ],
+        [
+            'timeout',
+            () => {
+                const error = new Error('timeout of 120000ms exceeded');
+                error.code = 'ECONNABORTED';
+                return error;
+            },
+            { reason: 'ai_review_timeout', code: 'ECONNABORTED' },
+        ],
+    ])('basic-check falls back to manual review when AI service has %s', async (_label, buildError, expectedFailure) => {
         mockedAxios.post = jest.fn(async (url) => {
             const urlStr = String(url);
             if (urlStr.includes('/run-qa-check')) {
-                const error = new Error('AI call failed');
-                error.response = { status: 503, statusText: 'Service Unavailable', data: { error: 'OpenAI unavailable' } };
-                throw error;
+                throw buildError();
             }
             return { data: {} };
         });
@@ -822,11 +873,47 @@ describe('Dashboard Modification Workflow (local, mocked externals)', () => {
         expect(response.body.correctedMenu).toBe(payload.menuContent);
         expect(response.body.suggestions).toEqual([]);
         expect(response.body.hasCriticalErrors).toBe(false);
-        expect(response.body.aiFailure).toMatchObject({
-            reason: 'ai_review_service_error',
-            status: 503,
-        });
+        expect(response.body.aiFailure).toMatchObject(expectedFailure);
         expect(response.body.reviewSkippedReason).toContain('manual review');
+    });
+
+    test('basic-check falls back to manual review when AI service returns malformed success response', async () => {
+        mockedAxios.post = jest.fn(async (url) => {
+            const urlStr = String(url);
+            if (urlStr.includes('/run-qa-check')) {
+                return {
+                    status: 200,
+                    statusText: 'OK',
+                    data: '<html>upstream proxy error</html>',
+                };
+            }
+            return { data: {} };
+        });
+
+        const payload = {
+            menuContent: 'Guacamole - $12\nCeviche - $15',
+            baselineMenuContent: '',
+            reviewMode: 'full',
+            allergens: '',
+            menuType: 'standard',
+        };
+
+        const response = await invokeJsonHandler(basicCheckHandler, payload, {
+            headers: { 'x-menumanager-debug-basic-check': '1' },
+        });
+
+        expect(response.status).toBe(200);
+        expect(response.body.success).toBe(true);
+        expect(response.body.aiUnavailable).toBe(true);
+        expect(response.body.manualReviewRequired).toBe(true);
+        expect(response.body.correctedMenu).toBe(payload.menuContent);
+        expect(response.body.suggestions).toEqual([]);
+        expect(response.body.hasCriticalErrors).toBe(false);
+        expect(response.body.aiFailure).toMatchObject({
+            reason: 'ai_review_malformed_response',
+            status: 200,
+        });
+        expect(response.body.basicCheckDiagnostics.aiResponse.body).toContain('upstream proxy error');
     });
 
     test('basic-check async start returns a pollable completed result', async () => {
@@ -846,8 +933,7 @@ describe('Dashboard Modification Workflow (local, mocked externals)', () => {
         expect(startResponse.body.checkId).toBeTruthy();
         expect(startResponse.body.pollUrl).toBe(`/api/form/basic-check/status/${startResponse.body.checkId}`);
 
-        await new Promise((resolve) => setImmediate(resolve));
-        await new Promise((resolve) => setImmediate(resolve));
+        await flushAsyncJobs();
 
         const statusResponse = await invokeJsonHandler(basicCheckStatusHandler, {}, {
             params: { checkId: startResponse.body.checkId },
@@ -856,6 +942,98 @@ describe('Dashboard Modification Workflow (local, mocked externals)', () => {
         expect(statusResponse.body.status).toBe('completed');
         expect(statusResponse.body.result.success).toBe(true);
         expect(statusResponse.body.result.correctedMenu).toBe(payload.menuContent);
+    });
+
+    test('basic-check async start stays pending while AI service is still running', async () => {
+        let resolveQaCheck;
+        let qaCallStarted = false;
+        mockedAxios.post = jest.fn((url, payload) => {
+            const urlStr = String(url);
+            if (urlStr.includes('/run-qa-check')) {
+                qaCallStarted = true;
+                return new Promise((resolve) => {
+                    resolveQaCheck = resolve;
+                });
+            }
+            return Promise.resolve({ data: {} });
+        });
+
+        const payload = {
+            menuContent: 'Guacamole - $12',
+            baselineMenuContent: '',
+            reviewMode: 'full',
+            allergens: '',
+            menuType: 'standard',
+        };
+
+        const startResponse = await invokeJsonHandler(basicCheckStartHandler, payload);
+        expect(startResponse.status).toBe(202);
+        expect(startResponse.body.status).toBe('pending');
+
+        await flushAsyncJobs();
+        expect(qaCallStarted).toBe(true);
+
+        const pendingResponse = await invokeJsonHandler(basicCheckStatusHandler, {}, {
+            params: { checkId: startResponse.body.checkId },
+        });
+        expect(pendingResponse.status).toBe(200);
+        expect(pendingResponse.body.status).toBe('pending');
+
+        resolveQaCheck({
+            data: {
+                feedback: '=== CORRECTED MENU ===\nGuacamole - $12\n=== END CORRECTED MENU ===\n=== SUGGESTIONS ===\n[]\n=== END SUGGESTIONS ===',
+            },
+        });
+        await flushAsyncJobs();
+
+        const completedResponse = await invokeJsonHandler(basicCheckStatusHandler, {}, {
+            params: { checkId: startResponse.body.checkId },
+        });
+        expect(completedResponse.status).toBe(200);
+        expect(completedResponse.body.status).toBe('completed');
+        expect(completedResponse.body.result.success).toBe(true);
+        expect(completedResponse.body.result.aiUnavailable).toBeUndefined();
+    });
+
+    test('basic-check async job completes with manual-review fallback after AI gateway failure', async () => {
+        mockedAxios.post = jest.fn(async (url) => {
+            const urlStr = String(url);
+            if (urlStr.includes('/run-qa-check')) {
+                const error = new Error('Request failed with status code 502');
+                error.response = { status: 502, statusText: 'Bad Gateway', data: '<html>Bad Gateway</html>' };
+                throw error;
+            }
+            return { data: {} };
+        });
+
+        const payload = {
+            menuContent: 'Guacamole - $12\nCeviche - $15',
+            baselineMenuContent: '',
+            reviewMode: 'full',
+            allergens: '',
+            menuType: 'standard',
+        };
+
+        const startResponse = await invokeJsonHandler(basicCheckStartHandler, payload);
+        expect(startResponse.status).toBe(202);
+
+        await flushAsyncJobs();
+
+        const statusResponse = await invokeJsonHandler(basicCheckStatusHandler, {}, {
+            params: { checkId: startResponse.body.checkId },
+        });
+        expect(statusResponse.status).toBe(200);
+        expect(statusResponse.body.status).toBe('completed');
+        expect(statusResponse.body.statusCode).toBe(200);
+        expect(statusResponse.body.result.success).toBe(true);
+        expect(statusResponse.body.result.aiUnavailable).toBe(true);
+        expect(statusResponse.body.result.manualReviewRequired).toBe(true);
+        expect(statusResponse.body.result.correctedMenu).toBe(payload.menuContent);
+        expect(statusResponse.body.result.suggestions).toEqual([]);
+        expect(statusResponse.body.result.aiFailure).toMatchObject({
+            reason: 'ai_review_service_error',
+            status: 502,
+        });
     });
 
     test('basic-check changed_only merges AI high-confidence corrections back into the full menu', async () => {
