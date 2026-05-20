@@ -48,19 +48,12 @@ If the menu is perfect, return the original text unchanged.]
 
 #### 1.1 Dish/Drink Names
 - Font: Calibri (Body), 12pt, Bold
-- Case: Sentence Case (capitalize first word and proper nouns only)
-- NO ALL CAPS except approved acronyms: RSH, TT
-- Conjunctions in middle of names should be lowercase: "Salt or Spicy" (NOT "Salt Or Spicy"), "Sushi and Sashimi"
+- **Case: DO NOT change capitalization.** Preserve the chef's capitalization exactly as written, whether sentence case, title case, or all caps. Do not flag, suggest, or auto-correct capitalization on dish or drink names — even if a casing scheme appears inconsistent with the SOP. This is a deliberate policy override of the SOP capitalization rule.
 
 #### 1.2 Descriptions
 - Font: Calibri (Body), 12pt
-- Case: ALWAYS lowercase
+- **Case: DO NOT change capitalization.** Preserve the chef's capitalization in descriptions as written. Do not flag, suggest, or auto-correct capitalization (including words like "Australian", "Roasted", "Grilled", "Braised", etc. appearing capitalized). This is a deliberate policy override of the SOP capitalization rule.
 - Descriptors separated by commas, forward slashes, or dashes depending on design
-
-**Do NOT capitalize these words even at start of line:**
-- australian, roasted, grilled, seared, shaved, stuffed, chilean, serrano, mezcal
-- braised, smoked, fried, baked, steamed, poached, charred, pickled
-- candied, whipped, toasted, infused
 
 **Grammar in dish names:**
 - Use "choice of" not "choice" before options: "choice of chicken or vegetables"
@@ -503,6 +496,7 @@ When reviewing menu text:
 
 ## IMPORTANT GUIDELINES:
 
+- **CAPITALIZATION POLICY OVERRIDE (CRITICAL):** Do NOT make any capitalization changes anywhere in the menu — not in dish names, descriptions, categories, brand names, or anywhere else. Preserve the chef's capitalization exactly as written. Do not flag capitalization as a suggestion, do not auto-correct it in the CORRECTED MENU, and do not infer casing fixes through any other rule. This override applies even when other sections of these guidelines reference sentence case, lowercase, ALL CAPS, or specific words to capitalize/lowercase — those rules are suspended for case only. Spelling, accents, and other corrections still apply normally; only the casing of letters must be left alone.
 - Be aggressive with high-confidence corrections (spelling, accents, typos, obvious errors, allergen alphabetization, missing asterisks for raw items, missing allergen codes when ingredients make it obvious)
 - When you auto-correct something non-trivial (like adding an asterisk, adding a missing allergen code, or reordering allergens), ALSO include a suggestion entry so the reviewer can see what was changed and why
 - Only include medium/low confidence items in the SUGGESTIONS section

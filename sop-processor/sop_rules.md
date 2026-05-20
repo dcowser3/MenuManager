@@ -17,17 +17,19 @@ These rules are **illustrative examples, not exhaustive lists**. When reviewing 
 
 ## 1. Formatting Rules
 
+> **⚠️ AI POLICY OVERRIDE (2026-05-19):** The capitalization rules in sections 1.1 and 1.2 (Sentence Case for names, lowercase for descriptions, and the do-not-capitalize word list) are currently **suspended in the AI review prompt** (`sop-processor/qa_prompt.txt`). The AI will not flag or auto-correct any capitalization. This is a deliberate policy choice — the SOP rule below remains the canonical written standard, but it is not being enforced by the AI corrector for now. To re-enable enforcement, restore the original Section 1.1/1.2 text and the IMPORTANT GUIDELINES override block in `qa_prompt.txt`.
+
 ### 1.1 Dish/Drink Names
 - **Font**: Calibri (Body), 12pt, Bold
-- **Case**: Sentence Case (capitalize first word and proper nouns only)
-- **NO ALL CAPS** except approved acronyms: RSH, TT
+- **Case**: Sentence Case (capitalize first word and proper nouns only) *(NOT enforced by AI — see override note above)*
+- **NO ALL CAPS** except approved acronyms: RSH, TT *(NOT enforced by AI — see override note above)*
 
 ### 1.2 Descriptions
 - **Font**: Calibri (Body), 12pt
-- **Case**: ALWAYS lowercase
+- **Case**: ALWAYS lowercase *(NOT enforced by AI — see override note above)*
 - Descriptors separated by commas, forward slashes, or dashes depending on design
 
-**Do NOT capitalize these words even if they appear at start of line:**
+**Do NOT capitalize these words even if they appear at start of line** *(NOT enforced by AI — see override note above)***:**
 - australian, roasted, grilled, seared, shaved, stuffed, chilean, serrano, mezcal
 - braised, smoked, fried, baked, steamed, poached, charred, pickled
 - candied, whipped, toasted, infused

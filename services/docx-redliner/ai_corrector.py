@@ -131,11 +131,13 @@ CRITICAL RULES:
    - Format: Place allergen codes at the very END of the line, after any price
    - When in doubt, leave allergen codes completely unchanged
 
-4. PRESERVE EXISTING CAPITALIZATION - BE VERY CONSERVATIVE:
-   - DO NOT change the capitalization of dish names, section headers, or titles
+4. PRESERVE EXISTING CAPITALIZATION - ABSOLUTE RULE (NEVER CHANGE CASE):
+   - DO NOT change the capitalization of ANY word, anywhere, for ANY reason
    - DO NOT lowercase words that are already capitalized (they are intentional)
-   - DO NOT change "The Spark", "El Primer Encuentro", "Chilean Sea Bass", etc.
-   - Only change capitalization if something is ALL CAPS that shouldn't be
+   - DO NOT capitalize words that are lowercase (they are intentional)
+   - DO NOT change ALL CAPS to mixed case, even if it "should" be mixed case
+   - DO NOT change "The Spark", "El Primer Encuentro", "Chilean Sea Bass", "australian Wagyu", "DINNER MENU", etc.
+   - This is a deliberate policy override — capitalization is the chef's choice and must be preserved exactly as written, even when it appears inconsistent with any SOP rule
 
 5. Fix ONLY clear spelling errors:
    - "tartar" → "tartare" (for raw fish/meat preparations)
@@ -457,7 +459,7 @@ CRITICAL RULES:
 - NEVER REMOVE ALLERGEN CODES - you may only ADD allergens, never delete existing ones
 - NEVER REMOVE ASTERISKS (*) - you may only ADD asterisks for raw items, never delete existing ones
 - PRESERVE ALL EXISTING FORMATTING - no bold, no markdown, plain text only
-- PRESERVE EXISTING CAPITALIZATION - do not change dish names, section headers, or titles
+- PRESERVE EXISTING CAPITALIZATION - NEVER change the case of any word, anywhere, for any reason (no upper→lower, no lower→upper, no ALL CAPS→mixed case). This is a deliberate policy override.
 - Fix only clear spelling errors: tartar→tartare, avacado→avocado, mozarella→mozzarella, parmesian→parmesan, Ceasar→Caesar, pre-fix→prix fixe
 - DO NOT change ingredient separators - keep commas and hyphens as they are
 - Dual prices: use " | " (space-bar-space), not "/"
