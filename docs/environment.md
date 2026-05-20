@@ -63,9 +63,9 @@ These are optional. If `CLICKUP_API_TOKEN` or `CLICKUP_LIST_ID` are not set, the
 | `CLICKUP_WEBHOOK_URL` | Public URL for ClickUp webhook events |
 | `CLICKUP_WEBHOOK_SECRET` | Optional webhook signing secret from ClickUp (`POST /webhook/register` response). If set, webhook signatures are strictly verified. |
 | `CLICKUP_INITIAL_REVIEW_STATUS` | Status assigned to newly created ClickUp tasks (default: `"pending initial isa review"`) |
-| `CLICKUP_CORRECTIONS_STATUS` | Status name that triggers correction download (default: `"to do"`) |
+| `CLICKUP_CORRECTIONS_STATUS` | Status name that triggers correction download (default: `"to do"`). This can differ from the Isabella direct-submit destination. |
 | `CLICKUP_CORRECTIONS_STATUSES` | Optional comma-separated trigger statuses for aliases or transitional workflows |
-| `CLICKUP_POST_APPROVAL_STATUS` | Status applied to the ClickUp task after approved DOCX processing finishes when it is not already there (default: `"to do"`) |
+| `CLICKUP_POST_APPROVAL_STATUS` | Status applied to the ClickUp task after approved DOCX processing finishes when it is not already there; Isabella direct submissions are also created in this status (default: `"to do"`) |
 
 ## Alerting And Monitoring
 

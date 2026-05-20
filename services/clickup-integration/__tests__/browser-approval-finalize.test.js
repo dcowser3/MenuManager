@@ -3,6 +3,7 @@ process.env.CLICKUP_LIST_ID = 'list_123';
 process.env.CLICKUP_TEAM_ID = 'team_123';
 process.env.CLICKUP_ASSIGNEE_ID = '114079264';
 process.env.CLICKUP_MARKETING_WATCHER_GROUP_NAME = 'Marketing';
+process.env.CLICKUP_CORRECTIONS_STATUS = 'approved';
 process.env.CLICKUP_POST_APPROVAL_STATUS = 'to do';
 process.env.GRAPH_CLIENT_ID = 'graph-client-id';
 process.env.GRAPH_TENANT_ID = 'graph-tenant-id';
@@ -272,7 +273,7 @@ describe('browser approval finalize route', () => {
         expect(watcherCall[1]).toEqual({ watchers: { add: [201, 202], rem: [] } });
     });
 
-    test('routes Isabella submissions directly to To Do with Marketing as assignees', async () => {
+    test('routes Isabella submissions directly to To Do with Marketing as assignees when corrections status is approved', async () => {
         axios.get.mockImplementation(async (url) => {
             const urlStr = String(url);
             if (urlStr.includes('https://api.clickup.com/api/v2/group')) {
@@ -320,6 +321,7 @@ describe('browser approval finalize route', () => {
         );
         expect(createCall).toBeTruthy();
         expect(createCall[1].status).toBe('to do');
+        expect(createCall[1].status).not.toBe('approved');
         expect(createCall[1].assignees).toEqual([201, 202]);
         expect(createCall[1].assignees).not.toContain(114079264);
     });
@@ -393,6 +395,75 @@ describe('browser approval finalize route', () => {
         );
         expect(statusCall).toBeTruthy();
         expect(statusCall[1]).toEqual({ status: 'to do' });
+    });
+
+    test('triggers differ compare for uploaded-baseline modifications finalized from the approval editor', async () => {
+        axios.get.mockImplementation(async (url) => {
+            const urlStr = String(url);
+            if (urlStr.includes('https://api.clickup.com/api/v2/group')) {
+                return {
+                    data: {
+                        groups: [
+                            {
+                                id: 'grp_marketing',
+                                name: 'Marketing',
+                                members: [
+                                    { user: { id: 201 } },
+                                    { user: { id: 202 } },
+                                ],
+                            },
+                        ],
+                    },
+                };
+            }
+            if (urlStr.includes('/submissions/sub_uploaded_baseline_1')) {
+                return {
+                    data: {
+                        id: 'sub_uploaded_baseline_1',
+                        clickup_task_id: 'cu_uploaded_baseline',
+                        project_name: 'Uploaded Baseline Dinner Menu',
+                        property: 'Toro - Chicago',
+                        service_period: 'dinner',
+                        submitter_email: 'chef@example.com',
+                        submitter_name: 'Chef Test',
+                        filename: 'Uploaded Baseline Dinner Menu.docx',
+                        submission_mode: 'modification',
+                        revision_source: 'uploaded_baseline',
+                        revision_baseline_doc_path: '/tmp/documents/sub_uploaded_baseline_1/baseline/legacy-approved.docx',
+                        original_path: '/tmp/documents/sub_uploaded_baseline_1/original/submitted-generated.docx',
+                        ai_draft_path: '/tmp/documents/sub_uploaded_baseline_1/ai-draft.docx',
+                        raw_payload: {},
+                    },
+                };
+            }
+            if (urlStr.includes('/properties')) {
+                return { data: { catalog: [] } };
+            }
+            return { data: null };
+        });
+
+        const approvedPath = '/tmp/documents/sub_uploaded_baseline_1/approved/browser-approved.docx';
+        const response = await invokeJsonHandler(finalizeHandler, {
+            body: {
+                submissionId: 'sub_uploaded_baseline_1',
+                approvedPath,
+                approvedFileName: 'Uploaded Baseline Dinner Menu.docx',
+            },
+        });
+
+        expect(response.status).toBe(200);
+        expect(response.body.success).toBe(true);
+
+        const compareCall = axios.post.mock.calls.find((call) =>
+            String(call[0]).includes('http://localhost:3006/compare')
+        );
+        expect(compareCall).toBeTruthy();
+        expect(compareCall[1]).toEqual({
+            submission_id: 'sub_uploaded_baseline_1',
+            ai_draft_path: '/tmp/documents/sub_uploaded_baseline_1/ai-draft.docx',
+            final_path: approvedPath,
+        });
+        expect(compareCall[1].final_path).not.toBe('/tmp/documents/sub_uploaded_baseline_1/baseline/legacy-approved.docx');
     });
 
     test('still moves the task to to do when Marketing assignment fails', async () => {

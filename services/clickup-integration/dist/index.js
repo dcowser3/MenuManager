@@ -34,6 +34,7 @@ const CLICKUP_WEBHOOK_SECRET = process.env.CLICKUP_WEBHOOK_SECRET;
 const CLICKUP_INITIAL_REVIEW_STATUS = (process.env.CLICKUP_INITIAL_REVIEW_STATUS || 'pending initial isa review').trim();
 const CLICKUP_CORRECTIONS_STATUS = normalizeStatus(process.env.CLICKUP_CORRECTIONS_STATUS || 'to do');
 const CLICKUP_POST_APPROVAL_STATUS = (process.env.CLICKUP_POST_APPROVAL_STATUS || 'to do').trim();
+const CLICKUP_ISABELLA_DIRECT_STATUS = CLICKUP_POST_APPROVAL_STATUS || 'to do';
 const CLICKUP_MARKETING_WATCHER_GROUP_NAME = (process.env.CLICKUP_MARKETING_WATCHER_GROUP_NAME || 'Marketing').trim();
 const CLICKUP_MARKETING_WATCHER_GROUP_ID = process.env.CLICKUP_MARKETING_WATCHER_GROUP_ID || '';
 const CLICKUP_WATCHER_USER_IDS = process.env.CLICKUP_WATCHER_USER_IDS || '';
@@ -1132,7 +1133,7 @@ app.post('/create-task', async (req, res) => {
                 overrideLines,
                 approvals,
             }),
-            status: routeToMarketing ? (CLICKUP_CORRECTIONS_STATUS || 'to do') : CLICKUP_INITIAL_REVIEW_STATUS,
+            status: routeToMarketing ? CLICKUP_ISABELLA_DIRECT_STATUS : CLICKUP_INITIAL_REVIEW_STATUS,
         };
         if (routeToMarketing) {
             if (marketingAssigneeIds.length) {

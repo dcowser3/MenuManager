@@ -36,6 +36,7 @@ Menu Manager is an AI-powered service designed to automate the review process fo
 - Basic AI Check suppresses missing-price false positives on add-on rows when an option already has a same-line price, such as `add chorizo 5 | mushrooms V 4`.
 - Basic AI Check recognizes embedded set-menu sections inside standard menus, such as `Quick Lunch Menu $38` with `choice of one appetizer & one entree`; included dishes do not need item prices, explicit `+` premium prices are allowed, and bare included-item prices are flagged as critical `Set Menu Item Price` issues without being auto-removed.
 - Basic AI Check now runs as an async dashboard job: the form starts a check, keeps submit blocked while it polls status, then unlocks only after AI results arrive or an explicit AI-unavailable/manual-review fallback is returned.
+- If a chef edits the reviewed menu after the first Basic AI Check, the form still requires one re-run. After the second completed Basic AI Check, later edits are allowed through final submit so the chef can keep an intentional correction the AI keeps undoing.
 - If the Basic AI Check service call fails, the public form keeps the original menu unchanged, shows an AI-unavailable warning, and allows the submission to continue to manual review instead of blocking the chef on a red error.
 - For local debugging, open the form with `?debugBasicCheck=1` to include Basic AI Check diagnostics in the Network response and `window.lastBasicCheckDiagnostics`; production requires `BASIC_AI_CHECK_DEBUG_ENABLED=true`.
 - `npm run smoke:basic-ai-check` runs a live async Basic AI Check smoke test against `DASHBOARD_URL` and can be configured to alert on AI-unavailable fallback.
@@ -112,7 +113,7 @@ services/
 
 Current ClickUp BAU status handoff:
 - New tasks start in `Pending Initial ISA Review`
-- New tasks are assigned through `CLICKUP_ASSIGNEE_ID` (Isabella in production) and add Marketing group members as watchers when the ClickUp group lookup is configured; submissions from `isabella@richardsandoval.com` route directly to `To Do` and assign the resolved Marketing users instead
+- New tasks are assigned through `CLICKUP_ASSIGNEE_ID` (Isabella in production) and add Marketing group members as watchers when the ClickUp group lookup is configured; submissions from `isabella@richardsandoval.com` route directly to `CLICKUP_POST_APPROVAL_STATUS` (`To Do` by default) and assign the resolved Marketing users instead, even when `CLICKUP_CORRECTIONS_STATUS` is a different review-complete trigger such as `approved`
 - Isabella uploads the corrected DOCX in ClickUp and moves the task to `To Do`; that status change downloads the latest DOCX and feeds the learning dashboard
 - When the approved DOCX is processed from any configured review-complete status, the task is assigned to the resolved Marketing users and the configured initial reviewer is removed when applicable; the task is then moved to `To Do`, or the status update is skipped if it is already there
 - Task due date is taken from the form "Date needed" using noon UTC on that calendar day so ClickUp does not display it one day early in US timezones (plain `YYYY-MM-DD` parsing used to mean UTC midnight)

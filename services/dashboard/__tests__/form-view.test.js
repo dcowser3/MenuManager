@@ -140,4 +140,19 @@ describe('dashboard form modification source chooser', () => {
         expect(template).toContain('If you are stuck, email <a href="mailto:<%= supportEmail %>"><%= supportEmail %></a>.');
         expect(template).toContain('Need help? Email <a href="mailto:<%= supportEmail %>"><%= supportEmail %></a>.');
     });
+
+    test('allows final submit after edits made following the second AI check', () => {
+        const template = fs.readFileSync(
+            path.join(__dirname, '..', 'views', 'form.ejs'),
+            'utf8'
+        );
+
+        expect(template).toContain('let aiCheckCompletedCount = 0;');
+        expect(template).toContain('aiCheckCompletedCount += 1;');
+        expect(template).toContain('window.formHelpers.shouldBlockSubmitForStaleAiCheck');
+        expect(template).toContain('return requiresAiRerun && aiCheckCompletedCount < 2;');
+        expect(template).toContain('if (!skipAiReview && shouldBlockSubmitForStaleAiCheck())');
+        expect(template).toContain('submittedWithPostSecondAiEdit: requiresAiRerun && !shouldBlockSubmitForStaleAiCheck()');
+        expect(template).not.toContain('if (!skipAiReview && requiresAiRerun)');
+    });
 });

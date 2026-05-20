@@ -101,6 +101,13 @@
         }).map((entry) => entry.name);
     }
 
+    function shouldBlockSubmitForStaleAiCheck(requiresAiRerun, completedCheckCount, unlockAfterCount) {
+        if (!requiresAiRerun) return false;
+        const completed = Number.parseInt(String(completedCheckCount || 0), 10) || 0;
+        const unlockAfter = Number.parseInt(String(unlockAfterCount || 2), 10) || 2;
+        return completed < unlockAfter;
+    }
+
     const api = {
         addBusinessDays,
         clampExtractedDateNeeded,
@@ -108,6 +115,7 @@
         parseExtractedSize,
         tokenizePropertyHint,
         findCatalogMatchesFromHints,
+        shouldBlockSubmitForStaleAiCheck,
     };
     if (typeof module !== 'undefined' && module.exports) {
         module.exports = api;

@@ -2279,6 +2279,7 @@
         let unapprovedAnnotationMap = {};
         let persistentPreviewUpdateTimer = null;
         let aiCheckHasRun = false;
+        let aiCheckCompletedCount = 0;
         let lastAiCheckedMenuText = '';
         let requiresAiRerun = false;
         let suppressRawNotice = false;
@@ -3260,6 +3261,14 @@
             updateSubmitButtonState();
         }
 
+        function shouldBlockSubmitForStaleAiCheck() {
+            const helper = window.formHelpers && window.formHelpers.shouldBlockSubmitForStaleAiCheck;
+            if (typeof helper === 'function') {
+                return helper(requiresAiRerun, aiCheckCompletedCount);
+            }
+            return requiresAiRerun && aiCheckCompletedCount < 2;
+        }
+
         function onSubmissionModeChange() {
             submissionMode = document.getElementById('submissionModeModification').checked ? 'modification' : 'new';
             const modSection = document.getElementById('modificationSearchSection');
@@ -3304,6 +3313,7 @@
                 unapprovedEditorHtml = '';
                 unapprovedAnnotationMap = {};
                 aiCheckHasRun = false;
+                aiCheckCompletedCount = 0;
                 aiCheckResults = null;
                 criticalErrorOverrides = {};
                 const selectedNote = document.getElementById('revisionSelectedNote');
@@ -3916,6 +3926,9 @@
             };
 
             aiCheckHasRun = false;
+            aiCheckCompletedCount = 0;
+            lastAiCheckedMenuText = '';
+            requiresAiRerun = false;
             aiCheckResults = synthetic;
             showStep2(synthetic);
             setAiSuggestionsVisibility(false);
@@ -5113,6 +5126,7 @@
                 });
 
                 aiCheckHasRun = true;
+                aiCheckCompletedCount += 1;
                 setAiSuggestionsVisibility(true);
                 aiCheckResults = data;
                 await logFormAttempt('basic_check_client_received', {
@@ -5129,7 +5143,8 @@
                     details: {
                         reviewMode: data.reviewMode || reviewMode,
                         changedLineCount: data.changedLineCount || 0,
-                        hasChanges: !!data.hasChanges
+                        hasChanges: !!data.hasChanges,
+                        aiCheckCompletedCount
                     }
                 });
                 showStep2(data);
@@ -5369,6 +5384,7 @@
             const submitBtn = document.getElementById('submitBtn');
             const banner = document.getElementById('criticalErrorBanner');
             const staleBanner = document.getElementById('aiStaleBanner');
+            const staleAiCheckBlocksSubmit = shouldBlockSubmitForStaleAiCheck();
             if (!aiCheckHasRun) {
                 submitBtn.disabled = true;
                 submitBtn.classList.add('blocked');
@@ -5377,7 +5393,7 @@
                 return;
             }
 
-            if (requiresAiRerun) {
+            if (staleAiCheckBlocksSubmit) {
                 submitBtn.disabled = true;
                 submitBtn.classList.add('blocked');
                 banner.classList.remove('show');
@@ -5468,6 +5484,7 @@
                 });
 
                 aiCheckHasRun = true;
+                aiCheckCompletedCount += 1;
                 requiresAiRerun = false;
                 setAiSuggestionsVisibility(true);
                 aiCheckResults = data;
@@ -5487,7 +5504,8 @@
                         reviewMode: data.reviewMode || reviewMode,
                         changedLineCount: data.changedLineCount || 0,
                         hasChanges: !!data.hasChanges,
-                        rerun: true
+                        rerun: true,
+                        aiCheckCompletedCount
                     }
                 });
 
@@ -5751,7 +5769,7 @@
                 return;
             }
 
-            if (!skipAiReview && requiresAiRerun) {
+            if (!skipAiReview && shouldBlockSubmitForStaleAiCheck()) {
                 showAlert('You edited the menu after AI check. Please re-run AI Check before submitting.', 'error');
                 return;
             }
@@ -5916,7 +5934,9 @@
                         skipAiReview: !!skipAiReview,
                         unapprovedMode: !!formData.unapprovedMode,
                         hasMenuImage: !!formData.menuImagePath,
-                        overriddenCriticalCount: criticalOverrides.length
+                        overriddenCriticalCount: criticalOverrides.length,
+                        aiCheckCompletedCount,
+                        submittedWithPostSecondAiEdit: requiresAiRerun && !shouldBlockSubmitForStaleAiCheck()
                     }
                 });
 
@@ -5956,7 +5976,9 @@
                             responseText: responseText.slice(0, 1000),
                             skipAiReview: !!skipAiReview,
                             unapprovedMode: !!formData.unapprovedMode,
-                            overriddenCriticalCount: criticalOverrides.length
+                            overriddenCriticalCount: criticalOverrides.length,
+                            aiCheckCompletedCount,
+                            submittedWithPostSecondAiEdit: requiresAiRerun && !shouldBlockSubmitForStaleAiCheck()
                         }
                     });
                     throw new Error(data.error || 'Failed to submit menu');
@@ -5977,7 +5999,9 @@
                         localTesting: !!data.localTesting,
                         skipAiReview: !!skipAiReview,
                         unapprovedMode: !!formData.unapprovedMode,
-                        overriddenCriticalCount: criticalOverrides.length
+                        overriddenCriticalCount: criticalOverrides.length,
+                        aiCheckCompletedCount,
+                        submittedWithPostSecondAiEdit: requiresAiRerun && !shouldBlockSubmitForStaleAiCheck()
                     }
                 });
 
@@ -6014,7 +6038,9 @@
                     details: {
                         skipAiReview: !!skipAiReview,
                         unapprovedMode: !!formData.unapprovedMode,
-                        overriddenCriticalCount: criticalOverrides.length
+                        overriddenCriticalCount: criticalOverrides.length,
+                        aiCheckCompletedCount,
+                        submittedWithPostSecondAiEdit: requiresAiRerun && !shouldBlockSubmitForStaleAiCheck()
                     }
                 });
                 showAlert('Error submitting menu: ' + error.message, 'error', {
@@ -6030,6 +6056,7 @@
             resetFormAttemptId();
 
             aiCheckHasRun = false;
+            aiCheckCompletedCount = 0;
             aiCheckResults = null;
             criticalErrorOverrides = {};
             aiChanges = [];

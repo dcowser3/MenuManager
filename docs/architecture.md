@@ -59,6 +59,9 @@ Runs AI Check
 Reviews AI suggestions
   Critical errors (missing price, incomplete dish name) block submission
   User fixes via edit + re-run, or overrides
+  Note: an edit after the first Basic AI Check still requires one re-run.
+        After the second completed Basic AI Check, later edits can be submitted without another AI pass
+        so chefs can keep intentional text the AI repeatedly changes.
   │
   ▼
 Submits menu

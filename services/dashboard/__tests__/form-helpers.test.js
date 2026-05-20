@@ -4,6 +4,7 @@ const {
     findCatalogMatchesFromHints,
     isValidDateInputValue,
     parseExtractedSize,
+    shouldBlockSubmitForStaleAiCheck,
     tokenizePropertyHint,
 } = require('../public/js/form-helpers');
 
@@ -206,5 +207,20 @@ describe('property catalog hint matching', () => {
             'Maya - Le Royal Meridien - Dubai',
             'Maya - Le Meridien - Dubai',
         ]);
+    });
+});
+
+describe('stale AI check submit gate', () => {
+    test('does not block when the menu has not changed after AI check', () => {
+        expect(shouldBlockSubmitForStaleAiCheck(false, 1)).toBe(false);
+    });
+
+    test('blocks a stale menu after only one completed AI check', () => {
+        expect(shouldBlockSubmitForStaleAiCheck(true, 1)).toBe(true);
+    });
+
+    test('allows stale edits after the second completed AI check', () => {
+        expect(shouldBlockSubmitForStaleAiCheck(true, 2)).toBe(false);
+        expect(shouldBlockSubmitForStaleAiCheck(true, 3)).toBe(false);
     });
 });
