@@ -48,6 +48,22 @@ The dashboard and service clients attach this header automatically for service-t
 
 Internal service clients default to a 5-second timeout (`INTERNAL_API_TIMEOUT_MS`) unless a route sets a more specific timeout. Basic AI Check overrides this with `BASIC_AI_CHECK_TIMEOUT_MS` (default `120000`) because it runs as a background job instead of a long gateway-facing request. The public form starts Basic AI Check with `/api/form/basic-check/start` and polls `/api/form/basic-check/status/:checkId`; submit remains blocked while the job is pending. If a dashboard route waits indefinitely, first confirm Docker Desktop is responding with `docker version`; a half-stuck Docker engine can hold ports open while no service process can answer.
 
+Basic AI Check failure-mode regressions are covered in `services/dashboard/__tests__/modification-workflow.test.js`. Before changing the AI check flow, run:
+
+```bash
+npm test -- --runTestsByPath services/dashboard/__tests__/modification-workflow.test.js
+```
+
+Those tests inject 502/503, connection-refused, timeout, malformed-success, and slow-running AI responses. The required behavior is always the same: dashboard responses stay HTTP 200, `aiUnavailable`/`manualReviewRequired` are set, suggestions stay empty, and the async status route completes with a manual-review fallback instead of surfacing a red fatal error to the chef.
+
+For a live smoke check against a running dashboard, use:
+
+```bash
+npm run smoke:basic-ai-check
+```
+
+Set `DASHBOARD_URL=https://...` to point it at staging or production. Set `BASIC_AI_SMOKE_FAIL_ON_AI_UNAVAILABLE=true` when the monitor should alert if AI is unavailable; set `BASIC_AI_SMOKE_EXPECT_AI_UNAVAILABLE=true` when intentionally testing the manual-review fallback with `ai-review` stopped or blocked. For a no-AI local route smoke, set `BASIC_AI_SMOKE_REVIEW_MODE=changed_only` and `BASIC_AI_SMOKE_BASELINE_MENU` equal to `BASIC_AI_SMOKE_MENU`.
+
 ## Quick Reset (native mode)
 
 If services are in a bad state and you just want to start clean:

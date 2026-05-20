@@ -37,15 +37,36 @@ describe('dashboard form modification source chooser', () => {
         expect(template).not.toContain('id="modSourceDatabase" value="database" checked');
     });
 
-    test('keeps imported redline and highlight spans editable in revision mode', () => {
+    test('builds a reusable uploaded-redline comparison before rendering the clean left editor', () => {
         const template = fs.readFileSync(
             path.join(__dirname, '..', 'views', 'form.ejs'),
             'utf8'
         );
 
         expect(template).toContain('reviewedArea.contentEditable = \'true\';');
+        expect(template).toContain('redlinePreview.buildRevisionComparisonFromAnnotatedHtml(unapprovedBaseHtml)');
+        expect(template).toContain('unapprovedDiffBaseline = revisionComparison.originalText || \'\';');
+        expect(template).toContain('unapprovedOriginalHtml = revisionComparison.originalHtml || \'\';');
+        expect(template).toContain('unapprovedEditorHtml = revisionComparison.editorHtml || \'\';');
+        expect(template).toContain('displayReviewedContent(unapprovedEditorHtml || \'<p><br></p>\');');
+        expect(template).toContain('renderPersistentPreview(unapprovedDiffBaseline, baseApprovedMenuContent);');
+        expect(template).toContain('annotationMap: {},');
+        expect(template).toContain('includeExistingAnnotations: false,');
+        expect(template).not.toContain('displayReviewedContent(unapprovedBaseHtml);');
+        expect(template).not.toContain('buildAnnotationMapFromDOM(unapprovedPreviewProbe);');
         expect(template).not.toContain('span.contentEditable = \'false\';');
         expect(template).not.toContain('querySelectorAll(\'.existing-del, .existing-ins\').forEach(span => {');
+    });
+
+    test('does not cap the left reviewed menu box below the persistent preview height', () => {
+        const template = fs.readFileSync(
+            path.join(__dirname, '..', 'views', 'form.ejs'),
+            'utf8'
+        );
+
+        expect(template).toContain('.reviewed-content-container');
+        expect(template).toContain('max-height: none;');
+        expect(template).not.toContain('max-height: 600px;');
     });
 
     test('excludes imported deletions from uploaded-unapproved AI review text', () => {
@@ -58,6 +79,22 @@ describe('dashboard form modification source chooser', () => {
         expect(template).toContain("clone.querySelectorAll('.existing-del, .persistent-del, del, s, [style*=\"line-through\"]')");
         expect(template).toContain('menuContent = extractAiReviewTextFromReviewedArea(reviewedArea);');
         expect(template).toContain('const menuContent = extractAiReviewTextFromReviewedArea(reviewedArea);');
+    });
+
+    test('keeps AI review output clean on the left while preserving redlines on the right', () => {
+        const template = fs.readFileSync(
+            path.join(__dirname, '..', 'views', 'form.ejs'),
+            'utf8'
+        );
+
+        expect(template).toContain('displayReviewedContent(quill.root.innerHTML);');
+        expect(template).toContain('const aiCheckBase = (unapprovedMode && unapprovedDiffBaseline)');
+        expect(template).toContain('const reviewedDisplayText = extractCleanTextFromReviewedArea(quill.root) || correctedDisplayText;');
+        expect(template).toContain('const changes = computeLineDiff(originalText, reviewedDisplayText);');
+        expect(template).toContain('return redlinePreview.computeInsertedTokenRanges(original, corrected);');
+        expect(template).toContain('renderPersistentPreview(aiCheckBase, reviewedDisplayText);');
+        expect(template).not.toContain('displayReviewedContent(aiReviewMenuPanel.leftPanelHtml);');
+        expect(template).not.toContain('buildAiReviewedMenuPanel');
     });
 
     test('uses a full-screen decision dialog for existing approved menu conflicts', () => {

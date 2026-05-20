@@ -737,7 +737,7 @@
             border: 1px solid var(--color-border);
             background: var(--color-background);
             min-height: 400px;
-            max-height: 600px;
+            max-height: none;
         }
 
         .reviewed-content-area {
@@ -2274,6 +2274,8 @@
         let unapprovedAnnotations = [];
         let unapprovedBaseHtml = '';
         let unapprovedDiffBaseline = '';
+        let unapprovedOriginalHtml = '';
+        let unapprovedEditorHtml = '';
         let unapprovedAnnotationMap = {};
         let persistentPreviewUpdateTimer = null;
         let aiCheckHasRun = false;
@@ -2379,6 +2381,24 @@
         }
 
         const BASIC_CHECK_CLIENT_TIMEOUT_MS = 150000;
+        const BASIC_CHECK_DEBUG_ENABLED = new URLSearchParams(window.location.search).has('debugBasicCheck');
+
+        function getBasicCheckDebugHeaders() {
+            return BASIC_CHECK_DEBUG_ENABLED ? { 'x-menumanager-debug-basic-check': '1' } : {};
+        }
+
+        function attachBasicCheckDebugFlag(payload) {
+            if (BASIC_CHECK_DEBUG_ENABLED) {
+                payload.debugBasicCheck = true;
+            }
+            return payload;
+        }
+
+        function captureBasicCheckDiagnostics(data) {
+            if (!data || !data.basicCheckDiagnostics) return;
+            window.lastBasicCheckDiagnostics = data.basicCheckDiagnostics;
+            console.info('Basic AI Check diagnostics', data.basicCheckDiagnostics);
+        }
 
         function buildBasicCheckFallback(menuContent, reviewMode, changedLineCount, reason, statusCode, options) {
             const meta = options || {};
@@ -2419,7 +2439,7 @@
             try {
                 startResponse = await fetch('/api/form/basic-check/start', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json', ...getAttemptHeaders() },
+                    headers: { 'Content-Type': 'application/json', ...getAttemptHeaders(getBasicCheckDebugHeaders()) },
                     body: JSON.stringify(payload)
                 });
             } catch (error) {
@@ -2457,7 +2477,7 @@
                 try {
                     statusResponse = await fetch(pollUrl, {
                         method: 'GET',
-                        headers: getAttemptHeaders()
+                        headers: getAttemptHeaders(getBasicCheckDebugHeaders())
                     });
                 } catch (error) {
                     return buildBasicCheckFallback(
@@ -2492,6 +2512,7 @@
                 }
 
                 if (statusData.status === 'completed' && statusData.result) {
+                    captureBasicCheckDiagnostics(statusData.result);
                     return {
                         ...statusData.result,
                         basicCheckStatus: statusData.statusCode || 200
@@ -3279,6 +3300,8 @@
                 unapprovedAnnotations = [];
                 unapprovedBaseHtml = '';
                 unapprovedDiffBaseline = '';
+                unapprovedOriginalHtml = '';
+                unapprovedEditorHtml = '';
                 unapprovedAnnotationMap = {};
                 aiCheckHasRun = false;
                 aiCheckResults = null;
@@ -3366,6 +3389,8 @@
                 unapprovedAnnotations = [];
                 unapprovedBaseHtml = '';
                 unapprovedDiffBaseline = '';
+                unapprovedOriginalHtml = '';
+                unapprovedEditorHtml = '';
                 unapprovedAnnotationMap = {};
                 preservedManagedFooterText = '';
             } else {
@@ -3377,6 +3402,8 @@
                 unapprovedAnnotations = [];
                 unapprovedBaseHtml = '';
                 unapprovedDiffBaseline = '';
+                unapprovedOriginalHtml = '';
+                unapprovedEditorHtml = '';
                 unapprovedAnnotationMap = {};
                 preservedManagedFooterText = '';
             }
@@ -3813,11 +3840,15 @@
                 unapprovedMode = true;
                 unapprovedAnnotations = data.annotations || [];
                 unapprovedBaseHtml = stripManagedFooterHtml(data.unapprovedHtml || '');
+                const revisionComparison = redlinePreview.buildRevisionComparisonFromAnnotatedHtml(unapprovedBaseHtml);
+                unapprovedDiffBaseline = revisionComparison.originalText || '';
+                unapprovedOriginalHtml = revisionComparison.originalHtml || '';
+                unapprovedEditorHtml = revisionComparison.editorHtml || '';
                 revisionSource = 'uploaded_unapproved';
                 revisionBaseSubmissionId = null;
                 revisionBaselineDocPath = data.baselineDocPath || '';
                 revisionBaselineFileName = data.baselineFileName || file.name;
-                baseApprovedMenuContent = data.visibleText || '';
+                baseApprovedMenuContent = revisionComparison.currentText || data.visibleText || '';
                 baseApprovedMenuContentHtml = '';
                 persistentDiffSummary = { insertions: 0, deletions: 0 };
 
@@ -3831,12 +3862,8 @@
                 suppressRawNotice = false;
                 setAllergenAutoDetectedBadge(!!normalizedBaseline.allergens);
 
-                // Baseline and annotation map are extracted from the editor DOM
-                // in enterRevisionTrackingMode() after the HTML is loaded.
-                // This guarantees structural identity with subsequent extractions.
-
-                // Use stripped text for Quill / submission
-                baseApprovedMenuContent = normalizedBaseline.menu || '';
+                // Use the accepted/current side of the uploaded redlines for Quill / submission.
+                baseApprovedMenuContent = revisionComparison.currentText || normalizedBaseline.menu || '';
                 quill.setText(baseApprovedMenuContent || '');
 
                 const selectedNote = document.getElementById('revisionSelectedNote');
@@ -3902,15 +3929,19 @@
                 step2Container.classList.add('revision-split');
             }
 
-            // If we have extracted HTML (bold/italic/etc), render it in the editable review area.
+            // If we have extracted HTML (bold/italic/etc), render the accepted/current side
+            // in the editor and use the synthetic original for the dynamic preview.
             if (unapprovedMode && unapprovedBaseHtml && unapprovedBaseHtml.trim()) {
-                displayReviewedContent(unapprovedBaseHtml);
-                // Extract baseline from the editor DOM using the SAME function
-                // used during editing — guarantees structural identity.
-                const reviewedArea = document.getElementById('reviewedContentArea');
-                unapprovedDiffBaseline = extractCleanTextFromReviewedArea(reviewedArea);
-                unapprovedAnnotationMap = buildAnnotationMapFromDOM(reviewedArea);
-                renderPersistentPreview(unapprovedDiffBaseline, unapprovedDiffBaseline);
+                if (!unapprovedEditorHtml || !unapprovedDiffBaseline) {
+                    const revisionComparison = redlinePreview.buildRevisionComparisonFromAnnotatedHtml(unapprovedBaseHtml);
+                    unapprovedDiffBaseline = revisionComparison.originalText || '';
+                    unapprovedOriginalHtml = revisionComparison.originalHtml || '';
+                    unapprovedEditorHtml = revisionComparison.editorHtml || '';
+                    baseApprovedMenuContent = revisionComparison.currentText || baseApprovedMenuContent;
+                }
+                unapprovedAnnotationMap = {};
+                displayReviewedContent(unapprovedEditorHtml || '<p><br></p>');
+                renderPersistentPreview(unapprovedDiffBaseline, baseApprovedMenuContent);
             } else if (baseApprovedMenuContentHtml && baseApprovedMenuContentHtml.trim()) {
                 displayReviewedContent(baseApprovedMenuContentHtml);
                 renderPersistentPreview(baseApprovedMenuContent, baseApprovedMenuContent);
@@ -5053,7 +5084,7 @@
                 ? (document.getElementById('reviewedContentArea')?.innerHTML || '')
                 : (quill.root.innerHTML || '');
             const persistentDiffHtmlForMetrics = document.getElementById('persistentPreviewBody')?.innerHTML || '';
-            const basicCheckPayload = {
+            const basicCheckPayload = attachBasicCheckDebugFlag({
                 menuContent,
                 allergens,
                 menuType,
@@ -5064,7 +5095,7 @@
                     menuHtmlLength: richHtmlForMetrics.length,
                     persistentDiffHtmlLength: persistentDiffHtmlForMetrics.length
                 })
-            };
+            });
 
             try {
                 await logFormAttempt('basic_check_started', {
@@ -5297,43 +5328,7 @@
         }
 
         function computeLineDiff(original, corrected) {
-            const revisedTokens = tokenizeDiffText(corrected);
-            const baseTokens = tokenizeDiffText(original);
-            const lcs = buildTokenLcs(baseTokens, revisedTokens);
-            const changes = [];
-
-            let idx = 0;
-            while (idx < revisedTokens.length) {
-                if (lcs.commonRev.has(idx)) {
-                    idx++;
-                    continue;
-                }
-
-                const start = revisedTokens[idx].start;
-                let end = revisedTokens[idx].end;
-                let hasVisibleToken = revisedTokens[idx].type !== 'whitespace';
-
-                idx++;
-                while (idx < revisedTokens.length && !lcs.commonRev.has(idx)) {
-                    end = revisedTokens[idx].end;
-                    if (revisedTokens[idx].type !== 'whitespace') {
-                        hasVisibleToken = true;
-                    }
-                    idx++;
-                }
-
-                if (!hasVisibleToken) {
-                    continue;
-                }
-
-                changes.push({
-                    start,
-                    length: end - start,
-                    word: corrected.slice(start, end)
-                });
-            }
-
-            return changes;
+            return redlinePreview.computeInsertedTokenRanges(original, corrected);
         }
 
         function renderSuggestionCard(suggestion, idx) {
@@ -5444,7 +5439,7 @@
             const baselineForAiReview = submissionMode === 'modification' && !unapprovedMode ? baseApprovedMenuContent : '';
             const richHtmlForMetrics = reviewedArea?.innerHTML || '';
             const persistentDiffHtmlForMetrics = document.getElementById('persistentPreviewBody')?.innerHTML || '';
-            const basicCheckPayload = {
+            const basicCheckPayload = attachBasicCheckDebugFlag({
                 menuContent,
                 allergens,
                 menuType,
@@ -5455,7 +5450,7 @@
                     menuHtmlLength: richHtmlForMetrics.length,
                     persistentDiffHtmlLength: persistentDiffHtmlForMetrics.length
                 })
-            };
+            });
 
             try {
                 await logFormAttempt('basic_check_started', {
@@ -5643,16 +5638,17 @@
             const sourceRichHtml = getCurrentRichMenuHtmlForText(originalText);
             setQuillReviewedHtmlFromText(correctedDisplayText, sourceRichHtml);
             applyHeadingFormatting(originalText, correctedDisplayText);
+            const reviewedDisplayText = extractCleanTextFromReviewedArea(quill.root) || correctedDisplayText;
 
             if (hasChanges) {
-                const changes = computeLineDiff(originalText, correctedDisplayText);
+                const changes = computeLineDiff(originalText, reviewedDisplayText);
 
                 aiChanges = changes.map(change => ({
                     start: change.start,
                     length: change.length,
                     word: change.word
                 }));
-                originalAiCorrectedText = correctedDisplayText;
+                originalAiCorrectedText = reviewedDisplayText;
 
                 changes.forEach(change => {
                     quill.formatText(change.start, change.length, {
@@ -5661,15 +5657,14 @@
                 });
             } else {
                 aiChanges = [];
-                originalAiCorrectedText = correctedDisplayText;
+                originalAiCorrectedText = reviewedDisplayText;
             }
 
-            // Display the reviewed content with highlights
             displayReviewedContent(quill.root.innerHTML);
             const aiCheckBase = (unapprovedMode && unapprovedDiffBaseline)
                 ? unapprovedDiffBaseline
                 : (baseApprovedMenuContent || originalText);
-            renderPersistentPreview(aiCheckBase, correctedDisplayText);
+            renderPersistentPreview(aiCheckBase, reviewedDisplayText);
             lastAiCheckedMenuText = extractAiReviewTextFromReviewedArea(document.getElementById('reviewedContentArea'));
             requiresAiRerun = false;
 
@@ -6044,6 +6039,8 @@
             unapprovedAnnotations = [];
             unapprovedBaseHtml = '';
             unapprovedDiffBaseline = '';
+            unapprovedOriginalHtml = '';
+            unapprovedEditorHtml = '';
             unapprovedAnnotationMap = {};
             preservedManagedFooterText = '';
 
@@ -6234,11 +6231,11 @@
 
             previewSection.classList.add('show');
             const baselineHtml = unapprovedMode
-                ? (unapprovedBaseHtml || '')
+                ? (unapprovedOriginalHtml || '')
                 : (baseApprovedMenuContentHtml || '');
             const rendered = redlinePreview.renderPersistentPreview(baseText, revisedText, {
-                annotationMap: unapprovedMode ? unapprovedAnnotationMap : {},
-                includeExistingAnnotations: unapprovedMode,
+                annotationMap: {},
+                includeExistingAnnotations: false,
                 baselineHtml,
             });
 

@@ -97,6 +97,276 @@ describe('redline preview helpers', () => {
         expect(displayHtml).toContain('<span class="existing-ins">new</span>');
     });
 
+    test('builds synthetic original and current text from uploaded redline HTML', () => {
+        const baselineHtml = [
+            '<p><strong>Alambre <span class="existing-ins">Skewers</span>,</strong> steak D 30</p>',
+            '<p><strong>Carne Asada,</strong> grilled <span class="existing-del"><strong>skirt</strong></span><span class="existing-ins"><strong>flank</strong></span> steak D 19</p>',
+        ].join('');
+
+        const comparison = redlinePreview.buildRevisionComparisonFromAnnotatedHtml(baselineHtml);
+        const rendered = redlinePreview.renderPersistentPreview(comparison.originalText, comparison.currentText, {
+            baselineHtml: comparison.originalHtml,
+        });
+
+        expect(comparison.originalText).toContain('Alambre, steak D 30');
+        expect(comparison.originalText).toContain('grilled skirt steak D 19');
+        expect(comparison.originalText).not.toContain('Skewers');
+        expect(comparison.originalText).not.toContain('flank');
+        expect(comparison.currentText).toContain('Alambre Skewers, steak D 30');
+        expect(comparison.currentText).toContain('grilled flank steak D 19');
+        expect(comparison.currentText).not.toContain('skirt');
+        expect(comparison.editorHtml).toContain('<strong>Alambre Skewers,</strong>');
+        expect(comparison.editorHtml).toContain('<strong>flank</strong>');
+        expect(comparison.editorHtml).not.toContain('existing-del');
+        expect(comparison.editorHtml).not.toContain('existing-ins');
+        expect(comparison.originalHtml).toContain('<strong>skirt</strong>');
+        expect(comparison.originalHtml).not.toContain('existing-del');
+        expect(comparison.originalHtml).not.toContain('existing-ins');
+        expect(rendered.html).toContain('<span class="persistent-ins">Skewers</span>');
+        expect(rendered.html).toContain('<span class="persistent-del"><strong>skirt</strong></span><span class="persistent-ins">flank</span>');
+    });
+
+    test('uses the synthetic original for later AI changes without offset artifacts', () => {
+        const baselineHtml = [
+            '<p><em>enhance your salad - add grilled chicken G 9 / salmon* G 12 / steak 5 oz* G 12 / shrimp S 12</em></p>',
+            '<p><strong>Alambre <span class="existing-ins">Skewers</span>,</strong> steak, chorizo, bacon, bell pepper, avocado, Oaxacan cheeses D 30</p>',
+            '<p><strong>Carne Asada,</strong> grilled <span class="existing-del">skirt</span><span class="existing-ins">flank</span> steak, costra-style cheese D 19</p>',
+        ].join('');
+
+        const comparison = redlinePreview.buildRevisionComparisonFromAnnotatedHtml(baselineHtml);
+        const aiCorrectedText = comparison.currentText.replace('shrimp S 12', 'shrimp* S 12');
+        const rendered = redlinePreview.renderPersistentPreview(comparison.originalText, aiCorrectedText, {
+            baselineHtml: comparison.originalHtml,
+        });
+
+        expect(rendered.html).toContain('<span class="persistent-ins">Skewers</span>');
+        expect(rendered.html).toContain('<span class="persistent-del">skirt</span><span class="persistent-ins">flank</span>');
+        expect(rendered.html).toContain('<em>shrimp</em><span class="persistent-ins">*</span>');
+        expect(rendered.html).not.toContain('existing-del');
+        expect(rendered.html).not.toContain('existing-ins');
+        expect(rendered.html).not.toContain('skirtflank');
+        expect(rendered.html).not.toContain('shri<span class="persistent-ins">*</span>mp');
+        expect(rendered.html).not.toContain('avocadMexican');
+        expect(rendered.html).not.toContain('Mexicancan');
+    });
+
+    test('keeps adjacent inserted and deleted menu rows from interleaving in the preview', () => {
+        const baselineHtml = [
+            '<p><strong>Mexican Chopped Salad,</strong> mixed greens, bacon, yellow corn, cherry tomato, black beans, panela cheese, caramelized almond, avocado dressing D,N <span class="existing-ins">16</span></p>',
+            '<p><span class="existing-ins"><strong>Rainbow Quinoa Bowl,</strong> cherry tomato, yellow corn, beets, avocado, radishes, cilantro, red onion, cucumber, lemon vinaigrette VG 15</span></p>',
+            '<p><span class="existing-del"><strong>Grilled Caesar Salad,</strong> pickled vegetables, pepitas, salsa macha hard-boiled egg, cotija cheese D,G,V14</span></p>',
+            '<p><strong>Tortilla Soup,</strong> shredded chicken, panela cheese, crema fresca espuma, avocado, tortilla strips D,G 13</p>',
+        ].join('');
+
+        const comparison = redlinePreview.buildRevisionComparisonFromAnnotatedHtml(baselineHtml);
+        const rendered = redlinePreview.renderPersistentPreview(comparison.originalText, comparison.currentText, {
+            baselineHtml: comparison.originalHtml,
+        });
+
+        expect(rendered.html).toContain('<span class="persistent-ins">Rainbow Quinoa Bowl, cherry tomato');
+        expect(rendered.html).toContain('<span class="persistent-del"><strong>Grilled Caesar Salad,</strong>');
+        expect(rendered.html.indexOf('Rainbow')).toBeLessThan(rendered.html.indexOf('Grilled'));
+        expect(rendered.html).not.toContain('Grilled16');
+        expect(rendered.html).not.toContain('CaesarRainbow');
+        expect(rendered.html).not.toContain('SaladQuinoa');
+        expect(rendered.html).not.toContain('vegetablescorn');
+        expect(rendered.html).not.toContain('cheesered');
+    });
+
+    test('renders unrelated same-position menu rows as row-level insert/delete without token interleaving', () => {
+        const originalText = [
+            'Mexican Chopped Salad, mixed greens, bacon, yellow corn, cherry tomato, black beans, panela cheese, caramelized almond, avocado dressing D,N',
+            'Grilled Caesar Salad, pickled vegetables, pepitas, salsa macha hard-boiled egg, cotija cheese D,G,V14',
+            'Tortilla Soup, shredded chicken, panela cheese, crema fresca espuma, avocado, tortilla strips D,G 13',
+        ].join('\n');
+        const currentText = [
+            'Mexican Chopped Salad, mixed greens, bacon, yellow corn, cherry tomato, black beans, panela cheese, caramelized almond, avocado dressing D,N 16',
+            'Rainbow Quinoa Bowl, cherry tomato, yellow corn, beets, avocado, radishes, cilantro, red onion, cucumber, lemon vinaigrette VG 15',
+            'Tortilla Soup, shredded chicken, panela cheese, crema fresca espuma, avocado, tortilla strips D,G 13',
+        ].join('\n');
+        const originalHtml = [
+            '<p><strong>Mexican Chopped Salad,</strong> mixed greens, bacon, yellow corn, cherry tomato, black beans, panela cheese, caramelized almond, avocado dressing D,N</p>',
+            '<p><strong>Grilled Caesar Salad,</strong> pickled vegetables, pepitas, salsa macha hard-boiled egg, cotija cheese D,G,V14</p>',
+            '<p><strong>Tortilla Soup,</strong> shredded chicken, panela cheese, crema fresca espuma, avocado, tortilla strips D,G 13</p>',
+        ].join('');
+
+        const rendered = redlinePreview.renderPersistentPreview(originalText, currentText, {
+            baselineHtml: originalHtml,
+        });
+
+        expect(rendered.html).toContain('<span class="persistent-ins">16</span>');
+        expect(rendered.html).toContain('<span class="persistent-ins">Rainbow Quinoa Bowl, cherry tomato');
+        expect(rendered.html).toContain('<br><span class="persistent-del"><strong>Grilled Caesar Salad,</strong>');
+        expect(rendered.html.indexOf('Rainbow Quinoa Bowl')).toBeLessThan(rendered.html.indexOf('Grilled'));
+        expect(rendered.html).not.toContain('Grilled16');
+        expect(rendered.html).not.toContain('CaesarRainbow');
+        expect(rendered.html).not.toContain('SaladQuinoa');
+        expect(rendered.html).not.toContain('vegetablescorn');
+        expect(rendered.html).not.toContain('pepitas,yellow');
+        expect(rendered.html).not.toContain('salsacorn');
+        expect(rendered.html).not.toContain('cheesered');
+    });
+
+    test('keeps similar menu-row edits as token-level redlines', () => {
+        const originalText = 'Carne Asada, grilled skirt steak, costra-style cheese D 19';
+        const currentText = 'Carne Asada, grilled flank steak, costra-style cheese D 19';
+        const originalHtml = '<p><strong>Carne Asada,</strong> grilled <strong>skirt</strong> steak, costra-style cheese D 19</p>';
+
+        const rendered = redlinePreview.renderPersistentPreview(originalText, currentText, {
+            baselineHtml: originalHtml,
+        });
+
+        expect(rendered.html).toContain('Carne');
+        expect(rendered.html).toContain('<span class="persistent-del"><strong>skirt</strong></span>');
+        expect(rendered.html).toContain('<span class="persistent-ins">flank</span>');
+        expect(rendered.html).not.toContain('<span class="persistent-ins">Carne Asada, grilled flank steak');
+        expect(rendered.html).not.toContain('<span class="persistent-del"><strong>Carne</strong>');
+        expect(rendered.html).not.toContain('skirtflank');
+    });
+
+    test('keeps the final character of deleted menu rows and tokens', () => {
+        const originalText = [
+            'Chicken Tinga Enchiladas, tomatillo salsa, Chihuahua cheese, black bean purée, crema fresca D 27',
+            '',
+            'Coliflor Rostizada, peanut chili sauce, creamy poblano sae, chichurri, roasted pepitas D,N,V 23',
+            'Roasted Mushrooms al Ajillo D,VG 9',
+            'Fajitas',
+        ].join('\n');
+        const currentText = [
+            'Chicken Tinga Enchiladas, tomatillo salsa, Chihuahua cheese, black bean purée, crema fresca D 27',
+            'Grilled Tlayuda, vegan chorizo, black bean purée, avocado, cherry tomato, Oaxacan cheese, pickled veggies, crema fresca D,V 25',
+            '',
+            '',
+            'Fajitas',
+        ].join('\n');
+        const originalHtml = [
+            '<p><strong>Chicken Tinga Enchiladas,</strong> tomatillo salsa, Chihuahua cheese, black bean purée, crema fresca D 27</p>',
+            '<p><span class="existing-del"><strong>Coliflor Rostizada,</strong> peanut chili sauce, creamy poblano sae, chichurri, roasted pepitas D,N,V 23</span></p>',
+            '<p><span class="existing-del"><strong>Roasted Mushrooms al Ajillo</strong> D,VG 9</span></p>',
+            '<p><strong>Fajitas</strong></p>',
+        ].join('');
+
+        const rendered = redlinePreview.renderPersistentPreview(originalText, currentText, {
+            baselineHtml: originalHtml,
+        });
+        const renderedText = redlinePreview.previewHtmlToPlainText(rendered.html);
+
+        expect(renderedText).toContain('roasted pepitas D,N,V 23');
+        expect(renderedText).toContain('D,VG 9');
+        expect(renderedText).toContain('D,N,V 23\nRoasted Mushrooms');
+        expect(renderedText).toContain('D,VG 9\nFajitas');
+        expect(rendered.html).not.toContain('roasted pepitas D,N,V 2</span>');
+        expect(rendered.html).not.toContain('D,VG </span>');
+        expect(renderedText).not.toContain('23Fajitas');
+    });
+
+    test('preserves preview line breaks when serializing preview HTML to text', () => {
+        const previewHtml = [
+            '<span class="persistent-del"><strong>Coliflor Rostizada,</strong> roasted pepitas D,N,V 23</span>',
+            '<strong>Fajitas</strong>',
+            '<span class="persistent-ins">Skirt Steak* G 29</span>',
+        ].join('<br>');
+
+        const unsafeText = previewHtml.replace(/<[^>]+>/g, '');
+        const safeText = redlinePreview.previewHtmlToPlainText(previewHtml);
+
+        expect(unsafeText).toContain('23Fajitas');
+        expect(safeText).toContain('D,N,V 23\nFajitas');
+        expect(safeText).toContain('Fajitas\nSkirt Steak* G 29');
+        expect(safeText).not.toContain('23Fajitas');
+    });
+
+    test('computes full AI-highlight ranges after rich editor text normalization', () => {
+        const originalText = [
+            'Alambre Skewers, steak, chorizo, bacon, bell pepper, avocado can cheeses, tomatillo chili morita sauce * D 30',
+            'Chicken Tinga Enchiladas, tomatillo salsa, Chihuahuahua cheese, black bean purée, crema fresca D 27',
+            'Grilled Tlayuda, vegan chorizo, black bean purée, avocado, cherry tomato, Oaxacancan cheese, pickled veggies, crema fresca D,V 25',
+        ].join('\n');
+        const quillNormalizedCorrectedText = [
+            'Alambre Skewers, steak, chorizo, bacon, bell pepper, avocado, Mexican cheeses, tomatillo chili morita sauce * D 30',
+            'Chicken Tinga Enchiladas, tomatillo salsa, Chihuahua cheese, black bean purée, crema fresca D 27',
+            'Grilled Tlayuda, vegan chorizo, black bean purée, avocado, cherry tomato, Oaxacan cheese, pickled veggies, crema fresca D,V 25',
+        ].join('\n');
+
+        const ranges = redlinePreview.computeInsertedTokenRanges(originalText, quillNormalizedCorrectedText);
+        const highlightedWords = ranges.map((range) => range.word);
+
+        expect(highlightedWords).toContain('Mexican');
+        expect(highlightedWords).toContain('Chihuahua');
+        expect(highlightedWords).toContain('Oaxacan');
+        expect(highlightedWords).not.toContain('Mexica');
+        expect(highlightedWords).not.toContain('Chihuahu');
+        expect(highlightedWords).not.toContain('Oaxaca');
+        expect(quillNormalizedCorrectedText.slice(ranges.find((range) => range.word === 'Oaxacan').start, ranges.find((range) => range.word === 'Oaxacan').start + ranges.find((range) => range.word === 'Oaxacan').length)).toBe('Oaxacan');
+    });
+
+    test('aligns matching rows when the current menu has an extra inserted row', () => {
+        const originalText = [
+            'Mexican Chopped Salad, mixed greens, panela cheese D,N 16',
+            'Tortilla Soup, shredded chicken, crema fresca espuma D,G 13',
+        ].join('\n');
+        const currentText = [
+            'Mexican Chopped Salad, mixed greens, panela cheese D,N 16',
+            'Rainbow Quinoa Bowl, cherry tomato, cucumber, lemon vinaigrette VG 15',
+            'Tortilla Soup, shredded chicken, crema fresca espuma D,G 13',
+        ].join('\n');
+        const originalHtml = [
+            '<p><strong>Mexican Chopped Salad,</strong> mixed greens, panela cheese D,N 16</p>',
+            '<p><strong>Tortilla Soup,</strong> shredded chicken, crema fresca espuma D,G 13</p>',
+        ].join('');
+
+        const rendered = redlinePreview.renderPersistentPreview(originalText, currentText, {
+            baselineHtml: originalHtml,
+        });
+
+        expect(rendered.html).toContain('<span class="persistent-ins">Rainbow Quinoa Bowl, cherry tomato');
+        expect(rendered.html).toContain('<br><strong>Tortilla</strong>');
+        expect(rendered.html).not.toContain('SaladRainbow');
+        expect(rendered.html).not.toContain('15Tortilla');
+        expect(rendered.html).not.toContain('persistent-del');
+    });
+
+    test('uses line matching even when AI output has the same line count but shifted rows', () => {
+        const originalText = [
+            'Tacos',
+            'Pescado, adobo, napa cabbage slaw, chipotle aioli, avocado G 18',
+            'Carne Asada, grilled skirt steak, costra-style cheese, red onion, cilantro, scallion * D 19',
+            'Adobo Chicken, radish, red onion, cilantro, tomatillo salsa verde G 17',
+            'Crispy Tofu, artisan cilantro-poblano tortilla, shiitake vinaigrette, romaine lettuce, pasilla chili sauce G,V 16',
+            'Especialidades',
+        ].join('\n');
+        const aiReviewedText = [
+            '',
+            'Tacos',
+            'Pescado, adobo, napa cabbage slaw, chipotle aioli, avocado G 18',
+            'Carne Asada, grilled flank steak, costra-style cheese, red onion, cilantro, scallion * D 19',
+            'Adobo Chicken, radish, red onion, cilantro, tomatillo salsa verde G 17',
+            'Crispy Tofu, artisan cilantro-poblano tortilla, shiitake vinaigrette, romaine lettuce, pasilla chili sauce G,V 16',
+        ].join('\n');
+        const originalHtml = [
+            '<p><strong>Tacos</strong></p>',
+            '<p><strong>Pescado,</strong> adobo, napa cabbage slaw, chipotle aioli, avocado G 18</p>',
+            '<p><strong>Carne Asada,</strong> grilled <strong>skirt</strong> steak, costra-style cheese, red onion, cilantro, scallion * D 19</p>',
+            '<p><strong>Adobo Chicken,</strong> radish, red onion, cilantro, tomatillo salsa verde G 17</p>',
+            '<p><strong>Crispy Tofu,</strong> artisan cilantro-poblano tortilla, shiitake vinaigrette, romaine lettuce, pasilla chili sauce G,V 16</p>',
+            '<p><strong>Especialidades</strong></p>',
+        ].join('');
+
+        const rendered = redlinePreview.renderPersistentPreview(originalText, aiReviewedText, {
+            baselineHtml: originalHtml,
+        });
+        const renderedText = redlinePreview.previewHtmlToPlainText(rendered.html);
+
+        expect(renderedText).toContain('Tacos\nPescado');
+        expect(rendered.html).toContain('<span class="persistent-del"><strong>skirt</strong></span><span class="persistent-ins">flank</span>');
+        expect(rendered.html).not.toContain('<span class="persistent-del"><strong>Tacos</strong></span>');
+        expect(rendered.html).not.toContain('<span class="persistent-ins">Tacos</span>');
+        expect(rendered.html).not.toContain('<span class="persistent-del"><strong>Pescado');
+        expect(rendered.html).not.toContain('<span class="persistent-ins">Pescado, adobo');
+        expect(rendered.html).not.toContain('PescadoPescado');
+        expect(rendered.html).not.toContain('TacosTacos');
+    });
+
     test('builds editable HTML without imported redline styling', () => {
         const baselineHtml = [
             '<p><strong>Sword <span class="existing-del">Fishh</span><span class="existing-ins">Fish</span> Dip</strong>, chips D 22</p>',
@@ -350,8 +620,7 @@ describe('redline preview helpers', () => {
 
         expect(revisedText).not.toContain('Queso Fundido');
         expect(rendered.html).toContain('<span class="existing-ins">Punta</span>');
-        expect(rendered.html).toContain('<span class="persistent-del">Queso</span>');
-        expect(rendered.html).toContain('<span class="persistent-del">Fundido</span>');
+        expect(rendered.html).toContain('<span class="persistent-del">Queso Fundido, melted cheese D,G,V 95</span>');
         expect(rendered.deletions).toBeGreaterThan(0);
     });
 
