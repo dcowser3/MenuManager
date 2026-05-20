@@ -9,7 +9,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=Montserrat:wght@300;400;500;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/css/menu-display.css">
     <script src="/js/diff-core.js"></script>
-    <script src="/js/redline-preview.js?v=20260518-footer-rich-preview"></script>
+    <script src="/js/redline-preview.js?v=20260520-live-rich-formatting"></script>
     <style>
         :root {
             --color-primary: #2c2c2c;
@@ -477,9 +477,14 @@
         );
         const baselineEditorHtml = redlinePreview.buildEditableHtmlFromBaseline(displayBaselineHtml, baselineText);
         editor.innerHTML = baselineEditorHtml;
+        let editorHasUserInput = false;
 
         function getEditorText() {
             return redlinePreview.extractCleanTextFromElement(editor).replace(/\r/g, '');
+        }
+
+        function getEditorHtml() {
+            return editor.innerHTML || '';
         }
 
         function renderPersistentPreview(baseText, revisedText) {
@@ -487,7 +492,7 @@
             // sees the original Calibri/centered/bold formatting from the
             // extracted DOCX. After edits, renderPersistentPreview uses baselineHtml
             // to clone inline markup (<strong>, etc.) for unchanged/deleted tokens.
-            if (displayBaselineHtml && baseText === revisedText) {
+            if (displayBaselineHtml && baseText === revisedText && !editorHasUserInput) {
                 lastRenderedHtml = '';
                 preview.innerHTML = displayBaselineHtml;
                 diffSummary.textContent = 'Live changes: 0 insertions, 0 deletions';
@@ -505,6 +510,7 @@
                 annotationMap: resolvedPreview.annotationMap,
                 includeExistingAnnotations: true,
                 baselineHtml: resolvedPreview.baselineHtml || '',
+                revisedHtml: getEditorHtml(),
             });
 
             lastRenderedHtml = rendered.html;
@@ -561,15 +567,25 @@
             }
         }
 
-        editor.addEventListener('input', () => {
+        function schedulePreviewUpdate() {
+            editorHasUserInput = true;
             clearTimeout(previewUpdateTimer);
             previewUpdateTimer = setTimeout(() => {
                 renderPersistentPreview(baselineText, getEditorText());
             }, 90);
+        }
+
+        editor.addEventListener('input', schedulePreviewUpdate);
+        editor.addEventListener('keydown', (event) => {
+            const key = String(event.key || '').toLowerCase();
+            if ((event.metaKey || event.ctrlKey) && key === 'b') {
+                setTimeout(schedulePreviewUpdate, 0);
+            }
         });
 
         document.getElementById('restoreBtn').addEventListener('click', () => {
             editor.innerHTML = baselineEditorHtml;
+            editorHasUserInput = false;
             renderPersistentPreview(baselineText, baselineText);
             editor.focus();
             showAlert('Editor reset to the submitted menu text.', 'success');

@@ -588,15 +588,35 @@
             const cleanStart = cleanOffset;
             let delText = '';
             let insText = '';
+            const deletionRuns = [];
             while (i < source.length && getExistingAnnotationType(annotationMap || {}, i)) {
                 const currentType = getExistingAnnotationType(annotationMap || {}, i);
-                if (currentType === 'del') {
-                    delText += source[i];
-                } else {
-                    insText += source[i];
-                    cleanOffset++;
+                const runStart = i;
+                const runCleanStart = cleanOffset;
+                let runText = '';
+
+                while (
+                    i < source.length &&
+                    getExistingAnnotationType(annotationMap || {}, i) === currentType
+                ) {
+                    runText += source[i];
+                    if (currentType === 'ins') {
+                        cleanOffset++;
+                    }
+                    i++;
                 }
-                i++;
+
+                if (currentType === 'del') {
+                    delText += runText;
+                    deletionRuns.push({
+                        text: runText,
+                        cleanStart: runCleanStart,
+                        startsAtLineStart: runStart === 0 || source[runStart - 1] === '\n',
+                        endsAtLineEnd: i >= source.length || source[i] === '\n'
+                    });
+                } else {
+                    insText += runText;
+                }
             }
 
             groups.push({
@@ -607,6 +627,7 @@
                 cleanEnd: cleanOffset,
                 delText: delText,
                 insText: insText,
+                deletionRuns: deletionRuns,
                 previewText: source.slice(start, i),
                 startsAtLineStart: start === 0 || source[start - 1] === '\n',
                 endsAtLineEnd: i >= source.length || source[i] === '\n'
@@ -709,24 +730,39 @@
                 return;
             }
 
-            const offset = mapBaselineOffsetToRevisedOffset(cleanBase, revisedText, group.cleanStart);
-            if (String(revisedText || '').slice(offset, offset + group.delText.length) === group.delText) {
-                return;
-            }
-            const isWholeDeletedLine = !group.insText && group.startsAtLineStart && group.endsAtLineEnd;
+            const deletionRuns = group.deletionRuns && group.deletionRuns.length
+                ? group.deletionRuns
+                : [{
+                    text: group.delText,
+                    cleanStart: group.cleanStart,
+                    startsAtLineStart: group.startsAtLineStart,
+                    endsAtLineEnd: group.endsAtLineEnd
+                }];
 
-            inserts.push({
-                idx: group.index,
-                text: group.delText,
-                offset: offset,
-                startsAtLineStart: isWholeDeletedLine,
-                endsAtLineEnd: isWholeDeletedLine
+            deletionRuns.forEach(function (run, runIndex) {
+                if (!run.text) return;
+
+                const offset = mapBaselineOffsetToRevisedOffset(cleanBase, revisedText, run.cleanStart);
+                if (String(revisedText || '').slice(offset, offset + run.text.length) === run.text) {
+                    return;
+                }
+                const isWholeDeletedLine = !group.insText && run.startsAtLineStart && run.endsAtLineEnd;
+
+                inserts.push({
+                    groupIndex: group.index,
+                    runIndex: runIndex,
+                    text: run.text,
+                    offset: offset,
+                    startsAtLineStart: isWholeDeletedLine,
+                    endsAtLineEnd: isWholeDeletedLine
+                });
             });
         });
 
         inserts.sort(function (a, b) {
             if (a.offset !== b.offset) return b.offset - a.offset;
-            return b.idx - a.idx;
+            if (a.groupIndex !== b.groupIndex) return b.groupIndex - a.groupIndex;
+            return b.runIndex - a.runIndex;
         });
 
         let output = String(revisedText || '');
@@ -1378,15 +1414,59 @@
         const annotationMap = settings.annotationMap || {};
         const includeExistingAnnotations = !!settings.includeExistingAnnotations;
         const baselineHtml = settings.baselineHtml || '';
+        const revisedHtml = settings.revisedHtml || '';
 
         var styleIndex = null;
         if (baselineHtml) {
             styleIndex = getStyleIndexForBaseline(baselineHtml, baseText);
         }
 
+        var revisedStyleIndex = null;
+        if (revisedHtml) {
+            revisedStyleIndex = getStyleIndexForBaseline(revisedHtml, revisedText);
+        }
+
         let insertions = 0;
         let deletions = 0;
         let html = '';
+
+        function cloneStyledTokenFromIndex(tokenStyleIndex, token, fallbackText) {
+            if (!tokenStyleIndex || !token || !getStyleSourceToken(tokenStyleIndex, token)) {
+                return '';
+            }
+            return cloneStyledTokenHtml(tokenStyleIndex, token, fallbackText, {}, false);
+        }
+
+        function renderAcceptedTokenHtml(baseToken, revisedToken, fallbackText) {
+            let tokenHtml = cloneStyledTokenFromIndex(revisedStyleIndex, revisedToken, fallbackText);
+            let hasStyledHtml = !!tokenHtml;
+            if (!tokenHtml) {
+                tokenHtml = cloneStyledTokenFromIndex(styleIndex, baseToken, fallbackText);
+                hasStyledHtml = !!tokenHtml;
+            }
+            if (!tokenHtml) {
+                tokenHtml = escapeHtml(fallbackText || '');
+            }
+
+            if (includeExistingAnnotations && baseToken) {
+                if (!hasStyledHtml) {
+                    return wrapWithExistingAnnotation(fallbackText || '', baseToken.start, annotationMap);
+                }
+                return wrapWithExistingAnnotationHtml(
+                    tokenHtml,
+                    baseToken.start,
+                    annotationMap,
+                    String(fallbackText || '').length
+                );
+            }
+
+            return tokenHtml;
+        }
+
+        function renderRevisedTokenHtml(revisedToken, fallbackText) {
+            const tokenHtml = cloneStyledTokenFromIndex(revisedStyleIndex, revisedToken, fallbackText);
+            return tokenHtml || escapeHtml(fallbackText || '');
+        }
 
         function renderWholeLineDeletion(baseSegment, baseOffset) {
             if (!String(baseSegment || '').trim()) {
@@ -1399,12 +1479,23 @@
             return '<span class="persistent-del">' + delInner + '</span>';
         }
 
-        function renderWholeLineInsertion(revisedSegment) {
+        function renderWholeLineInsertion(revisedSegment, revisedOffset) {
             if (!String(revisedSegment || '').trim()) {
                 return escapeHtml(revisedSegment || '');
             }
+            let insInner = '';
+            tokenizeDiffText(revisedSegment).forEach(function (token) {
+                const adjustedToken = {
+                    ...token,
+                    start: revisedOffset + token.start,
+                    end: revisedOffset + token.end,
+                };
+                insInner += token.value.trim()
+                    ? renderRevisedTokenHtml(adjustedToken, token.value)
+                    : escapeHtml(token.value);
+            });
             insertions++;
-            return '<span class="persistent-ins">' + escapeHtml(revisedSegment) + '</span>';
+            return '<span class="persistent-ins">' + (insInner || escapeHtml(revisedSegment)) + '</span>';
         }
 
         function appendPreviewLine(lines, lineHtml) {
@@ -1414,7 +1505,10 @@
         function appendUnmatchedLines(lines, baseStart, baseEnd, revisedStart, revisedEnd) {
             for (let revisedIndex = revisedStart; revisedIndex < revisedEnd; revisedIndex++) {
                 if (String(revisedLines[revisedIndex].text || '').trim()) {
-                    appendPreviewLine(lines, renderWholeLineInsertion(revisedLines[revisedIndex].text));
+                    appendPreviewLine(
+                        lines,
+                        renderWholeLineInsertion(revisedLines[revisedIndex].text, revisedLines[revisedIndex].start)
+                    );
                 }
             }
 
@@ -1425,14 +1519,14 @@
             }
         }
 
-        function renderTokenDiff(baseSegment, revisedSegment, baseOffset) {
+        function renderTokenDiff(baseSegment, revisedSegment, baseOffset, revisedOffset) {
             if (
                 String(baseSegment || '').trim() &&
                 String(revisedSegment || '').trim() &&
                 !areLinesSimilarEnoughForTokenDiff(baseSegment, revisedSegment)
             ) {
                 return [
-                    renderWholeLineInsertion(revisedSegment),
+                    renderWholeLineInsertion(revisedSegment, revisedOffset),
                     renderWholeLineDeletion(baseSegment, baseOffset)
                 ].join('<br>');
             }
@@ -1453,6 +1547,15 @@
                 };
             }
 
+            function globalRevisedToken(token) {
+                if (!token) return token;
+                return {
+                    ...token,
+                    start: revisedOffset + token.start,
+                    end: revisedOffset + token.end,
+                };
+            }
+
             while (i < baseTokens.length || j < revisedTokens.length) {
                 const baseTok = i < baseTokens.length ? baseTokens[i] : null;
                 const revTok = j < revisedTokens.length ? revisedTokens[j] : null;
@@ -1463,21 +1566,10 @@
                     revTok !== null &&
                     diffTokensEqual(baseTok, revTok);
                 const adjustedBaseTok = globalBaseToken(baseTok);
+                const adjustedRevTok = globalRevisedToken(revTok);
 
                 if (baseCommon && revCommon && sameToken) {
-                    if (styleIndex) {
-                        segmentHtml += cloneStyledTokenHtml(
-                            styleIndex,
-                            adjustedBaseTok,
-                            revTok.value,
-                            annotationMap,
-                            includeExistingAnnotations && adjustedBaseTok
-                        );
-                    } else if (includeExistingAnnotations && adjustedBaseTok) {
-                        segmentHtml += wrapWithExistingAnnotation(revTok.value, adjustedBaseTok.start, annotationMap);
-                    } else {
-                        segmentHtml += escapeHtml(revTok.value);
-                    }
+                    segmentHtml += renderAcceptedTokenHtml(adjustedBaseTok, adjustedRevTok, revTok.value);
                     i++;
                     j++;
                     continue;
@@ -1499,7 +1591,9 @@
 
                 if (j < revisedTokens.length && !revCommon) {
                     if (revTok && revTok.value.trim()) {
-                        segmentHtml += '<span class="persistent-ins">' + escapeHtml(revTok.value) + '</span>';
+                        segmentHtml += '<span class="persistent-ins">' +
+                            renderRevisedTokenHtml(adjustedRevTok, revTok.value) +
+                            '</span>';
                         insertions++;
                     } else {
                         segmentHtml += escapeHtml(revTok ? revTok.value : '');
@@ -1509,7 +1603,9 @@
                 }
 
                 if (j < revisedTokens.length) {
-                    segmentHtml += escapeHtml(revTok ? revTok.value : '');
+                    segmentHtml += revTok && revTok.value.trim()
+                        ? renderRevisedTokenHtml(adjustedRevTok, revTok.value)
+                        : escapeHtml(revTok ? revTok.value : '');
                     j++;
                 }
                 if (i < baseTokens.length) {
@@ -1535,7 +1631,8 @@
                     renderTokenDiff(
                         baseLines[match.baseIndex].text,
                         revisedLines[match.revisedIndex].text,
-                        baseLines[match.baseIndex].start
+                        baseLines[match.baseIndex].start,
+                        revisedLines[match.revisedIndex].start
                     )
                 );
                 baseIndex = match.baseIndex + 1;
@@ -1545,7 +1642,7 @@
             appendUnmatchedLines(renderedLines, baseIndex, baseLines.length, revisedIndex, revisedLines.length);
             html = renderedLines.join('<br>');
         } else {
-            html = renderTokenDiff(baseText, revisedText, 0);
+            html = renderTokenDiff(baseText, revisedText, 0, 0);
         }
 
         return { html, insertions, deletions };

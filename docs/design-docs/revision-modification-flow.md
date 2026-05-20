@@ -151,6 +151,8 @@ When chef uses uploaded baseline flow:
 - When the editor must fall back to saved `menu_content_html`, temporary green AI-review highlight spans are unwrapped before display/submission so the approval editor only shows formatting plus imported/live redlines.
 - Imported redline groups are resolved against live edits: if the reviewer changes accepted text back to the original deleted value, that imported redline is collapsed to plain text and no live insertion/deletion is shown for that group.
 - Whole-row imported deletions keep their row boundaries when they are reinserted for the live approval preview after a later reviewer edit; inline deletion/insertion pairs such as price corrections remain inline.
+- Mixed imported annotation groups remember each deleted run's clean-text anchor, so an inline correction inside a fully inserted row stays at its original phrase when another line is edited in the approval editor.
+- The approval editor passes the current left-editor HTML into the shared preview renderer, which maps accepted and inserted tokens back to the reviewer-edited rich text so live bolding is visible in the right preview; deleted tokens still render from the original baseline HTML.
 - After the chef edits, the live redline preview passes `baselineHtml` into `renderPersistentPreview` so unchanged and deleted tokens keep inline markup (`<strong>`, `<em>`, etc.) via `Range#cloneContents` instead of flattening to plain text.
 - Approval-editor text normalization preserves leading indentation from extracted DOCX paragraphs so alignment-sensitive content such as allergen legends is not flattened in the review UI.
 

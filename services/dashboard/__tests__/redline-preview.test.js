@@ -591,6 +591,80 @@ describe('redline preview helpers', () => {
         expect(rendered.deletions).toBe(1);
     });
 
+    test('keeps inline deletions anchored inside a fully inserted row after a nearby edit', () => {
+        const baselineHtml = [
+            '<p><strong>Menu</strong></p>',
+            '<p><strong>Snacks &amp; Shares</strong></p>',
+            '<p><strong>Pimento Dip,</strong> <span class="existing-del">Cheese</span><span class="existing-ins">cheese</span>, crudité, pickled veggies, crackers D,G,V 16</p>',
+            '<p><span class="existing-ins"><strong>Shrimp Cocktail,</strong> horseradish &amp; Harrison </span><span class="existing-del">Brother’s</span><span class="existing-ins">Brothers’ cocktail sauce, marinated green olives 22</span></p>',
+            '<p><strong>Sorghum -Glazed Pork Belly,</strong> spicy sorghum glaze, little gem lettuce, chive 22</p>',
+        ].join('');
+        const baselinePreviewText = [
+            'Menu',
+            'Snacks & Shares',
+            'Pimento Dip, Cheesecheese, crudité, pickled veggies, crackers D,G,V 16',
+            'Shrimp Cocktail, horseradish & Harrison Brother’sBrothers’ cocktail sauce, marinated green olives 22',
+            'Sorghum -Glazed Pork Belly, spicy sorghum glaze, little gem lettuce, chive 22',
+        ].join('\n');
+        const baselineText = [
+            'Menu',
+            'Snacks & Shares',
+            'Pimento Dip, cheese, crudité, pickled veggies, crackers D,G,V 16',
+            'Shrimp Cocktail, horseradish & Harrison Brothers’ cocktail sauce, marinated green olives 22',
+            'Sorghum -Glazed Pork Belly, spicy sorghum glaze, little gem lettuce, chive 22',
+        ].join('\n');
+        const revisedText = baselineText.replace('pickled veggies', 'pickled vegetables');
+        const annotationMap = {};
+
+        function markRange(start, end, type) {
+            expect(start).toBeGreaterThanOrEqual(0);
+            expect(end).toBeGreaterThan(start);
+            for (let i = start; i < end; i++) {
+                annotationMap[i] = type;
+            }
+        }
+
+        function mark(text, type) {
+            const start = baselinePreviewText.indexOf(text);
+            markRange(start, start + text.length, type);
+        }
+
+        mark('Cheese', 'del');
+        mark('cheese', 'ins');
+        const shrimpStart = baselinePreviewText.indexOf('Shrimp Cocktail');
+        const deletedBrotherStart = baselinePreviewText.indexOf('Brother’s');
+        const insertedBrothersStart = baselinePreviewText.indexOf('Brothers’');
+        const shrimpLineEnd = baselinePreviewText.indexOf('\nSorghum');
+        markRange(shrimpStart, deletedBrotherStart, 'ins');
+        markRange(deletedBrotherStart, deletedBrotherStart + 'Brother’s'.length, 'del');
+        markRange(insertedBrothersStart, shrimpLineEnd, 'ins');
+
+        const resolved = redlinePreview.resolveExistingAnnotationRevisions(
+            baselineText,
+            revisedText,
+            baselinePreviewText,
+            annotationMap,
+            { baselineHtml }
+        );
+        const rendered = redlinePreview.renderPersistentPreview(resolved.basePreviewText, resolved.revisedPreviewText, {
+            annotationMap: resolved.annotationMap,
+            includeExistingAnnotations: true,
+            baselineHtml: resolved.baselineHtml,
+        });
+        const renderedText = redlinePreview.previewHtmlToPlainText(rendered.html);
+
+        expect(resolved.revisedPreviewText).toContain(
+            'Shrimp Cocktail, horseradish & Harrison Brother’sBrothers’ cocktail sauce, marinated green olives 22'
+        );
+        expect(renderedText).toContain(
+            'Shrimp Cocktail, horseradish & Harrison Brother’sBrothers’ cocktail sauce, marinated green olives 22'
+        );
+        expect(rendered.html).toContain('<span class="existing-del">Brother’s</span>');
+        expect(renderedText).not.toContain('ShrimpBrother’sShrimp');
+        expect(renderedText).not.toContain('Brother’sBrothersBrothers’');
+        expect(resolved.revisedPreviewText).not.toContain('Brother’sShrimp Cocktail');
+    });
+
     test('keeps whole imported deleted rows separate after a later word edit', () => {
         const baselinePreviewText = [
             'Ahi Tuna Tiradito, almond leche de tigre, katsubushi, snow beans, lemon oil, cucumber pickles* N',
@@ -706,6 +780,38 @@ describe('redline preview helpers', () => {
         expect(edited.html).toContain('<strong>Guacamole</strong><strong> </strong><strong>Traditional</strong>');
         expect(edited.html).toContain('<span class="persistent-del">85</span>');
         expect(edited.html).toContain('<span class="persistent-ins">95</span>');
+    });
+
+    test('reflects live editor bolding on unchanged approval preview text', () => {
+        const baselineText = 'Pimento Dip, cheese, crudité, pickled veggies, crackers D,G,V 16';
+        const baselineHtml = '<p>Pimento Dip, cheese, crudité, pickled veggies, crackers D,G,V 16</p>';
+        const revisedHtml = '<p>Pimento Dip, <strong>cheese</strong>, crudité, pickled veggies, crackers D,G,V 16</p>';
+
+        const rendered = redlinePreview.renderPersistentPreview(baselineText, baselineText, {
+            baselineHtml,
+            revisedHtml,
+        });
+
+        expect(rendered.html).toContain('<strong>cheese</strong>');
+        expect(rendered.html).not.toContain('persistent-ins');
+        expect(rendered.html).not.toContain('persistent-del');
+        expect(rendered.insertions).toBe(0);
+        expect(rendered.deletions).toBe(0);
+    });
+
+    test('reflects live editor bolding on inserted approval preview text', () => {
+        const baselineText = 'Pimento Dip, cheese, crudité, pickled veggies, crackers D,G,V 16';
+        const revisedText = 'Pimento Dip, cheese, crudité, pickled vegetables, crackers D,G,V 16';
+        const baselineHtml = '<p>Pimento Dip, cheese, crudité, pickled veggies, crackers D,G,V 16</p>';
+        const revisedHtml = '<p>Pimento Dip, cheese, crudité, pickled <strong>vegetables</strong>, crackers D,G,V 16</p>';
+
+        const rendered = redlinePreview.renderPersistentPreview(baselineText, revisedText, {
+            baselineHtml,
+            revisedHtml,
+        });
+
+        expect(rendered.html).toContain('<span class="persistent-ins"><strong>vegetables</strong></span>');
+        expect(rendered.html).toContain('<span class="persistent-del">veggies</span>');
     });
 
     test('preserves baseline formatting when DOCX text contains non-breaking spaces', () => {
