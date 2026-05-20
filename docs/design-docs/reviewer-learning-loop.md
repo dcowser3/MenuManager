@@ -61,6 +61,7 @@ This feature captures human reviewer corrections and feeds stable correction pat
   - global scope, or a primary location when the rule is marked location-specific
   - additional configured locations that should share the same location-specific rule
 - Data is saved as reviewer correction-rule annotations for weekly manual prompt review, not auto-injected into prompt.
+- The learning submission page stores correction context in page-level script data and has `Save Rule` buttons reference corrections by index, so quoted dish text cannot break the button markup.
 
 ### APIs
 

@@ -52,6 +52,8 @@ Weekly optimization proposes prompt improvements
 4. Line-diff alignment (LCS-based) matches corresponding lines between AI draft and final
 5. Token-level replacements extracted as signals: `{ from: "Jalapeno", to: "Jalapeño", kind: "diacritic" }`
 
+The signal extractor only learns from line pairs that still look like the same menu item. Deleted dishes and replacement dishes are left unmatched, so spelling or diacritic differences inside a dish that was removed from the menu do not become reusable learning signals.
+
 **What gets stored:**
 
 | File | Format | Contents |
@@ -71,6 +73,7 @@ Weekly optimization proposes prompt improvements
 - Rejects numeric-heavy tokens
 - Levenshtein distance check for similarity
 - Very long tokens filtered
+- Requires same-dish line identity before extracting replacements, which prevents removed or replaced dishes from teaching bogus spelling/diacritic rules
 
 ---
 

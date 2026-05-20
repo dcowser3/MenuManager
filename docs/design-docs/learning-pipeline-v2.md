@@ -189,6 +189,8 @@ CREATE TABLE IF NOT EXISTS prompt_proposals (
 
 **Trigger:** After each `POST /compare`, the differ service checks if any new replacement patterns cross a threshold.
 
+Before aggregating a replacement, differ matches changed lines by same-dish identity. Lines from deleted or replacement dishes are ignored for learning, so removed menu items do not create spelling or diacritic proposals.
+
 **Instead of auto-promoting to the overlay:**
 1. Differ detects pattern: "Jalapeno → Jalapeño" seen 3 times across 2 submissions
 2. Creates a `correction_rules` record with `source: 'system'`, `status: 'pending'`

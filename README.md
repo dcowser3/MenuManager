@@ -149,6 +149,8 @@ Browser approval editor prototype:
 - The dashboard now surfaces a warning when the ClickUp attachment upload, Marketing assignment, or post-approval status move fails, instead of silently finalizing only on the local side
 - Once a menu reaches approved state, the final DOCX is downloadable from `/approved-menus` for Carlos or other operations users
 - The learning dashboard lets reviewers delete an individual learned submission row when test data should not remain in the training history; this removes that submission from differ training data and rebuilds detected patterns without touching the property catalog.
+- Learned spelling/diacritic patterns now come only from changed lines that still match the same dish, so removed or replacement dishes do not create bogus reusable rules.
+- Learning review `Save Rule` controls keep dish text out of inline button handlers, so apostrophes or quotes in corrected menu text cannot corrupt the button or block saving.
 
 Design approval entry point:
 - The DOCX-vs-PDF design approval tool remains in the codebase, but the welcome-page card is currently disabled and labeled `Feature Coming Soon`.

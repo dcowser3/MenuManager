@@ -150,7 +150,21 @@
             </div>
         </div>
 
-        <% const dishes = learningDetail.dish_corrections || []; %>
+        <%
+            const dishes = learningDetail.dish_corrections || [];
+            const jsonForScript = (value) => JSON.stringify(value)
+                .replace(/</g, '\\u003c')
+                .replace(/>/g, '\\u003e')
+                .replace(/&/g, '\\u0026')
+                .replace(/'/g, '\\u0027')
+                .replace(/\u2028/g, '\\u2028')
+                .replace(/\u2029/g, '\\u2029');
+            const submissionContext = {
+                submissionId,
+                projectName: submissionMeta.project_name || '',
+                restaurantName: submissionMeta.project_name || submissionMeta.property || '',
+            };
+        %>
         <% if (dishes.length === 0) { %>
             <div class="card">No dish-level corrections were detected for this submission.</div>
         <% } else { %>
@@ -252,7 +266,7 @@
                             </div>
 
                             <div style="margin-top: .5rem;">
-                                <button class="btn" onclick='saveDishRule(<%- JSON.stringify(dish) %>, <%= idx %>)'>Save Rule</button>
+                                <button type="button" class="btn save-rule-btn" data-dish-index="<%= idx %>">Save Rule</button>
                                 <span class="save-status" id="save-status-<%= idx %>"></span>
                             </div>
                         </div>
@@ -299,6 +313,9 @@
     </div>
 
     <script>
+        const dishCorrections = <%- jsonForScript(dishes) %>;
+        const submissionContext = <%- jsonForScript(submissionContext) %>;
+
         function togglePlain(idx) {
             document.getElementById(`plain-${idx}`).classList.toggle('open');
         }
@@ -308,12 +325,19 @@
             document.getElementById(`loc-fields-${idx}`).classList.toggle('open', checked);
         }
 
-        async function saveDishRule(dish, idx) {
+        async function saveDishRule(idx) {
             const statusEl = document.getElementById(`save-status-${idx}`);
+            const dish = dishCorrections[idx];
             const rule = (document.getElementById(`rule-${idx}`).value || '').trim();
             const changeType = (document.getElementById(`change-type-${idx}`).value || '').trim();
             const reviewerName = (document.getElementById(`reviewer-${idx}`).value || '').trim();
             const isLocationSpecific = document.getElementById(`loc-specific-${idx}`).checked;
+
+            if (!dish) {
+                statusEl.textContent = 'Correction details are missing.';
+                statusEl.className = 'save-status err';
+                return;
+            }
 
             let location = '';
             let otherLocations = [];
@@ -337,15 +361,15 @@
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        submission_id: '<%= submissionId %>',
+                        submission_id: submissionContext.submissionId,
                         correction_id: dish.correction_id,
                         original_text: dish.before_line,
                         corrected_text: dish.after_line,
                         change_type: changeType || null,
                         rule,
                         is_location_specific: isLocationSpecific,
-                        project_name: '<%= (submissionMeta.project_name || "").replace(/'/g, "\\'") %>',
-                        restaurant_name: '<%= (submissionMeta.project_name || submissionMeta.property || "").replace(/'/g, "\\'") %>',
+                        project_name: submissionContext.projectName,
+                        restaurant_name: submissionContext.restaurantName,
                         location,
                         other_applicable_locations: otherLocations,
                         reviewer_name: reviewerName,
@@ -363,6 +387,11 @@
                 statusEl.className = 'save-status err';
             }
         }
+
+        document.querySelectorAll('.save-rule-btn').forEach((button) => {
+            const idx = Number(button.getAttribute('data-dish-index'));
+            button.addEventListener('click', () => saveDishRule(idx));
+        });
     </script>
 </body>
 </html>
