@@ -43,6 +43,8 @@ Menu Manager is an AI-powered service designed to automate the review process fo
 - New-menu AI review preserves pasted inline formatting such as bold dish names by projecting source HTML styles onto the corrected text with shared `diff-core` token alignment before applying green AI-change highlights.
 - Modification previews preserve bold/italic inline styling from uploaded prior approved DOCX baselines, including DOCX non-breaking-space text, body-only rich HTML with preserved footer text, and live edits, by using the shared `diff-core` rich text range mapper.
 - Uploaded unapproved/redlined DOCX modifications derive a synthetic original/current pair from the uploaded redlines: the left editor shows clean accepted text with bold/italic preserved, while the right persistent preview recreates the uploaded redlines through the standard dynamic diff.
+- Generated DOCX output preserves intentional single blank rows from the on-site preview, uses the same compact 1.15 menu line height, and constrains the Word menu text column to better match preview wrapping.
+- Existing approved-menu warnings are shown before Basic AI Check, not again when the green final submit button is pressed.
 - Submission normalization keeps exactly one managed allergen legend, while preserving chef-supplied legal/price/footer copy such as AED service-charge text and venue-specific foodborne warnings
 - Modification previews exclude managed footer boilerplate from design-facing redlines while still preserving custom restaurant footer notes/raw warnings for generated DOCX output
 - DOCX baseline uploads now prefill the allergen key field from either pipe-delimited legends or parenthesized legends such as `(C) CELERY (D) DAIRY`

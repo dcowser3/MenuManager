@@ -112,6 +112,30 @@ describe('dashboard form modification source chooser', () => {
         expect(template).not.toContain('if (issue) showBaselineFreshnessWarning(issue);');
     });
 
+    test('checks existing approved menus before AI review, not final submit', () => {
+        const template = fs.readFileSync(
+            path.join(__dirname, '..', 'views', 'form.ejs'),
+            'utf8'
+        );
+
+        const runBasicCheckGate = template.match(/async function runBasicCheck\(\) \{[\s\S]*?if \(!requiresAiReview\(\)\)/)[0];
+        const submitGate = template.match(/async function submitMenu\(skipAiReview = false\) \{[\s\S]*?if \(isEditMode\)/)[0];
+
+        expect(runBasicCheckGate).toContain('ensureBaselineFreshnessBeforeContinue()');
+        expect(submitGate).not.toContain('ensureBaselineFreshnessBeforeContinue()');
+    });
+
+    test('keeps one intentional blank paragraph for DOCX submission spacing', () => {
+        const template = fs.readFileSync(
+            path.join(__dirname, '..', 'views', 'form.ejs'),
+            'utf8'
+        );
+
+        expect(template).toContain('Preserve one intentional blank row so the generated DOCX matches');
+        expect(template).toContain("html.replace(/(<p>(?:\\s|&nbsp;|<br\\s*\\/?>)*<\\/p>\\s*){2,}/gi, '<p><br></p>')");
+        expect(template).not.toContain("html.replace(/<p>(?:\\s|&nbsp;|<br\\s*\\/?>)*<\\/p>/gi, '')");
+    });
+
     test('keeps docx metadata extraction misses silent', () => {
         const template = fs.readFileSync(
             path.join(__dirname, '..', 'views', 'form.ejs'),

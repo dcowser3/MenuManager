@@ -5771,10 +5771,6 @@
                 return;
             }
 
-            if (!(await ensureBaselineFreshnessBeforeContinue())) {
-                return;
-            }
-
             if (isEditMode) {
                 toggleEditMode();
             }
@@ -6116,8 +6112,10 @@
         function sanitizeMenuHtmlForSubmission(htmlContent) {
             let html = htmlContent || '';
 
-            // Remove purely-empty paragraphs; these often become visual double-spacing in DOCX.
-            html = html.replace(/<p>(?:\s|&nbsp;|<br\s*\/?>)*<\/p>/gi, '');
+            // Preserve one intentional blank row so the generated DOCX matches
+            // the preview, while avoiding accidental stacks of empty rows.
+            html = html.replace(/(<p>(?:\s|&nbsp;|<br\s*\/?>)*<\/p>\s*){2,}/gi, '<p><br></p>');
+            html = html.replace(/<p>\s*<\/p>/gi, '<p><br></p>');
 
             // Collapse excessive whitespace between paragraph tags.
             html = html.replace(/>\s+</g, '><').trim();

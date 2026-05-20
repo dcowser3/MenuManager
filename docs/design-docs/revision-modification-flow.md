@@ -57,6 +57,7 @@ For modification flows, the baseline text must come from one of:
 - In normal modification mode, AI review is scoped to changed lines only (computed against approved baseline).
 - In uploaded unapproved/redlined DOCX mode, AI review runs against the full accepted visible menu text. Existing redline edits can already contain typos, so the full candidate text must be reviewed even when the chef makes no additional browser edits after upload. Imported deletion/cross-out spans (`existing-del`, `persistent-del`, DOCX strikethrough equivalents) are removed from the AI-review text so deleted dishes are not corrected.
 - Re-run AI Check uses the same normalized editor text extraction as the initial check; it does not read raw browser `innerText`, which can introduce extra blank lines around rendered block elements on each pass.
+- Existing approved-menu conflicts are checked when Basic AI Check starts. Once acknowledged or resolved there, final submit does not show the same warning again.
 - Managed footer handling is split into structured fields:
   - Menu body is used for AI review and persistent design redlines.
   - Allergen legends are normalized into the Allergen Key field and appended once during DOCX generation.
@@ -179,6 +180,7 @@ When a chef uploads an unapproved DOCX:
    - Extracted Date Needed values only apply when they are valid `YYYY-MM-DD` values; otherwise the read-only Date Needed field remains at the turnaround-derived minimum date.
 4. **DOCX generation** (`generate_from_form.py`):
    - `existing-del` → red strikethrough, `existing-ins` → yellow highlight (same formatting as `persistent-del`/`persistent-ins`).
+   - Intentional single blank rows from the preview are retained in generated DOCX output, and generated menu paragraphs use the same compact 1.15 line height plus a constrained centered text column so Word wrapping better matches the browser preview.
    - Submission-time footer normalization removes chef-supplied allergen legends from the editable body, normalizes the allergen key, and appends one managed allergen legend.
    - Legal/price/footer copy after the allergen legend, including AED service-charge text and venue-specific foodborne warnings, is preserved and appended after the managed allergen legend instead of being rewritten to the canonical warning.
    - If no foodborne warning is present but the menu is marked or detected as containing raw/undercooked items, the workflow appends the canonical foodborne warning.

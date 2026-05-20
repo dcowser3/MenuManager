@@ -13,7 +13,7 @@ import json
 import re
 from html.parser import HTMLParser
 from docx import Document
-from docx.shared import Pt, RGBColor
+from docx.shared import Inches, Pt, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.enum.text import WD_BREAK
 from docx.enum.text import WD_COLOR_INDEX
@@ -31,6 +31,7 @@ _LEGEND_KEYWORD_RE = re.compile(
     r'(allergen|gluten|dairy|fish|nuts?|egg|vegan|vegetarian|crustacean|soy|sesame|celery|mustard|shellfish|sulphites?|lupin)',
     re.IGNORECASE,
 )
+MENU_BODY_SIDE_INDENT = Inches(1.0)
 
 
 def _normalize_whitespace(value):
@@ -88,6 +89,7 @@ class MenuHTMLParser(HTMLParser):
         super().__init__()
         self.lines = []
         self.current_line = []
+        self.block_stack = []
         self.format_stack = [{
             'bold': False,
             'italic': False,
@@ -96,12 +98,29 @@ class MenuHTMLParser(HTMLParser):
             'highlight': False
         }]
 
+    def _append_current_line(self):
+        self.lines.append(self.current_line)
+        self.current_line = []
+        if self.block_stack:
+            self.block_stack[-1]['emitted'] = True
+
+    def _append_blank_line(self):
+        self.lines.append([])
+        if self.block_stack:
+            self.block_stack[-1]['emitted'] = True
+
     def handle_starttag(self, tag, attrs):
-        if tag in ['p', 'br']:
-            # New line
+        tag = (tag or '').lower()
+        if tag in ['p', 'div']:
             if self.current_line:
-                self.lines.append(self.current_line)
-                self.current_line = []
+                self._append_current_line()
+            self.block_stack.append({'had_content': False, 'emitted': False})
+        elif tag == 'br':
+            if self.current_line:
+                self._append_current_line()
+            else:
+                self._append_blank_line()
+            return
 
         current = dict(self.format_stack[-1])
         attr_map = dict(attrs or [])
@@ -124,13 +143,25 @@ class MenuHTMLParser(HTMLParser):
 
         self.format_stack.append(current)
 
+    def handle_startendtag(self, tag, attrs):
+        if (tag or '').lower() == 'br':
+            self.handle_starttag(tag, attrs)
+            return
+        self.handle_starttag(tag, attrs)
+        self.handle_endtag(tag)
+
     def handle_endtag(self, tag):
+        tag = (tag or '').lower()
+        if tag in ['p', 'div'] and self.block_stack:
+            block = self.block_stack[-1]
+            if self.current_line:
+                self._append_current_line()
+            elif not block.get('had_content') and not block.get('emitted'):
+                self._append_blank_line()
+            self.block_stack.pop()
+
         if len(self.format_stack) > 1:
             self.format_stack.pop()
-        if tag == 'p':
-            if self.current_line:
-                self.lines.append(self.current_line)
-                self.current_line = []
 
     def handle_data(self, data):
         if not data:
@@ -164,6 +195,8 @@ class MenuHTMLParser(HTMLParser):
                 'strike': current['strike'],
                 'highlight': current['highlight']
             })
+            if self.block_stack and (chunk.strip() or self.current_line):
+                self.block_stack[-1]['had_content'] = True
 
     def get_lines(self):
         """Get parsed lines with formatting."""
@@ -248,9 +281,11 @@ def populate_template(template_path: str, form_data: dict, output_path: str):
     def apply_menu_paragraph_style(para):
         para.alignment = WD_ALIGN_PARAGRAPH.CENTER
         # Keep generated menu paragraphs compact and predictable in Word.
+        para.paragraph_format.left_indent = MENU_BODY_SIDE_INDENT
+        para.paragraph_format.right_indent = MENU_BODY_SIDE_INDENT
         para.paragraph_format.space_before = Pt(0)
         para.paragraph_format.space_after = Pt(0)
-        para.paragraph_format.line_spacing = 1.0
+        para.paragraph_format.line_spacing = 1.15
 
     # Check if we have HTML content to preserve formatting
     menu_content_html = form_data.get('menuContentHtml', '')
