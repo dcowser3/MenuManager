@@ -154,6 +154,22 @@ describe('browser approval finalize route', () => {
 
         axios.get.mockImplementation(async (url) => {
             const urlStr = String(url);
+            if (urlStr.includes('https://api.clickup.com/api/v2/group')) {
+                return {
+                    data: {
+                        groups: [
+                            {
+                                id: 'grp_marketing',
+                                name: 'Marketing',
+                                members: [
+                                    { user: { id: 201 } },
+                                    { user: { id: 202 } },
+                                ],
+                            },
+                        ],
+                    },
+                };
+            }
             if (urlStr.includes('/submissions/sub_approval_1')) {
                 return {
                     data: {
@@ -343,7 +359,7 @@ describe('browser approval finalize route', () => {
         expect(createCall[1].description).not.toContain('- Revision Source: uploaded_baseline');
     });
 
-    test('uploads the approved docx back to clickup and moves the task to to do', async () => {
+    test('uploads the approved docx back to clickup, assigns Marketing, and moves the task to to do', async () => {
         const response = await invokeJsonHandler(finalizeHandler, {
             body: {
                 submissionId: 'sub_approval_1',
@@ -354,6 +370,8 @@ describe('browser approval finalize route', () => {
 
         expect(response.status).toBe(200);
         expect(response.body.attachmentUploaded).toBe(true);
+        expect(response.body.clickupMarketingAssigneesUpdated).toBe(true);
+        expect(response.body.marketingAssigneeCount).toBe(2);
         expect(response.body.clickupStatusUpdated).toBe(true);
         expect(response.body.warning).toBeUndefined();
 
@@ -362,8 +380,49 @@ describe('browser approval finalize route', () => {
         );
         expect(attachmentCall).toBeTruthy();
 
+        const assigneeCall = axios.put.mock.calls.find((call) =>
+            String(call[0]).includes('https://api.clickup.com/api/v2/task/cu_123') &&
+            call[1]?.assignees
+        );
+        expect(assigneeCall).toBeTruthy();
+        expect(assigneeCall[1]).toEqual({ assignees: { add: [201, 202], rem: [114079264] } });
+
         const statusCall = axios.put.mock.calls.find((call) =>
-            String(call[0]).includes('https://api.clickup.com/api/v2/task/cu_123')
+            String(call[0]).includes('https://api.clickup.com/api/v2/task/cu_123') &&
+            call[1]?.status
+        );
+        expect(statusCall).toBeTruthy();
+        expect(statusCall[1]).toEqual({ status: 'to do' });
+    });
+
+    test('still moves the task to to do when Marketing assignment fails', async () => {
+        axios.put.mockImplementation(async (_url, payload) => {
+            if (payload?.assignees) {
+                const error = new Error('assignment failed');
+                error.response = { data: { err: 'assignment failed' } };
+                throw error;
+            }
+            return { data: {} };
+        });
+
+        const response = await invokeJsonHandler(finalizeHandler, {
+            body: {
+                submissionId: 'sub_approval_1',
+                approvedPath: '/tmp/documents/sub_approval_1-approved.docx',
+                approvedFileName: 'Spring Menu.docx',
+            },
+        });
+
+        expect(response.status).toBe(200);
+        expect(response.body.attachmentUploaded).toBe(true);
+        expect(response.body.clickupMarketingAssigneesUpdated).toBe(false);
+        expect(response.body.marketingAssigneeCount).toBe(0);
+        expect(response.body.clickupStatusUpdated).toBe(true);
+        expect(response.body.warning).toContain('Marketing assignee update failed');
+
+        const statusCall = axios.put.mock.calls.find((call) =>
+            String(call[0]).includes('https://api.clickup.com/api/v2/task/cu_123') &&
+            call[1]?.status
         );
         expect(statusCall).toBeTruthy();
         expect(statusCall[1]).toEqual({ status: 'to do' });
@@ -534,19 +593,38 @@ describe('browser approval finalize route', () => {
 
         expect(response.status).toBe(200);
         expect(response.body.attachmentUploaded).toBe(false);
+        expect(response.body.clickupMarketingAssigneesUpdated).toBe(false);
+        expect(response.body.marketingAssigneeCount).toBe(0);
         expect(response.body.clickupStatusUpdated).toBe(false);
         expect(response.body.warning).toContain('ClickUp attachment upload failed');
+        expect(response.body.warning).toContain('Skipped Marketing assignee update');
         expect(response.body.warning).toContain('Skipped ClickUp status update to "to do"');
 
-        const statusCall = axios.put.mock.calls.find((call) =>
+        const taskUpdateCall = axios.put.mock.calls.find((call) =>
             String(call[0]).includes('https://api.clickup.com/api/v2/task/cu_123')
         );
-        expect(statusCall).toBeFalsy();
+        expect(taskUpdateCall).toBeFalsy();
     });
 
     test('processes corrected ClickUp uploads when the task moves to to do', async () => {
         axios.get.mockImplementation(async (url) => {
             const urlStr = String(url);
+            if (urlStr.includes('https://api.clickup.com/api/v2/group')) {
+                return {
+                    data: {
+                        groups: [
+                            {
+                                id: 'grp_marketing',
+                                name: 'Marketing',
+                                members: [
+                                    { user: { id: 201 } },
+                                    { user: { id: 202 } },
+                                ],
+                            },
+                        ],
+                    },
+                };
+            }
             if (urlStr === 'https://api.clickup.com/api/v2/task/cu_todo') {
                 return {
                     data: {
@@ -617,8 +695,16 @@ describe('browser approval finalize route', () => {
         );
         expect(compareCall[1].final_path).toContain('/sub_todo_1/approved/sub_todo_1-approved.docx');
 
+        const assigneeCall = axios.put.mock.calls.find((call) =>
+            String(call[0]).includes('https://api.clickup.com/api/v2/task/cu_todo') &&
+            call[1]?.assignees
+        );
+        expect(assigneeCall).toBeTruthy();
+        expect(assigneeCall[1]).toEqual({ assignees: { add: [201, 202], rem: [114079264] } });
+
         const statusCall = axios.put.mock.calls.find((call) =>
-            String(call[0]).includes('https://api.clickup.com/api/v2/task/cu_todo')
+            String(call[0]).includes('https://api.clickup.com/api/v2/task/cu_todo') &&
+            call[1]?.status
         );
         expect(statusCall).toBeFalsy();
     });

@@ -56,10 +56,10 @@ These are optional. If `CLICKUP_API_TOKEN` or `CLICKUP_LIST_ID` are not set, the
 | `CLICKUP_API_TOKEN` | ClickUp personal API token |
 | `CLICKUP_LIST_ID` | Target list ID for new tasks |
 | `CLICKUP_TEAM_ID` | Team ID / Workspace ID (required for webhook registration and Marketing watcher group lookup) |
-| `CLICKUP_ASSIGNEE_ID` | User ID to auto-assign tasks to; production uses Isabella's ClickUp user ID |
-| `CLICKUP_MARKETING_WATCHER_GROUP_NAME` | ClickUp User Group name/handle to resolve into watcher user IDs for new tasks (default: `"Marketing"`) |
-| `CLICKUP_MARKETING_WATCHER_GROUP_ID` | Optional comma-separated ClickUp User Group ID(s) to resolve into watcher user IDs instead of relying only on the group name |
-| `CLICKUP_WATCHER_USER_IDS` | Optional comma-separated ClickUp user IDs to add as task watchers directly, useful if group lookup is unavailable |
+| `CLICKUP_ASSIGNEE_ID` | User ID to auto-assign tasks to; production uses Isabella's ClickUp user ID. Post-approval routing removes this assignee when Marketing is assigned, unless the same user is part of Marketing. |
+| `CLICKUP_MARKETING_WATCHER_GROUP_NAME` | ClickUp User Group name/handle to resolve into Marketing user IDs for new-task watchers and post-approval assignees (default: `"Marketing"`) |
+| `CLICKUP_MARKETING_WATCHER_GROUP_ID` | Optional comma-separated ClickUp User Group ID(s) to resolve into Marketing user IDs instead of relying only on the group name |
+| `CLICKUP_WATCHER_USER_IDS` | Optional comma-separated ClickUp user IDs to add directly when group lookup is unavailable; these IDs are used for new-task watchers and post-approval Marketing assignees |
 | `CLICKUP_WEBHOOK_URL` | Public URL for ClickUp webhook events |
 | `CLICKUP_WEBHOOK_SECRET` | Optional webhook signing secret from ClickUp (`POST /webhook/register` response). If set, webhook signatures are strictly verified. |
 | `CLICKUP_INITIAL_REVIEW_STATUS` | Status assigned to newly created ClickUp tasks (default: `"pending initial isa review"`) |

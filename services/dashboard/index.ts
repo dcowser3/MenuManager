@@ -55,6 +55,17 @@ import {
     PropertyCatalogRecord,
 } from './lib/property-catalog';
 import { applyHighConfidenceSuggestionsToMenu } from './lib/apply-high-confidence-suggestions';
+import { guardAllergenAlphabetizationSuggestions } from './lib/allergen-suggestion-guard';
+import { preserveLeadingMenuTitle } from './lib/menu-title-guard';
+import {
+    buildCorrectionRuleRecord,
+    isCorrectionRuleValidationError,
+} from './lib/learning-correction-rules';
+import {
+    analyzeEmbeddedSetMenus,
+    buildEmbeddedSetMenuPromptSection,
+    guardEmbeddedSetMenuPrices,
+} from './lib/embedded-set-menu-guard';
 
 export {
     sanitizePlainTextInput,
@@ -1602,41 +1613,14 @@ app.post('/api/learning/correction-rules', async (req, res) => {
     try {
         const payload = req.body || {};
         const catalog = await getPropertyCatalogFromDb();
-        const propertyNames = new Set(catalog.map((item) => item.name.toLowerCase()));
-        const location = `${payload.location || ''}`.trim();
-
-        if (location && !propertyNames.has(location.toLowerCase())) {
-            return res.status(400).json({ error: 'location must be one of the configured properties' });
-        }
-
-        const otherLocations = Array.isArray(payload.other_applicable_locations)
-            ? payload.other_applicable_locations.map((s: any) => `${s || ''}`.trim()).filter(Boolean)
-            : [];
-
-        const record = {
-            submission_id: `${payload.submission_id || ''}`.trim(),
-            correction_id: `${payload.correction_id || ''}`.trim(),
-            original_text: `${payload.original_text || payload.before_line || ''}`.trim(),
-            corrected_text: `${payload.corrected_text || payload.after_line || ''}`.trim(),
-            change_type: `${payload.change_type || ''}`.trim() || null,
-            rule: `${payload.rule || ''}`.trim(),
-            is_location_specific: !!payload.is_location_specific,
-            project_name: `${payload.project_name || ''}`.trim() || null,
-            restaurant_name: `${payload.restaurant_name || ''}`.trim(),
-            location: location || 'All properties (global rule)',
-            other_applicable_locations: otherLocations,
-            reviewer_name: `${payload.reviewer_name || ''}`.trim() || null,
-            source: payload.source || 'human',
-            status: payload.source === 'system' ? 'pending' : 'accepted',
-        };
-
-        if (!record.submission_id || !record.correction_id || !record.original_text || !record.corrected_text || !record.rule) {
-            return res.status(400).json({ error: 'submission_id, correction_id, original_text, corrected_text, and rule are required' });
-        }
+        const record = buildCorrectionRuleRecord(payload, catalog);
 
         const response = await internalApi.post(`${DB_SERVICE_URL}/correction-rules`, record, { timeout: 3000 });
         res.json(response.data);
     } catch (error: any) {
+        if (isCorrectionRuleValidationError(error)) {
+            return res.status(error.statusCode).json({ error: error.message });
+        }
         console.error('Error saving correction rule:', error.message);
         res.status(error?.response?.status || 500).json(error?.response?.data || { error: 'Failed to save correction rule' });
     }
@@ -2055,6 +2039,9 @@ async function handleBasicCheck(req: any, res: any) {
 
         const reviewFooterMetadata = normalizeMenuFooter(textForReview, allergens || '');
         const sanitizedMenuContent = normalizeMenuFooter(menuContent, allergens || '');
+        const embeddedSetMenuAnalysis = menuType === 'prix_fixe'
+            ? { sections: [], issues: [] }
+            : analyzeEmbeddedSetMenus(reviewFooterMetadata.body);
         const diagnosticsPromptSections: string[] = [];
 
         // Debug logging
@@ -2147,6 +2134,11 @@ Note: Use ONLY these allergen codes when checking allergen compliance. Do not us
         diagnosticsPromptSections.push('footer_rules');
         finalPrompt = `${finalPrompt}\n\nIMPORTANT ADD-ON PRICE RULES:\n- For add-on or enhancement rows with options separated by pipes or slashes, treat a number immediately after an option as that option's price.\n- Do NOT flag an add-on option as missing a price when the option appears on the same row with a numeric price, such as \"add chorizo 5 | mushrooms V 4\".`;
         diagnosticsPromptSections.push('add_on_price_rules');
+
+        if (embeddedSetMenuAnalysis.sections.length > 0) {
+            finalPrompt = `${finalPrompt}\n\n${buildEmbeddedSetMenuPromptSection(embeddedSetMenuAnalysis)}`;
+            diagnosticsPromptSections.push('embedded_set_menu_rules');
+        }
 
         let qaResponse;
         try {
@@ -2319,9 +2311,17 @@ Note: Use ONLY these allergen codes when checking allergen compliance. Do not us
 
         // Parse the new format: corrected menu + suggestions
         const parsed = parseAIResponse(feedback, reviewFooterMetadata.body);
-        const appliedHc = applyHighConfidenceSuggestionsToMenu(parsed.correctedMenu, parsed.suggestions);
-        const correctedAfterHighConfidence = appliedHc.menuText;
-        const suggestionsAfterAutoApply = appliedHc.suggestions;
+        const titleGuard = preserveLeadingMenuTitle(reviewFooterMetadata.body, parsed.correctedMenu);
+        const allergenGuard = guardAllergenAlphabetizationSuggestions(titleGuard.correctedMenu, parsed.suggestions);
+        const appliedHc = applyHighConfidenceSuggestionsToMenu(allergenGuard.correctedMenu, allergenGuard.suggestions);
+        const setMenuGuard = guardEmbeddedSetMenuPrices(
+            reviewFooterMetadata.body,
+            appliedHc.menuText,
+            appliedHc.suggestions,
+            embeddedSetMenuAnalysis
+        );
+        const correctedAfterHighConfidence = setMenuGuard.correctedMenu;
+        const suggestionsAfterAutoApply = setMenuGuard.suggestions;
 
         const correctedMenuSanitized = stripManagedFooterText(correctedAfterHighConfidence);
         const originalMenuSanitized = sanitizedMenuContent.body;
@@ -2334,6 +2334,11 @@ Note: Use ONLY these allergen codes when checking allergen compliance. Do not us
         console.log('=== PARSED RESPONSE ===');
         console.log('Corrected menu length:', correctedMenuSanitized.length);
         console.log('Suggestions count:', parsed.suggestions.length);
+        console.log('Leading Menu title restored:', titleGuard.restored);
+        console.log('Allergen order guard dropped:', allergenGuard.droppedSuggestions.length);
+        console.log('Embedded set sections detected:', embeddedSetMenuAnalysis.sections.length);
+        console.log('Embedded set price suggestions added:', setMenuGuard.synthesizedSuggestions.length);
+        console.log('Embedded set prices restored:', setMenuGuard.restoredPrices.length);
         console.log('Reconciled suggestions count:', reconciledSuggestions.length);
         console.log('Has changes:', correctedMenuSanitized !== originalMenuSanitized);
         console.log('===========================');
@@ -2417,10 +2422,28 @@ Note: Use ONLY these allergen codes when checking allergen compliance. Do not us
                 suggestions: parsed.suggestions,
             },
             autoApply: {
-                suggestionsBeforeCount: parsed.suggestions.length,
-                suggestionsAfterCount: suggestionsAfterAutoApply.length,
-                correctedMenuChanged: correctedAfterHighConfidence !== parsed.correctedMenu,
-                remainingSuggestions: suggestionsAfterAutoApply,
+                suggestionsBeforeCount: allergenGuard.suggestions.length,
+                suggestionsAfterCount: appliedHc.suggestions.length,
+                correctedMenuChanged: appliedHc.menuText !== allergenGuard.correctedMenu,
+                remainingSuggestions: appliedHc.suggestions,
+            },
+            embeddedSetMenu: {
+                sections: embeddedSetMenuAnalysis.sections,
+                issues: embeddedSetMenuAnalysis.issues,
+                restoredPrices: setMenuGuard.restoredPrices,
+                synthesizedSuggestions: setMenuGuard.synthesizedSuggestions,
+                droppedSuggestions: setMenuGuard.droppedSuggestions,
+                correctedMenuChanged: setMenuGuard.correctedMenu !== appliedHc.menuText,
+                suggestionsAfterGuard: setMenuGuard.suggestions,
+            },
+            titleGuard: {
+                restored: titleGuard.restored,
+                originalTitleLine: titleGuard.originalTitleLine,
+                correctedMenuChanged: titleGuard.correctedMenu !== parsed.correctedMenu,
+            },
+            allergenGuard: {
+                droppedSuggestions: allergenGuard.droppedSuggestions,
+                correctedMenuChanged: allergenGuard.correctedMenu !== parsed.correctedMenu,
             },
             reconciliation: {
                 droppedSuggestions: reconciliation.droppedSuggestions,
@@ -2985,6 +3008,7 @@ function parseAIResponse(feedback: string, originalMenu: string): {
         if (
             s.type === 'Missing Price' ||
             s.type === 'Incomplete Dish Name' ||
+            type === 'set menu item price' ||
             type === 'course progression' ||
             type === 'pricing structure' ||
             isPrixFixeTopPriceIssue ||

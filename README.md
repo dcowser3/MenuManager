@@ -32,8 +32,9 @@ Menu Manager is an AI-powered service designed to automate the review process fo
 - DOCX template uploads can prefill project details and resolve split outlet/hotel/city hints to a canonical property when the match is unique
 - Required service-period classification on submission (`breakfast`, `brunch`, `lunch`, `dinner`, `happy_hour`, `holiday`, `other`)
 - AI-powered two-tier review (general QA + detailed corrections)
-- Basic AI Check: if the model returns an objective spelling/grammar fix as an exact recommendation (e.g. `Change 'x' to 'y'`) but forgets to update the corrected menu text, or mislabels that fix as critical, the dashboard applies or recognizes the correction so green highlights and the persistent preview stay consistent without blocking submission. High-confidence raw-item asterisk suggestions are also applied before the line's allergen/price suffix.
+- Basic AI Check: if the model returns an objective spelling/grammar fix as an exact recommendation (e.g. `Change 'x' to 'y'`) but forgets to update the corrected menu text, or mislabels that fix as critical, the dashboard applies or recognizes the correction so green highlights and the persistent preview stay consistent without blocking submission. High-confidence raw-item asterisk suggestions are also applied before the line's allergen/price suffix, false allergen alphabetization suggestions such as changing already-correct `D,G` to `G,D` are filtered before display, and a leading standalone `Menu` title is preserved.
 - Basic AI Check suppresses missing-price false positives on add-on rows when an option already has a same-line price, such as `add chorizo 5 | mushrooms V 4`.
+- Basic AI Check recognizes embedded set-menu sections inside standard menus, such as `Quick Lunch Menu $38` with `choice of one appetizer & one entree`; included dishes do not need item prices, explicit `+` premium prices are allowed, and bare included-item prices are flagged as critical `Set Menu Item Price` issues without being auto-removed.
 - Basic AI Check now runs as an async dashboard job: the form starts a check, keeps submit blocked while it polls status, then unlocks only after AI results arrive or an explicit AI-unavailable/manual-review fallback is returned.
 - If the Basic AI Check service call fails, the public form keeps the original menu unchanged, shows an AI-unavailable warning, and allows the submission to continue to manual review instead of blocking the chef on a red error.
 - For local debugging, open the form with `?debugBasicCheck=1` to include Basic AI Check diagnostics in the Network response and `window.lastBasicCheckDiagnostics`; production requires `BASIC_AI_CHECK_DEBUG_ENABLED=true`.
@@ -113,7 +114,7 @@ Current ClickUp BAU status handoff:
 - New tasks start in `Pending Initial ISA Review`
 - New tasks are assigned through `CLICKUP_ASSIGNEE_ID` (Isabella in production) and add Marketing group members as watchers when the ClickUp group lookup is configured; submissions from `isabella@richardsandoval.com` route directly to `To Do` and assign the resolved Marketing users instead
 - Isabella uploads the corrected DOCX in ClickUp and moves the task to `To Do`; that status change downloads the latest DOCX and feeds the learning dashboard
-- When the approved DOCX is processed from any other configured review-complete status, the task is moved to `To Do`; if it is already in `To Do`, the status update is skipped
+- When the approved DOCX is processed from any configured review-complete status, the task is assigned to the resolved Marketing users and the configured initial reviewer is removed when applicable; the task is then moved to `To Do`, or the status update is skipped if it is already there
 - Task due date is taken from the form "Date needed" using noon UTC on that calendar day so ClickUp does not display it one day early in US timezones (plain `YYYY-MM-DD` parsing used to mean UTC midnight)
 - If ClickUp task creation or attachment upload fails after the menu is saved, the submitter warning includes the submission reference so support can match the screenshot to logs, `system_alerts`, and the generated DOCX.
 - ClickUp task descriptions now spell out the selected modification workflow path instead of showing only raw `modification` / `revision_source` values.
@@ -141,8 +142,8 @@ Browser approval editor prototype:
 - The approval editor preserves leading indentation from extracted DOCX text so alignment-sensitive sections such as allergen keys do not get flattened before review, trims leading empty HTML paragraphs in the preview so it lines up with the editor before the first edit, keeps bold/italic (and other inline markup from the DOCX) in both the left rich editor and the live redline preview after you type by mapping ranges from the baseline HTML, and strips temporary green AI-review highlights from saved fallback HTML while preserving real imported redlines.
 - After AI review, the left editor restores leading dish-name bold from the uploaded DOCX/source HTML before rendering corrected text, so the editable menu and persistent preview stay visually aligned.
 - If a reviewer edits accepted text back to the original deleted side of an imported redline (for example `24 → 25` changed back to `24`), the approval preview resolves that imported redline to plain text instead of stacking stale deletion/insertion markup.
-- Submitting that page uploads the approved DOCX back to the linked ClickUp task and only then leaves/advances the task at `To Do`, matching Isabella's manual handoff flow
-- The dashboard now surfaces a warning when the ClickUp attachment upload or post-approval status move fails, instead of silently finalizing only on the local side
+- Submitting that page uploads the approved DOCX back to the linked ClickUp task and only then assigns Marketing and leaves/advances the task at `To Do`, matching Isabella's manual handoff flow
+- The dashboard now surfaces a warning when the ClickUp attachment upload, Marketing assignment, or post-approval status move fails, instead of silently finalizing only on the local side
 - Once a menu reaches approved state, the final DOCX is downloadable from `/approved-menus` for Carlos or other operations users
 - The learning dashboard lets reviewers delete an individual learned submission row when test data should not remain in the training history; this removes that submission from differ training data and rebuilds detected patterns without touching the property catalog.
 
@@ -155,7 +156,7 @@ Design approval entry point:
 - Submitters can type to search, but the selected value must match an allowed property.
 - The old separate free-text location field is removed; location metadata is derived from the selected property.
 - The form-side `Hotel Name` input is currently removed from chef entry flow.
-- Learning dashboards reuse the same property list for location-specific rule assignment and filtering.
+- Learning dashboards reuse the same property list for location-specific rule assignment and filtering; when `Location-specific rule?` is unchecked, reviewer annotations save as global rules without requiring a configured property.
 - Properties can also store SharePoint routing metadata:
   - base SharePoint folder path
   - resolved drive/library metadata

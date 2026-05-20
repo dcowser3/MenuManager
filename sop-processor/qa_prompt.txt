@@ -29,7 +29,7 @@ If the menu is perfect, return the original text unchanged.]
 
 [
   {
-    "type": "Spelling|Grammar|Formatting|Allergen Code|Diacritics|Redundant Word|Singular/Plural|Raw Item|Missing Price|Incomplete Dish Name|General",
+    "type": "Spelling|Grammar|Formatting|Allergen Code|Diacritics|Redundant Word|Singular/Plural|Raw Item|Missing Price|Set Menu Item Price|Incomplete Dish Name|General",
     "confidence": "medium|low",
     "severity": "critical|normal",
     "menuItem": "Name of the menu item this affects",
@@ -70,6 +70,7 @@ Every dish on a standard (non-prix-fixe) menu MUST have a price. If a dish entry
 - severity: "critical"
 - Do NOT auto-correct missing prices in the corrected menu — leave them in SUGGESTIONS only
 - For prix fixe menus, individual dishes do NOT need prices (only the overall prix fixe price is required). Do NOT flag missing individual dish prices on prix fixe menus, and recognize an overall price at the top such as `50.00pp` as the required price.
+- For embedded set-menu/prix-fixe subsections inside a standard menu (for example, a title like "Quick Lunch Menu $38" followed by "choice of one appetizer & one entrée"), included dishes do NOT need individual prices. If an included dish has a trailing bare item price, flag it as type "Set Menu Item Price" with severity "critical" and do NOT remove the price from CORRECTED MENU. Explicit plus prices such as "+5" or "+ AED 50" are premium/supplement upcharges and are allowed.
 
 #### 1.3.2 Incomplete/Missing Dish Names (CRITICAL)
 Every menu entry must have a recognizable dish name. Flag entries that are:
@@ -85,6 +86,7 @@ Flag these as a suggestion with:
 #### 1.4 Allergens
 - Format: Superscript, same line as dish/drink name
 - Comma-separated, NO spaces, ALPHABETICAL order (e.g., "D,G,N" not "G,N,D")
+- Alphabetical order means standard A-to-Z order of the code tokens, NOT the order the codes appear in the allergen legend. For example, "D,G" is already correct; never recommend changing "D,G" to "G,D".
 - Case: Always capitalized
 
 ---
@@ -93,6 +95,7 @@ Flag these as a suggestion with:
 
 #### 2.1 General Rules
 - Categories must be PLURAL (Appetizers, Entrees, Desserts, Wines)
+- A standalone top-level title/header such as "Menu" is allowed and is NOT a category. Do not delete, pluralize, rename, flag, or otherwise change a leading "Menu" title.
 - Observe all accent placements
 
 #### 2.2 Latin Concepts (Use Spanish Names)
@@ -481,7 +484,7 @@ When reviewing menu text:
 7. **Fix hyphenation** per rules (Section 5.1) - MEDIUM CONFIDENCE
 8. **Flag duplicate menu items** - if same dish appears twice, flag for review - MEDIUM CONFIDENCE
 9. **Suggest "cheese" modifier** where missing (Section 5.3) - LOW CONFIDENCE
-10. **Validate pricing**: Every dish must have a price (unless prix fixe) - CRITICAL SEVERITY, type "Missing Price"
+10. **Validate pricing**: Every dish must have a price unless it is inside a full-menu prix fixe or an embedded set-menu section. Bare item prices inside embedded set-menu sections are critical "Set Menu Item Price" issues; explicit plus-price premiums are allowed.
 11. **Check category names** for proper pluralization (Section 2) - LOW CONFIDENCE
 12. **Validate dish names**: Every entry must have a recognizable dish name - CRITICAL SEVERITY, type "Incomplete Dish Name"
 
@@ -508,5 +511,6 @@ When reviewing menu text:
 - Keep descriptions concise and actionable
 - The "severity" field is REQUIRED on every suggestion. Default to "normal" for most issues.
 - "Missing Price" suggestions MUST always have severity "critical"
+- "Set Menu Item Price" suggestions MUST always have severity "critical"
 - "Incomplete Dish Name" suggestions MUST always have severity "critical"
 - All other suggestion types should have severity "normal" unless they represent a truly critical issue

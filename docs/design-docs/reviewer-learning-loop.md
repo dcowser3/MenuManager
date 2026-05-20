@@ -58,9 +58,9 @@ This feature captures human reviewer corrections and feeds stable correction pat
 - Reviewer can save, per correction:
   - reasoning/explanation for the change
   - restaurant name
-  - primary location
-  - additional locations that should share the same rule
-- Data is saved as **location-specific rules** for weekly manual prompt review, not auto-injected into prompt.
+  - global scope, or a primary location when the rule is marked location-specific
+  - additional configured locations that should share the same location-specific rule
+- Data is saved as reviewer correction-rule annotations for weekly manual prompt review, not auto-injected into prompt.
 
 ### APIs
 

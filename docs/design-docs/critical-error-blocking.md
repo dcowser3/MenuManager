@@ -10,6 +10,7 @@ The AI review enforces "hard stops" for critical issues that block submission.
 | Error | Applies To | Detection | Can Auto-Correct? |
 |-------|-----------|-----------|-------------------|
 | **Missing Price** | Standard menus only | AI flags it; backend forces `critical` via normalizer | No — left in suggestions only |
+| **Set Menu Item Price** | Embedded set-menu sections inside standard menus | AI can flag it; deterministic guard synthesizes it for bare included-item prices | No — left in suggestions only |
 | **Incomplete Dish Name** | All menus | AI flags it; backend forces `critical` via normalizer | No — left in suggestions only |
 | **Prix Fixe Top Price Missing** | Prix fixe menus | Deterministic scan of top 5 non-empty lines (`enforcePrixFixeCriticalChecks`) | No |
 | **Course Numbering** | Prix fixe menus | Deterministic check for number line above headings + AI can flag it | No |
@@ -17,6 +18,8 @@ The AI review enforces "hard stops" for critical issues that block submission.
 | **Pricing Structure** | Prix fixe menus | AI flags it; backend forces `critical` via normalizer | No |
 
 **Prix fixe exemption:** Individual dishes on prix fixe menus do NOT need prices — only the top-level prix fixe price is required. The top-level price can use the per-person suffix `PP`/`pp`, so values like `50.00pp` count as valid prices.
+
+**Embedded set-menu exemption:** A standard menu can contain an embedded set section, such as `Quick Lunch Menu $38` followed by `choice of one appetizer & one entree`. Included dishes inside that section do not need item prices. Bare trailing prices on included dishes are critical `Set Menu Item Price` issues; explicit plus prices like `+5` or `+ AED 50` are treated as premium upcharges and allowed.
 
 ## Three Detection Layers
 
@@ -28,7 +31,7 @@ Tells the AI which suggestion types to mark `severity: "critical"`. The AI may o
 ### Layer 2: Severity Normalizer (`services/dashboard/index.ts` → `parseAIResponse`)
 A backend safety net that forces `critical` severity on known types regardless of what the AI returned:
 - Matches by `type` field: `Missing Price`, `Incomplete Dish Name`
-- Matches by `type` field (lowercase): `course progression`, `pricing structure`, `course numbering`
+- Matches by `type` field (lowercase): `set menu item price`, `course progression`, `pricing structure`, `course numbering`
 - Matches by regex on description: prix fixe top price issues, course numbering mentions
 - Fallback regex: descriptions mentioning "missing price" or "missing dish name" get reclassified
 
@@ -38,6 +41,13 @@ Runs only for prix fixe menus. Programmatically scans the menu text (no AI invol
 - **Course numbers:** Finds heading lines (Appetizers, Specialties, Desserts, etc.) and checks if the previous line is a standalone number or the heading starts with a number
 - Adds critical suggestions if missing; removes false-positive course numbering suggestions if numbers ARE present
 
+### Embedded Set-Menu Guard (`guardEmbeddedSetMenuPrices`)
+Runs for standard menus when the dashboard detects a package title with a total price, a nearby choice instruction, and set-section headings:
+- Injects prompt guidance so AI treats included dishes as part of the set section, not normal a la carte rows
+- Drops Missing Price suggestions for included set-section dishes
+- Restores bare item prices if AI removed them from corrected text
+- Synthesizes critical `Set Menu Item Price` suggestions for bare included-item prices, while allowing explicit `+` premium prices
+
 ### Reconciliation (`reconcileCriticalSuggestionsAgainstCorrectedMenu`)
 Filters out critical suggestions where the AI's corrected menu already resolved the issue (e.g., AI fixed a missing price in the corrected text but also flagged it as critical). Only handles Missing Price and Incomplete Dish Name types.
 
@@ -45,6 +55,10 @@ Missing-price reconciliation also handles add-on/enhancement rows. If the AI rep
 
 ### Auto-Applied Objective Corrections (`applyHighConfidenceSuggestionsToMenu`)
 Before critical blocking is calculated, the dashboard applies exact objective spelling/grammar recommendations such as `Change 'avocad' to 'avocado'` to the corrected menu text when the target token is still present. If the corrected menu already contains the replacement, the stale suggestion is removed. High-confidence raw-item asterisk suggestions are also applied before allergen/price suffixes. This is intentionally defensive because the model can occasionally put an auto-correctable fix in SUGGESTIONS or mark it as `critical`; these items should appear as applied AI changes, not chef-blocking errors.
+
+Allergen-code alphabetization suggestions also pass through a deterministic guard before display. If the model recommends changing an already alphabetized code list to a non-alphabetized order with the same codes, such as `D,G` to `G,D`, the suggestion is dropped and any matching corrected-menu change is restored to the alphabetized order.
+
+A leading standalone `Menu` line is treated as a document title, not a singular category. If the model deletes it or pluralizes it to `Menus`, the dashboard restores the original title line before diffing, highlighting, and critical-error reconciliation.
 
 ## User Flow
 
@@ -61,6 +75,7 @@ Before critical blocking is calculated, the dashboard applies exact objective sp
 | `sop-processor/qa_prompt.txt` | Tells AI which types are critical (lines 70–86) |
 | `services/dashboard/index.ts` → `parseAIResponse` | Severity normalizer — forces critical on known types |
 | `services/dashboard/lib/apply-high-confidence-suggestions.ts` | Applies or recognizes exact objective spelling/grammar corrections before blocking checks |
+| `services/dashboard/lib/embedded-set-menu-guard.ts` | Detects embedded set-menu sections and enforces bare-price review behavior |
 | `services/dashboard/index.ts` → `enforcePrixFixeCriticalChecks` | Deterministic prix fixe checks |
 | `services/dashboard/index.ts` → `reconcileCriticalSuggestionsAgainstCorrectedMenu` | Removes false-positive criticals |
 | `services/dashboard/views/form.ejs` | Renders critical cards, manages overrides, gates submit button |

@@ -332,6 +332,8 @@ The differ service stores comparison history under `LEARNING_DATA_DIR` when set,
 - Add "Project name" field (auto-filled)
 - Add "Change type" dropdown (auto-detected, editable)
 - Show system-proposed rules inline with accept/modify UI
+- If "Location-specific?" is unchecked, save the annotation as a global rule with `All properties (global rule)` as stored display text and do not require a property selection.
+- If "Location-specific?" is checked, require the primary property and any shared locations to match the configured property catalog.
 
 ## Implementation Order
 

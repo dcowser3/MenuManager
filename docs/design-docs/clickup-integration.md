@@ -46,6 +46,7 @@ When a chef submits a menu, a ClickUp task is automatically created with the gen
 - Extracts canonical approved menu text from the corrected DOCX
 - Updates submission to `status: 'approved'` with `final_path`, `approved_menu_content_raw`, and `approved_menu_content`
 - After approved DOCX processing completes, moves the ClickUp task to `CLICKUP_POST_APPROVAL_STATUS` (default: `To Do`) only when it is not already there
+- Routes the ClickUp task to Marketing assignees after approval processing by adding resolved Marketing users and removing `CLICKUP_ASSIGNEE_ID` when that reviewer is not part of the Marketing group
 - Calls `POST /approved-dishes/extract` on the DB service, waits for the result, and alerts if approved-dish extraction fails
 - Fire-and-forget: clickup-integration sends `corrections_ready` email with the DOCX attached
 - Fire-and-forget: differ compares AI draft vs corrected file for training
@@ -59,11 +60,11 @@ When a chef submits a menu, a ClickUp task is automatically created with the gen
 - Imported `existing-del` and `existing-ins` markup stays visible in the preview wherever that original redline content remains unchanged
 - Reviewer edits are submitted through `POST /api/approval/:submissionId/submit`
 - Dashboard generates an approved DOCX from the edited HTML and calls `POST localhost:3007/approval/finalize`
-- `clickup-integration` uploads the approved DOCX back to the ClickUp task when configured, finalizes the submission, triggers SharePoint upload, notifications, differ, and approved-dish extraction, then leaves/moves the task at `CLICKUP_POST_APPROVAL_STATUS`
+- `clickup-integration` uploads the approved DOCX back to the ClickUp task when configured, finalizes the submission, triggers SharePoint upload, notifications, differ, and approved-dish extraction, assigns the task to Marketing, then leaves/moves the task at `CLICKUP_POST_APPROVAL_STATUS`
 - Browser approval now preserves Isabella's manual sequencing:
   - upload corrected DOCX to ClickUp first
-  - only leave/move the task at `CLICKUP_POST_APPROVAL_STATUS` after that upload succeeds
-  - return a warning to the dashboard if either the attachment upload or the post-approval status transition fails
+  - only assign Marketing and leave/move the task at `CLICKUP_POST_APPROVAL_STATUS` after that upload succeeds
+  - return a warning to the dashboard if the attachment upload, Marketing assignment, or post-approval status transition fails
 
 ## Architecture
 

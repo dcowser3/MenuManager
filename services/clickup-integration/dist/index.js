@@ -149,12 +149,12 @@ function buildClickUpGroupUrl(groupIds) {
     }
     return `https://api.clickup.com/api/v2/group?${params.toString()}`;
 }
-async function resolveMarketingWatcherUserIds() {
+async function resolveMarketingUserIds() {
     const watcherIds = parseClickUpUserIds(CLICKUP_WATCHER_USER_IDS);
     const groupIds = parseDelimitedList(CLICKUP_MARKETING_WATCHER_GROUP_ID);
     const groupName = normalizeClickUpLabel(CLICKUP_MARKETING_WATCHER_GROUP_NAME);
     if (!CLICKUP_TEAM_ID && (groupIds.length || groupName)) {
-        console.warn('CLICKUP_TEAM_ID is required to resolve Marketing watcher group members.');
+        console.warn('CLICKUP_TEAM_ID is required to resolve Marketing user group members.');
         return uniqueNumbers(watcherIds);
     }
     if (!CLICKUP_TEAM_ID || (!groupIds.length && !groupName)) {
@@ -172,7 +172,7 @@ async function resolveMarketingWatcherUserIds() {
         return targetGroupIds.has(id) || (groupName && (name === groupName || handle === groupName));
     });
     if (!matchedGroups.length) {
-        console.warn(`ClickUp watcher group "${CLICKUP_MARKETING_WATCHER_GROUP_NAME}" was not found.`);
+        console.warn(`ClickUp Marketing group "${CLICKUP_MARKETING_WATCHER_GROUP_NAME}" was not found.`);
     }
     for (const group of matchedGroups) {
         const members = Array.isArray(group?.members) ? group.members : [];
@@ -185,13 +185,24 @@ async function resolveMarketingWatcherUserIds() {
     return uniqueNumbers(watcherIds);
 }
 async function addMarketingWatchersToTask(taskId) {
-    const watcherIds = await resolveMarketingWatcherUserIds();
+    const watcherIds = await resolveMarketingUserIds();
     if (!watcherIds.length) {
         console.warn('No ClickUp watcher user IDs resolved for Marketing notifications.');
         return 0;
     }
     await axios_1.default.put(`https://api.clickup.com/api/v2/task/${taskId}`, { watchers: { add: watcherIds, rem: [] } }, { headers: clickupHeaders });
     return watcherIds.length;
+}
+async function assignMarketingToApprovedTask(taskId) {
+    const marketingAssigneeIds = await resolveMarketingUserIds();
+    if (!marketingAssigneeIds.length) {
+        console.warn('No ClickUp user IDs resolved for Marketing assignment.');
+        return 0;
+    }
+    const removeAssigneeIds = parseClickUpUserIds(CLICKUP_ASSIGNEE_ID)
+        .filter((userId) => !marketingAssigneeIds.includes(userId));
+    await axios_1.default.put(`https://api.clickup.com/api/v2/task/${taskId}`, { assignees: { add: marketingAssigneeIds, rem: removeAssigneeIds } }, { headers: clickupHeaders });
+    return marketingAssigneeIds.length;
 }
 app.use(express.json({
     verify: (req, _res, buf) => {
@@ -813,9 +824,12 @@ async function finalizeApprovedSubmission(input) {
     const submission = input.submission;
     const clickupTaskId = `${input.clickupTaskId || submission?.clickup_task_id || ''}`.trim();
     const shouldUpdateClickupStatus = input.shouldUpdateClickupStatus !== false;
+    const shouldRouteClickupToMarketing = input.shouldRouteClickupToMarketing !== false && !!CLICKUP_API_TOKEN;
     const warnings = [];
     let extractedRaw = '';
     let extractedClean = '';
+    let clickupMarketingAssigneesUpdated = false;
+    let marketingAssigneeCount = 0;
     try {
         const extracted = await extractApprovedMenuContent(input.approvedPath);
         extractedRaw = extracted.raw;
@@ -885,6 +899,37 @@ async function finalizeApprovedSubmission(input) {
         });
     }
     if (clickupTaskId) {
+        if (shouldRouteClickupToMarketing) {
+            try {
+                marketingAssigneeCount = await assignMarketingToApprovedTask(clickupTaskId);
+                if (marketingAssigneeCount > 0) {
+                    clickupMarketingAssigneesUpdated = true;
+                    console.log(`Assigned ClickUp task ${clickupTaskId} to ${marketingAssigneeCount} Marketing user(s) after approval processing`);
+                }
+                else {
+                    warnings.push('Skipped Marketing assignee update because no Marketing user IDs were resolved.');
+                }
+            }
+            catch (assigneeError) {
+                const assigneeErrorDetail = assigneeError.response?.data || assigneeError.message;
+                warnings.push(`Marketing assignee update failed: ${typeof assigneeErrorDetail === 'string' ? assigneeErrorDetail : JSON.stringify(assigneeErrorDetail)}`);
+                console.error('Failed to assign ClickUp task to Marketing after approval:', assigneeErrorDetail);
+                sendAdminAlert({
+                    alert_type: 'clickup_marketing_assignment_failed',
+                    severity: 'warning',
+                    service: 'clickup-integration',
+                    submission_id: submission.id,
+                    message: `Failed to assign ClickUp task ${clickupTaskId} to Marketing after approval`,
+                    details: {
+                        error: assigneeErrorDetail,
+                        clickup_task_id: clickupTaskId,
+                    },
+                });
+            }
+        }
+        else if (input.skipClickupMarketingReason) {
+            warnings.push(input.skipClickupMarketingReason);
+        }
         if (shouldUpdateClickupStatus) {
             try {
                 await updateClickUpTaskStatus(clickupTaskId, CLICKUP_POST_APPROVAL_STATUS);
@@ -961,6 +1006,8 @@ async function finalizeApprovedSubmission(input) {
         processed: true,
         submissionId: submission.id,
         clickupStatusUpdated: !!clickupTaskId && shouldUpdateClickupStatus && !warnings.some((warning) => warning.startsWith('ClickUp status update failed')),
+        clickupMarketingAssigneesUpdated,
+        marketingAssigneeCount,
         warnings,
     };
 }
@@ -1039,7 +1086,7 @@ app.post('/create-task', async (req, res) => {
         let marketingAssigneeIds = [];
         if (routeToMarketing) {
             try {
-                marketingAssigneeIds = await resolveMarketingWatcherUserIds();
+                marketingAssigneeIds = await resolveMarketingUserIds();
             }
             catch (marketingError) {
                 const errorDetail = marketingError.response?.data?.err || marketingError.message;
@@ -1226,6 +1273,10 @@ app.post('/approval/finalize', async (req, res) => {
             attachmentId: uploadedAttachmentId,
             approvedAssetSource: 'browser_approval_editor',
             shouldUpdateClickupStatus: canUpdateClickupTask && attachmentUploaded,
+            shouldRouteClickupToMarketing: canUpdateClickupTask && attachmentUploaded,
+            skipClickupMarketingReason: canUpdateClickupTask && !attachmentUploaded
+                ? 'Skipped Marketing assignee update because the approved DOCX was not uploaded to the task.'
+                : undefined,
         });
         warnings.push(...(result.warnings || []));
         res.json({
@@ -1233,6 +1284,8 @@ app.post('/approval/finalize', async (req, res) => {
             processed: result.processed,
             submissionId: result.submissionId,
             attachmentUploaded,
+            clickupMarketingAssigneesUpdated: result.clickupMarketingAssigneesUpdated,
+            marketingAssigneeCount: result.marketingAssigneeCount,
             clickupStatusUpdated: result.clickupStatusUpdated,
             warning: warnings.length ? warnings.join(' | ') : undefined,
         });

@@ -346,7 +346,7 @@
                         is_location_specific: isLocationSpecific,
                         project_name: '<%= (submissionMeta.project_name || "").replace(/'/g, "\\'") %>',
                         restaurant_name: '<%= (submissionMeta.project_name || submissionMeta.property || "").replace(/'/g, "\\'") %>',
-                        location: location || 'All properties (global rule)',
+                        location,
                         other_applicable_locations: otherLocations,
                         reviewer_name: reviewerName,
                     })
