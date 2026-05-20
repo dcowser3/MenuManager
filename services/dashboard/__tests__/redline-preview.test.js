@@ -591,6 +591,57 @@ describe('redline preview helpers', () => {
         expect(rendered.deletions).toBe(1);
     });
 
+    test('keeps whole imported deleted rows separate after a later word edit', () => {
+        const baselinePreviewText = [
+            'Ahi Tuna Tiradito, almond leche de tigre, katsubushi, snow beans, lemon oil, cucumber pickles* N',
+            'Nikkei Tuna Tiradito, sesame oil, chili chalquita, ponzu, cucumber and daikon G 26',
+            'Peruvian Ceviche, snapper, leche de tigre, sweet potato, red onion, canchas* 25',
+            'Snapper Tiradito, yuzu-goma sauce, green apple, caviar, torched avocado, gochujang aioli* G',
+            'Bison Tiradito, togarashi, spiced pepitas, shimeji pickled, chipotle ponzu sauce, greens * 24',
+            'Acevichado Nikkei Roll, fish tiradito, leche de tigre, togarashi aioli, shrimp tempura, kabayaki* S,G 26',
+        ].join('\n');
+        const baselineText = [
+            'Ahi Tuna Tiradito, almond leche de tigre, katsubushi, snow beans, lemon oil, cucumber pickles* N',
+            '',
+            'Snapper Tiradito, yuzu-goma sauce, green apple, caviar, torched avocado, gochujang aioli* G',
+            '',
+            'Acevichado Nikkei Roll, fish tiradito, leche de tigre, togarashi aioli, shrimp tempura, kabayaki* S,G 26',
+        ].join('\n');
+        const revisedText = baselineText.replace(', cucumber', '');
+        const annotationMap = {};
+
+        function markDeletedRow(rowText) {
+            const start = baselinePreviewText.indexOf(rowText);
+            expect(start).toBeGreaterThanOrEqual(0);
+            for (let i = start; i < start + rowText.length; i++) {
+                annotationMap[i] = 'del';
+            }
+        }
+
+        markDeletedRow('Nikkei Tuna Tiradito, sesame oil, chili chalquita, ponzu, cucumber and daikon G 26');
+        markDeletedRow('Peruvian Ceviche, snapper, leche de tigre, sweet potato, red onion, canchas* 25');
+        markDeletedRow('Bison Tiradito, togarashi, spiced pepitas, shimeji pickled, chipotle ponzu sauce, greens * 24');
+
+        const resolved = redlinePreview.resolveExistingAnnotationRevisions(
+            baselineText,
+            revisedText,
+            baselinePreviewText,
+            annotationMap
+        );
+        const rendered = redlinePreview.renderPersistentPreview(resolved.basePreviewText, resolved.revisedPreviewText, {
+            annotationMap: resolved.annotationMap,
+            includeExistingAnnotations: true,
+        });
+        const renderedText = redlinePreview.previewHtmlToPlainText(rendered.html);
+
+        expect(resolved.revisedPreviewText).toContain('canchas* 25\nSnapper Tiradito');
+        expect(resolved.revisedPreviewText).toContain('greens * 24\nAcevichado Nikkei Roll');
+        expect(resolved.revisedPreviewText).not.toContain('25Snapper');
+        expect(resolved.revisedPreviewText).not.toContain('24Acevichado');
+        expect(renderedText).not.toContain('25Snapper');
+        expect(renderedText).not.toContain('24Acevichado');
+    });
+
     test('tracks deletion of an imported highlighted dish from the editable text', () => {
         const baselineText = [
             'COLD STARTERS',

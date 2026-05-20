@@ -546,13 +546,19 @@
         while (i < source.length) {
             if (annotationMap[i] === 'del') {
                 let text = '';
+                const start = i;
                 const offset = cleanOffset;
                 while (i < source.length && annotationMap[i] === 'del') {
                     text += source[i];
                     i++;
                 }
                 if (text) {
-                    anchors.push({ offset: offset, text: text });
+                    anchors.push({
+                        offset: offset,
+                        text: text,
+                        startsAtLineStart: start === 0 || source[start - 1] === '\n',
+                        endsAtLineEnd: i >= source.length || source[i] === '\n'
+                    });
                 }
                 continue;
             }
@@ -601,11 +607,34 @@
                 cleanEnd: cleanOffset,
                 delText: delText,
                 insText: insText,
-                previewText: source.slice(start, i)
+                previewText: source.slice(start, i),
+                startsAtLineStart: start === 0 || source[start - 1] === '\n',
+                endsAtLineEnd: i >= source.length || source[i] === '\n'
             });
         }
 
         return groups;
+    }
+
+    function buildBoundaryPreservingDeletionText(deletedText, outputText, offset, startsAtLineStart, endsAtLineEnd) {
+        let text = String(deletedText || '');
+        if (!text || (!startsAtLineStart && !endsAtLineEnd)) {
+            return text;
+        }
+
+        const output = String(outputText || '');
+        const safeOffset = Math.max(0, Math.min(offset || 0, output.length));
+        const before = safeOffset > 0 ? output[safeOffset - 1] : '';
+        const after = safeOffset < output.length ? output[safeOffset] : '';
+
+        if (startsAtLineStart && before && before !== '\n' && text[0] !== '\n') {
+            text = '\n' + text;
+        }
+        if (endsAtLineEnd && after && after !== '\n' && text[text.length - 1] !== '\n') {
+            text += '\n';
+        }
+
+        return text;
     }
 
     function groupWasRevertedToOriginal(group, cleanBaseText, revisedText) {
@@ -684,11 +713,14 @@
             if (String(revisedText || '').slice(offset, offset + group.delText.length) === group.delText) {
                 return;
             }
+            const isWholeDeletedLine = !group.insText && group.startsAtLineStart && group.endsAtLineEnd;
 
             inserts.push({
                 idx: group.index,
                 text: group.delText,
-                offset: offset
+                offset: offset,
+                startsAtLineStart: isWholeDeletedLine,
+                endsAtLineEnd: isWholeDeletedLine
             });
         });
 
@@ -699,7 +731,14 @@
 
         let output = String(revisedText || '');
         inserts.forEach(function (insert) {
-            output = output.slice(0, insert.offset) + insert.text + output.slice(insert.offset);
+            const text = buildBoundaryPreservingDeletionText(
+                insert.text,
+                output,
+                insert.offset,
+                insert.startsAtLineStart,
+                insert.endsAtLineEnd
+            );
+            output = output.slice(0, insert.offset) + text + output.slice(insert.offset);
         });
         return output;
     }
@@ -825,7 +864,9 @@
             return {
                 idx: idx,
                 text: anchor.text,
-                offset: mapBaselineOffsetToRevisedOffset(cleanBase, revised, anchor.offset)
+                offset: mapBaselineOffsetToRevisedOffset(cleanBase, revised, anchor.offset),
+                startsAtLineStart: anchor.startsAtLineStart,
+                endsAtLineEnd: anchor.endsAtLineEnd
             };
         }).sort(function (a, b) {
             if (a.offset !== b.offset) return b.offset - a.offset;
@@ -834,7 +875,14 @@
 
         let output = revised;
         inserts.forEach(function (insert) {
-            output = output.slice(0, insert.offset) + insert.text + output.slice(insert.offset);
+            const text = buildBoundaryPreservingDeletionText(
+                insert.text,
+                output,
+                insert.offset,
+                insert.startsAtLineStart,
+                insert.endsAtLineEnd
+            );
+            output = output.slice(0, insert.offset) + text + output.slice(insert.offset);
         });
         return output;
     }
