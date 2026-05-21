@@ -66,6 +66,7 @@ import {
     buildEmbeddedSetMenuPromptSection,
     guardEmbeddedSetMenuPrices,
 } from './lib/embedded-set-menu-guard';
+import { assessCorrectedMenuStructure } from './lib/corrected-menu-structure-guard';
 
 export {
     sanitizePlainTextInput,
@@ -876,6 +877,65 @@ export async function extractUnapprovedFromDocx(filePath: string): Promise<{
             size: projectDetails.size || '',
         },
     };
+}
+
+type CleanDocxUploadMode = 'baseline' | 'new_menu';
+
+async function handleCleanDocxMenuUpload(
+    req: any,
+    res: any,
+    options: {
+        mode: CleanDocxUploadMode;
+        missingFileMessage: string;
+        defaultFileName: string;
+        errorMessage: string;
+    }
+) {
+    try {
+        if (!req.file) {
+            return res.status(400).json({ error: options.missingFileMessage });
+        }
+
+        if (!hasAllowedExtension(req.file.originalname || req.file.path, ALLOWED_DOCX_EXTENSIONS)) {
+            return res.status(400).json({ error: 'Only .docx files are accepted' });
+        }
+        await assertUploadedFileType(req.file.path, ['docx']);
+
+        const extracted = await extractBaselineFromDocx(req.file.path);
+        const fileName = sanitizeStoredFileName(req.file.originalname, options.defaultFileName);
+        const sharedPayload = {
+            success: true,
+            extractedAllergenKey: extracted.extractedAllergenKey,
+            containsRawNotice: extracted.containsRawNotice,
+            extractedProject: extracted.extractedProject,
+        };
+
+        if (options.mode === 'baseline') {
+            return res.json({
+                ...sharedPayload,
+                baselineDocPath: req.file.path,
+                baselineFileName: fileName,
+                approvedMenuContent: extracted.approvedMenuContent,
+                approvedMenuContentRaw: extracted.approvedMenuContentRaw,
+                approvedMenuContentHtml: extracted.approvedMenuContentHtml,
+            });
+        }
+
+        return res.json({
+            ...sharedPayload,
+            menuDocPath: req.file.path,
+            menuDocFileName: fileName,
+            menuContent: extracted.approvedMenuContent,
+            menuContentRaw: extracted.approvedMenuContentRaw,
+            menuContentHtml: extracted.approvedMenuContentHtml,
+        });
+    } catch (error: any) {
+        console.error(options.errorMessage, error);
+        res.status(isClientInputError(error) ? 400 : 500).json({
+            error: options.errorMessage,
+            details: error.message,
+        });
+    }
 }
 
 /**
@@ -1877,32 +1937,25 @@ app.get('/api/submissions/latest-approved', async (req, res) => {
  * Extracts cleaned menu text + project details to prefill the form.
  */
 app.post('/api/modification/baseline-upload', upload.single('baselineDoc') as any, async (req, res) => {
-    try {
-        if (!req.file) {
-            return res.status(400).json({ error: 'No baseline document uploaded' });
-        }
+    return handleCleanDocxMenuUpload(req, res, {
+        mode: 'baseline',
+        missingFileMessage: 'No baseline document uploaded',
+        defaultFileName: 'baseline.docx',
+        errorMessage: 'Failed to process baseline document',
+    });
+});
 
-        if (!hasAllowedExtension(req.file.originalname || req.file.path, ALLOWED_DOCX_EXTENSIONS)) {
-            return res.status(400).json({ error: 'Only .docx files are accepted' });
-        }
-        await assertUploadedFileType(req.file.path, ['docx']);
-
-        const extracted = await extractBaselineFromDocx(req.file.path);
-        res.json({
-            success: true,
-            baselineDocPath: req.file.path,
-            baselineFileName: sanitizeStoredFileName(req.file.originalname, 'baseline.docx'),
-            approvedMenuContent: extracted.approvedMenuContent,
-            approvedMenuContentRaw: extracted.approvedMenuContentRaw,
-            approvedMenuContentHtml: extracted.approvedMenuContentHtml,
-            extractedAllergenKey: extracted.extractedAllergenKey,
-            containsRawNotice: extracted.containsRawNotice,
-            extractedProject: extracted.extractedProject,
-        });
-    } catch (error: any) {
-        console.error('Error extracting baseline document:', error);
-        res.status(isClientInputError(error) ? 400 : 500).json({ error: 'Failed to process baseline document', details: error.message });
-    }
+/**
+ * New Submission Flow: Upload menu DOCX and import its menu text into the form.
+ * Uses the same clean DOCX extraction path as uploaded approved baselines.
+ */
+app.post('/api/form/menu-doc-upload', upload.single('menuDoc') as any, async (req, res) => {
+    return handleCleanDocxMenuUpload(req, res, {
+        mode: 'new_menu',
+        missingFileMessage: 'No menu document uploaded',
+        defaultFileName: 'menu.docx',
+        errorMessage: 'Failed to process menu document',
+    });
 });
 
 /**
@@ -2126,8 +2179,10 @@ Note: Use ONLY these allergen codes when checking allergen compliance. Do not us
 
         // Call AI Review service's QA endpoint
         let finalPrompt = qaPrompt;
+        finalPrompt = `${finalPrompt}\n\nIMPORTANT CORRECTED MENU STRUCTURE RULES:\n- The CORRECTED MENU section must contain every submitted menu line in the same order.\n- Do not summarize, shorten, condense, omit, merge, reorder, or rewrite the menu structure.\n- Do not add section headings or line breaks that were not in the submitted menu.\n- Apply only high-confidence corrections inline and leave all other text unchanged.`;
+        diagnosticsPromptSections.push('corrected_menu_structure_rules');
         if (changedOnlyMode) {
-            finalPrompt = `${qaPrompt}\n\nIMPORTANT SCOPE FOR THIS REVIEW:\nYou are reviewing ONLY changed excerpts from a menu revision.\nDo NOT flag unchanged baseline content.\nReturn issues only for the changed excerpts provided.\nThe CORRECTED MENU section MUST contain exactly the same lines you received, in the same order, with high-confidence corrections applied to each line. Do not add, remove, merge, split, or reorder lines.`;
+            finalPrompt = `${finalPrompt}\n\nIMPORTANT SCOPE FOR THIS REVIEW:\nYou are reviewing ONLY changed excerpts from a menu revision.\nDo NOT flag unchanged baseline content.\nReturn issues only for the changed excerpts provided.\nThe CORRECTED MENU section MUST contain exactly the same lines you received, in the same order, with high-confidence corrections applied to each line. Do not add, remove, merge, split, or reorder lines.`;
             diagnosticsPromptSections.push('changed_only_scope');
         }
         finalPrompt = `${finalPrompt}\n\nIMPORTANT FOOTER RULES:\n- Do NOT review or suggest changes for the allergen legend/footer boilerplate.\n- Do NOT review or suggest changes for the standard foodborne illness warning/footer boilerplate.\n- The canonical foodborne illness warning is: ${RAW_NOTICE_TEXT}\n- Those footer lines are system-managed outside this review scope.`;
@@ -2312,7 +2367,16 @@ Note: Use ONLY these allergen codes when checking allergen compliance. Do not us
         // Parse the new format: corrected menu + suggestions
         const parsed = parseAIResponse(feedback, reviewFooterMetadata.body);
         const titleGuard = preserveLeadingMenuTitle(reviewFooterMetadata.body, parsed.correctedMenu);
-        const allergenGuard = guardAllergenAlphabetizationSuggestions(titleGuard.correctedMenu, parsed.suggestions);
+        const structureGuard = assessCorrectedMenuStructure(reviewFooterMetadata.body, titleGuard.correctedMenu);
+        const guardedCorrectedMenu = structureGuard.safe ? titleGuard.correctedMenu : reviewFooterMetadata.body;
+        if (!structureGuard.safe) {
+            console.warn('AI corrected menu rejected by structure guard:', {
+                checkId: basicCheckId,
+                reasons: structureGuard.reasons,
+                metrics: structureGuard.metrics,
+            });
+        }
+        const allergenGuard = guardAllergenAlphabetizationSuggestions(guardedCorrectedMenu, parsed.suggestions);
         const appliedHc = applyHighConfidenceSuggestionsToMenu(allergenGuard.correctedMenu, allergenGuard.suggestions);
         const setMenuGuard = guardEmbeddedSetMenuPrices(
             reviewFooterMetadata.body,
@@ -2335,6 +2399,7 @@ Note: Use ONLY these allergen codes when checking allergen compliance. Do not us
         console.log('Corrected menu length:', correctedMenuSanitized.length);
         console.log('Suggestions count:', parsed.suggestions.length);
         console.log('Leading Menu title restored:', titleGuard.restored);
+        console.log('Structure guard safe:', structureGuard.safe);
         console.log('Allergen order guard dropped:', allergenGuard.droppedSuggestions.length);
         console.log('Embedded set sections detected:', embeddedSetMenuAnalysis.sections.length);
         console.log('Embedded set price suggestions added:', setMenuGuard.synthesizedSuggestions.length);
@@ -2396,6 +2461,11 @@ Note: Use ONLY these allergen codes when checking allergen compliance. Do not us
                 hasChanges: changedOnlyMode
                     ? changedOnlyMergedMenu !== menuContent
                     : correctedMenuSanitized !== originalMenuSanitized,
+                correctedMenuStructureGuard: {
+                    safe: structureGuard.safe,
+                    reasons: structureGuard.reasons,
+                    metrics: structureGuard.metrics,
+                },
             },
         });
 
@@ -2443,7 +2513,13 @@ Note: Use ONLY these allergen codes when checking allergen compliance. Do not us
             },
             allergenGuard: {
                 droppedSuggestions: allergenGuard.droppedSuggestions,
-                correctedMenuChanged: allergenGuard.correctedMenu !== parsed.correctedMenu,
+                correctedMenuChanged: allergenGuard.correctedMenu !== guardedCorrectedMenu,
+            },
+            structureGuard: {
+                safe: structureGuard.safe,
+                reasons: structureGuard.reasons,
+                metrics: structureGuard.metrics,
+                correctedMenuChanged: guardedCorrectedMenu !== titleGuard.correctedMenu,
             },
             reconciliation: {
                 droppedSuggestions: reconciliation.droppedSuggestions,

@@ -129,6 +129,7 @@ describe('Dashboard Modification Workflow (local, mocked externals)', () => {
     const basicCheckStatusHandler = getRouteHandler('get', '/api/form/basic-check/status/:checkId');
     const attemptLogHandler = getRouteHandler('post', '/api/form/attempt-log');
     const submissionSearchHandler = getRouteHandler('get', '/api/submissions/search');
+    const newMenuDocUploadHandler = getRouteHandler('post', '/api/form/menu-doc-upload');
     const baselineUploadPath = path.join(process.cwd(), 'tmp', 'uploads', 'legacy-approved.docx');
     const originalNodeEnv = process.env.NODE_ENV;
 
@@ -298,6 +299,13 @@ describe('Dashboard Modification Workflow (local, mocked externals)', () => {
 
         expect(response.status).toBe(200);
         expect(response.body.success).toBe(true);
+    });
+
+    test('exposes a new-submission DOCX import route using the upload extraction path', async () => {
+        const response = await invokeJsonHandler(newMenuDocUploadHandler, {});
+
+        expect(response.status).toBe(400);
+        expect(response.body.error).toBe('No menu document uploaded');
     });
 
     test('form attempt failure email notifications are production-only', () => {

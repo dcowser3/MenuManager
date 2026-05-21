@@ -1561,6 +1561,17 @@
             cursor: not-allowed;
         }
 
+        .new-menu-doc-upload {
+            display: none;
+            margin-bottom: 0.75rem;
+            padding-bottom: 0.75rem;
+            border-bottom: 1px solid var(--color-border-light);
+        }
+
+        .new-menu-doc-upload.show {
+            display: block;
+        }
+
         .persistent-preview {
             display: none;
             margin-top: 1rem;
@@ -2022,6 +2033,14 @@
                 <div class="split-panel">
                     <h3>Your Menu Content</h3>
                     <p class="panel-subtitle">Paste your menu here (formatting preserved)</p>
+                    <div id="newMenuDocUploadSection" class="new-menu-doc-upload">
+                        <label for="newMenuDocUpload">Import menu from DOCX (Optional)</label>
+                        <div class="baseline-upload-row">
+                            <input type="file" id="newMenuDocUpload" accept=".docx" onchange="uploadNewMenuDoc()">
+                            <button type="button" class="baseline-upload-btn" id="newMenuDocUploadBtn" onclick="uploadNewMenuDoc()">Import DOCX</button>
+                        </div>
+                        <div id="newMenuDocSelectedNote" class="revision-selected"></div>
+                    </div>
                     <div class="menu-input-container">
                         <div id="menuEditor"></div>
                         <button class="expand-btn" onclick="openFullscreenView()" title="View full menu">
@@ -2285,6 +2304,7 @@
         let suppressRawNotice = false;
         let uploadedMenuImagePath = '';
         let uploadedMenuImageFileName = '';
+        let importedNewMenuDocFileName = '';
         let preservedManagedFooterText = '';
         let baselineFreshnessOverrideKey = '';
         let baselineFreshnessCheckTimer = null;
@@ -3274,11 +3294,19 @@
             const modSection = document.getElementById('modificationSearchSection');
             const recentLoader = document.getElementById('recentProjectLoader');
             const previewSection = document.getElementById('persistentPreviewSection');
+            const newMenuDocUploadSection = document.getElementById('newMenuDocUploadSection');
+            const newMenuDocSelectedNote = document.getElementById('newMenuDocSelectedNote');
 
             if (submissionMode === 'modification') {
                 modSection.classList.add('show');
                 recentLoader.style.display = 'none';
                 previewSection.classList.add('show');
+                if (newMenuDocUploadSection) newMenuDocUploadSection.classList.remove('show');
+                if (newMenuDocSelectedNote) {
+                    newMenuDocSelectedNote.classList.remove('show');
+                    newMenuDocSelectedNote.textContent = '';
+                }
+                importedNewMenuDocFileName = '';
                 onModificationSourceChange();
                 applyTurnaroundDefaults(true, true);
             } else {
@@ -3292,6 +3320,7 @@
                 }
 
                 modSection.classList.remove('show');
+                if (newMenuDocUploadSection) newMenuDocUploadSection.classList.add('show');
                 if (recentProjectsData.length > 0) {
                     recentLoader.style.display = 'flex';
                 }
@@ -3326,6 +3355,11 @@
                 setAllergenInputValue('');
                 setContainsRawSelection(false);
                 suppressRawNotice = false;
+                importedNewMenuDocFileName = '';
+                if (newMenuDocSelectedNote) {
+                    newMenuDocSelectedNote.classList.remove('show');
+                    newMenuDocSelectedNote.textContent = '';
+                }
                 setAllergenAutoDetectedBadge(false);
                 applyTurnaroundDefaults(true, false);
                 baselineFreshnessOverrideKey = '';
@@ -3729,38 +3763,146 @@
             applyApprovedBaseline(selected);
         }
 
-        async function uploadBaselineDoc() {
-            const input = document.getElementById('baselineDocUpload');
-            const btn = document.getElementById('baselineUploadBtn');
+        async function uploadCleanDocxForMenu(options) {
+            const input = document.getElementById(options.inputId);
+            const btn = document.getElementById(options.buttonId);
             const file = input.files && input.files[0];
             if (!file) {
-                showAlert('Choose a .docx baseline file first.', 'error');
-                return;
+                showAlert(options.emptyMessage, 'error');
+                return null;
             }
 
             const form = new FormData();
-            form.append('baselineDoc', file);
+            form.append(options.fieldName, file);
 
             btn.disabled = true;
-            btn.textContent = 'Extracting...';
+            btn.textContent = options.busyLabel || 'Extracting...';
 
             try {
-                await logFormAttempt('baseline_upload_started', {
-                    route: '/api/modification/baseline-upload',
-                    revisionSource: 'uploaded_baseline',
-                    revisionBaselineFileName: file.name,
+                await logFormAttempt(options.startedEvent, {
+                    route: options.route,
+                    revisionSource: options.revisionSource || '',
+                    revisionBaselineFileName: options.revisionSource ? file.name : '',
                     details: { fileName: file.name, fileSize: file.size }
                 });
-                const response = await fetch('/api/modification/baseline-upload', {
+                const response = await fetch(options.route, {
                     method: 'POST',
-                    headers: getAttemptHeaders({ 'x-menumanager-revision-source': 'uploaded_baseline' }),
+                    headers: getAttemptHeaders(options.headers || {}),
                     body: form,
                 });
                 const data = await response.json();
                 if (!response.ok) {
-                    throw new Error(data.error || 'Failed to extract baseline document');
+                    throw new Error(data.error || options.failureMessage);
                 }
 
+                return { data, file, status: response.status };
+            } catch (error) {
+                console.error(error);
+                await logFormAttempt(options.failedEvent, {
+                    route: options.route,
+                    revisionSource: options.revisionSource || '',
+                    revisionBaselineFileName: options.revisionSource ? file.name : '',
+                    errorMessage: error.message,
+                    details: { fileName: file.name, fileSize: file.size }
+                });
+                showAlert(options.errorAlertPrefix + error.message, 'error');
+                return null;
+            } finally {
+                btn.disabled = false;
+                btn.textContent = options.idleLabel;
+            }
+        }
+
+        function setQuillMenuContentFromUpload(menuText, menuHtml) {
+            const cleanHtml = stripManagedFooterHtml(menuHtml || '');
+            if (cleanHtml && quill && quill.clipboard) {
+                quill.clipboard.dangerouslyPasteHTML(cleanHtml);
+            } else {
+                quill.setText(menuText || '');
+            }
+        }
+
+        function resetAiStateAfterMenuImport() {
+            aiCheckHasRun = false;
+            aiCheckCompletedCount = 0;
+            lastAiCheckedMenuText = '';
+            requiresAiRerun = false;
+            aiCheckResults = null;
+            criticalErrorOverrides = {};
+            setAiSuggestionsVisibility(false);
+        }
+
+        async function uploadNewMenuDoc() {
+            const result = await uploadCleanDocxForMenu({
+                inputId: 'newMenuDocUpload',
+                buttonId: 'newMenuDocUploadBtn',
+                fieldName: 'menuDoc',
+                route: '/api/form/menu-doc-upload',
+                emptyMessage: 'Choose a .docx menu file first.',
+                failureMessage: 'Failed to import menu document',
+                errorAlertPrefix: 'Failed to import menu DOCX: ',
+                startedEvent: 'new_menu_doc_upload_started',
+                completedEvent: 'new_menu_doc_upload_completed',
+                failedEvent: 'new_menu_doc_upload_failed',
+                idleLabel: 'Import DOCX',
+                headers: { 'x-menumanager-revision-source': 'new_menu_doc' },
+            });
+            if (!result) return;
+
+            const { data, file, status } = result;
+            const normalizedMenu = stripBaselineFooter(data.menuContent || '', data.extractedAllergenKey || '');
+            const importedMenuText = normalizedMenu.menu || '';
+            const importedMenuHtml = stripManagedFooterHtml(data.menuContentHtml || '');
+
+            if (data.extractedProject) {
+                applyExtractedProjectToForm(data.extractedProject);
+            }
+
+            preservedManagedFooterText = normalizedMenu.footerText || '';
+            const detectedAllergens = normalizedMenu.allergens || data.extractedAllergenKey || '';
+            const detectedRawNotice = !!(data.containsRawNotice || normalizedMenu.hadRawNotice);
+            setAllergenInputValue(detectedAllergens || '');
+            setContainsRawSelection(detectedRawNotice);
+            suppressRawNotice = false;
+            setAllergenAutoDetectedBadge(!!detectedAllergens);
+            setQuillMenuContentFromUpload(importedMenuText, importedMenuHtml);
+            resetAiStateAfterMenuImport();
+
+            importedNewMenuDocFileName = data.menuDocFileName || file.name;
+            const selectedNote = document.getElementById('newMenuDocSelectedNote');
+            selectedNote.textContent = `Imported menu DOCX: ${importedNewMenuDocFileName}`;
+            selectedNote.classList.add('show');
+
+            await logFormAttempt('new_menu_doc_upload_completed', {
+                route: '/api/form/menu-doc-upload',
+                statusCode: status,
+                menuTextLength: importedMenuText.length,
+                menuHtmlLength: importedMenuHtml.length,
+                details: { fileName: file.name, fileSize: file.size }
+            });
+            showAlert('Menu DOCX imported. Review the extracted text before running AI Check.', 'success');
+        }
+
+        async function uploadBaselineDoc() {
+            const result = await uploadCleanDocxForMenu({
+                inputId: 'baselineDocUpload',
+                buttonId: 'baselineUploadBtn',
+                fieldName: 'baselineDoc',
+                route: '/api/modification/baseline-upload',
+                emptyMessage: 'Choose a .docx baseline file first.',
+                failureMessage: 'Failed to extract baseline document',
+                errorAlertPrefix: 'Failed to process baseline DOCX: ',
+                startedEvent: 'baseline_upload_started',
+                completedEvent: 'baseline_upload_completed',
+                failedEvent: 'baseline_upload_failed',
+                idleLabel: 'Extract Baseline',
+                revisionSource: 'uploaded_baseline',
+                headers: { 'x-menumanager-revision-source': 'uploaded_baseline' },
+            });
+            if (!result) return;
+
+            const { data, file, status } = result;
+            try {
                 revisionSource = 'uploaded_baseline';
                 revisionBaseSubmissionId = null;
                 revisionBaselineDocPath = data.baselineDocPath || '';
@@ -3791,7 +3933,7 @@
                 enterRevisionTrackingMode();
                 await logFormAttempt('baseline_upload_completed', {
                     route: '/api/modification/baseline-upload',
-                    statusCode: response.status,
+                    statusCode: status,
                     revisionSource: 'uploaded_baseline',
                     revisionBaselineFileName,
                     menuTextLength: baseApprovedMenuContent.length,
@@ -3801,17 +3943,7 @@
                 showAlert('Baseline extracted. Revision tracking mode is active.', 'success');
             } catch (error) {
                 console.error(error);
-                await logFormAttempt('baseline_upload_failed', {
-                    route: '/api/modification/baseline-upload',
-                    revisionSource: 'uploaded_baseline',
-                    revisionBaselineFileName: file.name,
-                    errorMessage: error.message,
-                    details: { fileName: file.name, fileSize: file.size }
-                });
                 showAlert('Failed to process baseline DOCX: ' + error.message, 'error');
-            } finally {
-                btn.disabled = false;
-                btn.textContent = 'Extract Baseline';
             }
         }
 

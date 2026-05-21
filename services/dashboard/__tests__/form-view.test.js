@@ -37,6 +37,21 @@ describe('dashboard form modification source chooser', () => {
         expect(template).not.toContain('id="modSourceDatabase" value="database" checked');
     });
 
+    test('lets brand-new submissions import menu content from DOCX using shared upload code', () => {
+        const template = fs.readFileSync(
+            path.join(__dirname, '..', 'views', 'form.ejs'),
+            'utf8'
+        );
+
+        expect(template).toContain('id="newMenuDocUploadSection"');
+        expect(template).toContain('id="newMenuDocUpload" accept=".docx" onchange="uploadNewMenuDoc()"');
+        expect(template).toContain('function uploadCleanDocxForMenu(options)');
+        expect(template).toContain("route: '/api/form/menu-doc-upload'");
+        expect(template).toContain("route: '/api/modification/baseline-upload'");
+        expect(template).toContain('setQuillMenuContentFromUpload(importedMenuText, importedMenuHtml);');
+        expect(template).toContain('newMenuDocUploadSection.classList.add(\'show\');');
+    });
+
     test('builds a reusable uploaded-redline comparison before rendering the clean left editor', () => {
         const template = fs.readFileSync(
             path.join(__dirname, '..', 'views', 'form.ejs'),
