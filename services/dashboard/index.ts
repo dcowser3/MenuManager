@@ -22,6 +22,7 @@ import {
     resolveApprovalSourceDocument,
     textToParagraphHtml,
 } from './lib/approval-baseline';
+import { buildSmtpRuntimeConfig } from './lib/smtp-config';
 import {
     ALLOWED_DOCX_EXTENSIONS,
     ALLOWED_MENU_IMAGE_EXTENSIONS,
@@ -105,6 +106,8 @@ const BASIC_AI_CHECK_TIMEOUT_MS = parsePositiveInteger(
     process.env.BASIC_AI_CHECK_TIMEOUT_MS || process.env.AI_REVIEW_QA_TIMEOUT_MS,
     120000
 );
+const AI_REVIEW_SUBMIT_TIMEOUT_MS = parsePositiveInteger(process.env.AI_REVIEW_SUBMIT_TIMEOUT_MS, BASIC_AI_CHECK_TIMEOUT_MS);
+const CLICKUP_TASK_CREATE_TIMEOUT_MS = parsePositiveInteger(process.env.CLICKUP_TASK_CREATE_TIMEOUT_MS, 60000);
 const BASIC_AI_CHECK_JOB_TTL_MS = parsePositiveInteger(process.env.BASIC_AI_CHECK_JOB_TTL_MS, 15 * 60 * 1000);
 const BASIC_AI_CHECK_DEBUG_ENABLED = process.env.BASIC_AI_CHECK_DEBUG_ENABLED !== undefined
     ? parseBooleanFlag(process.env.BASIC_AI_CHECK_DEBUG_ENABLED)
@@ -176,13 +179,10 @@ function cleanupBasicCheckJobs(): void {
 }
 
 // SMTP for admin alerts (reuses existing SMTP config)
-const hasSmtpConfig = !!(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS);
-const alertTransporter = hasSmtpConfig ? nodemailer.createTransport({
-    host: process.env.SMTP_HOST,
-    port: Number(process.env.SMTP_PORT || 587),
-    secure: false,
-    auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
-} as any) : null;
+const smtpConfig = buildSmtpRuntimeConfig();
+const hasSmtpConfig = smtpConfig.enabled;
+const smtpFromAddress = smtpConfig.fromAddress;
+const alertTransporter = hasSmtpConfig ? nodemailer.createTransport(smtpConfig.transportOptions as any) : null;
 
 // Alert dedup: 15-min cooldown per alert_type
 const alertCooldowns = new Map<string, number>();
@@ -206,7 +206,7 @@ function sendAdminAlert(alert: SystemAlert): void {
     if (alertTransporter && ALERT_EMAIL) {
         const severityLabel = alert.severity.toUpperCase();
         alertTransporter.sendMail({
-            from: `"Menu Manager Alerts" <${process.env.SMTP_USER}>`,
+            from: `"Menu Manager Alerts" <${smtpFromAddress}>`,
             to: ALERT_EMAIL,
             subject: `[${severityLabel}] ${alert.alert_type.replace(/_/g, ' ')} — Menu Manager`,
             html: buildAlertEmailHtml(alert, DASHBOARD_URL),
@@ -285,7 +285,7 @@ function sendFormAttemptFailureEmail(event: Record<string, any>): void {
         : '';
 
     alertTransporter.sendMail({
-        from: `"Menu Manager Alerts" <${process.env.SMTP_USER}>`,
+        from: `"Menu Manager Alerts" <${smtpFromAddress}>`,
         to: FORM_ATTEMPT_ALERT_EMAIL,
         subject,
         html: `
@@ -1327,7 +1327,9 @@ const submissionWorkflowHandlers = createSubmissionWorkflowHandlers({
     AI_REVIEW_URL,
     CLICKUP_SERVICE_URL,
     DEFAULT_ALLERGEN_KEY,
-    INTERNAL_REVIEWER_EMAIL: process.env.INTERNAL_REVIEWER_EMAIL,
+    PUBLIC_FORM_SUPPORT_EMAIL,
+    AI_REVIEW_SUBMIT_TIMEOUT_MS,
+    CLICKUP_TASK_CREATE_TIMEOUT_MS,
     getTempUploadsDir,
     getSubmissionDocumentDir,
     getPropertyCatalogFromDb,

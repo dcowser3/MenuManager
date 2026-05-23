@@ -71,6 +71,7 @@ function mergeFooterText(...values) {
     return lines.join('\n');
 }
 function createSubmissionWorkflowHandlers(deps) {
+    const publicSupportEmail = deps.PUBLIC_FORM_SUPPORT_EMAIL || 'dcowser@richardsandoval.com';
     const triggerAiReview = async (input) => {
         try {
             if (input.skipAi) {
@@ -86,7 +87,7 @@ function createSubmissionWorkflowHandlers(deps) {
                 submitter_email: input.submitterEmail,
                 filename: input.filename,
                 original_path: input.originalPath
-            });
+            }, { timeout: deps.AI_REVIEW_SUBMIT_TIMEOUT_MS });
             console.log(`✓ AI review triggered for ${input.submissionId}`);
         }
         catch (aiError) {
@@ -424,12 +425,12 @@ function createSubmissionWorkflowHandlers(deps) {
                         last_payload: clickupTaskPayload,
                         retry_count: 0,
                     });
-                    const clickupResponse = await deps.axios.post(`${deps.CLICKUP_SERVICE_URL}/create-task`, clickupTaskPayload);
+                    const clickupResponse = await deps.axios.post(`${deps.CLICKUP_SERVICE_URL}/create-task`, clickupTaskPayload, { timeout: deps.CLICKUP_TASK_CREATE_TIMEOUT_MS });
                     const clickupData = clickupResponse.data || {};
                     clickupTaskId = clickupData.taskId;
                     if (clickupData.skipped) {
                         clickupDiagnosticReference = submissionId;
-                        clickupWarning = (0, clickup_handoff_1.withSubmissionReference)('Menu submitted, but ClickUp integration is not configured yet. If this persists, please email the Word document to the design team.', clickupDiagnosticReference);
+                        clickupWarning = (0, clickup_handoff_1.withSubmissionReference)(`Menu submitted, but ClickUp integration is not configured yet. If this persists, please email the Word document to ${publicSupportEmail}.`, clickupDiagnosticReference);
                         await recordClickUpHandoff({
                             status: 'skipped_not_configured',
                             last_response: clickupData,
@@ -439,9 +440,8 @@ function createSubmissionWorkflowHandlers(deps) {
                         });
                     }
                     else if (clickupData.warning || clickupData.attachmentUploadFailed) {
-                        const supportEmail = deps.INTERNAL_REVIEWER_EMAIL || 'the design team';
                         clickupDiagnosticReference = submissionId;
-                        clickupWarning = (0, clickup_handoff_1.withSubmissionReference)(`Menu submitted, but we could not upload the Word document to ClickUp. If this persists, please email the Word document directly to ${supportEmail}.`, clickupDiagnosticReference);
+                        clickupWarning = (0, clickup_handoff_1.withSubmissionReference)(`Menu submitted, but we could not upload the Word document to ClickUp. If this persists, please email the Word document directly to ${publicSupportEmail}.`, clickupDiagnosticReference);
                         await recordClickUpHandoff({
                             status: 'task_created_with_warning',
                             task_id: clickupTaskId,
@@ -465,9 +465,8 @@ function createSubmissionWorkflowHandlers(deps) {
                 catch (clickupError) {
                     const errorDetails = (0, clickup_handoff_1.describeServiceError)(clickupError);
                     console.error('Failed to create ClickUp task:', errorDetails.response || errorDetails.message);
-                    const supportEmail = deps.INTERNAL_REVIEWER_EMAIL || 'the design team';
                     clickupDiagnosticReference = submissionId;
-                    clickupWarning = (0, clickup_handoff_1.withSubmissionReference)(`Menu submitted, but we could not create your ClickUp task. If this persists, please email the Word document directly to ${supportEmail}.`, clickupDiagnosticReference);
+                    clickupWarning = (0, clickup_handoff_1.withSubmissionReference)(`Menu submitted, but we could not create your ClickUp task. If this persists, please email the Word document directly to ${publicSupportEmail}.`, clickupDiagnosticReference);
                     await recordClickUpHandoff({
                         status: 'failed',
                         last_error: errorDetails,

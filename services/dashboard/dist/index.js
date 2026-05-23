@@ -53,6 +53,7 @@ const util_1 = require("util");
 const supabase_client_1 = require("@menumanager/supabase-client");
 const nodemailer_1 = __importDefault(require("nodemailer"));
 const approval_baseline_1 = require("./lib/approval-baseline");
+const smtp_config_1 = require("./lib/smtp-config");
 const upload_security_1 = require("./lib/upload-security");
 const internal_auth_1 = require("@menumanager/internal-auth");
 const submission_workflow_1 = require("./lib/submission-workflow");
@@ -98,6 +99,8 @@ function parseBooleanFlag(value) {
     return /^(1|true|yes|on)$/i.test(String(value || '').trim());
 }
 const BASIC_AI_CHECK_TIMEOUT_MS = parsePositiveInteger(process.env.BASIC_AI_CHECK_TIMEOUT_MS || process.env.AI_REVIEW_QA_TIMEOUT_MS, 120000);
+const AI_REVIEW_SUBMIT_TIMEOUT_MS = parsePositiveInteger(process.env.AI_REVIEW_SUBMIT_TIMEOUT_MS, BASIC_AI_CHECK_TIMEOUT_MS);
+const CLICKUP_TASK_CREATE_TIMEOUT_MS = parsePositiveInteger(process.env.CLICKUP_TASK_CREATE_TIMEOUT_MS, 60000);
 const BASIC_AI_CHECK_JOB_TTL_MS = parsePositiveInteger(process.env.BASIC_AI_CHECK_JOB_TTL_MS, 15 * 60 * 1000);
 const BASIC_AI_CHECK_DEBUG_ENABLED = process.env.BASIC_AI_CHECK_DEBUG_ENABLED !== undefined
     ? parseBooleanFlag(process.env.BASIC_AI_CHECK_DEBUG_ENABLED)
@@ -155,13 +158,10 @@ function cleanupBasicCheckJobs() {
     }
 }
 // SMTP for admin alerts (reuses existing SMTP config)
-const hasSmtpConfig = !!(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS);
-const alertTransporter = hasSmtpConfig ? nodemailer_1.default.createTransport({
-    host: process.env.SMTP_HOST,
-    port: Number(process.env.SMTP_PORT || 587),
-    secure: false,
-    auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
-}) : null;
+const smtpConfig = (0, smtp_config_1.buildSmtpRuntimeConfig)();
+const hasSmtpConfig = smtpConfig.enabled;
+const smtpFromAddress = smtpConfig.fromAddress;
+const alertTransporter = hasSmtpConfig ? nodemailer_1.default.createTransport(smtpConfig.transportOptions) : null;
 // Alert dedup: 15-min cooldown per alert_type
 const alertCooldowns = new Map();
 const ALERT_COOLDOWN_MS = 15 * 60 * 1000;
@@ -182,7 +182,7 @@ function sendAdminAlert(alert) {
     if (alertTransporter && ALERT_EMAIL) {
         const severityLabel = alert.severity.toUpperCase();
         alertTransporter.sendMail({
-            from: `"Menu Manager Alerts" <${process.env.SMTP_USER}>`,
+            from: `"Menu Manager Alerts" <${smtpFromAddress}>`,
             to: ALERT_EMAIL,
             subject: `[${severityLabel}] ${alert.alert_type.replace(/_/g, ' ')} — Menu Manager`,
             html: (0, supabase_client_1.buildAlertEmailHtml)(alert, DASHBOARD_URL),
@@ -253,7 +253,7 @@ function sendFormAttemptFailureEmail(event) {
         ? `<h3>Critical Suggestions</h3><pre style="background:#f5f5f5;padding:12px;overflow:auto;font-size:12px">${escapeEmailHtml(JSON.stringify(criticalSuggestions, null, 2))}</pre>`
         : '';
     alertTransporter.sendMail({
-        from: `"Menu Manager Alerts" <${process.env.SMTP_USER}>`,
+        from: `"Menu Manager Alerts" <${smtpFromAddress}>`,
         to: FORM_ATTEMPT_ALERT_EMAIL,
         subject,
         html: `
@@ -1143,7 +1143,9 @@ const submissionWorkflowHandlers = (0, submission_workflow_1.createSubmissionWor
     AI_REVIEW_URL,
     CLICKUP_SERVICE_URL,
     DEFAULT_ALLERGEN_KEY,
-    INTERNAL_REVIEWER_EMAIL: process.env.INTERNAL_REVIEWER_EMAIL,
+    PUBLIC_FORM_SUPPORT_EMAIL,
+    AI_REVIEW_SUBMIT_TIMEOUT_MS,
+    CLICKUP_TASK_CREATE_TIMEOUT_MS,
     getTempUploadsDir,
     getSubmissionDocumentDir,
     getPropertyCatalogFromDb,

@@ -15,6 +15,7 @@ const util_1 = require("util");
 const crypto_1 = __importDefault(require("crypto"));
 const supabase_client_1 = require("@menumanager/supabase-client");
 const approval_finalization_1 = require("./lib/approval-finalization");
+const smtp_config_1 = require("./lib/smtp-config");
 const sharepoint_filenames_1 = require("./lib/sharepoint-filenames");
 const clickup_due_date_1 = require("./lib/clickup-due-date");
 const internal_auth_1 = require("@menumanager/internal-auth");
@@ -43,18 +44,11 @@ const CLICKUP_REVIEW_COMPLETE_STATUSES = buildReviewCompleteStatuses();
 const GRAPH_CLIENT_ID = process.env.GRAPH_CLIENT_ID;
 const GRAPH_TENANT_ID = process.env.GRAPH_TENANT_ID;
 const GRAPH_CLIENT_SECRET = process.env.GRAPH_CLIENT_SECRET;
-const hasSmtpConfig = !!(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS);
-const mailFromAddress = process.env.GRAPH_MAILBOX_ADDRESS || process.env.SMTP_USER || 'no-reply@example.com';
+const smtpConfig = (0, smtp_config_1.buildSmtpRuntimeConfig)();
+const hasSmtpConfig = smtpConfig.enabled;
+const mailFromAddress = smtpConfig.fromAddress;
 let cachedGraphToken = null;
-const mailTransporter = nodemailer_1.default.createTransport({
-    host: process.env.SMTP_HOST,
-    port: Number(process.env.SMTP_PORT || 587),
-    secure: String(process.env.SMTP_SECURE || 'false').toLowerCase() === 'true',
-    auth: {
-        user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASS,
-    },
-});
+const mailTransporter = hasSmtpConfig ? nodemailer_1.default.createTransport(smtpConfig.transportOptions) : null;
 const ALERT_EMAIL = process.env.ALERT_EMAIL || '';
 const DASHBOARD_URL = process.env.DASHBOARD_URL || 'http://localhost:3005';
 const alertCooldowns = new Map();
@@ -65,10 +59,10 @@ function sendAdminAlert(alert) {
         return;
     alertCooldowns.set(alert.alert_type, Date.now());
     (0, supabase_client_1.logAlert)(alert);
-    if (hasSmtpConfig && ALERT_EMAIL) {
+    if (mailTransporter && ALERT_EMAIL) {
         const severityLabel = alert.severity.toUpperCase();
         mailTransporter.sendMail({
-            from: `"Menu Manager Alerts" <${process.env.SMTP_USER}>`,
+            from: `"Menu Manager Alerts" <${mailFromAddress}>`,
             to: ALERT_EMAIL,
             subject: `[${severityLabel}] ${alert.alert_type.replace(/_/g, ' ')} — Menu Manager`,
             html: (0, supabase_client_1.buildAlertEmailHtml)(alert, DASHBOARD_URL),

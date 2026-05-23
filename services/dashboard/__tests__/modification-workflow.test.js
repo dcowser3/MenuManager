@@ -276,11 +276,13 @@ describe('Dashboard Modification Workflow (local, mocked externals)', () => {
             String(c[0]).includes('/ai-review')
         );
         expect(aiReviewCall[1].filename).toBe(expectedFilename);
+        expect(aiReviewCall[2]).toEqual({ timeout: 120000 });
 
         const clickupCall = mockedAxios.post.mock.calls.find((c) =>
             String(c[0]).includes('/create-task')
         );
         expect(clickupCall[1].filename).toBe(expectedFilename);
+        expect(clickupCall[2]).toEqual({ timeout: 60000 });
     });
 
     test('accepts compact form attempt telemetry before a submission exists', async () => {
@@ -459,16 +461,17 @@ describe('Dashboard Modification Workflow (local, mocked externals)', () => {
             return defaultPost(url, payload);
         });
 
-        const response = await invokeJsonHandler(
-            submitHandler,
-            buildNewSubmissionPayload({ projectName: 'ClickUp Failure Project' }),
-            { headers: { host: 'sandovalhospitalitymenumanager.live' } }
+        process.env.NODE_ENV = 'production';
+        const response = await postJsonOverHttp(
+            '/api/form/submit',
+            buildNewSubmissionPayload({ projectName: 'ClickUp Failure Project' })
         );
 
         expect(response.status).toBe(200);
         expect(response.body.success).toBe(true);
         expect(response.body.clickup.taskId).toBeUndefined();
         expect(response.body.clickup.diagnosticReference).toBe(response.body.submissionId);
+        expect(response.body.clickup.warning).toContain('dcowser@richardsandoval.com');
         expect(response.body.clickup.warning).toContain(`Reference: ${response.body.submissionId}`);
 
         const clickupAlert = logAlert.mock.calls.find(([alert]) => alert.alert_type === 'clickup_task_failed');

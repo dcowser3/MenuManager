@@ -2,12 +2,15 @@ import express = require('express');
 import nodemailer from 'nodemailer';
 import dotenv = require('dotenv');
 import { promises as fsPromises } from 'fs';
+import { buildSmtpRuntimeConfig } from './src/smtp-config';
 
 dotenv.config({ path: '../../../.env' });
 
 const app = express();
 const port = 3003;
-const hasSmtpConfig = !!(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS);
+const smtpConfig = buildSmtpRuntimeConfig();
+const hasSmtpConfig = smtpConfig.enabled;
+const mailFromAddress = smtpConfig.fromAddress;
 const ALERT_EMAIL = process.env.ALERT_EMAIL || process.env.INTERNAL_REVIEWER_EMAIL || '';
 const DASHBOARD_URL = process.env.DASHBOARD_URL || 'http://localhost:3005';
 
@@ -15,15 +18,7 @@ const DASHBOARD_URL = process.env.DASHBOARD_URL || 'http://localhost:3005';
 const alertCooldowns = new Map<string, number>();
 const ALERT_COOLDOWN_MS = 15 * 60 * 1000;
 
-const transporter = nodemailer.createTransport({
-    host: process.env.SMTP_HOST,
-    port: 587,
-    secure: false,
-    auth: {
-        user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASS,
-    },
-});
+const transporter = hasSmtpConfig ? nodemailer.createTransport(smtpConfig.transportOptions as any) : null;
 
 app.use(express.json());
 
@@ -46,7 +41,7 @@ app.post('/notify', async (req, res) => {
             case 'corrections_ready':
                 const correctedBuffer = await fsPromises.readFile(payload.corrected_path);
                 mailOptions = {
-                    from: `"Menu Review Bot" <${process.env.GRAPH_MAILBOX_ADDRESS}>`,
+                    from: `"Menu Review Bot" <${mailFromAddress}>`,
                     to: payload.submitter_email,
                     subject: `Corrections Ready: ${payload.project_name || payload.filename}`,
                     html: `
@@ -85,7 +80,7 @@ app.post('/notify', async (req, res) => {
                 const details = payload.details || '';
 
                 mailOptions = {
-                    from: `"Menu Manager Alerts" <${process.env.SMTP_USER}>`,
+                    from: `"Menu Manager Alerts" <${mailFromAddress}>`,
                     to: ALERT_EMAIL,
                     subject: `[${severityLabel}] ${alertType} — Menu Manager`,
                     html: `
@@ -115,7 +110,7 @@ app.post('/notify', async (req, res) => {
                 return res.status(200).json({ skipped: true, reason: 'notification_type_disabled', type });
         }
 
-        await transporter.sendMail(mailOptions);
+        await transporter!.sendMail(mailOptions);
         console.log(`Notification email (${type}) sent successfully.`);
         res.status(200).send('Notification sent successfully.');
 

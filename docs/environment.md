@@ -6,10 +6,11 @@ All variables are configured in `.env` at the project root. See `.env.example` f
 
 | Variable | Description |
 |----------|-------------|
-| `SMTP_HOST` | SMTP server hostname (e.g., `smtp.gmail.com`) |
-| `SMTP_PORT` | SMTP server port (e.g., `587`) |
-| `SMTP_USER` | SMTP username / email address |
-| `SMTP_PASS` | SMTP password or app-specific password |
+| `SMTP_HOST` | SMTP server hostname for email notifications (e.g., `smtp.gmail.com` or `richardsandoval-com.mail.protection.outlook.com`) |
+| `SMTP_PORT` | SMTP server port (e.g., `587` for authenticated submission, `25` for Microsoft 365 IP relay) |
+| `SMTP_AUTH` | SMTP auth mode. Omit or set `login` for username/password; set `none` for IP/certificate-based relay. |
+| `SMTP_USER` | SMTP username / email address. Required unless `SMTP_AUTH=none`. |
+| `SMTP_PASS` | SMTP password or app-specific password. Required unless `SMTP_AUTH=none`. |
 | `OPENAI_API_KEY` | OpenAI API key for AI review service |
 | `INTERNAL_API_TOKEN` | Shared secret required on internal service-to-service requests between dashboard, db, parser, ai-review, differ, and clickup-integration |
 | `SUPABASE_URL` | Supabase project URL |
@@ -20,12 +21,16 @@ All variables are configured in `.env` at the project root. See `.env.example` f
 
 | Variable | Description |
 |----------|-------------|
+| `SMTP_FROM` | From address used for Menu Manager notification emails. Recommended when `SMTP_AUTH=none`; must use an accepted sender domain for Microsoft 365 relay. Defaults to `GRAPH_MAILBOX_ADDRESS`, then `SMTP_USER`, then `no-reply@richardsandoval.com`. |
+| `SMTP_SECURE` | Set `true` for implicit TLS SMTP, typically port `465`; defaults to `false`. |
+| `SMTP_REQUIRE_TLS` | Set `true` to require STARTTLS. Defaults to `true` when `SMTP_AUTH=none`, otherwise `false`. |
 | `INTERNAL_REVIEWER_EMAIL` | Email address that receives internal review notifications |
 | `ALERT_EMAIL` | Email address that receives system alert emails such as SharePoint upload, webhook, and extraction failures |
 | `FORM_ATTEMPT_ALERT_EMAIL` | Email address that receives production public-form failure alerts such as `413` submit errors (default: `dcowser@richardsandoval.com`) |
 | `PUBLIC_FORM_SUPPORT_EMAIL` | Email address shown to submitters in the form footer and blocking/red form errors (default: `dcowser@richardsandoval.com`) |
 | `AI_REVIEW_MODEL` | OpenAI model used by AI review service (default: `gpt-4o-mini`) |
 | `BASIC_AI_CHECK_TIMEOUT_MS` | Dashboard timeout in milliseconds for background public-form Basic AI Check calls to ai-review (default: `120000`; falls back to `AI_REVIEW_QA_TIMEOUT_MS` if set) |
+| `AI_REVIEW_SUBMIT_TIMEOUT_MS` | Dashboard timeout in milliseconds for the post-submit full AI review handoff (default: `BASIC_AI_CHECK_TIMEOUT_MS`, normally `120000`) |
 | `BASIC_AI_CHECK_JOB_TTL_MS` | How long dashboard keeps completed/failed Basic AI Check job results available for polling before cleanup (default: `900000`) |
 | `BASIC_AI_CHECK_DEBUG_ENABLED` | Allows opt-in Basic AI Check diagnostics responses when the request includes `debugBasicCheck`; defaults to enabled outside production and disabled in production |
 | `BASIC_AI_CHECK_DEBUG_MAX_CHARS` | Maximum characters retained per diagnostic text field such as AI prompt, reviewed text, and raw feedback (default: `60000`) |
@@ -35,6 +40,7 @@ All variables are configured in `.env` at the project root. See `.env.example` f
 | `AI_REVIEW_URL` | Base URL for AI review service (default: `http://localhost:3002`) |
 | `DIFFER_SERVICE_URL` | Base URL for differ service (default: `http://localhost:3006`) |
 | `CLICKUP_SERVICE_URL` | Base URL for ClickUp integration service (default: `http://localhost:3007`) |
+| `CLICKUP_TASK_CREATE_TIMEOUT_MS` | Dashboard timeout in milliseconds for the form submit to ClickUp task creation handoff (default: `60000`) |
 | `INTERNAL_API_TIMEOUT_MS` | Default timeout in milliseconds for internal service-to-service HTTP calls (default: `5000`; individual long-running calls may override it) |
 | `DOCUMENT_STORAGE_ROOT` | Root directory for persisted menu DOCX assets (default: `tmp/documents`) |
 | `JSON_BODY_LIMIT` | Shared Express JSON/urlencoded body limit for services that need larger rich-text payloads (default where used: `5mb`) |
@@ -75,6 +81,21 @@ Public form journeys also write compact telemetry to `form_attempt_logs` when Su
 
 In production, public-form failure events also send an email through the dashboard SMTP transport to `FORM_ATTEMPT_ALERT_EMAIL` (or `dcowser@richardsandoval.com` when unset). Local development and non-production environments do not send these form failure emails.
 
+For Microsoft 365 IP-based SMTP relay, configure the Exchange Online connector to trust the production server's outbound public IP address and use:
+
+```env
+SMTP_HOST=richardsandoval-com.mail.protection.outlook.com
+SMTP_PORT=25
+SMTP_AUTH=none
+SMTP_SECURE=false
+SMTP_REQUIRE_TLS=true
+SMTP_FROM=no-reply@richardsandoval.com
+SMTP_USER=
+SMTP_PASS=
+```
+
+The relay IP is part of the authentication boundary. Use the server's outbound public IP, not the inbound dashboard hostname.
+
 Current examples include:
 
 - `clickup_task_failed` from `dashboard` when the saved submission cannot create its ClickUp task; the submitter warning includes the submission reference, and alert details include the same diagnostic reference plus structured service error details
@@ -100,7 +121,7 @@ Internal HTTP routes now require the shared `INTERNAL_API_TOKEN` header on servi
 
 Set the same `INTERNAL_API_TOKEN` value for every service process in the environment. If it is missing, internal requests fail closed with `503` or `401` responses instead of falling back to network trust.
 
-Internal service clients also apply `INTERNAL_API_TIMEOUT_MS` (default `5000`) when a request does not specify a timeout. This prevents dashboard routes from waiting indefinitely on a sick dependency; routes that need more time can still pass an explicit timeout. The browser-facing Basic AI Check flow is async: `/api/form/basic-check/start` returns a check id quickly, and the form polls `/api/form/basic-check/status/:checkId` while submit remains blocked. The background AI call uses `BASIC_AI_CHECK_TIMEOUT_MS` (default `120000`) so real menu reviews have time to complete without holding a gateway request open. For local diagnosis, append `?debugBasicCheck=1` to `/form`; the completed poll response includes the reviewed text, prompt, raw AI feedback, parsed suggestions, and reconciliation drops, and the browser stores the same object on `window.lastBasicCheckDiagnostics`. In production, set `BASIC_AI_CHECK_DEBUG_ENABLED=true` before using that opt-in because diagnostics can include full menu text.
+Internal service clients also apply `INTERNAL_API_TIMEOUT_MS` (default `5000`) when a request does not specify a timeout. This prevents dashboard routes from waiting indefinitely on a sick dependency; routes that need more time can still pass an explicit timeout. The browser-facing Basic AI Check flow is async: `/api/form/basic-check/start` returns a check id quickly, and the form polls `/api/form/basic-check/status/:checkId` while submit remains blocked. The background AI call uses `BASIC_AI_CHECK_TIMEOUT_MS` (default `120000`) so real menu reviews have time to complete without holding a gateway request open. After form submission, full AI review uses `AI_REVIEW_SUBMIT_TIMEOUT_MS`, and the ClickUp handoff uses `CLICKUP_TASK_CREATE_TIMEOUT_MS` so slower external ClickUp task creation and attachment uploads do not inherit the 5-second internal default. For local diagnosis, append `?debugBasicCheck=1` to `/form`; the completed poll response includes the reviewed text, prompt, raw AI feedback, parsed suggestions, and reconciliation drops, and the browser stores the same object on `window.lastBasicCheckDiagnostics`. In production, set `BASIC_AI_CHECK_DEBUG_ENABLED=true` before using that opt-in because diagnostics can include full menu text.
 
 ## Document Storage Layout
 

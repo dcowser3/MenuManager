@@ -18,6 +18,7 @@ import {
     buildApprovedSubmissionUpdate,
     buildSharePointApprovedDocxAssetRecord,
 } from './lib/approval-finalization';
+import { buildSmtpRuntimeConfig } from './lib/smtp-config';
 import { buildSharePointApprovedFilename } from './lib/sharepoint-filenames';
 import { clickUpDueDateMillis } from './lib/clickup-due-date';
 import { createInternalApiClient, requireInternalServiceAuth } from '@menumanager/internal-auth';
@@ -49,19 +50,12 @@ const CLICKUP_REVIEW_COMPLETE_STATUSES = buildReviewCompleteStatuses();
 const GRAPH_CLIENT_ID = process.env.GRAPH_CLIENT_ID;
 const GRAPH_TENANT_ID = process.env.GRAPH_TENANT_ID;
 const GRAPH_CLIENT_SECRET = process.env.GRAPH_CLIENT_SECRET;
-const hasSmtpConfig = !!(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS);
-const mailFromAddress = process.env.GRAPH_MAILBOX_ADDRESS || process.env.SMTP_USER || 'no-reply@example.com';
+const smtpConfig = buildSmtpRuntimeConfig();
+const hasSmtpConfig = smtpConfig.enabled;
+const mailFromAddress = smtpConfig.fromAddress;
 let cachedGraphToken: { accessToken: string; expiresAt: number } | null = null;
 
-const mailTransporter = nodemailer.createTransport({
-    host: process.env.SMTP_HOST,
-    port: Number(process.env.SMTP_PORT || 587),
-    secure: String(process.env.SMTP_SECURE || 'false').toLowerCase() === 'true',
-    auth: {
-        user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASS,
-    },
-});
+const mailTransporter = hasSmtpConfig ? nodemailer.createTransport(smtpConfig.transportOptions as any) : null;
 
 const ALERT_EMAIL = process.env.ALERT_EMAIL || '';
 const DASHBOARD_URL = process.env.DASHBOARD_URL || 'http://localhost:3005';
@@ -75,10 +69,10 @@ function sendAdminAlert(alert: SystemAlert): void {
 
     logAlert(alert);
 
-    if (hasSmtpConfig && ALERT_EMAIL) {
+    if (mailTransporter && ALERT_EMAIL) {
         const severityLabel = alert.severity.toUpperCase();
         mailTransporter.sendMail({
-            from: `"Menu Manager Alerts" <${process.env.SMTP_USER}>`,
+            from: `"Menu Manager Alerts" <${mailFromAddress}>`,
             to: ALERT_EMAIL,
             subject: `[${severityLabel}] ${alert.alert_type.replace(/_/g, ' ')} — Menu Manager`,
             html: buildAlertEmailHtml(alert, DASHBOARD_URL),
@@ -549,7 +543,7 @@ async function sendCorrectionsReadyNotification(payload: {
     }
 
     const correctedBuffer = await fs.promises.readFile(payload.correctedPath);
-    await mailTransporter.sendMail({
+    await mailTransporter!.sendMail({
         from: `"Menu Review Bot" <${mailFromAddress}>`,
         to: payload.submitterEmail,
         subject: `Corrections Ready: ${payload.projectName || payload.filename || 'Menu Submission'}`,

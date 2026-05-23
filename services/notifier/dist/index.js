@@ -7,24 +7,19 @@ const express = require("express");
 const nodemailer_1 = __importDefault(require("nodemailer"));
 const dotenv = require("dotenv");
 const fs_1 = require("fs");
+const smtp_config_1 = require("./src/smtp-config");
 dotenv.config({ path: '../../../.env' });
 const app = express();
 const port = 3003;
-const hasSmtpConfig = !!(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS);
+const smtpConfig = (0, smtp_config_1.buildSmtpRuntimeConfig)();
+const hasSmtpConfig = smtpConfig.enabled;
+const mailFromAddress = smtpConfig.fromAddress;
 const ALERT_EMAIL = process.env.ALERT_EMAIL || process.env.INTERNAL_REVIEWER_EMAIL || '';
 const DASHBOARD_URL = process.env.DASHBOARD_URL || 'http://localhost:3005';
 // Dedup: track last alert time per alert_type (15-min cooldown)
 const alertCooldowns = new Map();
 const ALERT_COOLDOWN_MS = 15 * 60 * 1000;
-const transporter = nodemailer_1.default.createTransport({
-    host: process.env.SMTP_HOST,
-    port: 587,
-    secure: false,
-    auth: {
-        user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASS,
-    },
-});
+const transporter = hasSmtpConfig ? nodemailer_1.default.createTransport(smtpConfig.transportOptions) : null;
 app.use(express.json());
 app.post('/notify', async (req, res) => {
     const { type, payload } = req.body;
@@ -41,7 +36,7 @@ app.post('/notify', async (req, res) => {
             case 'corrections_ready':
                 const correctedBuffer = await fs_1.promises.readFile(payload.corrected_path);
                 mailOptions = {
-                    from: `"Menu Review Bot" <${process.env.GRAPH_MAILBOX_ADDRESS}>`,
+                    from: `"Menu Review Bot" <${mailFromAddress}>`,
                     to: payload.submitter_email,
                     subject: `Corrections Ready: ${payload.project_name || payload.filename}`,
                     html: `
@@ -76,7 +71,7 @@ app.post('/notify', async (req, res) => {
                 const message = payload.message || 'No details provided';
                 const details = payload.details || '';
                 mailOptions = {
-                    from: `"Menu Manager Alerts" <${process.env.SMTP_USER}>`,
+                    from: `"Menu Manager Alerts" <${mailFromAddress}>`,
                     to: ALERT_EMAIL,
                     subject: `[${severityLabel}] ${alertType} — Menu Manager`,
                     html: `

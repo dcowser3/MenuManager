@@ -120,6 +120,7 @@ Current ClickUp BAU status handoff:
 - When the approved DOCX is processed from any configured review-complete status, the task is assigned to the resolved Marketing users and the configured initial reviewer is removed when applicable; the task is then moved to `To Do`, or the status update is skipped if it is already there
 - Task due date is taken from the form "Date needed" using noon UTC on that calendar day so ClickUp does not display it one day early in US timezones (plain `YYYY-MM-DD` parsing used to mean UTC midnight)
 - If ClickUp task creation or attachment upload fails after the menu is saved, the submitter warning includes the submission reference so support can match the screenshot to logs, `system_alerts`, and the generated DOCX.
+- Submitter-facing ClickUp handoff warnings use `PUBLIC_FORM_SUPPORT_EMAIL` (default `dcowser@richardsandoval.com`), and the dashboard waits up to `CLICKUP_TASK_CREATE_TIMEOUT_MS` (default `60000`) for ClickUp task creation before showing that fallback.
 - ClickUp task descriptions now spell out the selected modification workflow path instead of showing only raw `modification` / `revision_source` values.
 - Pending submissions that saved successfully but have no `clickup_task_id` can be retried from the review page; retry metadata is kept in `raw_payload.clickup_handoff`.
 
@@ -271,13 +272,28 @@ Create a `.env` file with:
 ```
 # Email sending (SMTP)
 SMTP_HOST=
+SMTP_PORT=587
+SMTP_AUTH=login
+SMTP_FROM=
 SMTP_USER=
 SMTP_PASS=
+PUBLIC_FORM_SUPPORT_EMAIL=dcowser@richardsandoval.com
+FORM_ATTEMPT_ALERT_EMAIL=dcowser@richardsandoval.com
+
+# Microsoft 365 IP-based relay example:
+# SMTP_HOST=richardsandoval-com.mail.protection.outlook.com
+# SMTP_PORT=25
+# SMTP_AUTH=none
+# SMTP_REQUIRE_TLS=true
+# SMTP_FROM=no-reply@richardsandoval.com
+# SMTP_USER=
+# SMTP_PASS=
 
 # AI Review
 OPENAI_API_KEY=
 AI_REVIEW_MODEL=gpt-4o-mini
 BASIC_AI_CHECK_TIMEOUT_MS=120000
+AI_REVIEW_SUBMIT_TIMEOUT_MS=120000
 BASIC_AI_CHECK_JOB_TTL_MS=900000
 
 # Service URLs (override in cloud deployments)
@@ -287,6 +303,7 @@ DIFFER_SERVICE_URL=http://localhost:3006
 CLICKUP_SERVICE_URL=http://localhost:3007
 INTERNAL_API_TOKEN=replace-with-a-long-random-secret
 INTERNAL_API_TIMEOUT_MS=
+CLICKUP_TASK_CREATE_TIMEOUT_MS=60000
 
 # ClickUp workflow statuses
 CLICKUP_INITIAL_REVIEW_STATUS=pending initial isa review

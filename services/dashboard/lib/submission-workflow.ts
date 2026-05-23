@@ -22,7 +22,9 @@ type SubmissionWorkflowDeps = {
     AI_REVIEW_URL: string;
     CLICKUP_SERVICE_URL: string;
     DEFAULT_ALLERGEN_KEY: string;
-    INTERNAL_REVIEWER_EMAIL?: string;
+    PUBLIC_FORM_SUPPORT_EMAIL?: string;
+    AI_REVIEW_SUBMIT_TIMEOUT_MS: number;
+    CLICKUP_TASK_CREATE_TIMEOUT_MS: number;
     getTempUploadsDir: () => string;
     getSubmissionDocumentDir: (projectName: string, property: string, submissionId: string) => string;
     getPropertyCatalogFromDb: () => Promise<any[]>;
@@ -74,6 +76,8 @@ function mergeFooterText(...values: string[]): string {
 }
 
 export function createSubmissionWorkflowHandlers(deps: SubmissionWorkflowDeps) {
+    const publicSupportEmail = deps.PUBLIC_FORM_SUPPORT_EMAIL || 'dcowser@richardsandoval.com';
+
     const triggerAiReview = async (input: {
         submissionId: string;
         submitterEmail: string;
@@ -99,7 +103,7 @@ export function createSubmissionWorkflowHandlers(deps: SubmissionWorkflowDeps) {
                 submitter_email: input.submitterEmail,
                 filename: input.filename,
                 original_path: input.originalPath
-            });
+            }, { timeout: deps.AI_REVIEW_SUBMIT_TIMEOUT_MS });
 
             console.log(`✓ AI review triggered for ${input.submissionId}`);
         } catch (aiError: any) {
@@ -515,14 +519,18 @@ export function createSubmissionWorkflowHandlers(deps: SubmissionWorkflowDeps) {
                         last_payload: clickupTaskPayload,
                         retry_count: 0,
                     });
-                    const clickupResponse = await deps.axios.post(`${deps.CLICKUP_SERVICE_URL}/create-task`, clickupTaskPayload);
+                    const clickupResponse = await deps.axios.post(
+                        `${deps.CLICKUP_SERVICE_URL}/create-task`,
+                        clickupTaskPayload,
+                        { timeout: deps.CLICKUP_TASK_CREATE_TIMEOUT_MS }
+                    );
 
                     const clickupData = clickupResponse.data || {};
                     clickupTaskId = clickupData.taskId;
                     if (clickupData.skipped) {
                         clickupDiagnosticReference = submissionId;
                         clickupWarning = withSubmissionReference(
-                            'Menu submitted, but ClickUp integration is not configured yet. If this persists, please email the Word document to the design team.',
+                            `Menu submitted, but ClickUp integration is not configured yet. If this persists, please email the Word document to ${publicSupportEmail}.`,
                             clickupDiagnosticReference
                         );
                         await recordClickUpHandoff({
@@ -533,10 +541,9 @@ export function createSubmissionWorkflowHandlers(deps: SubmissionWorkflowDeps) {
                             retry_count: 0,
                         });
                     } else if (clickupData.warning || clickupData.attachmentUploadFailed) {
-                        const supportEmail = deps.INTERNAL_REVIEWER_EMAIL || 'the design team';
                         clickupDiagnosticReference = submissionId;
                         clickupWarning = withSubmissionReference(
-                            `Menu submitted, but we could not upload the Word document to ClickUp. If this persists, please email the Word document directly to ${supportEmail}.`,
+                            `Menu submitted, but we could not upload the Word document to ClickUp. If this persists, please email the Word document directly to ${publicSupportEmail}.`,
                             clickupDiagnosticReference
                         );
                         await recordClickUpHandoff({
@@ -560,10 +567,9 @@ export function createSubmissionWorkflowHandlers(deps: SubmissionWorkflowDeps) {
                 } catch (clickupError: any) {
                     const errorDetails = describeServiceError(clickupError);
                     console.error('Failed to create ClickUp task:', errorDetails.response || errorDetails.message);
-                    const supportEmail = deps.INTERNAL_REVIEWER_EMAIL || 'the design team';
                     clickupDiagnosticReference = submissionId;
                     clickupWarning = withSubmissionReference(
-                        `Menu submitted, but we could not create your ClickUp task. If this persists, please email the Word document directly to ${supportEmail}.`,
+                        `Menu submitted, but we could not create your ClickUp task. If this persists, please email the Word document directly to ${publicSupportEmail}.`,
                         clickupDiagnosticReference
                     );
                     await recordClickUpHandoff({
