@@ -62,7 +62,7 @@ Menu Manager is an AI-powered service designed to automate the review process fo
 - Production public-form failure events also email `FORM_ATTEMPT_ALERT_EMAIL`, defaulting to `dcowser@richardsandoval.com`, through the dashboard SMTP transport
 - Required-field validation now highlights missing submitter, project-details, and approval inputs directly in the form
 - The submission form footer and blocking/red form errors list `PUBLIC_FORM_SUPPORT_EMAIL` (default `dcowser@richardsandoval.com`) as the support contact for help.
-- Isabella's review queue is available at `/reviews`, with `/dashboard` and `/review-queue` redirecting there. It lists submissions still needing human review and links each row to the browser approval editor.
+- Isabella's review queue is available at `/reviews`, with `/dashboard` and `/review-queue` redirecting there. It lists submissions whose Menu Manager DB status still needs human review and links each row to the browser approval editor. Isabella-submitted direct handoffs that have already been sent to ClickUp/Marketing are excluded from this queue.
 - Notification system
 - Approved dishes are extracted automatically when the ClickUp-reviewed DOCX is marked approved
 - ClickUp tasks now include a browser approval link that opens a side-by-side approval editor: clean text editing on the left, live redline/highlight preview on the right, and final DOCX generation on submit
@@ -115,7 +115,7 @@ services/
 
 Current ClickUp BAU status handoff:
 - New tasks start in `Pending Initial ISA Review`
-- New tasks are assigned through `CLICKUP_ASSIGNEE_ID` (Isabella in production) and add Marketing group members as watchers when the ClickUp group lookup is configured; submissions from `isabella@richardsandoval.com` route directly to `CLICKUP_POST_APPROVAL_STATUS` (`To Do` by default) and assign the resolved Marketing users instead, even when `CLICKUP_CORRECTIONS_STATUS` is a different review-complete trigger such as `approved`
+- New tasks are assigned through `CLICKUP_ASSIGNEE_ID` (Isabella in production) and add Marketing group members as watchers when the ClickUp group lookup is configured; submissions from `isabella@richardsandoval.com` route directly to `CLICKUP_POST_APPROVAL_STATUS` (`To Do` by default), assign the resolved Marketing users, and update Menu Manager to `sent_to_marketing` instead of leaving the row in Isabella's review queue, even when `CLICKUP_CORRECTIONS_STATUS` is a different review-complete trigger such as `approved`
 - Isabella uploads the corrected DOCX in ClickUp and moves the task to `To Do`; that status change downloads the latest DOCX and feeds the learning dashboard
 - When the approved DOCX is processed from any configured review-complete status, the task is assigned to the resolved Marketing users and the configured initial reviewer is removed when applicable; the task is then moved to `To Do`, or the status update is skipped if it is already there
 - Task due date is taken from the form "Date needed" using noon UTC on that calendar day so ClickUp does not display it one day early in US timezones (plain `YYYY-MM-DD` parsing used to mean UTC midnight)

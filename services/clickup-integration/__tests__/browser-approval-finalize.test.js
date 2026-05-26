@@ -324,6 +324,15 @@ describe('browser approval finalize route', () => {
         expect(createCall[1].status).not.toBe('approved');
         expect(createCall[1].assignees).toEqual([201, 202]);
         expect(createCall[1].assignees).not.toContain(114079264);
+
+        const dbUpdateCall = axios.put.mock.calls.find((call) =>
+            String(call[0]).includes('http://localhost:3004/submissions/form-isa')
+        );
+        expect(dbUpdateCall).toBeTruthy();
+        expect(dbUpdateCall[1]).toEqual({
+            clickup_task_id: 'cu_isa',
+            status: 'sent_to_marketing',
+        });
     });
 
     test('describes modification workflow source with human-readable ClickUp labels', async () => {

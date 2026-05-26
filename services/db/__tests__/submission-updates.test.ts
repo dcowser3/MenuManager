@@ -120,6 +120,22 @@ describe('submission update hardening', () => {
                         final_path: '/Users/deriancowser/Documents/MenuManager/tmp/documents/no-ai.docx',
                         submitter_email: 'manual@example.com',
                     },
+                    'form-isabella-direct': {
+                        id: 'form-isabella-direct',
+                        source: 'form',
+                        status: 'pending_human_review',
+                        created_at: '2026-05-08T12:00:00.000Z',
+                        clickup_task_id: 'cu_isabella',
+                        submitter_email: 'isabella@richardsandoval.com',
+                    },
+                    'form-marketing': {
+                        id: 'form-marketing',
+                        source: 'form',
+                        status: 'sent_to_marketing',
+                        created_at: '2026-05-08T13:00:00.000Z',
+                        clickup_task_id: 'cu_marketing',
+                        submitter_email: 'isabella@richardsandoval.com',
+                    },
                     'form-200': {
                         id: 'form-200',
                         source: 'form',
@@ -239,6 +255,20 @@ describe('submission update hardening', () => {
         expect(result.rejectedFields).not.toContain('raw_payload');
         expect(result.allowedFields.raw_payload).toEqual({ clickup_handoff: { status: 'failed' } });
         expect(result.allowedFields.clickup_task_id).toBe('cu_123');
+    });
+
+    test('allows direct Isabella handoffs to leave the review queue', () => {
+        const result = sanitizeSubmissionUpdates(
+            {
+                clickup_task_id: 'cu_isa',
+                status: 'sent_to_marketing',
+            },
+            { repoRoot: '/Users/deriancowser/Documents/MenuManager' }
+        );
+
+        expect(result.rejectedFields).toEqual([]);
+        expect(result.allowedFields.status).toBe('sent_to_marketing');
+        expect(result.allowedFields.clickup_task_id).toBe('cu_isa');
     });
 
     test('accepts submission create bodies larger than the Express default JSON limit', async () => {

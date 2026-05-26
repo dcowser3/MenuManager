@@ -31,6 +31,7 @@ const ALLOWED_SUBMISSION_STATUSES = new Set([
     'processing',
     'pending_human_review',
     'submitted_no_ai_review',
+    'sent_to_marketing',
     'rejected_template',
     'rejected_tier1',
     'needs_prompt_fix',

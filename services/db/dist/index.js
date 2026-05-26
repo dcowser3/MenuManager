@@ -58,6 +58,7 @@ const PROPERTIES_TABLE = 'properties';
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const APPROVED_SUBMISSION_STATUSES = ['approved', 'approved_override'];
 const REVIEW_QUEUE_STATUSES = ['pending_human_review', 'submitted_no_ai_review'];
+const ISABELLA_EMAIL = 'isabella@richardsandoval.com';
 const DEFAULT_PROPERTY_NAMES = [
     '89Agave - Sedona',
     'Agent\'s Only - Pasadena',
@@ -608,6 +609,30 @@ function normalizeApprovedLookupValue(value) {
         .replace(/[_-]+/g, ' ')
         .replace(/\s+/g, ' ');
 }
+function getRawPayloadObject(submission) {
+    const rawPayload = submission?.raw_payload;
+    if (!rawPayload)
+        return {};
+    if (typeof rawPayload === 'object')
+        return rawPayload;
+    if (typeof rawPayload !== 'string')
+        return {};
+    try {
+        const parsed = JSON.parse(rawPayload);
+        return parsed && typeof parsed === 'object' ? parsed : {};
+    }
+    catch {
+        return {};
+    }
+}
+function isIsabellaDirectHandoff(submission) {
+    const submitterEmail = `${submission?.submitter_email || ''}`.trim().toLowerCase();
+    if (submitterEmail !== ISABELLA_EMAIL)
+        return false;
+    const clickupHandoff = getRawPayloadObject(submission).clickup_handoff || {};
+    const clickupTaskId = `${submission?.clickup_task_id || clickupHandoff.task_id || ''}`.trim();
+    return !!clickupTaskId;
+}
 function getSubmissionServicePeriod(submission) {
     return `${submission?.service_period || submission?.raw_payload?.servicePeriod || ''}`.trim();
 }
@@ -824,10 +849,12 @@ app.get('/submissions/pending', async (req, res) => {
             if (error) {
                 throw new Error(error.message);
             }
-            return res.status(200).json(data || []);
+            const pending = (data || []).filter((submission) => !isIsabellaDirectHandoff(submission));
+            return res.status(200).json(pending);
         }
         const submissions = JSON.parse(await fs_1.promises.readFile(SUBMISSIONS_DB, 'utf-8'));
-        const pending = Object.values(submissions).filter((sub) => REVIEW_QUEUE_STATUSES.includes(sub.status)).sort((a, b) => {
+        const pending = Object.values(submissions).filter((sub) => REVIEW_QUEUE_STATUSES.includes(sub.status)).filter((submission) => !isIsabellaDirectHandoff(submission))
+            .sort((a, b) => {
             const bTime = new Date(b.created_at || b.updated_at || 0).getTime();
             const aTime = new Date(a.created_at || a.updated_at || 0).getTime();
             return bTime - aTime;

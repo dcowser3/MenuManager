@@ -1579,9 +1579,11 @@ app.post('/create-task', async (req, res) => {
         }
 
         if (submissionId) {
-            await internalApi.put(`${DB_SERVICE_URL}/submissions/${submissionId}`, {
-                clickup_task_id: taskId,
-            });
+            const submissionUpdate: any = { clickup_task_id: taskId };
+            if (routeToMarketing) {
+                submissionUpdate.status = 'sent_to_marketing';
+            }
+            await internalApi.put(`${DB_SERVICE_URL}/submissions/${submissionId}`, submissionUpdate);
             console.log(`Stored clickup_task_id ${taskId} on submission ${submissionId}`);
         }
 

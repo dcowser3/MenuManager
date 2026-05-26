@@ -17,13 +17,14 @@ When a chef submits a menu, a ClickUp task is automatically created with the gen
 - Adds Isabella as the assignee when `CLICKUP_ASSIGNEE_ID` is configured
 - Resolves the configured Marketing ClickUp User Group to its member user IDs and adds those users as task watchers after task creation
 - If the submitter email is `isabella@richardsandoval.com`, creates the task directly in `CLICKUP_POST_APPROVAL_STATUS` (`To Do` by default) and assigns the resolved Marketing users instead of the Isabella assignee. This direct handoff does not use `CLICKUP_CORRECTIONS_STATUS`, so a separate review-complete trigger such as `approved` will not place Isabella submissions in the `approved` column.
+- After a direct Isabella handoff successfully creates the ClickUp task, the DB submission status is updated to `sent_to_marketing` so the row does not remain in Isabella's `/reviews` queue.
 - Stores `clickup_task_id` on the submission record
 - `due_date` is set from the form’s `YYYY-MM-DD` value using **noon UTC** on that calendar day so the task due date matches the chef’s date in US (and most other) timezones; naive `new Date("YYYY-MM-DD")` uses UTC midnight and showed up one day early in ClickUp for Americas users
 - Gracefully skips if ClickUp env vars are not configured (`{ skipped: true }`)
 - The dashboard waits up to `CLICKUP_TASK_CREATE_TIMEOUT_MS` (default `60000`) for create-task handoff so ClickUp task creation and attachment upload do not inherit the shorter internal-service default timeout.
 - If task creation or attachment upload fails after the submission and DOCX are saved, the dashboard response includes `clickup.diagnosticReference` (the submission id) and the submitter warning shows that reference plus the `PUBLIC_FORM_SUPPORT_EMAIL` contact. Internal `clickup_task_failed` alerts include the same reference plus ClickUp service URL, submitter, project/property, generated filename, DOCX path, and structured axios error details.
 - The dashboard records ClickUp handoff metadata under `submissions.raw_payload.clickup_handoff`, including the last create-task payload, last response/error, status, attempt timestamp, and retry count. Pending submissions without a `clickup_task_id` can be retried from `/review/:submissionId`, which rebuilds the create-task payload from the saved submission and stored asset metadata.
-- The public dashboard route `/reviews` lists submissions that still need Isabella's review, including AI-reviewed submissions in `pending_human_review` and manual-review fallback submissions in `submitted_no_ai_review`. `/dashboard` and `/review-queue` redirect to this queue.
+- The public dashboard route `/reviews` lists submissions that still need Isabella's review, including AI-reviewed submissions in `pending_human_review` and manual-review fallback submissions in `submitted_no_ai_review`. Direct Isabella handoffs with a linked ClickUp task are excluded. `/dashboard` and `/review-queue` redirect to this queue.
 
 ### Task metadata additions
 
