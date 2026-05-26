@@ -163,6 +163,18 @@
             font-size: .72rem;
             color: var(--muted);
         }
+        .submission-cell {
+            min-width: 210px;
+        }
+        .submission-name {
+            font-weight: 600;
+            color: var(--primary);
+            overflow-wrap: anywhere;
+        }
+        .submission-detail {
+            margin-top: .2rem;
+            overflow-wrap: anywhere;
+        }
         .prompt-block {
             border: 1px solid var(--border);
             background: #fff;
@@ -394,7 +406,8 @@
 
         <!-- Recent Learned Submissions -->
         <h3 class="section-title">Recent Learned Submissions</h3>
-        <% if (!recentSubmissions || recentSubmissions.length === 0) { %>
+        <% const displayedLearnedSubmissions = (learningSubmissions && learningSubmissions.length ? learningSubmissions : recentSubmissions) || []; %>
+        <% if (displayedLearnedSubmissions.length === 0) { %>
             <div class="empty">No training submissions recorded yet.</div>
         <% } else { %>
             <table>
@@ -411,9 +424,14 @@
                     </tr>
                 </thead>
                 <tbody>
-                <% (learningSubmissions && learningSubmissions.length ? learningSubmissions : recentSubmissions).forEach((item) => { %>
+                <% displayedLearnedSubmissions.forEach((item) => { %>
                     <tr id="learning-submission-<%= item.submission_id %>">
-                        <td><code><%= item.submission_id %></code></td>
+                        <td class="submission-cell">
+                            <div class="submission-name"><%= item.submission_display_name || item.submission_id || 'Unknown menu' %></div>
+                            <% if (item.submission_display_detail) { %>
+                                <div class="small submission-detail"><%= item.submission_display_detail %></div>
+                            <% } %>
+                        </td>
                         <td><%= item.timestamp ? new Date(item.timestamp).toLocaleString() : 'N/A' %></td>
                         <td><%= item.changes_detected ? 'YES' : 'NO' %></td>
                         <td><%= Number(item.change_percentage || 0).toFixed(2) %></td>

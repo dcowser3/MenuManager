@@ -307,7 +307,7 @@ Since v1 data is minimal (the system is new), migration is straightforward:
 
 **Keep:**
 - "Base QA Prompt" textarea (now the only prompt view)
-- Recent learned submissions table
+- Recent learned submissions table, with dashboard-side DB enrichment so the first column shows the stored menu/project name plus compact property/service/id detail instead of only the raw submission id
 - Location-specific rules table (now reads from Supabase)
 
 **Add:**

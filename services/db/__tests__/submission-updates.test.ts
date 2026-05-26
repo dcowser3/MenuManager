@@ -93,6 +93,7 @@ function postJsonOverHttp(routePath: string, body: any, headers: Record<string, 
 
 describe('submission update hardening', () => {
     const updateHandler = getRouteHandler('put', '/submissions/:id');
+    const pendingHandler = getRouteHandler('get', '/submissions/pending');
     const approvedListHandler = getRouteHandler('get', '/submissions/approved-list');
     const originalInternalApiToken = process.env.INTERNAL_API_TOKEN;
 
@@ -107,8 +108,17 @@ describe('submission update hardening', () => {
                         id: 'form-123',
                         source: 'form',
                         status: 'pending_human_review',
+                        created_at: '2026-05-08T09:00:00.000Z',
                         final_path: '/Users/deriancowser/Documents/MenuManager/tmp/documents/original.docx',
                         submitter_email: 'chef@example.com',
+                    },
+                    'form-no-ai': {
+                        id: 'form-no-ai',
+                        source: 'form',
+                        status: 'submitted_no_ai_review',
+                        created_at: '2026-05-08T11:00:00.000Z',
+                        final_path: '/Users/deriancowser/Documents/MenuManager/tmp/documents/no-ai.docx',
+                        submitter_email: 'manual@example.com',
                     },
                     'form-200': {
                         id: 'form-200',
@@ -256,6 +266,13 @@ describe('submission update hardening', () => {
             expect.stringContaining('submissions.json'),
             expect.stringContaining('form-large')
         );
+    });
+
+    test('lists all submissions that still need human review', async () => {
+        const response = await invokeJsonHandler(pendingHandler);
+
+        expect(response.status).toBe(200);
+        expect(response.body.map((submission: any) => submission.id)).toEqual(['form-no-ai', 'form-123']);
     });
 
     test('lists approved form submissions with approved doc filenames for download dashboard', async () => {

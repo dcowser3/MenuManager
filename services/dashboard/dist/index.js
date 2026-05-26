@@ -68,6 +68,7 @@ const apply_high_confidence_suggestions_1 = require("./lib/apply-high-confidence
 const allergen_suggestion_guard_1 = require("./lib/allergen-suggestion-guard");
 const menu_title_guard_1 = require("./lib/menu-title-guard");
 const learning_correction_rules_1 = require("./lib/learning-correction-rules");
+const learning_submissions_1 = require("./lib/learning-submissions");
 const embedded_set_menu_guard_1 = require("./lib/embedded-set-menu-guard");
 const corrected_menu_structure_guard_1 = require("./lib/corrected-menu-structure-guard");
 var upload_security_2 = require("./lib/upload-security");
@@ -798,6 +799,28 @@ app.get('/', (_req, res) => {
         title: 'Welcome - RSH Menu Manager'
     });
 });
+app.get('/dashboard', (_req, res) => {
+    res.redirect('/reviews');
+});
+app.get('/review-queue', (_req, res) => {
+    res.redirect('/reviews');
+});
+app.get('/reviews', async (_req, res) => {
+    try {
+        const pendingResponse = await internalApi.get(`${DB_SERVICE_URL}/submissions/pending`, { timeout: 5000 });
+        const reviews = Array.isArray(pendingResponse.data) ? pendingResponse.data : [];
+        res.render('index', {
+            title: 'Pending Reviews - RSH Menu Manager',
+            reviews,
+        });
+    }
+    catch (error) {
+        console.error('Error loading review dashboard:', error.response?.data || error.message);
+        res.status(500).render('error', {
+            message: 'Failed to load pending reviews',
+        });
+    }
+});
 /**
  * Welcome / Landing Page - Magic link entry point
  */
@@ -1374,7 +1397,21 @@ app.get('/learning', async (_req, res) => {
             ...decorate('weak', rulesData.weak_rules || []),
             ...decorate('conflicted', rulesData.conflicted_rules || []),
         ];
-        const recentSubmissions = (trainingData.data || []).slice(-25).reverse();
+        const learningSubmissionMetadata = new Map();
+        const fetchLearningSubmissionMetadata = async (submissionId) => {
+            if (!learningSubmissionMetadata.has(submissionId)) {
+                try {
+                    const response = await internalApi.get(`${DB_SERVICE_URL}/submissions/${encodeURIComponent(submissionId)}`, { timeout: 1500 });
+                    learningSubmissionMetadata.set(submissionId, response.data || null);
+                }
+                catch {
+                    learningSubmissionMetadata.set(submissionId, null);
+                }
+            }
+            return learningSubmissionMetadata.get(submissionId);
+        };
+        const recentSubmissions = await (0, learning_submissions_1.decorateLearningSubmissionsWithMenuNames)((trainingData.data || []).slice(-25).reverse(), fetchLearningSubmissionMetadata);
+        const decoratedLearningSubmissions = await (0, learning_submissions_1.decorateLearningSubmissionsWithMenuNames)(learningSubmissions, fetchLearningSubmissionMetadata);
         // Split correction rules by status for the dashboard
         const pendingRules = correctionRules.filter((r) => r.status === 'pending');
         const acceptedRules = correctionRules.filter((r) => r.status === 'accepted');
@@ -1396,7 +1433,7 @@ app.get('/learning', async (_req, res) => {
             pendingRules,
             acceptedRules,
             recentSubmissions,
-            learningSubmissions,
+            learningSubmissions: decoratedLearningSubmissions,
             propertyOptions,
             differStatus,
             basePrompt,

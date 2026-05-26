@@ -103,6 +103,8 @@ ClickUp sends taskStatusUpdated webhook
   └─ Fire-and-forget: POST differ — compare AI draft vs corrected file (training data)
 ```
 
+Before approval, Isabella can open `/reviews` in the dashboard service to see submissions whose status is `pending_human_review` or `submitted_no_ai_review`; `/dashboard` and `/review-queue` redirect to the same queue. Each row links to `/approval/:submissionId`, `/review/:submissionId`, and the original DOCX download.
+
 After approval, operations users can open `/approved-menus` in the dashboard service to browse approved form submissions and download the final DOCX from `/download/approved/:submissionId`. They can also open `/approved-dishes` to browse extracted approved dishes by derived brand, then use brand pages such as `/approved-dishes/toro-toro` to see dishes subdivided by canonical property/location. These dashboards read approved-menu and approved-dish metadata through the shared Supabase/local-storage layer directly, so they do not depend on the DB HTTP route being current before the page can render.
 
 For browser approvals, `POST /approval/finalize` mirrors the same operational handoff: it uploads the corrected DOCX back to the ClickUp task first, finalizes the submission, routes the task to the resolved Marketing assignees, and leaves/moves the task in the configured post-approval status (`To Do` by default). If the ClickUp upload fails, the task is not reassigned or advanced.

@@ -157,7 +157,8 @@ Useful API checks:
 
 Learning dashboard updates implemented in this session:
 - `/learning` now includes a **Recent Learned Submissions** table:
-  - submission id
+  - menu/project name, enriched from the stored submission record when available
+  - compact property/service/submission-id detail
   - timestamp
   - changes detected (YES/NO)
   - change percentage

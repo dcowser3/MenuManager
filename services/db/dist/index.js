@@ -57,6 +57,7 @@ const ASSETS_TABLE = 'assets';
 const PROPERTIES_TABLE = 'properties';
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const APPROVED_SUBMISSION_STATUSES = ['approved', 'approved_override'];
+const REVIEW_QUEUE_STATUSES = ['pending_human_review', 'submitted_no_ai_review'];
 const DEFAULT_PROPERTY_NAMES = [
     '89Agave - Sedona',
     'Agent\'s Only - Pasadena',
@@ -818,7 +819,7 @@ app.get('/submissions/pending', async (req, res) => {
             const { data, error } = await supabase
                 .from(SUBMISSIONS_TABLE)
                 .select('*')
-                .eq('status', 'pending_human_review')
+                .in('status', REVIEW_QUEUE_STATUSES)
                 .order('created_at', { ascending: false });
             if (error) {
                 throw new Error(error.message);
@@ -826,7 +827,11 @@ app.get('/submissions/pending', async (req, res) => {
             return res.status(200).json(data || []);
         }
         const submissions = JSON.parse(await fs_1.promises.readFile(SUBMISSIONS_DB, 'utf-8'));
-        const pending = Object.values(submissions).filter((sub) => sub.status === 'pending_human_review');
+        const pending = Object.values(submissions).filter((sub) => REVIEW_QUEUE_STATUSES.includes(sub.status)).sort((a, b) => {
+            const bTime = new Date(b.created_at || b.updated_at || 0).getTime();
+            const aTime = new Date(a.created_at || a.updated_at || 0).getTime();
+            return bTime - aTime;
+        });
         res.status(200).json(pending);
     }
     catch (error) {

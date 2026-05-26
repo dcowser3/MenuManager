@@ -23,6 +23,7 @@ When a chef submits a menu, a ClickUp task is automatically created with the gen
 - The dashboard waits up to `CLICKUP_TASK_CREATE_TIMEOUT_MS` (default `60000`) for create-task handoff so ClickUp task creation and attachment upload do not inherit the shorter internal-service default timeout.
 - If task creation or attachment upload fails after the submission and DOCX are saved, the dashboard response includes `clickup.diagnosticReference` (the submission id) and the submitter warning shows that reference plus the `PUBLIC_FORM_SUPPORT_EMAIL` contact. Internal `clickup_task_failed` alerts include the same reference plus ClickUp service URL, submitter, project/property, generated filename, DOCX path, and structured axios error details.
 - The dashboard records ClickUp handoff metadata under `submissions.raw_payload.clickup_handoff`, including the last create-task payload, last response/error, status, attempt timestamp, and retry count. Pending submissions without a `clickup_task_id` can be retried from `/review/:submissionId`, which rebuilds the create-task payload from the saved submission and stored asset metadata.
+- The public dashboard route `/reviews` lists submissions that still need Isabella's review, including AI-reviewed submissions in `pending_human_review` and manual-review fallback submissions in `submitted_no_ai_review`. `/dashboard` and `/review-queue` redirect to this queue.
 
 ### Task metadata additions
 

@@ -62,7 +62,7 @@ Menu Manager is an AI-powered service designed to automate the review process fo
 - Production public-form failure events also email `FORM_ATTEMPT_ALERT_EMAIL`, defaulting to `dcowser@richardsandoval.com`, through the dashboard SMTP transport
 - Required-field validation now highlights missing submitter, project-details, and approval inputs directly in the form
 - The submission form footer and blocking/red form errors list `PUBLIC_FORM_SUPPORT_EMAIL` (default `dcowser@richardsandoval.com`) as the support contact for help.
-- Reviewer dashboard
+- Isabella's review queue is available at `/reviews`, with `/dashboard` and `/review-queue` redirecting there. It lists submissions still needing human review and links each row to the browser approval editor.
 - Notification system
 - Approved dishes are extracted automatically when the ClickUp-reviewed DOCX is marked approved
 - ClickUp tasks now include a browser approval link that opens a side-by-side approval editor: clean text editing on the left, live redline/highlight preview on the right, and final DOCX generation on submit
@@ -126,6 +126,7 @@ Current ClickUp BAU status handoff:
 
 Browser approval editor prototype:
 - ClickUp tasks now include an approval link to `/approval/:submissionId`
+- Isabella can open `/reviews` to see every pending human-review or manual-review submission in one dashboard.
 - When the dashboard form is submitted from `localhost` outside production, ClickUp task creation is skipped, the browser automatically downloads the generated original DOCX, and the success alert shows an `Open approval editor` link for that same submission
 - Isabella can edit approved text in a left-side rich browser editor while a right-side panel shows the live tracked-change preview with preserved imported redlines/highlights
 - For submitted DOCX files that already contain redlines, the left editor uses the clean accepted text with deleted runs removed, accepted inserted runs unwrapped, and DOCX inline formatting such as bold dish names preserved; the preview keeps the imported deletion/insertion markup visible.
@@ -152,7 +153,7 @@ Browser approval editor prototype:
 - Submitting that page uploads the approved DOCX back to the linked ClickUp task and only then assigns Marketing and leaves/advances the task at `To Do`, matching Isabella's manual handoff flow
 - The dashboard now surfaces a warning when the ClickUp attachment upload, Marketing assignment, or post-approval status move fails, instead of silently finalizing only on the local side
 - Once a menu reaches approved state, the final DOCX is downloadable from `/approved-menus` for Carlos or other operations users
-- The learning dashboard lets reviewers delete an individual learned submission row when test data should not remain in the training history; this removes that submission from differ training data and rebuilds detected patterns without touching the property catalog.
+- The learning dashboard shows each learned submission by menu/project name with supporting property/service details, and lets reviewers delete an individual learned submission row when test data should not remain in the training history; this removes that submission from differ training data and rebuilds detected patterns without touching the property catalog.
 - Learned spelling/diacritic patterns now come only from changed lines that still match the same dish, so removed or replacement dishes do not create bogus reusable rules.
 - Learning review `Save Rule` controls keep dish text out of inline button handlers, so apostrophes or quotes in corrected menu text cannot corrupt the button or block saving.
 
