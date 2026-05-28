@@ -54,6 +54,7 @@ When a chef submits a menu, a ClickUp task is automatically created with the gen
 - Fire-and-forget: clickup-integration sends `corrections_ready` email with the DOCX attached
 - Fire-and-forget: differ compares AI draft vs corrected file for training
 - If the property has SharePoint routing metadata, uploads the approved DOCX to the property base folder or matching service subfolder via Microsoft Graph
+- SharePoint routing writes structured `[sharepoint-upload]` logs for selected ClickUp attachments, skipped/no-attempt decisions, and the upload attempt itself. It also raises a `sharepoint_upload_skipped` warning alert when Graph credentials are missing, so production approvals leave a diagnosable trail even when no Graph request is made.
 
 ## Browser Approval Flow (Local Prototype)
 

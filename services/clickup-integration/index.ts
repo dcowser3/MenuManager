@@ -20,6 +20,7 @@ import {
 } from './lib/approval-finalization';
 import { buildSmtpRuntimeConfig } from './lib/smtp-config';
 import { buildSharePointApprovedFilename } from './lib/sharepoint-filenames';
+import { logSharePointUploadEvent } from './lib/sharepoint-upload-logging';
 import { clickUpDueDateMillis } from './lib/clickup-due-date';
 import { createInternalApiClient, requireInternalServiceAuth } from '@menumanager/internal-auth';
 
@@ -88,6 +89,66 @@ function describeServiceError(error: any): Record<string, any> {
         statusText: error?.response?.statusText,
         response: error?.response?.data,
     }).filter(([, value]) => value !== undefined && value !== null && value !== ''));
+}
+
+function sharePointUploadContext(input: {
+    submission?: any;
+    property?: string;
+    servicePeriod?: string;
+    localFilePath?: string;
+    uploadFileName?: string;
+    storagePath?: string;
+    targetFolderPath?: string;
+    matchedFolder?: string | null;
+    siteUrl?: string;
+    libraryName?: string;
+    hasBaseFolderPath?: boolean;
+    serviceFolderCount?: number;
+    driveId?: string;
+    siteId?: string;
+    archivedDocxCount?: number;
+    attachmentCount?: number;
+    docxAttachmentCount?: number;
+    selectedAttachmentId?: string | null;
+    selectedAttachmentName?: string | null;
+    selectedAttachmentTimestamp?: number;
+    latestAttachmentName?: string | null;
+    latestAttachmentTimestamp?: number;
+    reason?: string;
+    skipped?: string;
+    error?: any;
+}): Record<string, any> {
+    return {
+        submissionId: input.submission?.id,
+        legacyId: input.submission?.legacy_id,
+        clickupTaskId: input.submission?.clickup_task_id,
+        projectName: input.submission?.project_name,
+        property: input.property || input.submission?.property,
+        servicePeriod: input.servicePeriod || input.submission?.service_period || input.submission?.raw_payload?.servicePeriod,
+        dateNeeded: input.submission?.date_needed,
+        localFilePath: input.localFilePath,
+        uploadFileName: input.uploadFileName,
+        storagePath: input.storagePath,
+        targetFolderPath: input.targetFolderPath,
+        matchedFolder: input.matchedFolder,
+        siteUrl: input.siteUrl,
+        libraryName: input.libraryName,
+        hasBaseFolderPath: input.hasBaseFolderPath,
+        serviceFolderCount: input.serviceFolderCount,
+        driveId: input.driveId,
+        siteId: input.siteId,
+        archivedDocxCount: input.archivedDocxCount,
+        attachmentCount: input.attachmentCount,
+        docxAttachmentCount: input.docxAttachmentCount,
+        selectedAttachmentId: input.selectedAttachmentId,
+        selectedAttachmentName: input.selectedAttachmentName,
+        selectedAttachmentTimestamp: input.selectedAttachmentTimestamp,
+        latestAttachmentName: input.latestAttachmentName,
+        latestAttachmentTimestamp: input.latestAttachmentTimestamp,
+        reason: input.reason,
+        skipped: input.skipped,
+        error: input.error,
+    };
 }
 
 function getRepoRoot(): string {
@@ -1005,15 +1066,37 @@ async function uploadApprovedDocToSharePoint(input: {
     archivedDocxCount?: number;
     fileName?: string;
 }> {
+    logSharePointUploadEvent('start', sharePointUploadContext(input));
+
     if (!GRAPH_CLIENT_ID || !GRAPH_TENANT_ID || !GRAPH_CLIENT_SECRET) {
+        logSharePointUploadEvent('skipped', sharePointUploadContext({
+            ...input,
+            skipped: 'graph credentials not configured',
+        }));
         return { uploaded: false, skipped: 'graph credentials not configured' };
     }
 
     const propertyConfig = await getPropertySharePointConfig(input.property);
+    logSharePointUploadEvent('property_config', sharePointUploadContext({
+        ...input,
+        driveId: propertyConfig?.sharepoint_drive_id,
+        siteUrl: propertyConfig?.sharepoint_site_url,
+        libraryName: propertyConfig?.sharepoint_library_name,
+        targetFolderPath: propertyConfig?.sharepoint_base_folder_path,
+        hasBaseFolderPath: !!propertyConfig?.sharepoint_base_folder_path,
+        serviceFolderCount: Array.isArray(propertyConfig?.sharepoint_service_folders)
+            ? propertyConfig.sharepoint_service_folders.length
+            : 0,
+    }));
+
     const canResolveDrive = !!propertyConfig?.sharepoint_drive_id || (
         !!propertyConfig?.sharepoint_site_url && !!propertyConfig?.sharepoint_library_name
     );
     if (!propertyConfig?.sharepoint_base_folder_path || !canResolveDrive) {
+        logSharePointUploadEvent('skipped', sharePointUploadContext({
+            ...input,
+            skipped: 'property has no sharepoint routing config',
+        }));
         return { uploaded: false, skipped: 'property has no sharepoint routing config' };
     }
 
@@ -1028,18 +1111,47 @@ async function uploadApprovedDocToSharePoint(input: {
         ? `${propertyConfig.sharepoint_base_folder_path}/${matchedFolder}`
         : propertyConfig.sharepoint_base_folder_path;
     const { siteId, driveId } = await resolveSharePointDrive(propertyConfig);
-    let archivedDocxCount = 0;
-
-    if (matchedFolder) {
-        archivedDocxCount = await archiveExistingDocxFilesInSharePointSubfolder(driveId, targetFolderPath);
-    }
-
     const canonicalFileName = buildSharePointApprovedFilename(input.submission || {
         property: input.property,
         service_period: input.servicePeriod,
     });
     const storagePath = `${targetFolderPath}/${canonicalFileName}`;
+
+    logSharePointUploadEvent('target_resolved', sharePointUploadContext({
+        ...input,
+        targetFolderPath,
+        storagePath,
+        matchedFolder,
+        driveId,
+        siteId,
+    }));
+
+    let archivedDocxCount = 0;
+
+    if (matchedFolder) {
+        archivedDocxCount = await archiveExistingDocxFilesInSharePointSubfolder(driveId, targetFolderPath);
+        logSharePointUploadEvent('archive_complete', sharePointUploadContext({
+            ...input,
+            targetFolderPath,
+            storagePath,
+            matchedFolder,
+            driveId,
+            siteId,
+            archivedDocxCount,
+        }));
+    }
+
     const fileBuffer = await fs.promises.readFile(input.localFilePath);
+
+    logSharePointUploadEvent('put_start', sharePointUploadContext({
+        ...input,
+        targetFolderPath,
+        storagePath,
+        matchedFolder,
+        driveId,
+        siteId,
+        archivedDocxCount,
+    }));
 
     const uploadedItem = await graphRequest<any>({
         method: 'PUT',
@@ -1050,6 +1162,16 @@ async function uploadApprovedDocToSharePoint(input: {
             'Content-Type': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
         },
     });
+
+    logSharePointUploadEvent('success', sharePointUploadContext({
+        ...input,
+        targetFolderPath,
+        storagePath,
+        matchedFolder,
+        driveId,
+        siteId,
+        archivedDocxCount,
+    }));
 
     return {
         uploaded: true,
@@ -1187,9 +1309,35 @@ async function finalizeApprovedSubmission(input: {
             console.warn(`SharePoint upload reported success for submission ${submission.id} without a storage path`);
         } else if (sharePointUpload.skipped) {
             console.log(`Skipped SharePoint upload for submission ${submission.id}: ${sharePointUpload.skipped}`);
+            if (sharePointUpload.skipped === 'graph credentials not configured') {
+                sendAdminAlert({
+                    alert_type: 'sharepoint_upload_skipped',
+                    severity: 'warning',
+                    service: 'clickup-integration',
+                    submission_id: submission.id,
+                    message: `Skipped SharePoint upload for "${submission.project_name}" because Graph credentials are not configured`,
+                    details: sharePointUploadContext({
+                        submission,
+                        property: submission.property,
+                        servicePeriod: submission.service_period || submission.raw_payload?.servicePeriod,
+                        localFilePath: input.approvedPath,
+                        uploadFileName: input.approvedFileName,
+                        skipped: sharePointUpload.skipped,
+                    }),
+                });
+            }
         }
     } catch (sharePointError: any) {
-        console.error('Failed to upload approved DOCX to SharePoint:', sharePointError.response?.data || sharePointError.message);
+        const sharePointErrorDetails = describeServiceError(sharePointError);
+        logSharePointUploadEvent('failed', sharePointUploadContext({
+            submission,
+            property: submission.property,
+            servicePeriod: submission.service_period || submission.raw_payload?.servicePeriod,
+            localFilePath: input.approvedPath,
+            uploadFileName: input.approvedFileName,
+            error: sharePointErrorDetails,
+        }));
+        console.error('Failed to upload approved DOCX to SharePoint:', sharePointErrorDetails.response || sharePointErrorDetails.message);
         sendAdminAlert({
             alert_type: 'sharepoint_upload_failed',
             severity: 'warning',
@@ -1197,7 +1345,7 @@ async function finalizeApprovedSubmission(input: {
             submission_id: submission.id,
             message: `Failed to upload approved DOCX to SharePoint for "${submission.project_name}"`,
             details: {
-                error: sharePointError.response?.data || sharePointError.message,
+                error: sharePointErrorDetails,
                 property: submission.property,
                 servicePeriod: submission.service_period || submission.raw_payload?.servicePeriod || null,
             },
@@ -1336,8 +1484,34 @@ async function processApprovedTask(clickupTaskId: string, opts?: { skipStatusChe
     console.log(`Found submission ${submission.id} for ClickUp task ${clickupTaskId}`);
 
     const attachments = taskResponse.data.attachments || [];
+    const docxAttachments = Array.isArray(attachments) ? attachments.filter(isDocxAttachment) : [];
     const latestAttachment = pickMostRecentCorrectedAttachment(attachments, submission.filename);
+    const latestAnyAttachment = Array.isArray(attachments)
+        ? [...attachments].sort((a, b) => attachmentTimestamp(b) - attachmentTimestamp(a))[0] || null
+        : null;
+    logSharePointUploadEvent('source_attachment_selected', sharePointUploadContext({
+        submission,
+        attachmentCount: Array.isArray(attachments) ? attachments.length : 0,
+        docxAttachmentCount: docxAttachments.length,
+        selectedAttachmentId: latestAttachment?.id || null,
+        selectedAttachmentName: latestAttachment ? getAttachmentFilename(latestAttachment) : null,
+        selectedAttachmentTimestamp: latestAttachment ? attachmentTimestamp(latestAttachment) : undefined,
+        latestAttachmentName: latestAnyAttachment ? getAttachmentFilename(latestAnyAttachment) : null,
+        latestAttachmentTimestamp: latestAnyAttachment ? attachmentTimestamp(latestAnyAttachment) : undefined,
+    }));
+
     if (isSubmissionAlreadyFinalizedForAttachment(submission, latestAttachment)) {
+        logSharePointUploadEvent('not_attempted', sharePointUploadContext({
+            submission,
+            attachmentCount: Array.isArray(attachments) ? attachments.length : 0,
+            docxAttachmentCount: docxAttachments.length,
+            selectedAttachmentId: latestAttachment?.id || null,
+            selectedAttachmentName: latestAttachment ? getAttachmentFilename(latestAttachment) : null,
+            selectedAttachmentTimestamp: latestAttachment ? attachmentTimestamp(latestAttachment) : undefined,
+            latestAttachmentName: latestAnyAttachment ? getAttachmentFilename(latestAnyAttachment) : null,
+            latestAttachmentTimestamp: latestAnyAttachment ? attachmentTimestamp(latestAnyAttachment) : undefined,
+            reason: 'submission is already approved for the latest ClickUp DOCX attachment',
+        }));
         return {
             processed: false,
             reason: 'submission is already approved for the latest ClickUp DOCX attachment',

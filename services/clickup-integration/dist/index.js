@@ -17,6 +17,7 @@ const supabase_client_1 = require("@menumanager/supabase-client");
 const approval_finalization_1 = require("./lib/approval-finalization");
 const smtp_config_1 = require("./lib/smtp-config");
 const sharepoint_filenames_1 = require("./lib/sharepoint-filenames");
+const sharepoint_upload_logging_1 = require("./lib/sharepoint-upload-logging");
 const clickup_due_date_1 = require("./lib/clickup-due-date");
 const internal_auth_1 = require("@menumanager/internal-auth");
 dotenv.config({ path: path_1.default.join(__dirname, '..', '..', '..', '.env') });
@@ -77,6 +78,39 @@ function describeServiceError(error) {
         statusText: error?.response?.statusText,
         response: error?.response?.data,
     }).filter(([, value]) => value !== undefined && value !== null && value !== ''));
+}
+function sharePointUploadContext(input) {
+    return {
+        submissionId: input.submission?.id,
+        legacyId: input.submission?.legacy_id,
+        clickupTaskId: input.submission?.clickup_task_id,
+        projectName: input.submission?.project_name,
+        property: input.property || input.submission?.property,
+        servicePeriod: input.servicePeriod || input.submission?.service_period || input.submission?.raw_payload?.servicePeriod,
+        dateNeeded: input.submission?.date_needed,
+        localFilePath: input.localFilePath,
+        uploadFileName: input.uploadFileName,
+        storagePath: input.storagePath,
+        targetFolderPath: input.targetFolderPath,
+        matchedFolder: input.matchedFolder,
+        siteUrl: input.siteUrl,
+        libraryName: input.libraryName,
+        hasBaseFolderPath: input.hasBaseFolderPath,
+        serviceFolderCount: input.serviceFolderCount,
+        driveId: input.driveId,
+        siteId: input.siteId,
+        archivedDocxCount: input.archivedDocxCount,
+        attachmentCount: input.attachmentCount,
+        docxAttachmentCount: input.docxAttachmentCount,
+        selectedAttachmentId: input.selectedAttachmentId,
+        selectedAttachmentName: input.selectedAttachmentName,
+        selectedAttachmentTimestamp: input.selectedAttachmentTimestamp,
+        latestAttachmentName: input.latestAttachmentName,
+        latestAttachmentTimestamp: input.latestAttachmentTimestamp,
+        reason: input.reason,
+        skipped: input.skipped,
+        error: input.error,
+    };
 }
 function getRepoRoot() {
     const candidates = [
@@ -744,12 +778,32 @@ async function archiveExistingDocxFilesInSharePointSubfolder(driveId, folderPath
     return movedCount;
 }
 async function uploadApprovedDocToSharePoint(input) {
+    (0, sharepoint_upload_logging_1.logSharePointUploadEvent)('start', sharePointUploadContext(input));
     if (!GRAPH_CLIENT_ID || !GRAPH_TENANT_ID || !GRAPH_CLIENT_SECRET) {
+        (0, sharepoint_upload_logging_1.logSharePointUploadEvent)('skipped', sharePointUploadContext({
+            ...input,
+            skipped: 'graph credentials not configured',
+        }));
         return { uploaded: false, skipped: 'graph credentials not configured' };
     }
     const propertyConfig = await getPropertySharePointConfig(input.property);
+    (0, sharepoint_upload_logging_1.logSharePointUploadEvent)('property_config', sharePointUploadContext({
+        ...input,
+        driveId: propertyConfig?.sharepoint_drive_id,
+        siteUrl: propertyConfig?.sharepoint_site_url,
+        libraryName: propertyConfig?.sharepoint_library_name,
+        targetFolderPath: propertyConfig?.sharepoint_base_folder_path,
+        hasBaseFolderPath: !!propertyConfig?.sharepoint_base_folder_path,
+        serviceFolderCount: Array.isArray(propertyConfig?.sharepoint_service_folders)
+            ? propertyConfig.sharepoint_service_folders.length
+            : 0,
+    }));
     const canResolveDrive = !!propertyConfig?.sharepoint_drive_id || (!!propertyConfig?.sharepoint_site_url && !!propertyConfig?.sharepoint_library_name);
     if (!propertyConfig?.sharepoint_base_folder_path || !canResolveDrive) {
+        (0, sharepoint_upload_logging_1.logSharePointUploadEvent)('skipped', sharePointUploadContext({
+            ...input,
+            skipped: 'property has no sharepoint routing config',
+        }));
         return { uploaded: false, skipped: 'property has no sharepoint routing config' };
     }
     const serviceFolders = Array.isArray(propertyConfig.sharepoint_service_folders)
@@ -760,16 +814,42 @@ async function uploadApprovedDocToSharePoint(input) {
         ? `${propertyConfig.sharepoint_base_folder_path}/${matchedFolder}`
         : propertyConfig.sharepoint_base_folder_path;
     const { siteId, driveId } = await resolveSharePointDrive(propertyConfig);
-    let archivedDocxCount = 0;
-    if (matchedFolder) {
-        archivedDocxCount = await archiveExistingDocxFilesInSharePointSubfolder(driveId, targetFolderPath);
-    }
     const canonicalFileName = (0, sharepoint_filenames_1.buildSharePointApprovedFilename)(input.submission || {
         property: input.property,
         service_period: input.servicePeriod,
     });
     const storagePath = `${targetFolderPath}/${canonicalFileName}`;
+    (0, sharepoint_upload_logging_1.logSharePointUploadEvent)('target_resolved', sharePointUploadContext({
+        ...input,
+        targetFolderPath,
+        storagePath,
+        matchedFolder,
+        driveId,
+        siteId,
+    }));
+    let archivedDocxCount = 0;
+    if (matchedFolder) {
+        archivedDocxCount = await archiveExistingDocxFilesInSharePointSubfolder(driveId, targetFolderPath);
+        (0, sharepoint_upload_logging_1.logSharePointUploadEvent)('archive_complete', sharePointUploadContext({
+            ...input,
+            targetFolderPath,
+            storagePath,
+            matchedFolder,
+            driveId,
+            siteId,
+            archivedDocxCount,
+        }));
+    }
     const fileBuffer = await fs_1.default.promises.readFile(input.localFilePath);
+    (0, sharepoint_upload_logging_1.logSharePointUploadEvent)('put_start', sharePointUploadContext({
+        ...input,
+        targetFolderPath,
+        storagePath,
+        matchedFolder,
+        driveId,
+        siteId,
+        archivedDocxCount,
+    }));
     const uploadedItem = await graphRequest({
         method: 'PUT',
         path: `/drives/${driveId}/root:/${encodeGraphPath(storagePath)}:/content`,
@@ -779,6 +859,15 @@ async function uploadApprovedDocToSharePoint(input) {
             'Content-Type': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
         },
     });
+    (0, sharepoint_upload_logging_1.logSharePointUploadEvent)('success', sharePointUploadContext({
+        ...input,
+        targetFolderPath,
+        storagePath,
+        matchedFolder,
+        driveId,
+        siteId,
+        archivedDocxCount,
+    }));
     return {
         uploaded: true,
         storagePath,
@@ -876,10 +965,36 @@ async function finalizeApprovedSubmission(input) {
         }
         else if (sharePointUpload.skipped) {
             console.log(`Skipped SharePoint upload for submission ${submission.id}: ${sharePointUpload.skipped}`);
+            if (sharePointUpload.skipped === 'graph credentials not configured') {
+                sendAdminAlert({
+                    alert_type: 'sharepoint_upload_skipped',
+                    severity: 'warning',
+                    service: 'clickup-integration',
+                    submission_id: submission.id,
+                    message: `Skipped SharePoint upload for "${submission.project_name}" because Graph credentials are not configured`,
+                    details: sharePointUploadContext({
+                        submission,
+                        property: submission.property,
+                        servicePeriod: submission.service_period || submission.raw_payload?.servicePeriod,
+                        localFilePath: input.approvedPath,
+                        uploadFileName: input.approvedFileName,
+                        skipped: sharePointUpload.skipped,
+                    }),
+                });
+            }
         }
     }
     catch (sharePointError) {
-        console.error('Failed to upload approved DOCX to SharePoint:', sharePointError.response?.data || sharePointError.message);
+        const sharePointErrorDetails = describeServiceError(sharePointError);
+        (0, sharepoint_upload_logging_1.logSharePointUploadEvent)('failed', sharePointUploadContext({
+            submission,
+            property: submission.property,
+            servicePeriod: submission.service_period || submission.raw_payload?.servicePeriod,
+            localFilePath: input.approvedPath,
+            uploadFileName: input.approvedFileName,
+            error: sharePointErrorDetails,
+        }));
+        console.error('Failed to upload approved DOCX to SharePoint:', sharePointErrorDetails.response || sharePointErrorDetails.message);
         sendAdminAlert({
             alert_type: 'sharepoint_upload_failed',
             severity: 'warning',
@@ -887,7 +1002,7 @@ async function finalizeApprovedSubmission(input) {
             submission_id: submission.id,
             message: `Failed to upload approved DOCX to SharePoint for "${submission.project_name}"`,
             details: {
-                error: sharePointError.response?.data || sharePointError.message,
+                error: sharePointErrorDetails,
                 property: submission.property,
                 servicePeriod: submission.service_period || submission.raw_payload?.servicePeriod || null,
             },
@@ -1018,8 +1133,33 @@ async function processApprovedTask(clickupTaskId, opts) {
     const submission = subResponse.data;
     console.log(`Found submission ${submission.id} for ClickUp task ${clickupTaskId}`);
     const attachments = taskResponse.data.attachments || [];
+    const docxAttachments = Array.isArray(attachments) ? attachments.filter(isDocxAttachment) : [];
     const latestAttachment = pickMostRecentCorrectedAttachment(attachments, submission.filename);
+    const latestAnyAttachment = Array.isArray(attachments)
+        ? [...attachments].sort((a, b) => attachmentTimestamp(b) - attachmentTimestamp(a))[0] || null
+        : null;
+    (0, sharepoint_upload_logging_1.logSharePointUploadEvent)('source_attachment_selected', sharePointUploadContext({
+        submission,
+        attachmentCount: Array.isArray(attachments) ? attachments.length : 0,
+        docxAttachmentCount: docxAttachments.length,
+        selectedAttachmentId: latestAttachment?.id || null,
+        selectedAttachmentName: latestAttachment ? getAttachmentFilename(latestAttachment) : null,
+        selectedAttachmentTimestamp: latestAttachment ? attachmentTimestamp(latestAttachment) : undefined,
+        latestAttachmentName: latestAnyAttachment ? getAttachmentFilename(latestAnyAttachment) : null,
+        latestAttachmentTimestamp: latestAnyAttachment ? attachmentTimestamp(latestAnyAttachment) : undefined,
+    }));
     if (isSubmissionAlreadyFinalizedForAttachment(submission, latestAttachment)) {
+        (0, sharepoint_upload_logging_1.logSharePointUploadEvent)('not_attempted', sharePointUploadContext({
+            submission,
+            attachmentCount: Array.isArray(attachments) ? attachments.length : 0,
+            docxAttachmentCount: docxAttachments.length,
+            selectedAttachmentId: latestAttachment?.id || null,
+            selectedAttachmentName: latestAttachment ? getAttachmentFilename(latestAttachment) : null,
+            selectedAttachmentTimestamp: latestAttachment ? attachmentTimestamp(latestAttachment) : undefined,
+            latestAttachmentName: latestAnyAttachment ? getAttachmentFilename(latestAnyAttachment) : null,
+            latestAttachmentTimestamp: latestAnyAttachment ? attachmentTimestamp(latestAnyAttachment) : undefined,
+            reason: 'submission is already approved for the latest ClickUp DOCX attachment',
+        }));
         return {
             processed: false,
             reason: 'submission is already approved for the latest ClickUp DOCX attachment',

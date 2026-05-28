@@ -101,6 +101,7 @@ Current examples include:
 - `clickup_task_failed` from `dashboard` when the saved submission cannot create its ClickUp task; the submitter warning includes the submission reference, and alert details include the same diagnostic reference plus structured service error details
 - `form_payload_too_large` from `dashboard` when Express rejects a public form JSON body before the route handler can create a submission row
 - `clickup_task_retry_failed` from `dashboard` when a manual retry from the review page still cannot create the ClickUp task
+- `sharepoint_upload_skipped` from `clickup-integration` when an approved DOCX reaches SharePoint routing but Graph credentials are missing, so no upload can be attempted
 - `sharepoint_upload_failed` from `clickup-integration` when Microsoft Graph/SharePoint rejects the approved DOCX upload, including `403` permission errors
 - `approved_dish_extraction_failed` from `clickup-integration` when approved-dish extraction fails after approval
 - `clickup_webhook_failed` from `clickup-integration` when webhook processing fails
@@ -109,7 +110,8 @@ Current examples include:
 Notes:
 
 - Alert emails are deduplicated with a 15-minute cooldown per `alert_type`.
-- A SharePoint upload failure is monitored as a warning and does not block the rest of the approval flow.
+- SharePoint upload skips/failures are monitored as warnings and do not block the rest of the approval flow.
+- `clickup-integration` also writes structured `[sharepoint-upload]` log lines for `source_attachment_selected`, `not_attempted`, `start`, `property_config`, `target_resolved`, `archive_complete`, `put_start`, `success`, `skipped`, and `failed` events. These include submission id, ClickUp task id, property/service period, selected ClickUp DOCX/latest attachment, target SharePoint path, matched folder, drive/site ids, archive count, and skipped/error details without logging Graph tokens.
 
 ## Internal Service Authentication
 

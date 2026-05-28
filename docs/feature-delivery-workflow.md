@@ -110,6 +110,7 @@ Every feature change needs both automated coverage and a live check.
 Automated verification examples:
 
 - route/helper/unit test for new behavior
+- workspace-local test script when available, for example `npm test --workspace=@menumanager/clickup-integration -- --runInBand`
 - focused Jest file for the changed module
 - targeted build of the changed workspaces
 

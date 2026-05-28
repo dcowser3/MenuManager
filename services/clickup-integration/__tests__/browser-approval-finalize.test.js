@@ -554,6 +554,9 @@ describe('browser approval finalize route', () => {
         expect(response.status).toBe(200);
         expect(response.body.attachmentUploaded).toBe(true);
         expect(response.body.clickupStatusUpdated).toBe(true);
+        expect(console.log).toHaveBeenCalledWith(expect.stringContaining('[sharepoint-upload] start '));
+        expect(console.log).toHaveBeenCalledWith(expect.stringContaining('[sharepoint-upload] target_resolved '));
+        expect(console.log).toHaveBeenCalledWith(expect.stringContaining('[sharepoint-upload] success '));
 
         const graphUrls = axios.mock.calls.map((call) => String(call[0]?.url || ''));
         expect(graphUrls.some((url) => url.includes('/sites/'))).toBe(false);
@@ -845,5 +848,7 @@ describe('browser approval finalize route', () => {
             String(call[0]).includes('http://localhost:3006/compare')
         );
         expect(compareCall).toBeFalsy();
+        expect(console.log).toHaveBeenCalledWith(expect.stringContaining('[sharepoint-upload] source_attachment_selected '));
+        expect(console.log).toHaveBeenCalledWith(expect.stringContaining('[sharepoint-upload] not_attempted '));
     });
 });
