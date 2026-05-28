@@ -5,8 +5,15 @@
  * and stores them in the approved_dishes table
  */
 
-import { createDishes } from './dishes';
+import { createDishes, replaceDishesForSubmission } from './dishes';
 import { CreateDishInput } from './types';
+import {
+    DishQualityResult,
+    DishSourceContext,
+    analyzeApprovedDishQuality,
+    buildDishQualityContext,
+    findDishSourceContext,
+} from './dish-quality';
 
 // Common allergen codes
 const ALLERGEN_CODES = ['VG', 'GF', 'DF', 'SF', 'PN', 'TN', 'SE', 'SL', 'SS', 'SY', 'CE', 'ET', 'MO', 'MU', 'A', 'C', 'D', 'E', 'F', 'G', 'M', 'N', 'P', 'V', 'S', 'T'];
@@ -53,7 +60,7 @@ const SHORT_SECTION_HEADINGS = new Set([
 
 // Category detection patterns
 const CATEGORY_PATTERNS = [
-    /^(a\s+la\s+carte)/i,
+    /^(?:a|à)\s+la\s+carte$/i,
     /^(for\s+the\s+table)/i,
     /^(appetizers?|starters?|antojitos|entradas?|first\s*course)/i,
     /^(salads?)/i,
@@ -61,10 +68,10 @@ const CATEGORY_PATTERNS = [
     /^(tacos?)/i,
     /^(suviche\s+bar|ceviche|sushi|rolls?)/i,
     /^(entr[eé]es?|mains?|main\s*course)/i,
-    /^(chef['’]?s\s+specialt(?:y|ies))/i,
+    /^(chef['’]?s\s+specialt(?:y|ies)|especialidades|especiales)/i,
     /^(seafood|fish)/i,
-    /^(meats?|poultry|beef|chicken|pork|lamb)/i,
-    /^(churrasco|grill|halal)/i,
+    /^(meats?|poultry|beef|chicken|pork|lamb)$/i,
+    /^(churrasco|grill|halal)$/i,
     /^(pasta|risotto)/i,
     /^(sides?|side\s*dishes?|accompaniments?)/i,
     /^(desserts?|sweets?|postres)/i,
@@ -78,7 +85,7 @@ const CATEGORY_PATTERNS = [
 /**
  * Extracted dish from menu parsing
  */
-interface ExtractedDish {
+export interface ExtractedDish {
     name: string;
     description?: string;
     price?: string;
@@ -86,6 +93,39 @@ interface ExtractedDish {
     category?: string;
     usedNextLineAsDescription?: boolean;
 }
+
+export interface PreparedApprovedDish {
+    index: number;
+    extracted: ExtractedDish;
+    input: CreateDishInput;
+    quality: DishQualityResult;
+    sourceContext: DishSourceContext;
+    excludedByRule: boolean;
+}
+
+export interface StorePreparedDishesOptions {
+    replaceExisting?: boolean;
+    excludeIndexes?: Set<number>;
+}
+
+export interface ExtractAndStoreDishesOptions {
+    servicePeriod?: string;
+    replaceExisting?: boolean;
+    excludeIndexes?: Set<number>;
+}
+
+export interface ExtractAndStoreDishesResult {
+    added: number;
+    extracted: number;
+    skipped: number;
+    qualityReviewCount: number;
+    excludedByRuleCount: number;
+}
+
+type SharedSectionDescription = {
+    description: string;
+    allergens: string[];
+};
 
 export function normalizeDishPriceForProperty(price: string | undefined, property?: string): string | undefined {
     const cleanPrice = `${price || ''}`.replace(/\s+/g, ' ').trim();
@@ -133,6 +173,7 @@ export function extractDishesFromText(menuContent: string): ExtractedDish[] {
 
     let currentCategory: string | undefined;
     let currentCategoryPrice: string | undefined;
+    let currentSharedDescription: SharedSectionDescription | undefined;
     let currentMenuPrice: string | undefined = inferMenuPriceLabel(lines);
 
     for (let i = 0; i < lines.length; i++) {
@@ -147,6 +188,7 @@ export function extractDishesFromText(menuContent: string): ExtractedDish[] {
             const markerCategory = cleanSectionCategoryName(line);
             if (markerCategory && isMenuTitleCategory(markerCategory)) {
                 currentCategory = markerCategory;
+                currentSharedDescription = undefined;
             }
             continue;
         }
@@ -161,6 +203,7 @@ export function extractDishesFromText(menuContent: string): ExtractedDish[] {
             const sectionCategory = cleanSectionCategoryName(line);
             if (sectionCategory) {
                 currentCategory = sectionCategory;
+                currentSharedDescription = undefined;
             }
             if (isPersistentSectionPriceLine(line)) {
                 currentMenuPrice = PRIX_FIXE_PRICE_LABEL;
@@ -178,6 +221,7 @@ export function extractDishesFromText(menuContent: string): ExtractedDish[] {
                 twoLineDish.price = currentCategoryPrice || currentMenuPrice;
             }
             twoLineDish.name = normalizeDishNameForCategory(twoLineDish.name, currentCategory);
+            applySharedSectionDescription(twoLineDish, currentCategory, currentSharedDescription);
             const isLowercaseFragment = isLowercaseOneWordFragment(twoLineDish.name, twoLineDish.description) ||
                 isLowercaseIngredientFragment(twoLineDish.name, twoLineDish.description, undefined);
             if (isLowercaseFragment) {
@@ -197,6 +241,13 @@ export function extractDishesFromText(menuContent: string): ExtractedDish[] {
         if (categoryMatch) {
             currentCategory = categoryMatch;
             currentCategoryPrice = undefined;
+            currentSharedDescription = undefined;
+            continue;
+        }
+
+        const sharedDescription = parseSharedSectionDescription(line, currentCategory);
+        if (sharedDescription) {
+            currentSharedDescription = sharedDescription;
             continue;
         }
 
@@ -224,6 +275,7 @@ export function extractDishesFromText(menuContent: string): ExtractedDish[] {
                 dish.price = currentCategoryPrice || currentMenuPrice;
             }
             dish.name = normalizeDishNameForCategory(dish.name, currentCategory);
+            applySharedSectionDescription(dish, currentCategory, currentSharedDescription);
             if (isNonDishLine(dish.name) || isSameCategoryName(dish.name, currentCategory)) {
                 i += wrappedLine.consumedLines;
                 continue;
@@ -268,7 +320,7 @@ function parseTwoLineDish(nameLine: string, descriptionLine?: string): Extracted
     }
 
     return {
-        name: cleanDishNameText(nameAllergenPass.cleanedText),
+        name: cleanDishNameText(nameAllergenPass.cleanedText, { hadPrice: !!price }),
         description,
         price,
         allergens,
@@ -348,7 +400,7 @@ function isPotentialDescriptionLine(line: string): boolean {
 }
 
 function joinWrappedDishContinuation(line: string, nextLine?: string): { line: string; consumedLines: number } {
-    if (!nextLine || extractPrice(line) || !extractPrice(nextLine)) {
+    if (!nextLine || extractPrice(line) || !extractPrice(nextLine) || isNonDishLine(line)) {
         return { line, consumedLines: 0 };
     }
 
@@ -405,6 +457,10 @@ function detectCategory(line: string): string | null {
         return cleanLine;
     }
 
+    if (looksLikeDishDescriptionLine(cleanLine)) {
+        return null;
+    }
+
     if (isGeographicHeading(cleanLine)) {
         return cleanLine;
     }
@@ -451,6 +507,7 @@ function isHeaderLine(line: string): boolean {
         /^lunch$/i,
         /^breakfast$/i,
         /^brunch$/i,
+        /^pricing$/i,
         /^\d+\.\d+\s*pp$/i,  // Prix fixe price like "85.00 PP"
         /^wine\s*pairing/i,
         /^chef['']?s/i,
@@ -470,14 +527,27 @@ function isHeaderLine(line: string): boolean {
 }
 
 function isDefiniteCategoryHeading(line: string): boolean {
-    return /^(?:a\s+la\s+carte|for\s+the\s+table|appetizers?|starters?|antojitos|entradas?|first\s*course|salads?(?:\s*&\s*bowls?)?|salad\s*&\s*cold\s+starters?|cold\s+starters?|soups?|tacos?|suviche\s+bar|ceviche|sushi|rolls?|entr[eé]es?|mains?|main\s*course|chef['’]?s\s+specialt(?:y|ies)|especiales|seafood|fish|meats?|poultry|beef|chicken|pork|lamb|churrasco|grill|halal|pasta|risotto|sides?|side\s*dishes?|accompaniments?|desserts?|sweets?|postres|beverages?|drinks?|cocktails?|wines?|beers?|spirits?|raw\s+bar|shared|hot\s+appetizer|main\s+entr[eé]e|specialty\s+drinks):?$/i.test(line.trim())
+    return /^(?:(?:a|à)\s+la\s+carte|for\s+the\s+table|appetizers?|starters?|antojitos|entradas?|first\s*course|salads?(?:\s*&\s*bowls?)?|salad\s*&\s*cold\s+starters?|cold\s+starters?|soups?|tacos?|suviche\s+bar|ceviche|sushi|rolls?|entr[eé]es?|mains?|main\s*course|chef['’]?s\s+specialt(?:y|ies)|especialidades|especiales|seafood|fish|meats?|poultry|beef|chicken|pork|lamb|churrasco|grill|halal|pasta|risotto|sides?|side\s*dishes?|accompaniments?|desserts?|sweets?|postres|beverages?|drinks?|cocktails?|wines?|beers?|spirits?|raw\s+bar|shared|hot\s+appetizer|main\s+entr[eé]e|specialty\s+drinks):?$/i.test(line.trim())
         || isGeographicHeading(line);
 }
 
 function isSectionLabelName(line: string): boolean {
     return isDefiniteCategoryHeading(line)
         || isShortBeverageOrServiceHeading(line)
-        || /^(?:signature\s+cocktails?|specialty\s+cocktails?|classic\s+cocktails?|bar\s+raya\s+exclusives|classics\s+with\s+a\s+twist|dessert\s+cocktails?|soup\s*&\s*salads?|ensaladas\s+y\s+sopa|guacamoles?\s*&\s*salsas?|m[aá]s\s*\|\s*sides|raw\s+bar|bubbles|by\s+the\s+glass|wine\s+by\s+the\s+glass|by\s+the\s+bottle|spirits?\s+list|bourbon,\s*whiskey\s*&\s*rye|wine\s+pairing|maki(?:\s+rolls?|\s+selection)?|nigiri|sashimi|fajitas|maya\s+signature\s+fajitas|de\s+la\s+parrilla\s*\|\s*from\s+the\s+grill|wood\s+fire\s+grill|from\s+the\s+(?:wood|grill)(?:\s*[-–—]\s*burning\s+grill)?|other\s+varietals\s*\/\s*unique\s+whites|(?:red|ros[ée])\s+wine\s*\(.+\)|signature\s+margaritas\s+glass\s*\/\s*pitcher|antojitos\s*\|\s*starters|especiales\s*\|\s*specialt(?:y|ies)|postres\s*\|\s*desserts?|.+\s+station)$/i.test(line.trim());
+        || /^(?:signature\s+cocktails?|specialty\s+cocktails?|classic\s+cocktails?|bar\s+raya\s+exclusives|classics\s+with\s+a\s+twist|dessert\s+cocktails?|soup\s*&\s*salads?|ensaladas\s+y\s+sopa|guacamoles?\s*&\s*salsas?|m[aá]s\s*\|\s*sides|raw\s+bar|bubbles|by\s+the\s+glass|wine\s+by\s+the\s+glass|by\s+the\s+bottle|spirits?\s+list|bourbon,\s*whiskey\s*&\s*rye|wine\s+pairing|maki(?:\s+rolls?|\s+selection)?|nigiri|sashimi|fajitas|maya\s+signature\s+fajitas|de\s+la\s+parrilla\s*\|\s*from\s+the\s+grill|wood\s+fire\s+grill|from\s+the\s+(?:wood|grill)(?:\s*[-–—]\s*burning\s+grill)?|other\s+varietals\s*\/\s*unique\s+whites|(?:red|ros[ée])\s+wine\s*\(.+\)|signature\s+margaritas\s+glass\s*\/\s*pitcher|antojitos\s*\|\s*starters|especialidades|especiales\s*\|\s*specialt(?:y|ies)|postres\s*\|\s*desserts?|.+\s+station)$/i.test(line.trim());
+}
+
+function looksLikeDishDescriptionLine(line: string): boolean {
+    const cleanLine = line.trim();
+    if (!/,/.test(cleanLine)) {
+        return false;
+    }
+
+    const commaCount = (cleanLine.match(/,/g) || []).length;
+    const hasIngredientWords = /\b(?:adobo|aioli|arugula|avocado|bean|beans|beef|butternut|carrot|cheese|chicken|chili|cilantro|coconut|corn|crema|figs?|glaze|guacamole|hibiscus|lemon|lime|mole|onion|orange|pepita|plantain|potato|pur[eé]e|radish|roasted|salsa|sauce|squash|tomatillo|tomato|tortilla|vinaigrette)\b/i.test(cleanLine);
+    const allergenPass = extractTrailingAllergens(normalizeAttachedAllergenCodes(cleanLine));
+
+    return commaCount >= 2 || (commaCount >= 1 && hasIngredientWords) || allergenPass.allergens.length > 0;
 }
 
 function isShortBeverageOrServiceHeading(line: string): boolean {
@@ -602,7 +672,7 @@ function parseDishLine(line: string, nextLine?: string): ExtractedDish | null {
     body = cleanedText.replace(/[,|]+\s*$/, '').trim();
 
     const { name, description: inlineDescription } = splitNameAndDescription(body);
-    const dishName = cleanDishNameText(name);
+    const dishName = cleanDishNameText(name, { hadPrice: !!price });
 
     // If dish name is too short after cleaning, skip
     if (dishName.length < 3 || !/[A-Za-z]/.test(dishName)) {
@@ -650,7 +720,11 @@ function isNonDishLine(line: string): boolean {
         return true;
     }
 
-    if (/^(?:served\s+for\s+the\s+table|host\s+chooses?.*|choose\b.*|choice\s+of\b.*|select\b.*|served\s+by\s+\d+\s+pieces?)$/i.test(metadataText)) {
+    if (/^(?:served\s+for\s+the\s+table|host\s+chooses?.*|choose\b.*|choice\s+of\b.*|select\b.*|your\s+selection\s+for\s+each\s+course|served\s+by\s+\d+\s+pieces?)$/i.test(metadataText)) {
+        return true;
+    }
+
+    if (/^served\s+with\b/i.test(metadataText)) {
         return true;
     }
 
@@ -670,7 +744,7 @@ function isNonDishLine(line: string): boolean {
         return true;
     }
 
-    if (/^(?:crafted\s+by|chef\s+.+|cocktails?\s+creations?\s+by|existing\s+menu\s+edits|new\s+menu\s+development|design\s+queue\s+workflow|please\s+(?:add|incorporate)\b|please\s+add\s+to\s+all\s+menus|raw\s+protein|separate\s+value|allergens?|allergen\s+key|top\s+of\s+form|bottom\s+of\s+form)\b/i.test(metadataText)) {
+    if (/^(?:crafted\s+by|chef\s+.+|cocktails?\s+creations?\s+by|existing\s+menu\s+edits|new\s+menu\s+development|design\s+queue\s+workflow|please\s+(?:add|incorporate)\b|please\s+add\s+to\s+all\s+menus|we\s+also\s+want\b|we\s+would\s+like\b|raw\s+protein|separate\s+value|allergens?|allergen\s+key|top\s+of\s+form|bottom\s+of\s+form)\b/i.test(metadataText)) {
         return true;
     }
 
@@ -679,6 +753,12 @@ function isNonDishLine(line: string): boolean {
     }
 
     if (/\b(?:all-you-can-eat|à\s+la\s+carte\s+pricing|a\s+la\s+carte\s+pricing|on\s+the\s+last\s+page|below\s+enhancements?\s+not\s+next|prepared\s+by\s+our\s+specialized\s+chef)\b/i.test(metadataText)) {
+        return true;
+    }
+
+    if (/(?:à|a)\s+la\s+carte\s+pricing[a-z]/i.test(metadataText)
+        || /\bpricing(?:antojitos|tacos|especialidades|postres|mas)\b/i.test(metadataText)
+        || /(?:[$€£]\s*\d+\s*[A-Za-zÀ-ÿ]){2,}/.test(metadataText)) {
         return true;
     }
 
@@ -899,13 +979,76 @@ function isShortPriceContinuation(line: string): boolean {
     return words.length > 0 && words.length <= 5 && !/[,|]/.test(withoutPrice);
 }
 
-function cleanDishNameText(name: string): string {
-    const cleanedName = name
+function parseSharedSectionDescription(line: string, category?: string): SharedSectionDescription | undefined {
+    if (!isSharedDescriptionCategory(category) || !/^served\s+with\b/i.test(line.trim())) {
+        return undefined;
+    }
+
+    const servingText = normalizeAttachedAllergenCodes(line)
+        .replace(/^served\s+with\b\s*/i, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+    const { cleanedText, allergens } = stripInlineAllergenCodes(servingText);
+    const description = cleanDescriptionText(cleanedText);
+
+    if (!description) {
+        return undefined;
+    }
+
+    return { description, allergens };
+}
+
+function applySharedSectionDescription(
+    dish: ExtractedDish,
+    category?: string,
+    sharedDescription?: SharedSectionDescription
+): void {
+    if (!sharedDescription || !isSharedDescriptionCategory(category) || dish.description) {
+        return;
+    }
+
+    dish.description = sharedDescription.description;
+    dish.allergens = uniqueAllergens([...dish.allergens, ...sharedDescription.allergens]);
+}
+
+function isSharedDescriptionCategory(category?: string): boolean {
+    return /\bfajitas?\b/i.test(`${category || ''}`);
+}
+
+function stripInlineAllergenCodes(text: string): { cleanedText: string; allergens: string[] } {
+    const allergens: string[] = [];
+    const cleanedText = text
+        .replace(new RegExp(`\\s+(${ALLERGEN_CLUSTER_SEQUENCE})(?=\\s*(?:,|$))`, 'gi'), (_match, cluster: string) => {
+            for (const token of cluster.split(/[\s,/.|]+/).filter(Boolean)) {
+                const upperToken = token.toUpperCase();
+                if (ALLERGEN_CODE_SET.has(upperToken) && !allergens.includes(upperToken)) {
+                    allergens.push(upperToken);
+                }
+            }
+            return '';
+        })
+        .replace(/\s+,/g, ',')
+        .replace(/,\s*,/g, ',')
+        .replace(/\s+/g, ' ')
+        .replace(/[,|]+\s*$/, '')
+        .trim();
+
+    return { cleanedText, allergens };
+}
+
+function cleanDishNameText(name: string, options: { hadPrice?: boolean } = {}): string {
+    let cleanedName = name
         .replace(/\s*[-–—]\s*[$€£]\s*\d+(?:\.\d{1,2})?(?:\s*[A-Z]{1,3}(?:\s*,\s*[A-Z]{1,3})*)?\s*$/i, '')
         .replace(/\s*\((?:suggested|prix[-\s]*fix(?:e|ed)?\s+price)[^)]*[$€£]\s*\d+(?:\.\d{1,2})?[^)]*\)\s*$/i, '')
         .replace(/\s*\([^)]*\)\s*[$€£]\s*\d+(?:\.\d{1,2})?/gi, '')
         .replace(/\s*\(\s*\d+\s*oz\s*\)\s*$/i, '')
+        .replace(/\s*[-–—]\s*$/, '')
         .trim();
+
+    if (options.hadPrice) {
+        cleanedName = cleanedName.replace(/^\d{2,3}\s+(?=[A-ZÀ-Þ])/, '').trim();
+    }
+
     const trailingToken = cleanedName.match(/\s+([A-Z]{1,3})$/)?.[1];
     if (trailingToken && ALLERGEN_CODE_SET.has(trailingToken)) {
         return cleanedName.replace(/\s+[A-Z]{1,3}$/, '').trim();
@@ -1209,19 +1352,28 @@ export async function extractAndStoreDishes(
     menuContent: string,
     property: string,
     submissionId: string,
+    options?: ExtractAndStoreDishesOptions
+): Promise<ExtractAndStoreDishesResult> {
+    const prepared = prepareApprovedDishInputs(menuContent, property, submissionId, {
+        servicePeriod: options?.servicePeriod,
+    });
+
+    return storePreparedApprovedDishes(prepared, submissionId, {
+        replaceExisting: options?.replaceExisting ?? true,
+        excludeIndexes: options?.excludeIndexes,
+    });
+}
+
+export function prepareApprovedDishInputs(
+    menuContent: string,
+    property: string,
+    submissionId: string,
     options?: {
         servicePeriod?: string;
     }
-): Promise<{ added: number }> {
-    // Extract dishes from text
+): PreparedApprovedDish[] {
     const extractedDishes = extractDishesFromText(menuContent);
-
-    if (extractedDishes.length === 0) {
-        return { added: 0 };
-    }
-
-    // Convert to database format
-    const dishes: CreateDishInput[] = extractedDishes.map(dish => ({
+    const inputs: CreateDishInput[] = extractedDishes.map(dish => ({
         dish_name: dish.name,
         property,
         service_period: options?.servicePeriod || undefined,
@@ -1231,11 +1383,56 @@ export async function extractAndStoreDishes(
         allergens: dish.allergens.length > 0 ? dish.allergens : undefined,
         source_submission_id: submissionId
     }));
+    const qualityContext = buildDishQualityContext(inputs);
 
-    // Batch insert all dishes
-    await createDishes(dishes);
+    return extractedDishes.map((dish, index) => {
+        const input = inputs[index];
+        const quality = analyzeApprovedDishQuality(input, qualityContext);
 
-    return { added: dishes.length };
+        return {
+            index,
+            extracted: dish,
+            input,
+            quality,
+            sourceContext: findDishSourceContext(menuContent, input),
+            excludedByRule: quality.disposition === 'exclude',
+        };
+    });
+}
+
+export async function storePreparedApprovedDishes(
+    prepared: PreparedApprovedDish[],
+    submissionId: string,
+    options: StorePreparedDishesOptions = {}
+): Promise<ExtractAndStoreDishesResult> {
+    const excludeIndexes = options.excludeIndexes || new Set<number>();
+    const included = prepared
+        .filter((dish) => !dish.excludedByRule && !excludeIndexes.has(dish.index))
+        .map((dish) => dish.input);
+
+    if (included.length === 0) {
+        return {
+            added: 0,
+            extracted: prepared.length,
+            skipped: prepared.length,
+            qualityReviewCount: prepared.filter((dish) => dish.quality.disposition === 'review').length,
+            excludedByRuleCount: prepared.filter((dish) => dish.excludedByRule).length,
+        };
+    }
+
+    if (options.replaceExisting) {
+        await replaceDishesForSubmission(submissionId, included);
+    } else {
+        await createDishes(included);
+    }
+
+    return {
+        added: included.length,
+        extracted: prepared.length,
+        skipped: prepared.length - included.length,
+        qualityReviewCount: prepared.filter((dish) => dish.quality.disposition === 'review').length,
+        excludedByRuleCount: prepared.filter((dish) => dish.excludedByRule).length,
+    };
 }
 
 function isReasonableMenuPrice(numericPrice: number, rawPrice: string): boolean {

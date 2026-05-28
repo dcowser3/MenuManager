@@ -58,7 +58,7 @@ The signal extractor only learns from line pairs that still look like the same m
 
 | File | Format | Contents |
 |------|--------|----------|
-| `tmp/learning/training_data.jsonl` | JSON Lines | One entry per comparison: submission_id, timestamp, paths, analysis, signals |
+| `tmp/learning/training_data.jsonl` | JSON Lines | One eligible human-review final approval per submission/source: submission_id, timestamp, paths, provenance, analysis, signals |
 | Comparison JSON (per submission) | JSON | Full line-by-line diff for the learning dashboard detail view |
 
 **Signal types:**
@@ -210,7 +210,7 @@ Controlled by `DOCUMENT_STORAGE_ROOT` env var. Defaults to `tmp/documents` (ephe
 
 ```
 tmp/learning/
-├── training_data.jsonl              One JSON object per comparison (append-only)
+├── training_data.jsonl              Eligible human-review comparisons, upserted by submission/source
 ├── learned_rules.json               Aggregated rule snapshot (rebuilt on each compare + startup)
 ├── rule_overrides.json              Manual enable/disable toggles
 └── location_specific_rules.json     Human annotations tied to properties

@@ -29,11 +29,15 @@ All variables are configured in `.env` at the project root. See `.env.example` f
 | `FORM_ATTEMPT_ALERT_EMAIL` | Email address that receives production public-form failure alerts such as `413` submit errors (default: `dcowser@richardsandoval.com`) |
 | `PUBLIC_FORM_SUPPORT_EMAIL` | Email address shown to submitters in the form footer and blocking/red form errors (default: `dcowser@richardsandoval.com`) |
 | `AI_REVIEW_MODEL` | OpenAI model used by AI review service (default: `gpt-4o-mini`) |
+| `APPROVED_DISH_AI_QUALITY_TIMEOUT_MS` | DB-service timeout in milliseconds when asking ai-review to classify questionable extracted dish rows (default: `20000`) |
 | `BASIC_AI_CHECK_TIMEOUT_MS` | Dashboard timeout in milliseconds for background public-form Basic AI Check calls to ai-review (default: `120000`; falls back to `AI_REVIEW_QA_TIMEOUT_MS` if set) |
 | `AI_REVIEW_SUBMIT_TIMEOUT_MS` | Dashboard timeout in milliseconds for the post-submit full AI review handoff (default: `BASIC_AI_CHECK_TIMEOUT_MS`, normally `120000`) |
 | `BASIC_AI_CHECK_JOB_TTL_MS` | How long dashboard keeps completed/failed Basic AI Check job results available for polling before cleanup (default: `900000`) |
 | `BASIC_AI_CHECK_DEBUG_ENABLED` | Allows opt-in Basic AI Check diagnostics responses when the request includes `debugBasicCheck`; defaults to enabled outside production and disabled in production |
 | `BASIC_AI_CHECK_DEBUG_MAX_CHARS` | Maximum characters retained per diagnostic text field such as AI prompt, reviewed text, and raw feedback (default: `60000`) |
+| `BASIC_AI_PRECHECK_DISABLED` | Set `true` to disable deterministic pre-AI Basic AI Check corrections for A/B testing against prompt-first behavior (default: enabled) |
+| `BASIC_AI_LEARNED_PRECHECK_DISABLED` | Set `true` to keep built-in pre-AI corrections enabled but skip accepted learned correction-rule replacements (default: learned replacements enabled) |
+| `BASIC_AI_LEARNED_RULE_FETCH_TIMEOUT_MS` | Dashboard timeout in milliseconds when loading accepted correction rules from the DB service before Basic AI Check (default: `2500`) |
 | `SOP_DOC_PATH` | Path to SOP document (default: `samples/sop.txt`) |
 | `DASHBOARD_URL` | Base URL for email links (default: `http://localhost:3005`) |
 | `DB_SERVICE_URL` | Base URL for DB service (default: `http://localhost:3004`) |
@@ -48,7 +52,7 @@ All variables are configured in `.env` at the project root. See `.env.example` f
 | `DB_JSON_BODY_LIMIT` | DB-service-specific override for internal submission and raw-payload JSON bodies (default: `JSON_BODY_LIMIT` or `5mb`) |
 | `LEARNING_DATA_DIR` | Root directory for differ comparison history and learned-rule snapshots (default: `tmp/learning`) |
 | `LEARNING_MIN_OCCURRENCES` | Minimum repeated corrections needed before a learned rule is active (default: `2`) |
-| `LEARNING_MAX_OVERLAY_RULES` | Max learned rules injected into QA prompt overlay (default: `25`) |
+| `LEARNING_MAX_OVERLAY_RULES` | Legacy v1 overlay cap. The v2 Basic AI Check path no longer injects this overlay into the prompt; accepted exact rules are loaded from `correction_rules` for deterministic pre-AI replacement. |
 | `GRAPH_CLIENT_ID` | Azure app client ID used for SharePoint/Microsoft Graph access |
 | `GRAPH_TENANT_ID` | Azure tenant ID used for SharePoint/Microsoft Graph access |
 | `GRAPH_CLIENT_SECRET` | Azure app client secret used for SharePoint/Microsoft Graph access |
@@ -145,7 +149,7 @@ When `LEARNING_DATA_DIR` is set, the differ service stores comparison history an
 
 Files currently used:
 
-- `training_data.jsonl` — append-only comparison history, one JSON object per learned submission
+- `training_data.jsonl` — comparison history for eligible human-review final approvals, upserted by submission/source so repeated finalization does not double-count one learned submission
 - `<submissionId>-comparison.json` — detail file for a single learned submission
 - `learned_rules.json` — rebuilt detected-pattern snapshot
 - `rule_overrides.json` and `location_specific_rules.json` — legacy/local learning controls

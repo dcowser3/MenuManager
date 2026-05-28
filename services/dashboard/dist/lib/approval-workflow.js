@@ -9,11 +9,17 @@ function createApprovalWorkflowHandlers(deps) {
             finalPath: input.finalPath,
             changesMade: input.changesMade,
         }));
-        await deps.axios.post(`${deps.DIFFER_SERVICE_URL}/compare`, {
-            submission_id: input.submissionId,
-            ai_draft_path: input.submission.ai_draft_path,
-            final_path: input.finalPath
-        });
+        if (input.changesMade) {
+            await deps.axios.post(`${deps.DIFFER_SERVICE_URL}/compare`, {
+                submission_id: input.submissionId,
+                ai_draft_path: input.submission.ai_draft_path,
+                final_path: input.finalPath,
+                comparison_source: 'human_review_final_approval',
+                review_source: 'dashboard_corrected_upload',
+                review_completed_at: new Date().toISOString(),
+                changed_by_human: true,
+            });
+        }
         deps.extractDishesAfterApproval(input.submission.id || input.submissionId, input.submission.menu_content, input.submission.property || 'Unknown', input.finalPath, input.submission.service_period || input.submission.raw_payload?.servicePeriod).catch((err) => console.error('Background dish extraction failed:', err));
     };
     const quickApprove = async (req, res) => {

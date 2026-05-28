@@ -3,7 +3,11 @@
 const fs = require('fs');
 const path = require('path');
 const dotenv = require('dotenv');
-const { getSupabaseClient } = require('@menumanager/supabase-client');
+const {
+    analyzeApprovedDishQuality,
+    buildDishQualityContext,
+    getSupabaseClient,
+} = require('@menumanager/supabase-client');
 
 dotenv.config({ path: path.resolve(__dirname, '../../..', '.env'), quiet: true });
 
@@ -410,7 +414,16 @@ function classifyMissingPrice(dish, submission, contextDetails) {
     return { price_audit_class: 'no_price_visible_nearby', nearby_price_text: '' };
 }
 
-function analyzeDish(dish, submission, duplicateCounts) {
+function mergeSharedIssues(issues, sharedIssues) {
+    const existingCodes = new Set(issues.map((issue) => issue.code));
+    for (const issue of sharedIssues) {
+        if (!existingCodes.has(issue.code)) {
+            addIssue(issues, issue.code, issue.severity, issue.reason);
+        }
+    }
+}
+
+function analyzeDish(dish, submission, duplicateCounts, qualityContext) {
     const issues = [];
     const name = compactText(dish.dish_name);
     const category = compactText(dish.menu_category);
@@ -474,6 +487,8 @@ function analyzeDish(dish, submission, duplicateCounts) {
     if (!submission?.id) {
         addIssue(issues, 'missing_source_submission', 'high', 'Dish row is not tied to a loaded imported submission.');
     }
+
+    mergeSharedIssues(issues, analyzeApprovedDishQuality(dish, qualityContext).issues);
 
     return issues;
 }
@@ -582,12 +597,13 @@ async function main() {
     console.log(`Loaded ${dishes.length} approved dish row(s).`);
 
     const duplicateCounts = countDuplicates(dishes);
+    const qualityContext = buildDishQualityContext(dishes);
     const flaggedRows = [];
 
     for (const dish of dishes) {
         const submission = submissionsById.get(dish.source_submission_id);
         const sourceRow = submission ? sourceRowForSubmission(submission, sourceLookup) : null;
-        const issues = analyzeDish(dish, submission, duplicateCounts);
+        const issues = analyzeDish(dish, submission, duplicateCounts, qualityContext);
         if (issues.length === 0) {
             continue;
         }

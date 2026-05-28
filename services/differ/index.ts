@@ -8,10 +8,19 @@ import { promisify } from 'util';
 import dotenv = require('dotenv');
 import { getSupabaseClient, isSupabaseConfigured } from '@menumanager/supabase-client';
 import { requireInternalServiceAuth } from '@menumanager/internal-auth';
-import { deleteLearningSubmissionFromFiles } from './lib/learning-store';
 import {
+    HUMAN_REVIEW_COMPARISON_SOURCE,
+    buildLearningComparisonKey,
+    deleteLearningSubmissionFromFiles,
+    getLearningAggregationEntries,
+    isHumanReviewLearningEntry,
+    upsertTrainingEntry,
+} from './lib/learning-store';
+import {
+    ReplacementExample,
     ReplacementSignal,
     diffLines,
+    extractReplacementExamples,
     extractLineReplacements,
     extractReplacementSignals,
     linesLikelySameContext,
@@ -78,6 +87,12 @@ type TrainingEntry = {
     original_path?: string;
     ai_draft_path: string;
     final_path: string;
+    comparison_source?: string;
+    review_source?: string;
+    review_completed_at?: string;
+    changed_by_human?: boolean;
+    learning_eligible?: boolean;
+    comparison_key?: string;
     analysis: {
         identical: boolean;
         ai_draft_words: number;
@@ -199,10 +214,27 @@ app.use(requireInternalServiceAuth);
 app.post('/compare', async (req, res) => {
     try {
         const { submission_id, ai_draft_path, final_path, original_path } = req.body;
+        const comparisonSource = `${req.body?.comparison_source || ''}`.trim();
+        const reviewSource = `${req.body?.review_source || ''}`.trim();
+        const reviewCompletedAt = `${req.body?.review_completed_at || ''}`.trim();
+        const changedByHuman = req.body?.changed_by_human === true;
 
         if (!submission_id || !ai_draft_path || !final_path) {
             return res.status(400).json({
                 error: 'Missing required fields: submission_id, ai_draft_path, final_path',
+            });
+        }
+
+        if (comparisonSource !== HUMAN_REVIEW_COMPARISON_SOURCE || !changedByHuman) {
+            const skipReason = `learning requires comparison_source="${HUMAN_REVIEW_COMPARISON_SOURCE}" and changed_by_human=true`;
+            console.log(`⏭️  Skipping learning comparison for ${submission_id}: ${skipReason}`);
+            return res.status(200).json({
+                success: true,
+                skipped: true,
+                skip_reason: skipReason,
+                submission_id,
+                training_data_saved: false,
+                learned_rules_active: (await readLearnedRulesSnapshot()).active_rules.length,
             });
         }
 
@@ -212,6 +244,21 @@ app.post('/compare', async (req, res) => {
         const finalText = await extractText(final_path);
         const differences = analyzeDocuments(aiDraftText, finalText);
         const replacements = extractReplacementSignals(aiDraftText, finalText);
+
+        if (!differences.hasChanges) {
+            const skipReason = 'final approved document matches the AI draft';
+            console.log(`⏭️  Skipping learning comparison for ${submission_id}: ${skipReason}`);
+            return res.status(200).json({
+                success: true,
+                skipped: true,
+                skip_reason: skipReason,
+                submission_id,
+                differences: differences.summary,
+                training_data_saved: false,
+                replacement_signals: 0,
+                learned_rules_active: (await readLearnedRulesSnapshot()).active_rules.length,
+            });
+        }
 
         const trainingEntry: TrainingEntry = {
             submission_id,
@@ -223,14 +270,20 @@ app.post('/compare', async (req, res) => {
             ...(original_path ? { original_path } : {}),
             ai_draft_path,
             final_path,
+            comparison_source: comparisonSource,
+            ...(reviewSource ? { review_source: reviewSource } : {}),
+            ...(reviewCompletedAt ? { review_completed_at: reviewCompletedAt } : {}),
+            changed_by_human: true,
+            learning_eligible: true,
             analysis: differences.summary,
             learning_signals: {
                 replacements,
                 replacement_count: replacements.length,
             },
         };
+        trainingEntry.comparison_key = buildLearningComparisonKey(trainingEntry);
 
-        await fs.appendFile(TRAINING_DATA_FILE, `${JSON.stringify(trainingEntry)}\n`);
+        const saveResult = await saveTrainingEntry(trainingEntry);
 
         const detailPath = path.join(DIFFERENCES_DIR, `${submission_id}-comparison.json`);
         await fs.writeFile(
@@ -251,12 +304,17 @@ app.post('/compare', async (req, res) => {
         console.log(`✅ Comparison complete for ${submission_id}`);
         console.log(`   Changes detected: ${differences.hasChanges ? 'YES' : 'NO'}`);
         console.log(`   Replacement signals: ${replacements.length}`);
+        if (saveResult.replaced_entries > 0) {
+            console.log(`   Replaced ${saveResult.replaced_entries} earlier comparison entr${saveResult.replaced_entries === 1 ? 'y' : 'ies'} for this submission/source`);
+        }
 
         res.status(200).json({
             success: true,
+            skipped: false,
             submission_id,
             differences: differences.summary,
             training_data_saved: true,
+            replaced_training_entries: saveResult.replaced_entries,
             replacement_signals: replacements.length,
             learned_rules_active: learnedRules.active_rules.length,
             detail_path: detailPath,
@@ -269,11 +327,14 @@ app.post('/compare', async (req, res) => {
 
 app.get('/stats', async (_req, res) => {
     try {
-        const entries = await readTrainingEntries();
+        const rawEntries = await readTrainingEntries();
+        const entries = getLearningAggregationEntries(rawEntries);
         const comparisonsWithChanges = entries.filter((e) => e.changes_detected).length;
 
         const stats = {
             total_comparisons: entries.length,
+            raw_training_entries: rawEntries.length,
+            ineligible_or_duplicate_entries: rawEntries.length - entries.length,
             comparisons_with_changes: comparisonsWithChanges,
             comparisons_without_changes: entries.length - comparisonsWithChanges,
             average_change_percentage:
@@ -315,6 +376,31 @@ app.get('/learning/rules', async (_req, res) => {
     }
 });
 
+app.get('/learning/rule-examples', async (req, res) => {
+    try {
+        const originalText = firstQueryValue(req.query.original_text || req.query.from).trim();
+        const correctedText = firstQueryValue(req.query.corrected_text || req.query.to).trim();
+        const submissionIds = parseSubmissionIdQuery(req.query.submission_ids || req.query.submission_id);
+        const limit = clampPositiveInteger(firstQueryValue(req.query.limit), 1, 20, 8);
+
+        if (!originalText || !correctedText) {
+            return res.status(400).json({ error: 'original_text and corrected_text are required' });
+        }
+
+        const payload = await findRuleExamplesForReplacement({
+            originalText,
+            correctedText,
+            submissionIds,
+            limit,
+        });
+
+        res.json(payload);
+    } catch (error) {
+        console.error('Error loading learning rule examples:', error);
+        res.status(500).json({ error: 'Failed to load learning rule examples' });
+    }
+});
+
 // v2: Overlay injection removed. This endpoint returns empty for backward compatibility.
 app.get('/learning/overlay', async (_req, res) => {
     res.json({
@@ -338,7 +424,7 @@ app.get('/learning/overrides', async (_req, res) => {
 
 app.get('/learning/submissions', async (_req, res) => {
     try {
-        const entries = await readTrainingEntries();
+        const entries = getLearningAggregationEntries(await readTrainingEntries());
         const latestBySubmission = new Map<string, TrainingEntry>();
 
         for (const entry of entries) {
@@ -364,6 +450,8 @@ app.get('/learning/submissions', async (_req, res) => {
                 replacement_count: entry.learning_signals?.replacement_count || 0,
                 ai_draft_path: entry.ai_draft_path,
                 final_path: entry.final_path,
+                comparison_source: entry.comparison_source,
+                review_source: entry.review_source,
             }));
 
         res.json({ count: submissions.length, submissions });
@@ -398,7 +486,7 @@ app.delete('/learning/submissions/:submissionId', async (req, res) => {
 app.get('/learning/submissions/:submissionId', async (req, res) => {
     try {
         const submissionId = `${req.params.submissionId || ''}`.trim();
-        const entries = await readTrainingEntries();
+        const entries = getLearningAggregationEntries(await readTrainingEntries());
         const matches = entries
             .filter((entry) => entry.submission_id === submissionId)
             .sort((a, b) => new Date(b.timestamp || 0).getTime() - new Date(a.timestamp || 0).getTime());
@@ -552,6 +640,7 @@ app.post('/learning/recompute-signals', async (_req, res) => {
                         replacements,
                         replacement_count: replacements.length,
                     },
+                    ...(isHumanReviewLearningEntry(entry) ? { comparison_key: buildLearningComparisonKey(entry) } : {}),
                 });
             } catch {
                 skipped += 1;
@@ -559,8 +648,7 @@ app.post('/learning/recompute-signals', async (_req, res) => {
             }
         }
 
-        const lines = refreshed.map((entry) => JSON.stringify(entry)).join('\n');
-        await fs.writeFile(TRAINING_DATA_FILE, lines ? `${lines}\n` : '');
+        await writeTrainingEntries(refreshed);
         const snapshot = await rebuildLearnedRules();
 
         res.json({
@@ -798,6 +886,136 @@ async function readTrainingEntries(): Promise<TrainingEntry[]> {
         .filter((entry): entry is TrainingEntry => entry !== null);
 }
 
+async function writeTrainingEntries(entries: TrainingEntry[]): Promise<void> {
+    const lines = entries.map((entry) => JSON.stringify(entry)).join('\n');
+    await fs.writeFile(TRAINING_DATA_FILE, lines ? `${lines}\n` : '');
+}
+
+async function saveTrainingEntry(entry: TrainingEntry): Promise<{ replaced_entries: number; total_entries: number }> {
+    const existingEntries = await readTrainingEntries();
+    const result = upsertTrainingEntry(existingEntries, entry);
+    await writeTrainingEntries(result.entries);
+
+    return {
+        replaced_entries: result.replaced_entries,
+        total_entries: result.entries.length,
+    };
+}
+
+type RuleExampleRecord = ReplacementExample & {
+    submission_id: string;
+    timestamp: string;
+    ai_draft_path: string;
+    final_path: string;
+    evidence_source: 'ai_draft_vs_final_approved_docx';
+    comparison_source?: string;
+    review_source?: string;
+};
+
+function firstQueryValue(value: any): string {
+    if (Array.isArray(value)) {
+        return `${value[0] || ''}`;
+    }
+    return `${value || ''}`;
+}
+
+function parseSubmissionIdQuery(value: any): string[] {
+    const rawValues = Array.isArray(value) ? value : [value];
+    const ids = rawValues
+        .flatMap((item) => `${item || ''}`.split(','))
+        .map((item) => item.trim())
+        .filter((item) => item && /^[A-Za-z0-9_-]+$/.test(item));
+
+    return Array.from(new Set(ids));
+}
+
+function clampPositiveInteger(value: string, min: number, max: number, fallback: number): number {
+    const parsed = Number.parseInt(value || '', 10);
+    if (!Number.isFinite(parsed)) return fallback;
+    return Math.min(Math.max(parsed, min), max);
+}
+
+function normalizeEvidenceToken(token: string): string {
+    return (token || '').toLowerCase().replace(/[’'`]/g, "'").trim();
+}
+
+async function findRuleExamplesForReplacement(input: {
+    originalText: string;
+    correctedText: string;
+    submissionIds: string[];
+    limit: number;
+}): Promise<{
+    original_text: string;
+    corrected_text: string;
+    evidence_source: 'ai_draft_vs_final_approved_docx';
+    count: number;
+    examples: RuleExampleRecord[];
+    searched_submission_ids: string[];
+    errors: Array<{ submission_id: string; error: string }>;
+}> {
+    const entries = getLearningAggregationEntries(await readTrainingEntries());
+    const submissionFilter = new Set(input.submissionIds);
+    const fromNorm = normalizeEvidenceToken(input.originalText);
+    const toNorm = normalizeEvidenceToken(input.correctedText);
+    const examples: RuleExampleRecord[] = [];
+    const errors: Array<{ submission_id: string; error: string }> = [];
+    const searchedSubmissionIds = new Set<string>();
+
+    const candidates = entries
+        .filter((entry) => !submissionFilter.size || submissionFilter.has(entry.submission_id))
+        .sort((a, b) => new Date(b.timestamp || 0).getTime() - new Date(a.timestamp || 0).getTime());
+
+    for (const entry of candidates) {
+        if (examples.length >= input.limit) break;
+
+        const storedReplacements = entry.learning_signals?.replacements || [];
+        const hasStoredSignal = storedReplacements.some((rep) =>
+            rep.from_norm === fromNorm && rep.to_norm === toNorm
+        );
+
+        if (!hasStoredSignal && (!submissionFilter.size || storedReplacements.length > 0)) {
+            continue;
+        }
+
+        searchedSubmissionIds.add(entry.submission_id);
+
+        try {
+            const aiDraftText = await extractText(entry.ai_draft_path);
+            const finalText = await extractText(entry.final_path);
+            const matches = extractReplacementExamples(aiDraftText, finalText, input.originalText, input.correctedText);
+
+            for (const match of matches) {
+                examples.push({
+                    ...match,
+                    submission_id: entry.submission_id,
+                    timestamp: entry.timestamp,
+                    ai_draft_path: entry.ai_draft_path,
+                    final_path: entry.final_path,
+                    evidence_source: 'ai_draft_vs_final_approved_docx',
+                    comparison_source: entry.comparison_source,
+                    review_source: entry.review_source,
+                });
+                if (examples.length >= input.limit) break;
+            }
+        } catch (error: any) {
+            errors.push({
+                submission_id: entry.submission_id,
+                error: error?.message || 'failed to extract comparison text',
+            });
+        }
+    }
+
+    return {
+        original_text: input.originalText,
+        corrected_text: input.correctedText,
+        evidence_source: 'ai_draft_vs_final_approved_docx',
+        count: examples.length,
+        examples,
+        searched_submission_ids: Array.from(searchedSubmissionIds),
+        errors,
+    };
+}
+
 async function readLearnedRulesSnapshot(): Promise<LearnedRulesSnapshot> {
     const content = await fs.readFile(LEARNED_RULES_FILE, 'utf-8');
     return JSON.parse(content) as LearnedRulesSnapshot;
@@ -825,7 +1043,7 @@ async function readLocationRules(): Promise<LocationSpecificRule[]> {
 }
 
 async function rebuildLearnedRules(): Promise<LearnedRulesSnapshot> {
-    const entries = await readTrainingEntries();
+    const entries = getLearningAggregationEntries(await readTrainingEntries());
 
     const pairMap = new Map<
         string,

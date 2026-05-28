@@ -11,8 +11,11 @@ exports.isPrixFixeServicePeriod = isPrixFixeServicePeriod;
 exports.normalizeDishPriceForStorage = normalizeDishPriceForStorage;
 exports.extractDishesFromText = extractDishesFromText;
 exports.extractAndStoreDishes = extractAndStoreDishes;
+exports.prepareApprovedDishInputs = prepareApprovedDishInputs;
+exports.storePreparedApprovedDishes = storePreparedApprovedDishes;
 exports.previewDishExtraction = previewDishExtraction;
 const dishes_1 = require("./dishes");
+const dish_quality_1 = require("./dish-quality");
 // Common allergen codes
 const ALLERGEN_CODES = ['VG', 'GF', 'DF', 'SF', 'PN', 'TN', 'SE', 'SL', 'SS', 'SY', 'CE', 'ET', 'MO', 'MU', 'A', 'C', 'D', 'E', 'F', 'G', 'M', 'N', 'P', 'V', 'S', 'T'];
 const ALLERGEN_CODE_SET = new Set(ALLERGEN_CODES);
@@ -54,7 +57,7 @@ const SHORT_SECTION_HEADINGS = new Set([
 ]);
 // Category detection patterns
 const CATEGORY_PATTERNS = [
-    /^(a\s+la\s+carte)/i,
+    /^(?:a|à)\s+la\s+carte$/i,
     /^(for\s+the\s+table)/i,
     /^(appetizers?|starters?|antojitos|entradas?|first\s*course)/i,
     /^(salads?)/i,
@@ -62,10 +65,10 @@ const CATEGORY_PATTERNS = [
     /^(tacos?)/i,
     /^(suviche\s+bar|ceviche|sushi|rolls?)/i,
     /^(entr[eé]es?|mains?|main\s*course)/i,
-    /^(chef['’]?s\s+specialt(?:y|ies))/i,
+    /^(chef['’]?s\s+specialt(?:y|ies)|especialidades|especiales)/i,
     /^(seafood|fish)/i,
-    /^(meats?|poultry|beef|chicken|pork|lamb)/i,
-    /^(churrasco|grill|halal)/i,
+    /^(meats?|poultry|beef|chicken|pork|lamb)$/i,
+    /^(churrasco|grill|halal)$/i,
     /^(pasta|risotto)/i,
     /^(sides?|side\s*dishes?|accompaniments?)/i,
     /^(desserts?|sweets?|postres)/i,
@@ -110,6 +113,7 @@ function extractDishesFromText(menuContent) {
     const lines = menuContent.split('\n').map(l => l.trim()).filter(Boolean);
     let currentCategory;
     let currentCategoryPrice;
+    let currentSharedDescription;
     let currentMenuPrice = inferMenuPriceLabel(lines);
     for (let i = 0; i < lines.length; i++) {
         const line = lines[i];
@@ -121,6 +125,7 @@ function extractDishesFromText(menuContent) {
             const markerCategory = cleanSectionCategoryName(line);
             if (markerCategory && isMenuTitleCategory(markerCategory)) {
                 currentCategory = markerCategory;
+                currentSharedDescription = undefined;
             }
             continue;
         }
@@ -133,6 +138,7 @@ function extractDishesFromText(menuContent) {
             const sectionCategory = cleanSectionCategoryName(line);
             if (sectionCategory) {
                 currentCategory = sectionCategory;
+                currentSharedDescription = undefined;
             }
             if (isPersistentSectionPriceLine(line)) {
                 currentMenuPrice = PRIX_FIXE_PRICE_LABEL;
@@ -150,6 +156,7 @@ function extractDishesFromText(menuContent) {
                 twoLineDish.price = currentCategoryPrice || currentMenuPrice;
             }
             twoLineDish.name = normalizeDishNameForCategory(twoLineDish.name, currentCategory);
+            applySharedSectionDescription(twoLineDish, currentCategory, currentSharedDescription);
             const isLowercaseFragment = isLowercaseOneWordFragment(twoLineDish.name, twoLineDish.description) ||
                 isLowercaseIngredientFragment(twoLineDish.name, twoLineDish.description, undefined);
             if (isLowercaseFragment) {
@@ -168,6 +175,12 @@ function extractDishesFromText(menuContent) {
         if (categoryMatch) {
             currentCategory = categoryMatch;
             currentCategoryPrice = undefined;
+            currentSharedDescription = undefined;
+            continue;
+        }
+        const sharedDescription = parseSharedSectionDescription(line, currentCategory);
+        if (sharedDescription) {
+            currentSharedDescription = sharedDescription;
             continue;
         }
         // Skip lines that are clearly headers or metadata
@@ -190,6 +203,7 @@ function extractDishesFromText(menuContent) {
                 dish.price = currentCategoryPrice || currentMenuPrice;
             }
             dish.name = normalizeDishNameForCategory(dish.name, currentCategory);
+            applySharedSectionDescription(dish, currentCategory, currentSharedDescription);
             if (isNonDishLine(dish.name) || isSameCategoryName(dish.name, currentCategory)) {
                 i += wrappedLine.consumedLines;
                 continue;
@@ -227,7 +241,7 @@ function parseTwoLineDish(nameLine, descriptionLine) {
         return null;
     }
     return {
-        name: cleanDishNameText(nameAllergenPass.cleanedText),
+        name: cleanDishNameText(nameAllergenPass.cleanedText, { hadPrice: !!price }),
         description,
         price,
         allergens,
@@ -291,7 +305,7 @@ function isPotentialDescriptionLine(line) {
     return /^[a-zà-ÿ]/.test(cleanLine) || /[,/]/.test(cleanLine) || !!extractPrice(cleanLine) || allergenPass.allergens.length > 0;
 }
 function joinWrappedDishContinuation(line, nextLine) {
-    if (!nextLine || extractPrice(line) || !extractPrice(nextLine)) {
+    if (!nextLine || extractPrice(line) || !extractPrice(nextLine) || isNonDishLine(line)) {
         return { line, consumedLines: 0 };
     }
     const cleanNextLine = nextLine.trim();
@@ -334,6 +348,9 @@ function detectCategory(line) {
     if (isMenuTitleCategory(cleanLine)) {
         return cleanLine;
     }
+    if (looksLikeDishDescriptionLine(cleanLine)) {
+        return null;
+    }
     if (isGeographicHeading(cleanLine)) {
         return cleanLine;
     }
@@ -373,6 +390,7 @@ function isHeaderLine(line) {
         /^lunch$/i,
         /^breakfast$/i,
         /^brunch$/i,
+        /^pricing$/i,
         /^\d+\.\d+\s*pp$/i, // Prix fixe price like "85.00 PP"
         /^wine\s*pairing/i,
         /^chef['']?s/i,
@@ -389,13 +407,23 @@ function isHeaderLine(line) {
     return false;
 }
 function isDefiniteCategoryHeading(line) {
-    return /^(?:a\s+la\s+carte|for\s+the\s+table|appetizers?|starters?|antojitos|entradas?|first\s*course|salads?(?:\s*&\s*bowls?)?|salad\s*&\s*cold\s+starters?|cold\s+starters?|soups?|tacos?|suviche\s+bar|ceviche|sushi|rolls?|entr[eé]es?|mains?|main\s*course|chef['’]?s\s+specialt(?:y|ies)|especiales|seafood|fish|meats?|poultry|beef|chicken|pork|lamb|churrasco|grill|halal|pasta|risotto|sides?|side\s*dishes?|accompaniments?|desserts?|sweets?|postres|beverages?|drinks?|cocktails?|wines?|beers?|spirits?|raw\s+bar|shared|hot\s+appetizer|main\s+entr[eé]e|specialty\s+drinks):?$/i.test(line.trim())
+    return /^(?:(?:a|à)\s+la\s+carte|for\s+the\s+table|appetizers?|starters?|antojitos|entradas?|first\s*course|salads?(?:\s*&\s*bowls?)?|salad\s*&\s*cold\s+starters?|cold\s+starters?|soups?|tacos?|suviche\s+bar|ceviche|sushi|rolls?|entr[eé]es?|mains?|main\s*course|chef['’]?s\s+specialt(?:y|ies)|especialidades|especiales|seafood|fish|meats?|poultry|beef|chicken|pork|lamb|churrasco|grill|halal|pasta|risotto|sides?|side\s*dishes?|accompaniments?|desserts?|sweets?|postres|beverages?|drinks?|cocktails?|wines?|beers?|spirits?|raw\s+bar|shared|hot\s+appetizer|main\s+entr[eé]e|specialty\s+drinks):?$/i.test(line.trim())
         || isGeographicHeading(line);
 }
 function isSectionLabelName(line) {
     return isDefiniteCategoryHeading(line)
         || isShortBeverageOrServiceHeading(line)
-        || /^(?:signature\s+cocktails?|specialty\s+cocktails?|classic\s+cocktails?|bar\s+raya\s+exclusives|classics\s+with\s+a\s+twist|dessert\s+cocktails?|soup\s*&\s*salads?|ensaladas\s+y\s+sopa|guacamoles?\s*&\s*salsas?|m[aá]s\s*\|\s*sides|raw\s+bar|bubbles|by\s+the\s+glass|wine\s+by\s+the\s+glass|by\s+the\s+bottle|spirits?\s+list|bourbon,\s*whiskey\s*&\s*rye|wine\s+pairing|maki(?:\s+rolls?|\s+selection)?|nigiri|sashimi|fajitas|maya\s+signature\s+fajitas|de\s+la\s+parrilla\s*\|\s*from\s+the\s+grill|wood\s+fire\s+grill|from\s+the\s+(?:wood|grill)(?:\s*[-–—]\s*burning\s+grill)?|other\s+varietals\s*\/\s*unique\s+whites|(?:red|ros[ée])\s+wine\s*\(.+\)|signature\s+margaritas\s+glass\s*\/\s*pitcher|antojitos\s*\|\s*starters|especiales\s*\|\s*specialt(?:y|ies)|postres\s*\|\s*desserts?|.+\s+station)$/i.test(line.trim());
+        || /^(?:signature\s+cocktails?|specialty\s+cocktails?|classic\s+cocktails?|bar\s+raya\s+exclusives|classics\s+with\s+a\s+twist|dessert\s+cocktails?|soup\s*&\s*salads?|ensaladas\s+y\s+sopa|guacamoles?\s*&\s*salsas?|m[aá]s\s*\|\s*sides|raw\s+bar|bubbles|by\s+the\s+glass|wine\s+by\s+the\s+glass|by\s+the\s+bottle|spirits?\s+list|bourbon,\s*whiskey\s*&\s*rye|wine\s+pairing|maki(?:\s+rolls?|\s+selection)?|nigiri|sashimi|fajitas|maya\s+signature\s+fajitas|de\s+la\s+parrilla\s*\|\s*from\s+the\s+grill|wood\s+fire\s+grill|from\s+the\s+(?:wood|grill)(?:\s*[-–—]\s*burning\s+grill)?|other\s+varietals\s*\/\s*unique\s+whites|(?:red|ros[ée])\s+wine\s*\(.+\)|signature\s+margaritas\s+glass\s*\/\s*pitcher|antojitos\s*\|\s*starters|especialidades|especiales\s*\|\s*specialt(?:y|ies)|postres\s*\|\s*desserts?|.+\s+station)$/i.test(line.trim());
+}
+function looksLikeDishDescriptionLine(line) {
+    const cleanLine = line.trim();
+    if (!/,/.test(cleanLine)) {
+        return false;
+    }
+    const commaCount = (cleanLine.match(/,/g) || []).length;
+    const hasIngredientWords = /\b(?:adobo|aioli|arugula|avocado|bean|beans|beef|butternut|carrot|cheese|chicken|chili|cilantro|coconut|corn|crema|figs?|glaze|guacamole|hibiscus|lemon|lime|mole|onion|orange|pepita|plantain|potato|pur[eé]e|radish|roasted|salsa|sauce|squash|tomatillo|tomato|tortilla|vinaigrette)\b/i.test(cleanLine);
+    const allergenPass = extractTrailingAllergens(normalizeAttachedAllergenCodes(cleanLine));
+    return commaCount >= 2 || (commaCount >= 1 && hasIngredientWords) || allergenPass.allergens.length > 0;
 }
 function isShortBeverageOrServiceHeading(line) {
     const normalized = line
@@ -495,7 +523,7 @@ function parseDishLine(line, nextLine) {
     const allergens = uniqueAllergens([...firstAllergenPass.allergens, ...secondPassAllergens]);
     body = cleanedText.replace(/[,|]+\s*$/, '').trim();
     const { name, description: inlineDescription } = splitNameAndDescription(body);
-    const dishName = cleanDishNameText(name);
+    const dishName = cleanDishNameText(name, { hadPrice: !!price });
     // If dish name is too short after cleaning, skip
     if (dishName.length < 3 || !/[A-Za-z]/.test(dishName)) {
         return null;
@@ -535,7 +563,10 @@ function isNonDishLine(line) {
     if (/^missing\s+description$/i.test(metadataText)) {
         return true;
     }
-    if (/^(?:served\s+for\s+the\s+table|host\s+chooses?.*|choose\b.*|choice\s+of\b.*|select\b.*|served\s+by\s+\d+\s+pieces?)$/i.test(metadataText)) {
+    if (/^(?:served\s+for\s+the\s+table|host\s+chooses?.*|choose\b.*|choice\s+of\b.*|select\b.*|your\s+selection\s+for\s+each\s+course|served\s+by\s+\d+\s+pieces?)$/i.test(metadataText)) {
+        return true;
+    }
+    if (/^served\s+with\b/i.test(metadataText)) {
         return true;
     }
     if (/^(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|mon|tues?|wed|thu(?:rs)?|fri|sat|sun)$/i.test(metadataText)) {
@@ -550,13 +581,18 @@ function isNonDishLine(line) {
     if (!extractPrice(normalized) && /^vegan\s+option\s+available\b/i.test(metadataText)) {
         return true;
     }
-    if (/^(?:crafted\s+by|chef\s+.+|cocktails?\s+creations?\s+by|existing\s+menu\s+edits|new\s+menu\s+development|design\s+queue\s+workflow|please\s+(?:add|incorporate)\b|please\s+add\s+to\s+all\s+menus|raw\s+protein|separate\s+value|allergens?|allergen\s+key|top\s+of\s+form|bottom\s+of\s+form)\b/i.test(metadataText)) {
+    if (/^(?:crafted\s+by|chef\s+.+|cocktails?\s+creations?\s+by|existing\s+menu\s+edits|new\s+menu\s+development|design\s+queue\s+workflow|please\s+(?:add|incorporate)\b|please\s+add\s+to\s+all\s+menus|we\s+also\s+want\b|we\s+would\s+like\b|raw\s+protein|separate\s+value|allergens?|allergen\s+key|top\s+of\s+form|bottom\s+of\s+form)\b/i.test(metadataText)) {
         return true;
     }
     if (/^(?:an\s+extra\s+charge|not\s+to\s+exceed|price\s+(?:per\b|\d)|savor\s+our\b|bottomless\b|on\s+the\s+bottom\s+of\s+the\s+menu)\b/i.test(metadataText)) {
         return true;
     }
     if (/\b(?:all-you-can-eat|à\s+la\s+carte\s+pricing|a\s+la\s+carte\s+pricing|on\s+the\s+last\s+page|below\s+enhancements?\s+not\s+next|prepared\s+by\s+our\s+specialized\s+chef)\b/i.test(metadataText)) {
+        return true;
+    }
+    if (/(?:à|a)\s+la\s+carte\s+pricing[a-z]/i.test(metadataText)
+        || /\bpricing(?:antojitos|tacos|especialidades|postres|mas)\b/i.test(metadataText)
+        || /(?:[$€£]\s*\d+\s*[A-Za-zÀ-ÿ]){2,}/.test(metadataText)) {
         return true;
     }
     if (isDateOrEventTimeLine(normalized) || isDateOrEventTimeLine(metadataText) || /\bdesign@richardsandoval\.com\b/i.test(metadataText)) {
@@ -727,13 +763,61 @@ function isShortPriceContinuation(line) {
     const words = withoutPrice.split(/\s+/).filter(Boolean);
     return words.length > 0 && words.length <= 5 && !/[,|]/.test(withoutPrice);
 }
-function cleanDishNameText(name) {
-    const cleanedName = name
+function parseSharedSectionDescription(line, category) {
+    if (!isSharedDescriptionCategory(category) || !/^served\s+with\b/i.test(line.trim())) {
+        return undefined;
+    }
+    const servingText = normalizeAttachedAllergenCodes(line)
+        .replace(/^served\s+with\b\s*/i, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+    const { cleanedText, allergens } = stripInlineAllergenCodes(servingText);
+    const description = cleanDescriptionText(cleanedText);
+    if (!description) {
+        return undefined;
+    }
+    return { description, allergens };
+}
+function applySharedSectionDescription(dish, category, sharedDescription) {
+    if (!sharedDescription || !isSharedDescriptionCategory(category) || dish.description) {
+        return;
+    }
+    dish.description = sharedDescription.description;
+    dish.allergens = uniqueAllergens([...dish.allergens, ...sharedDescription.allergens]);
+}
+function isSharedDescriptionCategory(category) {
+    return /\bfajitas?\b/i.test(`${category || ''}`);
+}
+function stripInlineAllergenCodes(text) {
+    const allergens = [];
+    const cleanedText = text
+        .replace(new RegExp(`\\s+(${ALLERGEN_CLUSTER_SEQUENCE})(?=\\s*(?:,|$))`, 'gi'), (_match, cluster) => {
+        for (const token of cluster.split(/[\s,/.|]+/).filter(Boolean)) {
+            const upperToken = token.toUpperCase();
+            if (ALLERGEN_CODE_SET.has(upperToken) && !allergens.includes(upperToken)) {
+                allergens.push(upperToken);
+            }
+        }
+        return '';
+    })
+        .replace(/\s+,/g, ',')
+        .replace(/,\s*,/g, ',')
+        .replace(/\s+/g, ' ')
+        .replace(/[,|]+\s*$/, '')
+        .trim();
+    return { cleanedText, allergens };
+}
+function cleanDishNameText(name, options = {}) {
+    let cleanedName = name
         .replace(/\s*[-–—]\s*[$€£]\s*\d+(?:\.\d{1,2})?(?:\s*[A-Z]{1,3}(?:\s*,\s*[A-Z]{1,3})*)?\s*$/i, '')
         .replace(/\s*\((?:suggested|prix[-\s]*fix(?:e|ed)?\s+price)[^)]*[$€£]\s*\d+(?:\.\d{1,2})?[^)]*\)\s*$/i, '')
         .replace(/\s*\([^)]*\)\s*[$€£]\s*\d+(?:\.\d{1,2})?/gi, '')
         .replace(/\s*\(\s*\d+\s*oz\s*\)\s*$/i, '')
+        .replace(/\s*[-–—]\s*$/, '')
         .trim();
+    if (options.hadPrice) {
+        cleanedName = cleanedName.replace(/^\d{2,3}\s+(?=[A-ZÀ-Þ])/, '').trim();
+    }
     const trailingToken = cleanedName.match(/\s+([A-Z]{1,3})$/)?.[1];
     if (trailingToken && ALLERGEN_CODE_SET.has(trailingToken)) {
         return cleanedName.replace(/\s+[A-Z]{1,3}$/, '').trim();
@@ -982,13 +1066,17 @@ function splitCommaDelimitedNameAndDescription(line) {
  * @returns Number of dishes added
  */
 async function extractAndStoreDishes(menuContent, property, submissionId, options) {
-    // Extract dishes from text
+    const prepared = prepareApprovedDishInputs(menuContent, property, submissionId, {
+        servicePeriod: options?.servicePeriod,
+    });
+    return storePreparedApprovedDishes(prepared, submissionId, {
+        replaceExisting: options?.replaceExisting ?? true,
+        excludeIndexes: options?.excludeIndexes,
+    });
+}
+function prepareApprovedDishInputs(menuContent, property, submissionId, options) {
     const extractedDishes = extractDishesFromText(menuContent);
-    if (extractedDishes.length === 0) {
-        return { added: 0 };
-    }
-    // Convert to database format
-    const dishes = extractedDishes.map(dish => ({
+    const inputs = extractedDishes.map(dish => ({
         dish_name: dish.name,
         property,
         service_period: options?.servicePeriod || undefined,
@@ -998,9 +1086,47 @@ async function extractAndStoreDishes(menuContent, property, submissionId, option
         allergens: dish.allergens.length > 0 ? dish.allergens : undefined,
         source_submission_id: submissionId
     }));
-    // Batch insert all dishes
-    await (0, dishes_1.createDishes)(dishes);
-    return { added: dishes.length };
+    const qualityContext = (0, dish_quality_1.buildDishQualityContext)(inputs);
+    return extractedDishes.map((dish, index) => {
+        const input = inputs[index];
+        const quality = (0, dish_quality_1.analyzeApprovedDishQuality)(input, qualityContext);
+        return {
+            index,
+            extracted: dish,
+            input,
+            quality,
+            sourceContext: (0, dish_quality_1.findDishSourceContext)(menuContent, input),
+            excludedByRule: quality.disposition === 'exclude',
+        };
+    });
+}
+async function storePreparedApprovedDishes(prepared, submissionId, options = {}) {
+    const excludeIndexes = options.excludeIndexes || new Set();
+    const included = prepared
+        .filter((dish) => !dish.excludedByRule && !excludeIndexes.has(dish.index))
+        .map((dish) => dish.input);
+    if (included.length === 0) {
+        return {
+            added: 0,
+            extracted: prepared.length,
+            skipped: prepared.length,
+            qualityReviewCount: prepared.filter((dish) => dish.quality.disposition === 'review').length,
+            excludedByRuleCount: prepared.filter((dish) => dish.excludedByRule).length,
+        };
+    }
+    if (options.replaceExisting) {
+        await (0, dishes_1.replaceDishesForSubmission)(submissionId, included);
+    }
+    else {
+        await (0, dishes_1.createDishes)(included);
+    }
+    return {
+        added: included.length,
+        extracted: prepared.length,
+        skipped: prepared.length - included.length,
+        qualityReviewCount: prepared.filter((dish) => dish.quality.disposition === 'review').length,
+        excludedByRuleCount: prepared.filter((dish) => dish.excludedByRule).length,
+    };
 }
 function isReasonableMenuPrice(numericPrice, rawPrice) {
     if (!(numericPrice > 0)) {

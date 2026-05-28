@@ -72,6 +72,27 @@ export async function createDishes(inputs: CreateDishInput[]): Promise<ApprovedD
 }
 
 /**
+ * Replace all dishes for a submission with a new extraction result.
+ */
+export async function replaceDishesForSubmission(
+    submissionId: string,
+    inputs: CreateDishInput[]
+): Promise<ApprovedDish[]> {
+    const supabase = getSupabaseClient();
+
+    const { error: deactivateError } = await supabase
+        .from(TABLE)
+        .update({ is_active: false })
+        .eq('source_submission_id', submissionId);
+
+    if (deactivateError) {
+        throw new Error(`Failed to replace dishes for submission: ${deactivateError.message}`);
+    }
+
+    return createDishes(inputs);
+}
+
+/**
  * Get a dish by ID
  */
 export async function getDish(id: string): Promise<ApprovedDish | null> {

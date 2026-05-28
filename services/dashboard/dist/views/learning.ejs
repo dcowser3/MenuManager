@@ -163,6 +163,59 @@
             font-size: .72rem;
             color: var(--muted);
         }
+        .examples-row td {
+            background: #fcfcfb;
+            padding: 0;
+        }
+        .examples-panel {
+            padding: .85rem 1rem 1rem;
+            border-top: 1px solid var(--border);
+        }
+        .examples-note {
+            margin-bottom: .75rem;
+            color: var(--muted);
+            font-size: .76rem;
+        }
+        .example-item {
+            border: 1px solid var(--border);
+            background: #fff;
+            padding: .75rem;
+            margin-top: .65rem;
+        }
+        .example-meta {
+            display: flex;
+            justify-content: space-between;
+            gap: 1rem;
+            flex-wrap: wrap;
+            margin-bottom: .6rem;
+            font-size: .72rem;
+            color: var(--muted);
+        }
+        .example-lines {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: .65rem;
+        }
+        .example-label {
+            font-size: .62rem;
+            text-transform: uppercase;
+            letter-spacing: .1em;
+            color: var(--muted);
+            margin-bottom: .2rem;
+        }
+        .example-line {
+            border: 1px solid var(--border);
+            background: var(--bg-alt);
+            padding: .55rem .6rem;
+            white-space: pre-wrap;
+            overflow-wrap: anywhere;
+            font-size: .8rem;
+        }
+        @media (max-width: 760px) {
+            .example-lines {
+                grid-template-columns: 1fr;
+            }
+        }
         .submission-cell {
             min-width: 210px;
         }
@@ -262,6 +315,23 @@
             <div class="stat"><div class="label">Accepted Rules</div><div class="value"><%= acceptedRules.length %></div></div>
         </div>
 
+        <%
+            const jsonForScript = (value) => JSON.stringify(value)
+                .replace(/</g, '\\u003c')
+                .replace(/>/g, '\\u003e')
+                .replace(/&/g, '\\u0026')
+                .replace(/'/g, '\\u0027')
+                .replace(/\u2028/g, '\\u2028')
+                .replace(/\u2029/g, '\\u2029');
+            const pendingRuleExamplePayload = (pendingRules || []).map((rule) => ({
+                id: rule.id,
+                source: rule.source || '',
+                original_text: rule.original_text || '',
+                corrected_text: rule.corrected_text || '',
+                submission_ids: Array.isArray(rule.submission_ids) ? rule.submission_ids : [],
+            }));
+        %>
+
         <!-- Pending Rules (need human review) -->
         <% if (pendingRules.length > 0) { %>
             <h3 class="section-title">Pending Rules (Awaiting Review)</h3>
@@ -300,9 +370,21 @@
                             <div class="btn-group">
                                 <button class="btn success" onclick="reviewRule('<%= rule.id %>', 'accepted')">Accept</button>
                                 <button class="btn danger" onclick="reviewRule('<%= rule.id %>', 'rejected')">Reject</button>
+                                <% if (rule.source === 'system') { %>
+                                    <button class="btn secondary" type="button" onclick="toggleRuleExamples('<%= rule.id %>', this)">Examples</button>
+                                <% } %>
                             </div>
                         </td>
                     </tr>
+                    <% if (rule.source === 'system') { %>
+                        <tr class="examples-row" id="rule-examples-row-<%= rule.id %>" style="display:none;">
+                            <td colspan="7">
+                                <div class="examples-panel" id="rule-examples-<%= rule.id %>">
+                                    <div class="small">Loading examples...</div>
+                                </div>
+                            </td>
+                        </tr>
+                    <% } %>
                 <% }) %>
                 </tbody>
             </table>
@@ -452,6 +534,123 @@
     </div>
 
     <script>
+        const ruleExamplesPayload = <%- jsonForScript(pendingRuleExamplePayload) %>;
+        const ruleExamplesById = new Map(ruleExamplesPayload.map((rule) => [String(rule.id), rule]));
+        const loadedRuleExamples = new Set();
+
+        function escapeHtml(value) {
+            return String(value || '')
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
+        function basename(value) {
+            return String(value || '').split(/[\\/]/).pop() || 'N/A';
+        }
+
+        async function toggleRuleExamples(ruleId, button) {
+            const row = document.getElementById(`rule-examples-row-${ruleId}`);
+            const container = document.getElementById(`rule-examples-${ruleId}`);
+            const rule = ruleExamplesById.get(String(ruleId));
+            if (!row || !container || !rule) return;
+
+            const opening = row.style.display === 'none';
+            row.style.display = opening ? '' : 'none';
+            if (!opening || loadedRuleExamples.has(String(ruleId))) return;
+
+            const originalText = button ? button.textContent : '';
+            if (button) {
+                button.disabled = true;
+                button.textContent = 'Loading';
+            }
+
+            try {
+                const params = new URLSearchParams({
+                    original_text: rule.original_text || '',
+                    corrected_text: rule.corrected_text || '',
+                    submission_ids: (rule.submission_ids || []).join(','),
+                    limit: '8',
+                });
+                const response = await fetch(`/api/learning/rule-examples?${params.toString()}`);
+                const payload = await response.json().catch(() => ({}));
+                if (!response.ok) {
+                    throw new Error(payload.error || 'Failed to load examples');
+                }
+                renderRuleExamples(container, rule, payload);
+                loadedRuleExamples.add(String(ruleId));
+            } catch (error) {
+                container.innerHTML = `<div class="examples-note">${escapeHtml(error.message || 'Failed to load examples')}</div>`;
+            } finally {
+                if (button) {
+                    button.disabled = false;
+                    button.textContent = originalText || 'Examples';
+                }
+            }
+        }
+
+        function renderRuleExamples(container, rule, payload) {
+            const examples = Array.isArray(payload.examples) ? payload.examples : [];
+            const errors = Array.isArray(payload.errors) ? payload.errors : [];
+            const intro = [
+                'Evidence source: differ compared the stored AI draft DOCX with an eligible human-reviewed final approval DOCX.',
+                'Use these snippets to confirm the proposal came from the post-AI human approval path before accepting it globally.',
+            ].join(' ');
+
+            if (examples.length === 0) {
+                const errorText = errors.length ? ` ${errors.length} submission(s) could not be read.` : '';
+                container.innerHTML = `<div class="examples-note">${escapeHtml(intro)}</div><div class="empty">No matching examples were reconstructed.${escapeHtml(errorText)}</div>`;
+                return;
+            }
+
+            const exampleHtml = examples.map((example) => {
+                const submissionName = example.submission_display_name || example.submission_id || 'Unknown submission';
+                const submissionDetail = example.submission_display_detail ? `<div>${escapeHtml(example.submission_display_detail)}</div>` : '';
+                const tokenChanges = (example.token_changes || [])
+                    .map((change) => `${change.from || ''} -> ${change.to || ''}`)
+                    .join(', ');
+                const changesFlag = example.submission_changes_made === true
+                    ? 'changes_made: true'
+                    : example.submission_changes_made === false
+                        ? 'changes_made: false'
+                        : 'changes_made: unknown';
+                return `
+                    <div class="example-item">
+                        <div class="example-meta">
+                            <div>
+                                <a href="/learning/submission/${encodeURIComponent(example.submission_id || '')}">${escapeHtml(submissionName)}</a>
+                                ${submissionDetail}
+                            </div>
+                            <div>
+                                <div>${example.timestamp ? escapeHtml(new Date(example.timestamp).toLocaleString()) : 'N/A'}</div>
+                                <div>Status: <code>${escapeHtml(example.submission_status || 'unknown')}</code>; <code>${escapeHtml(changesFlag)}</code></div>
+                                <div>AI draft: <code>${escapeHtml(basename(example.ai_draft_path))}</code></div>
+                                <div>Final approved: <code>${escapeHtml(basename(example.final_path))}</code></div>
+                            </div>
+                        </div>
+                        ${tokenChanges ? `<div class="small" style="margin-bottom:.45rem;">Token change: ${escapeHtml(tokenChanges)}</div>` : ''}
+                        <div class="example-lines">
+                            <div>
+                                <div class="example-label">AI Draft Line</div>
+                                <div class="example-line">${escapeHtml(example.before_line)}</div>
+                            </div>
+                            <div>
+                                <div class="example-label">Final Approved Line</div>
+                                <div class="example-line">${escapeHtml(example.after_line)}</div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+
+            const errorNote = errors.length
+                ? `<div class="examples-note">${escapeHtml(errors.length)} referenced submission(s) could not be read.</div>`
+                : '';
+            container.innerHTML = `<div class="examples-note">${escapeHtml(intro)}</div>${errorNote}${exampleHtml}`;
+        }
+
         async function reviewRule(ruleId, newStatus) {
             try {
                 const response = await fetch(`/api/learning/correction-rules/${ruleId}`, {

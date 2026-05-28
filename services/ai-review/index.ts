@@ -26,6 +26,158 @@ const AI_REVIEW_MODEL = process.env.AI_REVIEW_MODEL || 'gpt-4o-mini';
 app.use(express.json());
 app.use(requireInternalServiceAuth);
 
+type DishQualityVerdict = 'dish' | 'not_dish' | 'uncertain';
+type DishQualityConfidence = 'high' | 'medium' | 'low';
+
+type DishQualityCheckRow = {
+    index: number;
+    dishName?: string;
+    description?: string;
+    category?: string;
+    servicePeriod?: string;
+    price?: string;
+    allergens?: string[];
+    qualityIssues?: Array<{ code?: string; reason?: string; severity?: string }>;
+    sourceContext?: {
+        sourceLine?: string;
+        previousLine?: string;
+        nextLine?: string;
+        context?: string;
+    };
+};
+
+export type DishQualityAiResult = {
+    index: number;
+    verdict: DishQualityVerdict;
+    confidence: DishQualityConfidence;
+    reason: string;
+};
+
+function hasConfiguredOpenAIKey(): boolean {
+    return !!process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY !== 'your-openai-api-key-here';
+}
+
+function normalizeVerdict(value: unknown): DishQualityVerdict {
+    if (value === 'dish' || value === 'not_dish' || value === 'uncertain') {
+        return value;
+    }
+    return 'uncertain';
+}
+
+function normalizeConfidence(value: unknown): DishQualityConfidence {
+    if (value === 'high' || value === 'medium' || value === 'low') {
+        return value;
+    }
+    return 'low';
+}
+
+function uncertainResult(index: number, reason = 'AI response was unavailable or invalid.'): DishQualityAiResult {
+    return {
+        index,
+        verdict: 'uncertain',
+        confidence: 'low',
+        reason,
+    };
+}
+
+function extractJsonObject(text: string): any {
+    const trimmed = `${text || ''}`.trim();
+    const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+    const jsonText = fenced ? fenced[1] : trimmed;
+    return JSON.parse(jsonText);
+}
+
+export function parseDishQualityAiResponse(content: string, rows: DishQualityCheckRow[]): DishQualityAiResult[] {
+    try {
+        const parsed = extractJsonObject(content);
+        const rawResults = Array.isArray(parsed?.results) ? parsed.results : [];
+        const byIndex = new Map<number, DishQualityAiResult>();
+
+        for (const result of rawResults) {
+            const index = Number(result?.index);
+            if (!Number.isInteger(index)) {
+                continue;
+            }
+            byIndex.set(index, {
+                index,
+                verdict: normalizeVerdict(result?.verdict),
+                confidence: normalizeConfidence(result?.confidence),
+                reason: `${result?.reason || ''}`.trim() || 'No reason provided.',
+            });
+        }
+
+        return rows.map((row) => byIndex.get(Number(row.index)) || uncertainResult(Number(row.index), 'AI response omitted this row.'));
+    } catch {
+        return rows.map((row) => uncertainResult(Number(row.index), 'AI response was not valid JSON.'));
+    }
+}
+
+function buildDishQualityPrompt(input: {
+    property?: string;
+    servicePeriod?: string;
+    rows: DishQualityCheckRow[];
+}): string {
+    return [
+        'You are reviewing extracted restaurant menu rows before they are saved as approved dishes.',
+        'Return JSON only with shape {"results":[{"index":number,"verdict":"dish|not_dish|uncertain","confidence":"high|medium|low","reason":"short reason"}]}.',
+        'Use "dish" for real menu items, including beverages and simple protein options like a fajita protein with a price.',
+        'Use "not_dish" for pricing grids, instructions, category headings, package/course labels, allergen legends, and rows that are clearly not orderable items.',
+        'Use "uncertain" when context is insufficient or a row may be a legitimate unusual menu item.',
+        'Only use high confidence when the evidence is obvious.',
+        '',
+        `Property: ${input.property || 'Unknown'}`,
+        `Service period: ${input.servicePeriod || 'Unknown'}`,
+        '',
+        'Rows to review:',
+        JSON.stringify(input.rows, null, 2),
+    ].join('\n');
+}
+
+app.post('/approved-dishes/quality-check', async (req, res) => {
+    const rows = Array.isArray(req.body?.rows) ? req.body.rows.slice(0, 100) as DishQualityCheckRow[] : [];
+    if (rows.length === 0) {
+        return res.status(400).json({ error: 'rows are required' });
+    }
+
+    if (!hasConfiguredOpenAIKey()) {
+        return res.status(503).json({ error: 'OpenAI API key not configured' });
+    }
+
+    try {
+        const prompt = buildDishQualityPrompt({
+            property: `${req.body?.property || ''}`.trim(),
+            servicePeriod: `${req.body?.servicePeriod || ''}`.trim(),
+            rows,
+        });
+
+        const response = await openai.createChatCompletion({
+            model: AI_REVIEW_MODEL,
+            temperature: 0,
+            messages: [
+                {
+                    role: 'system',
+                    content: 'You classify extracted menu rows. Respond with strict JSON only.',
+                },
+                {
+                    role: 'user',
+                    content: prompt,
+                },
+            ],
+        });
+
+        const content = response.data.choices[0].message?.content || '';
+        res.json({
+            results: parseDishQualityAiResponse(content, rows),
+        });
+    } catch (error: any) {
+        console.error('Error during approved dish quality check:', error.message);
+        res.status(500).json({
+            error: 'Error performing approved dish quality check',
+            message: error.message,
+        });
+    }
+});
+
 /**
  * QA Check Endpoint - Used by parser to run pre-check validation
  * This runs the same QA prompt that chefs should use before submitting

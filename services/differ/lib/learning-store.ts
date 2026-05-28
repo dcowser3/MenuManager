@@ -1,6 +1,18 @@
 import { promises as fs } from 'fs';
 import * as path from 'path';
 
+export const HUMAN_REVIEW_COMPARISON_SOURCE = 'human_review_final_approval';
+
+export type LearningTrainingEntryLike = {
+    submission_id?: string;
+    timestamp?: string;
+    ai_draft_path?: string;
+    final_path?: string;
+    comparison_source?: string;
+    changed_by_human?: boolean;
+    learning_eligible?: boolean;
+};
+
 export type LearningSubmissionDeleteResult = {
     submission_id: string;
     deleted_entries: number;
@@ -17,6 +29,79 @@ export function assertValidLearningSubmissionId(submissionId: string): string {
         throw error;
     }
     return normalized;
+}
+
+function normalizeKeyPart(value: unknown): string {
+    return `${value || ''}`.trim().toLowerCase();
+}
+
+export function buildLearningComparisonKey(entry: LearningTrainingEntryLike): string {
+    const submissionId = normalizeKeyPart(entry.submission_id);
+    const comparisonSource = normalizeKeyPart(entry.comparison_source) || 'legacy';
+
+    if (submissionId) {
+        return JSON.stringify([submissionId, comparisonSource]);
+    }
+
+    return JSON.stringify([
+        comparisonSource,
+        `${entry.ai_draft_path || ''}`.trim(),
+        `${entry.final_path || ''}`.trim(),
+    ]);
+}
+
+export function isHumanReviewLearningEntry(entry: LearningTrainingEntryLike): boolean {
+    return entry.learning_eligible === true &&
+        entry.changed_by_human === true &&
+        normalizeKeyPart(entry.comparison_source) === HUMAN_REVIEW_COMPARISON_SOURCE;
+}
+
+export function upsertTrainingEntry<T extends LearningTrainingEntryLike>(
+    entries: T[],
+    nextEntry: T
+): { entries: T[]; replaced_entries: number } {
+    const nextKey = buildLearningComparisonKey(nextEntry);
+    const retained: T[] = [];
+    let replacedEntries = 0;
+
+    for (const entry of entries) {
+        if (buildLearningComparisonKey(entry) === nextKey) {
+            replacedEntries += 1;
+            continue;
+        }
+        retained.push(entry);
+    }
+
+    retained.push(nextEntry);
+    return {
+        entries: retained,
+        replaced_entries: replacedEntries,
+    };
+}
+
+export function dedupeTrainingEntries<T extends LearningTrainingEntryLike>(entries: T[]): T[] {
+    const latestByKey = new Map<string, T>();
+
+    for (const entry of entries) {
+        const key = buildLearningComparisonKey(entry);
+        const existing = latestByKey.get(key);
+        if (!existing) {
+            latestByKey.set(key, entry);
+            continue;
+        }
+
+        const existingTs = new Date(existing.timestamp || 0).getTime();
+        const entryTs = new Date(entry.timestamp || 0).getTime();
+        if (entryTs >= existingTs) {
+            latestByKey.set(key, entry);
+        }
+    }
+
+    return Array.from(latestByKey.values());
+}
+
+export function getLearningAggregationEntries<T extends LearningTrainingEntryLike>(entries: T[]): T[] {
+    return dedupeTrainingEntries(entries.filter(isHumanReviewLearningEntry));
 }
 
 export async function deleteLearningSubmissionFromFiles(input: {

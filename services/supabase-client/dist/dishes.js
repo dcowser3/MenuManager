@@ -5,6 +5,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.createDish = createDish;
 exports.createDishes = createDishes;
+exports.replaceDishesForSubmission = replaceDishesForSubmission;
 exports.getDish = getDish;
 exports.searchDishes = searchDishes;
 exports.getDishesByProperty = getDishesByProperty;
@@ -67,6 +68,20 @@ async function createDishes(inputs) {
         throw new Error(`Failed to create dishes: ${error.message}`);
     }
     return data;
+}
+/**
+ * Replace all dishes for a submission with a new extraction result.
+ */
+async function replaceDishesForSubmission(submissionId, inputs) {
+    const supabase = (0, client_1.getSupabaseClient)();
+    const { error: deactivateError } = await supabase
+        .from(TABLE)
+        .update({ is_active: false })
+        .eq('source_submission_id', submissionId);
+    if (deactivateError) {
+        throw new Error(`Failed to replace dishes for submission: ${deactivateError.message}`);
+    }
+    return createDishes(inputs);
 }
 /**
  * Get a dish by ID

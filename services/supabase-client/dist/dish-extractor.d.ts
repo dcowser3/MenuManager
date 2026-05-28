@@ -4,16 +4,42 @@
  * Extracts individual dishes from approved menu content
  * and stores them in the approved_dishes table
  */
+import { CreateDishInput } from './types';
+import { DishQualityResult, DishSourceContext } from './dish-quality';
 /**
  * Extracted dish from menu parsing
  */
-interface ExtractedDish {
+export interface ExtractedDish {
     name: string;
     description?: string;
     price?: string;
     allergens: string[];
     category?: string;
     usedNextLineAsDescription?: boolean;
+}
+export interface PreparedApprovedDish {
+    index: number;
+    extracted: ExtractedDish;
+    input: CreateDishInput;
+    quality: DishQualityResult;
+    sourceContext: DishSourceContext;
+    excludedByRule: boolean;
+}
+export interface StorePreparedDishesOptions {
+    replaceExisting?: boolean;
+    excludeIndexes?: Set<number>;
+}
+export interface ExtractAndStoreDishesOptions {
+    servicePeriod?: string;
+    replaceExisting?: boolean;
+    excludeIndexes?: Set<number>;
+}
+export interface ExtractAndStoreDishesResult {
+    added: number;
+    extracted: number;
+    skipped: number;
+    qualityReviewCount: number;
+    excludedByRuleCount: number;
 }
 export declare function normalizeDishPriceForProperty(price: string | undefined, property?: string): string | undefined;
 export declare function isPrixFixeServicePeriod(servicePeriod: string | undefined): boolean;
@@ -33,14 +59,13 @@ export declare function extractDishesFromText(menuContent: string): ExtractedDis
  * @param submissionId - The source submission ID
  * @returns Number of dishes added
  */
-export declare function extractAndStoreDishes(menuContent: string, property: string, submissionId: string, options?: {
+export declare function extractAndStoreDishes(menuContent: string, property: string, submissionId: string, options?: ExtractAndStoreDishesOptions): Promise<ExtractAndStoreDishesResult>;
+export declare function prepareApprovedDishInputs(menuContent: string, property: string, submissionId: string, options?: {
     servicePeriod?: string;
-}): Promise<{
-    added: number;
-}>;
+}): PreparedApprovedDish[];
+export declare function storePreparedApprovedDishes(prepared: PreparedApprovedDish[], submissionId: string, options?: StorePreparedDishesOptions): Promise<ExtractAndStoreDishesResult>;
 /**
  * Extract dishes without storing (for preview/testing)
  */
 export declare function previewDishExtraction(menuContent: string): ExtractedDish[];
-export {};
 //# sourceMappingURL=dish-extractor.d.ts.map

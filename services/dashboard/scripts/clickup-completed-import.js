@@ -8,6 +8,8 @@ const { promisify } = require('util');
 const axios = require('axios');
 const dotenv = require('dotenv');
 const {
+    analyzeApprovedDishQuality,
+    buildDishQualityContext,
     createDishes,
     getSupabaseClient,
     normalizeDishPriceForStorage,
@@ -520,6 +522,27 @@ async function loadPropertyCatalog() {
     return data || [];
 }
 
+function buildExtractedDishQualityWarnings(row) {
+    const dishes = (row.extractedDishes || []).map((dish) => ({
+        dish_name: dish.name,
+        property: row.property,
+        service_period: row.servicePeriod,
+        menu_category: dish.category,
+        description: dish.description,
+        price: normalizeDishPriceForStorage(dish.price, row.property, row.servicePeriod),
+        allergens: dish.allergens || [],
+        source_submission_id: row.taskId || row.importedSubmissionId || '',
+    }));
+    const context = buildDishQualityContext(dishes);
+    const hasExclude = dishes.some((dish) => analyzeApprovedDishQuality(dish, context).disposition === 'exclude');
+    const hasHighIssue = dishes.some((dish) => analyzeApprovedDishQuality(dish, context).issues.some((issue) => issue.severity === 'high'));
+
+    return {
+        hasExclude,
+        hasHighIssue,
+    };
+}
+
 function buildWarnings(row) {
     const warnings = [];
     if (!row.docxAttachmentName) warnings.push('no_docx');
@@ -530,6 +553,11 @@ function buildWarnings(row) {
     if (row.propertyAlternatives.length) warnings.push('property_ambiguous');
     if (row.extractionError) warnings.push('extraction_failed');
     if (row.extractionAttempted && row.extractedDishCount === 0 && row.docxAttachmentName) warnings.push('zero_dishes');
+    if (row.extractionAttempted && row.extractedDishCount > 0) {
+        const quality = buildExtractedDishQualityWarnings(row);
+        if (quality.hasExclude) warnings.push('dish_quality_exclude');
+        if (quality.hasHighIssue) warnings.push('dish_quality_high');
+    }
     if (!row.isNewestForPropertyService && row.property && row.servicePeriod) warnings.push('not_newest_for_property_service');
     return warnings;
 }

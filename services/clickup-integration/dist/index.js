@@ -1087,6 +1087,10 @@ async function finalizeApprovedSubmission(input) {
         ai_draft_path: submission.ai_draft_path,
         final_path: input.approvedPath,
         submission_id: submission.id,
+        comparison_source: 'human_review_final_approval',
+        review_source: input.approvedAssetSource || 'isabella_clickup',
+        review_completed_at: new Date().toISOString(),
+        changed_by_human: true,
     }).catch((err) => console.error('Failed to trigger differ comparison:', err.message));
     try {
         await extractApprovedDishesForSubmission({

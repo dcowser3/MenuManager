@@ -33,10 +33,17 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.HUMAN_REVIEW_COMPARISON_SOURCE = void 0;
 exports.assertValidLearningSubmissionId = assertValidLearningSubmissionId;
+exports.buildLearningComparisonKey = buildLearningComparisonKey;
+exports.isHumanReviewLearningEntry = isHumanReviewLearningEntry;
+exports.upsertTrainingEntry = upsertTrainingEntry;
+exports.dedupeTrainingEntries = dedupeTrainingEntries;
+exports.getLearningAggregationEntries = getLearningAggregationEntries;
 exports.deleteLearningSubmissionFromFiles = deleteLearningSubmissionFromFiles;
 const fs_1 = require("fs");
 const path = __importStar(require("path"));
+exports.HUMAN_REVIEW_COMPARISON_SOURCE = 'human_review_final_approval';
 function assertValidLearningSubmissionId(submissionId) {
     const normalized = `${submissionId || ''}`.trim();
     if (!normalized || !/^[A-Za-z0-9_-]+$/.test(normalized)) {
@@ -45,6 +52,63 @@ function assertValidLearningSubmissionId(submissionId) {
         throw error;
     }
     return normalized;
+}
+function normalizeKeyPart(value) {
+    return `${value || ''}`.trim().toLowerCase();
+}
+function buildLearningComparisonKey(entry) {
+    const submissionId = normalizeKeyPart(entry.submission_id);
+    const comparisonSource = normalizeKeyPart(entry.comparison_source) || 'legacy';
+    if (submissionId) {
+        return JSON.stringify([submissionId, comparisonSource]);
+    }
+    return JSON.stringify([
+        comparisonSource,
+        `${entry.ai_draft_path || ''}`.trim(),
+        `${entry.final_path || ''}`.trim(),
+    ]);
+}
+function isHumanReviewLearningEntry(entry) {
+    return entry.learning_eligible === true &&
+        entry.changed_by_human === true &&
+        normalizeKeyPart(entry.comparison_source) === exports.HUMAN_REVIEW_COMPARISON_SOURCE;
+}
+function upsertTrainingEntry(entries, nextEntry) {
+    const nextKey = buildLearningComparisonKey(nextEntry);
+    const retained = [];
+    let replacedEntries = 0;
+    for (const entry of entries) {
+        if (buildLearningComparisonKey(entry) === nextKey) {
+            replacedEntries += 1;
+            continue;
+        }
+        retained.push(entry);
+    }
+    retained.push(nextEntry);
+    return {
+        entries: retained,
+        replaced_entries: replacedEntries,
+    };
+}
+function dedupeTrainingEntries(entries) {
+    const latestByKey = new Map();
+    for (const entry of entries) {
+        const key = buildLearningComparisonKey(entry);
+        const existing = latestByKey.get(key);
+        if (!existing) {
+            latestByKey.set(key, entry);
+            continue;
+        }
+        const existingTs = new Date(existing.timestamp || 0).getTime();
+        const entryTs = new Date(entry.timestamp || 0).getTime();
+        if (entryTs >= existingTs) {
+            latestByKey.set(key, entry);
+        }
+    }
+    return Array.from(latestByKey.values());
+}
+function getLearningAggregationEntries(entries) {
+    return dedupeTrainingEntries(entries.filter(isHumanReviewLearningEntry));
 }
 async function deleteLearningSubmissionFromFiles(input) {
     const normalizedId = assertValidLearningSubmissionId(input.submissionId);

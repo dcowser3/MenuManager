@@ -2,7 +2,7 @@
 
 **Status:** Implemented (Phase 1, Feb 2026)
 
-This feature captures human reviewer corrections and feeds stable correction patterns back into the AI QA prompt automatically.
+This feature captures human reviewer corrections and feeds stable correction patterns back into the Basic AI Check through human-reviewed correction rules.
 
 ## What Is Automated
 
@@ -10,20 +10,23 @@ This feature captures human reviewer corrections and feeds stable correction pat
 2. `clickup-integration` calls `differ` (`POST /compare`) with:
    - AI draft path
    - Reviewer final DOCX path
+   - `comparison_source: "human_review_final_approval"` and `changed_by_human: true`
 3. `differ` extracts replacement signals (`from -> to`) from AI-vs-final text deltas.
 4. `differ` aggregates historical signals into `tmp/learning/learned_rules.json` with:
    - occurrences
    - submission count
    - dominance/conflict scoring
    - confidence
-5. Dashboard basic check fetches `GET /learning/overlay` from `differ` and appends learned rules to the QA prompt before calling `ai-review`.
+5. Dashboard surfaces system-proposed rules for human review. Accepted correction rules are available to the Basic AI Check deterministic pre-AI pass before `ai-review` is called; they are no longer appended as an automatic prompt overlay.
+
+The differ skips learning for quick approvals, imports/backfills, AI-only changes, missing provenance flags, and final DOCX files that are identical to the AI draft. Eligible training entries are upserted by submission/source before aggregation so repeated finalization cannot inflate occurrences.
 
 ## New Differ Endpoints
 
 - `GET /learning/rules`
   - Returns full learned-rules snapshot (active, weak, conflicted).
 - `GET /learning/overlay`
-  - Returns a prompt-ready snippet built from active rules only.
+  - Deprecated in v2. The endpoint returns an empty overlay; accepted rules now flow through the `correction_rules` table and deterministic pre-AI checks.
 - `GET /learning/overrides`
   - Returns manual disable overrides for specific learned rules.
 - `POST /learning/overrides`
@@ -36,8 +39,7 @@ This feature captures human reviewer corrections and feeds stable correction pat
 
 - Route: `GET /learning` (dashboard service)
 - Displays learned rules with confidence, status, and activity
-- Allows manual enable/disable controls
-- Disable actions are persisted as differ overrides and excluded from prompt overlay
+- Displays pending `correction_rules` for accept/reject review and accepted rules that can feed deterministic pre-AI checks
 - Shows recent training ingestions (submission id, timestamp, changes, change %) for auditability
 - Shows a connectivity warning when dashboard cannot reach differ endpoints
 - Each submission row links to `GET /learning/submission/:submissionId` for manual correction review
@@ -60,7 +62,7 @@ This feature captures human reviewer corrections and feeds stable correction pat
   - restaurant name
   - global scope, or a primary location when the rule is marked location-specific
   - additional configured locations that should share the same location-specific rule
-- Data is saved as reviewer correction-rule annotations for weekly manual prompt review, not auto-injected into prompt.
+- Data is saved as reviewer correction-rule annotations. Accepted exact spelling, diacritic, terminology, grammar, and punctuation rules can be applied by the Basic AI Check deterministic pre-AI pass when the rule scope matches the submitted property.
 - The learning submission page stores correction context in page-level script data and has `Save Rule` buttons reference corrections by index, so quoted dish text cannot break the button markup.
 
 ### APIs
@@ -81,8 +83,8 @@ This feature captures human reviewer corrections and feeds stable correction pat
   - low-signal mismatches
 - Replacement extraction uses line-diff alignment first (instead of raw same-line-index comparison) to reduce false mappings when line numbers shift.
 - Rules must meet minimum occurrences (`LEARNING_MIN_OCCURRENCES`, default `2`).
-- Low-dominance mappings are marked `conflicted` and excluded from prompt overlay.
-- Dashboard fails open: if `differ` is unavailable, AI check still runs without overlay.
+- Low-dominance mappings are marked `conflicted` and are not proposed as accepted deterministic rules.
+- Dashboard fails open: if accepted correction rules cannot be loaded from the DB service, Basic AI Check still runs deterministic built-in checks and AI review without learned-rule replacements.
 - Deletion-only edits may be counted as document changes but may not generate replacement rules (`from -> to`) on their own.
 
 ## Startup Behavior
@@ -93,11 +95,12 @@ This feature captures human reviewer corrections and feeds stable correction pat
 ## Environment Knobs
 
 - `LEARNING_MIN_OCCURRENCES` (default `2`)
-- `LEARNING_MAX_OVERLAY_RULES` (default `25`)
+- `BASIC_AI_PRECHECK_DISABLED=true` disables the Basic AI Check deterministic pre-AI pass for A/B testing.
+- `BASIC_AI_LEARNED_PRECHECK_DISABLED=true` keeps built-in deterministic checks enabled but disables accepted correction-rule replacements.
+- `BASIC_AI_LEARNED_RULE_FETCH_TIMEOUT_MS` controls how long the dashboard waits for accepted correction rules before failing open.
+- `npm run preai:ab-replay` runs an offline paired-DOCX replay of deterministic pre-AI checks against the curated `Training Menus` human/redlined targets and writes a report under `tmp/pre-ai-ab-replay/`. Use `-- --source all` to include broader sample pairs.
 
 ## Not Yet Implemented (Future Phases)
 
 - Automatic direct edits to `qa_prompt.txt`
-- Human approval workflow for promoting weak/conflicted rules
-- Supabase persistence for learning artifacts (currently local under `tmp/learning`)
 - Semantic correction extraction beyond token replacements

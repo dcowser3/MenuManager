@@ -43,4 +43,25 @@ describe('learning replacement signal extraction', () => {
             }),
         ]));
     });
+    test('reconstructs example lines for a proposed replacement rule', () => {
+        const aiDraft = [
+            'Tuna Tostada, avocado, watermelon radishes, lime 18',
+            'Green Salad, cucumber, radishes, pepita vinaigrette 14',
+        ].join('\n');
+        const final = [
+            'Tuna Tostada, avocado, watermelon radish, lime 18',
+            'Green Salad, cucumber, radish, pepita vinaigrette 14',
+        ].join('\n');
+        const examples = (0, learning_signals_1.extractReplacementExamples)(aiDraft, final, 'radishes', 'radish');
+        expect(examples).toHaveLength(2);
+        expect(examples[0]).toEqual(expect.objectContaining({
+            before_line: 'Tuna Tostada, avocado, watermelon radishes, lime 18',
+            after_line: 'Tuna Tostada, avocado, watermelon radish, lime 18',
+            token_changes: [expect.objectContaining({ from: 'radishes', to: 'radish' })],
+        }));
+        expect(examples[1]).toEqual(expect.objectContaining({
+            before_line: 'Green Salad, cucumber, radishes, pepita vinaigrette 14',
+            after_line: 'Green Salad, cucumber, radish, pepita vinaigrette 14',
+        }));
+    });
 });

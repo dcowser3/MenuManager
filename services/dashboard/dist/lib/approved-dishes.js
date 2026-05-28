@@ -64,9 +64,67 @@ function slugifyApprovedDishBrand(value) {
         .replace(/^-+|-+$/g, '');
     return slug || 'unknown-brand';
 }
-function normalizeSourceDish(row) {
+function formatDateLabel(value) {
+    if (!value)
+        return '';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime()))
+        return '';
+    return date.toISOString().slice(0, 10);
+}
+function extractClickUpTaskUrl(row) {
+    const payload = row?.raw_payload || {};
+    return `${payload?.clickupHistoryImport?.taskUrl || payload?.clickupTaskUrl || ''}`.trim();
+}
+function buildSourceInfo(sourceRow, sourceSubmissionId) {
+    const id = `${sourceRow?.id || sourceSubmissionId || ''}`.trim();
+    const filename = `${sourceRow?.filename || ''}`.trim();
+    const projectName = `${sourceRow?.project_name || ''}`.trim();
+    const legacyId = `${sourceRow?.legacy_id || ''}`.trim();
+    const sourceType = `${sourceRow?.source || ''}`.trim();
+    const clickupTaskId = `${sourceRow?.clickup_task_id || ''}`.trim();
+    const reviewedAt = `${sourceRow?.reviewed_at || ''}`.trim();
+    const updatedAt = `${sourceRow?.updated_at || ''}`.trim();
+    const fallbackId = id ? id.slice(0, 8) : '';
+    const label = filename || projectName || legacyId || fallbackId || 'Unknown source';
+    const detailParts = [
+        projectName && projectName !== label ? projectName : '',
+        sourceType,
+        clickupTaskId ? `ClickUp ${clickupTaskId}` : '',
+        formatDateLabel(reviewedAt || updatedAt),
+    ].filter(Boolean);
+    return {
+        id,
+        legacyId,
+        projectName,
+        filename,
+        sourceType,
+        clickupTaskId,
+        clickupTaskUrl: extractClickUpTaskUrl(sourceRow),
+        reviewedAt,
+        updatedAt,
+        label,
+        detail: detailParts.join(' | '),
+    };
+}
+function normalizeSourceDish(row, options) {
     const property = `${row.property || ''}`.trim() || 'Unknown Property';
     const brand = deriveBrandFromProperty(property);
+    const sourceSubmissionId = `${row.source_submission_id || ''}`.trim();
+    const sourceRow = sourceSubmissionId ? options.sourceById.get(sourceSubmissionId) : undefined;
+    const qualityInput = {
+        id: row.id,
+        dish_name: row.dish_name,
+        property: row.property,
+        service_period: row.service_period,
+        menu_category: row.menu_category,
+        description: row.description,
+        price: row.price,
+        allergens: row.allergens,
+        source_submission_id: row.source_submission_id,
+    };
+    const quality = (0, supabase_client_1.analyzeApprovedDishQuality)(qualityInput, options.qualityContext);
+    const sourceText = `${sourceRow?.approved_menu_content || sourceRow?.menu_content || ''}`;
     return {
         id: `${row.id || ''}`.trim(),
         dishName: `${row.dish_name || ''}`.trim(),
@@ -81,7 +139,14 @@ function normalizeSourceDish(row) {
         allergens: Array.isArray(row.allergens)
             ? row.allergens.map((allergen) => `${allergen || ''}`.trim()).filter(Boolean)
             : [],
-        sourceSubmissionId: `${row.source_submission_id || ''}`.trim(),
+        sourceSubmissionId,
+        source: buildSourceInfo(sourceRow, sourceSubmissionId),
+        quality: {
+            issues: quality.issues,
+            highestSeverity: quality.highestSeverity || '',
+            disposition: quality.disposition,
+        },
+        sourceContext: (0, supabase_client_1.findDishSourceContext)(sourceText, qualityInput),
         createdAt: `${row.created_at || ''}`.trim(),
     };
 }
@@ -95,6 +160,11 @@ function matchesDishSearch(dish, query) {
         dish.brand,
         dish.servicePeriod,
         dish.menuCategory,
+        dish.source.label,
+        dish.source.detail,
+        dish.sourceSubmissionId,
+        dish.quality.issues.map((issue) => issue.code).join(' '),
+        dish.quality.issues.map((issue) => issue.reason).join(' '),
         dish.price,
         dish.allergens.join(' '),
     ].join(' ').toLowerCase();
@@ -145,6 +215,57 @@ async function readLocalApprovedDishes(repoRoot) {
         throw error;
     }
 }
+async function readLocalSubmissions(repoRoot) {
+    const target = path.join(getLocalDbDir(repoRoot), 'submissions.json');
+    try {
+        const raw = await fs_1.promises.readFile(target, 'utf-8');
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed))
+            return parsed;
+        if (parsed && typeof parsed === 'object')
+            return Object.values(parsed);
+        return [];
+    }
+    catch (error) {
+        if (error?.code === 'ENOENT')
+            return [];
+        throw error;
+    }
+}
+async function loadSubmissionRows(repoRoot, sourceRows) {
+    const submissionIds = Array.from(new Set(sourceRows.map((row) => `${row.source_submission_id || ''}`.trim()).filter(Boolean)));
+    const sourceById = new Map();
+    if (submissionIds.length === 0) {
+        return sourceById;
+    }
+    if ((0, supabase_client_1.isSupabaseConfigured)()) {
+        const supabase = (0, supabase_client_1.getSupabaseClient)();
+        for (let offset = 0; offset < submissionIds.length; offset += PAGE_SIZE) {
+            const batch = submissionIds.slice(offset, offset + PAGE_SIZE);
+            const { data, error } = await supabase
+                .from('submissions')
+                .select('id, legacy_id, project_name, filename, clickup_task_id, source, service_period, reviewed_at, updated_at, approved_menu_content, menu_content, raw_payload')
+                .in('id', batch);
+            if (error) {
+                throw new Error(`Failed to load approved dish source submissions: ${error.message}`);
+            }
+            for (const row of data || []) {
+                if (row?.id) {
+                    sourceById.set(`${row.id}`, row);
+                }
+            }
+        }
+    }
+    else {
+        const localSubmissions = await readLocalSubmissions(repoRoot);
+        for (const row of localSubmissions) {
+            if (row?.id) {
+                sourceById.set(`${row.id}`, row);
+            }
+        }
+    }
+    return sourceById;
+}
 async function loadApprovedDishRows(repoRoot) {
     let sourceRows = [];
     if ((0, supabase_client_1.isSupabaseConfigured)()) {
@@ -170,9 +291,11 @@ async function loadApprovedDishRows(repoRoot) {
     else {
         sourceRows = await readLocalApprovedDishes(repoRoot);
     }
-    return sourceRows
-        .filter((row) => row.is_active !== false)
-        .map((row) => normalizeSourceDish(row))
+    const activeRows = sourceRows.filter((row) => row.is_active !== false);
+    const sourceById = await loadSubmissionRows(repoRoot, activeRows);
+    const qualityContext = (0, supabase_client_1.buildDishQualityContext)(activeRows);
+    return activeRows
+        .map((row) => normalizeSourceDish(row, { sourceById, qualityContext }))
         .filter((dish) => !!dish.dishName);
 }
 async function listApprovedDishBrands(repoRoot, query = '') {

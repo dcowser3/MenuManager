@@ -63,7 +63,7 @@
             const tbody = table.querySelector('tbody');
             if (!tbody) return;
 
-            let sortColumn = 0;
+            let sortColumn = 1;
             let sortDirection = 'asc';
 
             const applyTableState = () => {

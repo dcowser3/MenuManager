@@ -7,11 +7,10 @@ You MUST respond with EXACTLY this structure:
 ```
 === CORRECTED MENU ===
 [Return the full menu text with ALL high-confidence corrections applied. Make corrections for:
-- Spelling errors (see vocabulary rules below)
-- Missing or incorrect diacritical marks (see accents list below)
+- Remaining spelling errors not already fixed by deterministic pre-AI checks
+- Remaining missing or incorrect diacritical marks not already fixed by deterministic pre-AI checks
 - Clear typos
-- Allergen code formatting issues (including alphabetizing allergen codes)
-- Raw/undercooked item markers (*) — ADD the asterisk if missing on items that clearly need it (oysters, tartare, sushi, sashimi, ceviche, crudo, raw preparations, undercooked meats, runny eggs, etc.)
+- Raw/undercooked item markers (*) for ambiguous cases not already handled by deterministic pre-AI checks
 - Missing allergen codes when HIGH confidence based on visible ingredients (e.g., add V for vegetarian if dish clearly contains no meat/fish/seafood; add F for obvious fish dishes; add D for dishes with cheese/cream/butter)
 
 DO NOT make corrections for:
@@ -128,62 +127,15 @@ FOR THE TABLE, APPETIZERS, BITES, SALADS, SOUPS, FROM THE GRILL, SPECIALTIES, SI
 
 ---
 
-### 3. VOCABULARY & SPELLING (High Confidence Corrections)
+### 3. VOCABULARY & SPELLING
 
-Apply these spelling corrections automatically:
+Deterministic pre-AI checks already apply approved exact spelling replacements and accepted human correction rules before you receive the menu text. Do NOT re-report those already-applied deterministic edits as remaining suggestions.
 
-| Correct | Incorrect | Notes |
-|---------|-----------|-------|
-| barbecue | BBQ, barbeque | Always spell out |
-| aioli | mayo, mayonnaise | Use "aioli" instead; remove "mayo" if "aioli" already present |
-| Caesar | cesar, ceasar | Style of dressing |
-| chili | chile* | *Exception: Named chilis use Spanish "chile" (e.g., "chile de árbol") |
-| tartare | tartar* | *"Tartar" is condiment; "tartare" is raw protein dish |
-| mozzarella | mozarella | Double z, single r |
-| parmesan | parmesian | |
-| shiitake | shitake | Double i |
-| passion fruit | passionfruit | Two words |
-| yuzu kosho | yuzukosho, yuzu-kosho, khoso | Two words, no hyphen |
-| liqueur | liquor | For sweet alcoholic spirits |
-| dulce de leche | dulche de leche | Correct Spanish spelling |
-| dried chili | dry chili | Use "dried" not "dry" |
-| honeycomb | honey comb | One word |
-| housemade | house made, homemade | One word; use consistently throughout menu |
-| Caesar | Cesar, Ceasar | Correct spelling for salad/dressing |
-| chipotle | chipothle, chipotl | Correct spelling |
-| napa (cabbage) | nappa | Single p |
-| seafood | sea food | One word |
-| pak choy | pak coy | Correct spelling |
-| cashew | cashu | Correct spelling |
-| locally grown | local grown | Use adverb form |
-| jasmine (rice) | jasmin | Correct spelling |
-| meringue | merengue | English spelling (not Spanish) |
-| passion fruit | passion fruits | Singular form |
-| pickled (adjective) | pickles | Use adjective form before nouns: "pickled vegetables" |
-| brussels sprouts | brussels sprout | Always plural |
-| Singaporean-style | singaporean style | Capitalize nationality, hyphenate |
-| Brazil nuts | Brazilian nuts | Correct name (country, not nationality) |
-| chili | chilli | American English uses single l |
-| peppercorn | pepper corn | One word |
-
-**Nut names - remove redundant "nut":**
-- cashew (NOT cashew nut)
-- pine nut is an exception (keep "nut")
-
-**Brand names to capitalize:**
-- Maldon (salt)
-- Manchego (cheese)
-- Patrón (tequila)
-
-**Word order - adjective before noun:**
-- lump crab (NOT crab lump)
-- pickled red onion (NOT red pickled onion)
-- cream foam (NOT foam cream) - the base noun comes last
-- wasabi cream (NOT cream wasabi)
-
-**Remove redundant words:**
-- "sauce" after sauce names: "cajeta caramel" (NOT "cajeta caramel sauce"), "chocolate" (NOT "chocolate sauce")
-- But keep "sauce" when it's the main descriptor: "salsa verde", "chili sauce"
+Continue to review for contextual spelling or terminology issues that cannot be safely handled by exact replacement rules:
+- "chili" vs. "chile" depends on whether the phrase is an English ingredient/cooking term or a named Spanish chile.
+- "tartar" vs. "tartare" depends on whether the item is a condiment or a raw protein preparation.
+- "mayo" vs. "aioli" is not an absolute replacement; flag only when the menu context clearly supports the change.
+- Word order and redundant-word issues should be suggestions unless the correction is objective and high confidence.
 
 Additional terms:
 - FOODBORNE: Introduced through food (referring to illnesses)
@@ -192,47 +144,11 @@ Additional terms:
 
 ---
 
-### 4. ACCENTS & DIACRITICAL MARKS (High Confidence Corrections)
+### 4. ACCENTS & DIACRITICAL MARKS
 
-These words MUST use proper accents - apply automatically:
+Deterministic pre-AI checks already apply the approved high-confidence diacritic allowlist and accepted human-learned diacritic rules. Do NOT re-report those already-applied deterministic edits as remaining suggestions.
 
-| Without Accent | Correct Spelling |
-|----------------|------------------|
-| Açaí | Açaí |
-| Aji | Ají |
-| Albarino | Albariño |
-| Anejo | Añejo |
-| Cachaca | Cachaça |
-| Cafe | Café |
-| Camaron | Camarón |
-| Chicharron | Chicharrón |
-| Chile de Arbol | Chile de Árbol |
-| Cocteles | Cócteles |
-| Creme Brulee | Crème Brûlée |
-| Creme Fraiche | Crème Fraîche |
-| Crepes | Crêpes |
-| Entree | Entrée |
-| Flambeed | Flambéed |
-| Genoise | Génoise |
-| Jalapeno | Jalapeño |
-| Lena | Leña |
-| Mas | Más |
-| Nino | Niño |
-| Patron | Patrón |
-| Pina | Piña |
-| Pistou | Pistou |
-| Puree | Purée |
-| Rhone | Rhône |
-| Rose | Rosé |
-| Saute, Sauteed | Sauté, Sautéed |
-| Taquenos | Taqueños |
-| Tajin | Tajín |
-| Tampiquena | Tampiqueña |
-| Huancaina | Huancaína |
-| Aji panca | Ají panca |
-| Aji amarillo | Ají amarillo |
-
-**Inference rule**: Any Spanish, French, or Portuguese word that traditionally uses accents should retain them. When you see unaccented versions of these words, automatically apply the correct diacritical marks.
+Continue to flag remaining accent or diacritic issues only when they are contextual, uncertain, or outside the deterministic allowlist. Be careful with words that can be valid with or without accents depending on context, such as "rose"/"rosé", "mas"/"más", "patron"/"Patrón", and property/name cases like "Lena"/"Leña".
 
 ---
 
@@ -343,9 +259,10 @@ D dairy | G gluten | N nuts | S shellfish | V vegetarian | VG vegan
 ```
 
 #### 7.2 Formatting
-- Comma-separated, NO spaces
-- ALPHABETICAL order — auto-correct in the CORRECTED MENU (e.g., "G,D,N" → "D,G,N")
-- Example: `Dish Name D,G,N 18`
+- Deterministic pre-AI checks already normalize recognized trailing allergen clusters to uppercase, comma-separated, no spaces, and alphabetical order.
+- Do NOT re-report an allergen alphabetization/formatting edit that has already been applied.
+- Continue to review whether the codes themselves are missing or incorrect.
+- Example final format: `Dish Name D,G,N 18`
 
 #### 7.3 Ingredient-to-Allergen Mapping
 
@@ -433,7 +350,7 @@ Use this knowledge to identify missing allergen codes based on the document's al
 **EGGS**
 - Hollandaise & Bearnaise Sauces, Caesar Dressing (Traditional)
 - Sunny-Side-Up or Over-Easy Eggs, Fried & Soft-Boiled Eggs, Tiramisu
-- Any dish with "sunny side-up egg" needs * (runny yolk = undercooked)
+- Deterministic pre-AI checks already handle clear poached egg and sunny-side-up egg markers when the line has a safe allergen/price suffix; review remaining ambiguous egg preparations.
 - Cured egg yolk - needs * (curing does not fully cook)
 
 **OTHER**
@@ -443,26 +360,25 @@ Use this knowledge to identify missing allergen codes based on the document's al
 
 #### 8.2 Asterisk Placement Rules (CRITICAL)
 
-The asterisk (*) must be placed AFTER the last word of the description, BEFORE the allergen codes and price.
+Deterministic pre-AI checks already normalize existing raw asterisk placement and add missing markers for the strongest raw-item terms. Continue to review ambiguous raw/undercooked cases. If you add or preserve a marker, the asterisk (*) must be attached to the last word of the dish/description, BEFORE the allergen codes and price.
 
 **Correct placement patterns:**
 ```
 Dish Name, description* ALLERGENS PRICE
-Dish Name, description * ALLERGENS PRICE
 Dish Name* ALLERGENS PRICE
 ```
 
 **Examples:**
 - `First Kiss, yellowfin tuna, leche de tigre, ají amarillo, truffle oil, root chips, furikake* 24`
 - `Toro Love & Fire, 6oz Australian Wagyu filet mignon, jumbo prawns, guajillo–macha sauce* D,S 85`
-- `Angry Zengo, spicy tuna, avocado, lemon, yuzu kosho aioli * E,F,SE 78`
-- `Sashimi *F` (for sashimi items, asterisk goes before allergen)
-- `Chef's Selection Sushi and Tiradito *F`
+- `Angry Zengo, spicy tuna, avocado, lemon, yuzu kosho aioli* E,F,SE 78`
+- `Sashimi* F` (for sashimi items, asterisk goes before allergen)
+- `Chef's Selection Sushi and Tiradito* F`
 
 **Key rules:**
 1. Asterisk goes at END of description, not after dish name
-2. Space before asterisk is acceptable: `description *` or `description*`
-3. For items with only allergens (no description), asterisk goes before allergens: `Sashimi *F`
+2. Do not leave a space before the asterisk: use `description*`, not `description *`
+3. For items with only allergens (no description), asterisk goes before allergens: `Sashimi* F`
 4. Sushi/sashimi items need both * AND appropriate fish allergen (F)
 
 #### 8.3 Required Footer
@@ -475,10 +391,10 @@ Culinary pages MUST include:
 
 When reviewing menu text:
 
-1. **Check spelling** against vocabulary rules (Section 3) - HIGH CONFIDENCE
-2. **Apply accents** to all words that need them (Section 4) - HIGH CONFIDENCE
-3. **Validate allergen codes** are present, alphabetized, and correctly formatted (Section 7) - HIGH CONFIDENCE — auto-correct alphabetical order AND add missing allergen codes when ingredients make it obvious (e.g., add V for vegetarian dishes with no meat/fish/seafood, add F for fish dishes). Also include a suggestion so the reviewer sees the change.
-4. **Add raw/undercooked item asterisks** where missing (Section 8) - HIGH CONFIDENCE — auto-add the asterisk (*) in the CORRECTED MENU for items that clearly need it (oysters, tartare, sushi, ceviche, crudo, raw tuna, Wagyu, etc.). Also include a suggestion so the reviewer sees the change.
+1. **Check remaining spelling** after deterministic pre-AI replacements (Section 3)
+2. **Check remaining accents** after deterministic pre-AI replacements (Section 4)
+3. **Validate allergen codes** are present and correct (Section 7) - HIGH CONFIDENCE — formatting/alphabetization has already been normalized by code; add missing allergen codes only when ingredients make it obvious (e.g., add V for vegetarian dishes with no meat/fish/seafood, add F for fish dishes). Also include a suggestion so the reviewer sees the change.
+4. **Add raw/undercooked item asterisks** for ambiguous cases still missing after deterministic pre-AI checks (Section 8). Also include a suggestion so the reviewer sees the change.
 5. **Check plural/singular** usage (Section 6) - MEDIUM CONFIDENCE
 6. **Flag redundant words** (Section 5.2) - MEDIUM CONFIDENCE
 7. **Fix hyphenation** per rules (Section 5.1) - MEDIUM CONFIDENCE
@@ -490,17 +406,14 @@ When reviewing menu text:
 
 **When uncertain**: Flag for human review rather than making incorrect changes.
 
-**Pattern inference**: These rules are examples. Apply similar logic to unlisted items:
-- If "Jalapeno" needs an accent, so do other Spanish words with n
-- If "Mozzarella" is misspelled as "Mozarella", similar double-letter errors should be caught
-- If "passion fruit" is two words, apply similar logic to compound food terms
+**Pattern inference**: Deterministic replacements cover the approved exact lists. Use inference only for contextual or unlisted issues, and flag uncertain cases for human review.
 
 ---
 
 ## IMPORTANT GUIDELINES:
 
 - **CAPITALIZATION POLICY OVERRIDE (CRITICAL):** Do NOT make any capitalization changes anywhere in the menu — not in dish names, descriptions, categories, brand names, or anywhere else. Preserve the chef's capitalization exactly as written. Do not flag capitalization as a suggestion, do not auto-correct it in the CORRECTED MENU, and do not infer casing fixes through any other rule. This override applies even when other sections of these guidelines reference sentence case, lowercase, ALL CAPS, or specific words to capitalize/lowercase — those rules are suspended for case only. Spelling, accents, and other corrections still apply normally; only the casing of letters must be left alone.
-- Be aggressive with high-confidence corrections (spelling, accents, typos, obvious errors, allergen alphabetization, missing asterisks for raw items, missing allergen codes when ingredients make it obvious)
+- Be aggressive with remaining high-confidence corrections (typos, obvious errors, ambiguous raw items, missing allergen codes when ingredients make it obvious), but do not duplicate deterministic pre-AI edits.
 - When you auto-correct something non-trivial (like adding an asterisk, adding a missing allergen code, or reordering allergens), ALSO include a suggestion entry so the reviewer can see what was changed and why
 - Only include medium/low confidence items in the SUGGESTIONS section
 - Treat the allergen legend/footer and the standard foodborne illness warning/footer as protected boilerplate, not normal menu copy

@@ -18,9 +18,58 @@ export type ReplacementSignal = {
     line_index: number;
 };
 
+export type ReplacementExample = {
+    correction_id: string;
+    line_index: number;
+    before_line: string;
+    after_line: string;
+    token_changes: Array<{ from: string; to: string; kind: ReplacementSignal['kind'] }>;
+};
+
 export type LineDiffEdit = { type: 'equal' | 'delete' | 'insert'; lines: string[]; indices: number[] };
 type ModifiedLinePair = { beforeLine: string; afterLine: string; beforeLineIndex: number };
 type LinePairCandidate = { deleteIndex: number; insertIndex: number; score: number };
+
+export function extractReplacementExamples(aiDraft: string, final: string, from: string, to: string): ReplacementExample[] {
+    const fromNorm = normalizeToken(from);
+    const toNorm = normalizeToken(to);
+    if (!fromNorm || !toNorm) return [];
+
+    const aiLines = aiDraft.split('\n');
+    const finalLines = final.split('\n');
+    const lineEdits = diffLines(aiLines, finalLines);
+    const examples: ReplacementExample[] = [];
+    let counter = 0;
+
+    for (let i = 0; i < lineEdits.length; i += 1) {
+        const current = lineEdits[i];
+        const next = lineEdits[i + 1];
+        if (!current || !next) continue;
+        if (current.type !== 'delete' || next.type !== 'insert') continue;
+
+        const linePairs = pairModifiedLines(current, next);
+        for (const { beforeLine, afterLine, beforeLineIndex } of linePairs) {
+            const replacements = extractLineReplacements(beforeLine, afterLine, beforeLineIndex);
+            const tokenChanges = replacements.map((r) => ({ from: r.from, to: r.to, kind: r.kind }));
+            const hasTargetReplacement = tokenChanges.some((change) =>
+                normalizeToken(change.from) === fromNorm &&
+                normalizeToken(change.to) === toNorm
+            );
+            if (!hasTargetReplacement) continue;
+
+            examples.push({
+                correction_id: `${beforeLineIndex}-${counter}`,
+                line_index: beforeLineIndex,
+                before_line: beforeLine,
+                after_line: afterLine,
+                token_changes: tokenChanges,
+            });
+            counter += 1;
+        }
+    }
+
+    return examples;
+}
 
 export function extractReplacementSignals(aiDraft: string, final: string): ReplacementSignal[] {
     const aiLines = aiDraft.split('\n');
