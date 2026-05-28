@@ -17,7 +17,10 @@ function renderLearningView(overrides = {}) {
         totalRules: 0,
         detectedPatterns: [],
         pendingRules: [],
+        ignoredSystemPendingRules: [],
         acceptedRules: [],
+        activeExactRules: [],
+        curatedActiveRules: [],
         recentSubmissions: [],
         learningSubmissions: [],
         propertyOptions: [],
@@ -89,5 +92,58 @@ describe('learning dashboard view', () => {
         expect(html).toContain('"original_text":"radishes"');
         expect(html).toContain('"submission_ids":["sub-123"]');
         expect(html).toContain('rule-examples-row-rule-1');
+    });
+    test('shows active pre-AI rules without rendering the full AI prompt', () => {
+        const html = renderLearningView({
+            basePrompt: 'SECRET PROMPT TEXT',
+            curatedActiveRules: [{
+                    label: 'veggies -> vegetables',
+                    detail: 'Accepted human guidance, except veggie burger wording.',
+                    source: 'human',
+                    status: 'Active code guard',
+                    evidenceCount: 2,
+                }],
+            activeExactRules: [{
+                    original_text: 'tomatoes',
+                    corrected_text: 'tomato',
+                    rule: 'Always use "tomato" instead of "tomatoes"',
+                    source: 'system',
+                    location: 'All properties (global rule)',
+                    is_location_specific: false,
+                }],
+            acceptedRules: [{
+                    original_text: 'tomatoes',
+                    corrected_text: 'tomato',
+                    rule: 'Always use "tomato" instead of "tomatoes"',
+                    source: 'system',
+                    location: 'All properties (global rule)',
+                    is_location_specific: false,
+                    pre_ai_status: 'Active exact rule',
+                    pre_ai_active: true,
+                }],
+        });
+        expect(html).toContain('Active Pre-AI Rules');
+        expect(html).toContain('veggies -&gt; vegetables');
+        expect(html).toContain('Accepted Exact Rules Active In Pre-AI (1)');
+        expect(html).toContain('Accepted Correction Rule Audit Log (1)');
+        expect(html).not.toContain('Current Base Prompt');
+        expect(html).not.toContain('SECRET PROMPT TEXT');
+    });
+    test('keeps stale system proposals out of the actionable pending table', () => {
+        const html = renderLearningView({
+            pendingRules: [],
+            ignoredSystemPendingRules: [{
+                    id: 'stale-rule',
+                    original_text: 'radishes',
+                    corrected_text: 'radish',
+                    rule: 'Always use "radish" instead of "radishes"',
+                    source: 'system',
+                    created_at: '2026-05-26T18:11:46.250Z',
+                }],
+        });
+        expect(html).toContain('No actionable pending rules');
+        expect(html).toContain('Ignored stale system proposals (1)');
+        expect(html).toContain('These are pending system proposals from older detected-pattern data');
+        expect(html).not.toContain("reviewRule('stale-rule'");
     });
 });

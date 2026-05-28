@@ -40,6 +40,9 @@ The differ skips learning for quick approvals, imports/backfills, AI-only change
 - Route: `GET /learning` (dashboard service)
 - Displays learned rules with confidence, status, and activity
 - Displays pending `correction_rules` for accept/reject review and accepted rules that can feed deterministic pre-AI checks
+- Shows compact active pre-AI rules first, including curated code guards promoted from accepted human explanations and accepted exact replacement rules.
+- Hides the full AI prompt from the learning dashboard; prompt review remains on the prompt proposal page.
+- Stale pending system proposals are ignored when the current differ snapshot no longer has matching eligible human-review evidence, so old system-only patterns such as rejected/pluralization experiments do not look actionable.
 - Shows recent training ingestions (submission id, timestamp, changes, change %) for auditability
 - Shows a connectivity warning when dashboard cannot reach differ endpoints
 - Each submission row links to `GET /learning/submission/:submissionId` for manual correction review

@@ -272,6 +272,53 @@
             font-size: .8rem;
             min-width: 260px;
         }
+        .compact-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+            gap: .65rem;
+            margin-bottom: 1rem;
+        }
+        .rule-card {
+            border: 1px solid var(--border);
+            background: #fff;
+            padding: .75rem .85rem;
+        }
+        .rule-card-title {
+            font-weight: 600;
+            margin-bottom: .25rem;
+        }
+        .rule-card-meta {
+            display: flex;
+            gap: .35rem;
+            flex-wrap: wrap;
+            margin-top: .55rem;
+        }
+        details.compact-details {
+            border: 1px solid var(--border);
+            background: #fff;
+            margin-bottom: 1rem;
+        }
+        details.compact-details summary {
+            cursor: pointer;
+            padding: .75rem .9rem;
+            font-size: .78rem;
+            letter-spacing: .08em;
+            text-transform: uppercase;
+            color: var(--primary);
+            background: var(--bg-alt);
+            border-bottom: 1px solid transparent;
+        }
+        details.compact-details[open] summary {
+            border-bottom-color: var(--border);
+        }
+        .details-body {
+            padding: .75rem;
+        }
+        .compact-table th,
+        .compact-table td {
+            font-size: .78rem;
+            padding: .5rem .55rem;
+        }
     </style>
 </head>
 <body>
@@ -313,6 +360,7 @@
             <div class="stat"><div class="label">Detected Patterns</div><div class="value"><%= totalRules %></div></div>
             <div class="stat"><div class="label">Pending Review</div><div class="value"><%= pendingRules.length %></div></div>
             <div class="stat"><div class="label">Accepted Rules</div><div class="value"><%= acceptedRules.length %></div></div>
+            <div class="stat"><div class="label">Active Pre-AI</div><div class="value"><%= (curatedActiveRules || []).length + (activeExactRules || []).length %></div></div>
         </div>
 
         <%
@@ -331,6 +379,58 @@
                 submission_ids: Array.isArray(rule.submission_ids) ? rule.submission_ids : [],
             }));
         %>
+
+        <!-- Active Pre-AI Rules -->
+        <h3 class="section-title">Active Pre-AI Rules</h3>
+        <div class="panel">
+            These rules are already applied before the AI review. Pending system proposals are not active until accepted, and stale system proposals without current eligible evidence are ignored.
+        </div>
+        <div class="compact-grid">
+            <% (curatedActiveRules || []).forEach((rule) => { %>
+                <div class="rule-card">
+                    <div class="rule-card-title"><%= rule.label %></div>
+                    <div class="small"><%= rule.detail %></div>
+                    <div class="rule-card-meta">
+                        <span class="badge human"><%= rule.source %></span>
+                        <span class="badge accepted"><%= rule.status %></span>
+                        <% if (rule.evidenceCount > 0) { %>
+                            <span class="badge">Evidence <%= rule.evidenceCount %></span>
+                        <% } %>
+                    </div>
+                </div>
+            <% }) %>
+        </div>
+        <details class="compact-details">
+            <summary>Accepted Exact Rules Active In Pre-AI (<%= (activeExactRules || []).length %>)</summary>
+            <div class="details-body">
+                <% if (!activeExactRules || activeExactRules.length === 0) { %>
+                    <div class="empty">No accepted exact replacement rules are active beyond the curated code guards.</div>
+                <% } else { %>
+                    <table class="compact-table">
+                        <thead>
+                            <tr>
+                                <th>Original</th>
+                                <th>Corrected</th>
+                                <th>Rule</th>
+                                <th>Source</th>
+                                <th>Scope</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                        <% activeExactRules.forEach((rule) => { %>
+                            <tr>
+                                <td><%= rule.original_text || '' %></td>
+                                <td><%= rule.corrected_text || '' %></td>
+                                <td><%= rule.rule || '' %></td>
+                                <td><span class="badge <%= rule.source %>"><%= rule.source %></span></td>
+                                <td><%= rule.location || '' %><%= rule.is_location_specific ? '' : ' (global)' %></td>
+                            </tr>
+                        <% }) %>
+                        </tbody>
+                    </table>
+                <% } %>
+            </div>
+        </details>
 
         <!-- Pending Rules (need human review) -->
         <% if (pendingRules.length > 0) { %>
@@ -388,28 +488,65 @@
                 <% }) %>
                 </tbody>
             </table>
+        <% } else { %>
+            <h3 class="section-title">Pending Rules (Awaiting Review)</h3>
+            <div class="empty">No actionable pending rules. System proposals need current eligible human-review evidence before they appear here.</div>
+        <% } %>
+
+        <% if (ignoredSystemPendingRules && ignoredSystemPendingRules.length > 0) { %>
+            <details class="compact-details">
+                <summary>Ignored stale system proposals (<%= ignoredSystemPendingRules.length %>)</summary>
+                <div class="details-body">
+                    <div class="small" style="margin-bottom:.6rem;">
+                        These are pending system proposals from older detected-pattern data. They are not used by Basic AI Check and are hidden from the review queue because the current learning scan does not have matching eligible human-review evidence.
+                    </div>
+                    <table class="compact-table">
+                        <thead>
+                            <tr>
+                                <th>Original</th>
+                                <th>Corrected</th>
+                                <th>Rule</th>
+                                <th>Created</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                        <% ignoredSystemPendingRules.forEach((rule) => { %>
+                            <tr>
+                                <td><%= rule.original_text || '' %></td>
+                                <td><%= rule.corrected_text || '' %></td>
+                                <td><%= rule.rule || '' %></td>
+                                <td><%= rule.created_at ? new Date(rule.created_at).toLocaleString() : 'N/A' %></td>
+                            </tr>
+                        <% }) %>
+                        </tbody>
+                    </table>
+                </div>
+            </details>
         <% } %>
 
         <!-- Accepted Correction Rules -->
-        <h3 class="section-title">Accepted Correction Rules</h3>
-        <div class="filter-row">
-            <label for="ruleLocationFilter" class="small" style="margin:0;">Property Filter:</label>
-            <select id="ruleLocationFilter" onchange="filterAcceptedRules()">
-                <option value="">All Properties</option>
-                <% (propertyOptions || []).forEach((property) => { %>
-                    <option value="<%= property %>"><%= property %></option>
-                <% }) %>
-            </select>
-        </div>
-        <% if (acceptedRules.length === 0) { %>
-            <div class="empty">No accepted correction rules yet. Annotate corrections from submission reviews to build the rule set.</div>
-        <% } else { %>
+        <details class="compact-details">
+            <summary>Accepted Correction Rule Audit Log (<%= acceptedRules.length %>)</summary>
+            <div class="details-body">
+                <div class="filter-row">
+                    <label for="ruleLocationFilter" class="small" style="margin:0;">Property Filter:</label>
+                    <select id="ruleLocationFilter" onchange="filterAcceptedRules()">
+                        <option value="">All Properties</option>
+                        <% (propertyOptions || []).forEach((property) => { %>
+                            <option value="<%= property %>"><%= property %></option>
+                        <% }) %>
+                    </select>
+                </div>
+                <% if (acceptedRules.length === 0) { %>
+                    <div class="empty">No accepted correction rules yet. Annotate corrections from submission reviews to build the rule set.</div>
+                <% } else { %>
             <table id="acceptedRulesTable">
                 <thead>
                     <tr>
                         <th>Original</th>
                         <th>Corrected</th>
                         <th>Rule</th>
+                        <th>Pre-AI Status</th>
                         <th>Type</th>
                         <th>Restaurant</th>
                         <th>Location</th>
@@ -423,6 +560,7 @@
                         <td><%= rule.original_text || '' %></td>
                         <td><%= rule.corrected_text || '' %></td>
                         <td><%= rule.rule || '' %></td>
+                        <td><span class="badge <%= rule.pre_ai_active ? 'accepted' : 'system' %>"><%= rule.pre_ai_status || '' %></span></td>
                         <td><%= rule.change_type || '' %></td>
                         <td><%= rule.restaurant_name || '' %></td>
                         <td>
@@ -437,16 +575,9 @@
                 <% }) %>
                 </tbody>
             </table>
-        <% } %>
-
-        <!-- Base Prompt (read-only reference) -->
-        <h3 class="section-title">Current Base Prompt</h3>
-        <div class="prompt-block">
-            <div class="small" style="margin-bottom:.5rem;">
-                This is the prompt sent to AI. It evolves through weekly prompt rewrite proposals — no auto-injection.
+                <% } %>
             </div>
-            <textarea class="prompt-text" readonly><%= basePrompt || '' %></textarea>
-        </div>
+        </details>
 
         <!-- Detected Patterns (read-only reference from differ) -->
         <h3 class="section-title">Detected Patterns (Auto-Scanned)</h3>

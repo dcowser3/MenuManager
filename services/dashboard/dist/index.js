@@ -1380,6 +1380,60 @@ app.get('/training/download-prompt/:sessionId', async (req, res) => {
 /**
  * Learning Rules Dashboard
  */
+function normalizeCorrectionRuleKeyPart(value) {
+    return `${value || ''}`
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+function correctionRulePairKey(original, corrected) {
+    return `${normalizeCorrectionRuleKeyPart(original)}=>${normalizeCorrectionRuleKeyPart(corrected)}`;
+}
+function isAcceptedRulePreAiEligible(rule) {
+    const changeType = `${rule.change_type || ''}`.trim().toLowerCase();
+    const original = `${rule.original_text || ''}`.trim();
+    const corrected = `${rule.corrected_text || ''}`.trim();
+    const allowedTypes = new Set([
+        '',
+        'diacritic',
+        'diacritics',
+        'spelling',
+        'typo',
+        'grammar',
+        'terminology',
+        'punctuation',
+    ]);
+    return `${rule.status || ''}`.toLowerCase() === 'accepted'
+        && allowedTypes.has(changeType)
+        && !!original
+        && !!corrected
+        && original !== corrected
+        && !original.includes('\n')
+        && !corrected.includes('\n')
+        && original.length <= 240
+        && corrected.length <= 240;
+}
+function describeAcceptedRulePreAiStatus(rule) {
+    if (!isAcceptedRulePreAiEligible(rule)) {
+        return 'Manual review only';
+    }
+    const ruleText = `${rule.rule || ''}`.toLowerCase();
+    const original = `${rule.original_text || ''}`.toLowerCase();
+    const corrected = `${rule.corrected_text || ''}`.toLowerCase();
+    if (ruleText.includes('veggies')
+        || (original.includes('veggies') && corrected.includes('vegetables'))
+        || ruleText.includes('tres leches')
+        || original.includes('tres leches')
+        || ruleText.includes('poached egg')
+        || ruleText.includes('sunny side')
+        || original.includes('poached egg')
+        || original.includes('sunny side')) {
+        return 'Active code guard';
+    }
+    return 'Active exact rule';
+}
 app.get('/learning', async (_req, res) => {
     try {
         const [rulesResult, trainingResult, submissionsResult, correctionRulesResult, propertiesResult] = await Promise.all([
@@ -1404,8 +1458,6 @@ app.get('/learning', async (_req, res) => {
         const learningSubmissions = submissionsResult.data?.submissions || [];
         const correctionRules = correctionRulesResult.data || [];
         const propertyOptions = propertiesResult.data?.properties || [];
-        const qaPromptPath = path.join(getRepoRoot(), 'sop-processor', 'qa_prompt.txt');
-        const basePrompt = await fs_1.promises.readFile(qaPromptPath, 'utf-8');
         // v2: detected patterns from differ (read-only reference, not auto-injected)
         const decorate = (category, items) => (items || []).map((r) => ({
             ...r,
@@ -1417,6 +1469,7 @@ app.get('/learning', async (_req, res) => {
             ...decorate('weak', rulesData.weak_rules || []),
             ...decorate('conflicted', rulesData.conflicted_rules || []),
         ];
+        const activeDetectedPatternKeys = new Set((rulesData.active_rules || []).map((rule) => correctionRulePairKey(rule.source, rule.target)));
         const learningSubmissionMetadata = new Map();
         const fetchLearningSubmissionMetadata = async (submissionId) => {
             if (!learningSubmissionMetadata.has(submissionId)) {
@@ -1433,8 +1486,51 @@ app.get('/learning', async (_req, res) => {
         const recentSubmissions = await (0, learning_submissions_1.decorateLearningSubmissionsWithMenuNames)((trainingData.data || []).slice(-25).reverse(), fetchLearningSubmissionMetadata);
         const decoratedLearningSubmissions = await (0, learning_submissions_1.decorateLearningSubmissionsWithMenuNames)(learningSubmissions, fetchLearningSubmissionMetadata);
         // Split correction rules by status for the dashboard
-        const pendingRules = correctionRules.filter((r) => r.status === 'pending');
-        const acceptedRules = correctionRules.filter((r) => r.status === 'accepted');
+        const allPendingRules = correctionRules.filter((r) => r.status === 'pending');
+        const canValidateSystemProposalEvidence = !!rulesResult.ok;
+        const ignoredSystemPendingRules = allPendingRules.filter((rule) => rule.source === 'system'
+            && canValidateSystemProposalEvidence
+            && !activeDetectedPatternKeys.has(correctionRulePairKey(rule.original_text, rule.corrected_text)));
+        const ignoredSystemPendingRuleIds = new Set(ignoredSystemPendingRules.map((rule) => rule.id));
+        const pendingRules = allPendingRules.filter((rule) => !ignoredSystemPendingRuleIds.has(rule.id));
+        const acceptedRules = correctionRules
+            .filter((r) => r.status === 'accepted')
+            .map((rule) => ({
+            ...rule,
+            pre_ai_status: describeAcceptedRulePreAiStatus(rule),
+            pre_ai_active: isAcceptedRulePreAiEligible(rule),
+        }));
+        const activeExactRules = acceptedRules.filter((rule) => rule.pre_ai_status === 'Active exact rule');
+        const curatedActiveRules = [
+            {
+                label: 'veggies -> vegetables',
+                detail: 'Accepted human guidance, except veggie burger wording.',
+                source: 'human',
+                status: 'Active code guard',
+                evidenceCount: acceptedRules.filter((rule) => `${rule.rule || ''} ${rule.original_text || ''} ${rule.corrected_text || ''}`.toLowerCase().includes('veggies')).length,
+            },
+            {
+                label: 'Tres Leches -> add V',
+                detail: 'Accepted human guidance that Tres Leches needs vegetarian code V.',
+                source: 'human',
+                status: 'Active code guard',
+                evidenceCount: acceptedRules.filter((rule) => `${rule.rule || ''} ${rule.original_text || ''}`.toLowerCase().includes('tres leches')).length,
+            },
+            {
+                label: 'poached egg -> raw marker',
+                detail: 'Accepted human guidance for poached egg asterisks.',
+                source: 'human',
+                status: 'Active code guard',
+                evidenceCount: acceptedRules.filter((rule) => `${rule.rule || ''} ${rule.original_text || ''}`.toLowerCase().includes('poached egg')).length,
+            },
+            {
+                label: 'sunny-side-up egg -> raw marker',
+                detail: 'Accepted human guidance for sunny-side-up egg asterisks.',
+                source: 'human',
+                status: 'Active code guard',
+                evidenceCount: acceptedRules.filter((rule) => `${rule.rule || ''} ${rule.original_text || ''}`.toLowerCase().includes('sunny side')).length,
+            },
+        ];
         const differStatus = {
             rulesOk: !!rulesResult.ok,
             trainingOk: !!trainingResult.ok,
@@ -1451,12 +1547,14 @@ app.get('/learning', async (_req, res) => {
             totalRules: rulesData.total_rules || 0,
             detectedPatterns,
             pendingRules,
+            ignoredSystemPendingRules,
             acceptedRules,
+            activeExactRules,
+            curatedActiveRules,
             recentSubmissions,
             learningSubmissions: decoratedLearningSubmissions,
             propertyOptions,
             differStatus,
-            basePrompt,
             documentStorageRoot: process.env.DOCUMENT_STORAGE_ROOT || '',
         });
     }
