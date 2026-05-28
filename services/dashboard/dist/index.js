@@ -792,7 +792,7 @@ async function handleCleanDocxMenuUpload(req, res, options) {
     }
 }
 /**
- * Dashboard Home - List all pending reviews
+ * Dashboard Home
  */
 app.get('/', (_req, res) => {
     res.render('welcome', {
@@ -800,11 +800,14 @@ app.get('/', (_req, res) => {
     });
 });
 app.get('/dashboard', (_req, res) => {
-    res.redirect('/reviews');
+    res.redirect('/');
 });
 app.get('/review-queue', (_req, res) => {
     res.redirect('/reviews');
 });
+/**
+ * Direct Isabella review queue.
+ */
 app.get('/reviews', async (_req, res) => {
     try {
         const pendingResponse = await internalApi.get(`${DB_SERVICE_URL}/submissions/pending`, { timeout: 5000 });

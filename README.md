@@ -62,7 +62,7 @@ Menu Manager is an AI-powered service designed to automate the review process fo
 - Production public-form failure events also email `FORM_ATTEMPT_ALERT_EMAIL`, defaulting to `dcowser@richardsandoval.com`, through the dashboard SMTP transport
 - Required-field validation now highlights missing submitter, project-details, and approval inputs directly in the form
 - The submission form footer and blocking/red form errors list `PUBLIC_FORM_SUPPORT_EMAIL` (default `dcowser@richardsandoval.com`) as the support contact for help.
-- Isabella's review queue is available at `/reviews`, with `/dashboard` and `/review-queue` redirecting there. It lists submissions whose Menu Manager DB status still needs human review and links each row to the browser approval editor. Isabella-submitted direct handoffs that have already been sent to ClickUp/Marketing are excluded from this queue.
+- Isabella's review queue is available by direct link at `/reviews` (legacy `/review-queue` still redirects there), but it is intentionally not linked from the public welcome dashboard and `/dashboard` now returns to the welcome screen. The queue lists submissions whose Menu Manager DB status still needs human review and links each row to the browser approval editor. Isabella-submitted direct handoffs that have already been sent to ClickUp/Marketing are excluded from this queue.
 - Notification system
 - Approved dishes are extracted automatically when the ClickUp-reviewed DOCX is marked approved
 - ClickUp tasks now include a browser approval link that opens a side-by-side approval editor: clean text editing on the left, live redline/highlight preview on the right, and final DOCX generation on submit
@@ -126,7 +126,7 @@ Current ClickUp BAU status handoff:
 
 Browser approval editor prototype:
 - ClickUp tasks now include an approval link to `/approval/:submissionId`
-- Isabella can open `/reviews` to see every pending human-review or manual-review submission in one dashboard.
+- Isabella can open `/reviews` directly to see every pending human-review or manual-review submission; the queue is intentionally unlisted from the main welcome dashboard.
 - When the dashboard form is submitted from `localhost` outside production, ClickUp task creation is skipped, the browser automatically downloads the generated original DOCX, and the success alert shows an `Open approval editor` link for that same submission
 - Isabella can edit approved text in a left-side rich browser editor while a right-side panel shows the live tracked-change preview with preserved imported redlines/highlights
 - For submitted DOCX files that already contain redlines, the left editor uses the clean accepted text with deleted runs removed, accepted inserted runs unwrapped, and DOCX inline formatting such as bold dish names preserved; the preview keeps the imported deletion/insertion markup visible.
