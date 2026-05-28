@@ -109,4 +109,87 @@ describe('learning cleanup', () => {
             rebuildSnapshot: async () => ({ total_rules: 0 }),
         })).rejects.toThrow('submissionId must contain only');
     });
+    test('keys human-review comparisons once per submission/source', () => {
+        const firstEntry = {
+            submission_id: 'sub-1',
+            timestamp: '2026-05-10T10:00:00.000Z',
+            comparison_source: learning_store_1.HUMAN_REVIEW_COMPARISON_SOURCE,
+            ai_draft_path: '/tmp/sub-1-draft.docx',
+            final_path: '/tmp/sub-1-approved-a.docx',
+        };
+        const secondEntry = {
+            ...firstEntry,
+            timestamp: '2026-05-10T10:05:00.000Z',
+            final_path: '/tmp/sub-1-approved-b.docx',
+        };
+        expect((0, learning_store_1.buildLearningComparisonKey)(firstEntry)).toBe((0, learning_store_1.buildLearningComparisonKey)(secondEntry));
+    });
+    test('upserts duplicate human-review training entries instead of appending counts', () => {
+        const originalEntry = {
+            submission_id: 'sub-1',
+            timestamp: '2026-05-10T10:00:00.000Z',
+            comparison_source: learning_store_1.HUMAN_REVIEW_COMPARISON_SOURCE,
+            changed_by_human: true,
+            learning_eligible: true,
+            ai_draft_path: '/tmp/sub-1-draft.docx',
+            final_path: '/tmp/sub-1-approved-a.docx',
+            learning_signals: { replacement_count: 1 },
+        };
+        const repeatedEntry = {
+            ...originalEntry,
+            timestamp: '2026-05-10T10:05:00.000Z',
+            final_path: '/tmp/sub-1-approved-b.docx',
+            learning_signals: { replacement_count: 2 },
+        };
+        const result = (0, learning_store_1.upsertTrainingEntry)([originalEntry], repeatedEntry);
+        expect(result.replaced_entries).toBe(1);
+        expect(result.entries).toHaveLength(1);
+        expect(result.entries[0].final_path).toBe('/tmp/sub-1-approved-b.docx');
+        expect(result.entries[0].learning_signals.replacement_count).toBe(2);
+    });
+    test('learning aggregation ignores legacy and ineligible entries before deduping', () => {
+        const entries = [
+            {
+                submission_id: 'legacy-1',
+                timestamp: '2026-05-10T10:00:00.000Z',
+                ai_draft_path: '/tmp/legacy-draft.docx',
+                final_path: '/tmp/legacy-final.docx',
+                learning_signals: { replacement_count: 5 },
+            },
+            {
+                submission_id: 'sub-1',
+                timestamp: '2026-05-10T10:00:00.000Z',
+                comparison_source: learning_store_1.HUMAN_REVIEW_COMPARISON_SOURCE,
+                changed_by_human: true,
+                learning_eligible: true,
+                ai_draft_path: '/tmp/sub-1-draft.docx',
+                final_path: '/tmp/sub-1-approved-a.docx',
+                learning_signals: { replacement_count: 1 },
+            },
+            {
+                submission_id: 'sub-1',
+                timestamp: '2026-05-10T10:05:00.000Z',
+                comparison_source: learning_store_1.HUMAN_REVIEW_COMPARISON_SOURCE,
+                changed_by_human: true,
+                learning_eligible: true,
+                ai_draft_path: '/tmp/sub-1-draft.docx',
+                final_path: '/tmp/sub-1-approved-b.docx',
+                learning_signals: { replacement_count: 2 },
+            },
+            {
+                submission_id: 'sub-2',
+                timestamp: '2026-05-10T10:10:00.000Z',
+                comparison_source: learning_store_1.HUMAN_REVIEW_COMPARISON_SOURCE,
+                changed_by_human: false,
+                learning_eligible: true,
+                ai_draft_path: '/tmp/sub-2-draft.docx',
+                final_path: '/tmp/sub-2-final.docx',
+                learning_signals: { replacement_count: 3 },
+            },
+        ];
+        const eligible = (0, learning_store_1.getLearningAggregationEntries)(entries);
+        expect(eligible).toHaveLength(1);
+        expect(eligible[0].submission_id).toBe('sub-1');
+        expect(eligible[0].final_path).toBe('/tmp/sub-1-approved-b.docx');
+    });
 });

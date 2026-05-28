@@ -19,20 +19,22 @@ describe('approved dish table controls', () => {
 
     test('matches rows by one or more column filters', () => {
         const row = makeRow([
+            'Clean',
             'Aperol Spritz',
             'aperol, campari, prosecco',
             'Cocktails',
             'Brunch Beverage',
+            'Tamayo Brunch Menu ClickUp task-1',
             '20',
             'None',
         ]);
 
         expect(rowMatchesFilters(row, [
-            { column: 0, value: 'spritz' },
-            { column: 3, value: 'brunch' },
+            { column: 1, value: 'spritz' },
+            { column: 5, value: 'tamayo brunch' },
         ])).toBe(true);
         expect(rowMatchesFilters(row, [
-            { column: 2, value: 'dessert' },
+            { column: 3, value: 'dessert' },
         ])).toBe(false);
     });
 

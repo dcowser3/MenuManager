@@ -3,15 +3,25 @@ import { promises as fs } from 'fs';
 import * as fsSync from 'fs';
 import * as path from 'path';
 import dotenv = require('dotenv');
-import { getSupabaseClient, isSupabaseConfigured, logAlert, extractAndStoreDishes } from '@menumanager/supabase-client';
+import {
+    PreparedApprovedDish,
+    extractAndStoreDishes,
+    getSupabaseClient,
+    isSupabaseConfigured,
+    logAlert,
+    prepareApprovedDishInputs,
+    storePreparedApprovedDishes,
+} from '@menumanager/supabase-client';
 import { sanitizeSubmissionUpdates } from './lib/submission-updates';
-import { requireInternalServiceAuth } from '@menumanager/internal-auth';
+import { buildInternalServiceHeaders, requireInternalServiceAuth } from '@menumanager/internal-auth';
 
 dotenv.config({ path: path.join(__dirname, '..', '..', '..', '.env') });
 
 const app = express();
 const port = 3004;
 const JSON_BODY_LIMIT = process.env.DB_JSON_BODY_LIMIT || process.env.JSON_BODY_LIMIT || '5mb';
+const AI_REVIEW_URL = process.env.AI_REVIEW_URL || 'http://localhost:3002';
+const DISH_QUALITY_AI_TIMEOUT_MS = Number(process.env.APPROVED_DISH_AI_QUALITY_TIMEOUT_MS || 20000);
 
 const DB_DIR = path.join(__dirname, '..', '..', '..', 'tmp', 'db');
 const SUBMISSIONS_DB = path.join(DB_DIR, 'submissions.json');
@@ -1432,6 +1442,98 @@ app.get('/submissions/:id', async (req, res) => {
     }
 });
 
+type ApprovedDishAiQualityResult = {
+    index: number;
+    verdict: 'dish' | 'not_dish' | 'uncertain';
+    confidence: 'high' | 'medium' | 'low';
+    reason?: string;
+};
+
+async function reviewPreparedDishesWithAi(input: {
+    prepared: PreparedApprovedDish[];
+    property: string;
+    servicePeriod?: string;
+    submissionId: string;
+}): Promise<{
+    attempted: boolean;
+    reviewed: number;
+    excludedIndexes: Set<number>;
+    results: ApprovedDishAiQualityResult[];
+    error?: string;
+}> {
+    const candidates = input.prepared.filter((dish) => dish.quality.disposition === 'review');
+    if (candidates.length === 0) {
+        return {
+            attempted: false,
+            reviewed: 0,
+            excludedIndexes: new Set<number>(),
+            results: [],
+        };
+    }
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), Number.isFinite(DISH_QUALITY_AI_TIMEOUT_MS) && DISH_QUALITY_AI_TIMEOUT_MS > 0
+        ? DISH_QUALITY_AI_TIMEOUT_MS
+        : 20000);
+
+    try {
+        const response = await fetch(`${AI_REVIEW_URL}/approved-dishes/quality-check`, {
+            method: 'POST',
+            headers: buildInternalServiceHeaders({
+                'content-type': 'application/json',
+            }),
+            body: JSON.stringify({
+                property: input.property,
+                servicePeriod: input.servicePeriod,
+                submissionId: input.submissionId,
+                rows: candidates.map((dish) => ({
+                    index: dish.index,
+                    dishName: dish.input.dish_name,
+                    description: dish.input.description,
+                    category: dish.input.menu_category,
+                    servicePeriod: dish.input.service_period,
+                    price: dish.input.price,
+                    allergens: dish.input.allergens || [],
+                    qualityIssues: dish.quality.issues,
+                    sourceContext: dish.sourceContext,
+                })),
+            }),
+            signal: controller.signal,
+        });
+
+        if (!response.ok) {
+            const body = await response.text().catch(() => '');
+            throw new Error(`AI quality check failed with ${response.status}${body ? `: ${body.slice(0, 300)}` : ''}`);
+        }
+
+        const payload = await response.json() as { results?: ApprovedDishAiQualityResult[] };
+        const results = Array.isArray(payload.results) ? payload.results : [];
+        const excludedIndexes = new Set<number>();
+        for (const result of results) {
+            if (result.verdict === 'not_dish' && result.confidence === 'high') {
+                excludedIndexes.add(result.index);
+            }
+        }
+
+        return {
+            attempted: true,
+            reviewed: candidates.length,
+            excludedIndexes,
+            results,
+        };
+    } catch (error: any) {
+        return {
+            attempted: true,
+            reviewed: candidates.length,
+            excludedIndexes: new Set<number>(),
+            results: [],
+            error: error?.name === 'AbortError' ? 'AI quality check timed out' : error.message,
+        };
+    } finally {
+        clearTimeout(timeout);
+    }
+}
+
 app.post('/approved-dishes/extract', async (req, res) => {
     try {
         if (!isSupabaseConfigured()) {
@@ -1457,14 +1559,34 @@ app.post('/approved-dishes/extract', async (req, res) => {
         const property = `${req.body?.property || submission?.property || ''}`.trim() || 'Unknown';
         const servicePeriod = `${req.body?.servicePeriod || submission?.service_period || submission?.raw_payload?.servicePeriod || ''}`.trim() || undefined;
 
-        const result = await extractAndStoreDishes(approvedMenuContent, property, resolvedSubmissionId, {
+        const prepared = prepareApprovedDishInputs(approvedMenuContent, property, resolvedSubmissionId, {
             servicePeriod,
+        });
+        const aiReview = await reviewPreparedDishesWithAi({
+            prepared,
+            property,
+            servicePeriod,
+            submissionId: resolvedSubmissionId,
+        });
+        const result = await storePreparedApprovedDishes(prepared, resolvedSubmissionId, {
+            replaceExisting: true,
+            excludeIndexes: aiReview.excludedIndexes,
         });
 
         res.json({
             success: true,
             submissionId: resolvedSubmissionId,
             added: result.added,
+            extracted: result.extracted,
+            skipped: result.skipped,
+            quality: {
+                review_count: result.qualityReviewCount,
+                excluded_by_rule_count: result.excludedByRuleCount,
+                excluded_by_ai_count: aiReview.excludedIndexes.size,
+                ai_attempted: aiReview.attempted,
+                ai_reviewed: aiReview.reviewed,
+                ai_error: aiReview.error,
+            },
         });
     } catch (error: any) {
         console.error('Error extracting approved dishes:', error.message);

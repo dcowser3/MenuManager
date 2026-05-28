@@ -1,8 +1,12 @@
-jest.mock('@menumanager/supabase-client', () => ({
-    __esModule: true,
-    getSupabaseClient: jest.fn(),
-    isSupabaseConfigured: jest.fn(() => false),
-}));
+jest.mock('@menumanager/supabase-client', () => {
+    const quality = jest.requireActual('../../supabase-client/src/dish-quality');
+    return {
+        __esModule: true,
+        ...quality,
+        getSupabaseClient: jest.fn(),
+        isSupabaseConfigured: jest.fn(() => false),
+    };
+});
 
 jest.mock('fs', () => {
     const actual = jest.requireActual('fs');
@@ -64,6 +68,8 @@ describe('approved dish browse helpers', () => {
                         property: 'Tamayo - Denver',
                         service_period: 'Lunch',
                         menu_category: 'Starters',
+                        price: '16',
+                        source_submission_id: 'sub-3',
                         is_active: true,
                     },
                     {
@@ -71,6 +77,43 @@ describe('approved dish browse helpers', () => {
                         dish_name: 'Inactive Taco',
                         property: 'Toro Toro - Malta',
                         is_active: false,
+                    },
+                ]);
+            }
+
+            if (normalized.endsWith('/tmp/db/submissions.json')) {
+                return JSON.stringify([
+                    {
+                        id: 'sub-1',
+                        legacy_id: 'form-1',
+                        project_name: 'Toro Dinner 2026',
+                        filename: 'Toro_Dinner_2026.docx',
+                        source: 'form',
+                        clickup_task_id: 'task-1',
+                        reviewed_at: '2026-05-01T12:00:00.000Z',
+                        approved_menu_content: 'Lomo Saltado, beef tenderloin, potato, tomato G 42',
+                    },
+                    {
+                        id: 'sub-2',
+                        legacy_id: 'clickup-task-2',
+                        project_name: 'Toro Dessert Update',
+                        filename: 'Toro_Dessert_Update.docx',
+                        source: 'clickup_history_import',
+                        clickup_task_id: 'task-2',
+                        updated_at: '2026-05-02T12:00:00.000Z',
+                        approved_menu_content: 'Churros, dulce de leche D,G 14',
+                        raw_payload: {
+                            clickupHistoryImport: {
+                                taskUrl: 'https://app.clickup.com/t/task-2',
+                            },
+                        },
+                    },
+                    {
+                        id: 'sub-3',
+                        legacy_id: 'form-3',
+                        project_name: 'Tamayo Lunch 2026',
+                        filename: 'Tamayo_Lunch_2026.docx',
+                        source: 'form',
                     },
                 ]);
             }
@@ -133,9 +176,36 @@ describe('approved dish browse helpers', () => {
                         dishName: 'Churros',
                         description: 'dulce de leche',
                         brand: 'Toro Toro',
+                        source: expect.objectContaining({
+                            label: 'Toro_Dessert_Update.docx',
+                            projectName: 'Toro Dessert Update',
+                            clickupTaskUrl: 'https://app.clickup.com/t/task-2',
+                        }),
+                        quality: expect.objectContaining({
+                            disposition: 'keep',
+                        }),
                     }),
                 ],
             },
         ]);
+    });
+
+    test('matches search terms against source metadata and exposes quality flags', async () => {
+        const detail = await getApprovedDishBrandDetail(repoRoot, 'tamayo', {
+            query: 'tamayo lunch',
+        });
+
+        expect(detail?.dishes).toHaveLength(1);
+        expect(detail?.dishes[0]).toMatchObject({
+            dishName: 'Guacamole',
+            source: expect.objectContaining({
+                label: 'Tamayo_Lunch_2026.docx',
+                projectName: 'Tamayo Lunch 2026',
+            }),
+            quality: expect.objectContaining({
+                disposition: 'review',
+            }),
+        });
+        expect(detail?.dishes[0].quality.issues.map((issue) => issue.code)).toContain('bare_low_info_dish');
     });
 });

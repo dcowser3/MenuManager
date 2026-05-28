@@ -71,6 +71,7 @@ const learning_correction_rules_1 = require("./lib/learning-correction-rules");
 const learning_submissions_1 = require("./lib/learning-submissions");
 const embedded_set_menu_guard_1 = require("./lib/embedded-set-menu-guard");
 const corrected_menu_structure_guard_1 = require("./lib/corrected-menu-structure-guard");
+const pre_ai_deterministic_rules_1 = require("./lib/pre-ai-deterministic-rules");
 var upload_security_2 = require("./lib/upload-security");
 Object.defineProperty(exports, "sanitizePlainTextInput", { enumerable: true, get: function () { return upload_security_2.sanitizePlainTextInput; } });
 Object.defineProperty(exports, "sanitizeRichTextHtml", { enumerable: true, get: function () { return upload_security_2.sanitizeRichTextHtml; } });
@@ -101,6 +102,9 @@ function parseBooleanFlag(value) {
 }
 const BASIC_AI_CHECK_TIMEOUT_MS = parsePositiveInteger(process.env.BASIC_AI_CHECK_TIMEOUT_MS || process.env.AI_REVIEW_QA_TIMEOUT_MS, 120000);
 const AI_REVIEW_SUBMIT_TIMEOUT_MS = parsePositiveInteger(process.env.AI_REVIEW_SUBMIT_TIMEOUT_MS, BASIC_AI_CHECK_TIMEOUT_MS);
+const BASIC_AI_PRECHECK_ENABLED = !parseBooleanFlag(process.env.BASIC_AI_PRECHECK_DISABLED);
+const BASIC_AI_LEARNED_PRECHECK_ENABLED = !parseBooleanFlag(process.env.BASIC_AI_LEARNED_PRECHECK_DISABLED);
+const BASIC_AI_LEARNED_RULE_FETCH_TIMEOUT_MS = parsePositiveInteger(process.env.BASIC_AI_LEARNED_RULE_FETCH_TIMEOUT_MS, 2500);
 const CLICKUP_TASK_CREATE_TIMEOUT_MS = parsePositiveInteger(process.env.CLICKUP_TASK_CREATE_TIMEOUT_MS, 60000);
 const BASIC_AI_CHECK_JOB_TTL_MS = parsePositiveInteger(process.env.BASIC_AI_CHECK_JOB_TTL_MS, 15 * 60 * 1000);
 const BASIC_AI_CHECK_DEBUG_ENABLED = process.env.BASIC_AI_CHECK_DEBUG_ENABLED !== undefined
@@ -451,6 +455,19 @@ function normalizeMenuFooter(text, fallbackAllergens = '') {
         hadRawNotice,
         preservedFooterText: preservedFooterLines.join('\n'),
     };
+}
+async function fetchAcceptedCorrectionRulesForPreAi() {
+    if (!BASIC_AI_PRECHECK_ENABLED || !BASIC_AI_LEARNED_PRECHECK_ENABLED) {
+        return [];
+    }
+    try {
+        const response = await internalApi.get(`${DB_SERVICE_URL}/correction-rules?status=accepted&limit=500`, { timeout: BASIC_AI_LEARNED_RULE_FETCH_TIMEOUT_MS });
+        return Array.isArray(response.data) ? response.data : [];
+    }
+    catch (error) {
+        console.warn('Accepted correction rules unavailable for pre-AI deterministic checks:', error?.message || error);
+        return [];
+    }
 }
 function decodeHtmlText(html) {
     return (html || '')
@@ -1509,6 +1526,80 @@ app.post('/api/learning/correction-rules', async (req, res) => {
         res.status(error?.response?.status || 500).json(error?.response?.data || { error: 'Failed to save correction rule' });
     }
 });
+function firstLearningQueryValue(value) {
+    if (Array.isArray(value)) {
+        return `${value[0] || ''}`;
+    }
+    return `${value || ''}`;
+}
+function parseLearningSubmissionIds(value) {
+    const rawValues = Array.isArray(value) ? value : [value];
+    const ids = rawValues
+        .flatMap((item) => `${item || ''}`.split(','))
+        .map((item) => item.trim())
+        .filter((item) => item && /^[A-Za-z0-9_-]+$/.test(item));
+    return Array.from(new Set(ids));
+}
+/**
+ * Correction rule evidence examples: proxy differ before/after snippets and
+ * enrich them with submission display metadata for the learning dashboard.
+ */
+app.get('/api/learning/rule-examples', async (req, res) => {
+    try {
+        const originalText = (0, upload_security_1.sanitizePlainTextInput)(firstLearningQueryValue(req.query.original_text || req.query.from), { maxLength: 200 });
+        const correctedText = (0, upload_security_1.sanitizePlainTextInput)(firstLearningQueryValue(req.query.corrected_text || req.query.to), { maxLength: 200 });
+        const submissionIds = parseLearningSubmissionIds(req.query.submission_ids || req.query.submission_id);
+        const limitRaw = Number.parseInt(firstLearningQueryValue(req.query.limit), 10);
+        const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 20) : 8;
+        if (!originalText || !correctedText) {
+            return res.status(400).json({ error: 'original_text and corrected_text are required' });
+        }
+        const response = await internalApi.get(`${DIFFER_SERVICE_URL}/learning/rule-examples`, {
+            timeout: 6000,
+            params: {
+                original_text: originalText,
+                corrected_text: correctedText,
+                submission_ids: submissionIds.join(','),
+                limit,
+            },
+        });
+        const metadataBySubmissionId = new Map();
+        const fetchSubmissionMetadata = async (submissionId) => {
+            if (metadataBySubmissionId.has(submissionId)) {
+                return metadataBySubmissionId.get(submissionId);
+            }
+            try {
+                const metaResponse = await internalApi.get(`${DB_SERVICE_URL}/submissions/${encodeURIComponent(submissionId)}`, { timeout: 1500 });
+                const metadata = metaResponse.data || null;
+                metadataBySubmissionId.set(submissionId, metadata);
+                return metadata;
+            }
+            catch {
+                metadataBySubmissionId.set(submissionId, null);
+                return null;
+            }
+        };
+        const decoratedExamples = await (0, learning_submissions_1.decorateLearningSubmissionsWithMenuNames)(response.data?.examples || [], fetchSubmissionMetadata);
+        const examples = decoratedExamples.map((example) => {
+            const metadata = metadataBySubmissionId.get(`${example.submission_id || ''}`) || {};
+            return {
+                ...example,
+                submission_status: metadata.status || '',
+                submission_changes_made: metadata.changes_made,
+                submission_reviewed_at: metadata.reviewed_at || '',
+                approved_text_extracted_at: metadata.approved_text_extracted_at || '',
+            };
+        });
+        res.json({
+            ...(response.data || {}),
+            examples,
+        });
+    }
+    catch (error) {
+        console.error('Error loading correction rule examples:', error.message);
+        res.status(error?.response?.status || 500).json(error?.response?.data || { error: 'Failed to load correction rule examples' });
+    }
+});
 /**
  * Correction rules: update status (accept/reject/modify)
  */
@@ -1836,6 +1927,7 @@ async function handleBasicCheck(req, res) {
         const menuContent = (0, upload_security_1.sanitizePlainTextInput)(req.body?.menuContent, { multiline: true, maxLength: upload_security_1.MAX_LONG_TEXT_LENGTH });
         const allergens = (0, upload_security_1.sanitizePlainTextInput)(req.body?.allergens, { multiline: true, maxLength: 2000 });
         const menuType = (0, upload_security_1.sanitizePlainTextInput)(req.body?.menuType, { maxLength: 64 });
+        const property = (0, upload_security_1.sanitizePlainTextInput)(req.body?.property, { maxLength: 255 });
         const baselineMenuContent = (0, upload_security_1.sanitizePlainTextInput)(req.body?.baselineMenuContent, { multiline: true, maxLength: upload_security_1.MAX_LONG_TEXT_LENGTH });
         const reviewMode = (0, upload_security_1.sanitizePlainTextInput)(req.body?.reviewMode, { maxLength: 64 });
         if (!menuContent || !menuContent.trim()) {
@@ -1898,9 +1990,18 @@ async function handleBasicCheck(req, res) {
         }
         const reviewFooterMetadata = normalizeMenuFooter(textForReview, allergens || '');
         const sanitizedMenuContent = normalizeMenuFooter(menuContent, allergens || '');
+        const effectiveReviewAllergens = allergens || reviewFooterMetadata.normalizedAllergenLine;
+        const acceptedCorrectionRules = await fetchAcceptedCorrectionRulesForPreAi();
+        const preAiDeterministic = (0, pre_ai_deterministic_rules_1.runPreAiDeterministicChecks)(reviewFooterMetadata.body, {
+            enabled: BASIC_AI_PRECHECK_ENABLED,
+            property,
+            allergenLegend: effectiveReviewAllergens,
+            acceptedCorrectionRules,
+        });
+        const preCheckedReviewBody = preAiDeterministic.menuText;
         const embeddedSetMenuAnalysis = menuType === 'prix_fixe'
             ? { sections: [], issues: [] }
-            : (0, embedded_set_menu_guard_1.analyzeEmbeddedSetMenus)(reviewFooterMetadata.body);
+            : (0, embedded_set_menu_guard_1.analyzeEmbeddedSetMenus)(preCheckedReviewBody);
         const diagnosticsPromptSections = [];
         // Debug logging
         console.log('=== BASIC CHECK REQUEST ===');
@@ -1908,6 +2009,7 @@ async function handleBasicCheck(req, res) {
         console.log('First 200 chars:', menuContent.substring(0, 200));
         console.log('Menu type:', menuType || 'standard');
         console.log('Custom allergens:', allergens ? 'Yes' : 'No (using defaults)');
+        console.log('Pre-AI deterministic corrections:', preAiDeterministic.appliedCorrections.length);
         console.log('===========================');
         // Load QA prompt
         const qaPromptPath = path.join(getRepoRoot(), 'sop-processor', 'qa_prompt.txt');
@@ -1957,7 +2059,6 @@ This is a PRIX FIXE (pre-fix) menu. Apply these special rules:
             console.log('Injected prix fixe rules into prompt');
             diagnosticsPromptSections.push('prix_fixe');
         }
-        const effectiveReviewAllergens = allergens || reviewFooterMetadata.normalizedAllergenLine;
         // If custom or extracted allergens are provided, inject them into the prompt
         if (effectiveReviewAllergens && effectiveReviewAllergens.trim()) {
             const allergenSection = `
@@ -1978,6 +2079,10 @@ Note: Use ONLY these allergen codes when checking allergen compliance. Do not us
         let finalPrompt = qaPrompt;
         finalPrompt = `${finalPrompt}\n\nIMPORTANT CORRECTED MENU STRUCTURE RULES:\n- The CORRECTED MENU section must contain every submitted menu line in the same order.\n- Do not summarize, shorten, condense, omit, merge, reorder, or rewrite the menu structure.\n- Do not add section headings or line breaks that were not in the submitted menu.\n- Apply only high-confidence corrections inline and leave all other text unchanged.`;
         diagnosticsPromptSections.push('corrected_menu_structure_rules');
+        if (BASIC_AI_PRECHECK_ENABLED) {
+            finalPrompt = `${finalPrompt}\n\nIMPORTANT PRE-AI DETERMINISTIC CHECKS:\n- Allowlisted spelling, diacritic, allergen-code formatting, raw-marker placement, and accepted correction-rule replacements have already been applied before this AI review.\n- Do not re-report those already-applied deterministic edits as remaining suggestions.\n- Focus on remaining semantic, contextual, uncertain, or reviewer-needed issues.`;
+            diagnosticsPromptSections.push('pre_ai_deterministic_checks');
+        }
         if (changedOnlyMode) {
             finalPrompt = `${finalPrompt}\n\nIMPORTANT SCOPE FOR THIS REVIEW:\nYou are reviewing ONLY changed excerpts from a menu revision.\nDo NOT flag unchanged baseline content.\nReturn issues only for the changed excerpts provided.\nThe CORRECTED MENU section MUST contain exactly the same lines you received, in the same order, with high-confidence corrections applied to each line. Do not add, remove, merge, split, or reorder lines.`;
             diagnosticsPromptSections.push('changed_only_scope');
@@ -1990,10 +2095,19 @@ Note: Use ONLY these allergen codes when checking allergen compliance. Do not us
             finalPrompt = `${finalPrompt}\n\n${(0, embedded_set_menu_guard_1.buildEmbeddedSetMenuPromptSection)(embeddedSetMenuAnalysis)}`;
             diagnosticsPromptSections.push('embedded_set_menu_rules');
         }
+        const getDeterministicFallbackMenu = () => {
+            if (preAiDeterministic.appliedCorrections.length === 0) {
+                return menuContent;
+            }
+            if (changedOnlyMode) {
+                return mergeChangedLineCorrections(menuContent, baselineMenuContent, preCheckedReviewBody).merged;
+            }
+            return preCheckedReviewBody;
+        };
         let qaResponse;
         try {
             qaResponse = await internalApi.post(`${AI_REVIEW_URL}/run-qa-check`, {
-                text: reviewFooterMetadata.body,
+                text: preCheckedReviewBody,
                 prompt: finalPrompt
             }, {
                 timeout: BASIC_AI_CHECK_TIMEOUT_MS
@@ -2002,7 +2116,10 @@ Note: Use ONLY these allergen codes when checking allergen compliance. Do not us
         catch (aiError) {
             const errorDetails = (0, clickup_handoff_1.describeServiceError)(aiError);
             const aiFailure = sanitizeBasicCheckFailure(errorDetails);
-            const fallbackMessage = 'AI check is temporarily unavailable. No automated suggestions were applied, but you can still submit this menu for manual review.';
+            const deterministicFallbackMenu = getDeterministicFallbackMenu();
+            const fallbackMessage = preAiDeterministic.appliedCorrections.length > 0
+                ? 'AI check is temporarily unavailable. Deterministic pre-check corrections were applied, and you can still submit this menu for manual review.'
+                : 'AI check is temporarily unavailable. No automated suggestions were applied, but you can still submit this menu for manual review.';
             console.error('AI basic check unavailable:', { checkId: basicCheckId, ...aiFailure });
             void (0, form_attempt_logging_1.logFormAttemptEvent)({
                 attemptId,
@@ -2022,7 +2139,7 @@ Note: Use ONLY these allergen codes when checking allergen compliance. Do not us
                 menuHtmlLength: req.body?.menuHtmlLength,
                 persistentDiffHtmlLength: req.body?.persistentDiffHtmlLength,
                 baseMenuTextLength: baselineMenuContent.length,
-                correctedMenuTextLength: menuContent.length,
+                correctedMenuTextLength: deterministicFallbackMenu.length,
                 requestBodyLength: req.get('content-length'),
                 suggestionsCount: 0,
                 criticalSuggestionsCount: 0,
@@ -2042,10 +2159,17 @@ Note: Use ONLY these allergen codes when checking allergen compliance. Do not us
                 aiRequest: {
                     url: `${AI_REVIEW_URL}/run-qa-check`,
                     timeoutMs: BASIC_AI_CHECK_TIMEOUT_MS,
-                    textLength: reviewFooterMetadata.body.length,
+                    textLength: preCheckedReviewBody.length,
                     promptLength: finalPrompt.length,
-                    text: truncateDiagnosticText(reviewFooterMetadata.body),
+                    text: truncateDiagnosticText(preCheckedReviewBody),
                     prompt: truncateDiagnosticText(finalPrompt),
+                },
+                preAiDeterministic: {
+                    enabled: BASIC_AI_PRECHECK_ENABLED,
+                    appliedCorrectionCount: preAiDeterministic.appliedCorrections.length,
+                    learnedRulesConsidered: preAiDeterministic.learnedRulesConsidered,
+                    learnedRulesApplied: preAiDeterministic.learnedRulesApplied,
+                    appliedCorrections: preAiDeterministic.appliedCorrections,
                 },
                 aiFailure,
             } : undefined;
@@ -2053,9 +2177,9 @@ Note: Use ONLY these allergen codes when checking allergen compliance. Do not us
                 success: true,
                 checkId: basicCheckId,
                 originalMenu: menuContent,
-                correctedMenu: menuContent,
+                correctedMenu: deterministicFallbackMenu,
                 suggestions: [],
-                hasChanges: false,
+                hasChanges: deterministicFallbackMenu !== menuContent,
                 hasCriticalErrors: false,
                 reviewMode: changedOnlyMode ? 'changed_only' : 'full',
                 changedLineCount,
@@ -2068,13 +2192,16 @@ Note: Use ONLY these allergen codes when checking allergen compliance. Do not us
         }
         const feedback = qaResponse?.data?.feedback;
         if (typeof feedback !== 'string' || !feedback.trim()) {
+            const deterministicFallbackMenu = getDeterministicFallbackMenu();
             const aiFailure = {
                 reason: 'ai_review_malformed_response',
                 status: qaResponse?.status,
                 statusText: qaResponse?.statusText,
                 message: 'AI review service returned no feedback text',
             };
-            const fallbackMessage = 'AI check is temporarily unavailable. No automated suggestions were applied, but you can still submit this menu for manual review.';
+            const fallbackMessage = preAiDeterministic.appliedCorrections.length > 0
+                ? 'AI check is temporarily unavailable. Deterministic pre-check corrections were applied, and you can still submit this menu for manual review.'
+                : 'AI check is temporarily unavailable. No automated suggestions were applied, but you can still submit this menu for manual review.';
             console.error('AI basic check malformed response:', { checkId: basicCheckId, ...aiFailure });
             void (0, form_attempt_logging_1.logFormAttemptEvent)({
                 attemptId,
@@ -2094,7 +2221,7 @@ Note: Use ONLY these allergen codes when checking allergen compliance. Do not us
                 menuHtmlLength: req.body?.menuHtmlLength,
                 persistentDiffHtmlLength: req.body?.persistentDiffHtmlLength,
                 baseMenuTextLength: baselineMenuContent.length,
-                correctedMenuTextLength: menuContent.length,
+                correctedMenuTextLength: deterministicFallbackMenu.length,
                 requestBodyLength: req.get('content-length'),
                 suggestionsCount: 0,
                 criticalSuggestionsCount: 0,
@@ -2114,10 +2241,17 @@ Note: Use ONLY these allergen codes when checking allergen compliance. Do not us
                 aiRequest: {
                     url: `${AI_REVIEW_URL}/run-qa-check`,
                     timeoutMs: BASIC_AI_CHECK_TIMEOUT_MS,
-                    textLength: reviewFooterMetadata.body.length,
+                    textLength: preCheckedReviewBody.length,
                     promptLength: finalPrompt.length,
-                    text: truncateDiagnosticText(reviewFooterMetadata.body),
+                    text: truncateDiagnosticText(preCheckedReviewBody),
                     prompt: truncateDiagnosticText(finalPrompt),
+                },
+                preAiDeterministic: {
+                    enabled: BASIC_AI_PRECHECK_ENABLED,
+                    appliedCorrectionCount: preAiDeterministic.appliedCorrections.length,
+                    learnedRulesConsidered: preAiDeterministic.learnedRulesConsidered,
+                    learnedRulesApplied: preAiDeterministic.learnedRulesApplied,
+                    appliedCorrections: preAiDeterministic.appliedCorrections,
                 },
                 aiResponse: {
                     status: qaResponse?.status,
@@ -2130,9 +2264,9 @@ Note: Use ONLY these allergen codes when checking allergen compliance. Do not us
                 success: true,
                 checkId: basicCheckId,
                 originalMenu: menuContent,
-                correctedMenu: menuContent,
+                correctedMenu: deterministicFallbackMenu,
                 suggestions: [],
-                hasChanges: false,
+                hasChanges: deterministicFallbackMenu !== menuContent,
                 hasCriticalErrors: false,
                 reviewMode: changedOnlyMode ? 'changed_only' : 'full',
                 changedLineCount,
@@ -2153,10 +2287,16 @@ Note: Use ONLY these allergen codes when checking allergen compliance. Do not us
         }
         console.log('=== END RAW FEEDBACK ===');
         // Parse the new format: corrected menu + suggestions
-        const parsed = parseAIResponse(feedback, reviewFooterMetadata.body);
-        const titleGuard = (0, menu_title_guard_1.preserveLeadingMenuTitle)(reviewFooterMetadata.body, parsed.correctedMenu);
-        const structureGuard = (0, corrected_menu_structure_guard_1.assessCorrectedMenuStructure)(reviewFooterMetadata.body, titleGuard.correctedMenu);
-        const guardedCorrectedMenu = structureGuard.safe ? titleGuard.correctedMenu : reviewFooterMetadata.body;
+        const parsed = parseAIResponse(feedback, preCheckedReviewBody);
+        const postAiDeterministic = (0, pre_ai_deterministic_rules_1.runPreAiDeterministicChecks)(parsed.correctedMenu, {
+            enabled: BASIC_AI_PRECHECK_ENABLED,
+            property,
+            allergenLegend: effectiveReviewAllergens,
+            acceptedCorrectionRules,
+        });
+        const titleGuard = (0, menu_title_guard_1.preserveLeadingMenuTitle)(preCheckedReviewBody, postAiDeterministic.menuText);
+        const structureGuard = (0, corrected_menu_structure_guard_1.assessCorrectedMenuStructure)(preCheckedReviewBody, titleGuard.correctedMenu);
+        const guardedCorrectedMenu = structureGuard.safe ? titleGuard.correctedMenu : preCheckedReviewBody;
         if (!structureGuard.safe) {
             console.warn('AI corrected menu rejected by structure guard:', {
                 checkId: basicCheckId,
@@ -2166,7 +2306,7 @@ Note: Use ONLY these allergen codes when checking allergen compliance. Do not us
         }
         const allergenGuard = (0, allergen_suggestion_guard_1.guardAllergenAlphabetizationSuggestions)(guardedCorrectedMenu, parsed.suggestions);
         const appliedHc = (0, apply_high_confidence_suggestions_1.applyHighConfidenceSuggestionsToMenu)(allergenGuard.correctedMenu, allergenGuard.suggestions);
-        const setMenuGuard = (0, embedded_set_menu_guard_1.guardEmbeddedSetMenuPrices)(reviewFooterMetadata.body, appliedHc.menuText, appliedHc.suggestions, embeddedSetMenuAnalysis);
+        const setMenuGuard = (0, embedded_set_menu_guard_1.guardEmbeddedSetMenuPrices)(preCheckedReviewBody, appliedHc.menuText, appliedHc.suggestions, embeddedSetMenuAnalysis);
         const correctedAfterHighConfidence = setMenuGuard.correctedMenu;
         const suggestionsAfterAutoApply = setMenuGuard.suggestions;
         const correctedMenuSanitized = stripManagedFooterText(correctedAfterHighConfidence);
@@ -2236,6 +2376,18 @@ Note: Use ONLY these allergen codes when checking allergen compliance. Do not us
                     reasons: structureGuard.reasons,
                     metrics: structureGuard.metrics,
                 },
+                preAiDeterministic: {
+                    enabled: BASIC_AI_PRECHECK_ENABLED,
+                    appliedCorrectionCount: preAiDeterministic.appliedCorrections.length,
+                    learnedRulesConsidered: preAiDeterministic.learnedRulesConsidered,
+                    learnedRulesApplied: preAiDeterministic.learnedRulesApplied,
+                },
+                postAiDeterministic: {
+                    enabled: BASIC_AI_PRECHECK_ENABLED,
+                    appliedCorrectionCount: postAiDeterministic.appliedCorrections.length,
+                    learnedRulesConsidered: postAiDeterministic.learnedRulesConsidered,
+                    learnedRulesApplied: postAiDeterministic.learnedRulesApplied,
+                },
             },
         });
         const basicCheckDiagnostics = diagnosticsRequested ? {
@@ -2246,10 +2398,17 @@ Note: Use ONLY these allergen codes when checking allergen compliance. Do not us
             aiRequest: {
                 url: `${AI_REVIEW_URL}/run-qa-check`,
                 timeoutMs: BASIC_AI_CHECK_TIMEOUT_MS,
-                textLength: reviewFooterMetadata.body.length,
+                textLength: preCheckedReviewBody.length,
                 promptLength: finalPrompt.length,
-                text: truncateDiagnosticText(reviewFooterMetadata.body),
+                text: truncateDiagnosticText(preCheckedReviewBody),
                 prompt: truncateDiagnosticText(finalPrompt),
+            },
+            preAiDeterministic: {
+                enabled: BASIC_AI_PRECHECK_ENABLED,
+                appliedCorrectionCount: preAiDeterministic.appliedCorrections.length,
+                learnedRulesConsidered: preAiDeterministic.learnedRulesConsidered,
+                learnedRulesApplied: preAiDeterministic.learnedRulesApplied,
+                appliedCorrections: preAiDeterministic.appliedCorrections,
             },
             aiResponse: {
                 rawFeedbackLength: `${feedback || ''}`.length,
@@ -2259,6 +2418,14 @@ Note: Use ONLY these allergen codes when checking allergen compliance. Do not us
                 correctedMenuLength: parsed.correctedMenu.length,
                 correctedMenu: truncateDiagnosticText(parsed.correctedMenu),
                 suggestions: parsed.suggestions,
+            },
+            postAiDeterministic: {
+                enabled: BASIC_AI_PRECHECK_ENABLED,
+                appliedCorrectionCount: postAiDeterministic.appliedCorrections.length,
+                learnedRulesConsidered: postAiDeterministic.learnedRulesConsidered,
+                learnedRulesApplied: postAiDeterministic.learnedRulesApplied,
+                appliedCorrections: postAiDeterministic.appliedCorrections,
+                correctedMenu: truncateDiagnosticText(postAiDeterministic.menuText),
             },
             autoApply: {
                 suggestionsBeforeCount: allergenGuard.suggestions.length,

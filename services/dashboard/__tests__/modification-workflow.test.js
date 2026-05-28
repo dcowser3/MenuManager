@@ -744,7 +744,7 @@ describe('Dashboard Modification Workflow (local, mocked externals)', () => {
             String(c[0]).includes('/run-qa-check')
         );
         expect(qaCall).toBeTruthy();
-        expect(qaCall[1].text).toBe('Ceviche - $15');
+        expect(qaCall[1].text).toBe('Ceviche* $15');
     });
 
     test('basic-check full review sends all text even when modification baseline content exists', async () => {
@@ -822,6 +822,71 @@ describe('Dashboard Modification Workflow (local, mocked externals)', () => {
         });
     });
 
+    test('basic-check applies accepted learned correction rules before sending text to AI', async () => {
+        mockedAxios.get = jest.fn(async (url) => {
+            const urlStr = String(url);
+            if (urlStr.includes('/correction-rules')) {
+                return {
+                    data: [{
+                        id: 'rule-habanero',
+                        status: 'accepted',
+                        source: 'human',
+                        original_text: 'habanero salsa',
+                        corrected_text: 'habanero relish',
+                        change_type: 'terminology',
+                        rule: 'Use relish for the approved preparation.',
+                        is_location_specific: true,
+                        location: 'Toro Denver',
+                        other_applicable_locations: [],
+                    }],
+                };
+            }
+            if (urlStr.includes('/properties')) {
+                return { data: { catalog: [{ name: 'Toro Denver' }] } };
+            }
+            return { data: {} };
+        });
+        mockedAxios.post = jest.fn(async (url, payload) => {
+            const urlStr = String(url);
+            if (urlStr.includes('/run-qa-check')) {
+                const echoText = (payload && typeof payload.text === 'string') ? payload.text : '';
+                return {
+                    data: {
+                        feedback: `=== CORRECTED MENU ===\n${echoText}\n=== END CORRECTED MENU ===\n=== SUGGESTIONS ===\n[]\n=== END SUGGESTIONS ===`
+                    }
+                };
+            }
+            return { data: {} };
+        });
+
+        const payload = {
+            menuContent: 'Taco, habanero salsa, cilantro 15',
+            baselineMenuContent: '',
+            reviewMode: 'full',
+            allergens: '',
+            menuType: 'standard',
+            property: 'Toro Denver',
+        };
+
+        const response = await invokeJsonHandler(basicCheckHandler, payload, {
+            headers: { 'x-menumanager-debug-basic-check': '1' },
+        });
+
+        const qaCall = mockedAxios.post.mock.calls.find((c) =>
+            String(c[0]).includes('/run-qa-check')
+        );
+        expect(qaCall[1].text).toBe('Taco, habanero relish, cilantro 15');
+        expect(response.status).toBe(200);
+        expect(response.body.success).toBe(true);
+        expect(response.body.correctedMenu).toBe('Taco, habanero relish, cilantro 15');
+        expect(response.body.basicCheckDiagnostics.preAiDeterministic).toMatchObject({
+            enabled: true,
+            appliedCorrectionCount: 1,
+            learnedRulesConsidered: 1,
+            learnedRulesApplied: 1,
+        });
+    });
+
     test.each([
         [
             '503 service error',
@@ -881,8 +946,9 @@ describe('Dashboard Modification Workflow (local, mocked externals)', () => {
         expect(response.body.success).toBe(true);
         expect(response.body.aiUnavailable).toBe(true);
         expect(response.body.manualReviewRequired).toBe(true);
-        expect(response.body.correctedMenu).toBe(payload.menuContent);
+        expect(response.body.correctedMenu).toBe('Guacamole - $12\nCeviche* $15');
         expect(response.body.suggestions).toEqual([]);
+        expect(response.body.hasChanges).toBe(true);
         expect(response.body.hasCriticalErrors).toBe(false);
         expect(response.body.aiFailure).toMatchObject(expectedFailure);
         expect(response.body.reviewSkippedReason).toContain('manual review');
@@ -917,8 +983,9 @@ describe('Dashboard Modification Workflow (local, mocked externals)', () => {
         expect(response.body.success).toBe(true);
         expect(response.body.aiUnavailable).toBe(true);
         expect(response.body.manualReviewRequired).toBe(true);
-        expect(response.body.correctedMenu).toBe(payload.menuContent);
+        expect(response.body.correctedMenu).toBe('Guacamole - $12\nCeviche* $15');
         expect(response.body.suggestions).toEqual([]);
+        expect(response.body.hasChanges).toBe(true);
         expect(response.body.hasCriticalErrors).toBe(false);
         expect(response.body.aiFailure).toMatchObject({
             reason: 'ai_review_malformed_response',
@@ -1039,8 +1106,9 @@ describe('Dashboard Modification Workflow (local, mocked externals)', () => {
         expect(statusResponse.body.result.success).toBe(true);
         expect(statusResponse.body.result.aiUnavailable).toBe(true);
         expect(statusResponse.body.result.manualReviewRequired).toBe(true);
-        expect(statusResponse.body.result.correctedMenu).toBe(payload.menuContent);
+        expect(statusResponse.body.result.correctedMenu).toBe('Guacamole - $12\nCeviche* $15');
         expect(statusResponse.body.result.suggestions).toEqual([]);
+        expect(statusResponse.body.result.hasChanges).toBe(true);
         expect(statusResponse.body.result.aiFailure).toMatchObject({
             reason: 'ai_review_service_error',
             status: 502,
@@ -1076,7 +1144,7 @@ describe('Dashboard Modification Workflow (local, mocked externals)', () => {
         expect(response.body.changedLineCount).toBe(1);
         expect(response.body.hasChanges).toBe(true);
         expect(response.body.correctedMenu).toBe(
-            'Guacamole - $12\nMarket Salad, avocado, heirloom tomatoes, halloumi cheese, cucumber, red onion D, V 70'
+            'Guacamole - $12\nMarket Salad, avocado, heirloom tomatoes, halloumi cheese, cucumber, red onion D,V 70'
         );
     });
 

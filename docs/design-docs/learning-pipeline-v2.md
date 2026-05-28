@@ -187,18 +187,38 @@ CREATE TABLE IF NOT EXISTS prompt_proposals (
 
 ### Flow 2: System-Proposed Rules
 
-**Trigger:** After each `POST /compare`, the differ service checks if any new replacement patterns cross a threshold.
+**Trigger:** After a human-reviewed final approval calls `POST /compare` with `comparison_source: "human_review_final_approval"` and `changed_by_human: true`, the differ service verifies that the final approved DOCX differs from the AI draft sent to Isabella. Only then does it save learning evidence and check whether any replacement patterns cross a threshold.
 
 Before aggregating a replacement, differ matches changed lines by same-dish identity. Lines from deleted or replacement dishes are ignored for learning, so removed menu items do not create spelling or diacritic proposals.
+
+Quick approvals, imports/backfills, AI-only intermediate changes, requests without the human-review provenance flags, and identical final documents are skipped for learning. Training entries are keyed by submission plus comparison source and upserted, so reprocessing the same approved submission replaces the prior learning row instead of double-counting its replacements.
 
 **Instead of auto-promoting to the overlay:**
 1. Differ detects pattern: "Jalapeno → Jalapeño" seen 3 times across 2 submissions
 2. Creates a `correction_rules` record with `source: 'system'`, `status: 'pending'`
 3. Dashboard shows these in a "Proposed Rules" section with an accept/reject/modify UI
-4. Human reviews: accepts (optionally adds context), rejects, or modifies the rule text
-5. Accepted rules feed into the weekly prompt cycle
+4. Reviewer can expand examples for a proposed rule. The dashboard reconstructs the matching before/after lines from differ history, showing the AI draft DOCX line beside the final approved DOCX line and linking back to the learned submission.
+5. Human reviews: accepts (optionally adds context), rejects, or modifies the rule text
+6. Accepted exact replacement rules feed into the Basic AI Check deterministic pre-AI pass when their scope matches the submitted property. They can still be considered by the weekly prompt cycle when a broader prompt change is warranted.
 
-**Key difference from v1:** System-detected patterns are *proposals*, not auto-injected rules.
+**Key difference from v1:** System-detected patterns are *proposals*, not auto-injected prompt rules.
+The evidence examples are reconstructed only from eligible human-review final-approval comparisons, so reviewers can verify the exact AI draft line and final approved DOCX line before treating the pattern as an intentional human edit.
+
+### Flow 2.5: Basic AI Check Pre-AI Deterministic Pass
+
+Before the dashboard calls `ai-review`, Basic AI Check runs deterministic checks over the review body:
+
+- built-in exact spelling and diacritic replacements that are safe enough to remove from the prompt tables
+- allergen-code cluster formatting (uppercase, comma-separated, no spaces, alphabetical)
+- raw asterisk placement, with the asterisk attached to the last dish/description word, plus missing asterisks for strong raw terms such as tartare, sashimi, raw/uncooked ceviche, crudo, tiradito, poke, raw or half-shell oysters, explicit raw tuna/salmon/hamachi/fish/beef, poached egg, and sunny-side-up egg
+- curated deterministic guards promoted from accepted human-review explanations when the rule can be safely bounded in code, such as `veggies` to `vegetables`, Tres Leches requiring vegetarian code `V`, and poached/sunny-side-up egg raw markers
+- accepted `correction_rules` exact replacements whose status is `accepted` and whose property scope matches the submitted property
+
+Learned rules are intentionally constrained to exact spelling, diacritic, terminology, grammar, and punctuation replacements. Broad `content` rules remain reviewer/prompt material because they can change meaning. If accepted rules cannot be loaded, the dashboard fails open and still runs the built-in deterministic checks plus AI review.
+
+After the AI response is parsed, the dashboard reapplies the same deterministic cleanup to the model's corrected menu before structure/reconciliation guards. This prevents the model from reintroducing deterministic formatting drift such as `description *` raw markers or unsorted allergen clusters.
+
+For historical accuracy testing, set `BASIC_AI_PRECHECK_DISABLED=true` to compare old prompt-first behavior against the new pre-AI path. Set `BASIC_AI_LEARNED_PRECHECK_DISABLED=true` to isolate built-in deterministic checks from accepted learned-rule replacements. For an offline deterministic-only replay, run `npm run preai:ab-replay`; it compares the curated `Training Menus` DOCX pairs against the same text after pre-AI checks, using the paired human/redlined DOCX as the target and writing reports under `tmp/pre-ai-ab-replay/`. Use `-- --source all` when the broader sample-pair set is useful for exploratory regression hunting.
 
 ### Flow 3: Weekly Prompt Rewrite
 
@@ -280,7 +300,7 @@ Before aggregating a replacement, differ matches changed lines by same-dish iden
 ## What Gets Kept
 
 1. **Differ comparison engine:** Still extracts before/after token-level diffs — core value
-2. **Training data JSONL:** Still appended for history/audit
+2. **Training data JSONL:** Still kept for history/audit, but eligible human-review comparisons are upserted by submission/source so duplicate finalizations do not inflate counts
 3. **Correction annotation UI:** Enhanced, not replaced
 4. **Document pair tracking:** The assets table + `document_pairs` view we just built
 5. **`rebuildLearnedRules()`:** Repurposed — instead of building an overlay, it proposes `correction_rules` with `source: 'system'`
@@ -314,6 +334,7 @@ Since v1 data is minimal (the system is new), migration is straightforward:
 - **Per-submission cleanup:** each recent learned submission has a delete action for removing known test rows from differ history. The dashboard calls `DELETE /api/learning/submissions/:submissionId`, which proxies to the differ service, removes matching JSONL entries plus the detail comparison file, and rebuilds the detected-pattern snapshot.
 - **"Proposed Rules"** section: system-detected patterns awaiting review
   - Accept / Reject / Modify buttons per rule
+  - Evidence examples button per system rule, showing reconstructed AI draft vs final approved DOCX lines, source filenames, and learned-submission links
   - Bulk accept/reject
 - **"Weekly Prompt Proposal"** section:
   - Current prompt vs proposed prompt diff

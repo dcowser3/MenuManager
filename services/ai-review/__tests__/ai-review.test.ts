@@ -44,4 +44,42 @@ describe('AI Review Service', () => {
         expect(reviewResult.pass).toBe(true);
         expect(reviewResult.confidence).toBe(0.9);
     });
+
+    it('parses approved dish quality verdicts from model JSON', async () => {
+        const { parseDishQualityAiResponse } = await import('../index');
+        const rows = [
+            { index: 0, dishName: 'Adobo Chicken' },
+            { index: 1, dishName: 'À La Carte PricingAntojitos' },
+        ];
+
+        const results = parseDishQualityAiResponse(JSON.stringify({
+            results: [
+                { index: 0, verdict: 'dish', confidence: 'high', reason: 'A priced fajita protein can be a menu item.' },
+                { index: 1, verdict: 'not_dish', confidence: 'high', reason: 'This is a pricing grid.' },
+            ],
+        }), rows);
+
+        expect(results).toEqual([
+            expect.objectContaining({ index: 0, verdict: 'dish', confidence: 'high' }),
+            expect.objectContaining({ index: 1, verdict: 'not_dish', confidence: 'high' }),
+        ]);
+    });
+
+    it('returns uncertain for omitted or malformed approved dish quality responses', async () => {
+        const { parseDishQualityAiResponse } = await import('../index');
+        const rows = [
+            { index: 0, dishName: 'Pan-Seared Scallops' },
+            { index: 1, dishName: 'Pricing' },
+        ];
+
+        expect(parseDishQualityAiResponse('{not json', rows)).toEqual([
+            expect.objectContaining({ index: 0, verdict: 'uncertain', confidence: 'low' }),
+            expect.objectContaining({ index: 1, verdict: 'uncertain', confidence: 'low' }),
+        ]);
+
+        expect(parseDishQualityAiResponse(JSON.stringify({ results: [{ index: 0, verdict: 'dish', confidence: 'medium' }] }), rows)).toEqual([
+            expect.objectContaining({ index: 0, verdict: 'dish', confidence: 'medium' }),
+            expect.objectContaining({ index: 1, verdict: 'uncertain', confidence: 'low' }),
+        ]);
+    });
 });

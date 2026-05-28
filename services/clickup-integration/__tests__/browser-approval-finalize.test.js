@@ -471,6 +471,10 @@ describe('browser approval finalize route', () => {
             submission_id: 'sub_uploaded_baseline_1',
             ai_draft_path: '/tmp/documents/sub_uploaded_baseline_1/ai-draft.docx',
             final_path: approvedPath,
+            comparison_source: 'human_review_final_approval',
+            review_source: 'browser_approval_editor',
+            review_completed_at: expect.any(String),
+            changed_by_human: true,
         });
         expect(compareCall[1].final_path).not.toBe('/tmp/documents/sub_uploaded_baseline_1/baseline/legacy-approved.docx');
     });
@@ -774,6 +778,10 @@ describe('browser approval finalize route', () => {
             expect.objectContaining({
                 submission_id: 'sub_todo_1',
                 ai_draft_path: '/tmp/documents/sub_todo_1-draft.docx',
+                comparison_source: 'human_review_final_approval',
+                review_source: 'isabella_clickup',
+                review_completed_at: expect.any(String),
+                changed_by_human: true,
             })
         );
         expect(compareCall[1].final_path).toContain('/sub_todo_1/approved/sub_todo_1-approved.docx');

@@ -1,6 +1,15 @@
 import { promises as fs } from 'fs';
 import * as path from 'path';
-import { getSupabaseClient, isSupabaseConfigured } from '@menumanager/supabase-client';
+import {
+    DishQualityIssue,
+    DishQualitySeverity,
+    DishSourceContext,
+    analyzeApprovedDishQuality,
+    buildDishQualityContext,
+    findDishSourceContext,
+    getSupabaseClient,
+    isSupabaseConfigured,
+} from '@menumanager/supabase-client';
 
 const APPROVED_DISHES_TABLE = 'approved_dishes';
 const LOCAL_APPROVED_DISHES_FILE = 'approved_dishes.json';
@@ -22,6 +31,41 @@ type ApprovedDishSourceRow = {
     created_at?: string;
 };
 
+type ApprovedDishSubmissionRow = {
+    id?: string;
+    legacy_id?: string;
+    project_name?: string;
+    filename?: string;
+    clickup_task_id?: string;
+    source?: string;
+    service_period?: string;
+    reviewed_at?: string;
+    updated_at?: string;
+    approved_menu_content?: string;
+    menu_content?: string;
+    raw_payload?: any;
+};
+
+export type ApprovedDishSourceInfo = {
+    id: string;
+    legacyId: string;
+    projectName: string;
+    filename: string;
+    sourceType: string;
+    clickupTaskId: string;
+    clickupTaskUrl: string;
+    reviewedAt: string;
+    updatedAt: string;
+    label: string;
+    detail: string;
+};
+
+export type ApprovedDishQualityInfo = {
+    issues: DishQualityIssue[];
+    highestSeverity: DishQualitySeverity | '';
+    disposition: 'keep' | 'review' | 'exclude';
+};
+
 export type ApprovedDishListItem = {
     id: string;
     dishName: string;
@@ -35,6 +79,9 @@ export type ApprovedDishListItem = {
     price: string;
     allergens: string[];
     sourceSubmissionId: string;
+    source: ApprovedDishSourceInfo;
+    quality: ApprovedDishQualityInfo;
+    sourceContext: DishSourceContext;
     createdAt: string;
 };
 
@@ -85,9 +132,75 @@ export function slugifyApprovedDishBrand(value: string): string {
     return slug || 'unknown-brand';
 }
 
-function normalizeSourceDish(row: ApprovedDishSourceRow): ApprovedDishListItem {
+function formatDateLabel(value: string | undefined): string {
+    if (!value) return '';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return '';
+    return date.toISOString().slice(0, 10);
+}
+
+function extractClickUpTaskUrl(row: ApprovedDishSubmissionRow | undefined): string {
+    const payload = row?.raw_payload || {};
+    return `${payload?.clickupHistoryImport?.taskUrl || payload?.clickupTaskUrl || ''}`.trim();
+}
+
+function buildSourceInfo(sourceRow: ApprovedDishSubmissionRow | undefined, sourceSubmissionId: string): ApprovedDishSourceInfo {
+    const id = `${sourceRow?.id || sourceSubmissionId || ''}`.trim();
+    const filename = `${sourceRow?.filename || ''}`.trim();
+    const projectName = `${sourceRow?.project_name || ''}`.trim();
+    const legacyId = `${sourceRow?.legacy_id || ''}`.trim();
+    const sourceType = `${sourceRow?.source || ''}`.trim();
+    const clickupTaskId = `${sourceRow?.clickup_task_id || ''}`.trim();
+    const reviewedAt = `${sourceRow?.reviewed_at || ''}`.trim();
+    const updatedAt = `${sourceRow?.updated_at || ''}`.trim();
+    const fallbackId = id ? id.slice(0, 8) : '';
+    const label = filename || projectName || legacyId || fallbackId || 'Unknown source';
+    const detailParts = [
+        projectName && projectName !== label ? projectName : '',
+        sourceType,
+        clickupTaskId ? `ClickUp ${clickupTaskId}` : '',
+        formatDateLabel(reviewedAt || updatedAt),
+    ].filter(Boolean);
+
+    return {
+        id,
+        legacyId,
+        projectName,
+        filename,
+        sourceType,
+        clickupTaskId,
+        clickupTaskUrl: extractClickUpTaskUrl(sourceRow),
+        reviewedAt,
+        updatedAt,
+        label,
+        detail: detailParts.join(' | '),
+    };
+}
+
+function normalizeSourceDish(
+    row: ApprovedDishSourceRow,
+    options: {
+        sourceById: Map<string, ApprovedDishSubmissionRow>;
+        qualityContext: ReturnType<typeof buildDishQualityContext>;
+    }
+): ApprovedDishListItem {
     const property = `${row.property || ''}`.trim() || 'Unknown Property';
     const brand = deriveBrandFromProperty(property);
+    const sourceSubmissionId = `${row.source_submission_id || ''}`.trim();
+    const sourceRow = sourceSubmissionId ? options.sourceById.get(sourceSubmissionId) : undefined;
+    const qualityInput = {
+        id: row.id,
+        dish_name: row.dish_name,
+        property: row.property,
+        service_period: row.service_period,
+        menu_category: row.menu_category,
+        description: row.description,
+        price: row.price,
+        allergens: row.allergens,
+        source_submission_id: row.source_submission_id,
+    };
+    const quality = analyzeApprovedDishQuality(qualityInput, options.qualityContext);
+    const sourceText = `${sourceRow?.approved_menu_content || sourceRow?.menu_content || ''}`;
 
     return {
         id: `${row.id || ''}`.trim(),
@@ -103,7 +216,14 @@ function normalizeSourceDish(row: ApprovedDishSourceRow): ApprovedDishListItem {
         allergens: Array.isArray(row.allergens)
             ? row.allergens.map((allergen) => `${allergen || ''}`.trim()).filter(Boolean)
             : [],
-        sourceSubmissionId: `${row.source_submission_id || ''}`.trim(),
+        sourceSubmissionId,
+        source: buildSourceInfo(sourceRow, sourceSubmissionId),
+        quality: {
+            issues: quality.issues,
+            highestSeverity: quality.highestSeverity || '',
+            disposition: quality.disposition,
+        },
+        sourceContext: findDishSourceContext(sourceText, qualityInput),
         createdAt: `${row.created_at || ''}`.trim(),
     };
 }
@@ -118,6 +238,11 @@ function matchesDishSearch(dish: ApprovedDishListItem, query: string): boolean {
         dish.brand,
         dish.servicePeriod,
         dish.menuCategory,
+        dish.source.label,
+        dish.source.detail,
+        dish.sourceSubmissionId,
+        dish.quality.issues.map((issue) => issue.code).join(' '),
+        dish.quality.issues.map((issue) => issue.reason).join(' '),
         dish.price,
         dish.allergens.join(' '),
     ].join(' ').toLowerCase();
@@ -174,6 +299,64 @@ async function readLocalApprovedDishes(repoRoot: string): Promise<ApprovedDishSo
     }
 }
 
+async function readLocalSubmissions(repoRoot: string): Promise<ApprovedDishSubmissionRow[]> {
+    const target = path.join(getLocalDbDir(repoRoot), 'submissions.json');
+    try {
+        const raw = await fs.readFile(target, 'utf-8');
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) return parsed;
+        if (parsed && typeof parsed === 'object') return Object.values(parsed);
+        return [];
+    } catch (error: any) {
+        if (error?.code === 'ENOENT') return [];
+        throw error;
+    }
+}
+
+async function loadSubmissionRows(
+    repoRoot: string,
+    sourceRows: ApprovedDishSourceRow[]
+): Promise<Map<string, ApprovedDishSubmissionRow>> {
+    const submissionIds = Array.from(new Set(
+        sourceRows.map((row) => `${row.source_submission_id || ''}`.trim()).filter(Boolean)
+    ));
+    const sourceById = new Map<string, ApprovedDishSubmissionRow>();
+
+    if (submissionIds.length === 0) {
+        return sourceById;
+    }
+
+    if (isSupabaseConfigured()) {
+        const supabase = getSupabaseClient();
+        for (let offset = 0; offset < submissionIds.length; offset += PAGE_SIZE) {
+            const batch = submissionIds.slice(offset, offset + PAGE_SIZE);
+            const { data, error } = await supabase
+                .from('submissions')
+                .select('id, legacy_id, project_name, filename, clickup_task_id, source, service_period, reviewed_at, updated_at, approved_menu_content, menu_content, raw_payload')
+                .in('id', batch);
+
+            if (error) {
+                throw new Error(`Failed to load approved dish source submissions: ${error.message}`);
+            }
+
+            for (const row of data || []) {
+                if (row?.id) {
+                    sourceById.set(`${row.id}`, row as ApprovedDishSubmissionRow);
+                }
+            }
+        }
+    } else {
+        const localSubmissions = await readLocalSubmissions(repoRoot);
+        for (const row of localSubmissions) {
+            if (row?.id) {
+                sourceById.set(`${row.id}`, row);
+            }
+        }
+    }
+
+    return sourceById;
+}
+
 async function loadApprovedDishRows(repoRoot: string): Promise<ApprovedDishListItem[]> {
     let sourceRows: ApprovedDishSourceRow[] = [];
 
@@ -202,9 +385,12 @@ async function loadApprovedDishRows(repoRoot: string): Promise<ApprovedDishListI
         sourceRows = await readLocalApprovedDishes(repoRoot);
     }
 
-    return sourceRows
-        .filter((row) => row.is_active !== false)
-        .map((row) => normalizeSourceDish(row))
+    const activeRows = sourceRows.filter((row) => row.is_active !== false);
+    const sourceById = await loadSubmissionRows(repoRoot, activeRows);
+    const qualityContext = buildDishQualityContext(activeRows);
+
+    return activeRows
+        .map((row) => normalizeSourceDish(row, { sourceById, qualityContext }))
         .filter((dish) => !!dish.dishName);
 }
 

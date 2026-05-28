@@ -11,6 +11,10 @@ export declare function createDish(input: CreateDishInput): Promise<ApprovedDish
  */
 export declare function createDishes(inputs: CreateDishInput[]): Promise<ApprovedDish[]>;
 /**
+ * Replace all dishes for a submission with a new extraction result.
+ */
+export declare function replaceDishesForSubmission(submissionId: string, inputs: CreateDishInput[]): Promise<ApprovedDish[]>;
+/**
  * Get a dish by ID
  */
 export declare function getDish(id: string): Promise<ApprovedDish | null>;

@@ -736,4 +736,129 @@ describe('approved dish extraction', () => {
         ]));
         expect(extracted.some((dish) => /^(RED|GIN|RUM|TEA|Wood Fire Grill|Wednesday|Brown Sugar|Classics with a Twist|Fajitas|vegan option|mashed potatoes)/i.test(dish.name))).toBe(false);
     });
+
+    test('skips Tamayo brunch pricing glue rows', () => {
+        const menuText = [
+            'Bottomless food & Drink | Bottomless food',
+            'Antojitos',
+            'Seasonal Fruit Cocktail, orange, mango foam, bee pollen V',
+            'Salsas Trio & Chips, charred pepita habanero salsa, molcajete, salsa verde G,VG',
+            'À La Carte PricingAntojitos - $12Tacos - $14Especialidades - $16Mas - $8Postres - $8À La Carte PricingAntojitos - $12Tacos - $14Especialidades - $16Mas - $8Postres -',
+        ].join('\n');
+
+        const extracted = previewDishExtraction(menuText);
+
+        expect(extracted.map((dish) => dish.name)).toEqual([
+            'Seasonal Fruit Cocktail',
+            'Salsas Trio & Chips',
+        ]);
+        expect(extracted.some((dish) => /pricing|carte/i.test(dish.name))).toBe(false);
+        expect(extracted.every((dish) => dish.category === 'Antojitos')).toBe(true);
+    });
+
+    test('skips Tamayo beverage pricing headings and run-window instructions', () => {
+        const menuText = [
+            'Beverage Menu',
+            'Beso de Jalisco, Weber Ranch Vodka, Lemon, Agave, Strawberry, Mint',
+            'We also want to run these drinks from Friday the 13th to Sunday the 15th on a separate 5x7 menu.',
+            'Pricing',
+            'Beso de Jalisco - $12',
+            'Love Supreme - $13',
+        ].join('\n');
+
+        const extracted = previewDishExtraction(menuText);
+
+        expect(extracted.map((dish) => dish.name)).toEqual([
+            'Beso de Jalisco',
+            'Beso de Jalisco',
+            'Love Supreme',
+        ]);
+        expect(extracted.some((dish) => /pricing|friday the 13th/i.test(dish.name))).toBe(false);
+        expect(extracted.some((dish) => /[-–—]$/.test(dish.name))).toBe(false);
+    });
+
+    test('does not promote prix fixe dish descriptions into category', () => {
+        const menuText = [
+            'NEW YEAR’S EVE 3-COURSE PRIX FIXE',
+            'Your Selection for Each Course | 85.00',
+            'Appetizer',
+            'Grilled Figs & Burrata Salad, baby arugula, pepita pesto, blood orange segment, caramelized pecan, hibiscus glaze, lemon olive oil D,N,V',
+            'Pan-Seared Scallops, roasted corn purée, purslane sprouts, roasted poblano sauce* D,S',
+            'Butternut Squash Soup, crab cake, coconut espuma, spicy pepita D,S',
+            'Entrée',
+            'Pan-Seared Chilean Seabass, charred adobo octopus, oaxacan mole amarillo, roasted heirloom carrot, sorrel sprouts D,S',
+        ].join('\n');
+
+        const extracted = previewDishExtraction(menuText);
+
+        expect(extracted.map((dish) => dish.name)).toEqual([
+            'Grilled Figs & Burrata Salad',
+            'Pan-Seared Scallops',
+            'Butternut Squash Soup',
+            'Pan-Seared Chilean Seabass',
+        ]);
+        expect(extracted.slice(0, 3).every((dish) => dish.category === 'Appetizer')).toBe(true);
+        expect(extracted[3]).toMatchObject({
+            name: 'Pan-Seared Chilean Seabass',
+            category: 'Entrée',
+        });
+    });
+
+    test('recognizes Especialidades as a category instead of a two-line dish', () => {
+        const menuText = [
+            'Tacos',
+            'Adobo Chicken, radish, red onion, cilantro, tomatillo salsa verde G 17',
+            'Especialidades',
+            '29 Chicken Tinga Enchiladas, tomatillo salsa, chihuahua cheese, black bean purée, crema fresca D 28',
+            'Salmon a la Talla, corn esquites, cherry tomato, chayote napa cabbage slaw* G 31',
+        ].join('\n');
+
+        const extracted = previewDishExtraction(menuText);
+
+        expect(extracted.map((dish) => dish.name)).toEqual([
+            'Adobo Chicken',
+            'Chicken Tinga Enchiladas',
+            'Salmon a la Talla',
+        ]);
+        expect(extracted[1]).toMatchObject({
+            category: 'Especialidades',
+            price: '28',
+        });
+        expect(extracted[2]).toMatchObject({
+            category: 'Especialidades',
+            price: '31',
+        });
+        expect(extracted.some((dish) => dish.name === 'Especialidades')).toBe(false);
+    });
+
+    test('applies shared fajita serving descriptions to bare protein rows', () => {
+        const menuText = [
+            'Fajitas',
+            'served with flour tortillas G, guacamole V, crema fresca D, pico de gallo',
+            'Adobo Chicken G 27',
+            'Shrimp, salsa macha marinade S 29',
+        ].join('\n');
+
+        const extracted = previewDishExtraction(menuText);
+
+        expect(extracted.map((dish) => dish.name)).toEqual([
+            'Adobo Chicken',
+            'Shrimp',
+        ]);
+        expect(extracted[0]).toMatchObject({
+            name: 'Adobo Chicken',
+            description: 'flour tortillas, guacamole, crema fresca, pico de gallo',
+            category: 'Fajitas',
+            price: '27',
+            allergens: ['G', 'V', 'D'],
+        });
+        expect(extracted[1]).toMatchObject({
+            name: 'Shrimp',
+            description: 'salsa macha marinade',
+            category: 'Fajitas',
+            price: '29',
+            allergens: ['S'],
+        });
+        expect(extracted.some((dish) => /^served with/i.test(dish.name))).toBe(false);
+    });
 });

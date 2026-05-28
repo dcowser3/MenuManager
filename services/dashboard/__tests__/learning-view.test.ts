@@ -71,4 +71,28 @@ describe('learning dashboard view', () => {
         expect(html).toContain('Recovered Menu');
         expect(html).not.toContain('No training submissions recorded yet.');
     });
+
+    test('renders evidence controls for pending system rules', () => {
+        const html = renderLearningView({
+            pendingRules: [{
+                id: 'rule-1',
+                original_text: 'radishes',
+                corrected_text: 'radish',
+                rule: 'Always use "radish" instead of "radishes"',
+                source: 'system',
+                restaurant_name: '',
+                location: 'All properties (global rule)',
+                is_location_specific: false,
+                occurrences: 2,
+                confidence: 0.6,
+                submission_ids: ['sub-123'],
+            }],
+        });
+
+        expect(html).toContain('Examples');
+        expect(html).toContain('ruleExamplesPayload');
+        expect(html).toContain('"original_text":"radishes"');
+        expect(html).toContain('"submission_ids":["sub-123"]');
+        expect(html).toContain('rule-examples-row-rule-1');
+    });
 });
