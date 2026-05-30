@@ -46,6 +46,14 @@ const CLICKUP_ISABELLA_DIRECT_STATUS = CLICKUP_POST_APPROVAL_STATUS || 'to do';
 const CLICKUP_MARKETING_WATCHER_GROUP_NAME = (process.env.CLICKUP_MARKETING_WATCHER_GROUP_NAME || 'Marketing').trim();
 const CLICKUP_MARKETING_WATCHER_GROUP_ID = process.env.CLICKUP_MARKETING_WATCHER_GROUP_ID || '';
 const CLICKUP_WATCHER_USER_IDS = process.env.CLICKUP_WATCHER_USER_IDS || '';
+const CLICKUP_WEBHOOK_SUBMISSION_LOOKUP_RETRIES = parseNonNegativeInteger(
+    process.env.CLICKUP_WEBHOOK_SUBMISSION_LOOKUP_RETRIES,
+    5
+);
+const CLICKUP_WEBHOOK_SUBMISSION_LOOKUP_RETRY_DELAY_MS = parseNonNegativeInteger(
+    process.env.CLICKUP_WEBHOOK_SUBMISSION_LOOKUP_RETRY_DELAY_MS,
+    1000
+);
 const ISABELLA_SUBMITTER_EMAIL = 'isabella@richardsandoval.com';
 const CLICKUP_REVIEW_COMPLETE_STATUSES = buildReviewCompleteStatuses();
 const GRAPH_CLIENT_ID = process.env.GRAPH_CLIENT_ID;
@@ -89,6 +97,11 @@ function describeServiceError(error: any): Record<string, any> {
         statusText: error?.response?.statusText,
         response: error?.response?.data,
     }).filter(([, value]) => value !== undefined && value !== null && value !== ''));
+}
+
+function parseNonNegativeInteger(value: any, fallback: number): number {
+    const parsed = Number.parseInt(`${value || ''}`, 10);
+    return Number.isInteger(parsed) && parsed >= 0 ? parsed : fallback;
 }
 
 function sharePointUploadContext(input: {
@@ -795,6 +808,56 @@ function describeReviewCompleteStatuses(): string {
         .join(', ');
 }
 
+function getClickUpTaskListId(task: any): string {
+    return `${task?.list?.id || task?.list_id || task?.listId || ''}`.trim();
+}
+
+function isConfiguredMenuManagerTask(task: any): boolean {
+    const configuredListId = `${CLICKUP_LIST_ID || ''}`.trim();
+    if (!configuredListId) return true;
+
+    const taskListId = getClickUpTaskListId(task);
+    return !taskListId || taskListId === configuredListId;
+}
+
+function isSubmissionLookupNotFound(error: any): boolean {
+    const status = error?.response?.status;
+    const responseError = `${error?.response?.data?.error || error?.response?.data?.message || ''}`;
+    return status === 404 || /no submission found/i.test(responseError);
+}
+
+function sleep(ms: number): Promise<void> {
+    return ms > 0
+        ? new Promise((resolve) => setTimeout(resolve, ms))
+        : Promise.resolve();
+}
+
+async function getSubmissionByClickUpTaskWithRetry(clickupTaskId: string): Promise<any> {
+    const maxAttempts = CLICKUP_WEBHOOK_SUBMISSION_LOOKUP_RETRIES + 1;
+    let lastError: any;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+        try {
+            const response = await internalApi.get(
+                `${DB_SERVICE_URL}/submissions/by-clickup-task/${encodeURIComponent(clickupTaskId)}`
+            );
+            return response.data;
+        } catch (error: any) {
+            lastError = error;
+            if (!isSubmissionLookupNotFound(error) || attempt >= maxAttempts) {
+                throw error;
+            }
+            console.log(
+                `Submission for ClickUp task ${clickupTaskId} not found yet; retrying lookup ` +
+                `${attempt}/${CLICKUP_WEBHOOK_SUBMISSION_LOOKUP_RETRIES}`
+            );
+            await sleep(CLICKUP_WEBHOOK_SUBMISSION_LOOKUP_RETRY_DELAY_MS);
+        }
+    }
+
+    throw lastError;
+}
+
 function normalizeFolderMatchKey(value: string | undefined): string {
     return String(value || '')
         .trim()
@@ -1483,8 +1546,15 @@ async function processApprovedTask(clickupTaskId: string, opts?: { skipStatusChe
         return { processed: false, reason: `task status is "${currentStatus}", expected ${describeReviewCompleteStatuses()}` };
     }
 
-    const subResponse = await internalApi.get(`${DB_SERVICE_URL}/submissions/by-clickup-task/${clickupTaskId}`);
-    const submission = subResponse.data;
+    if (!isConfiguredMenuManagerTask(taskResponse.data)) {
+        const taskListId = getClickUpTaskListId(taskResponse.data) || 'unknown';
+        return {
+            processed: false,
+            reason: `task belongs to ClickUp list "${taskListId}", not configured Menu Manager list "${CLICKUP_LIST_ID}"`,
+        };
+    }
+
+    const submission = await getSubmissionByClickUpTaskWithRetry(clickupTaskId);
     console.log(`Found submission ${submission.id} for ClickUp task ${clickupTaskId}`);
 
     const attachments = taskResponse.data.attachments || [];

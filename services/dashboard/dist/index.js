@@ -71,6 +71,7 @@ const learning_correction_rules_1 = require("./lib/learning-correction-rules");
 const learning_submissions_1 = require("./lib/learning-submissions");
 const embedded_set_menu_guard_1 = require("./lib/embedded-set-menu-guard");
 const corrected_menu_structure_guard_1 = require("./lib/corrected-menu-structure-guard");
+const price_integrity_guard_1 = require("./lib/price-integrity-guard");
 const pre_ai_deterministic_rules_1 = require("./lib/pre-ai-deterministic-rules");
 var upload_security_2 = require("./lib/upload-security");
 Object.defineProperty(exports, "sanitizePlainTextInput", { enumerable: true, get: function () { return upload_security_2.sanitizePlainTextInput; } });
@@ -2189,6 +2190,8 @@ Note: Use ONLY these allergen codes when checking allergen compliance. Do not us
         diagnosticsPromptSections.push('footer_rules');
         finalPrompt = `${finalPrompt}\n\nIMPORTANT ADD-ON PRICE RULES:\n- For add-on or enhancement rows with options separated by pipes or slashes, treat a number immediately after an option as that option's price.\n- Do NOT flag an add-on option as missing a price when the option appears on the same row with a numeric price, such as \"add chorizo 5 | mushrooms V 4\".`;
         diagnosticsPromptSections.push('add_on_price_rules');
+        finalPrompt = `${finalPrompt}\n\nIMPORTANT STANDARD ITEM PRICE RULES:\n- A trailing whole number at the end of a standard menu item is a valid price even when there are no allergen codes before it.\n- Do NOT flag a line like \"Short Rib al Carbón, housemade tomatillo sauce, pickled red onion 54\" as Missing Price.`;
+        diagnosticsPromptSections.push('standard_item_price_rules');
         if (embeddedSetMenuAnalysis.sections.length > 0) {
             finalPrompt = `${finalPrompt}\n\n${(0, embedded_set_menu_guard_1.buildEmbeddedSetMenuPromptSection)(embeddedSetMenuAnalysis)}`;
             diagnosticsPromptSections.push('embedded_set_menu_rules');
@@ -2405,8 +2408,9 @@ Note: Use ONLY these allergen codes when checking allergen compliance. Do not us
         const allergenGuard = (0, allergen_suggestion_guard_1.guardAllergenAlphabetizationSuggestions)(guardedCorrectedMenu, parsed.suggestions);
         const appliedHc = (0, apply_high_confidence_suggestions_1.applyHighConfidenceSuggestionsToMenu)(allergenGuard.correctedMenu, allergenGuard.suggestions);
         const setMenuGuard = (0, embedded_set_menu_guard_1.guardEmbeddedSetMenuPrices)(preCheckedReviewBody, appliedHc.menuText, appliedHc.suggestions, embeddedSetMenuAnalysis);
-        const correctedAfterHighConfidence = setMenuGuard.correctedMenu;
-        const suggestionsAfterAutoApply = setMenuGuard.suggestions;
+        const priceIntegrityGuard = (0, price_integrity_guard_1.guardCorrectedMenuPrices)(preCheckedReviewBody, setMenuGuard.correctedMenu, setMenuGuard.suggestions);
+        const correctedAfterHighConfidence = priceIntegrityGuard.correctedMenu;
+        const suggestionsAfterAutoApply = priceIntegrityGuard.suggestions;
         const correctedMenuSanitized = stripManagedFooterText(correctedAfterHighConfidence);
         const originalMenuSanitized = sanitizedMenuContent.body;
         const reconciliation = reconcileCriticalSuggestionsAgainstCorrectedMenuWithDiagnostics(correctedMenuSanitized, suggestionsAfterAutoApply);
@@ -2420,6 +2424,7 @@ Note: Use ONLY these allergen codes when checking allergen compliance. Do not us
         console.log('Embedded set sections detected:', embeddedSetMenuAnalysis.sections.length);
         console.log('Embedded set price suggestions added:', setMenuGuard.synthesizedSuggestions.length);
         console.log('Embedded set prices restored:', setMenuGuard.restoredPrices.length);
+        console.log('Price integrity guard changes:', priceIntegrityGuard.changes.length);
         console.log('Reconciled suggestions count:', reconciledSuggestions.length);
         console.log('Has changes:', correctedMenuSanitized !== originalMenuSanitized);
         console.log('===========================');
@@ -2486,6 +2491,10 @@ Note: Use ONLY these allergen codes when checking allergen compliance. Do not us
                     learnedRulesConsidered: postAiDeterministic.learnedRulesConsidered,
                     learnedRulesApplied: postAiDeterministic.learnedRulesApplied,
                 },
+                priceIntegrityGuard: {
+                    changedPriceCount: priceIntegrityGuard.changes.length,
+                    changes: priceIntegrityGuard.changes,
+                },
             },
         });
         const basicCheckDiagnostics = diagnosticsRequested ? {
@@ -2539,6 +2548,11 @@ Note: Use ONLY these allergen codes when checking allergen compliance. Do not us
                 droppedSuggestions: setMenuGuard.droppedSuggestions,
                 correctedMenuChanged: setMenuGuard.correctedMenu !== appliedHc.menuText,
                 suggestionsAfterGuard: setMenuGuard.suggestions,
+            },
+            priceIntegrityGuard: {
+                changes: priceIntegrityGuard.changes,
+                correctedMenuChanged: priceIntegrityGuard.correctedMenu !== setMenuGuard.correctedMenu,
+                suggestionsAfterGuard: priceIntegrityGuard.suggestions,
             },
             titleGuard: {
                 restored: titleGuard.restored,
@@ -2861,6 +2875,35 @@ function looksLikePriceOnLine(line) {
     // Handles "... - 8", "... 14", "... $12", "... 12.50"
     return /(?:^|[\s\-|])\$?\d{1,3}(?:[.,]\d{1,2})?\s*$/.test(compact);
 }
+function isLikelyContinuationLine(previousLine, nextLine) {
+    const previous = (previousLine || '').trim();
+    const next = (nextLine || '').trim();
+    if (!previous || !next)
+        return false;
+    if (/^[A-Z][A-Za-zÀ-ÖØ-öø-ÿ\s&'’-]{1,40}$/.test(next) && !next.includes(',')) {
+        return false;
+    }
+    if (/^[A-ZÀ-ÖØ-Þ0-9][^,\n]{1,80},/.test(next)) {
+        return false;
+    }
+    if (/[,:;/&-]\s*$/.test(previous)) {
+        return true;
+    }
+    return /^[a-zà-öø-ÿ]/.test(next);
+}
+function extendLineWithContinuations(lines, startIndex) {
+    let combined = lines[startIndex] || '';
+    for (let i = startIndex + 1; i < Math.min(lines.length, startIndex + 3); i++) {
+        if (!isLikelyContinuationLine(combined, lines[i])) {
+            break;
+        }
+        combined = `${combined.trimEnd()} ${lines[i].trim()}`;
+        if (looksLikePriceOnLine(combined)) {
+            break;
+        }
+    }
+    return combined;
+}
 function findCorrectedLineForMenuItem(correctedMenu, menuItem) {
     const itemNorm = normalizeForSuggestionMatch(menuItem || '');
     if (!itemNorm)
@@ -2871,10 +2914,11 @@ function findCorrectedLineForMenuItem(correctedMenu, menuItem) {
         itemVariants.add(addOnMatch[1].trim());
     }
     const lines = (correctedMenu || '').split('\n').map(l => l.trim()).filter(Boolean);
-    for (const line of lines) {
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
         const lineNorm = normalizeForSuggestionMatch(line);
         if ([...itemVariants].some((variant) => variant && lineNorm.includes(variant))) {
-            return line;
+            return extendLineWithContinuations(lines, i);
         }
     }
     return null;

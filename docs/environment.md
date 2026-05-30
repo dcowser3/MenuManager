@@ -76,6 +76,8 @@ These are optional. If `CLICKUP_API_TOKEN` or `CLICKUP_LIST_ID` are not set, the
 | `CLICKUP_CORRECTIONS_STATUS` | Status name that triggers correction download (default: `"to do"`). This can differ from the Isabella direct-submit destination. |
 | `CLICKUP_CORRECTIONS_STATUSES` | Optional comma-separated trigger statuses for aliases or transitional workflows |
 | `CLICKUP_POST_APPROVAL_STATUS` | Status applied to the ClickUp task after approved DOCX processing finishes when it is not already there; Isabella direct submissions are also created in this status (default: `"to do"`) |
+| `CLICKUP_WEBHOOK_SUBMISSION_LOOKUP_RETRIES` | Number of extra DB lookup attempts after a ClickUp review-complete webhook sees no linked submission yet (default: `5`) |
+| `CLICKUP_WEBHOOK_SUBMISSION_LOOKUP_RETRY_DELAY_MS` | Delay between those webhook submission lookup retries in milliseconds (default: `1000`) |
 
 ## Alerting And Monitoring
 

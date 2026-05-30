@@ -68,6 +68,7 @@ Every dish on a standard (non-prix-fixe) menu MUST have a price. If a dish entry
 - type: "Missing Price"
 - severity: "critical"
 - Do NOT auto-correct missing prices in the corrected menu — leave them in SUGGESTIONS only
+- A trailing whole number counts as the item price even when there are no allergen codes before it, such as `Short Rib al Carbón, housemade tomatillo sauce, pickled red onion 54`
 - For prix fixe menus, individual dishes do NOT need prices (only the overall prix fixe price is required). Do NOT flag missing individual dish prices on prix fixe menus, and recognize an overall price at the top such as `50.00pp` as the required price.
 - For embedded set-menu/prix-fixe subsections inside a standard menu (for example, a title like "Quick Lunch Menu $38" followed by "choice of one appetizer & one entrée"), included dishes do NOT need individual prices. If an included dish has a trailing bare item price, flag it as type "Set Menu Item Price" with severity "critical" and do NOT remove the price from CORRECTED MENU. Explicit plus prices such as "+5" or "+ AED 50" are premium/supplement upcharges and are allowed.
 

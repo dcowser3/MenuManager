@@ -5,6 +5,8 @@ process.env.CLICKUP_ASSIGNEE_ID = '114079264';
 process.env.CLICKUP_MARKETING_WATCHER_GROUP_NAME = 'Marketing';
 process.env.CLICKUP_CORRECTIONS_STATUS = 'approved';
 process.env.CLICKUP_POST_APPROVAL_STATUS = 'to do';
+process.env.CLICKUP_WEBHOOK_SUBMISSION_LOOKUP_RETRIES = '2';
+process.env.CLICKUP_WEBHOOK_SUBMISSION_LOOKUP_RETRY_DELAY_MS = '1';
 process.env.GRAPH_CLIENT_ID = 'graph-client-id';
 process.env.GRAPH_TENANT_ID = 'graph-tenant-id';
 process.env.GRAPH_CLIENT_SECRET = 'graph-client-secret';
@@ -64,6 +66,7 @@ jest.mock('@menumanager/supabase-client', () => ({
 }));
 
 const axios = require('axios').default;
+const { logAlert } = require('@menumanager/supabase-client');
 const app = require('../index').default;
 
 function getRouteHandler(method, routePath) {
@@ -139,6 +142,7 @@ describe('browser approval finalize route', () => {
         axios.post.mockReset();
         axios.put.mockReset();
         axios.mockReset();
+        logAlert.mockClear();
 
         axios.mockImplementation(async (config) => {
             const urlStr = String(config?.url || '');
@@ -798,6 +802,145 @@ describe('browser approval finalize route', () => {
             call[1]?.status
         );
         expect(statusCall).toBeFalsy();
+    });
+
+    test('ignores review-complete webhooks for tasks outside the configured menu list', async () => {
+        axios.get.mockImplementation(async (url) => {
+            const urlStr = String(url);
+            if (urlStr === 'https://api.clickup.com/api/v2/task/cu_other_list') {
+                return {
+                    data: {
+                        id: 'cu_other_list',
+                        status: { status: 'to do' },
+                        list: { id: 'marketing_list' },
+                        attachments: [],
+                    },
+                };
+            }
+            return { data: null };
+        });
+
+        const response = await invokeWebhookHandler(webhookHandler, {
+            body: {
+                event: 'taskStatusUpdated',
+                task_id: 'cu_other_list',
+                history_items: [
+                    {
+                        field: 'status',
+                        after: { status: 'to do' },
+                    },
+                ],
+            },
+        });
+
+        expect(response.status).toBe(200);
+        expect(response.body).toBe('OK');
+        expect(axios.get.mock.calls.some((call) =>
+            String(call[0]).includes('/submissions/by-clickup-task/cu_other_list')
+        )).toBe(false);
+        expect(logAlert).not.toHaveBeenCalled();
+        expect(console.log).toHaveBeenCalledWith(expect.stringContaining('not configured Menu Manager list'));
+    });
+
+    test('retries a menu-task webhook submission lookup before alerting', async () => {
+        let lookupAttempts = 0;
+        axios.get.mockImplementation(async (url) => {
+            const urlStr = String(url);
+            if (urlStr.includes('https://api.clickup.com/api/v2/group')) {
+                return {
+                    data: {
+                        groups: [
+                            {
+                                id: 'grp_marketing',
+                                name: 'Marketing',
+                                members: [
+                                    { user: { id: 201 } },
+                                    { user: { id: 202 } },
+                                ],
+                            },
+                        ],
+                    },
+                };
+            }
+            if (urlStr === 'https://api.clickup.com/api/v2/task/cu_retry') {
+                return {
+                    data: {
+                        id: 'cu_retry',
+                        status: { status: 'to do' },
+                        list: { id: 'list_123' },
+                        attachments: [
+                            {
+                                id: 'att_retry.docx',
+                                title: 'Corrected Retry Menu.docx',
+                                extension: 'docx',
+                                url: 'https://clickup.example/attachment/retry.docx',
+                                date: '1778457980067',
+                            },
+                        ],
+                    },
+                };
+            }
+            if (urlStr === 'https://clickup.example/attachment/retry.docx') {
+                return { data: Buffer.from('corrected docx') };
+            }
+            if (urlStr.includes('/submissions/by-clickup-task/cu_retry')) {
+                lookupAttempts += 1;
+                if (lookupAttempts === 1) {
+                    const notFound = new Error('Request failed with status code 404');
+                    notFound.response = {
+                        status: 404,
+                        data: { error: 'No submission found for this ClickUp task' },
+                    };
+                    throw notFound;
+                }
+                return {
+                    data: {
+                        id: 'sub_retry_1',
+                        clickup_task_id: 'cu_retry',
+                        project_name: 'Retry Dinner Menu',
+                        property: 'Maya - Dubai',
+                        service_period: 'dinner',
+                        submitter_email: 'chef@example.com',
+                        submitter_name: 'Chef Test',
+                        filename: 'Original Retry Menu.docx',
+                        ai_draft_path: '/tmp/documents/sub_retry_1-draft.docx',
+                        raw_payload: {},
+                    },
+                };
+            }
+            if (urlStr.includes('/properties')) {
+                return { data: { catalog: [] } };
+            }
+            return { data: null };
+        });
+
+        await invokeWebhookHandler(webhookHandler, {
+            body: {
+                event: 'taskStatusUpdated',
+                task_id: 'cu_retry',
+                history_items: [
+                    {
+                        field: 'status',
+                        after: { status: 'to do' },
+                    },
+                ],
+            },
+        });
+
+        expect(lookupAttempts).toBe(2);
+        expect(logAlert).not.toHaveBeenCalledWith(expect.objectContaining({
+            alert_type: 'clickup_webhook_failed',
+        }));
+        expect(console.log).toHaveBeenCalledWith(expect.stringContaining('retrying lookup 1/2'));
+
+        const compareCall = axios.post.mock.calls.find((call) =>
+            String(call[0]).includes('http://localhost:3006/compare')
+        );
+        expect(compareCall).toBeTruthy();
+        expect(compareCall[1]).toEqual(expect.objectContaining({
+            submission_id: 'sub_retry_1',
+            review_source: 'isabella_clickup',
+        }));
     });
 
     test('ignores a to do webhook when the latest ClickUp DOCX was already finalized', async () => {

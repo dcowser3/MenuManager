@@ -48,10 +48,20 @@ Runs for standard menus when the dashboard detects a package title with a total 
 - Restores bare item prices if AI removed them from corrected text
 - Synthesizes critical `Set Menu Item Price` suggestions for bare included-item prices, while allowing explicit `+` premium prices
 
+### Price Integrity Guard (`guardCorrectedMenuPrices`)
+Runs after the model response has passed structure checks and high-confidence objective cleanup, but before critical reconciliation:
+- Compares submitted non-empty lines against the AI-corrected non-empty lines by position when line counts match
+- Removes any trailing price the AI added to a line that was submitted without a trailing price, while preserving other corrected text on that line
+- Restores the submitted price value if the AI changes a trailing price value
+- Keeps any existing `Missing Price` suggestion, or synthesizes one if the model added a price without flagging the issue
+- Records guarded changes in Basic AI Check diagnostics and form-attempt details for incident review
+
 ### Reconciliation (`reconcileCriticalSuggestionsAgainstCorrectedMenu`)
-Filters out critical suggestions where the AI's corrected menu already resolved the issue (e.g., AI fixed a missing price in the corrected text but also flagged it as critical). Only handles Missing Price and Incomplete Dish Name types.
+Filters out critical suggestions where the corrected menu already resolved the issue. Missing Price reconciliation only runs after the price integrity guard has removed AI-added prices, so an unpriced submitted line cannot be treated as resolved just because the model invented a price. Reconciliation only handles Missing Price and Incomplete Dish Name types.
 
 Missing-price reconciliation also handles add-on/enhancement rows. If the AI reports an item such as `add mushrooms`, the matcher checks both the full phrase and the option name without the leading add-on verb, so a same-line option like `add chorizo 5 | mushrooms V 4` counts as priced and does not block submission.
+
+Missing-price reconciliation treats a bare trailing whole number as a valid price even without allergen codes before it. If the model wraps an item into a continuation line, such as splitting `Short Rib al Carbón, ... roasted tomato salsa,` from `butter lettuce, pickled red onion 54`, the matcher joins likely continuation lines before checking for the trailing price.
 
 ### Auto-Applied Objective Corrections (`applyHighConfidenceSuggestionsToMenu`)
 Before critical blocking is calculated, the dashboard applies exact objective spelling/grammar recommendations such as `Change 'avocad' to 'avocado'` to the corrected menu text when the target token is still present. If the corrected menu already contains the replacement, the stale suggestion is removed. High-confidence raw-item asterisk suggestions are also applied before allergen/price suffixes. This is intentionally defensive because the model can occasionally put an auto-correctable fix in SUGGESTIONS or mark it as `critical`; these items should appear as applied AI changes, not chef-blocking errors.
@@ -76,6 +86,7 @@ A leading standalone `Menu` line is treated as a document title, not a singular 
 | `services/dashboard/index.ts` → `parseAIResponse` | Severity normalizer — forces critical on known types |
 | `services/dashboard/lib/apply-high-confidence-suggestions.ts` | Applies or recognizes exact objective spelling/grammar corrections before blocking checks |
 | `services/dashboard/lib/embedded-set-menu-guard.ts` | Detects embedded set-menu sections and enforces bare-price review behavior |
+| `services/dashboard/lib/price-integrity-guard.ts` | Prevents AI-added or AI-changed trailing prices from reaching corrected menu output |
 | `services/dashboard/index.ts` → `enforcePrixFixeCriticalChecks` | Deterministic prix fixe checks |
 | `services/dashboard/index.ts` → `reconcileCriticalSuggestionsAgainstCorrectedMenu` | Removes false-positive criticals |
 | `services/dashboard/views/form.ejs` | Renders critical cards, manages overrides, gates submit button |

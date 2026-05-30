@@ -43,7 +43,9 @@ When a chef submits a menu, a ClickUp task is automatically created with the gen
 
 - ClickUp sends `taskStatusUpdated` events to `POST /webhook/clickup`
 - Filters for review-complete statuses: `CLICKUP_CORRECTIONS_STATUSES` when set, `CLICKUP_CORRECTIONS_STATUS`, and `CLICKUP_POST_APPROVAL_STATUS` (`To Do` by default)
+- Ignores review-complete events for tasks whose ClickUp `list.id` does not match `CLICKUP_LIST_ID`, so workspace-wide Marketing task updates do not create Menu Manager alerts
 - Looks up submission via `GET /submissions/by-clickup-task/:taskId` on the DB service
+- Retries that submission lookup on transient `404` / `No submission found` responses using `CLICKUP_WEBHOOK_SUBMISSION_LOOKUP_RETRIES` and `CLICKUP_WEBHOOK_SUBMISSION_LOOKUP_RETRY_DELAY_MS`; this covers the brief race where ClickUp sends the status webhook before Menu Manager has persisted the returned `clickup_task_id`
 - Downloads the latest attachment from the ClickUp task
 - If no usable ClickUp attachment exists at approval time, falls back to the locally stored submitted DOCX so "perfect as submitted" menus can still be finalized
 - Extracts canonical approved menu text from the corrected DOCX

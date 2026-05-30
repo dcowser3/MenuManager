@@ -822,6 +822,224 @@ describe('Dashboard Modification Workflow (local, mocked externals)', () => {
         });
     });
 
+    test('basic-check strips AI-hallucinated prices and preserves missing-price blocking', async () => {
+        mockedAxios.post = jest.fn(async (url, payload) => {
+            const urlStr = String(url);
+            if (urlStr.includes('/run-qa-check')) {
+                const echoText = (payload && typeof payload.text === 'string') ? payload.text : '';
+                const corrected = echoText.replace(
+                    'Tuna Tartare, ponzu macha, radish, habanero aioli, avocado, cilantro, charred corn tlayudas*',
+                    'Tuna Tartare, ponzu macha, radish, habanero aioli, avocado, cilantro, charred corn tlayudas* D,G,N 24'
+                );
+                return {
+                    data: {
+                        feedback: `=== CORRECTED MENU ===\n${corrected}\n=== END CORRECTED MENU ===\n=== SUGGESTIONS ===\n[]\n=== END SUGGESTIONS ===`
+                    }
+                };
+            }
+            return { data: {} };
+        });
+
+        const payload = {
+            menuContent: [
+                'Ceviches',
+                'Tuluminati, hamachi, achiote leche de tigre, grilled pineapple xni-pec, cilantro, avocado* 24',
+                'Tuna Tartare, ponzu macha, radish, habanero aioli, avocado, cilantro, charred corn tlayudas*',
+                'Tan Ceviche Trio, signature ceviches, amarillo, tuluminati, tan ceviche* G,S 48',
+            ].join('\n'),
+            baselineMenuContent: '',
+            reviewMode: 'full',
+            allergens: '',
+            menuType: 'standard',
+        };
+
+        const response = await invokeJsonHandler(basicCheckHandler, payload, {
+            headers: { 'x-menumanager-debug-basic-check': '1' },
+        });
+
+        expect(response.status).toBe(200);
+        expect(response.body.success).toBe(true);
+        expect(response.body.correctedMenu).toContain(
+            'Tuna Tartare, ponzu macha, radish, habanero aioli, avocado, cilantro, charred corn tlayudas* D,G,N'
+        );
+        expect(response.body.correctedMenu).not.toContain('tlayudas* D,G,N 24');
+        expect(response.body.suggestions).toEqual([
+            expect.objectContaining({
+                type: 'Missing Price',
+                severity: 'critical',
+                menuItem: 'Tuna Tartare',
+            }),
+        ]);
+        expect(response.body.hasCriticalErrors).toBe(true);
+        expect(response.body.basicCheckDiagnostics.priceIntegrityGuard.changes).toEqual([
+            expect.objectContaining({
+                reason: 'added_price',
+                menuItem: 'Tuna Tartare',
+                correctedPrice: '24',
+            }),
+        ]);
+        expect(response.body.basicCheckDiagnostics.reconciliation.droppedSuggestions).toEqual([]);
+    });
+
+    test('basic-check suppresses missing-price false positives for bare trailing item prices', async () => {
+        mockedAxios.post = jest.fn(async (url, payload) => {
+            const urlStr = String(url);
+            if (urlStr.includes('/run-qa-check')) {
+                const echoText = (payload && typeof payload.text === 'string') ? payload.text : '';
+                return {
+                    data: {
+                        feedback: `=== CORRECTED MENU ===\n${echoText}\n=== END CORRECTED MENU ===\n=== SUGGESTIONS ===\n${JSON.stringify([
+                            {
+                                type: 'Missing Price',
+                                confidence: 'high',
+                                severity: 'critical',
+                                menuItem: 'Short Rib al Carbón',
+                                description: 'This item appears to be missing a price.',
+                                recommendation: 'Add a price.',
+                            },
+                        ])}\n=== END SUGGESTIONS ===`
+                    }
+                };
+            }
+            return { data: {} };
+        });
+
+        const payload = {
+            menuContent: [
+                'Platos Fuertes',
+                'Short Rib al Carbón, housemade tomatillo sauce, roasted tomato salsa, butter lettuce, pickled red onion 54',
+                'Tulum Mar Y Tierra, prime filet mignon, creamy crab & shrimp enchilada, cheese fondue, mole negro sauce* D,G,S 59',
+            ].join('\n'),
+            baselineMenuContent: '',
+            reviewMode: 'full',
+            allergens: '',
+            menuType: 'standard',
+        };
+
+        const response = await invokeJsonHandler(basicCheckHandler, payload, {
+            headers: { 'x-menumanager-debug-basic-check': '1' },
+        });
+
+        expect(response.status).toBe(200);
+        expect(response.body.success).toBe(true);
+        expect(response.body.suggestions).toEqual([]);
+        expect(response.body.hasCriticalErrors).toBe(false);
+        expect(response.body.basicCheckDiagnostics.aiRequest.prompt).toContain('IMPORTANT STANDARD ITEM PRICE RULES');
+        expect(response.body.basicCheckDiagnostics.reconciliation.droppedSuggestions).toEqual([
+            expect.objectContaining({
+                reason: 'critical_resolved_in_corrected_menu',
+                matchedLine: 'Short Rib al Carbón, housemade tomatillo sauce, roasted tomato salsa, butter lettuce, pickled red onion 54',
+            }),
+        ]);
+    });
+
+    test('basic-check finds a bare trailing price on a wrapped continuation line', async () => {
+        mockedAxios.post = jest.fn(async (url, payload) => {
+            const urlStr = String(url);
+            if (urlStr.includes('/run-qa-check')) {
+                const echoText = (payload && typeof payload.text === 'string') ? payload.text : '';
+                const corrected = echoText.replace(
+                    'Short Rib al Carbón, housemade tomatillo sauce, roasted tomato salsa, butter lettuce, pickled red onion 54',
+                    'Short Rib al Carbón, housemade tomatillo sauce, roasted tomato salsa,\nbutter lettuce, pickled red onion 54'
+                );
+                return {
+                    data: {
+                        feedback: `=== CORRECTED MENU ===\n${corrected}\n=== END CORRECTED MENU ===\n=== SUGGESTIONS ===\n${JSON.stringify([
+                            {
+                                type: 'Missing Price',
+                                confidence: 'high',
+                                severity: 'critical',
+                                menuItem: 'Short Rib al Carbón',
+                                description: 'This item appears to be missing a price.',
+                                recommendation: 'Add a price.',
+                            },
+                        ])}\n=== END SUGGESTIONS ===`
+                    }
+                };
+            }
+            return { data: {} };
+        });
+
+        const payload = {
+            menuContent: [
+                'Platos Fuertes',
+                'Short Rib al Carbón, housemade tomatillo sauce, roasted tomato salsa, butter lettuce, pickled red onion 54',
+                'Tulum Mar Y Tierra, prime filet mignon, creamy crab & shrimp enchilada, cheese fondue, mole negro sauce* D,G,S 59',
+            ].join('\n'),
+            baselineMenuContent: '',
+            reviewMode: 'full',
+            allergens: '',
+            menuType: 'standard',
+        };
+
+        const response = await invokeJsonHandler(basicCheckHandler, payload, {
+            headers: { 'x-menumanager-debug-basic-check': '1' },
+        });
+
+        expect(response.status).toBe(200);
+        expect(response.body.success).toBe(true);
+        expect(response.body.suggestions).toEqual([]);
+        expect(response.body.hasCriticalErrors).toBe(false);
+        expect(response.body.basicCheckDiagnostics.reconciliation.droppedSuggestions).toEqual([
+            expect.objectContaining({
+                reason: 'critical_resolved_in_corrected_menu',
+                matchedLine: 'Short Rib al Carbón, housemade tomatillo sauce, roasted tomato salsa, butter lettuce, pickled red onion 54',
+            }),
+        ]);
+    });
+
+    test('basic-check does not borrow the next dish price for a truly unpriced item', async () => {
+        mockedAxios.post = jest.fn(async (url, payload) => {
+            const urlStr = String(url);
+            if (urlStr.includes('/run-qa-check')) {
+                const echoText = (payload && typeof payload.text === 'string') ? payload.text : '';
+                return {
+                    data: {
+                        feedback: `=== CORRECTED MENU ===\n${echoText}\n=== END CORRECTED MENU ===\n=== SUGGESTIONS ===\n${JSON.stringify([
+                            {
+                                type: 'Missing Price',
+                                confidence: 'high',
+                                severity: 'critical',
+                                menuItem: 'No Price Dish',
+                                description: 'This item appears to be missing a price.',
+                                recommendation: 'Add a price.',
+                            },
+                        ])}\n=== END SUGGESTIONS ===`
+                    }
+                };
+            }
+            return { data: {} };
+        });
+
+        const payload = {
+            menuContent: [
+                'Platos Fuertes',
+                'No Price Dish, tomato salsa,',
+                'Tulum Mar Y Tierra, prime filet mignon, creamy crab & shrimp enchilada, cheese fondue, mole negro sauce* D,G,S 59',
+            ].join('\n'),
+            baselineMenuContent: '',
+            reviewMode: 'full',
+            allergens: '',
+            menuType: 'standard',
+        };
+
+        const response = await invokeJsonHandler(basicCheckHandler, payload, {
+            headers: { 'x-menumanager-debug-basic-check': '1' },
+        });
+
+        expect(response.status).toBe(200);
+        expect(response.body.success).toBe(true);
+        expect(response.body.suggestions).toEqual([
+            expect.objectContaining({
+                type: 'Missing Price',
+                severity: 'critical',
+                menuItem: 'No Price Dish',
+            }),
+        ]);
+        expect(response.body.hasCriticalErrors).toBe(true);
+        expect(response.body.basicCheckDiagnostics.reconciliation.droppedSuggestions).toEqual([]);
+    });
+
     test('basic-check applies accepted learned correction rules before sending text to AI', async () => {
         mockedAxios.get = jest.fn(async (url) => {
             const urlStr = String(url);
