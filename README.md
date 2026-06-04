@@ -136,9 +136,13 @@ Browser approval editor prototype:
 - Isabella can edit approved text in a left-side rich browser editor while a right-side panel shows the live tracked-change preview with preserved imported redlines/highlights
 - For submitted DOCX files that already contain redlines, the left editor uses the clean accepted text with deleted runs removed, accepted inserted runs unwrapped, and DOCX inline formatting such as bold dish names preserved; the preview keeps the imported deletion/insertion markup visible.
 - The browser approval preview and the backend differ service use shared `diff-core` tokenization/LCS helpers so punctuation, separator, and word alignment rules are reused instead of duplicated per page/service.
+- The approval editor preview is rendered in the browser and does not call the `differ` service while the reviewer types; `differ` remains the backend training/learning comparison service after human approval.
 - The live approval preview keeps adjacent imported deletion/insertion pairs separated after new edits, so corrections like `jalapeno` → `jalapeño` or `neapolitan` → `Neapolitan` do not get re-styled as one combined deleted token when another word is removed.
 - The live approval preview keeps inline imported deletions anchored inside fully inserted rows after unrelated nearby edits, so a top-line wording change does not duplicate or move redlined text on the next menu item.
+- The approval editor anchors imported DOCX redlines with extractor-provided paragraph annotation ranges and uses a preview-derived clean baseline internally, so deleting blank spacer rows does not shift existing redlines into repeated nearby words or prices.
 - The live approval preview reflects rich formatting from the left editor for accepted and newly inserted text, so manual bolding stays visible on the right while deleted text keeps the original baseline styling.
+- Imported-redline approval-editor previews update automatically through a browser worker with a right-panel loading indicator, one in-flight render, coalesced latest edits, stale-response guards, and timeout recovery so the preview cannot stay stuck on `Updating Preview`.
+- Imported-redline preview resolving caches the shared baseline/revised token alignment once per render instead of rebuilding it for every imported annotation group; the Venga fixture benchmark should stay under one second on a local dev machine.
 - The live approval preview preserves whole-row boundaries for imported deleted dishes after reviewer edits, so deleted prices stay on their own row instead of merging into the next accepted dish.
 - Uploaded unapproved/redlined DOCX modifications now receive a full AI check on the accepted visible menu text, so pre-existing tracked edits such as misspelled inserted words are reviewed even if the chef makes no additional browser edits. Imported deletions/crossed-out dishes are excluded from the AI-review payload while remaining visible in the editor and persistent preview.
 - Uploaded unapproved/redlined DOCX modifications keep the left revision editor clean by removing imported deletion text and unwrapping imported insertion text while preserving bold/italic markup; the right preview shows the uploaded changes by diffing the synthetic original against the current left-editor text.
@@ -161,6 +165,16 @@ Browser approval editor prototype:
 - The learning dashboard shows each learned submission by menu/project name with supporting property/service details, and lets reviewers delete an individual learned submission row when test data should not remain in the training history; this removes that submission from differ training data and rebuilds detected patterns without touching the property catalog.
 - Learned spelling/diacritic patterns now come only from changed lines that still match the same dish, so removed or replacement dishes do not create bogus reusable rules.
 - Learning review `Save Rule` controls keep dish text out of inline button handlers, so apostrophes or quotes in corrected menu text cannot corrupt the button or block saving.
+
+Approval editor regression harness:
+
+```bash
+npm run approval-editor:harness
+npm run test:approval-editor-browser
+npm run benchmark:approval-preview
+```
+
+The harness serves the checked-in Venga unapproved-DOCX redline fixture at `http://localhost:3015/approval/approval-editor-venga-venga` by default. The browser regression starts its own harness on port `3016`, deletes the blank line before `SPICY SWINGER`, adds words on two lines, performs rapid edits, and fails if the preview spinner sticks or the known corruption strings (`65S`, `SPICYPICY`, `MakemakemaMakeke`, `73727273`) appear.
 
 Design approval entry point:
 - The DOCX-vs-PDF design approval tool remains in the codebase, but the welcome-page card is currently disabled and labeled `Feature Coming Soon`.
@@ -196,6 +210,20 @@ npm run test:approved-dishes -- --legacy-id form-1771781530178
 npm run test:approved-dishes -- --legacy-id form-1771781530178 --write
 ```
 
+You can also re-run the current extractor against existing source submissions to repair approved-dish rows. The command is dry-run by default and writes a JSON report under `tmp/reports/`:
+
+```bash
+npm run repair:approved-dishes -- --all
+npm run repair:approved-dishes -- --brand Tamayo
+npm run repair:approved-dishes -- --source-submission-id <uuid> --apply
+```
+
+In Docker, run the same maintenance flow from the dashboard workspace:
+
+```bash
+docker compose -f docker-compose.dev.yml exec -T dashboard npm run repair:approved-dishes -- --all
+```
+
 Notes:
 - `--id <uuid>` also works if you want to target the Supabase submission UUID directly.
 - `--approved-only` forces the test to use only `approved_menu_content`; without it the script falls back to `menu_content`, matching the DB extraction endpoint behavior.
@@ -208,6 +236,7 @@ Notes:
 - ClickUp approval finalization, DB extract/backfill routes, dashboard design approval, local approved-dish tests, and ClickUp history imports all use the shared approved-dish extractor and pass service period when available. Future DB extraction replaces visible rows for the same `source_submission_id` after a successful non-empty extraction by deactivating previous active rows and inserting the clean extraction output, so repeated approvals do not append another generation of the same rows.
 - The shared quality analyzer flags pricing grids, category/description contamination, instruction text, missing provenance, low-information plausible rows, and exact repeated rows. Questionable DB extraction rows are sent to ai-review for an advisory `dish` / `not_dish` / `uncertain` check; only high-confidence `not_dish` responses are excluded from future writes.
 - `--write` stores rows in `approved_dishes` for that submission and now follows the shared replacement behavior, so use a test submission when possible.
+- `repair:approved-dishes` only applies candidates whose re-extraction is non-empty, has no high/exclude quality rows, stays within the configured row-count drop safety cap, and shows an obvious quality improvement unless `--include-clean` is supplied. Apply mode deactivates the previous active rows for each repaired `source_submission_id` before inserting the clean extraction output.
 
 ## ClickUp Completed-Menu Import Dry Run
 

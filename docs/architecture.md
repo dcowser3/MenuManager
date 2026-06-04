@@ -109,6 +109,8 @@ After approval, operations users can open `/approved-menus` in the dashboard ser
 
 Approved-dish extraction prepares candidate rows with deterministic quality flags before writing. The DB service sends questionable rows to the ai-review service through `POST /approved-dishes/quality-check`; high-confidence `not_dish` responses are excluded from future writes, while unavailable or uncertain AI responses leave deterministic behavior in place. Future DB extraction replaces visible rows for the same `source_submission_id` after a successful non-empty extraction by deactivating previous active rows and inserting the clean extraction output, preventing repeated approvals from appending another generation of identical active rows.
 
+The same extractor and quality analyzer power the `repair:approved-dishes` maintenance command. It can dry-run or apply repairs for all active approved-dish source submissions, a brand, a property, or explicit submission ids, and applies only candidates whose fresh extraction is non-empty, has no high/exclude quality rows, and passes row-count safety gates.
+
 For browser approvals, `POST /approval/finalize` mirrors the same operational handoff: it uploads the corrected DOCX back to the ClickUp task first, finalizes the submission, routes the task to the resolved Marketing assignees, and leaves/moves the task in the configured post-approval status (`To Do` by default). If the ClickUp upload fails, the task is not reassigned or advanced.
 
 ### Design Approval Flow
@@ -141,6 +143,7 @@ User reviews differences, submits approval
 - **db** depends on: Supabase (optional), local JSON files (fallback)
 - **supabase-client** is a shared library used by db service
 - **diff-core** is a shared JavaScript library used by dashboard and differ for tokenization, token equality, LCS alignment, grouped insert/delete/equal edits, and projecting inline HTML formatting onto corrected menu text.
+- The browser approval editor uses `diff-core` through `redline-preview.js` plus a worker-backed preview controller; it does not call the `differ` network service for each keystroke. The controller keeps one render in flight, coalesces rapid edits to the latest state, ignores stale worker responses, and clears/retries timed-out renders so the right preview cannot remain stuck on its loading state.
 
 ## Dashboard Module Notes
 
@@ -156,6 +159,7 @@ The dashboard service still uses a single Express entrypoint, but the highest-ri
 
 `services/dashboard/index.ts` now primarily composes dependencies, mounts routes, and keeps shared helpers that are still used across multiple dashboard areas.
 The dashboard accepts chef form JSON/urlencoded bodies up to `DASHBOARD_JSON_BODY_LIMIT` (or `JSON_BODY_LIMIT`, default `5mb`) so rich menu HTML and persistent redline previews can pass through the public submit route without tripping Express's default 100 KB parser cap.
+The approval editor has a standalone Venga redline fixture harness in `scripts/approval-editor-harness.js`, with browser regression and benchmark commands in the root `package.json`, so the reusable preview path can be tested without ClickUp or DB state.
 The public form also emits compact `form_attempt_logs` telemetry keyed by a browser-generated attempt id. Baseline upload, preserve-redlines extraction, Basic AI Check, final submit, and parser-level `413` events record mode/source metadata, payload length estimates, and critical AI suggestions without persisting full menu bodies.
 Basic AI Check treats the model's corrected-menu block as untrusted generated text. The prompt asks the model to preserve every submitted line in order, and the dashboard applies a structure guard before rendering the response: if the corrected text loses too many original tokens, becomes much shorter, or drops many lines, the dashboard falls back to the submitted text while keeping review suggestions.
 Brand-new menu submissions can import a DOCX through `/api/form/menu-doc-upload`. That route shares the clean DOCX extraction handler with `/api/modification/baseline-upload`, then the browser fills the menu editor, detected project fields, allergen key, and raw-food notice controls before Basic AI Check.

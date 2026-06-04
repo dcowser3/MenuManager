@@ -9,6 +9,10 @@
   "scripts": {
     "test": "jest",
     "test:approved-dishes": "node scripts/test-approved-dishes.js",
+    "benchmark:approval-preview": "node scripts/approval-preview-benchmark.js",
+    "approval-editor:harness": "node scripts/approval-editor-harness.js",
+    "test:approval-editor-browser": "node scripts/approval-editor-browser-regression.js",
+    "repair:approved-dishes": "node scripts/repair-approved-dishes.js",
     "smoke:basic-ai-check": "node scripts/basic-ai-check-smoke.js",
     "prompt:optimize": "node scripts/prompt-optimize.js",
     "preai:ab-replay": "node scripts/pre-ai-ab-replay.js",
@@ -24,6 +28,7 @@
     "@types/jest": "29.5.14",
     "jest": "^29.7.0",
     "jest-util": "29.7.0",
+    "playwright": "^1.60.0",
     "ts-jest": "^29.4.6",
     "typescript": "^5.9.2"
   },

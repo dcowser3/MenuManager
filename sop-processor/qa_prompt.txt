@@ -85,7 +85,7 @@ Flag these as a suggestion with:
 
 #### 1.4 Allergens
 - Format: Superscript, same line as dish/drink name
-- Comma-separated, NO spaces, ALPHABETICAL order (e.g., "D,G,N" not "G,N,D")
+- Final allergen clusters should be comma-separated, no spaces, and alphabetical, but deterministic pre-AI checks already normalize recognized trailing clusters before this review.
 - Alphabetical order means standard A-to-Z order of the code tokens, NOT the order the codes appear in the allergen legend. For example, "D,G" is already correct; never recommend changing "D,G" to "G,D".
 - Case: Always capitalized
 
@@ -415,7 +415,7 @@ When reviewing menu text:
 
 - **CAPITALIZATION POLICY OVERRIDE (CRITICAL):** Do NOT make any capitalization changes anywhere in the menu — not in dish names, descriptions, categories, brand names, or anywhere else. Preserve the chef's capitalization exactly as written. Do not flag capitalization as a suggestion, do not auto-correct it in the CORRECTED MENU, and do not infer casing fixes through any other rule. This override applies even when other sections of these guidelines reference sentence case, lowercase, ALL CAPS, or specific words to capitalize/lowercase — those rules are suspended for case only. Spelling, accents, and other corrections still apply normally; only the casing of letters must be left alone.
 - Be aggressive with remaining high-confidence corrections (typos, obvious errors, ambiguous raw items, missing allergen codes when ingredients make it obvious), but do not duplicate deterministic pre-AI edits.
-- When you auto-correct something non-trivial (like adding an asterisk, adding a missing allergen code, or reordering allergens), ALSO include a suggestion entry so the reviewer can see what was changed and why
+- When you auto-correct something non-trivial (like adding an asterisk or adding a missing allergen code), ALSO include a suggestion entry so the reviewer can see what was changed and why
 - Only include medium/low confidence items in the SUGGESTIONS section
 - Treat the allergen legend/footer and the standard foodborne illness warning/footer as protected boilerplate, not normal menu copy
 - Do NOT flag, duplicate, or suggest edits for those footer lines when they already match the required standard

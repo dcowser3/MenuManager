@@ -11,10 +11,23 @@ type ExtractedApprovedDocx = {
     approvedMenuContentHtml: string;
 };
 
+type ExtractedAnnotation = {
+    start: number;
+    end: number;
+    type: string;
+};
+
+type ApprovalPreviewAnnotation = {
+    start: number;
+    end: number;
+    type: 'del' | 'ins';
+};
+
 type ExtractedUnapprovedDocx = {
     visibleText: string;
     cleanVisibleText?: string;
     unapprovedHtml: string;
+    annotations?: Array<Array<ExtractedAnnotation>>;
 };
 
 type ApprovalSourceExtractionMode = 'approved' | 'unapproved';
@@ -44,6 +57,7 @@ export type ApprovalBaselineResult = {
     editorHtml: string;
     visibleText: string;
     previewText: string;
+    previewAnnotations: Array<Array<ApprovalPreviewAnnotation>>;
     sourceMode: ApprovalBaselineSourceMode;
     sourceLabel: string;
 };
@@ -109,6 +123,48 @@ export function normalizeApprovalEditorText(text: string): string {
     }
 
     return normalized.join('\n');
+}
+
+function normalizeApprovalEditorTextWithAnnotations(
+    text: string,
+    annotations?: Array<Array<ExtractedAnnotation>>
+): { text: string; annotations: Array<Array<ApprovalPreviewAnnotation>> } {
+    const lines = `${text || ''}`
+        .replace(/\r/g, '')
+        .split('\n')
+        .map((line, index) => ({
+            text: line.replace(/\u00A0/g, ' ').replace(/[ \t]+$/g, ''),
+            annotations: Array.isArray(annotations?.[index])
+                ? annotations![index].filter((annotation): annotation is ApprovalPreviewAnnotation =>
+                    (annotation.type === 'del' || annotation.type === 'ins') &&
+                    Number.isFinite(annotation.start) &&
+                    Number.isFinite(annotation.end) &&
+                    annotation.end > annotation.start
+                )
+                : [],
+        }));
+
+    while (lines.length && !lines[0].text.trim()) lines.shift();
+    while (lines.length && !lines[lines.length - 1].text.trim()) lines.pop();
+
+    const normalized: typeof lines = [];
+    let prevBlank = false;
+    for (const line of lines) {
+        if (!line.text.trim()) {
+            if (!prevBlank) {
+                normalized.push({ text: '', annotations: [] });
+            }
+            prevBlank = true;
+            continue;
+        }
+        normalized.push(line);
+        prevBlank = false;
+    }
+
+    return {
+        text: normalized.map((line) => line.text).join('\n'),
+        annotations: normalized.map((line) => line.annotations),
+    };
 }
 
 /**
@@ -218,6 +274,7 @@ export async function loadApprovalBaselineFromSubmission(
     let editorHtml = '';
     let visibleText = '';
     let previewText = '';
+    let previewAnnotations: ApprovalBaselineResult['previewAnnotations'] = [];
     let sourceMode: ApprovalBaselineSourceMode = 'saved_submission_data';
     let sourceLabel = getSourceLabel('saved_submission_data');
     const submissionTag = submission.id || submission.filename || 'unknown';
@@ -246,7 +303,12 @@ export async function loadApprovalBaselineFromSubmission(
             } else {
                 const extracted = await options.extractUnapprovedFromDocx(absolutePath);
                 editorHtml = normalizeApprovalEditorHtml(`${extracted.unapprovedHtml || ''}`.trim());
-                previewText = normalizeApprovalEditorText(extracted.visibleText || '');
+                const normalizedPreview = normalizeApprovalEditorTextWithAnnotations(
+                    extracted.visibleText || '',
+                    extracted.annotations
+                );
+                previewText = normalizedPreview.text;
+                previewAnnotations = normalizedPreview.annotations;
                 visibleText = normalizeApprovalEditorText(extracted.cleanVisibleText || extracted.visibleText || '');
             }
 
@@ -306,6 +368,7 @@ export async function loadApprovalBaselineFromSubmission(
         editorHtml,
         visibleText,
         previewText,
+        previewAnnotations,
         sourceMode,
         sourceLabel,
     };

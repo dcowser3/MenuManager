@@ -9,7 +9,8 @@
     <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=Montserrat:wght@300;400;500;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/css/menu-display.css">
     <script src="/js/diff-core.js"></script>
-    <script src="/js/redline-preview.js?v=20260520-live-rich-formatting"></script>
+    <script src="/js/redline-preview.js?v=20260603-approval-editor-perf"></script>
+    <script src="/js/approval-preview-controller.js?v=20260603-worker-preview-stable"></script>
     <style>
         :root {
             --color-primary: #2c2c2c;
@@ -304,6 +305,53 @@
             box-shadow: inset 0 0 0 1px var(--color-secondary);
         }
 
+        .preview-shell {
+            position: relative;
+            flex: 1;
+            min-height: 0;
+            display: flex;
+        }
+
+        .preview-shell .preview-body {
+            width: 100%;
+        }
+
+        .preview-loading {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            z-index: 2;
+            display: flex;
+            align-items: center;
+            gap: 0.65rem;
+            padding: 0.65rem 1rem;
+            border-bottom: 1px solid var(--color-border);
+            background: rgba(250, 250, 248, 0.94);
+            color: var(--color-text-light);
+            font-size: 0.72rem;
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+            pointer-events: none;
+        }
+
+        .preview-loading[hidden] {
+            display: none;
+        }
+
+        .preview-spinner {
+            width: 0.9rem;
+            height: 0.9rem;
+            border: 2px solid rgba(139, 115, 85, 0.25);
+            border-top-color: var(--color-secondary);
+            border-radius: 50%;
+            animation: approval-preview-spin 0.8s linear infinite;
+        }
+
+        @keyframes approval-preview-spin {
+            to { transform: rotate(360deg); }
+        }
+
         .footer-actions {
             display: flex;
             justify-content: flex-end;
@@ -439,7 +487,13 @@
                         <h3>Live Redline Preview</h3>
                         <p>Yellow is new text. Red strike-through is removed text. Imported redlines stay visible where unchanged.</p>
                     </div>
-                    <div id="approvalPreview" class="preview-body menu-extract-display"></div>
+                    <div class="preview-shell">
+                        <div id="previewLoading" class="preview-loading" hidden>
+                            <span class="preview-spinner" aria-hidden="true"></span>
+                            <span>Updating Preview</span>
+                        </div>
+                        <div id="approvalPreview" class="preview-body menu-extract-display"></div>
+                    </div>
                 </section>
             </div>
 
@@ -453,146 +507,27 @@
         const submissionId = <%- JSON.stringify(submission.id) %>;
         const baselineText = <%- JSON.stringify(visibleText) %>;
         const baselinePreviewText = <%- JSON.stringify(previewText || visibleText) %>;
+        const baselineAnnotations = <%- typeof previewAnnotationsJson !== 'undefined' ? previewAnnotationsJson : '[]' %>;
         const baselineHtml = <%- JSON.stringify(editorHtml) %>;
-        const editor = document.getElementById('approvalEditorInput');
-        const preview = document.getElementById('approvalPreview');
-        const submitBtn = document.getElementById('submitBtn');
-        const alertBox = document.getElementById('alertBox');
-        const diffSummary = document.getElementById('diffSummary');
-        const redlinePreview = window.MenuRedlinePreview;
-        const displayBaselineHtml = redlinePreview.stripTransientReviewHighlights(baselineHtml);
-        let previewUpdateTimer = null;
-        let lastRenderedHtml = '';
-
-        function showAlert(message, type = 'success') {
-            alertBox.textContent = message;
-            alertBox.className = `alert show ${type}`;
-            window.scrollTo({ top: 0, behavior: 'smooth' });
-        }
-
-        const baselineAnnotationMap = redlinePreview.buildAnnotationMapFromHtml(
-            displayBaselineHtml,
+        window.approvalPreviewController = window.MenuApprovalPreviewController.createApprovalPreviewController({
+            submissionId,
+            baselineText,
             baselinePreviewText,
-            { trimText: false }
-        );
-        const baselineEditorHtml = redlinePreview.buildEditableHtmlFromBaseline(displayBaselineHtml, baselineText);
-        editor.innerHTML = baselineEditorHtml;
-        let editorHasUserInput = false;
-
-        function getEditorText() {
-            return redlinePreview.extractCleanTextFromElement(editor).replace(/\r/g, '');
-        }
-
-        function getEditorHtml() {
-            return editor.innerHTML || '';
-        }
-
-        function renderPersistentPreview(baseText, revisedText) {
-            // No live edits yet → render the source HTML directly so the chef
-            // sees the original Calibri/centered/bold formatting from the
-            // extracted DOCX. After edits, renderPersistentPreview uses baselineHtml
-            // to clone inline markup (<strong>, etc.) for unchanged/deleted tokens.
-            if (displayBaselineHtml && baseText === revisedText && !editorHasUserInput) {
-                lastRenderedHtml = '';
-                preview.innerHTML = displayBaselineHtml;
-                diffSummary.textContent = 'Live changes: 0 insertions, 0 deletions';
-                return;
-            }
-
-            const resolvedPreview = redlinePreview.resolveExistingAnnotationRevisions(
-                baselineText,
-                revisedText,
-                baselinePreviewText,
-                baselineAnnotationMap,
-                { baselineHtml: displayBaselineHtml || '' }
-            );
-            const rendered = redlinePreview.renderPersistentPreview(resolvedPreview.basePreviewText, resolvedPreview.revisedPreviewText, {
-                annotationMap: resolvedPreview.annotationMap,
-                includeExistingAnnotations: true,
-                baselineHtml: resolvedPreview.baselineHtml || '',
-                revisedHtml: getEditorHtml(),
-            });
-
-            lastRenderedHtml = rendered.html;
-            preview.innerHTML = rendered.html;
-            diffSummary.textContent = `Live changes: ${rendered.insertions} insertions, ${rendered.deletions} deletions`;
-        }
-
-        function buildSubmissionPreviewHtml() {
-            if (!lastRenderedHtml) {
-                // No edits made → submit the unchanged baseline HTML so the
-                // approved record keeps the original DOCX formatting.
-                return displayBaselineHtml || '';
-            }
-            return lastRenderedHtml
-                .split('\n')
-                .map((lineHtml) => `<p>${lineHtml || '<br>'}</p>`)
-                .join('');
-        }
-
-        async function submitApproval() {
-            submitBtn.disabled = true;
-            submitBtn.textContent = 'Submitting...';
-
-            try {
-                const menuContentText = getEditorText();
-                const editorHtml = buildSubmissionPreviewHtml();
-
-                if (!menuContentText.trim()) {
-                    throw new Error('Approval editor is empty.');
-                }
-
-                const response = await fetch(`/api/approval/${encodeURIComponent(submissionId)}/submit`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        editorHtml,
-                        menuContentText
-                    })
-                });
-
-                const data = await response.json();
-                if (!response.ok) {
-                    throw new Error(data.error || 'Failed to submit approval');
-                }
-
-                const targetSubmissionId = (data && data.submissionId) || submissionId;
-                submitBtn.textContent = 'Loading corrections...';
-                window.location.assign(`/learning/submission/${encodeURIComponent(targetSubmissionId)}`);
-            } catch (error) {
-                console.error(error);
-                showAlert(`Error submitting approval: ${error.message}`, 'error');
-                submitBtn.disabled = false;
-                submitBtn.textContent = 'Submit Approval';
-            }
-        }
-
-        function schedulePreviewUpdate() {
-            editorHasUserInput = true;
-            clearTimeout(previewUpdateTimer);
-            previewUpdateTimer = setTimeout(() => {
-                renderPersistentPreview(baselineText, getEditorText());
-            }, 90);
-        }
-
-        editor.addEventListener('input', schedulePreviewUpdate);
-        editor.addEventListener('keydown', (event) => {
-            const key = String(event.key || '').toLowerCase();
-            if ((event.metaKey || event.ctrlKey) && key === 'b') {
-                setTimeout(schedulePreviewUpdate, 0);
-            }
+            baselineAnnotations,
+            baselineHtml,
+            submitUrl: `/api/approval/${encodeURIComponent(submissionId)}/submit`,
+            learningUrlBase: '/learning/submission/',
+            debugPreviewTiming: new URLSearchParams(window.location.search).has('debugPreview'),
+            elements: {
+                editor: document.getElementById('approvalEditorInput'),
+                preview: document.getElementById('approvalPreview'),
+                loading: document.getElementById('previewLoading'),
+                submitBtn: document.getElementById('submitBtn'),
+                restoreBtn: document.getElementById('restoreBtn'),
+                alertBox: document.getElementById('alertBox'),
+                diffSummary: document.getElementById('diffSummary'),
+            },
         });
-
-        document.getElementById('restoreBtn').addEventListener('click', () => {
-            editor.innerHTML = baselineEditorHtml;
-            editorHasUserInput = false;
-            renderPersistentPreview(baselineText, baselineText);
-            editor.focus();
-            showAlert('Editor reset to the submitted menu text.', 'success');
-        });
-
-        submitBtn.addEventListener('click', submitApproval);
-        renderPersistentPreview(baselineText, baselineText);
     </script>
 </body>
 </html>

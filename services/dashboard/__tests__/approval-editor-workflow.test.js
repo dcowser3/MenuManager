@@ -44,6 +44,8 @@ jest.mock('@menumanager/supabase-client', () => ({
 
 const axios = require('axios').default;
 const fs = require('fs');
+const actualFs = jest.requireActual('fs');
+const path = jest.requireActual('path');
 const app = require('../index').default;
 const mockedAxios = axios;
 
@@ -187,5 +189,37 @@ describe('Browser Approval Editor Workflow (local, mocked externals)', () => {
 
         expect(response.status).toBe(400);
         expect(response.body.error).toBe('Approval editor content is required');
+    });
+
+    test('approval editor uses reusable worker-backed preview controller', () => {
+        const template = actualFs.readFileSync(
+            path.join(__dirname, '..', 'views', 'approval-editor.ejs'),
+            'utf8'
+        );
+        const controller = actualFs.readFileSync(
+            path.join(__dirname, '..', 'public', 'js', 'approval-preview-controller.js'),
+            'utf8'
+        );
+        const worker = actualFs.readFileSync(
+            path.join(__dirname, '..', 'public', 'js', 'approval-preview-worker.js'),
+            'utf8'
+        );
+
+        expect(template).toContain('previewAnnotationsJson');
+        expect(template).toContain('/js/approval-preview-controller.js');
+        expect(template).toContain('previewLoading');
+        expect(template).toContain('Updating Preview');
+        expect(template).toContain('createApprovalPreviewController');
+        expect(template).not.toContain('refreshPreviewBtn');
+        expect(controller).toContain('new global.Worker');
+        expect(controller).toContain('approval-preview-worker.js');
+        expect(controller).toContain('forceRichPreview');
+        expect(controller).toContain('queuedRequest');
+        expect(controller).toContain('workerTimeoutMs');
+        expect(controller).toContain('superseded');
+        expect(controller).toContain('buildAnnotationMapFromParagraphAnnotations');
+        expect(controller).toContain('buildAnnotationMapFromHtml');
+        expect(worker).toContain("importScripts('/js/diff-core.js', '/js/redline-preview.js')");
+        expect(worker).toContain('renderPersistentPreview');
     });
 });

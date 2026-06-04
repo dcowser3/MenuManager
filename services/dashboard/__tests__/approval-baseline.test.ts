@@ -94,6 +94,7 @@ describe('approval baseline helpers', () => {
             visibleText: 'green aguachile, avocadoavocad, wakame',
             cleanVisibleText: 'green aguachile, avocad, wakame',
             unapprovedHtml: '<p>green aguachile, <span class="existing-del">avocado</span>avocad, wakame</p>',
+            annotations: [[{ start: 18, end: 25, type: 'del' }]],
         });
 
         const baseline = await loadApprovalBaselineFromSubmission(
@@ -109,7 +110,56 @@ describe('approval baseline helpers', () => {
 
         expect(baseline.visibleText).toBe('green aguachile, avocad, wakame');
         expect(baseline.previewText).toBe('green aguachile, avocadoavocad, wakame');
+        expect(baseline.previewAnnotations).toEqual([[{ start: 18, end: 25, type: 'del' }]]);
         expect(baseline.editorHtml).toContain('existing-del');
+    });
+
+    test('keeps unapproved preview annotations aligned when normalizing blank lines', async () => {
+        mockedFs.access.mockResolvedValue(undefined);
+        const extractApprovedFromDocx = jest.fn();
+        const extractUnapprovedFromDocx = jest.fn().mockResolvedValue({
+            visibleText: '\nAlpha oldnew\n\n\nBeta 1214\n',
+            cleanVisibleText: '\nAlpha new\n\nBeta 14\n',
+            unapprovedHtml: '<p><br></p><p>Alpha <span class="existing-del">old</span><span class="existing-ins">new</span></p><p><br></p><p><br></p><p>Beta <span class="existing-del">12</span><span class="existing-ins">14</span></p>',
+            annotations: [
+                [],
+                [
+                    { start: 6, end: 9, type: 'del' },
+                    { start: 9, end: 12, type: 'ins' },
+                ],
+                [],
+                [],
+                [
+                    { start: 5, end: 7, type: 'del' },
+                    { start: 7, end: 9, type: 'ins' },
+                    { start: 0, end: 1, type: 'comment' },
+                ],
+            ],
+        });
+
+        const baseline = await loadApprovalBaselineFromSubmission(
+            {
+                original_path: '/tmp/original.docx',
+            },
+            {
+                extractApprovedFromDocx,
+                extractUnapprovedFromDocx,
+                resolveStoredPath: (storedPath) => storedPath,
+            }
+        );
+
+        expect(baseline.previewText).toBe('Alpha oldnew\n\nBeta 1214');
+        expect(baseline.previewAnnotations).toEqual([
+            [
+                { start: 6, end: 9, type: 'del' },
+                { start: 9, end: 12, type: 'ins' },
+            ],
+            [],
+            [
+                { start: 5, end: 7, type: 'del' },
+                { start: 7, end: 9, type: 'ins' },
+            ],
+        ]);
     });
 
     test('uses the approved baseline extractor when only the revision baseline path exists', async () => {

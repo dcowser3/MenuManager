@@ -72,7 +72,7 @@
         }
 
         for (const child of element.children) {
-            const text = (child.innerText || '')
+            const text = (child.textContent || child.innerText || '')
                 .replace(/\u00A0/g, ' ')
                 .trim();
             lines.push(text);
@@ -658,9 +658,11 @@
         return text;
     }
 
-    function groupWasRevertedToOriginal(group, cleanBaseText, revisedText) {
+    function groupWasRevertedToOriginal(group, cleanBaseText, revisedText, mapOffset) {
         const revised = String(revisedText || '');
-        const offset = mapBaselineOffsetToRevisedOffset(cleanBaseText, revised, group.cleanStart);
+        const offset = mapOffset
+            ? mapOffset(group.cleanStart)
+            : mapBaselineOffsetToRevisedOffset(cleanBaseText, revised, group.cleanStart);
 
         if (group.delText) {
             const oldAtOffset = revised.slice(offset, offset + group.delText.length);
@@ -720,8 +722,10 @@
         return { text: text, annotationMap: nextMap };
     }
 
-    function reinsertExistingDeletionsForGroups(cleanBaseText, revisedText, groups, revertedIndexes) {
+    function reinsertExistingDeletionsForGroups(cleanBaseText, revisedText, groups, revertedIndexes, mapOffset) {
         const cleanBase = String(cleanBaseText || '');
+        const revised = String(revisedText || '');
+        const offsetMapper = mapOffset || createBaselineOffsetMapper(cleanBase, revised);
         const reverted = revertedIndexes || new Set();
         const inserts = [];
 
@@ -742,8 +746,8 @@
             deletionRuns.forEach(function (run, runIndex) {
                 if (!run.text) return;
 
-                const offset = mapBaselineOffsetToRevisedOffset(cleanBase, revisedText, run.cleanStart);
-                if (String(revisedText || '').slice(offset, offset + run.text.length) === run.text) {
+                const offset = offsetMapper(run.cleanStart);
+                if (revised.slice(offset, offset + run.text.length) === run.text) {
                     return;
                 }
                 const isWholeDeletedLine = !group.insText && run.startsAtLineStart && run.endsAtLineEnd;
@@ -765,7 +769,7 @@
             return b.runIndex - a.runIndex;
         });
 
-        let output = String(revisedText || '');
+        let output = revised;
         inserts.forEach(function (insert) {
             const text = buildBoundaryPreservingDeletionText(
                 insert.text,
@@ -833,18 +837,20 @@
         return container.innerHTML;
     }
 
-    function mapBaselineOffsetToRevisedOffset(baseText, revisedText, offset) {
+    function createBaselineOffsetMapper(baseText, revisedText) {
         const base = String(baseText || '');
         const revised = String(revisedText || '');
-        const target = Math.max(0, Math.min(offset || 0, base.length));
 
-        if (target <= 0) return 0;
-        if (target >= base.length) return revised.length;
+        function clampOffset(offset) {
+            return Math.max(0, Math.min(offset || 0, base.length));
+        }
 
         const baseTokens = tokenizeDiffText(base);
         const revisedTokens = tokenizeDiffText(revised);
         if (!baseTokens.length || !revisedTokens.length) {
-            return Math.max(0, Math.min(target, revised.length));
+            return function (offset) {
+                return Math.max(0, Math.min(clampOffset(offset), revised.length));
+            };
         }
 
         const lcs = buildTokenLcs(baseTokens, revisedTokens);
@@ -855,30 +861,41 @@
             return lcs.commonRev.has(idx);
         });
 
-        let prevPair = null;
-        for (let i = 0; i < commonBase.length && i < commonRevised.length; i++) {
-            const baseTok = commonBase[i];
-            const revisedTok = commonRevised[i];
+        return function (offset) {
+            const target = clampOffset(offset);
 
-            if (target >= baseTok.start && target <= baseTok.end) {
-                return Math.min(revisedTok.start + (target - baseTok.start), revisedTok.end);
+            if (target <= 0) return 0;
+            if (target >= base.length) return revised.length;
+
+            let prevPair = null;
+            for (let i = 0; i < commonBase.length && i < commonRevised.length; i++) {
+                const baseTok = commonBase[i];
+                const revisedTok = commonRevised[i];
+
+                if (target >= baseTok.start && target <= baseTok.end) {
+                    return Math.min(revisedTok.start + (target - baseTok.start), revisedTok.end);
+                }
+
+                if (baseTok.start >= target) {
+                    return revisedTok.start;
+                }
+
+                prevPair = { baseTok: baseTok, revisedTok: revisedTok };
             }
 
-            if (baseTok.start >= target) {
-                return revisedTok.start;
+            if (prevPair) {
+                return Math.min(
+                    revised.length,
+                    prevPair.revisedTok.end + Math.max(0, target - prevPair.baseTok.end)
+                );
             }
 
-            prevPair = { baseTok: baseTok, revisedTok: revisedTok };
-        }
+            return Math.max(0, Math.min(target, revised.length));
+        };
+    }
 
-        if (prevPair) {
-            return Math.min(
-                revised.length,
-                prevPair.revisedTok.end + Math.max(0, target - prevPair.baseTok.end)
-            );
-        }
-
-        return Math.max(0, Math.min(target, revised.length));
+    function mapBaselineOffsetToRevisedOffset(baseText, revisedText, offset) {
+        return createBaselineOffsetMapper(baseText, revisedText)(offset);
     }
 
     function reinsertExistingDeletions(cleanBaseText, revisedText, basePreviewText, annotationMap) {
@@ -896,11 +913,12 @@
             return revised;
         }
 
+        const mapOffset = createBaselineOffsetMapper(cleanBase, revised);
         const inserts = anchors.map(function (anchor, idx) {
             return {
                 idx: idx,
                 text: anchor.text,
-                offset: mapBaselineOffsetToRevisedOffset(cleanBase, revised, anchor.offset),
+                offset: mapOffset(anchor.offset),
                 startsAtLineStart: anchor.startsAtLineStart,
                 endsAtLineEnd: anchor.endsAtLineEnd
             };
@@ -931,9 +949,10 @@
         const annotations = annotationMap || {};
         const groups = buildExistingAnnotationGroups(previewBase, annotations);
         const revertedIndexes = new Set();
+        const mapOffset = createBaselineOffsetMapper(cleanBase, revised);
 
         groups.forEach(function (group) {
-            if (groupWasRevertedToOriginal(group, cleanBase, revised)) {
+            if (groupWasRevertedToOriginal(group, cleanBase, revised, mapOffset)) {
                 revertedIndexes.add(group.index);
             }
         });
@@ -941,7 +960,7 @@
         if (!revertedIndexes.size) {
             return {
                 basePreviewText: previewBase,
-                revisedPreviewText: reinsertExistingDeletionsForGroups(cleanBase, revised, groups, revertedIndexes),
+                revisedPreviewText: reinsertExistingDeletionsForGroups(cleanBase, revised, groups, revertedIndexes, mapOffset),
                 annotationMap: annotations,
                 baselineHtml: settings.baselineHtml || ''
             };
@@ -950,7 +969,7 @@
         const resolvedBase = buildResolvedBasePreview(previewBase, annotations, groups, revertedIndexes);
         return {
             basePreviewText: resolvedBase.text,
-            revisedPreviewText: reinsertExistingDeletionsForGroups(cleanBase, revised, groups, revertedIndexes),
+            revisedPreviewText: reinsertExistingDeletionsForGroups(cleanBase, revised, groups, revertedIndexes, mapOffset),
             annotationMap: resolvedBase.annotationMap,
             baselineHtml: collapseRevertedGroupsInHtml(settings.baselineHtml || '', revertedIndexes)
         };
@@ -1008,7 +1027,8 @@
         return { entries: entries, plain: plain };
     }
 
-    var baselineStyleCache = { html: '', text: '', index: null };
+    var styleIndexCacheEntries = [];
+    var STYLE_INDEX_CACHE_LIMIT = 4;
 
     function normalizeStyleIndexText(text) {
         return String(text == null ? '' : text)
@@ -1074,37 +1094,52 @@
         if (!baselineHtml || baseText == null) {
             return null;
         }
-        if (baselineStyleCache.html === baselineHtml && baselineStyleCache.text === baseText && baselineStyleCache.index) {
-            return baselineStyleCache.index;
+        for (let i = 0; i < styleIndexCacheEntries.length; i++) {
+            const entry = styleIndexCacheEntries[i];
+            if (entry.html === baselineHtml && entry.text === baseText) {
+                if (i > 0) {
+                    styleIndexCacheEntries.splice(i, 1);
+                    styleIndexCacheEntries.unshift(entry);
+                }
+                return entry.index;
+            }
         }
+
+        function cacheStyleIndex(index) {
+            styleIndexCacheEntries.unshift({
+                html: baselineHtml,
+                text: baseText,
+                index: index || null,
+            });
+            if (styleIndexCacheEntries.length > STYLE_INDEX_CACHE_LIMIT) {
+                styleIndexCacheEntries.length = STYLE_INDEX_CACHE_LIMIT;
+            }
+            return index || null;
+        }
+
         if (diffCore.createRichTextIndexFromHtml) {
             var richIdx = diffCore.createRichTextIndexFromHtml(baselineHtml);
             if (richIdx && styleIndexTextMatches(richIdx.plain, baseText)) {
-                baselineStyleCache = { html: baselineHtml, text: baseText, index: richIdx };
-                return richIdx;
+                return cacheStyleIndex(richIdx);
             }
             if (richIdx) {
                 const sourceByBaseStart = buildStyleTokenMap(richIdx.plain, baseText);
                 if (sourceByBaseStart) {
                     richIdx.sourceByBaseStart = sourceByBaseStart;
-                    baselineStyleCache = { html: baselineHtml, text: baseText, index: richIdx };
-                    return richIdx;
+                    return cacheStyleIndex(richIdx);
                 }
             }
         }
         if (!global.document) {
-            baselineStyleCache = { html: baselineHtml, text: baseText, index: null };
-            return null;
+            return cacheStyleIndex(null);
         }
         const wrap = global.document.createElement('div');
         wrap.innerHTML = baselineHtml;
         var idx = buildTrimAwareCharIndex(wrap);
         if (!idx || !styleIndexTextMatches(idx.plain, baseText)) {
-            baselineStyleCache = { html: baselineHtml, text: baseText, index: null };
-            return null;
+            return cacheStyleIndex(null);
         }
-        baselineStyleCache = { html: baselineHtml, text: baseText, index: idx };
-        return idx;
+        return cacheStyleIndex(idx);
     }
 
     function getStyleSourceToken(styleIndex, baseToken) {
@@ -1671,6 +1706,7 @@
         stripExistingDeletions,
         buildExistingDeletionAnchors,
         buildExistingAnnotationGroups,
+        createBaselineOffsetMapper,
         reinsertExistingDeletions,
         resolveExistingAnnotationRevisions,
         buildTrimAwareCharIndex,

@@ -27,5 +27,6 @@ __exportStar(require("./submissions"), exports);
 __exportStar(require("./dishes"), exports);
 __exportStar(require("./dish-extractor"), exports);
 __exportStar(require("./dish-quality"), exports);
+__exportStar(require("./approved-dish-repair"), exports);
 __exportStar(require("./alerts"), exports);
 //# sourceMappingURL=index.js.map

@@ -34,6 +34,20 @@ describe('redline preview helpers', () => {
         ].join('\n'));
     });
 
+    test('prefers textContent for child row extraction to avoid layout-forcing innerText reads', () => {
+        const element = {
+            children: [
+                { textContent: 'COLD STARTERS', innerText: 'SHOULD NOT READ' },
+                { textContent: 'Guacamole Traditional 85', innerText: 'SHOULD NOT READ' },
+            ],
+        };
+
+        expect(redlinePreview.extractCleanTextFromElement(element)).toBe([
+            'COLD STARTERS',
+            'Guacamole Traditional 85',
+        ].join('\n'));
+    });
+
     test('extracts text from an edited rich surface without child blocks', () => {
         const element = {
             children: [],
@@ -885,5 +899,88 @@ describe('redline preview helpers', () => {
         expect(rendered.html).toContain('<span class="existing-ins"><strong>Watermelon</strong></span>');
         expect(rendered.html).not.toContain('<span class="existing-ins"><span class="existing-ins">');
         expect(rendered.html).toContain('<span class="persistent-ins">pine</span>');
+    });
+
+    test('keeps imported Venga redlines anchored after deleting the blank line before SPICY SWINGER', () => {
+        const baselinePreviewText = [
+            'CADILLAC 20',
+            'reposado tequila, grand marnier, citrus',
+            'make it a pitcher 6580',
+            'SPICY ORANGE  16',
+            'serrano-peppercorn-infused tequila, orange, citrus',
+            'make it a pitcher 65',
+            'SPICY SWINGER 18',
+            'serrano-infused reposado tequila, citrus, pineapple',
+            'Makemake it a pitcher 7372',
+            'CÓCTELES',
+            'PALOMA 15',
+        ].join('\n');
+        const baselineText = [
+            'CADILLAC 20',
+            'reposado tequila, grand marnier, citrus',
+            'make it a pitcher 80',
+            '',
+            'SPICY SWINGER 18',
+            'serrano-infused reposado tequila, citrus, pineapple',
+            'make it a pitcher 72',
+            'CÓCTELES',
+            'PALOMA 15',
+        ].join('\n');
+        const paragraphAnnotations = [
+            [],
+            [],
+            [
+                { start: 18, end: 20, type: 'del' },
+                { start: 20, end: 22, type: 'ins' },
+            ],
+            [{ start: 0, end: 16, type: 'del' }],
+            [{ start: 0, end: 50, type: 'del' }],
+            [{ start: 0, end: 20, type: 'del' }],
+            [],
+            [],
+            [
+                { start: 0, end: 4, type: 'del' },
+                { start: 4, end: 8, type: 'ins' },
+                { start: 22, end: 24, type: 'del' },
+                { start: 24, end: 26, type: 'ins' },
+            ],
+            [],
+            [],
+        ];
+        const annotationMap = redlinePreview.buildAnnotationMapFromParagraphAnnotations(
+            baselinePreviewText,
+            paragraphAnnotations
+        );
+        const baselineResolverText = redlinePreview.stripExistingDeletions(
+            baselinePreviewText,
+            annotationMap
+        );
+        const revisedText = baselineText.replace(
+            'make it a pitcher 80\n\nSPICY SWINGER 18',
+            'make it a pitcher 80\nSPICY SWINGER 18'
+        );
+
+        const resolved = redlinePreview.resolveExistingAnnotationRevisions(
+            baselineResolverText,
+            revisedText,
+            baselinePreviewText,
+            annotationMap
+        );
+        const rendered = redlinePreview.renderPersistentPreview(resolved.basePreviewText, resolved.revisedPreviewText, {
+            annotationMap: resolved.annotationMap,
+            includeExistingAnnotations: true,
+        });
+        const renderedText = redlinePreview.previewHtmlToPlainText(rendered.html);
+
+        expect(renderedText).toContain('make it a pitcher 65\nSPICY SWINGER 18');
+        expect(renderedText).toContain('Makemake it a pitcher 7372');
+        expect(renderedText).not.toContain('make it a pitcher 65S');
+        expect(renderedText).not.toContain('SPICYPICY SWINGER 18');
+        expect(renderedText).not.toContain('MakemakemaMakeke');
+        expect(renderedText).not.toContain('73727273');
+        expect(rendered.html).toContain('<span class="existing-del">65</span><span class="existing-ins">80</span>');
+        expect(rendered.html).toContain('<span class="existing-del">SPICY</span>');
+        expect(rendered.html).toContain('<span class="existing-del">Make</span><span class="existing-ins">make</span>');
+        expect(rendered.html).toContain('<span class="existing-del">73</span><span class="existing-ins">72</span>');
     });
 });

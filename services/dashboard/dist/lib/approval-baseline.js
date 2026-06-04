@@ -57,6 +57,41 @@ function normalizeApprovalEditorText(text) {
     }
     return normalized.join('\n');
 }
+function normalizeApprovalEditorTextWithAnnotations(text, annotations) {
+    const lines = `${text || ''}`
+        .replace(/\r/g, '')
+        .split('\n')
+        .map((line, index) => ({
+        text: line.replace(/\u00A0/g, ' ').replace(/[ \t]+$/g, ''),
+        annotations: Array.isArray(annotations?.[index])
+            ? annotations[index].filter((annotation) => (annotation.type === 'del' || annotation.type === 'ins') &&
+                Number.isFinite(annotation.start) &&
+                Number.isFinite(annotation.end) &&
+                annotation.end > annotation.start)
+            : [],
+    }));
+    while (lines.length && !lines[0].text.trim())
+        lines.shift();
+    while (lines.length && !lines[lines.length - 1].text.trim())
+        lines.pop();
+    const normalized = [];
+    let prevBlank = false;
+    for (const line of lines) {
+        if (!line.text.trim()) {
+            if (!prevBlank) {
+                normalized.push({ text: '', annotations: [] });
+            }
+            prevBlank = true;
+            continue;
+        }
+        normalized.push(line);
+        prevBlank = false;
+    }
+    return {
+        text: normalized.map((line) => line.text).join('\n'),
+        annotations: normalized.map((line) => line.annotations),
+    };
+}
 /**
  * Strip leading/trailing empty paragraphs from DOCX-derived HTML so the live preview
  * vertically aligns with the textarea (which uses normalizeApprovalEditorText on visible text).
@@ -142,6 +177,7 @@ async function loadApprovalBaselineFromSubmission(submission, options) {
     let editorHtml = '';
     let visibleText = '';
     let previewText = '';
+    let previewAnnotations = [];
     let sourceMode = 'saved_submission_data';
     let sourceLabel = getSourceLabel('saved_submission_data');
     const submissionTag = submission.id || submission.filename || 'unknown';
@@ -166,7 +202,9 @@ async function loadApprovalBaselineFromSubmission(submission, options) {
             else {
                 const extracted = await options.extractUnapprovedFromDocx(absolutePath);
                 editorHtml = normalizeApprovalEditorHtml(`${extracted.unapprovedHtml || ''}`.trim());
-                previewText = normalizeApprovalEditorText(extracted.visibleText || '');
+                const normalizedPreview = normalizeApprovalEditorTextWithAnnotations(extracted.visibleText || '', extracted.annotations);
+                previewText = normalizedPreview.text;
+                previewAnnotations = normalizedPreview.annotations;
                 visibleText = normalizeApprovalEditorText(extracted.cleanVisibleText || extracted.visibleText || '');
             }
             sourceMode = candidate.sourceMode;
@@ -204,6 +242,7 @@ async function loadApprovalBaselineFromSubmission(submission, options) {
         editorHtml,
         visibleText,
         previewText,
+        previewAnnotations,
         sourceMode,
         sourceLabel,
     };

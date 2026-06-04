@@ -52,4 +52,13 @@ Use Tamayo - Denver as the pilot property because it has known examples of prici
 
 Run extraction in preview/dry-run mode before writing. Bulk ClickUp imports now add quality warnings to the dry-run report and keep warning rows out of `--apply --only-clean`.
 
-For targeted data repair, reprocess the affected source submissions with the shared extractor after confirming the dry-run has no high-severity quality rows. The repair path deactivates the previous active rows for that `source_submission_id` and inserts the clean extraction output, leaving old rows available in Supabase for audit history but removing them from the dashboard.
+For targeted data repair, reprocess the affected source submissions with the shared extractor after confirming the dry-run has no high-severity quality rows. The reusable command is:
+
+```bash
+npm run repair:approved-dishes -- --all
+npm run repair:approved-dishes -- --brand Tamayo
+npm run repair:approved-dishes -- --property "Tamayo - Denver" --apply
+docker compose -f docker-compose.dev.yml exec -T dashboard npm run repair:approved-dishes -- --all
+```
+
+The repair command compares active rows to a fresh extraction from the source submission's approved menu text. A candidate is eligible only when the new extraction is non-empty, has zero high/exclude quality rows, stays inside the configured row-count drop safety cap, and removes an obvious problem such as pricing rows, category contamination, instruction text, exact duplicates, or blank descriptions. `--include-clean` allows changed clean rows that do not improve those metrics, and `--max-count-drop-ratio` adjusts the default 70% safety cap. Apply mode deactivates the previous active rows for each repaired `source_submission_id` and inserts the clean extraction output, leaving old rows available in Supabase for audit history but removing them from the dashboard.

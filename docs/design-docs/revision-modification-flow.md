@@ -146,6 +146,7 @@ When chef uses uploaded baseline flow:
   - `uploaded_baseline` → clean baseline extraction
   - `uploaded_unapproved` → unapproved extraction with preserved redlines
 - When an unapproved/redlined DOCX is used as the approval source, the editor keeps separate text baselines: synthetic original text for the right preview, and clean accepted/current text for the left rich editor.
+- Imported DOCX redlines are anchored from extractor-provided paragraph annotation ranges. The live approval preview resolves edits against a preview-derived clean baseline so blank-line changes in the left editor do not shift old deletion/insertion spans into repeated nearby menu text.
 - DOCX-derived preview HTML is normalized to strip leading/trailing empty `<p><br></p>` blocks so the live preview aligns vertically with the editor (which trims leading blank lines).
 - The left rich editor is initialized by projecting the DOCX baseline HTML onto the clean accepted text, removing imported deletion spans, unwrapping imported insertion spans, and preserving inline markup such as `<strong>` and `<em>`.
 - When the editor must fall back to saved `menu_content_html`, temporary green AI-review highlight spans are unwrapped before display/submission so the approval editor only shows formatting plus imported/live redlines.
@@ -153,8 +154,20 @@ When chef uses uploaded baseline flow:
 - Whole-row imported deletions keep their row boundaries when they are reinserted for the live approval preview after a later reviewer edit; inline deletion/insertion pairs such as price corrections remain inline.
 - Mixed imported annotation groups remember each deleted run's clean-text anchor, so an inline correction inside a fully inserted row stays at its original phrase when another line is edited in the approval editor.
 - The approval editor passes the current left-editor HTML into the shared preview renderer, which maps accepted and inserted tokens back to the reviewer-edited rich text so live bolding is visible in the right preview; deleted tokens still render from the original baseline HTML.
+- For imported-redline approval documents, left-side text edits schedule an automatic worker-backed preview render and show a right-panel loading state, so the expensive redline render does not block the editor cursor. The worker controller allows one active render, coalesces rapid edits to the latest text, ignores stale worker responses, and times out/restarts failed renders so `Updating Preview` cannot stay stuck.
+- Imported-redline resolving builds the shared baseline-to-revised token offset mapper once per render and reuses it for every imported annotation group. This keeps the Venga approval fixture under one second locally without replacing `@menumanager/diff-core`; package swaps should only happen if the fixture benchmark proves faster output with the same redline correctness.
 - After the chef edits, the live redline preview passes `baselineHtml` into `renderPersistentPreview` so unchanged and deleted tokens keep inline markup (`<strong>`, `<em>`, etc.) via `Range#cloneContents` instead of flattening to plain text.
 - Approval-editor text normalization preserves leading indentation from extracted DOCX paragraphs so alignment-sensitive content such as allergen legends is not flattened in the review UI.
+
+Manual/automated regression commands:
+
+```bash
+npm run approval-editor:harness
+npm run test:approval-editor-browser
+npm run benchmark:approval-preview
+```
+
+The harness uses `services/dashboard/__fixtures__/approval-editor/venga-unapproved.json` and renders the real approval editor template, controller, worker, and redline preview assets. The browser regression covers blank-line deletion before `SPICY SWINGER`, two-line insertion, rapid edits during a worker render, spinner completion, and the known corruption strings (`65S`, `SPICYPICY`, `MakemakemaMakeke`, `73727273`).
 
 ## Unapproved DOCX Flow (Preserve Existing Redlines)
 

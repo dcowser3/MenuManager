@@ -1299,6 +1299,8 @@ app.get('/approval/:submissionId', async (req, res) => {
             editorHtml: baseline.editorHtml,
             visibleText: baseline.visibleText,
             previewText: baseline.previewText,
+            previewAnnotations: baseline.previewAnnotations,
+            previewAnnotationsJson: JSON.stringify(baseline.previewAnnotations || []),
             sourceMode: baseline.sourceMode,
             sourceLabel: baseline.sourceLabel,
             approvalUrl,
