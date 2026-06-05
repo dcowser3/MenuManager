@@ -17,6 +17,18 @@ export interface ExtractedDish {
     category?: string;
     usedNextLineAsDescription?: boolean;
 }
+export interface DishNameFormattingAnchor {
+    dishName: string;
+    lineText: string;
+    lineNumber: number;
+    start: number;
+    end: number;
+    reason: 'inline_description' | 'same_line_price' | 'same_line_allergen';
+}
+export interface DishNameFormattingOptions {
+    property?: string;
+    servicePeriod?: string;
+}
 export interface PreparedApprovedDish {
     index: number;
     extracted: ExtractedDish;
@@ -63,6 +75,14 @@ export declare function extractAndStoreDishes(menuContent: string, property: str
 export declare function prepareApprovedDishInputs(menuContent: string, property: string, submissionId: string, options?: {
     servicePeriod?: string;
 }): PreparedApprovedDish[];
+/**
+ * Build high-confidence dish-name formatting anchors from menu text.
+ *
+ * This intentionally uses a stricter gate than approved-dish storage. A row can
+ * be plausible enough to save for review but still too ambiguous to alter
+ * visible formatting. Ambiguous duplicate source lines are skipped.
+ */
+export declare function buildDishNameFormattingAnchors(menuContent: string, options?: DishNameFormattingOptions): DishNameFormattingAnchor[];
 export declare function storePreparedApprovedDishes(prepared: PreparedApprovedDish[], submissionId: string, options?: StorePreparedDishesOptions): Promise<ExtractAndStoreDishesResult>;
 /**
  * Extract dishes without storing (for preview/testing)

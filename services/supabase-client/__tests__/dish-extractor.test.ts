@@ -1,4 +1,9 @@
-import { normalizeDishPriceForProperty, normalizeDishPriceForStorage, previewDishExtraction } from '../src/dish-extractor';
+import {
+    buildDishNameFormattingAnchors,
+    normalizeDishPriceForProperty,
+    normalizeDishPriceForStorage,
+    previewDishExtraction,
+} from '../src/dish-extractor';
 
 describe('approved dish extraction', () => {
     test('splits inline dish names from descriptions and ignores managed footer lines', () => {
@@ -860,5 +865,93 @@ describe('approved dish extraction', () => {
             allergens: ['S'],
         });
         expect(extracted.some((dish) => /^served with/i.test(dish.name))).toBe(false);
+    });
+});
+
+describe('dish name formatting anchors', () => {
+    test('returns high-confidence anchors for same-line dish signals', () => {
+        const menuText = [
+            'STARTERS',
+            'Guacamole - fresh avocado / lime / cilantro D,G 12',
+            'Punta Mita, prawns, tomato, onion, cilantro C,F,S 95',
+            'Classic Margarita 18',
+            'Chicken Yakitori G,D €14.00',
+            'C crustaceans | D dairy | G gluten',
+        ].join('\n');
+
+        const anchors = buildDishNameFormattingAnchors(menuText, { property: 'Test Property' });
+
+        expect(anchors.map((anchor) => ({
+            dishName: anchor.dishName,
+            lineText: anchor.lineText,
+            start: anchor.start,
+            end: anchor.end,
+            reason: anchor.reason,
+        }))).toEqual([
+            {
+                dishName: 'Guacamole',
+                lineText: 'Guacamole - fresh avocado / lime / cilantro D,G 12',
+                start: menuText.indexOf('Guacamole'),
+                end: menuText.indexOf('Guacamole') + 'Guacamole'.length,
+                reason: 'inline_description',
+            },
+            {
+                dishName: 'Punta Mita',
+                lineText: 'Punta Mita, prawns, tomato, onion, cilantro C,F,S 95',
+                start: menuText.indexOf('Punta Mita'),
+                end: menuText.indexOf('Punta Mita') + 'Punta Mita'.length,
+                reason: 'inline_description',
+            },
+            {
+                dishName: 'Classic Margarita',
+                lineText: 'Classic Margarita 18',
+                start: menuText.indexOf('Classic Margarita'),
+                end: menuText.indexOf('Classic Margarita') + 'Classic Margarita'.length,
+                reason: 'same_line_price',
+            },
+            {
+                dishName: 'Chicken Yakitori',
+                lineText: 'Chicken Yakitori G,D €14.00',
+                start: menuText.indexOf('Chicken Yakitori'),
+                end: menuText.indexOf('Chicken Yakitori') + 'Chicken Yakitori'.length,
+                reason: 'same_line_price',
+            },
+        ]);
+    });
+
+    test('skips category headings, ambiguous rows, two-line names, footers, and duplicate source lines', () => {
+        const menuText = [
+            'COCKTAILS',
+            'Venue, Room',
+            'Margaritas',
+            'Classic Margarita 18',
+            'TACOS',
+            'Pescado',
+            'adobo, napa cabbage slaw, chipotle aioli, avocado G 18',
+            'Guacamole, avocado, tomato V 12',
+            'Guacamole, avocado, tomato V 12',
+            'ALLERGEN KEY',
+            'C crustaceans | D dairy | G gluten',
+        ].join('\n');
+
+        const anchors = buildDishNameFormattingAnchors(menuText, { property: 'Test Property' });
+
+        expect(anchors.map((anchor) => anchor.dishName)).toEqual(['Classic Margarita']);
+        expect(anchors.some((anchor) => anchor.lineText.includes('Venue'))).toBe(false);
+        expect(anchors.some((anchor) => anchor.dishName === 'Margaritas')).toBe(false);
+        expect(anchors.some((anchor) => anchor.dishName === 'Pescado')).toBe(false);
+        expect(anchors.some((anchor) => anchor.dishName === 'Guacamole')).toBe(false);
+    });
+
+    test('skips inferred category-enriched names that are not exact source prefixes', () => {
+        const menuText = [
+            'Salads & Bowls',
+            'Kale, heirloom cherry tomato, grapes, orange-white balsamic vinaigrette D,V 16',
+        ].join('\n');
+
+        const anchors = buildDishNameFormattingAnchors(menuText, { property: 'Test Property' });
+
+        expect(previewDishExtraction(menuText)[0].name).toBe('Kale (Salad)');
+        expect(anchors).toEqual([]);
     });
 });

@@ -50,6 +50,7 @@ For modification flows, the baseline text must come from one of:
 
 - Chef edits menu as usual.
 - Before AI review or final submission, the form checks the selected property/service period against the latest approved baseline. If the user selected an older or mismatched baseline, or starts a new menu where an approved baseline already exists, the form opens a full-screen decision dialog with explicit actions to load the existing approved menu, keep the selected baseline, continue as brand new, or return to the form. Background freshness checks update state only and do not stack warning banners while the chef is editing fields.
+- Uploaded unapproved/redlined DOCX mode skips that database-baseline replacement prompt after extraction. The uploaded DOCX is already the explicit revision source, and replacing it with the latest database baseline would discard preserved redlines/highlights before final submit.
 - Right-side persistent preview shows live diff against approved baseline:
   - Deletions: red strike-through
   - Insertions: yellow highlight

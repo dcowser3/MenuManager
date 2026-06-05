@@ -1370,6 +1370,90 @@
         return ranges;
     }
 
+    function getDishNamePrefixOffset(lineText, dishName) {
+        const name = String(dishName || '').trim();
+        if (!name) return null;
+
+        const sourceLine = String(lineText || '');
+        const leadingWhitespaceLength = (sourceLine.match(/^\s*/) || [''])[0].length;
+        if (sourceLine.slice(leadingWhitespaceLength, leadingWhitespaceLength + name.length) !== name) {
+            return null;
+        }
+
+        const remainder = sourceLine.slice(leadingWhitespaceLength + name.length);
+        if (remainder && !/^[\s,;:|/)-]/.test(remainder) && !/^[-–—]/.test(remainder)) {
+            return null;
+        }
+
+        return leadingWhitespaceLength;
+    }
+
+    function resolveDishNameFormattingRanges(text, anchors) {
+        if (!Array.isArray(anchors) || anchors.length === 0) {
+            return [];
+        }
+
+        const source = String(text || '');
+        const lines = buildLineRanges(source);
+        const ranges = [];
+        const seen = {};
+
+        anchors.forEach(function (anchor) {
+            const dishName = String(anchor && anchor.dishName || '').trim();
+            if (!dishName) return;
+
+            const targetLineText = normalizeInlineText(anchor.lineText || '');
+            let matchedLine = null;
+
+            if (targetLineText) {
+                const candidates = lines.filter(function (line) {
+                    return normalizeInlineText(line.text) === targetLineText;
+                });
+                if (candidates.length === 1) {
+                    matchedLine = candidates[0];
+                } else if (candidates.length > 1 && Number.isInteger(anchor.lineNumber)) {
+                    const lineByNumber = lines[anchor.lineNumber - 1];
+                    if (lineByNumber && normalizeInlineText(lineByNumber.text) === targetLineText) {
+                        matchedLine = lineByNumber;
+                    }
+                }
+            }
+
+            if (matchedLine) {
+                const prefixOffset = getDishNamePrefixOffset(matchedLine.text, dishName);
+                if (prefixOffset !== null) {
+                    const start = matchedLine.start + prefixOffset;
+                    const end = start + dishName.length;
+                    const key = start + ':' + end;
+                    if (!seen[key]) {
+                        seen[key] = true;
+                        ranges.push({ start: start, end: end, dishName: dishName });
+                    }
+                    return;
+                }
+            }
+
+            const start = Number(anchor.start);
+            const end = Number(anchor.end);
+            if (
+                Number.isInteger(start) &&
+                Number.isInteger(end) &&
+                end > start &&
+                source.slice(start, end) === dishName
+            ) {
+                const key = start + ':' + end;
+                if (!seen[key]) {
+                    seen[key] = true;
+                    ranges.push({ start: start, end: end, dishName: dishName });
+                }
+            }
+        });
+
+        return ranges.sort(function (a, b) {
+            return a.start - b.start || a.end - b.end;
+        });
+    }
+
     function getMeaningfulTokenValues(text) {
         return tokenizeDiffText(text)
             .map(function (token) {
@@ -1702,6 +1786,7 @@
         computeInsertedTokenRanges,
         restoreLeadingBoldFromSource,
         buildEditableHtmlFromBaseline,
+        resolveDishNameFormattingRanges,
         wrapWithExistingAnnotation,
         stripExistingDeletions,
         buildExistingDeletionAnchors,

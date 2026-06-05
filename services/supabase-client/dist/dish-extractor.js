@@ -12,6 +12,7 @@ exports.normalizeDishPriceForStorage = normalizeDishPriceForStorage;
 exports.extractDishesFromText = extractDishesFromText;
 exports.extractAndStoreDishes = extractAndStoreDishes;
 exports.prepareApprovedDishInputs = prepareApprovedDishInputs;
+exports.buildDishNameFormattingAnchors = buildDishNameFormattingAnchors;
 exports.storePreparedApprovedDishes = storePreparedApprovedDishes;
 exports.previewDishExtraction = previewDishExtraction;
 const dishes_1 = require("./dishes");
@@ -413,7 +414,7 @@ function isDefiniteCategoryHeading(line) {
 function isSectionLabelName(line) {
     return isDefiniteCategoryHeading(line)
         || isShortBeverageOrServiceHeading(line)
-        || /^(?:signature\s+cocktails?|specialty\s+cocktails?|classic\s+cocktails?|bar\s+raya\s+exclusives|classics\s+with\s+a\s+twist|dessert\s+cocktails?|soup\s*&\s*salads?|ensaladas\s+y\s+sopa|guacamoles?\s*&\s*salsas?|m[aá]s\s*\|\s*sides|raw\s+bar|bubbles|by\s+the\s+glass|wine\s+by\s+the\s+glass|by\s+the\s+bottle|spirits?\s+list|bourbon,\s*whiskey\s*&\s*rye|wine\s+pairing|maki(?:\s+rolls?|\s+selection)?|nigiri|sashimi|fajitas|maya\s+signature\s+fajitas|de\s+la\s+parrilla\s*\|\s*from\s+the\s+grill|wood\s+fire\s+grill|from\s+the\s+(?:wood|grill)(?:\s*[-–—]\s*burning\s+grill)?|other\s+varietals\s*\/\s*unique\s+whites|(?:red|ros[ée])\s+wine\s*\(.+\)|signature\s+margaritas\s+glass\s*\/\s*pitcher|antojitos\s*\|\s*starters|especialidades|especiales\s*\|\s*specialt(?:y|ies)|postres\s*\|\s*desserts?|.+\s+station)$/i.test(line.trim());
+        || /^(?:signature\s+cocktails?|specialty\s+cocktails?|classic\s+cocktails?|bar\s+raya\s+exclusives|classics\s+with\s+a\s+twist|dessert\s+cocktails?|margaritas?|soup\s*&\s*salads?|ensaladas\s+y\s+sopa|guacamoles?\s*&\s*salsas?|m[aá]s\s*\|\s*sides|raw\s+bar|bubbles|by\s+the\s+glass|wine\s+by\s+the\s+glass|by\s+the\s+bottle|spirits?\s+list|bourbon,\s*whiskey\s*&\s*rye|wine\s+pairing|maki(?:\s+rolls?|\s+selection)?|nigiri|sashimi|fajitas|maya\s+signature\s+fajitas|de\s+la\s+parrilla\s*\|\s*from\s+the\s+grill|wood\s+fire\s+grill|from\s+the\s+(?:wood|grill)(?:\s*[-–—]\s*burning\s+grill)?|other\s+varietals\s*\/\s*unique\s+whites|(?:red|ros[ée])\s+wine\s*\(.+\)|signature\s+margaritas\s+glass\s*\/\s*pitcher|antojitos\s*\|\s*starters|especialidades|especiales\s*\|\s*specialt(?:y|ies)|postres\s*\|\s*desserts?|.+\s+station)$/i.test(line.trim());
 }
 function looksLikeDishDescriptionLine(line) {
     const cleanLine = line.trim();
@@ -1099,6 +1100,120 @@ function prepareApprovedDishInputs(menuContent, property, submissionId, options)
             excludedByRule: quality.disposition === 'exclude',
         };
     });
+}
+function buildSourceLineRanges(menuText) {
+    const ranges = [];
+    let start = 0;
+    for (const lineText of `${menuText || ''}`.split('\n')) {
+        ranges.push({
+            lineText,
+            trimmedText: lineText.trim(),
+            lineNumber: ranges.length + 1,
+            start,
+            leadingWhitespaceLength: lineText.match(/^\s*/)?.[0].length || 0,
+        });
+        start += lineText.length + 1;
+    }
+    return ranges;
+}
+function hasExactDishNamePrefix(lineText, dishName) {
+    const trimmedLine = `${lineText || ''}`.trim();
+    const cleanName = `${dishName || ''}`.trim();
+    if (!trimmedLine || !cleanName || !trimmedLine.startsWith(cleanName)) {
+        return false;
+    }
+    const remainder = trimmedLine.slice(cleanName.length);
+    return !remainder || /^[\s,;:|/)-]|^[-–—]/.test(remainder);
+}
+function sourceLineHasSameLineAllergen(lineText) {
+    const normalizedLine = normalizeAttachedAllergenCodes(lineText);
+    const withoutPrice = removeTrailingPrice(normalizedLine);
+    return extractTrailingAllergens(withoutPrice).allergens.length > 0;
+}
+function getDishNameFormattingReason(dish, sourceLine) {
+    const dishName = `${dish.input.dish_name || ''}`.trim();
+    if (!hasExactDishNamePrefix(sourceLine, dishName)) {
+        return null;
+    }
+    const suffix = sourceLine.trim().slice(dishName.length);
+    const hasInlineDescription = !!dish.input.description && /^\s*(?:[,;:]|[-–—])\s*\S/.test(suffix);
+    if (hasInlineDescription) {
+        return 'inline_description';
+    }
+    if (dish.input.price && extractPrice(sourceLine)) {
+        return 'same_line_price';
+    }
+    if (dish.input.allergens?.length && sourceLineHasSameLineAllergen(sourceLine)) {
+        return 'same_line_allergen';
+    }
+    return null;
+}
+function canFormatPreparedDishName(dish) {
+    if (dish.excludedByRule || dish.quality.disposition === 'exclude') {
+        return false;
+    }
+    return !dish.quality.issues.some((issue) => issue.severity === 'high');
+}
+/**
+ * Build high-confidence dish-name formatting anchors from menu text.
+ *
+ * This intentionally uses a stricter gate than approved-dish storage. A row can
+ * be plausible enough to save for review but still too ambiguous to alter
+ * visible formatting. Ambiguous duplicate source lines are skipped.
+ */
+function buildDishNameFormattingAnchors(menuContent, options = {}) {
+    const sourceText = `${menuContent || ''}`;
+    if (!sourceText.trim()) {
+        return [];
+    }
+    const lineRanges = buildSourceLineRanges(sourceText);
+    const nonEmptyLineOccurrences = new Map();
+    for (const range of lineRanges) {
+        if (!range.trimmedText) {
+            continue;
+        }
+        const existing = nonEmptyLineOccurrences.get(range.trimmedText) || [];
+        existing.push(range);
+        nonEmptyLineOccurrences.set(range.trimmedText, existing);
+    }
+    const prepared = prepareApprovedDishInputs(sourceText, options.property || 'Unknown', 'dish-name-formatting-preview', { servicePeriod: options.servicePeriod });
+    const anchors = [];
+    const seenRanges = new Set();
+    for (const dish of prepared) {
+        if (!canFormatPreparedDishName(dish)) {
+            continue;
+        }
+        const sourceLine = `${dish.sourceContext.sourceLine || ''}`.trim();
+        if (!sourceLine) {
+            continue;
+        }
+        const matches = nonEmptyLineOccurrences.get(sourceLine) || [];
+        if (matches.length !== 1) {
+            continue;
+        }
+        const reason = getDishNameFormattingReason(dish, sourceLine);
+        if (!reason) {
+            continue;
+        }
+        const lineRange = matches[0];
+        const dishName = `${dish.input.dish_name || ''}`.trim();
+        const start = lineRange.start + lineRange.leadingWhitespaceLength;
+        const end = start + dishName.length;
+        const key = `${start}:${end}`;
+        if (seenRanges.has(key)) {
+            continue;
+        }
+        seenRanges.add(key);
+        anchors.push({
+            dishName,
+            lineText: lineRange.lineText,
+            lineNumber: lineRange.lineNumber,
+            start,
+            end,
+            reason,
+        });
+    }
+    return anchors;
 }
 async function storePreparedApprovedDishes(prepared, submissionId, options = {}) {
     const excludeIndexes = options.excludeIndexes || new Set();

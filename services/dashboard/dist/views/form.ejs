@@ -2433,6 +2433,7 @@
                 hasCriticalErrors: false,
                 reviewMode: reviewMode || 'full',
                 changedLineCount: changedLineCount || 0,
+                dishNameFormatting: [],
                 aiUnavailable: true,
                 manualReviewRequired: true,
                 gatewayFallbackStatus: statusCode || 0,
@@ -3569,6 +3570,10 @@
         }
 
         async function getBaselineFreshnessIssue() {
+            if (submissionMode === 'modification' && (unapprovedMode || revisionSource === 'uploaded_unapproved')) {
+                return null;
+            }
+
             const { property, servicePeriod } = getCurrentPropertyService();
             if (!property || !servicePeriod) return null;
 
@@ -5406,6 +5411,15 @@
             }
         }
 
+        function applyDishNameFormattingAnchors(displayText, anchors) {
+            if (!quill || !redlinePreview || !redlinePreview.resolveDishNameFormattingRanges) return;
+            const ranges = redlinePreview.resolveDishNameFormattingRanges(displayText || '', anchors || []);
+            ranges.forEach((range) => {
+                if (!Number.isInteger(range.start) || !Number.isInteger(range.end) || range.end <= range.start) return;
+                quill.formatText(range.start, range.end - range.start, { bold: true });
+            });
+        }
+
         function tokenizeDiffText(text) {
             return redlinePreview.tokenizeDiffText(text);
         }
@@ -5788,6 +5802,7 @@
             const sourceRichHtml = getCurrentRichMenuHtmlForText(originalText);
             setQuillReviewedHtmlFromText(correctedDisplayText, sourceRichHtml);
             applyHeadingFormatting(originalText, correctedDisplayText);
+            applyDishNameFormattingAnchors(correctedDisplayText, results.dishNameFormatting);
             const reviewedDisplayText = extractCleanTextFromReviewedArea(quill.root) || correctedDisplayText;
 
             if (hasChanges) {
@@ -5814,7 +5829,7 @@
             const aiCheckBase = (unapprovedMode && unapprovedDiffBaseline)
                 ? unapprovedDiffBaseline
                 : (baseApprovedMenuContent || originalText);
-            renderPersistentPreview(aiCheckBase, reviewedDisplayText);
+            renderPersistentPreview(aiCheckBase, reviewedDisplayText, quill.root.innerHTML || '');
             lastAiCheckedMenuText = extractAiReviewTextFromReviewedArea(document.getElementById('reviewedContentArea'));
             requiresAiRerun = false;
 
@@ -6347,7 +6362,7 @@
                 const diffBase = (unapprovedMode && unapprovedDiffBaseline)
                     ? unapprovedDiffBaseline
                     : (baseApprovedMenuContent || (aiCheckResults?.originalMenu || ''));
-                renderPersistentPreview(diffBase, currentText);
+                renderPersistentPreview(diffBase, currentText, reviewedArea.innerHTML || '');
             }, 120);
         }
 
@@ -6378,7 +6393,7 @@
             return redlinePreview.wrapWithExistingAnnotation(token, charOffset, annotationMap);
         }
 
-        function renderPersistentPreview(baseText, revisedText) {
+        function renderPersistentPreview(baseText, revisedText, revisedHtml) {
             const previewSection = document.getElementById('persistentPreviewSection');
             const previewBody = document.getElementById('persistentPreviewBody');
 
@@ -6396,6 +6411,7 @@
                 annotationMap: {},
                 includeExistingAnnotations: false,
                 baselineHtml,
+                revisedHtml: revisedHtml ? stripAiReviewTransientFormatting(revisedHtml) : '',
             });
 
             persistentDiffSummary = {
@@ -6410,8 +6426,10 @@
 
             // Extract clean text from the edited content
             const currentText = extractCleanTextFromReviewedArea(reviewedArea);
+            const currentHtml = stripAiReviewTransientFormatting(reviewedArea.innerHTML || '');
 
-            quill.setText(currentText);
+            setQuillReviewedHtmlFromText(currentText, currentHtml);
+            applyDishNameFormattingAnchors(currentText, aiCheckResults?.dishNameFormatting || []);
 
             const currentChanges = computeLineDiff(aiCheckResults.originalMenu, currentText);
             const preservedChanges = [];
@@ -6449,7 +6467,7 @@
             const recalcBase = (unapprovedMode && unapprovedDiffBaseline)
                 ? unapprovedDiffBaseline
                 : (baseApprovedMenuContent || aiCheckResults.originalMenu);
-            renderPersistentPreview(recalcBase, currentText);
+            renderPersistentPreview(recalcBase, currentText, quill.root.innerHTML || '');
         }
 
         function findWordPosition(text, word, expectedPosition) {

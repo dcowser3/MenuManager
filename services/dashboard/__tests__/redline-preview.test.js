@@ -94,6 +94,54 @@ describe('redline preview helpers', () => {
         expect(restored).toContain('<strong>Tortilla Soup,</strong> shredded chicken');
     });
 
+    test('resolves dish-name formatting anchors against the displayed reviewed text', () => {
+        const displayText = [
+            'STARTERS',
+            '',
+            '  Guacamole - fresh avocado / lime / cilantro D,G 12',
+            'Classic Margarita 18',
+        ].join('\n');
+
+        const ranges = redlinePreview.resolveDishNameFormattingRanges(displayText, [
+            {
+                dishName: 'Guacamole',
+                lineText: 'Guacamole - fresh avocado / lime / cilantro D,G 12',
+                lineNumber: 2,
+                start: 9,
+                end: 18,
+            },
+            {
+                dishName: 'Classic Margarita',
+                lineText: 'Classic Margarita 18',
+                lineNumber: 4,
+                start: displayText.indexOf('Classic Margarita'),
+                end: displayText.indexOf('Classic Margarita') + 'Classic Margarita'.length,
+            },
+        ]);
+
+        expect(ranges).toEqual([
+            {
+                dishName: 'Guacamole',
+                start: displayText.indexOf('Guacamole'),
+                end: displayText.indexOf('Guacamole') + 'Guacamole'.length,
+            },
+            {
+                dishName: 'Classic Margarita',
+                start: displayText.indexOf('Classic Margarita'),
+                end: displayText.indexOf('Classic Margarita') + 'Classic Margarita'.length,
+            },
+        ]);
+    });
+
+    test('preserves revised dish-name bold in persistent modification preview', () => {
+        const text = 'Guacamole - fresh avocado / lime / cilantro D,G 12';
+        const rendered = redlinePreview.renderPersistentPreview(text, text, {
+            revisedHtml: '<p><strong>Guacamole</strong> - fresh avocado / lime / cilantro D,G 12</p>',
+        });
+
+        expect(rendered.html).toContain('<strong>Guacamole</strong>');
+    });
+
     test('strips transient AI review highlights without removing real redlines or bold', () => {
         const baselineHtml = [
             '<p><strong>Margaritas</strong></p>',

@@ -11,6 +11,7 @@ import { promisify } from 'util';
 // Supabase client for dish extraction and alerting (optional - gracefully handles if not configured)
 import {
     isSupabaseConfigured,
+    buildDishNameFormattingAnchors,
     extractAndStoreDishes,
     logAlert,
     buildAlertEmailHtml,
@@ -2306,6 +2307,7 @@ async function handleBasicCheck(req: any, res: any) {
         const allergens = sanitizePlainTextInput(req.body?.allergens, { multiline: true, maxLength: 2000 });
         const menuType = sanitizePlainTextInput(req.body?.menuType, { maxLength: 64 });
         const property = sanitizePlainTextInput(req.body?.property, { maxLength: 255 });
+        const servicePeriod = sanitizePlainTextInput(req.body?.servicePeriod, { maxLength: 64 });
         const baselineMenuContent = sanitizePlainTextInput(req.body?.baselineMenuContent, { multiline: true, maxLength: MAX_LONG_TEXT_LENGTH });
         const reviewMode = sanitizePlainTextInput(req.body?.reviewMode, { maxLength: 64 });
 
@@ -2322,6 +2324,7 @@ async function handleBasicCheck(req: any, res: any) {
             changedLineCount = changedOnlyText.changedLineCount;
 
             if (changedLineCount === 0) {
+                const dishNameFormatting = buildBasicCheckDishNameFormatting(menuContent, { property, servicePeriod });
                 void logFormAttemptEvent({
                     attemptId,
                     eventType: 'basic_check_completed',
@@ -2355,6 +2358,7 @@ async function handleBasicCheck(req: any, res: any) {
                     hasCriticalErrors: false,
                     reviewMode: 'changed_only',
                     changedLineCount: 0,
+                    dishNameFormatting,
                     ...(diagnosticsRequested ? {
                         basicCheckDiagnostics: {
                             checkId: basicCheckId,
@@ -2364,6 +2368,10 @@ async function handleBasicCheck(req: any, res: any) {
                             reason: 'no_changed_lines',
                             comparedTextLength: menuContent.length,
                             baselineTextLength: baselineMenuContent.length,
+                            dishNameFormatting: {
+                                anchorCount: dishNameFormatting.length,
+                                anchors: dishNameFormatting,
+                            },
                         }
                     } : {}),
                 });
@@ -2576,6 +2584,13 @@ Note: Use ONLY these allergen codes when checking allergen compliance. Do not us
                 },
                 aiFailure,
             } : undefined;
+            const dishNameFormatting = buildBasicCheckDishNameFormatting(deterministicFallbackMenu, { property, servicePeriod });
+            if (basicCheckDiagnostics) {
+                (basicCheckDiagnostics as any).dishNameFormatting = {
+                    anchorCount: dishNameFormatting.length,
+                    anchors: dishNameFormatting,
+                };
+            }
 
             return res.json({
                 success: true,
@@ -2591,6 +2606,7 @@ Note: Use ONLY these allergen codes when checking allergen compliance. Do not us
                 manualReviewRequired: true,
                 aiFailure,
                 reviewSkippedReason: fallbackMessage,
+                dishNameFormatting,
                 ...(basicCheckDiagnostics ? { basicCheckDiagnostics } : {}),
             });
         }
@@ -2667,6 +2683,13 @@ Note: Use ONLY these allergen codes when checking allergen compliance. Do not us
                 },
                 aiFailure,
             } : undefined;
+            const dishNameFormatting = buildBasicCheckDishNameFormatting(deterministicFallbackMenu, { property, servicePeriod });
+            if (basicCheckDiagnostics) {
+                (basicCheckDiagnostics as any).dishNameFormatting = {
+                    anchorCount: dishNameFormatting.length,
+                    anchors: dishNameFormatting,
+                };
+            }
 
             return res.json({
                 success: true,
@@ -2682,6 +2705,7 @@ Note: Use ONLY these allergen codes when checking allergen compliance. Do not us
                 manualReviewRequired: true,
                 aiFailure,
                 reviewSkippedReason: fallbackMessage,
+                dishNameFormatting,
                 ...(basicCheckDiagnostics ? { basicCheckDiagnostics } : {}),
             });
         }
@@ -2775,6 +2799,12 @@ Note: Use ONLY these allergen codes when checking allergen compliance. Do not us
             }
         }
 
+        const finalCorrectedMenu = changedOnlyMode ? changedOnlyMergedMenu : correctedMenuSanitized;
+        const finalHasChanges = changedOnlyMode
+            ? changedOnlyMergedMenu !== menuContent
+            : correctedMenuSanitized !== originalMenuSanitized;
+        const dishNameFormatting = buildBasicCheckDishNameFormatting(finalCorrectedMenu, { property, servicePeriod });
+
         void logFormAttemptEvent({
             attemptId,
             eventType: 'basic_check_completed',
@@ -2793,7 +2823,7 @@ Note: Use ONLY these allergen codes when checking allergen compliance. Do not us
             menuHtmlLength: req.body?.menuHtmlLength,
             persistentDiffHtmlLength: req.body?.persistentDiffHtmlLength,
             baseMenuTextLength: baselineMenuContent.length,
-            correctedMenuTextLength: (changedOnlyMode ? changedOnlyMergedMenu : correctedMenuSanitized).length,
+            correctedMenuTextLength: finalCorrectedMenu.length,
             requestBodyLength: req.get('content-length'),
             suggestionsCount: finalSuggestions.length,
             criticalSuggestionsCount: criticalSuggestions.length,
@@ -2801,9 +2831,8 @@ Note: Use ONLY these allergen codes when checking allergen compliance. Do not us
             details: {
                 reviewMode: changedOnlyMode ? 'changed_only' : 'full',
                 changedLineCount,
-                hasChanges: changedOnlyMode
-                    ? changedOnlyMergedMenu !== menuContent
-                    : correctedMenuSanitized !== originalMenuSanitized,
+                hasChanges: finalHasChanges,
+                dishNameFormattingAnchorCount: dishNameFormatting.length,
                 correctedMenuStructureGuard: {
                     safe: structureGuard.safe,
                     reasons: structureGuard.reasons,
@@ -2907,10 +2936,12 @@ Note: Use ONLY these allergen codes when checking allergen compliance. Do not us
             final: {
                 suggestions: finalSuggestions,
                 hasCriticalErrors,
-                hasChanges: changedOnlyMode
-                    ? changedOnlyMergedMenu !== menuContent
-                    : correctedMenuSanitized !== originalMenuSanitized,
-                correctedMenu: truncateDiagnosticText(changedOnlyMode ? changedOnlyMergedMenu : correctedMenuSanitized),
+                hasChanges: finalHasChanges,
+                correctedMenu: truncateDiagnosticText(finalCorrectedMenu),
+                dishNameFormatting: {
+                    anchorCount: dishNameFormatting.length,
+                    anchors: dishNameFormatting,
+                },
             },
         } : undefined;
 
@@ -2932,14 +2963,13 @@ Note: Use ONLY these allergen codes when checking allergen compliance. Do not us
         res.json({
             success: true,
             originalMenu: menuContent,
-            correctedMenu: changedOnlyMode ? changedOnlyMergedMenu : correctedMenuSanitized,
+            correctedMenu: finalCorrectedMenu,
             suggestions: finalSuggestions,
-            hasChanges: changedOnlyMode
-                ? changedOnlyMergedMenu !== menuContent
-                : correctedMenuSanitized !== originalMenuSanitized,
+            hasChanges: finalHasChanges,
             hasCriticalErrors,
             reviewMode: changedOnlyMode ? 'changed_only' : 'full',
             changedLineCount,
+            dishNameFormatting,
             ...(basicCheckDiagnostics ? { basicCheckDiagnostics } : {}),
         });
 
@@ -3235,6 +3265,18 @@ function normalizeReviewLine(line: string): string {
         .replace(/[“”"]/g, '"')
         .replace(/[’']/g, "'")
         .trim();
+}
+
+function buildBasicCheckDishNameFormatting(
+    menuContent: string,
+    options: { property?: string; servicePeriod?: string }
+) {
+    try {
+        return buildDishNameFormattingAnchors(menuContent, options);
+    } catch (error: any) {
+        console.warn('Dish name formatting anchor generation failed:', error?.message || error);
+        return [];
+    }
 }
 
 function stripDiacritics(input: string): string {

@@ -36,6 +36,7 @@ jest.mock('mammoth', () => ({
 }));
 jest.mock('@menumanager/supabase-client', () => ({
     __esModule: true,
+    buildDishNameFormattingAnchors: jest.requireActual('../../supabase-client/src/dish-extractor').buildDishNameFormattingAnchors,
     isSupabaseConfigured: jest.fn(() => false),
     extractAndStoreDishes: jest.fn().mockResolvedValue({ added: 0 }),
     logAlert: jest.fn().mockResolvedValue(undefined),
@@ -718,6 +719,13 @@ describe('Dashboard Modification Workflow (local, mocked externals)', () => {
         expect(response.body.reviewMode).toBe('changed_only');
         expect(response.body.changedLineCount).toBe(0);
         expect(response.body.suggestions).toEqual([]);
+        expect(response.body.dishNameFormatting).toEqual([
+            expect.objectContaining({
+                dishName: 'Guacamole',
+                lineText: 'Guacamole - $12',
+                reason: 'same_line_price',
+            }),
+        ]);
 
         const qaCall = mockedAxios.post.mock.calls.find((c) =>
             String(c[0]).includes('/run-qa-check')
@@ -747,6 +755,26 @@ describe('Dashboard Modification Workflow (local, mocked externals)', () => {
         expect(qaCall[1].text).toBe('Ceviche* $15');
     });
 
+    test('basic-check returns dish-name formatting anchors for changed_only merged menus', async () => {
+        const payload = {
+            menuContent: 'Guacamole - $12\nClassic Margarita 18',
+            baselineMenuContent: 'Guacamole - $12',
+            reviewMode: 'changed_only',
+            allergens: '',
+            menuType: 'standard',
+        };
+
+        const response = await invokeJsonHandler(basicCheckHandler, payload);
+
+        expect(response.status).toBe(200);
+        expect(response.body.success).toBe(true);
+        expect(response.body.correctedMenu).toBe(payload.menuContent);
+        expect(response.body.dishNameFormatting.map((anchor) => anchor.dishName)).toEqual([
+            'Guacamole',
+            'Classic Margarita',
+        ]);
+    });
+
     test('basic-check full review sends all text even when modification baseline content exists', async () => {
         const payload = {
             menuContent: 'Guacamole - $12\nMarket Salad, avocado, halloumi cheee, cucumber V 70',
@@ -768,6 +796,10 @@ describe('Dashboard Modification Workflow (local, mocked externals)', () => {
         expect(qaCall).toBeTruthy();
         expect(qaCall[1].text).toBe(payload.menuContent);
         expect(qaCall[2]).toEqual({ timeout: 120000 });
+        expect(response.body.dishNameFormatting.map((anchor) => anchor.dishName)).toEqual([
+            'Guacamole',
+            'Market Salad',
+        ]);
     });
 
     test('basic-check suppresses missing-price false positive for priced add-on option rows', async () => {

@@ -107,9 +107,22 @@ describe('dashboard form modification source chooser', () => {
         expect(template).toContain('const reviewedDisplayText = extractCleanTextFromReviewedArea(quill.root) || correctedDisplayText;');
         expect(template).toContain('const changes = computeLineDiff(originalText, reviewedDisplayText);');
         expect(template).toContain('return redlinePreview.computeInsertedTokenRanges(original, corrected);');
-        expect(template).toContain('renderPersistentPreview(aiCheckBase, reviewedDisplayText);');
+        expect(template).toContain('applyDishNameFormattingAnchors(correctedDisplayText, results.dishNameFormatting);');
+        expect(template).toContain('renderPersistentPreview(aiCheckBase, reviewedDisplayText, quill.root.innerHTML || \'\');');
         expect(template).not.toContain('displayReviewedContent(aiReviewMenuPanel.leftPanelHtml);');
         expect(template).not.toContain('buildAiReviewedMenuPanel');
+    });
+
+    test('applies server-provided dish-name anchors through Quill formatting', () => {
+        const template = fs.readFileSync(
+            path.join(__dirname, '..', 'views', 'form.ejs'),
+            'utf8'
+        );
+
+        expect(template).toContain('function applyDishNameFormattingAnchors(displayText, anchors)');
+        expect(template).toContain('redlinePreview.resolveDishNameFormattingRanges(displayText || \'\', anchors || [])');
+        expect(template).toContain('quill.formatText(range.start, range.end - range.start, { bold: true });');
+        expect(template).toContain('revisedHtml: revisedHtml ? stripAiReviewTransientFormatting(revisedHtml) : \'\',');
     });
 
     test('uses a full-screen decision dialog for existing approved menu conflicts', () => {
@@ -125,6 +138,16 @@ describe('dashboard form modification source chooser', () => {
         expect(template).toContain('Use Existing Menu');
         expect(template).toContain('latestBaselineFreshnessIssue = issue;');
         expect(template).not.toContain('if (issue) showBaselineFreshnessWarning(issue);');
+    });
+
+    test('does not replace uploaded-unapproved redlines with a database freshness baseline', () => {
+        const template = fs.readFileSync(
+            path.join(__dirname, '..', 'views', 'form.ejs'),
+            'utf8'
+        );
+
+        expect(template).toContain("if (submissionMode === 'modification' && (unapprovedMode || revisionSource === 'uploaded_unapproved')) {");
+        expect(template).toContain('return null;');
     });
 
     test('keeps docx metadata extraction misses silent', () => {
