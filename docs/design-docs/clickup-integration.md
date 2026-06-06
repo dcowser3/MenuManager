@@ -16,7 +16,7 @@ When a chef submits a menu, a ClickUp task is automatically created with the gen
 - Uploads optional menu image attachment when provided in the form (`menuImageUpload`)
 - Adds Isabella as the assignee when `CLICKUP_ASSIGNEE_ID` is configured
 - Resolves the configured Marketing ClickUp User Group to its member user IDs and adds those users as task watchers after task creation
-- If the submitter email is `isabella@richardsandoval.com`, creates the task directly in `CLICKUP_POST_APPROVAL_STATUS` (`To Do` by default) and assigns the resolved Marketing users instead of the Isabella assignee. This direct handoff does not use `CLICKUP_CORRECTIONS_STATUS`, so a separate review-complete trigger such as `approved` will not place Isabella submissions in the `approved` column.
+- If the submitter email is `isabella@richardsandoval.com`, creates the task directly in `CLICKUP_POST_APPROVAL_STATUS` (`To Do` by default) and assigns the resolved Marketing users instead of the Isabella assignee. This direct handoff does not use `CLICKUP_CORRECTIONS_STATUS`, so a separate review-complete trigger such as `approved` will not place Isabella submissions in the `approved` column during creation.
 - After a direct Isabella handoff successfully creates the ClickUp task, the DB submission status is updated to `sent_to_marketing` so the row does not remain in Isabella's `/reviews` queue.
 - Stores `clickup_task_id` on the submission record
 - `due_date` is set from the form’s `YYYY-MM-DD` value using **noon UTC** on that calendar day so the task due date matches the chef’s date in US (and most other) timezones; naive `new Date("YYYY-MM-DD")` uses UTC midnight and showed up one day early in ClickUp for Americas users
@@ -46,6 +46,7 @@ When a chef submits a menu, a ClickUp task is automatically created with the gen
 - Ignores review-complete events for tasks whose ClickUp `list.id` does not match `CLICKUP_LIST_ID`, so workspace-wide Marketing task updates do not create Menu Manager alerts
 - Looks up submission via `GET /submissions/by-clickup-task/:taskId` on the DB service
 - Retries that submission lookup on transient `404` / `No submission found` responses using `CLICKUP_WEBHOOK_SUBMISSION_LOOKUP_RETRIES` and `CLICKUP_WEBHOOK_SUBMISSION_LOOKUP_RETRY_DELAY_MS`; this covers the brief race where ClickUp sends the status webhook before Menu Manager has persisted the returned `clickup_task_id`
+- Skips submissions already marked as Isabella direct handoffs (`status: sent_to_marketing` plus Isabella submitter email), so a later manual move from `To Do` to a review-complete status such as `approved` does not download an attachment, re-run finalization, move the task back, or change assignees
 - Downloads the latest attachment from the ClickUp task
 - If no usable ClickUp attachment exists at approval time, falls back to the locally stored submitted DOCX so "perfect as submitted" menus can still be finalized
 - Extracts canonical approved menu text from the corrected DOCX
@@ -71,6 +72,12 @@ When a chef submits a menu, a ClickUp task is automatically created with the gen
   - upload corrected DOCX to ClickUp first
   - only assign Marketing and leave/move the task at `CLICKUP_POST_APPROVAL_STATUS` after that upload succeeds
   - return a warning to the dashboard if the attachment upload, Marketing assignment, or post-approval status transition fails
+
+## Runtime And Spec Coverage
+
+- ClickUp integration development and service images run on Node 24 LTS; the repo pins this with `.nvmrc`, `.node-version`, and `package.json` engines.
+- Executable business specs for ClickUp actions and submission upload options live in `docs/business-requirements/`.
+- Run them with `npm run test:business`; keep these business-readable scenarios updated when ClickUp status routing or upload-option behavior changes.
 
 ## Architecture
 

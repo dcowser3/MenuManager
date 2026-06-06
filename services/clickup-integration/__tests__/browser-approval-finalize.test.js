@@ -804,6 +804,82 @@ describe('browser approval finalize route', () => {
         expect(statusCall).toBeFalsy();
     });
 
+    test('skips Isabella direct handoff when the task is later moved to approved', async () => {
+        axios.get.mockImplementation(async (url) => {
+            const urlStr = String(url);
+            if (urlStr === 'https://api.clickup.com/api/v2/task/cu_isa_direct') {
+                return {
+                    data: {
+                        id: 'cu_isa_direct',
+                        status: { status: 'approved' },
+                        list: { id: 'list_123' },
+                        attachments: [
+                            {
+                                id: 'att_isa_corrected.docx',
+                                title: 'Isabella Event Menu.docx',
+                                extension: 'docx',
+                                url: 'https://clickup.example/attachment/isabella-event.docx',
+                                date: '1778457980067',
+                            },
+                        ],
+                    },
+                };
+            }
+            if (urlStr.includes('/submissions/by-clickup-task/cu_isa_direct')) {
+                return {
+                    data: {
+                        id: 'form-isa',
+                        clickup_task_id: 'cu_isa_direct',
+                        status: 'sent_to_marketing',
+                        project_name: 'Final Review Menu',
+                        property: 'Toro - Chicago',
+                        service_period: 'dinner',
+                        submitter_email: 'isabella@richardsandoval.com',
+                        submitter_name: 'Isabella Sandoval',
+                        filename: 'Final Review Menu.docx',
+                        raw_payload: {},
+                    },
+                };
+            }
+            if (urlStr === 'https://clickup.example/attachment/isabella-event.docx') {
+                return { data: Buffer.from('should not download') };
+            }
+            return { data: null };
+        });
+
+        const response = await invokeWebhookHandler(webhookHandler, {
+            body: {
+                event: 'taskStatusUpdated',
+                task_id: 'cu_isa_direct',
+                history_items: [
+                    {
+                        field: 'status',
+                        before: { status: 'to do' },
+                        after: { status: 'approved' },
+                    },
+                ],
+            },
+        });
+
+        expect(response.status).toBe(200);
+        expect(response.body).toBe('OK');
+        expect(console.log).toHaveBeenCalledWith(
+            expect.stringContaining('direct Isabella-to-Marketing handoff')
+        );
+        expect(axios.get.mock.calls.some((call) =>
+            String(call[0]) === 'https://clickup.example/attachment/isabella-event.docx'
+        )).toBe(false);
+        expect(axios.post.mock.calls.some((call) =>
+            String(call[0]).includes('http://localhost:3006/compare')
+        )).toBe(false);
+        expect(axios.put.mock.calls.some((call) =>
+            String(call[0]).includes('https://api.clickup.com/api/v2/task/cu_isa_direct')
+        )).toBe(false);
+        expect(axios.put.mock.calls.some((call) =>
+            String(call[0]).includes('http://localhost:3004/submissions/form-isa')
+        )).toBe(false);
+    });
+
     test('ignores review-complete webhooks for tasks outside the configured menu list', async () => {
         axios.get.mockImplementation(async (url) => {
             const urlStr = String(url);

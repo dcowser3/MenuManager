@@ -8,7 +8,7 @@
 #     helper files resolve inside service containers.
 #   - Does NOT bake service source into the image — compose bind-mounts it.
 
-FROM node:18-bookworm-slim
+FROM node:24-bookworm-slim
 
 WORKDIR /app
 

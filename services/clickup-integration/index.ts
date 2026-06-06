@@ -22,6 +22,11 @@ import { buildSmtpRuntimeConfig } from './lib/smtp-config';
 import { buildSharePointApprovedFilename } from './lib/sharepoint-filenames';
 import { logSharePointUploadEvent } from './lib/sharepoint-upload-logging';
 import { clickUpDueDateMillis } from './lib/clickup-due-date';
+import {
+    isDirectIsabellaMarketingHandoff,
+    isIsabellaSubmission,
+    normalizeClickUpLabel,
+} from './lib/clickup-handoff-rules';
 import { createInternalApiClient, requireInternalServiceAuth } from '@menumanager/internal-auth';
 
 dotenv.config({ path: path.join(__dirname, '..', '..', '..', '.env') });
@@ -54,7 +59,6 @@ const CLICKUP_WEBHOOK_SUBMISSION_LOOKUP_RETRY_DELAY_MS = parseNonNegativeInteger
     process.env.CLICKUP_WEBHOOK_SUBMISSION_LOOKUP_RETRY_DELAY_MS,
     1000
 );
-const ISABELLA_SUBMITTER_EMAIL = 'isabella@richardsandoval.com';
 const CLICKUP_REVIEW_COMPLETE_STATUSES = buildReviewCompleteStatuses();
 const GRAPH_CLIENT_ID = process.env.GRAPH_CLIENT_ID;
 const GRAPH_TENANT_ID = process.env.GRAPH_TENANT_ID;
@@ -222,20 +226,12 @@ function uniqueNumbers(values: number[]): number[] {
     return Array.from(new Set(values));
 }
 
-function normalizeClickUpLabel(value: any): string {
-    return String(value || '').trim().toLowerCase();
-}
-
 function clickUpGroupMemberUserId(member: any): number | null {
     const raw = (typeof member === 'number' || typeof member === 'string')
         ? member
         : (member?.user?.id ?? member?.id ?? member?.userid ?? member?.user_id);
     const parsed = Number.parseInt(String(raw || ''), 10);
     return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
-}
-
-function isIsabellaSubmission(email: any): boolean {
-    return normalizeClickUpLabel(email) === ISABELLA_SUBMITTER_EMAIL;
 }
 
 function buildClickUpGroupUrl(groupIds: string[]): string {
@@ -1556,6 +1552,16 @@ async function processApprovedTask(clickupTaskId: string, opts?: { skipStatusChe
 
     const submission = await getSubmissionByClickUpTaskWithRetry(clickupTaskId);
     console.log(`Found submission ${submission.id} for ClickUp task ${clickupTaskId}`);
+
+    if (isDirectIsabellaMarketingHandoff(submission)) {
+        const reason = 'submission is already a direct Isabella-to-Marketing handoff';
+        console.log(`Skipping ClickUp approval processing for task ${clickupTaskId}: ${reason}`);
+        return {
+            processed: false,
+            reason,
+            submissionId: submission.id,
+        };
+    }
 
     const attachments = taskResponse.data.attachments || [];
     const docxAttachments = Array.isArray(attachments) ? attachments.filter(isDocxAttachment) : [];

@@ -4,7 +4,7 @@ Known failure modes when starting services locally and how to diagnose them. Eve
 
 ## Default: Docker
 
-Use Docker for local service startup, route/API/browser verification, and service-dependent debugging unless you are intentionally testing native startup. The dev stack keeps Python venv and `node_modules` inside a reproducible image, which avoids the OOM / corrupted-venv / broken-tsc-shim failure modes that waste time in native mode.
+Use Docker for local service startup, route/API/browser verification, and service-dependent debugging unless you are intentionally testing native startup. The dev stack uses Node 24 LTS and keeps Python venv and `node_modules` inside a reproducible image, which avoids the OOM / corrupted-venv / broken-tsc-shim failure modes that waste time in native mode.
 
 | Mode | Entry point | When to use |
 |------|-------------|-------------|

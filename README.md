@@ -122,6 +122,7 @@ services/
 Current ClickUp BAU status handoff:
 - New tasks start in `Pending Initial ISA Review`
 - New tasks are assigned through `CLICKUP_ASSIGNEE_ID` (Isabella in production) and add Marketing group members as watchers when the ClickUp group lookup is configured; submissions from `isabella@richardsandoval.com` route directly to `CLICKUP_POST_APPROVAL_STATUS` (`To Do` by default), assign the resolved Marketing users, and update Menu Manager to `sent_to_marketing` instead of leaving the row in Isabella's review queue, even when `CLICKUP_CORRECTIONS_STATUS` is a different review-complete trigger such as `approved`
+- ClickUp review-complete webhooks skip submissions already marked as Isabella direct handoffs, so moving one of those tasks from `To Do` to `approved` will not download a DOCX, move the task back, or reassign Marketing
 - Isabella uploads the corrected DOCX in ClickUp and moves the task to `To Do`; that status change downloads the latest DOCX and feeds the learning dashboard
 - When the approved DOCX is processed from any configured review-complete status, the task is assigned to the resolved Marketing users and the configured initial reviewer is removed when applicable; the task is then moved to `To Do`, or the status update is skipped if it is already there
 - Task due date is taken from the form "Date needed" using noon UTC on that calendar day so ClickUp does not display it one day early in US timezones (plain `YYYY-MM-DD` parsing used to mean UTC midnight)
@@ -177,6 +178,14 @@ npm run benchmark:approval-preview
 ```
 
 The harness serves the checked-in Venga unapproved-DOCX redline fixture at `http://localhost:3015/approval/approval-editor-venga-venga` by default. The browser regression starts its own harness on port `3016`, deletes the blank line before `SPICY SWINGER`, adds words on two lines, performs rapid edits, and fails if the preview spinner sticks or the known corruption strings (`65S`, `SPICYPICY`, `MakemakemaMakeke`, `73727273`) appear.
+
+Executable business specs live in `docs/business-requirements/` and are run with current Cucumber-JS:
+
+```bash
+npm run test:business
+```
+
+Use these `.feature` files for business-readable ClickUp action rules and submission upload-option expectations before or alongside lower-level Jest tests.
 
 Design approval entry point:
 - The DOCX-vs-PDF design approval tool remains in the codebase, but the welcome-page card is currently disabled and labeled `Feature Coming Soon`.
@@ -277,8 +286,8 @@ Apply mode upserts approved submissions by ClickUp task id, deactivates that sub
 
 ### Prerequisites
 
-- Node.js v18+
-- npm v7+ (for workspace support)
+- Node.js v24 LTS (`.nvmrc` and `.node-version` pin `24`)
+- npm bundled with Node 24
 - Docker Desktop
 - SMTP server credentials
 - OpenAI API key
