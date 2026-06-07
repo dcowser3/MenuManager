@@ -85,6 +85,54 @@ describe('approved dish quality analyzer', () => {
         expect(result.disposition).toBe('keep');
     });
 
+    test('flags beverage headings and layout leaders before storage', () => {
+        const rows = [
+            {
+                dish_name: 'Pick Me Up',
+                menu_category: 'Mineral Water',
+                description: 'Carajillo – cinnamon-infused Licor 43 – reposado – espresso',
+                price: '14',
+                source_submission_id: 'sub-1',
+            },
+            {
+                dish_name: 'Acqua Panna 1 liter........',
+                menu_category: 'Mineral Water',
+                price: '8',
+                source_submission_id: 'sub-1',
+            },
+        ];
+        const context = buildDishQualityContext(rows);
+
+        const headingResult = analyzeApprovedDishQuality(rows[0], context);
+        const leaderResult = analyzeApprovedDishQuality(rows[1], context);
+
+        expect(headingResult).toMatchObject({
+            disposition: 'exclude',
+            highestSeverity: 'high',
+        });
+        expect(headingResult.issues.map((issue) => issue.code)).toContain('beverage_heading_as_name');
+        expect(leaderResult).toMatchObject({
+            disposition: 'exclude',
+            highestSeverity: 'high',
+        });
+        expect(leaderResult.issues.map((issue) => issue.code)).toContain('layout_leader_in_name');
+    });
+
+    test('flags beverage rows where ingredients were stored as the name', () => {
+        const row = {
+            dish_name: 'Blanco Tequila – citrus – frozen or rocks',
+            menu_category: 'Margaritas',
+            description: 'Fresh Fruit',
+            price: '15',
+            source_submission_id: 'sub-1',
+        };
+
+        const result = analyzeApprovedDishQuality(row, buildDishQualityContext([row]));
+
+        expect(result.disposition).toBe('review');
+        expect(result.issues.map((issue) => issue.code)).toContain('beverage_name_description_swap');
+    });
+
     test('prefers source lines near the matching category for repeated dish names', () => {
         const menuText = [
             'Tacos',

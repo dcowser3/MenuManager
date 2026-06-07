@@ -20,6 +20,7 @@ function renderLearningView(overrides = {}) {
         ignoredSystemPendingRules: [],
         acceptedRules: [],
         activeExactRules: [],
+        manualGuidanceRules: [],
         curatedActiveRules: [],
         recentSubmissions: [],
         learningSubmissions: [],
@@ -93,6 +94,19 @@ describe('learning dashboard view', () => {
         expect(html).toContain('"submission_ids":["sub-123"]');
         expect(html).toContain('rule-examples-row-rule-1');
     });
+    test('renders the manual add-rule form with menu and property scope controls', () => {
+        const html = renderLearningView({
+            propertyOptions: ['Maya - New York', 'Tamayo - Denver'],
+        });
+        expect(html).toContain('id="manualRuleForm"');
+        expect(html).toContain('id="manual-rule-menu-type"');
+        expect(html).toContain('<option value="food">Food menus only</option>');
+        expect(html).toContain('<option value="beverage">Beverage menus only</option>');
+        expect(html).toContain('id="manual-rule-location-specific"');
+        expect(html).toContain('<option value="Maya - New York">Maya - New York</option>');
+        expect(html).toContain("fetch('/api/learning/correction-rules'");
+        expect(html).toContain('applies_to_menu_type');
+    });
     test('shows active pre-AI rules without rendering the full AI prompt', () => {
         const html = renderLearningView({
             basePrompt: 'SECRET PROMPT TEXT',
@@ -111,6 +125,15 @@ describe('learning dashboard view', () => {
                     location: 'All properties (global rule)',
                     is_location_specific: false,
                 }],
+            manualGuidanceRules: [{
+                    rule: 'Beverage menus keep zero-proof section names.',
+                    applies_to_menu_type: 'beverage',
+                    source: 'human',
+                    location: 'All properties (global rule)',
+                    is_location_specific: false,
+                    pre_ai_status: 'Manual guidance',
+                    pre_ai_active: false,
+                }],
             acceptedRules: [{
                     original_text: 'tomatoes',
                     corrected_text: 'tomato',
@@ -120,12 +143,25 @@ describe('learning dashboard view', () => {
                     is_location_specific: false,
                     pre_ai_status: 'Active exact rule',
                     pre_ai_active: true,
+                }, {
+                    original_text: null,
+                    corrected_text: null,
+                    rule: 'Beverage menus keep zero-proof section names.',
+                    source: 'human',
+                    applies_to_menu_type: 'beverage',
+                    location: 'All properties (global rule)',
+                    is_location_specific: false,
+                    pre_ai_status: 'Manual guidance',
+                    pre_ai_active: false,
                 }],
         });
         expect(html).toContain('Active Pre-AI Rules');
         expect(html).toContain('veggies -&gt; vegetables');
         expect(html).toContain('Accepted Exact Rules Active In Pre-AI (1)');
-        expect(html).toContain('Accepted Correction Rule Audit Log (1)');
+        expect(html).toContain('Accepted Manual Guidance (1)');
+        expect(html).toContain('Beverage menus keep zero-proof section names.');
+        expect(html).toContain('Beverage menus');
+        expect(html).toContain('Accepted Correction Rule Audit Log (2)');
         expect(html).not.toContain('Current Base Prompt');
         expect(html).not.toContain('SECRET PROMPT TEXT');
     });

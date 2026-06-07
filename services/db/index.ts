@@ -1449,6 +1449,38 @@ type ApprovedDishAiQualityResult = {
     reason?: string;
 };
 
+const DISH_QUALITY_AI_BATCH_SIZE = 100;
+const DISH_QUALITY_AI_REVIEW_CODES = new Set([
+    'beverage_heading_as_name',
+    'beverage_name_description_swap',
+    'category_as_name',
+    'description_contains_allergen_cluster',
+    'modifier_row_name',
+    'name_equals_category',
+]);
+
+function shouldReviewPreparedDishWithAi(dish: PreparedApprovedDish): boolean {
+    if (dish.excludedByRule || dish.quality.disposition !== 'review') {
+        return false;
+    }
+
+    return dish.quality.issues.some((issue) => DISH_QUALITY_AI_REVIEW_CODES.has(issue.code));
+}
+
+function buildApprovedDishAiRows(candidates: PreparedApprovedDish[]): any[] {
+    return candidates.map((dish) => ({
+        index: dish.index,
+        dishName: dish.input.dish_name,
+        description: dish.input.description,
+        category: dish.input.menu_category,
+        servicePeriod: dish.input.service_period,
+        price: dish.input.price,
+        allergens: dish.input.allergens || [],
+        qualityIssues: dish.quality.issues,
+        sourceContext: dish.sourceContext,
+    }));
+}
+
 async function reviewPreparedDishesWithAi(input: {
     prepared: PreparedApprovedDish[];
     property: string;
@@ -1461,7 +1493,7 @@ async function reviewPreparedDishesWithAi(input: {
     results: ApprovedDishAiQualityResult[];
     error?: string;
 }> {
-    const candidates = input.prepared.filter((dish) => dish.quality.disposition === 'review');
+    const candidates = input.prepared.filter(shouldReviewPreparedDishWithAi);
     if (candidates.length === 0) {
         return {
             attempted: false,
@@ -1471,43 +1503,42 @@ async function reviewPreparedDishesWithAi(input: {
         };
     }
 
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), Number.isFinite(DISH_QUALITY_AI_TIMEOUT_MS) && DISH_QUALITY_AI_TIMEOUT_MS > 0
-        ? DISH_QUALITY_AI_TIMEOUT_MS
-        : 20000);
-
     try {
-        const response = await fetch(`${AI_REVIEW_URL}/approved-dishes/quality-check`, {
-            method: 'POST',
-            headers: buildInternalServiceHeaders({
-                'content-type': 'application/json',
-            }),
-            body: JSON.stringify({
-                property: input.property,
-                servicePeriod: input.servicePeriod,
-                submissionId: input.submissionId,
-                rows: candidates.map((dish) => ({
-                    index: dish.index,
-                    dishName: dish.input.dish_name,
-                    description: dish.input.description,
-                    category: dish.input.menu_category,
-                    servicePeriod: dish.input.service_period,
-                    price: dish.input.price,
-                    allergens: dish.input.allergens || [],
-                    qualityIssues: dish.quality.issues,
-                    sourceContext: dish.sourceContext,
-                })),
-            }),
-            signal: controller.signal,
-        });
+        const results: ApprovedDishAiQualityResult[] = [];
+        for (let start = 0; start < candidates.length; start += DISH_QUALITY_AI_BATCH_SIZE) {
+            const batch = candidates.slice(start, start + DISH_QUALITY_AI_BATCH_SIZE);
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), Number.isFinite(DISH_QUALITY_AI_TIMEOUT_MS) && DISH_QUALITY_AI_TIMEOUT_MS > 0
+                ? DISH_QUALITY_AI_TIMEOUT_MS
+                : 20000);
 
-        if (!response.ok) {
-            const body = await response.text().catch(() => '');
-            throw new Error(`AI quality check failed with ${response.status}${body ? `: ${body.slice(0, 300)}` : ''}`);
+            try {
+                const response = await fetch(`${AI_REVIEW_URL}/approved-dishes/quality-check`, {
+                    method: 'POST',
+                    headers: buildInternalServiceHeaders({
+                        'content-type': 'application/json',
+                    }),
+                    body: JSON.stringify({
+                        property: input.property,
+                        servicePeriod: input.servicePeriod,
+                        submissionId: input.submissionId,
+                        rows: buildApprovedDishAiRows(batch),
+                    }),
+                    signal: controller.signal,
+                });
+
+                if (!response.ok) {
+                    const body = await response.text().catch(() => '');
+                    throw new Error(`AI quality check failed with ${response.status}${body ? `: ${body.slice(0, 300)}` : ''}`);
+                }
+
+                const payload = await response.json() as { results?: ApprovedDishAiQualityResult[] };
+                results.push(...(Array.isArray(payload.results) ? payload.results : []));
+            } finally {
+                clearTimeout(timeout);
+            }
         }
 
-        const payload = await response.json() as { results?: ApprovedDishAiQualityResult[] };
-        const results = Array.isArray(payload.results) ? payload.results : [];
         const excludedIndexes = new Set<number>();
         for (const result of results) {
             if (result.verdict === 'not_dish' && result.confidence === 'high') {
@@ -1529,8 +1560,6 @@ async function reviewPreparedDishesWithAi(input: {
             results: [],
             error: error?.name === 'AbortError' ? 'AI quality check timed out' : error.message,
         };
-    } finally {
-        clearTimeout(timeout);
     }
 }
 
@@ -1934,8 +1963,12 @@ app.post('/correction-rules', async (req, res) => {
         }
 
         const record = req.body || {};
-        if (!record.submission_id || !record.correction_id || !record.original_text || !record.corrected_text || !record.rule) {
-            return res.status(400).json({ error: 'submission_id, correction_id, original_text, corrected_text, and rule are required' });
+        if (!record.submission_id || !record.correction_id || !record.rule) {
+            return res.status(400).json({ error: 'submission_id, correction_id, and rule are required' });
+        }
+        const appliesToMenuType = `${record.applies_to_menu_type || 'all'}`.trim().toLowerCase();
+        if (!['all', 'food', 'beverage'].includes(appliesToMenuType)) {
+            return res.status(400).json({ error: 'applies_to_menu_type must be all, food, or beverage' });
         }
 
         const supabase = getSupabaseClient();
@@ -1944,10 +1977,11 @@ app.post('/correction-rules', async (req, res) => {
             .insert({
                 submission_id: record.submission_id,
                 correction_id: record.correction_id,
-                original_text: record.original_text,
-                corrected_text: record.corrected_text,
+                original_text: record.original_text || null,
+                corrected_text: record.corrected_text || null,
                 change_type: record.change_type || null,
                 rule: record.rule,
+                applies_to_menu_type: appliesToMenuType,
                 is_location_specific: record.is_location_specific || false,
                 project_name: record.project_name || null,
                 restaurant_name: record.restaurant_name || '',
@@ -2046,11 +2080,21 @@ app.put('/correction-rules/:id', async (req, res) => {
         // Only allow specific fields to be updated
         const allowedFields: Record<string, any> = {};
         const editable = ['status', 'rule', 'is_location_specific', 'other_applicable_locations',
-                          'change_type', 'restaurant_name', 'location', 'project_name', 'reviewer_name'];
+                          'change_type', 'restaurant_name', 'location', 'project_name', 'reviewer_name',
+                          'applies_to_menu_type'];
         for (const key of editable) {
             if (updates[key] !== undefined) {
                 allowedFields[key] = updates[key];
             }
+        }
+        if (
+            allowedFields.applies_to_menu_type !== undefined
+            && !['all', 'food', 'beverage'].includes(`${allowedFields.applies_to_menu_type}`.trim().toLowerCase())
+        ) {
+            return res.status(400).json({ error: 'applies_to_menu_type must be all, food, or beverage' });
+        }
+        if (allowedFields.applies_to_menu_type !== undefined) {
+            allowedFields.applies_to_menu_type = `${allowedFields.applies_to_menu_type}`.trim().toLowerCase();
         }
 
         if (Object.keys(allowedFields).length === 0) {

@@ -38,9 +38,11 @@ const GEOGRAPHIC_HEADINGS = new Set([
     'france',
     'italy',
     'mexico',
+    'moldova',
     'new zealand',
     'oregon',
     'portugal',
+    'rioja',
     'sicily',
     'spain',
     'usa',
@@ -55,6 +57,38 @@ const SHORT_SECTION_HEADINGS = new Set([
     'rum',
     'tea',
     'wok',
+]);
+const BEVERAGE_SECTION_HEADING_KEYS = new Set([
+    'anejo',
+    'blanco',
+    'cerveza',
+    'cerveza local',
+    'cervezalocal',
+    'cocktails',
+    'cocteles',
+    'drink',
+    'drinks',
+    'espumoso',
+    'extra anejo',
+    'extraanejo',
+    'flights',
+    'happy hour',
+    'happyhour',
+    'house infused tequila',
+    'houseinfusedtequila',
+    'margaritas',
+    'mezcal',
+    'mineral water',
+    'pick me up',
+    'pick me ups',
+    'reposado',
+    'rojo',
+    'rosado',
+    'vino by the bottle',
+    'vino by the glass',
+    'vinobythebottle',
+    'vinobytheglass',
+    'zero proof',
 ]);
 // Category detection patterns
 const CATEGORY_PATTERNS = [
@@ -109,9 +143,10 @@ function normalizeDishPriceForStorage(price, property, servicePeriod) {
 /**
  * Extract dishes from menu content text
  */
-function extractDishesFromText(menuContent) {
+function extractDishesFromText(menuContent, options = {}) {
     const dishes = [];
-    const lines = menuContent.split('\n').map(l => l.trim()).filter(Boolean);
+    const extractionLines = buildExtractionLines(menuContent);
+    const lines = extractionLines.map((line) => line.text);
     let currentCategory;
     let currentCategoryPrice;
     let currentSharedDescription;
@@ -150,7 +185,17 @@ function extractDishesFromText(menuContent) {
             }
             continue;
         }
-        const twoLineDish = parseTwoLineDish(line, lines[i + 1]);
+        const beverageCategory = detectBeverageCategory(line);
+        if (beverageCategory) {
+            currentCategory = beverageCategory;
+            currentCategoryPrice = undefined;
+            currentSharedDescription = undefined;
+            continue;
+        }
+        const beverageContext = isBeverageExtractionContext(options.servicePeriod, currentCategory);
+        const twoLineDish = parseTwoLineDish(line, lines[i + 1], {
+            beverageContext,
+        });
         if (twoLineDish) {
             twoLineDish.category = currentCategory;
             if (!twoLineDish.price) {
@@ -158,6 +203,7 @@ function extractDishesFromText(menuContent) {
             }
             twoLineDish.name = normalizeDishNameForCategory(twoLineDish.name, currentCategory);
             applySharedSectionDescription(twoLineDish, currentCategory, currentSharedDescription);
+            applyDishSource(twoLineDish, extractionLines[i]);
             const isLowercaseFragment = isLowercaseOneWordFragment(twoLineDish.name, twoLineDish.description) ||
                 isLowercaseIngredientFragment(twoLineDish.name, twoLineDish.description, undefined);
             if (isLowercaseFragment) {
@@ -170,6 +216,26 @@ function extractDishesFromText(menuContent) {
             dishes.push(twoLineDish);
             i++;
             continue;
+        }
+        if (beverageContext &&
+            !extractPrice(line) &&
+            !detectBeverageCategory(line) &&
+            looksLikePriceBearingBeverageItemLine(lines[i + 1] || '') &&
+            !looksLikeBeverageDescriptionLine(lines[i + 1] || '')) {
+            const standaloneBeverageDish = parseDishLine(line, undefined, {
+                beverageContext,
+            });
+            if (standaloneBeverageDish) {
+                standaloneBeverageDish.category = currentCategory;
+                standaloneBeverageDish.price = standaloneBeverageDish.price || currentCategoryPrice || currentMenuPrice;
+                standaloneBeverageDish.name = normalizeDishNameForCategory(standaloneBeverageDish.name, currentCategory);
+                applySharedSectionDescription(standaloneBeverageDish, currentCategory, currentSharedDescription);
+                applyDishSource(standaloneBeverageDish, extractionLines[i]);
+                if (!isNonDishLine(standaloneBeverageDish.name) && !isSameCategoryName(standaloneBeverageDish.name, currentCategory)) {
+                    dishes.push(standaloneBeverageDish);
+                    continue;
+                }
+            }
         }
         // Check if this line is a category header
         const categoryMatch = detectCategory(line);
@@ -191,13 +257,17 @@ function extractDishesFromText(menuContent) {
         const wrappedLine = joinWrappedDishContinuation(line, lines[i + 1]);
         const followingLine = lines[i + wrappedLine.consumedLines + 1];
         const lineAfterFollowing = lines[i + wrappedLine.consumedLines + 2];
-        const protectedFollowingLine = (extractPrice(normalizeAttachedAllergenCodes(wrappedLine.line)) &&
+        const shouldProtectFollowingLine = (extractPrice(normalizeAttachedAllergenCodes(wrappedLine.line)) &&
             followingLine &&
             lineAfterFollowing &&
             isPotentialTwoLineDishName(followingLine, lineAfterFollowing) &&
-            isPotentialDescriptionLine(lineAfterFollowing)) ? undefined : followingLine;
+            isPotentialDescriptionLine(lineAfterFollowing) &&
+            !(isBeverageExtractionContext(options.servicePeriod, currentCategory) && looksLikeBeverageDescriptionLine(followingLine)));
+        const protectedFollowingLine = shouldProtectFollowingLine ? undefined : followingLine;
         // Try to parse as a dish
-        const dish = parseDishLine(wrappedLine.line, protectedFollowingLine);
+        const dish = parseDishLine(wrappedLine.line, protectedFollowingLine, {
+            beverageContext,
+        });
         if (dish) {
             dish.category = currentCategory;
             if (!dish.price) {
@@ -205,6 +275,7 @@ function extractDishesFromText(menuContent) {
             }
             dish.name = normalizeDishNameForCategory(dish.name, currentCategory);
             applySharedSectionDescription(dish, currentCategory, currentSharedDescription);
+            applyDishSource(dish, extractionLines[i]);
             if (isNonDishLine(dish.name) || isSameCategoryName(dish.name, currentCategory)) {
                 i += wrappedLine.consumedLines;
                 continue;
@@ -219,8 +290,27 @@ function extractDishesFromText(menuContent) {
     }
     return dedupeExtractedDishes(dishes);
 }
-function parseTwoLineDish(nameLine, descriptionLine) {
+function buildExtractionLines(menuContent) {
+    return `${menuContent || ''}`
+        .split(/\r?\n/)
+        .map((line, index) => ({
+        text: line.trim(),
+        lineNumber: index + 1,
+    }))
+        .filter((line) => Boolean(line.text));
+}
+function applyDishSource(dish, sourceLine) {
+    if (!sourceLine || dish.sourceLine) {
+        return;
+    }
+    dish.sourceLine = sourceLine.text;
+    dish.sourceLineNumber = sourceLine.lineNumber;
+}
+function parseTwoLineDish(nameLine, descriptionLine, options = {}) {
     if (!descriptionLine || !isPotentialTwoLineDishName(nameLine, descriptionLine) || !isPotentialDescriptionLine(descriptionLine)) {
+        return null;
+    }
+    if (!extractPrice(nameLine) && options.beverageContext && extractPrice(descriptionLine) && !looksLikeBeverageDescriptionLine(descriptionLine)) {
         return null;
     }
     if (isEventTitleLine(nameLine) && /\|/.test(descriptionLine)) {
@@ -379,6 +469,73 @@ function detectCategory(line) {
     }
     return null;
 }
+function detectBeverageCategory(line) {
+    if (extractPrice(line)) {
+        return null;
+    }
+    const cleaned = cleanBeverageSectionCategoryName(line);
+    if (!cleaned) {
+        return null;
+    }
+    return isKnownBeverageSectionHeading(cleaned) ? cleaned : null;
+}
+function cleanBeverageSectionCategoryName(line) {
+    const cleaned = line
+        .replace(/\s*\((?:formerly|formally)\s+["'“”]?[^)]*["'“”]?\)\s*/ig, ' ')
+        .replace(/[*_#]+/g, ' ')
+        .replace(/\s*[-–—]+\s*$/g, '')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .replace(/^["'“”]+|["'“”]+$/g, '')
+        .trim();
+    return cleaned;
+}
+function normalizeBeverageHeadingKey(value) {
+    return value
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+        .replace(/&/g, ' and ')
+        .replace(/[^a-z0-9]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+function isKnownBeverageSectionHeading(line) {
+    const normalized = normalizeBeverageHeadingKey(line);
+    const compact = normalized.replace(/\s+/g, '');
+    return BEVERAGE_SECTION_HEADING_KEYS.has(normalized) || BEVERAGE_SECTION_HEADING_KEYS.has(compact);
+}
+function isBeverageExtractionContext(servicePeriod, category) {
+    return /\b(?:bar|bev(?:erage)?|beer|cerveza|cocktails?|cocteles|drink|fresca|happy\s*hour|margaritas?|mezcal|mocktails?|sotol|spirits?|tequila|vino|wine|zero\s*proof)\b/i
+        .test(`${servicePeriod || ''} ${category || ''}`);
+}
+function looksLikeBeverageDescriptionLine(line) {
+    const cleanLine = line.trim();
+    if (!cleanLine || extractPrice(cleanLine)) {
+        return false;
+    }
+    const normalized = normalizeBeverageHeadingKey(cleanLine);
+    const hasBeverageWord = /\b(?:agave|anejo|añejo|aquafaba|bitters?|blanco|bourbon|brandy|cacao|cafe|café|cava|chartreuse|citrus|cointreau|cream|demerara|espresso|gin|grapefruit|hibiscus|juice|lemon|liqueur|licor|lime|mango|marnier|mezcal|mint|orange|reposado|rum|sangrita|sotol|sparkling|syrup|tequila|vermouth|vodka|whiskey|whisky|wine)\b/i
+        .test(cleanLine);
+    const hasIngredientSeparators = /[,/]|[-–—]/.test(cleanLine);
+    return /^[a-zà-ÿ]/.test(cleanLine) ||
+        /^(?:choice\s+of|house[-\s]+infused)\b/i.test(cleanLine) ||
+        (hasIngredientSeparators && hasBeverageWord) ||
+        /\b(?:strawberry|blood\s*orange|pineapple|mango|prickly\s*pear|coconut|passionfruit|basil|cucumber|jalapeño|jalapeno)\b/i.test(normalized);
+}
+function looksLikePriceBearingBeverageItemLine(line) {
+    const price = extractPrice(line);
+    if (!price) {
+        return false;
+    }
+    const withoutPrice = removeTrailingPrice(normalizeAttachedAllergenCodes(line)).trim();
+    if (withoutPrice.length < 3 || isNonDishLine(withoutPrice)) {
+        return false;
+    }
+    return /^[A-ZÀ-Þ0-9]/.test(withoutPrice) &&
+        /\b(?:beer|blanc|blanco|cabernet|cava|chardonnay|ciao|corona|extra|grigio|lager|light|malbec|modelo|panna|pellegrino|pinot|riesling|ros[eé]|sauvignon|tempranillo|tequila|vino|water)\b/i
+            .test(withoutPrice);
+}
 /**
  * Check if line is a header/metadata (not a dish)
  */
@@ -413,6 +570,7 @@ function isDefiniteCategoryHeading(line) {
 }
 function isSectionLabelName(line) {
     return isDefiniteCategoryHeading(line)
+        || isKnownBeverageSectionHeading(cleanBeverageSectionCategoryName(line))
         || isShortBeverageOrServiceHeading(line)
         || /^(?:signature\s+cocktails?|specialty\s+cocktails?|classic\s+cocktails?|bar\s+raya\s+exclusives|classics\s+with\s+a\s+twist|dessert\s+cocktails?|margaritas?|soup\s*&\s*salads?|ensaladas\s+y\s+sopa|guacamoles?\s*&\s*salsas?|m[aá]s\s*\|\s*sides|raw\s+bar|bubbles|by\s+the\s+glass|wine\s+by\s+the\s+glass|by\s+the\s+bottle|spirits?\s+list|bourbon,\s*whiskey\s*&\s*rye|wine\s+pairing|maki(?:\s+rolls?|\s+selection)?|nigiri|sashimi|fajitas|maya\s+signature\s+fajitas|de\s+la\s+parrilla\s*\|\s*from\s+the\s+grill|wood\s+fire\s+grill|from\s+the\s+(?:wood|grill)(?:\s*[-–—]\s*burning\s+grill)?|other\s+varietals\s*\/\s*unique\s+whites|(?:red|ros[ée])\s+wine\s*\(.+\)|signature\s+margaritas\s+glass\s*\/\s*pitcher|antojitos\s*\|\s*starters|especialidades|especiales\s*\|\s*specialt(?:y|ies)|postres\s*\|\s*desserts?|.+\s+station)$/i.test(line.trim());
 }
@@ -502,7 +660,7 @@ function isRawNoticeLine(line) {
 /**
  * Parse a line as a dish
  */
-function parseDishLine(line, nextLine) {
+function parseDishLine(line, nextLine, options = {}) {
     // Skip very short lines
     if (line.length < 3) {
         return null;
@@ -536,7 +694,14 @@ function parseDishLine(line, nextLine) {
         price = extractPrice(nextLine);
         usedNextLineAsDescription = true;
     }
-    if (!description && nextLine && !extractPrice(nextLine) && !detectCategory(nextLine) && !isFooterBoundary(nextLine) && !isHeaderLine(nextLine) && !isNonDishLine(nextLine)) {
+    const nextLineIsBeverageDescription = !!nextLine && options.beverageContext && looksLikeBeverageDescriptionLine(nextLine);
+    if (!description &&
+        nextLine &&
+        !extractPrice(nextLine) &&
+        !detectCategory(nextLine) &&
+        !isFooterBoundary(nextLine) &&
+        !isHeaderLine(nextLine) &&
+        (!isNonDishLine(nextLine) || nextLineIsBeverageDescription)) {
         // Next line doesn't have a price and isn't a category - might be description
         if (nextLine.length > 10 && nextLine.length < 200) {
             description = cleanDescriptionText(nextLine);
@@ -814,10 +979,11 @@ function cleanDishNameText(name, options = {}) {
         .replace(/\s*\((?:suggested|prix[-\s]*fix(?:e|ed)?\s+price)[^)]*[$€£]\s*\d+(?:\.\d{1,2})?[^)]*\)\s*$/i, '')
         .replace(/\s*\([^)]*\)\s*[$€£]\s*\d+(?:\.\d{1,2})?/gi, '')
         .replace(/\s*\(\s*\d+\s*oz\s*\)\s*$/i, '')
+        .replace(/\s*[.·•…]{2,}\s*$/g, '')
         .replace(/\s*[-–—]\s*$/, '')
         .trim();
     if (options.hadPrice) {
-        cleanedName = cleanedName.replace(/^\d{2,3}\s+(?=[A-ZÀ-Þ])/, '').trim();
+        cleanedName = cleanedName.replace(/^\d{1,2}\s+(?=[A-ZÀ-Þ])/, '').trim();
     }
     const trailingToken = cleanedName.match(/\s+([A-Z]{1,3})$/)?.[1];
     if (trailingToken && ALLERGEN_CODE_SET.has(trailingToken)) {
@@ -1036,6 +1202,9 @@ function splitCommaDelimitedNameAndDescription(line) {
     if (name.length < 3 || name.length > 80 || description.length < 5 || description.length > 200) {
         return null;
     }
+    if (looksLikeBeverageNameWithGeographicTail(name, description)) {
+        return null;
+    }
     const nameWords = name.split(/\s+/).filter(Boolean);
     if (nameWords.length > 8 || /[,|/]/.test(name)) {
         return null;
@@ -1054,6 +1223,29 @@ function splitCommaDelimitedNameAndDescription(line) {
         name,
         description,
     };
+}
+function looksLikeBeverageNameWithGeographicTail(name, description) {
+    const fullText = `${name} ${description}`;
+    if (!/\b(?:albari[ñn]o|barolo|blanc|blanco|borsao|brut|cabernet|cava|champagne|chardonnay|chianti|grenache|malbec|merlot|pinot|rioja|ros[eé]|rose|sauvignon|syrah|tempranillo|verdejo|zinfandel)\b/i.test(fullText)) {
+        return false;
+    }
+    const geographicParts = description
+        .split(',')
+        .map(part => part.trim())
+        .filter(Boolean);
+    if (geographicParts.length === 0 || geographicParts.length > 3) {
+        return false;
+    }
+    return geographicParts.every(part => {
+        const normalized = part
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .toLowerCase()
+            .replace(/[^a-z\s]/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+        return GEOGRAPHIC_HEADINGS.has(normalized);
+    });
 }
 /**
  * Extract dishes from approved menu and store in database
@@ -1076,7 +1268,9 @@ async function extractAndStoreDishes(menuContent, property, submissionId, option
     });
 }
 function prepareApprovedDishInputs(menuContent, property, submissionId, options) {
-    const extractedDishes = extractDishesFromText(menuContent);
+    const extractedDishes = extractDishesFromText(menuContent, {
+        servicePeriod: options?.servicePeriod,
+    });
     const inputs = extractedDishes.map(dish => ({
         dish_name: dish.name,
         property,
@@ -1096,10 +1290,48 @@ function prepareApprovedDishInputs(menuContent, property, submissionId, options)
             extracted: dish,
             input,
             quality,
-            sourceContext: (0, dish_quality_1.findDishSourceContext)(menuContent, input),
+            sourceContext: findExtractedDishSourceContext(menuContent, dish, input),
             excludedByRule: quality.disposition === 'exclude',
         };
     });
+}
+function compactSourceText(value) {
+    return `${value || ''}`.replace(/\s+/g, ' ').trim();
+}
+function findExtractedDishSourceContext(menuText, dish, fallbackInput) {
+    const sourceLine = compactSourceText(dish.sourceLine);
+    if (!sourceLine) {
+        return (0, dish_quality_1.findDishSourceContext)(menuText, fallbackInput);
+    }
+    const lines = `${menuText || ''}`
+        .split(/\r?\n/)
+        .map((line, index) => ({
+        text: compactSourceText(line),
+        lineNumber: index + 1,
+    }))
+        .filter((line) => Boolean(line.text));
+    const lineIndex = lines.findIndex((line) => {
+        if (dish.sourceLineNumber && line.lineNumber !== dish.sourceLineNumber) {
+            return false;
+        }
+        return line.text === sourceLine;
+    });
+    if (lineIndex >= 0) {
+        return {
+            sourceLine: lines[lineIndex].text,
+            previousLine: lines[lineIndex - 1]?.text || '',
+            nextLine: lines[lineIndex + 1]?.text || '',
+            context: lines.slice(Math.max(0, lineIndex - 1), Math.min(lines.length, lineIndex + 2)).map((line) => line.text).join(' | '),
+            lineNumber: lines[lineIndex].lineNumber,
+        };
+    }
+    return {
+        sourceLine,
+        previousLine: '',
+        nextLine: '',
+        context: sourceLine,
+        lineNumber: dish.sourceLineNumber,
+    };
 }
 function buildSourceLineRanges(menuText) {
     const ranges = [];
@@ -1130,9 +1362,16 @@ function sourceLineHasSameLineAllergen(lineText) {
     const withoutPrice = removeTrailingPrice(normalizedLine);
     return extractTrailingAllergens(withoutPrice).allergens.length > 0;
 }
+function hasDotLeaderPriceGrid(lineText) {
+    const text = `${lineText || ''}`.trim();
+    return /(?:\.{5,}|…{2,})\s*(?:[$€£]\s*)?\d{1,4}(?:[.,]\d{2})?\s*$/.test(text);
+}
 function getDishNameFormattingReason(dish, sourceLine) {
     const dishName = `${dish.input.dish_name || ''}`.trim();
     if (!hasExactDishNamePrefix(sourceLine, dishName)) {
+        return null;
+    }
+    if (hasDotLeaderPriceGrid(sourceLine)) {
         return null;
     }
     const suffix = sourceLine.trim().slice(dishName.length);
@@ -1258,7 +1497,7 @@ function isReasonableMenuPrice(numericPrice, rawPrice) {
 /**
  * Extract dishes without storing (for preview/testing)
  */
-function previewDishExtraction(menuContent) {
-    return extractDishesFromText(menuContent);
+function previewDishExtraction(menuContent, options = {}) {
+    return extractDishesFromText(menuContent, options);
 }
 //# sourceMappingURL=dish-extractor.js.map

@@ -16,6 +16,11 @@ export interface ExtractedDish {
     allergens: string[];
     category?: string;
     usedNextLineAsDescription?: boolean;
+    sourceLine?: string;
+    sourceLineNumber?: number;
+}
+export interface DishExtractionOptions {
+    servicePeriod?: string;
 }
 export interface DishNameFormattingAnchor {
     dishName: string;
@@ -59,7 +64,7 @@ export declare function normalizeDishPriceForStorage(price: string | undefined, 
 /**
  * Extract dishes from menu content text
  */
-export declare function extractDishesFromText(menuContent: string): ExtractedDish[];
+export declare function extractDishesFromText(menuContent: string, options?: DishExtractionOptions): ExtractedDish[];
 /**
  * Extract dishes from approved menu and store in database
  *
@@ -87,5 +92,5 @@ export declare function storePreparedApprovedDishes(prepared: PreparedApprovedDi
 /**
  * Extract dishes without storing (for preview/testing)
  */
-export declare function previewDishExtraction(menuContent: string): ExtractedDish[];
+export declare function previewDishExtraction(menuContent: string, options?: DishExtractionOptions): ExtractedDish[];
 //# sourceMappingURL=dish-extractor.d.ts.map

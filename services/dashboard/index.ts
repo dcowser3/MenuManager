@@ -122,6 +122,10 @@ const BASIC_AI_LEARNED_RULE_FETCH_TIMEOUT_MS = parsePositiveInteger(
 );
 const CLICKUP_TASK_CREATE_TIMEOUT_MS = parsePositiveInteger(process.env.CLICKUP_TASK_CREATE_TIMEOUT_MS, 60000);
 const BASIC_AI_CHECK_JOB_TTL_MS = parsePositiveInteger(process.env.BASIC_AI_CHECK_JOB_TTL_MS, 15 * 60 * 1000);
+const CLICKUP_APPROVAL_FINALIZE_TIMEOUT_MS = parsePositiveInteger(
+    process.env.CLICKUP_APPROVAL_FINALIZE_TIMEOUT_MS,
+    CLICKUP_TASK_CREATE_TIMEOUT_MS
+);
 const BASIC_AI_CHECK_DEBUG_ENABLED = process.env.BASIC_AI_CHECK_DEBUG_ENABLED !== undefined
     ? parseBooleanFlag(process.env.BASIC_AI_CHECK_DEBUG_ENABLED)
     : process.env.NODE_ENV !== 'production';
@@ -1409,6 +1413,7 @@ const approvalWorkflowHandlers = createApprovalWorkflowHandlers({
     DB_SERVICE_URL,
     DIFFER_SERVICE_URL,
     CLICKUP_SERVICE_URL,
+    CLICKUP_APPROVAL_FINALIZE_TIMEOUT_MS,
     DEFAULT_ALLERGEN_KEY,
     getSubmissionDocumentDir,
     extractDishesAfterApproval,
@@ -1644,22 +1649,28 @@ function isAcceptedRulePreAiEligible(rule: any): boolean {
 }
 
 function describeAcceptedRulePreAiStatus(rule: any): string {
+    const original = `${rule.original_text || ''}`.trim();
+    const corrected = `${rule.corrected_text || ''}`.trim();
+    if (!original && !corrected) {
+        return 'Manual guidance';
+    }
+
     if (!isAcceptedRulePreAiEligible(rule)) {
         return 'Manual review only';
     }
 
     const ruleText = `${rule.rule || ''}`.toLowerCase();
-    const original = `${rule.original_text || ''}`.toLowerCase();
-    const corrected = `${rule.corrected_text || ''}`.toLowerCase();
+    const originalLower = original.toLowerCase();
+    const correctedLower = corrected.toLowerCase();
     if (
         ruleText.includes('veggies')
-        || (original.includes('veggies') && corrected.includes('vegetables'))
+        || (originalLower.includes('veggies') && correctedLower.includes('vegetables'))
         || ruleText.includes('tres leches')
-        || original.includes('tres leches')
+        || originalLower.includes('tres leches')
         || ruleText.includes('poached egg')
         || ruleText.includes('sunny side')
-        || original.includes('poached egg')
-        || original.includes('sunny side')
+        || originalLower.includes('poached egg')
+        || originalLower.includes('sunny side')
     ) {
         return 'Active code guard';
     }
@@ -1748,6 +1759,7 @@ app.get('/learning', async (_req, res) => {
                 pre_ai_active: isAcceptedRulePreAiEligible(rule),
             }));
         const activeExactRules = acceptedRules.filter((rule: any) => rule.pre_ai_status === 'Active exact rule');
+        const manualGuidanceRules = acceptedRules.filter((rule: any) => rule.pre_ai_status === 'Manual guidance');
         const curatedActiveRules = [
             {
                 label: 'veggies -> vegetables',
@@ -1807,6 +1819,7 @@ app.get('/learning', async (_req, res) => {
             ignoredSystemPendingRules,
             acceptedRules,
             activeExactRules,
+            manualGuidanceRules,
             curatedActiveRules,
             recentSubmissions,
             learningSubmissions: decoratedLearningSubmissions,
@@ -2306,6 +2319,7 @@ async function handleBasicCheck(req: any, res: any) {
         const menuContent = sanitizePlainTextInput(req.body?.menuContent, { multiline: true, maxLength: MAX_LONG_TEXT_LENGTH });
         const allergens = sanitizePlainTextInput(req.body?.allergens, { multiline: true, maxLength: 2000 });
         const menuType = sanitizePlainTextInput(req.body?.menuType, { maxLength: 64 });
+        const templateType = sanitizePlainTextInput(req.body?.templateType, { maxLength: 64 }) || 'food';
         const property = sanitizePlainTextInput(req.body?.property, { maxLength: 255 });
         const servicePeriod = sanitizePlainTextInput(req.body?.servicePeriod, { maxLength: 64 });
         const baselineMenuContent = sanitizePlainTextInput(req.body?.baselineMenuContent, { multiline: true, maxLength: MAX_LONG_TEXT_LENGTH });
@@ -2387,6 +2401,7 @@ async function handleBasicCheck(req: any, res: any) {
         const preAiDeterministic = runPreAiDeterministicChecks(reviewFooterMetadata.body, {
             enabled: BASIC_AI_PRECHECK_ENABLED,
             property,
+            templateType,
             allergenLegend: effectiveReviewAllergens,
             acceptedCorrectionRules,
         });
@@ -2724,6 +2739,7 @@ Note: Use ONLY these allergen codes when checking allergen compliance. Do not us
         const postAiDeterministic = runPreAiDeterministicChecks(parsed.correctedMenu, {
             enabled: BASIC_AI_PRECHECK_ENABLED,
             property,
+            templateType,
             allergenLegend: effectiveReviewAllergens,
             acceptedCorrectionRules,
         });

@@ -22,6 +22,7 @@ describe('buildCorrectionRuleRecord', () => {
         }, catalog);
         expect(record.is_location_specific).toBe(false);
         expect(record.location).toBe(learning_correction_rules_1.GLOBAL_CORRECTION_RULE_LOCATION);
+        expect(record.applies_to_menu_type).toBe('all');
     });
     test('saves blank non-location-specific submissions as global rules', () => {
         const record = (0, learning_correction_rules_1.buildCorrectionRuleRecord)({
@@ -57,5 +58,32 @@ describe('buildCorrectionRuleRecord', () => {
         }, catalog);
         expect(record.location).toBe('Toro Toro - Grosvenor House - Dubai');
         expect(record.other_applicable_locations).toEqual(['Maya - New York']);
+    });
+    test('supports freeform manual rules without before and after text', () => {
+        const record = (0, learning_correction_rules_1.buildCorrectionRuleRecord)({
+            rule: 'Beverage menus should preserve zero-proof cocktail section names.',
+            applies_to_menu_type: 'beverage',
+            is_location_specific: true,
+            location: 'Maya - New York',
+            reviewer_name: 'Isabella',
+        }, catalog);
+        expect(record.submission_id).toMatch(/^manual-submission-/);
+        expect(record.correction_id).toMatch(/^manual-rule-/);
+        expect(record.original_text).toBeNull();
+        expect(record.corrected_text).toBeNull();
+        expect(record.applies_to_menu_type).toBe('beverage');
+        expect(record.status).toBe('accepted');
+    });
+    test('requires optional exact replacement fields to be paired', () => {
+        expect(() => (0, learning_correction_rules_1.buildCorrectionRuleRecord)({
+            rule: 'Use relish for this preparation.',
+            original_text: 'habanero salsa',
+        }, catalog)).toThrow('original_text and corrected_text must be provided together');
+    });
+    test('rejects unknown menu rule scopes', () => {
+        expect(() => (0, learning_correction_rules_1.buildCorrectionRuleRecord)({
+            ...basePayload,
+            applies_to_menu_type: 'dessert',
+        }, catalog)).toThrow('applies_to_menu_type must be all, food, or beverage');
     });
 });

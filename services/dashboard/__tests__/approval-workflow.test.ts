@@ -33,6 +33,7 @@ function createDeps() {
         DB_SERVICE_URL: 'http://localhost:3004',
         DIFFER_SERVICE_URL: 'http://localhost:3006',
         CLICKUP_SERVICE_URL: 'http://localhost:3007',
+        CLICKUP_APPROVAL_FINALIZE_TIMEOUT_MS: 60000,
         DEFAULT_ALLERGEN_KEY: 'G GF VG V',
         getSubmissionDocumentDir: jest.fn(() => '/tmp/documents/sub-1'),
         extractDishesAfterApproval: jest.fn(async () => undefined),
@@ -58,6 +59,7 @@ describe('approval workflow learning provenance', () => {
         deps.axios.get.mockResolvedValue({
             data: {
                 id: 'sub-1',
+                original_path: '/tmp/documents/sub-1/sub-1-original.docx',
                 ai_draft_path: '/tmp/documents/sub-1/sub-1-draft.docx',
                 menu_content: 'Draft menu',
                 property: 'Tamayo - Denver',
@@ -84,6 +86,7 @@ describe('approval workflow learning provenance', () => {
         deps.axios.get.mockResolvedValue({
             data: {
                 id: 'sub-1',
+                original_path: '/tmp/documents/sub-1/sub-1-original.docx',
                 ai_draft_path: '/tmp/documents/sub-1/sub-1-draft.docx',
                 menu_content: 'Draft menu',
                 property: 'Tamayo - Denver',
@@ -102,6 +105,7 @@ describe('approval workflow learning provenance', () => {
             'http://localhost:3006/compare',
             expect.objectContaining({
                 submission_id: 'sub-1',
+                original_path: '/tmp/documents/sub-1/sub-1-original.docx',
                 ai_draft_path: '/tmp/documents/sub-1/sub-1-draft.docx',
                 comparison_source: 'human_review_final_approval',
                 review_source: 'dashboard_corrected_upload',
@@ -110,5 +114,42 @@ describe('approval workflow learning provenance', () => {
         );
         const comparePayload = (deps.axios.post as jest.Mock).mock.calls[0]?.[1];
         expect(comparePayload.final_path).toContain('/tmp/finals/sub-1-final.docx');
+    });
+
+    test('browser approval finalization uses the long ClickUp timeout', async () => {
+        const deps = createDeps();
+        deps.axios.get.mockResolvedValue({
+            data: {
+                id: 'sub-1',
+                ai_draft_path: '/tmp/documents/sub-1/sub-1-draft.docx',
+                menu_content: 'Draft menu',
+                project_name: 'Summer Menu',
+                property: 'Tamayo - Denver',
+                asset_type: 'PRINT',
+                filename: 'summer-menu.docx',
+            },
+        });
+        deps.axios.post.mockResolvedValue({ data: { success: true } });
+        const handlers = createApprovalWorkflowHandlers(deps as any);
+        const res = createJsonResponse();
+
+        await handlers.submitBrowserApproval({
+            params: { submissionId: 'sub-1' },
+            body: {
+                editorHtml: '<p><strong>Guacamole</strong> avocado, lime</p>',
+                menuContentText: 'Guacamole avocado, lime',
+            },
+        }, res);
+
+        expect(res.statusCode).toBe(200);
+        expect(deps.axios.post).toHaveBeenCalledWith(
+            'http://localhost:3007/approval/finalize',
+            expect.objectContaining({
+                submissionId: 'sub-1',
+                approvedPath: '/tmp/documents/sub-1/approved/sub-1-approved.docx',
+                approvedFileName: 'summer-menu.docx',
+            }),
+            { timeout: 60000 }
+        );
     });
 });

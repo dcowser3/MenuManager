@@ -164,6 +164,11 @@
                 projectName: submissionMeta.project_name || '',
                 restaurantName: submissionMeta.project_name || submissionMeta.property || '',
             };
+            const menuScopeLabel = (value) => {
+                if (value === 'food') return 'Food menus';
+                if (value === 'beverage') return 'Beverage menus';
+                return 'All menus';
+            };
         %>
         <% if (dishes.length === 0) { %>
             <div class="card">No dish-level corrections were detected for this submission.</div>
@@ -202,10 +207,18 @@
                                     <span class="annotation-title">Correction Details</span>
                                     <span class="annotation-hint">Write the actionable rule this correction represents</span>
                                 </div>
-                                <div class="annotation-fields">
+                                <div class="annotation-fields three-col">
                                     <div class="annotation-field full-width">
                                         <label for="rule-<%= idx %>">Rule *</label>
                                         <textarea id="rule-<%= idx %>" placeholder="e.g., Jalape&#241;o always needs the &#241; per RSH brand guide"></textarea>
+                                    </div>
+                                    <div class="annotation-field">
+                                        <label for="menu-scope-<%= idx %>">Menu Scope</label>
+                                        <select id="menu-scope-<%= idx %>">
+                                            <option value="all">All menus</option>
+                                            <option value="food">Food menus only</option>
+                                            <option value="beverage">Beverage menus only</option>
+                                        </select>
                                     </div>
                                     <div class="annotation-field">
                                         <label for="change-type-<%= idx %>">Change Type</label>
@@ -287,6 +300,7 @@
                             <th>Original</th>
                             <th>Corrected</th>
                             <th>Rule</th>
+                            <th>Menu Scope</th>
                             <th>Restaurant</th>
                             <th>Location</th>
                             <th>Other Locations</th>
@@ -300,6 +314,7 @@
                                 <td><%= item.original_text || '' %></td>
                                 <td><%= item.corrected_text || '' %></td>
                                 <td><%= item.rule || '' %></td>
+                                <td><%= menuScopeLabel(item.applies_to_menu_type) %></td>
                                 <td><%= item.restaurant_name || '' %></td>
                                 <td><%= item.location || '' %><%= item.is_location_specific ? '' : ' (global)' %></td>
                                 <td><%= (item.other_applicable_locations || []).join(', ') %></td>
@@ -329,6 +344,7 @@
             const statusEl = document.getElementById(`save-status-${idx}`);
             const dish = dishCorrections[idx];
             const rule = (document.getElementById(`rule-${idx}`).value || '').trim();
+            const menuScope = (document.getElementById(`menu-scope-${idx}`).value || 'all').trim();
             const changeType = (document.getElementById(`change-type-${idx}`).value || '').trim();
             const reviewerName = (document.getElementById(`reviewer-${idx}`).value || '').trim();
             const isLocationSpecific = document.getElementById(`loc-specific-${idx}`).checked;
@@ -367,6 +383,7 @@
                         corrected_text: dish.after_line,
                         change_type: changeType || null,
                         rule,
+                        applies_to_menu_type: menuScope,
                         is_location_specific: isLocationSpecific,
                         project_name: submissionContext.projectName,
                         restaurant_name: submissionContext.restaurantName,

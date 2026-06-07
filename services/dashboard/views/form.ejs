@@ -5413,11 +5413,73 @@
 
         function applyDishNameFormattingAnchors(displayText, anchors) {
             if (!quill || !redlinePreview || !redlinePreview.resolveDishNameFormattingRanges) return;
-            const ranges = redlinePreview.resolveDishNameFormattingRanges(displayText || '', anchors || []);
+            const sourceText = displayText || '';
+            const ranges = redlinePreview.resolveDishNameFormattingRanges(sourceText, anchors || []);
+            const lineRanges = buildDisplayLineRanges(sourceText);
+            const anchoredLineIndexes = new Set();
+
+            ranges.forEach((range) => {
+                const matchedLine = lineRanges.find((line) => range.start >= line.start && range.start <= line.end);
+                if (matchedLine) {
+                    anchoredLineIndexes.add(matchedLine.index);
+                }
+            });
+
+            let afterAnchoredDishLine = false;
+            lineRanges.forEach((line) => {
+                const hasText = !!(line.text || '').trim();
+                if (!hasText) {
+                    afterAnchoredDishLine = false;
+                    return;
+                }
+
+                if (anchoredLineIndexes.has(line.index)) {
+                    afterAnchoredDishLine = true;
+                    return;
+                }
+
+                if (afterAnchoredDishLine && shouldClearProjectedDishContinuationBold(line.text)) {
+                    quill.formatText(line.start, line.text.length, { bold: false });
+                    return;
+                }
+
+                if (isHeadingLike(line.text) || lineHasTrailingItemPrice(line.text)) {
+                    afterAnchoredDishLine = false;
+                }
+            });
+
             ranges.forEach((range) => {
                 if (!Number.isInteger(range.start) || !Number.isInteger(range.end) || range.end <= range.start) return;
                 quill.formatText(range.start, range.end - range.start, { bold: true });
             });
+        }
+
+        function buildDisplayLineRanges(text) {
+            const lines = String(text || '').split('\n');
+            let offset = 0;
+            return lines.map((line, index) => {
+                const range = {
+                    index,
+                    text: line,
+                    start: offset,
+                    end: offset + line.length,
+                };
+                offset += line.length + 1;
+                return range;
+            });
+        }
+
+        function lineHasTrailingItemPrice(line) {
+            const text = (line || '').trim();
+            return /(?:^|[\s.])(?:[$€£]\s*)?\d{1,4}(?:[.,]\d{2})?\s*$/.test(text);
+        }
+
+        function shouldClearProjectedDishContinuationBold(line) {
+            const text = (line || '').trim();
+            if (!text || isHeadingLike(text) || lineHasTrailingItemPrice(text)) {
+                return false;
+            }
+            return true;
         }
 
         function tokenizeDiffText(text) {

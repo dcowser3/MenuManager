@@ -87,14 +87,16 @@ CREATE TABLE IF NOT EXISTS correction_rules (
     correction_id VARCHAR(100) NOT NULL,
 
     -- The actual correction
-    original_text TEXT NOT NULL,          -- Before text (line or phrase)
-    corrected_text TEXT NOT NULL,         -- After text
+    original_text TEXT,                   -- Before text (line or phrase), optional for freeform manual guidance
+    corrected_text TEXT,                  -- After text, optional for freeform manual guidance
     change_type VARCHAR(50),             -- 'diacritic', 'spelling', 'punctuation',
                                          -- 'capitalization', 'content', 'formatting'
 
     -- Human annotation (the important part)
     rule TEXT NOT NULL,                   -- Human-written rule / reasoning
                                          -- e.g., "Jalapeño always needs the ñ per RSH brand guide"
+    applies_to_menu_type VARCHAR(50) DEFAULT 'all',
+                                         -- 'all', 'food', or 'beverage'
     is_location_specific BOOLEAN DEFAULT false,
 
     -- Context
@@ -124,6 +126,7 @@ CREATE TABLE IF NOT EXISTS correction_rules (
 CREATE INDEX idx_correction_rules_submission ON correction_rules(submission_id);
 CREATE INDEX idx_correction_rules_status ON correction_rules(status);
 CREATE INDEX idx_correction_rules_location ON correction_rules(location);
+CREATE INDEX idx_correction_rules_menu_scope ON correction_rules(applies_to_menu_type);
 CREATE INDEX idx_correction_rules_unconsumed ON correction_rules(prompt_cycle_id)
     WHERE prompt_cycle_id IS NULL;
 ```
@@ -171,6 +174,8 @@ CREATE TABLE IF NOT EXISTS prompt_proposals (
 
 **Current state:** The `learning-submission.ejs` view already shows before/after corrections with annotation fields. It needs enrichment.
 
+Reviewers can also add an accepted rule directly from `GET /learning` without opening a specific submission. Direct rules can be broad manual guidance with no before/after replacement text, or exact replacement guidance when both original and corrected phrases are supplied. The dashboard captures whether the rule applies to all menus, food menus, or beverage menus, and whether it is global or limited to configured properties.
+
 **Changes to annotation form:**
 
 | Field | Current | New |
@@ -187,11 +192,15 @@ CREATE TABLE IF NOT EXISTS prompt_proposals (
 
 ### Flow 2: System-Proposed Rules
 
-**Trigger:** After a human-reviewed final approval calls `POST /compare` with `comparison_source: "human_review_final_approval"` and `changed_by_human: true`, the differ service verifies that the final approved DOCX differs from the AI draft sent to Isabella. Only then does it save learning evidence and check whether any replacement patterns cross a threshold.
+**Trigger:** After a human-reviewed final approval calls `POST /compare` with `comparison_source: "human_review_final_approval"` and `changed_by_human: true`, the differ service verifies that the final approved DOCX differs from the AI draft sent to Isabella. Text differences and bold-formatting audit differences can both save learning evidence, but only text replacement patterns are considered for rule proposals.
 
 Before aggregating a replacement, differ matches changed lines by same-dish identity. Lines from deleted or replacement dishes are ignored for learning, so removed menu items do not create spelling or diacritic proposals.
 
-Quick approvals, imports/backfills, AI-only intermediate changes, requests without the human-review provenance flags, and identical final documents are skipped for learning. Training entries are keyed by submission plus comparison source and upserted, so reprocessing the same approved submission replaces the prior learning row instead of double-counting its replacements.
+Bold-formatting audit signals are stored when the AI draft and final approved DOCX have the same line text but different leading bold spans. When the original submission DOCX path is present, differ also flags whether the submitter already had the final approved bolding before AI changed it. These signals do not create design-facing redlines and do not auto-promote into correction rules.
+
+The Basic AI Check bolding pass uses the reviewed evidence conservatively: it reapplies only high-confidence dish-name prefix anchors, clears projected bold from likely continuation/ingredient lines after anchored dishes, and skips dot-leader price-grid rows as formatting anchors.
+
+Quick approvals, imports/backfills, AI-only intermediate changes, requests without the human-review provenance flags, and final documents with neither text nor bold-formatting differences are skipped for learning. Training entries are keyed by submission plus comparison source and upserted, so reprocessing the same approved submission replaces the prior learning row instead of double-counting its replacements.
 
 **Instead of auto-promoting to the overlay:**
 1. Differ detects pattern: "Jalapeno → Jalapeño" seen 3 times across 2 submissions
@@ -212,7 +221,7 @@ Before the dashboard calls `ai-review`, Basic AI Check runs deterministic checks
 - allergen-code cluster formatting (uppercase, comma-separated, no spaces, alphabetical)
 - raw asterisk placement, with the asterisk attached to the last dish/description word, plus missing asterisks for strong raw terms such as tartare, sashimi, raw/uncooked ceviche, crudo, tiradito, poke, raw or half-shell oysters, explicit raw tuna/salmon/hamachi/fish/beef, poached egg, and sunny-side-up egg
 - curated deterministic guards promoted from accepted human-review explanations when the rule can be safely bounded in code, such as `veggies` to `vegetables`, Tres Leches requiring vegetarian code `V`, and poached/sunny-side-up egg raw markers
-- accepted `correction_rules` exact replacements whose status is `accepted` and whose property scope matches the submitted property
+- accepted `correction_rules` exact replacements whose status is `accepted` and whose property and menu-type scopes match the submitted property/template type
 
 Learned rules are intentionally constrained to exact spelling, diacritic, terminology, grammar, and punctuation replacements. Broad `content` rules remain reviewer/prompt material because they can change meaning. If accepted rules cannot be loaded, the dashboard fails open and still runs the built-in deterministic checks plus AI review.
 
@@ -244,6 +253,7 @@ For historical accuracy testing, set `BASIC_AI_PRECHECK_DISABLED=true` to compar
    - Original: "{original_text}"
    - Corrected: "{corrected_text}"
    - Rule: "{rule}"
+   - Menu scope: {applies_to_menu_type}
    - Scope: {location_specific ? "Location-specific: {location}" : "Universal"}
    - Also applies to: {other_applicable_locations}
 

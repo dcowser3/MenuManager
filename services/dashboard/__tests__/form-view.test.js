@@ -120,7 +120,9 @@ describe('dashboard form modification source chooser', () => {
         );
 
         expect(template).toContain('function applyDishNameFormattingAnchors(displayText, anchors)');
-        expect(template).toContain('redlinePreview.resolveDishNameFormattingRanges(displayText || \'\', anchors || [])');
+        expect(template).toContain('redlinePreview.resolveDishNameFormattingRanges(sourceText, anchors || [])');
+        expect(template).toContain('function shouldClearProjectedDishContinuationBold(line)');
+        expect(template).toContain('quill.formatText(line.start, line.text.length, { bold: false });');
         expect(template).toContain('quill.formatText(range.start, range.end - range.start, { bold: true });');
         expect(template).toContain('revisedHtml: revisedHtml ? stripAiReviewTransientFormatting(revisedHtml) : \'\',');
     });

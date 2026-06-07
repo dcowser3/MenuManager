@@ -47,12 +47,17 @@ Weekly optimization proposes prompt improvements
 
 **What happens:**
 1. `clickup-integration` downloads the corrected DOCX
-2. Calls `differ` service: `POST /compare` with AI draft path + final approved path
-3. `differ` extracts clean menu text from both DOCX files (via `extract_clean_menu_text.py`)
+2. Calls `differ` service: `POST /compare` with AI draft path + final approved path, plus the original submission path and submitted rich HTML when available
+3. `differ` extracts clean menu text and cleaned inline-format HTML from the DOCX files (via `extract_clean_menu_text.py`) and can use submitted rich HTML as the original formatting baseline
 4. Line-diff alignment (LCS-based) matches corresponding lines between AI draft and final
 5. Token-level replacements extracted as signals: `{ from: "Jalapeno", to: "Jalapeño", kind: "diacritic" }`
+6. Bold-formatting audit signals are recorded when AI draft and final approval have the same line text but different leading bold spans; if the original submission path is available, the signal marks whether the submitter already had the final bolding before AI changed it
 
 The signal extractor only learns from line pairs that still look like the same menu item. Deleted dishes and replacement dishes are left unmatched, so spelling or diacritic differences inside a dish that was removed from the menu do not become reusable learning signals.
+
+Bold-formatting signals are diagnostic evidence only. They do not create design-facing redlines and do not feed automatic replacement-rule aggregation.
+
+Current bolding heuristics use this audit evidence to keep the next AI-reviewed HTML conservative: only high-confidence dish-name prefixes are re-bolded, likely continuation/ingredient lines after anchored dishes are cleared of projected bold, and dot-leader price-grid rows are not promoted to dish-name bold anchors.
 
 **What gets stored:**
 
@@ -65,6 +70,7 @@ The signal extractor only learns from line pairs that still look like the same m
 - **Diacritic** — accent corrections (Jalapeno → Jalapeño)
 - **Punctuation** — quote normalization, apostrophes
 - **Spelling** — word corrections (mozarella → mozzarella)
+- **Bold formatting** — leading bold prefix changed on an otherwise identical line; stored under `formatting_signals.bold_changes`
 
 **Guardrails to avoid noise:**
 - Filters stopwords (of, or, the, a, an, may)

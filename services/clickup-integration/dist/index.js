@@ -1123,9 +1123,12 @@ async function finalizeApprovedSubmission(input) {
             details: { error: err.message },
         });
     });
+    const originalHtml = submission.raw_payload?.form_payload?.menuContentHtml || submission.menu_content_html;
     internalApi.post(`${DIFFER_SERVICE_URL}/compare`, {
         ai_draft_path: submission.ai_draft_path,
         final_path: input.approvedPath,
+        original_path: submission.original_path,
+        ...(originalHtml ? { original_html: originalHtml } : {}),
         submission_id: submission.id,
         comparison_source: 'human_review_final_approval',
         review_source: input.approvedAssetSource || 'isabella_clickup',
@@ -1337,7 +1340,14 @@ app.post('/create-task', async (req, res) => {
             }
         }
         else if (CLICKUP_ASSIGNEE_ID) {
-            taskPayload.assignees = [parseInt(CLICKUP_ASSIGNEE_ID, 10)];
+            const reviewerAssigneeIds = parseClickUpUserIds(CLICKUP_ASSIGNEE_ID);
+            if (reviewerAssigneeIds.length) {
+                taskPayload.assignees = reviewerAssigneeIds;
+                taskPayload.notify_all = true;
+            }
+            else {
+                warnings.push('No valid ClickUp reviewer assignee IDs were resolved from CLICKUP_ASSIGNEE_ID.');
+            }
         }
         if (dateNeeded) {
             const dueMs = (0, clickup_due_date_1.clickUpDueDateMillis)(dateNeeded);

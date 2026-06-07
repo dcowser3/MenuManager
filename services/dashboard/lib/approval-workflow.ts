@@ -12,6 +12,7 @@ type ApprovalWorkflowDeps = {
     DB_SERVICE_URL: string;
     DIFFER_SERVICE_URL: string;
     CLICKUP_SERVICE_URL: string;
+    CLICKUP_APPROVAL_FINALIZE_TIMEOUT_MS: number;
     DEFAULT_ALLERGEN_KEY: string;
     getSubmissionDocumentDir: (projectName: string, property: string, submissionId: string) => string;
     extractDishesAfterApproval: (
@@ -52,10 +53,13 @@ export function createApprovalWorkflowHandlers(deps: ApprovalWorkflowDeps) {
         );
 
         if (input.changesMade) {
+            const originalHtml = input.submission.raw_payload?.form_payload?.menuContentHtml || input.submission.menu_content_html;
             await deps.axios.post(`${deps.DIFFER_SERVICE_URL}/compare`, {
                 submission_id: input.submissionId,
                 ai_draft_path: input.submission.ai_draft_path,
                 final_path: input.finalPath,
+                original_path: input.submission.original_path,
+                ...(originalHtml ? { original_html: originalHtml } : {}),
                 comparison_source: 'human_review_final_approval',
                 review_source: 'dashboard_corrected_upload',
                 review_completed_at: new Date().toISOString(),
@@ -225,7 +229,8 @@ export function createApprovalWorkflowHandlers(deps: ApprovalWorkflowDeps) {
                     submissionId: submission.id || submissionId,
                     approvedPath,
                     approvedFileName,
-                })
+                }),
+                { timeout: deps.CLICKUP_APPROVAL_FINALIZE_TIMEOUT_MS }
             );
 
             res.json({

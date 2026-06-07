@@ -43,6 +43,7 @@ type DishQualityCheckRow = {
         previousLine?: string;
         nextLine?: string;
         context?: string;
+        lineNumber?: number;
     };
 };
 
@@ -112,7 +113,7 @@ export function parseDishQualityAiResponse(content: string, rows: DishQualityChe
     }
 }
 
-function buildDishQualityPrompt(input: {
+export function buildDishQualityPrompt(input: {
     property?: string;
     servicePeriod?: string;
     rows: DishQualityCheckRow[];
@@ -120,8 +121,11 @@ function buildDishQualityPrompt(input: {
     return [
         'You are reviewing extracted restaurant menu rows before they are saved as approved dishes.',
         'Return JSON only with shape {"results":[{"index":number,"verdict":"dish|not_dish|uncertain","confidence":"high|medium|low","reason":"short reason"}]}.',
-        'Use "dish" for real menu items, including beverages and simple protein options like a fajita protein with a price.',
+        'Use "dish" for real menu items, including beverages, spirits, wines, beers, waters, flights, and simple protein options like a fajita protein with a price.',
+        'Beverage price-list rows can be valid dishes even when they have only a name and price.',
         'Use "not_dish" for pricing grids, instructions, category headings, package/course labels, allergen legends, and rows that are clearly not orderable items.',
+        'Beverage section headings such as Pick Me Up, Pick Me Ups, Cocteles, Zero Proof, Espumoso, Blanco, Rosado, Rojo, Cerveza, Reposado, Añejo, Mezcal, Flights, and Vino by the Bottle are not dishes when they describe the following rows.',
+        'Visual leader dots or repeated punctuation are layout artifacts, not part of an item name.',
         'Use "uncertain" when context is insufficient or a row may be a legitimate unusual menu item.',
         'Only use high confidence when the evidence is obvious.',
         '',

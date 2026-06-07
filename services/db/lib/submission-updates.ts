@@ -32,6 +32,7 @@ const ALLOWED_SUBMISSION_STATUSES = new Set([
     'needs_correction',
     'approved',
     'approved_override',
+    'deleted',
 ]);
 
 const ARRAY_FIELDS = new Set([

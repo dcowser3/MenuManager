@@ -28,6 +28,7 @@ jest.mock('fs', () => {
 import fs from 'fs';
 import app from '../index';
 import { sanitizeSubmissionUpdates } from '../lib/submission-updates';
+import { getSupabaseClient, isSupabaseConfigured } from '@menumanager/supabase-client';
 
 function getRouteHandler(method: string, routePath: string) {
     const layer = (app as any)._router.stack.find(
@@ -95,10 +96,13 @@ describe('submission update hardening', () => {
     const updateHandler = getRouteHandler('put', '/submissions/:id');
     const pendingHandler = getRouteHandler('get', '/submissions/pending');
     const approvedListHandler = getRouteHandler('get', '/submissions/approved-list');
+    const createCorrectionRuleHandler = getRouteHandler('post', '/correction-rules');
     const originalInternalApiToken = process.env.INTERNAL_API_TOKEN;
 
     beforeEach(() => {
         process.env.INTERNAL_API_TOKEN = 'test-token';
+        (isSupabaseConfigured as jest.Mock).mockReturnValue(false);
+        (getSupabaseClient as jest.Mock).mockReset();
         jest.spyOn(console, 'error').mockImplementation(() => {});
         (fs.promises.readFile as jest.Mock).mockImplementation(async (target: string) => {
             const normalized = String(target);
@@ -135,6 +139,14 @@ describe('submission update hardening', () => {
                         created_at: '2026-05-08T13:00:00.000Z',
                         clickup_task_id: 'cu_marketing',
                         submitter_email: 'isabella@richardsandoval.com',
+                    },
+                    'form-deleted-clickup': {
+                        id: 'form-deleted-clickup',
+                        source: 'form',
+                        status: 'deleted',
+                        created_at: '2026-05-08T14:00:00.000Z',
+                        clickup_task_id: 'cu_deleted',
+                        submitter_email: 'chef@example.com',
                     },
                     'form-200': {
                         id: 'form-200',
@@ -234,13 +246,31 @@ describe('submission update hardening', () => {
         const response = await invokeJsonHandler(updateHandler, {
             params: { id: 'form-123' },
             body: {
-                status: 'deleted',
+                status: 'closed',
             },
         });
 
         expect(response.status).toBe(400);
         expect(response.body.details[0]).toContain('status must be one of:');
         expect(fs.promises.writeFile).not.toHaveBeenCalled();
+    });
+
+    test('allows operationally deleted submissions to leave the review queue', () => {
+        const result = sanitizeSubmissionUpdates(
+            {
+                status: 'deleted',
+                raw_payload: {
+                    review_queue_cleanup: {
+                        reason: 'Linked ClickUp task was deleted',
+                    },
+                },
+            },
+            { repoRoot: '/Users/deriancowser/Documents/MenuManager' }
+        );
+
+        expect(result.rejectedFields).toEqual([]);
+        expect(result.allowedFields.status).toBe('deleted');
+        expect(result.allowedFields.raw_payload.review_queue_cleanup.reason).toBe('Linked ClickUp task was deleted');
     });
 
     test('sanitizeSubmissionUpdates allows object raw_payload updates for operational metadata', () => {
@@ -320,5 +350,42 @@ describe('submission update hardening', () => {
             status: 'approved',
             servicePeriod: 'dinner',
         });
+    });
+
+    test('creates freeform correction rules with menu scope and nullable exact text', async () => {
+        const insert = jest.fn((record) => ({
+            select: jest.fn(() => ({
+                single: jest.fn(async () => ({
+                    data: { id: 'rule-1', ...record },
+                    error: null,
+                })),
+            })),
+        }));
+        const from = jest.fn(() => ({ insert }));
+        (isSupabaseConfigured as jest.Mock).mockReturnValue(true);
+        (getSupabaseClient as jest.Mock).mockReturnValue({ from });
+
+        const response = await invokeJsonHandler(createCorrectionRuleHandler, {
+            body: {
+                submission_id: 'manual-submission-1',
+                correction_id: 'manual-rule-1',
+                original_text: null,
+                corrected_text: null,
+                rule: 'Beverage menus should keep zero-proof section names.',
+                applies_to_menu_type: 'beverage',
+                is_location_specific: false,
+                restaurant_name: '',
+                location: 'All properties (global rule)',
+            },
+        });
+
+        expect(response.status).toBe(201);
+        expect(from).toHaveBeenCalledWith('correction_rules');
+        expect(insert).toHaveBeenCalledWith(expect.objectContaining({
+            original_text: null,
+            corrected_text: null,
+            applies_to_menu_type: 'beverage',
+            rule: 'Beverage menus should keep zero-proof section names.',
+        }));
     });
 });

@@ -29,6 +29,10 @@ import {
     buildTokenEdits,
     tokenizeDiffText,
 } from '@menumanager/diff-core';
+import {
+    BoldFormattingSignal,
+    extractBoldFormattingSignals,
+} from './lib/formatting-signals';
 
 dotenv.config({ path: path.join(__dirname, '..', '..', '..', '.env') });
 
@@ -59,7 +63,12 @@ function getRepoRoot(): string {
     return candidates[0];
 }
 
-async function extractDocxCleanText(filePath: string): Promise<string> {
+type ExtractedDocumentPayload = {
+    text: string;
+    html?: string;
+};
+
+async function extractDocxCleanPayload(filePath: string): Promise<ExtractedDocumentPayload> {
     const repoRoot = getRepoRoot();
     const scriptPath = path.join(repoRoot, 'services', 'docx-redliner', 'extract_clean_menu_text.py');
     const venvPython = path.join(repoRoot, 'services', 'docx-redliner', 'venv', 'bin', 'python');
@@ -74,7 +83,10 @@ async function extractDocxCleanText(filePath: string): Promise<string> {
     if (payload.error) {
         throw new Error(payload.error);
     }
-    return String(payload.cleaned_menu_content || payload.menu_content || '').trim();
+    return {
+        text: String(payload.cleaned_menu_content || payload.menu_content || '').trim(),
+        html: String(payload.cleaned_menu_html || '').trim() || undefined,
+    };
 }
 
 type TrainingEntry = {
@@ -103,6 +115,10 @@ type TrainingEntry = {
     learning_signals?: {
         replacements: ReplacementSignal[];
         replacement_count: number;
+    };
+    formatting_signals?: {
+        bold_changes: BoldFormattingSignal[];
+        bold_change_count: number;
     };
 };
 
@@ -214,6 +230,7 @@ app.use(requireInternalServiceAuth);
 app.post('/compare', async (req, res) => {
     try {
         const { submission_id, ai_draft_path, final_path, original_path } = req.body;
+        const originalHtml = `${req.body?.original_html || ''}`.trim();
         const comparisonSource = `${req.body?.comparison_source || ''}`.trim();
         const reviewSource = `${req.body?.review_source || ''}`.trim();
         const reviewCompletedAt = `${req.body?.review_completed_at || ''}`.trim();
@@ -240,12 +257,29 @@ app.post('/compare', async (req, res) => {
 
         console.log(`📊 Analyzing differences for submission ${submission_id}`);
 
-        const aiDraftText = await extractText(ai_draft_path);
-        const finalText = await extractText(final_path);
+        const aiDraftDocument = await extractDocument(ai_draft_path);
+        const finalDocument = await extractDocument(final_path);
+        let originalDocument: ExtractedDocumentPayload | undefined;
+        if (original_path) {
+            try {
+                originalDocument = await extractDocument(original_path);
+            } catch (error: any) {
+                console.warn(`Could not extract original formatting for ${submission_id}: ${error.message}`);
+            }
+        }
+
+        const aiDraftText = aiDraftDocument.text;
+        const finalText = finalDocument.text;
         const differences = analyzeDocuments(aiDraftText, finalText);
         const replacements = extractReplacementSignals(aiDraftText, finalText);
+        const boldFormattingSignals = extractBoldFormattingSignals({
+            aiDraftHtml: aiDraftDocument.html,
+            finalHtml: finalDocument.html,
+            originalHtml: originalHtml || originalDocument?.html,
+        });
+        const hasChanges = differences.hasChanges || boldFormattingSignals.length > 0;
 
-        if (!differences.hasChanges) {
+        if (!hasChanges) {
             const skipReason = 'final approved document matches the AI draft';
             console.log(`⏭️  Skipping learning comparison for ${submission_id}: ${skipReason}`);
             return res.status(200).json({
@@ -265,7 +299,7 @@ app.post('/compare', async (req, res) => {
             timestamp: new Date().toISOString(),
             ai_draft_length: aiDraftText.length,
             final_length: finalText.length,
-            changes_detected: differences.hasChanges,
+            changes_detected: hasChanges,
             change_percentage: differences.changePercentage,
             ...(original_path ? { original_path } : {}),
             ai_draft_path,
@@ -279,6 +313,10 @@ app.post('/compare', async (req, res) => {
             learning_signals: {
                 replacements,
                 replacement_count: replacements.length,
+            },
+            formatting_signals: {
+                bold_changes: boldFormattingSignals,
+                bold_change_count: boldFormattingSignals.length,
             },
         };
         trainingEntry.comparison_key = buildLearningComparisonKey(trainingEntry);
@@ -302,8 +340,9 @@ app.post('/compare', async (req, res) => {
         const learnedRules = await rebuildLearnedRules();
 
         console.log(`✅ Comparison complete for ${submission_id}`);
-        console.log(`   Changes detected: ${differences.hasChanges ? 'YES' : 'NO'}`);
+        console.log(`   Changes detected: ${hasChanges ? 'YES' : 'NO'}`);
         console.log(`   Replacement signals: ${replacements.length}`);
+        console.log(`   Bold formatting signals: ${boldFormattingSignals.length}`);
         if (saveResult.replaced_entries > 0) {
             console.log(`   Replaced ${saveResult.replaced_entries} earlier comparison entr${saveResult.replaced_entries === 1 ? 'y' : 'ies'} for this submission/source`);
         }
@@ -316,6 +355,7 @@ app.post('/compare', async (req, res) => {
             training_data_saved: true,
             replaced_training_entries: saveResult.replaced_entries,
             replacement_signals: replacements.length,
+            bold_formatting_signals: boldFormattingSignals.length,
             learned_rules_active: learnedRules.active_rules.length,
             detail_path: detailPath,
         });
@@ -341,6 +381,10 @@ app.get('/stats', async (_req, res) => {
                 entries.reduce((sum, e) => sum + (e.change_percentage || 0), 0) / (entries.length || 1),
             replacement_signals_total: entries.reduce(
                 (sum, e) => sum + (e.learning_signals?.replacement_count || 0),
+                0
+            ),
+            bold_formatting_signals_total: entries.reduce(
+                (sum, e) => sum + (e.formatting_signals?.bold_change_count || 0),
                 0
             ),
             latest_comparison: entries[entries.length - 1] || null,
@@ -448,6 +492,7 @@ app.get('/learning/submissions', async (_req, res) => {
                 changes_detected: entry.changes_detected,
                 change_percentage: entry.change_percentage,
                 replacement_count: entry.learning_signals?.replacement_count || 0,
+                bold_formatting_count: entry.formatting_signals?.bold_change_count || 0,
                 ai_draft_path: entry.ai_draft_path,
                 final_path: entry.final_path,
                 comparison_source: entry.comparison_source,
@@ -620,9 +665,26 @@ app.post('/learning/recompute-signals', async (_req, res) => {
         const refreshed: TrainingEntry[] = [];
         for (const entry of entries) {
             try {
-                const aiDraftText = await extractText(entry.ai_draft_path);
-                const finalText = await extractText(entry.final_path);
+                const aiDraftDocument = await extractDocument(entry.ai_draft_path);
+                const finalDocument = await extractDocument(entry.final_path);
+                let originalDocument: ExtractedDocumentPayload | undefined;
+                if (entry.original_path) {
+                    try {
+                        originalDocument = await extractDocument(entry.original_path);
+                    } catch {
+                        originalDocument = undefined;
+                    }
+                }
+
+                const aiDraftText = aiDraftDocument.text;
+                const finalText = finalDocument.text;
                 const replacements = extractReplacementSignals(aiDraftText, finalText);
+                const boldFormattingSignals = extractBoldFormattingSignals({
+                    aiDraftHtml: aiDraftDocument.html,
+                    finalHtml: finalDocument.html,
+                    originalHtml: originalDocument?.html,
+                });
+                const hasChanges = aiDraftText.trim() !== finalText.trim() || boldFormattingSignals.length > 0;
                 replacementCount += replacements.length;
                 recomputed += 1;
 
@@ -630,7 +692,7 @@ app.post('/learning/recompute-signals', async (_req, res) => {
                     ...entry,
                     ai_draft_length: aiDraftText.length,
                     final_length: finalText.length,
-                    changes_detected: aiDraftText.trim() !== finalText.trim(),
+                    changes_detected: hasChanges,
                     change_percentage: (() => {
                         const lengthDiff = Math.abs(finalText.length - aiDraftText.length);
                         const maxLen = Math.max(aiDraftText.length, finalText.length) || 1;
@@ -639,6 +701,10 @@ app.post('/learning/recompute-signals', async (_req, res) => {
                     learning_signals: {
                         replacements,
                         replacement_count: replacements.length,
+                    },
+                    formatting_signals: {
+                        bold_changes: boldFormattingSignals,
+                        bold_change_count: boldFormattingSignals.length,
                     },
                     ...(isHumanReviewLearningEntry(entry) ? { comparison_key: buildLearningComparisonKey(entry) } : {}),
                 });
@@ -667,12 +733,12 @@ app.post('/learning/recompute-signals', async (_req, res) => {
     }
 });
 
-async function extractText(filePath: string): Promise<string> {
+async function extractDocument(filePath: string): Promise<ExtractedDocumentPayload> {
     const isDocx = filePath.toLowerCase().endsWith('.docx');
     if (isDocx) {
         try {
-            const cleaned = await extractDocxCleanText(filePath);
-            if (cleaned) return cleaned;
+            const cleaned = await extractDocxCleanPayload(filePath);
+            if (cleaned.text) return cleaned;
         } catch (error: any) {
             console.warn(`Differ fallback to Mammoth for ${path.basename(filePath)}: ${error.message}`);
         }
@@ -680,7 +746,11 @@ async function extractText(filePath: string): Promise<string> {
 
     const buffer = await fs.readFile(filePath);
     const result = await mammoth.extractRawText({ buffer });
-    return result.value;
+    return { text: result.value };
+}
+
+async function extractText(filePath: string): Promise<string> {
+    return (await extractDocument(filePath)).text;
 }
 
 function analyzeDocuments(aiDraft: string, final: string) {

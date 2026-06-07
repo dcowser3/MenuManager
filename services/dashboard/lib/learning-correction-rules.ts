@@ -7,10 +7,11 @@ export class CorrectionRuleValidationError extends Error {
 export interface CorrectionRuleRecord {
     submission_id: string;
     correction_id: string;
-    original_text: string;
-    corrected_text: string;
+    original_text: string | null;
+    corrected_text: string | null;
     change_type: string | null;
     rule: string;
+    applies_to_menu_type: string;
     is_location_specific: boolean;
     project_name: string | null;
     restaurant_name: string;
@@ -23,6 +24,11 @@ export interface CorrectionRuleRecord {
 
 function text(value: any): string {
     return `${value || ''}`.trim();
+}
+
+function optionalText(value: any): string | null {
+    const normalized = text(value);
+    return normalized || null;
 }
 
 function locationKey(value: string): string {
@@ -42,13 +48,35 @@ function getConfiguredPropertyNames(catalog: Array<{ name?: string }>): Set<stri
     );
 }
 
+function normalizeMenuRuleScope(value: any): string {
+    const normalized = text(value).toLowerCase();
+    if (!normalized || normalized === 'all') {
+        return 'all';
+    }
+    if (normalized === 'food' || normalized === 'beverage') {
+        return normalized;
+    }
+    throw new CorrectionRuleValidationError('applies_to_menu_type must be all, food, or beverage');
+}
+
+function manualRuleId(prefix: string): string {
+    const random = Math.random().toString(36).slice(2, 10);
+    return `${prefix}-${Date.now()}-${random}`;
+}
+
 export function buildCorrectionRuleRecord(payload: any, catalog: Array<{ name?: string }>): CorrectionRuleRecord {
     const propertyNames = getConfiguredPropertyNames(catalog);
     const rawLocation = text(payload.location);
     const isLocationSpecific = !!payload.is_location_specific;
+    const originalText = optionalText(payload.original_text || payload.before_line);
+    const correctedText = optionalText(payload.corrected_text || payload.after_line);
     const otherLocations = Array.isArray(payload.other_applicable_locations)
         ? payload.other_applicable_locations.map((s: any) => text(s)).filter(Boolean)
         : [];
+
+    if ((originalText && !correctedText) || (!originalText && correctedText)) {
+        throw new CorrectionRuleValidationError('original_text and corrected_text must be provided together');
+    }
 
     if (isLocationSpecific) {
         if (!rawLocation || isGlobalLocationPlaceholder(rawLocation) || !propertyNames.has(locationKey(rawLocation))) {
@@ -62,12 +90,13 @@ export function buildCorrectionRuleRecord(payload: any, catalog: Array<{ name?: 
     }
 
     const record: CorrectionRuleRecord = {
-        submission_id: text(payload.submission_id),
-        correction_id: text(payload.correction_id),
-        original_text: text(payload.original_text || payload.before_line),
-        corrected_text: text(payload.corrected_text || payload.after_line),
+        submission_id: text(payload.submission_id) || manualRuleId('manual-submission'),
+        correction_id: text(payload.correction_id) || manualRuleId('manual-rule'),
+        original_text: originalText,
+        corrected_text: correctedText,
         change_type: text(payload.change_type) || null,
         rule: text(payload.rule),
+        applies_to_menu_type: normalizeMenuRuleScope(payload.applies_to_menu_type),
         is_location_specific: isLocationSpecific,
         project_name: text(payload.project_name) || null,
         restaurant_name: text(payload.restaurant_name),
@@ -78,8 +107,8 @@ export function buildCorrectionRuleRecord(payload: any, catalog: Array<{ name?: 
         status: payload.source === 'system' ? 'pending' : 'accepted',
     };
 
-    if (!record.submission_id || !record.correction_id || !record.original_text || !record.corrected_text || !record.rule) {
-        throw new CorrectionRuleValidationError('submission_id, correction_id, original_text, corrected_text, and rule are required');
+    if (!record.submission_id || !record.correction_id || !record.rule) {
+        throw new CorrectionRuleValidationError('rule is required');
     }
 
     return record;

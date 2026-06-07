@@ -104,6 +104,30 @@ function ruleAppliesToProperty(rule, property) {
     return (rule.other_applicable_locations || [])
         .some((location) => normalizeScope(location) === propertyKey);
 }
+function normalizeTemplateScope(value) {
+    const normalized = `${value || ''}`.toLowerCase().trim();
+    if (!normalized || normalized === 'all') {
+        return 'all';
+    }
+    if (normalized === 'food' || normalized === 'beverage' || normalized === 'food_beverage') {
+        return normalized;
+    }
+    if (normalized === 'non_beverage') {
+        return 'food';
+    }
+    return normalized;
+}
+function ruleAppliesToTemplateType(rule, templateType) {
+    const ruleScope = normalizeTemplateScope(rule.applies_to_menu_type);
+    if (ruleScope === 'all') {
+        return true;
+    }
+    const submittedScope = normalizeTemplateScope(templateType || 'food');
+    if (submittedScope === 'food_beverage') {
+        return ruleScope === 'food' || ruleScope === 'beverage';
+    }
+    return ruleScope === submittedScope;
+}
 function isAllUpper(value) {
     const letters = value.replace(/[^A-Za-zÀ-ÖØ-öø-ÿ]/g, '');
     return !!letters && letters === letters.toUpperCase();
@@ -358,7 +382,8 @@ function isSafeLearnedRule(rule) {
 function applyAcceptedCorrectionRules(lines, options) {
     const applicableRules = (options.acceptedCorrectionRules || [])
         .filter(isSafeLearnedRule)
-        .filter((rule) => ruleAppliesToProperty(rule, options.property));
+        .filter((rule) => ruleAppliesToProperty(rule, options.property))
+        .filter((rule) => ruleAppliesToTemplateType(rule, options.templateType));
     let nextLines = [...lines];
     const appliedCorrections = [];
     const appliedRuleIds = new Set();

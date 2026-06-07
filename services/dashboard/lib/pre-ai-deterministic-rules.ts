@@ -18,6 +18,7 @@ export type AcceptedCorrectionRule = {
     rule?: string;
     source?: string;
     status?: string;
+    applies_to_menu_type?: string | null;
     is_location_specific?: boolean;
     location?: string;
     other_applicable_locations?: string[];
@@ -26,6 +27,7 @@ export type AcceptedCorrectionRule = {
 export type PreAiDeterministicOptions = {
     enabled?: boolean;
     property?: string;
+    templateType?: string;
     allergenLegend?: string;
     acceptedCorrectionRules?: AcceptedCorrectionRule[];
 };
@@ -157,6 +159,34 @@ function ruleAppliesToProperty(rule: AcceptedCorrectionRule, property: string | 
 
     return (rule.other_applicable_locations || [])
         .some((location) => normalizeScope(location) === propertyKey);
+}
+
+function normalizeTemplateScope(value: string | undefined | null): string {
+    const normalized = `${value || ''}`.toLowerCase().trim();
+    if (!normalized || normalized === 'all') {
+        return 'all';
+    }
+    if (normalized === 'food' || normalized === 'beverage' || normalized === 'food_beverage') {
+        return normalized;
+    }
+    if (normalized === 'non_beverage') {
+        return 'food';
+    }
+    return normalized;
+}
+
+function ruleAppliesToTemplateType(rule: AcceptedCorrectionRule, templateType: string | undefined): boolean {
+    const ruleScope = normalizeTemplateScope(rule.applies_to_menu_type);
+    if (ruleScope === 'all') {
+        return true;
+    }
+
+    const submittedScope = normalizeTemplateScope(templateType || 'food');
+    if (submittedScope === 'food_beverage') {
+        return ruleScope === 'food' || ruleScope === 'beverage';
+    }
+
+    return ruleScope === submittedScope;
 }
 
 function isAllUpper(value: string): boolean {
@@ -477,7 +507,8 @@ function applyAcceptedCorrectionRules(
 } {
     const applicableRules = (options.acceptedCorrectionRules || [])
         .filter(isSafeLearnedRule)
-        .filter((rule) => ruleAppliesToProperty(rule, options.property));
+        .filter((rule) => ruleAppliesToProperty(rule, options.property))
+        .filter((rule) => ruleAppliesToTemplateType(rule, options.templateType));
     let nextLines = [...lines];
     const appliedCorrections: PreAiAppliedCorrection[] = [];
     const appliedRuleIds = new Set<string>();

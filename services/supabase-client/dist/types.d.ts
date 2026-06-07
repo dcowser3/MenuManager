@@ -1,7 +1,7 @@
 /**
  * TypeScript interfaces for Menu Manager database tables
  */
-export type SubmissionStatus = 'processing' | 'pending_ai_review' | 'pending_human_review' | 'approved' | 'rejected';
+export type SubmissionStatus = 'processing' | 'submitted_no_ai_review' | 'pending_ai_review' | 'pending_human_review' | 'sent_to_marketing' | 'rejected_template' | 'rejected_tier1' | 'needs_prompt_fix' | 'needs_correction' | 'approved' | 'approved_override' | 'rejected' | 'deleted';
 export type MenuType = 'standard' | 'prix_fixe';
 export type TemplateType = 'food' | 'beverage';
 export type UserRole = 'chef' | 'reviewer' | 'admin';

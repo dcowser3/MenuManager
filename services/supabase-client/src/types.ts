@@ -5,10 +5,18 @@
 // Submission status types
 export type SubmissionStatus =
     | 'processing'
+    | 'submitted_no_ai_review'
     | 'pending_ai_review'
     | 'pending_human_review'
+    | 'sent_to_marketing'
+    | 'rejected_template'
+    | 'rejected_tier1'
+    | 'needs_prompt_fix'
+    | 'needs_correction'
     | 'approved'
-    | 'rejected';
+    | 'approved_override'
+    | 'rejected'
+    | 'deleted';
 
 // Menu types
 export type MenuType = 'standard' | 'prix_fixe';

@@ -262,6 +262,7 @@ describe('browser approval finalize route', () => {
         );
         expect(createCall).toBeTruthy();
         expect(createCall[1].assignees).toEqual([114079264]);
+        expect(createCall[1].notify_all).toBe(true);
 
         const groupCall = axios.get.mock.calls.find((call) =>
             String(call[0]).includes('https://api.clickup.com/api/v2/group?')
@@ -328,6 +329,7 @@ describe('browser approval finalize route', () => {
         expect(createCall[1].status).not.toBe('approved');
         expect(createCall[1].assignees).toEqual([201, 202]);
         expect(createCall[1].assignees).not.toContain(114079264);
+        expect(createCall[1].notify_all).toBeUndefined();
 
         const dbUpdateCall = axios.put.mock.calls.find((call) =>
             String(call[0]).includes('http://localhost:3004/submissions/form-isa')
@@ -475,6 +477,7 @@ describe('browser approval finalize route', () => {
             submission_id: 'sub_uploaded_baseline_1',
             ai_draft_path: '/tmp/documents/sub_uploaded_baseline_1/ai-draft.docx',
             final_path: approvedPath,
+            original_path: '/tmp/documents/sub_uploaded_baseline_1/original/submitted-generated.docx',
             comparison_source: 'human_review_final_approval',
             review_source: 'browser_approval_editor',
             review_completed_at: expect.any(String),

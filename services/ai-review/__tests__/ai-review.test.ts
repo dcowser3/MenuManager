@@ -82,4 +82,34 @@ describe('AI Review Service', () => {
             expect.objectContaining({ index: 1, verdict: 'uncertain', confidence: 'low' }),
         ]);
     });
+
+    it('includes beverage-specific approved dish quality guidance', async () => {
+        const { buildDishQualityPrompt } = await import('../index');
+
+        const prompt = buildDishQualityPrompt({
+            property: 'Tamayo - Denver',
+            servicePeriod: 'Beverage',
+            rows: [
+                {
+                    index: 0,
+                    dishName: 'Pick Me Up',
+                    description: 'Carajillo – cinnamon-infused Licor 43 – reposado – espresso',
+                    category: 'Mineral Water',
+                    price: '14',
+                    qualityIssues: [{ code: 'beverage_heading_as_name', severity: 'high' }],
+                },
+                {
+                    index: 1,
+                    dishName: 'Acqua Panna 1 liter........',
+                    category: 'Mineral Water',
+                    price: '8',
+                    qualityIssues: [{ code: 'layout_leader_in_name', severity: 'high' }],
+                },
+            ],
+        });
+
+        expect(prompt).toContain('Beverage price-list rows can be valid dishes');
+        expect(prompt).toContain('Beverage section headings such as Pick Me Up');
+        expect(prompt).toContain('Visual leader dots');
+    });
 });

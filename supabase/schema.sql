@@ -76,8 +76,13 @@ CREATE TABLE submissions (
     -- 'processing' - Initial state, being validated
     -- 'pending_ai_review' - Waiting for AI review
     -- 'pending_human_review' - AI done, waiting for human
+    -- 'submitted_no_ai_review' - Manual-review fallback after AI is skipped/unavailable
+    -- 'sent_to_marketing' - Direct handoff sent beyond Isabella review
+    -- 'needs_correction' - Design approval mismatch needs correction
     -- 'approved' - Fully approved
+    -- 'approved_override' - Approved with documented mismatch override
     -- 'rejected' - Rejected by reviewer
+    -- 'deleted' - Operationally removed from active queues after the linked ClickUp task was deleted
 
     -- Flags
     changes_made BOOLEAN DEFAULT false,              -- Did human make changes to AI draft?
@@ -480,13 +485,16 @@ CREATE TABLE IF NOT EXISTS correction_rules (
     correction_id VARCHAR(100) NOT NULL,
 
     -- The correction itself
-    original_text TEXT NOT NULL,
-    corrected_text TEXT NOT NULL,
+    original_text TEXT,
+    corrected_text TEXT,
     change_type VARCHAR(50),              -- 'diacritic', 'spelling', 'punctuation',
                                           -- 'capitalization', 'content', 'formatting'
 
     -- Human annotation
     rule TEXT NOT NULL,                    -- Actionable instruction / reasoning
+    applies_to_menu_type VARCHAR(50) DEFAULT 'all' NOT NULL, -- 'all', 'food', or 'beverage'
+    CONSTRAINT correction_rules_applies_to_menu_type_check
+        CHECK (applies_to_menu_type IN ('all', 'food', 'beverage')),
     is_location_specific BOOLEAN DEFAULT false,
 
     -- Context
@@ -516,6 +524,7 @@ CREATE TABLE IF NOT EXISTS correction_rules (
 CREATE INDEX IF NOT EXISTS idx_correction_rules_submission ON correction_rules(submission_id);
 CREATE INDEX IF NOT EXISTS idx_correction_rules_status ON correction_rules(status);
 CREATE INDEX IF NOT EXISTS idx_correction_rules_location ON correction_rules(location);
+CREATE INDEX IF NOT EXISTS idx_correction_rules_menu_scope ON correction_rules(applies_to_menu_type);
 CREATE INDEX IF NOT EXISTS idx_correction_rules_unconsumed ON correction_rules(prompt_cycle_id)
     WHERE prompt_cycle_id IS NULL;
 

@@ -2,6 +2,7 @@ import {
     buildDishNameFormattingAnchors,
     normalizeDishPriceForProperty,
     normalizeDishPriceForStorage,
+    prepareApprovedDishInputs,
     previewDishExtraction,
 } from '../src/dish-extractor';
 
@@ -782,6 +783,134 @@ describe('approved dish extraction', () => {
         expect(extracted.some((dish) => /[-–—]$/.test(dish.name))).toBe(false);
     });
 
+    test('uses Pick Me Up as beverage category instead of dish name', () => {
+        const menuText = [
+            'Mineral Water',
+            'Acqua Panna 1 liter........ 8',
+            '“Pick me ups” (formally “dessert cocktails”)_',
+            'Carajillo – cinnamon-infused Licor 43 – reposado – espresso 14',
+            'Espresso Martini – Cantera Negra café – blanco – espresso 14',
+        ].join('\n');
+
+        const extracted = previewDishExtraction(menuText, { servicePeriod: 'Beverage' });
+
+        expect(extracted.map((dish) => dish.name)).toEqual([
+            'Acqua Panna 1 liter',
+            'Carajillo',
+            'Espresso Martini',
+        ]);
+        expect(extracted[0]).toMatchObject({
+            name: 'Acqua Panna 1 liter',
+            price: '8',
+            category: 'Mineral Water',
+        });
+        expect(extracted[1]).toMatchObject({
+            name: 'Carajillo',
+            description: 'cinnamon-infused Licor 43 – reposado – espresso',
+            price: '14',
+            category: 'Pick me ups',
+        });
+        expect(extracted[2]).toMatchObject({
+            category: 'Pick me ups',
+        });
+        expect(extracted.some((dish) => /pick me/i.test(dish.name))).toBe(false);
+        expect(extracted.some((dish) => /\.{2,}|…{2,}/.test(dish.name))).toBe(false);
+    });
+
+    test('keeps beverage price-list categories and separate description rows aligned', () => {
+        const menuText = [
+            'Margaritas',
+            'Traditional Margarita 14',
+            'Blanco Tequila – citrus – frozen or rocks',
+            'Fresh Fruit 15',
+            'choice of: strawberry, blood orange, pineapple, mango, prickly pear, coconut',
+            'Cocteles',
+            'Volcano – Olmeca Altos Añejo – Cynar – Yellow Chartreuse – lime – agave 17',
+            'Zero Proof',
+            'Garden Grove – Seedlip Garden – lime – basil – cucumber – black pepper – aquafaba 13',
+            'Mineral Water',
+            'Topo Chico',
+            'S. Pellegrino 750mL 8',
+            'Espumoso',
+            'Cava Codorníu Brut, Spain 14',
+            'Blanco',
+            'Sauvignon Blanc Château Vartely, Moldova 10',
+            'Rosado',
+            'Rosé Borsao Grenache, Spain 12',
+            'Rojo',
+            'Tempranillo Campo Viejo, Rioja, Spain 12',
+            'Cerveza',
+            'Corona Extra 6',
+            'Flights',
+            '123 Organic Vertical 32',
+        ].join('\n');
+
+        const extracted = previewDishExtraction(menuText, { servicePeriod: 'Beverage' });
+
+        expect(extracted.map((dish) => dish.name)).toEqual([
+            'Traditional Margarita',
+            'Fresh Fruit',
+            'Volcano',
+            'Garden Grove',
+            'Topo Chico',
+            'S. Pellegrino 750mL',
+            'Cava Codorníu Brut, Spain',
+            'Sauvignon Blanc Château Vartely, Moldova',
+            'Rosé Borsao Grenache, Spain',
+            'Tempranillo Campo Viejo, Rioja, Spain',
+            'Corona Extra',
+            '123 Organic Vertical',
+        ]);
+        expect(extracted[0]).toMatchObject({
+            name: 'Traditional Margarita',
+            description: 'Blanco Tequila – citrus – frozen or rocks',
+            price: '14',
+            category: 'Margaritas',
+        });
+        expect(extracted[1]).toMatchObject({
+            name: 'Fresh Fruit',
+            description: 'choice of: strawberry, blood orange, pineapple, mango, prickly pear, coconut',
+            price: '15',
+            category: 'Margaritas',
+        });
+        expect(extracted.find((dish) => dish.name === 'Volcano')).toMatchObject({ category: 'Cocteles' });
+        expect(extracted.find((dish) => dish.name === 'Garden Grove')).toMatchObject({ category: 'Zero Proof' });
+        expect(extracted.find((dish) => dish.name === 'S. Pellegrino 750mL')).toMatchObject({ category: 'Mineral Water' });
+        expect(extracted.find((dish) => dish.name === 'Cava Codorníu Brut, Spain')).toMatchObject({ category: 'Espumoso' });
+        expect(extracted.find((dish) => dish.name === 'Sauvignon Blanc Château Vartely, Moldova')).toMatchObject({ category: 'Blanco' });
+        expect(extracted.find((dish) => dish.name === 'Rosé Borsao Grenache, Spain')).toMatchObject({ category: 'Rosado' });
+        expect(extracted.find((dish) => dish.name === 'Tempranillo Campo Viejo, Rioja, Spain')).toMatchObject({ category: 'Rojo' });
+        expect(extracted.find((dish) => dish.name === 'Corona Extra')).toMatchObject({ category: 'Cerveza' });
+        expect(extracted.find((dish) => dish.name === '123 Organic Vertical')).toMatchObject({ price: '32', category: 'Flights' });
+        expect(extracted.some((dish) => /^(Cocteles|Zero Proof|Espumoso|Blanco|Rosado|Rojo|Cerveza|Flights)$/i.test(dish.name))).toBe(false);
+    });
+
+    test('uses extracted source line when repeated beverage names appear', () => {
+        const menuText = [
+            'Margaritas',
+            'Coin 19',
+            'Lalo Blanco – lime – Cointreau',
+            'Happy Hour',
+            'Coin 10',
+            'House Vino 8',
+        ].join('\n');
+
+        const prepared = prepareApprovedDishInputs(menuText, 'Tamayo - Denver', 'sub-1', {
+            servicePeriod: 'Beverage',
+        });
+        const coinRows = prepared.filter((dish) => dish.input.dish_name === 'Coin');
+
+        expect(coinRows).toHaveLength(2);
+        expect(coinRows[0].sourceContext).toMatchObject({
+            sourceLine: 'Coin 19',
+            lineNumber: 2,
+        });
+        expect(coinRows[1].sourceContext).toMatchObject({
+            sourceLine: 'Coin 10',
+            lineNumber: 5,
+        });
+    });
+
     test('does not promote prix fixe dish descriptions into category', () => {
         const menuText = [
             'NEW YEAR’S EVE 3-COURSE PRIX FIXE',
@@ -941,6 +1070,19 @@ describe('dish name formatting anchors', () => {
         expect(anchors.some((anchor) => anchor.dishName === 'Margaritas')).toBe(false);
         expect(anchors.some((anchor) => anchor.dishName === 'Pescado')).toBe(false);
         expect(anchors.some((anchor) => anchor.dishName === 'Guacamole')).toBe(false);
+    });
+
+    test('skips dot-leader price-grid rows while keeping normal same-line prices', () => {
+        const menuText = [
+            'TEQUILA',
+            'Altos .........................................................................13',
+            'Classic Margarita 18',
+        ].join('\n');
+
+        const anchors = buildDishNameFormattingAnchors(menuText, { property: 'Test Property' });
+
+        expect(anchors.map((anchor) => anchor.dishName)).toEqual(['Classic Margarita']);
+        expect(anchors.some((anchor) => anchor.lineText.includes('Altos'))).toBe(false);
     });
 
     test('skips inferred category-enriched names that are not exact source prefixes', () => {

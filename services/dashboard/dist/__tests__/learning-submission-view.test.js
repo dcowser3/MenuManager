@@ -50,4 +50,11 @@ describe('learning-submission view', () => {
         expect(html).not.toContain('</script><div>bad</div>');
         expect(html).toContain('projectName":"Chef\\u0027s Test Menu');
     });
+    test('renders menu scope controls for saved correction rules', () => {
+        const html = renderLearningSubmission();
+        expect(html).toContain('id="menu-scope-0"');
+        expect(html).toContain('<option value="food">Food menus only</option>');
+        expect(html).toContain('<option value="beverage">Beverage menus only</option>');
+        expect(html).toContain('applies_to_menu_type: menuScope');
+    });
 });

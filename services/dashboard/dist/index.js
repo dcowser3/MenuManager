@@ -108,6 +108,7 @@ const BASIC_AI_LEARNED_PRECHECK_ENABLED = !parseBooleanFlag(process.env.BASIC_AI
 const BASIC_AI_LEARNED_RULE_FETCH_TIMEOUT_MS = parsePositiveInteger(process.env.BASIC_AI_LEARNED_RULE_FETCH_TIMEOUT_MS, 2500);
 const CLICKUP_TASK_CREATE_TIMEOUT_MS = parsePositiveInteger(process.env.CLICKUP_TASK_CREATE_TIMEOUT_MS, 60000);
 const BASIC_AI_CHECK_JOB_TTL_MS = parsePositiveInteger(process.env.BASIC_AI_CHECK_JOB_TTL_MS, 15 * 60 * 1000);
+const CLICKUP_APPROVAL_FINALIZE_TIMEOUT_MS = parsePositiveInteger(process.env.CLICKUP_APPROVAL_FINALIZE_TIMEOUT_MS, CLICKUP_TASK_CREATE_TIMEOUT_MS);
 const BASIC_AI_CHECK_DEBUG_ENABLED = process.env.BASIC_AI_CHECK_DEBUG_ENABLED !== undefined
     ? parseBooleanFlag(process.env.BASIC_AI_CHECK_DEBUG_ENABLED)
     : process.env.NODE_ENV !== 'production';
@@ -1210,6 +1211,7 @@ const approvalWorkflowHandlers = (0, approval_workflow_1.createApprovalWorkflowH
     DB_SERVICE_URL,
     DIFFER_SERVICE_URL,
     CLICKUP_SERVICE_URL,
+    CLICKUP_APPROVAL_FINALIZE_TIMEOUT_MS,
     DEFAULT_ALLERGEN_KEY,
     getSubmissionDocumentDir,
     extractDishesAfterApproval,
@@ -1419,20 +1421,25 @@ function isAcceptedRulePreAiEligible(rule) {
         && corrected.length <= 240;
 }
 function describeAcceptedRulePreAiStatus(rule) {
+    const original = `${rule.original_text || ''}`.trim();
+    const corrected = `${rule.corrected_text || ''}`.trim();
+    if (!original && !corrected) {
+        return 'Manual guidance';
+    }
     if (!isAcceptedRulePreAiEligible(rule)) {
         return 'Manual review only';
     }
     const ruleText = `${rule.rule || ''}`.toLowerCase();
-    const original = `${rule.original_text || ''}`.toLowerCase();
-    const corrected = `${rule.corrected_text || ''}`.toLowerCase();
+    const originalLower = original.toLowerCase();
+    const correctedLower = corrected.toLowerCase();
     if (ruleText.includes('veggies')
-        || (original.includes('veggies') && corrected.includes('vegetables'))
+        || (originalLower.includes('veggies') && correctedLower.includes('vegetables'))
         || ruleText.includes('tres leches')
-        || original.includes('tres leches')
+        || originalLower.includes('tres leches')
         || ruleText.includes('poached egg')
         || ruleText.includes('sunny side')
-        || original.includes('poached egg')
-        || original.includes('sunny side')) {
+        || originalLower.includes('poached egg')
+        || originalLower.includes('sunny side')) {
         return 'Active code guard';
     }
     return 'Active exact rule';
@@ -1504,6 +1511,7 @@ app.get('/learning', async (_req, res) => {
             pre_ai_active: isAcceptedRulePreAiEligible(rule),
         }));
         const activeExactRules = acceptedRules.filter((rule) => rule.pre_ai_status === 'Active exact rule');
+        const manualGuidanceRules = acceptedRules.filter((rule) => rule.pre_ai_status === 'Manual guidance');
         const curatedActiveRules = [
             {
                 label: 'veggies -> vegetables',
@@ -1553,6 +1561,7 @@ app.get('/learning', async (_req, res) => {
             ignoredSystemPendingRules,
             acceptedRules,
             activeExactRules,
+            manualGuidanceRules,
             curatedActiveRules,
             recentSubmissions,
             learningSubmissions: decoratedLearningSubmissions,
@@ -2028,6 +2037,7 @@ async function handleBasicCheck(req, res) {
         const menuContent = (0, upload_security_1.sanitizePlainTextInput)(req.body?.menuContent, { multiline: true, maxLength: upload_security_1.MAX_LONG_TEXT_LENGTH });
         const allergens = (0, upload_security_1.sanitizePlainTextInput)(req.body?.allergens, { multiline: true, maxLength: 2000 });
         const menuType = (0, upload_security_1.sanitizePlainTextInput)(req.body?.menuType, { maxLength: 64 });
+        const templateType = (0, upload_security_1.sanitizePlainTextInput)(req.body?.templateType, { maxLength: 64 }) || 'food';
         const property = (0, upload_security_1.sanitizePlainTextInput)(req.body?.property, { maxLength: 255 });
         const servicePeriod = (0, upload_security_1.sanitizePlainTextInput)(req.body?.servicePeriod, { maxLength: 64 });
         const baselineMenuContent = (0, upload_security_1.sanitizePlainTextInput)(req.body?.baselineMenuContent, { multiline: true, maxLength: upload_security_1.MAX_LONG_TEXT_LENGTH });
@@ -2103,6 +2113,7 @@ async function handleBasicCheck(req, res) {
         const preAiDeterministic = (0, pre_ai_deterministic_rules_1.runPreAiDeterministicChecks)(reviewFooterMetadata.body, {
             enabled: BASIC_AI_PRECHECK_ENABLED,
             property,
+            templateType,
             allergenLegend: effectiveReviewAllergens,
             acceptedCorrectionRules,
         });
@@ -2417,6 +2428,7 @@ Note: Use ONLY these allergen codes when checking allergen compliance. Do not us
         const postAiDeterministic = (0, pre_ai_deterministic_rules_1.runPreAiDeterministicChecks)(parsed.correctedMenu, {
             enabled: BASIC_AI_PRECHECK_ENABLED,
             property,
+            templateType,
             allergenLegend: effectiveReviewAllergens,
             acceptedCorrectionRules,
         });

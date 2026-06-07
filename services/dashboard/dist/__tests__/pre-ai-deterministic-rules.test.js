@@ -187,6 +187,23 @@ describe('runPreAiDeterministicChecks', () => {
         expect((0, pre_ai_deterministic_rules_1.runPreAiDeterministicChecks)('Fish, tomatillo salsa 22', { property: 'Toro Denver', acceptedCorrectionRules: rules }).menuText).toBe('Fish, tomatillo sauce 22');
         expect((0, pre_ai_deterministic_rules_1.runPreAiDeterministicChecks)('Fish, tomatillo salsa 22', { property: 'Toro Miami', acceptedCorrectionRules: rules }).menuText).toBe('Fish, tomatillo salsa 22');
     });
+    it('only applies menu-scoped learned rules to matching template types', () => {
+        const rules = [{
+                id: 'rule-beverage',
+                status: 'accepted',
+                source: 'human',
+                original_text: 'zero proof',
+                corrected_text: 'zero-proof',
+                change_type: 'punctuation',
+                rule: 'Beverage menus hyphenate zero-proof.',
+                applies_to_menu_type: 'beverage',
+                is_location_specific: false,
+                location: 'All properties (global rule)',
+            }];
+        expect((0, pre_ai_deterministic_rules_1.runPreAiDeterministicChecks)('zero proof margarita 13', { templateType: 'food', acceptedCorrectionRules: rules }).menuText).toBe('zero proof margarita 13');
+        expect((0, pre_ai_deterministic_rules_1.runPreAiDeterministicChecks)('zero proof margarita 13', { templateType: 'beverage', acceptedCorrectionRules: rules }).menuText).toBe('zero-proof margarita 13');
+        expect((0, pre_ai_deterministic_rules_1.runPreAiDeterministicChecks)('zero proof margarita 13', { templateType: 'food_beverage', acceptedCorrectionRules: rules }).menuText).toBe('zero-proof margarita 13');
+    });
     it('ignores pending or broad content learned rules', () => {
         const rules = [
             {

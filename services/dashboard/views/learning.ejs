@@ -319,6 +319,100 @@
             font-size: .78rem;
             padding: .5rem .55rem;
         }
+        .manual-rule-panel {
+            border: 1px solid var(--border);
+            background: #fff;
+            padding: 1rem 1.1rem;
+            margin-bottom: 1rem;
+        }
+        .form-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: .75rem;
+            align-items: end;
+        }
+        .form-grid.three {
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+        }
+        .form-field {
+            display: flex;
+            flex-direction: column;
+            min-width: 0;
+        }
+        .form-field.full-width {
+            grid-column: 1 / -1;
+        }
+        label {
+            display: block;
+            font-size: .63rem;
+            text-transform: uppercase;
+            letter-spacing: .1em;
+            color: var(--muted);
+            margin-bottom: .25rem;
+        }
+        input, textarea, select {
+            width: 100%;
+            border: 1px solid var(--border);
+            padding: .55rem .6rem;
+            font-family: inherit;
+            font-size: .84rem;
+            background: #fff;
+            color: var(--text);
+        }
+        input:focus, textarea:focus, select:focus {
+            outline: none;
+            border-color: #8b7355;
+        }
+        textarea {
+            min-height: 84px;
+            resize: vertical;
+        }
+        select[multiple] {
+            min-height: 96px;
+        }
+        .check-row {
+            display: flex;
+            align-items: center;
+            gap: .45rem;
+            min-height: 2.45rem;
+        }
+        .check-row input[type="checkbox"] {
+            width: auto;
+        }
+        .check-row label {
+            margin: 0;
+            font-size: .8rem;
+            text-transform: none;
+            letter-spacing: 0;
+            color: var(--text);
+            cursor: pointer;
+        }
+        .manual-location-fields {
+            display: none;
+            margin-top: .75rem;
+        }
+        .manual-location-fields.open {
+            display: block;
+        }
+        .form-actions {
+            display: flex;
+            gap: .75rem;
+            align-items: center;
+            margin-top: .85rem;
+            flex-wrap: wrap;
+        }
+        .save-status {
+            font-size: .78rem;
+            color: var(--muted);
+        }
+        .save-status.ok { color: var(--success); }
+        .save-status.err { color: var(--danger); }
+        @media (max-width: 760px) {
+            .form-grid,
+            .form-grid.three {
+                grid-template-columns: 1fr;
+            }
+        }
     </style>
 </head>
 <body>
@@ -378,7 +472,86 @@
                 corrected_text: rule.corrected_text || '',
                 submission_ids: Array.isArray(rule.submission_ids) ? rule.submission_ids : [],
             }));
+            const menuScopeLabel = (value) => {
+                if (value === 'food') return 'Food menus';
+                if (value === 'beverage') return 'Beverage menus';
+                return 'All menus';
+            };
         %>
+
+        <!-- Manual Rule Capture -->
+        <h3 class="section-title">Add Rule</h3>
+        <form class="manual-rule-panel" id="manualRuleForm">
+            <div class="form-grid">
+                <div class="form-field full-width">
+                    <label for="manual-rule-text">Rule *</label>
+                    <textarea id="manual-rule-text" placeholder="e.g., Use the beverage-specific tequila spelling from the approved brand glossary"></textarea>
+                </div>
+                <div class="form-field">
+                    <label for="manual-rule-menu-type">Menu Scope</label>
+                    <select id="manual-rule-menu-type">
+                        <option value="all">All menus</option>
+                        <option value="food">Food menus only</option>
+                        <option value="beverage">Beverage menus only</option>
+                    </select>
+                </div>
+                <div class="form-field">
+                    <label for="manual-rule-change-type">Change Type</label>
+                    <select id="manual-rule-change-type">
+                        <option value="content">Content</option>
+                        <option value="terminology">Terminology</option>
+                        <option value="diacritic">Diacritic</option>
+                        <option value="spelling">Spelling</option>
+                        <option value="punctuation">Punctuation</option>
+                        <option value="capitalization">Capitalization</option>
+                        <option value="formatting">Formatting</option>
+                    </select>
+                </div>
+            </div>
+            <div class="form-grid three" style="margin-top:.75rem;">
+                <div class="form-field">
+                    <label for="manual-rule-original">Original Phrase</label>
+                    <input id="manual-rule-original" placeholder="Optional exact text">
+                </div>
+                <div class="form-field">
+                    <label for="manual-rule-corrected">Corrected Phrase</label>
+                    <input id="manual-rule-corrected" placeholder="Optional replacement">
+                </div>
+                <div class="form-field">
+                    <label for="manual-rule-reviewer">Reviewer Name</label>
+                    <input id="manual-rule-reviewer" placeholder="Optional">
+                </div>
+            </div>
+            <div class="check-row" style="margin-top:.75rem;">
+                <input type="checkbox" id="manual-rule-location-specific">
+                <label for="manual-rule-location-specific">Location-specific rule?</label>
+            </div>
+            <div class="manual-location-fields" id="manual-rule-location-fields">
+                <div class="form-grid">
+                    <div class="form-field">
+                        <label for="manual-rule-location">Primary Property</label>
+                        <select id="manual-rule-location">
+                            <option value="">Select property</option>
+                            <% (propertyOptions || []).forEach((property) => { %>
+                                <option value="<%= property %>"><%= property %></option>
+                            <% }) %>
+                        </select>
+                    </div>
+                    <div class="form-field">
+                        <label for="manual-rule-shared-locations">Other Applicable Locations</label>
+                        <select multiple id="manual-rule-shared-locations">
+                            <% (propertyOptions || []).forEach((property) => { %>
+                                <option value="<%= property %>"><%= property %></option>
+                            <% }) %>
+                        </select>
+                    </div>
+                </div>
+            </div>
+            <div class="form-actions">
+                <button type="submit" class="btn success">Save Rule</button>
+                <span class="save-status" id="manual-rule-status"></span>
+            </div>
+        </form>
 
         <!-- Active Pre-AI Rules -->
         <h3 class="section-title">Active Pre-AI Rules</h3>
@@ -431,6 +604,42 @@
                 <% } %>
             </div>
         </details>
+        <details class="compact-details">
+            <summary>Accepted Manual Guidance (<%= (manualGuidanceRules || []).length %>)</summary>
+            <div class="details-body">
+                <% if (!manualGuidanceRules || manualGuidanceRules.length === 0) { %>
+                    <div class="empty">No accepted manual guidance rules yet.</div>
+                <% } else { %>
+                    <table class="compact-table">
+                        <thead>
+                            <tr>
+                                <th>Rule</th>
+                                <th>Menu Scope</th>
+                                <th>Location</th>
+                                <th>Reviewer</th>
+                                <th>Created</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                        <% manualGuidanceRules.forEach((rule) => { %>
+                            <tr>
+                                <td><%= rule.rule || '' %></td>
+                                <td><%= menuScopeLabel(rule.applies_to_menu_type) %></td>
+                                <td>
+                                    <%= rule.location || '' %><%= rule.is_location_specific ? '' : ' (global)' %>
+                                    <% if (rule.other_applicable_locations && rule.other_applicable_locations.length > 0) { %>
+                                        <div class="small">Also: <%= rule.other_applicable_locations.join(', ') %></div>
+                                    <% } %>
+                                </td>
+                                <td><%= rule.reviewer_name || '' %></td>
+                                <td><%= rule.created_at ? new Date(rule.created_at).toLocaleString() : 'N/A' %></td>
+                            </tr>
+                        <% }) %>
+                        </tbody>
+                    </table>
+                <% } %>
+            </div>
+        </details>
 
         <!-- Pending Rules (need human review) -->
         <% if (pendingRules.length > 0) { %>
@@ -441,6 +650,7 @@
                         <th>Original</th>
                         <th>Corrected</th>
                         <th>Rule</th>
+                        <th>Menu Scope</th>
                         <th>Source</th>
                         <th>Restaurant / Location</th>
                         <th>Signals</th>
@@ -453,6 +663,7 @@
                         <td><strong><%= rule.original_text %></strong></td>
                         <td><strong><%= rule.corrected_text %></strong></td>
                         <td><%= rule.rule || '' %></td>
+                        <td><%= menuScopeLabel(rule.applies_to_menu_type) %></td>
                         <td><span class="badge <%= rule.source %>"><%= rule.source %></span></td>
                         <td>
                             <div><%= rule.restaurant_name || '' %></div>
@@ -478,7 +689,7 @@
                     </tr>
                     <% if (rule.source === 'system') { %>
                         <tr class="examples-row" id="rule-examples-row-<%= rule.id %>" style="display:none;">
-                            <td colspan="7">
+                            <td colspan="8">
                                 <div class="examples-panel" id="rule-examples-<%= rule.id %>">
                                     <div class="small">Loading examples...</div>
                                 </div>
@@ -506,6 +717,7 @@
                                 <th>Original</th>
                                 <th>Corrected</th>
                                 <th>Rule</th>
+                                <th>Menu Scope</th>
                                 <th>Created</th>
                             </tr>
                         </thead>
@@ -515,6 +727,7 @@
                                 <td><%= rule.original_text || '' %></td>
                                 <td><%= rule.corrected_text || '' %></td>
                                 <td><%= rule.rule || '' %></td>
+                                <td><%= menuScopeLabel(rule.applies_to_menu_type) %></td>
                                 <td><%= rule.created_at ? new Date(rule.created_at).toLocaleString() : 'N/A' %></td>
                             </tr>
                         <% }) %>
@@ -547,6 +760,7 @@
                         <th>Corrected</th>
                         <th>Rule</th>
                         <th>Pre-AI Status</th>
+                        <th>Menu Scope</th>
                         <th>Type</th>
                         <th>Restaurant</th>
                         <th>Location</th>
@@ -561,6 +775,7 @@
                         <td><%= rule.corrected_text || '' %></td>
                         <td><%= rule.rule || '' %></td>
                         <td><span class="badge <%= rule.pre_ai_active ? 'accepted' : 'system' %>"><%= rule.pre_ai_status || '' %></span></td>
+                        <td><%= menuScopeLabel(rule.applies_to_menu_type) %></td>
                         <td><%= rule.change_type || '' %></td>
                         <td><%= rule.restaurant_name || '' %></td>
                         <td>
@@ -782,6 +997,90 @@
             container.innerHTML = `<div class="examples-note">${escapeHtml(intro)}</div>${errorNote}${exampleHtml}`;
         }
 
+        function setManualRuleStatus(message, kind) {
+            const statusEl = document.getElementById('manual-rule-status');
+            if (!statusEl) return;
+            statusEl.textContent = message || '';
+            statusEl.className = `save-status ${kind || ''}`.trim();
+        }
+
+        function updateManualLocationFields() {
+            const isLocationSpecific = document.getElementById('manual-rule-location-specific')?.checked;
+            document.getElementById('manual-rule-location-fields')?.classList.toggle('open', !!isLocationSpecific);
+        }
+
+        function updateManualSharedLocationOptions() {
+            const primary = document.getElementById('manual-rule-location')?.value || '';
+            const shared = document.getElementById('manual-rule-shared-locations');
+            if (!shared) return;
+            Array.from(shared.options).forEach((option) => {
+                option.disabled = !!primary && option.value === primary;
+                if (option.disabled) {
+                    option.selected = false;
+                }
+            });
+        }
+
+        async function saveManualRule(event) {
+            event.preventDefault();
+
+            const form = document.getElementById('manualRuleForm');
+            const submitButton = form?.querySelector('button[type="submit"]');
+            const rule = (document.getElementById('manual-rule-text')?.value || '').trim();
+            const originalText = (document.getElementById('manual-rule-original')?.value || '').trim();
+            const correctedText = (document.getElementById('manual-rule-corrected')?.value || '').trim();
+            const isLocationSpecific = !!document.getElementById('manual-rule-location-specific')?.checked;
+            const location = (document.getElementById('manual-rule-location')?.value || '').trim();
+            const sharedSelect = document.getElementById('manual-rule-shared-locations');
+            const otherLocations = sharedSelect
+                ? Array.from(sharedSelect.selectedOptions).map((option) => option.value)
+                : [];
+
+            if (!rule) {
+                setManualRuleStatus('Rule is required.', 'err');
+                return;
+            }
+            if ((originalText && !correctedText) || (!originalText && correctedText)) {
+                setManualRuleStatus('Original and corrected phrases must be provided together.', 'err');
+                return;
+            }
+            if (isLocationSpecific && !location) {
+                setManualRuleStatus('Primary property is required for location-specific rules.', 'err');
+                return;
+            }
+
+            if (submitButton) submitButton.disabled = true;
+            setManualRuleStatus('Saving...', '');
+
+            try {
+                const response = await fetch('/api/learning/correction-rules', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        rule,
+                        original_text: originalText || null,
+                        corrected_text: correctedText || null,
+                        change_type: document.getElementById('manual-rule-change-type')?.value || 'content',
+                        applies_to_menu_type: document.getElementById('manual-rule-menu-type')?.value || 'all',
+                        is_location_specific: isLocationSpecific,
+                        location,
+                        other_applicable_locations: otherLocations,
+                        reviewer_name: (document.getElementById('manual-rule-reviewer')?.value || '').trim(),
+                        source: 'human',
+                    }),
+                });
+                const result = await response.json().catch(() => ({}));
+                if (!response.ok) {
+                    throw new Error(result.error || 'Failed to save rule');
+                }
+                setManualRuleStatus('Saved.', 'ok');
+                setTimeout(() => window.location.reload(), 600);
+            } catch (error) {
+                setManualRuleStatus(error.message || 'Save failed.', 'err');
+                if (submitButton) submitButton.disabled = false;
+            }
+        }
+
         async function reviewRule(ruleId, newStatus) {
             try {
                 const response = await fetch(`/api/learning/correction-rules/${ruleId}`, {
@@ -841,6 +1140,12 @@
                 row.style.display = !selected || rowLocation === selected ? '' : 'none';
             });
         }
+
+        document.getElementById('manualRuleForm')?.addEventListener('submit', saveManualRule);
+        document.getElementById('manual-rule-location-specific')?.addEventListener('change', updateManualLocationFields);
+        document.getElementById('manual-rule-location')?.addEventListener('change', updateManualSharedLocationOptions);
+        updateManualLocationFields();
+        updateManualSharedLocationOptions();
     </script>
 </body>
 </html>

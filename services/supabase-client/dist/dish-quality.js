@@ -43,11 +43,45 @@ const CATEGORY_WORDS = new Set([
     'wines',
 ]);
 const EXCLUDE_CODES = new Set([
+    'beverage_heading_as_name',
+    'layout_leader_in_name',
     'pricing_grid_as_dish',
     'instruction_text_name',
     'package_or_course_label',
     'price_only_name',
     'modifier_row_name',
+]);
+const BEVERAGE_HEADING_WORDS = new Set([
+    'anejo',
+    'blanco',
+    'cerveza',
+    'cerveza local',
+    'cervezalocal',
+    'cocktails',
+    'cocteles',
+    'drink',
+    'drinks',
+    'espumoso',
+    'extra anejo',
+    'extraanejo',
+    'flights',
+    'happy hour',
+    'happyhour',
+    'house infused tequila',
+    'houseinfusedtequila',
+    'margaritas',
+    'mezcal',
+    'mineral water',
+    'pick me up',
+    'pick me ups',
+    'reposado',
+    'rojo',
+    'rosado',
+    'vino by the bottle',
+    'vino by the glass',
+    'vinobythebottle',
+    'vinobytheglass',
+    'zero proof',
 ]);
 const SEVERITY_RANK = {
     high: 3,
@@ -147,6 +181,34 @@ function looksLikeKnownCategory(value) {
     const normalized = normalizeDishQualityText(value);
     return CATEGORY_WORDS.has(normalized) || /\bstation$/.test(normalized);
 }
+function cleanBeverageHeadingText(value) {
+    return compactText(value)
+        .replace(/\s*\((?:formerly|formally)\s+["'“”]?[^)]*["'“”]?\)\s*/ig, ' ')
+        .replace(/[*_#]+/g, ' ')
+        .replace(/\s*[-–—]+\s*$/g, '')
+        .replace(/^["'“”]+|["'“”]+$/g, '')
+        .trim();
+}
+function looksLikeBeverageHeading(value) {
+    const normalized = normalizeDishQualityText(cleanBeverageHeadingText(value));
+    const compact = normalized.replace(/\s+/g, '');
+    return BEVERAGE_HEADING_WORDS.has(normalized) || BEVERAGE_HEADING_WORDS.has(compact);
+}
+function hasLayoutLeaderRun(value) {
+    return /[.·•…]{2,}/.test(compactText(value));
+}
+function looksLikeShortTitle(value) {
+    const text = compactText(value);
+    const words = text.split(/\s+/).filter(Boolean);
+    return words.length > 0 &&
+        words.length <= 4 &&
+        words.every((word) => /^[A-ZÀ-Þ0-9]/.test(word));
+}
+function looksLikeBeverageIngredientText(value) {
+    const text = compactText(value);
+    return /[-–—,/]/.test(text) &&
+        /\b(?:agave|anejo|añejo|aquafaba|bitters?|blanco|bourbon|brandy|cafe|café|citrus|cointreau|espresso|gin|grapefruit|lemon|licor|lime|liqueur|mezcal|orange|reposado|rum|sotol|syrup|tequila|vodka|whiskey|whisky|wine)\b/i.test(text);
+}
 function looksLikeDescription(value) {
     const text = compactText(value);
     if (!text) {
@@ -188,6 +250,15 @@ function analyzeApprovedDishQuality(dish, context = {}) {
     }
     if (isPricingName(name, description)) {
         addIssue(issues, 'pricing_grid_as_dish', 'high', 'Dish row looks like pricing grid or menu pricing text.');
+    }
+    if (name && looksLikeBeverageHeading(name)) {
+        addIssue(issues, 'beverage_heading_as_name', 'high', 'Dish name looks like a beverage section heading.');
+    }
+    if (name && hasLayoutLeaderRun(name)) {
+        addIssue(issues, 'layout_leader_in_name', 'high', 'Dish name still contains visual leader dots or similar layout artifacts.');
+    }
+    if (description && looksLikeShortTitle(description) && looksLikeBeverageIngredientText(name)) {
+        addIssue(issues, 'beverage_name_description_swap', 'medium', 'Dish name looks like beverage ingredients while description looks like the actual item name.');
     }
     if (isInstructionLike(name)) {
         addIssue(issues, 'instruction_text_name', 'high', 'Dish name looks like menu instructions or attribution.');

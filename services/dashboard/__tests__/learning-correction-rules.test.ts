@@ -27,6 +27,7 @@ describe('buildCorrectionRuleRecord', () => {
 
         expect(record.is_location_specific).toBe(false);
         expect(record.location).toBe(GLOBAL_CORRECTION_RULE_LOCATION);
+        expect(record.applies_to_menu_type).toBe('all');
     });
 
     test('saves blank non-location-specific submissions as global rules', () => {
@@ -69,5 +70,36 @@ describe('buildCorrectionRuleRecord', () => {
 
         expect(record.location).toBe('Toro Toro - Grosvenor House - Dubai');
         expect(record.other_applicable_locations).toEqual(['Maya - New York']);
+    });
+
+    test('supports freeform manual rules without before and after text', () => {
+        const record = buildCorrectionRuleRecord({
+            rule: 'Beverage menus should preserve zero-proof cocktail section names.',
+            applies_to_menu_type: 'beverage',
+            is_location_specific: true,
+            location: 'Maya - New York',
+            reviewer_name: 'Isabella',
+        }, catalog);
+
+        expect(record.submission_id).toMatch(/^manual-submission-/);
+        expect(record.correction_id).toMatch(/^manual-rule-/);
+        expect(record.original_text).toBeNull();
+        expect(record.corrected_text).toBeNull();
+        expect(record.applies_to_menu_type).toBe('beverage');
+        expect(record.status).toBe('accepted');
+    });
+
+    test('requires optional exact replacement fields to be paired', () => {
+        expect(() => buildCorrectionRuleRecord({
+            rule: 'Use relish for this preparation.',
+            original_text: 'habanero salsa',
+        }, catalog)).toThrow('original_text and corrected_text must be provided together');
+    });
+
+    test('rejects unknown menu rule scopes', () => {
+        expect(() => buildCorrectionRuleRecord({
+            ...basePayload,
+            applies_to_menu_type: 'dessert',
+        }, catalog)).toThrow('applies_to_menu_type must be all, food, or beverage');
     });
 });
