@@ -57,17 +57,25 @@
                 baselinePreviewText,
                 { trimText: false }
             );
-        const baselineResolverText = redlinePreview.stripExistingDeletions(
+        const canonicalBaseline = redlinePreview.buildRevisionComparisonFromAnnotatedPreview(
             baselinePreviewText,
-            annotationMap
+            annotationMap,
+            {
+                baselineText,
+                baselineHtml: displayBaselineHtml,
+            }
         );
-        const baselineEditorHtml = redlinePreview.buildEditableHtmlFromBaseline(displayBaselineHtml, baselineText);
+        const baselineOriginalText = canonicalBaseline.originalText || baselineText;
+        const baselineFixedText = canonicalBaseline.currentText || baselineText;
+        const baselineOriginalHtml = canonicalBaseline.originalHtml || displayBaselineHtml || '';
+        const baselineEditorHtml = canonicalBaseline.editorHtml ||
+            redlinePreview.buildEditableHtmlFromBaseline(displayBaselineHtml, baselineFixedText);
         const canUseWorker = hasImportedAnnotations && typeof global.Worker === 'function';
-        const workerUrl = settings.workerUrl || '/js/approval-preview-worker.js';
+        const workerUrl = settings.workerUrl || '/js/approval-preview-worker.js?v=20260609-structural-line-match';
 
         let worker = null;
         let previewUpdateTimer = null;
-        let lastRenderedEditorText = baselineText;
+        let lastRenderedEditorText = baselineFixedText;
         let lastRenderedEditorHtml = '';
         let pendingRichPreview = false;
         let editorHasUserInput = false;
@@ -128,22 +136,12 @@
 
         function renderPreviewOnMainThread(revisedText, revisedHtml, scheduleTimings) {
             const renderStart = nowMs();
-            const resolvedPreview = redlinePreview.resolveExistingAnnotationRevisions(
-                baselineResolverText || baselineText,
-                revisedText,
-                baselinePreviewText,
-                annotationMap,
-                { baselineHtml: displayBaselineHtml || '' }
-            );
             const resolveEnd = nowMs();
             const rendered = redlinePreview.renderPersistentPreview(
-                resolvedPreview.basePreviewText,
-                resolvedPreview.revisedPreviewText,
+                baselineOriginalText,
+                revisedText,
                 {
-                    annotationMap: resolvedPreview.annotationMap,
-                    revisedAnnotationMap: resolvedPreview.revisedAnnotationMap,
-                    includeExistingAnnotations: true,
-                    baselineHtml: resolvedPreview.baselineHtml || '',
+                    baselineHtml: baselineOriginalHtml || '',
                     revisedHtml,
                 }
             );
@@ -365,8 +363,9 @@
                 baselineText,
                 baselinePreviewText,
                 baselineAnnotations,
-                baselineHtml: displayBaselineHtml || '',
-                baselineResolverText,
+                baselineHtml: baselineOriginalHtml || displayBaselineHtml || '',
+                baselineOriginalText,
+                baselineOriginalHtml,
                 annotationMap,
                 revisedText: request.revisedText,
                 revisedHtml: request.revisedHtml,
@@ -499,18 +498,32 @@
             clearTimeout(previewUpdateTimer);
             cancelActiveAndQueued();
             lastRenderedHtml = '';
-            lastRenderedEditorText = baselineText;
+            lastRenderedEditorText = baselineFixedText;
             lastRenderedEditorHtml = '';
-            preview.innerHTML = displayBaselineHtml || '';
-            markPreviewFresh({ insertions: 0, deletions: 0 });
+            const rendered = renderPreviewOnMainThread(
+                baselineFixedText,
+                baselineEditorHtml,
+                null
+            );
+            lastRenderedHtml = rendered.html;
+            lastRenderedEditorHtml = baselineEditorHtml;
+            preview.innerHTML = rendered.html;
+            markPreviewFresh(rendered);
             editor.focus();
             showAlert('Editor reset to the submitted menu text.', 'success');
         }
 
         worker = canUseWorker ? createWorker() : null;
         editor.innerHTML = baselineEditorHtml;
-        preview.innerHTML = displayBaselineHtml || '';
-        markPreviewFresh({ insertions: 0, deletions: 0 });
+        const initialRendered = renderPreviewOnMainThread(
+            baselineFixedText,
+            baselineEditorHtml,
+            null
+        );
+        lastRenderedHtml = initialRendered.html;
+        lastRenderedEditorHtml = baselineEditorHtml;
+        preview.innerHTML = initialRendered.html;
+        markPreviewFresh(initialRendered);
 
         editor.addEventListener('input', () => schedulePreviewUpdate());
         editor.addEventListener('keydown', (event) => {

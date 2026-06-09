@@ -1,6 +1,6 @@
 # ClickUp Integration
 
-**Status:** Complete (Updated Mar 2026)
+**Status:** Complete (Updated Jun 2026)
 
 When a chef submits a menu, a ClickUp task is automatically created with the generated DOCX attached and assigned to the reviewer. When the reviewer uploads corrections and changes the task status, the system detects this via webhook, downloads the corrected file, emails it to the submitter, feeds it to the differ service as training data, and asks the DB service to extract approved dishes into Supabase.
 
@@ -14,7 +14,7 @@ When a chef submits a menu, a ClickUp task is automatically created with the gen
 - Modification submissions use human-readable ClickUp description labels that include the chosen workflow route, such as `I'll make menu changes here (Find in Database)`, `I'll make menu changes here (Upload Prior Approved DOCX)`, or `I already made my menu edits on a doc (Upload Unapproved DOCX, Preserve Redlines)`.
 - Uploads the generated DOCX as an attachment
 - Uploads optional menu image attachment when provided in the form (`menuImageUpload`)
-- Adds Isabella as the assignee when `CLICKUP_ASSIGNEE_ID` is configured and sets ClickUp's `notify_all` flag for reviewer-routed tasks so Isabella still gets the normal ClickUp inbox/email notification when the service is using her API token
+- Adds Isabella as the assignee when `CLICKUP_ASSIGNEE_ID` is configured, sets ClickUp's task-level `notify_all` flag, and then creates an assigned reviewer comment with `notify_all: true`. The extra assigned comment gives ClickUp a second notification event for Isabella when the service is using Isabella's own API token as the task creator.
 - Resolves the configured Marketing ClickUp User Group to its member user IDs and adds those users as task watchers after task creation
 - If the submitter email is `isabella@richardsandoval.com`, creates the task directly in `CLICKUP_POST_APPROVAL_STATUS` (`To Do` by default) and assigns the resolved Marketing users instead of the Isabella assignee. This direct handoff does not use `CLICKUP_CORRECTIONS_STATUS`, so a separate review-complete trigger such as `approved` will not place Isabella submissions in the `approved` column during creation.
 - After a direct Isabella handoff successfully creates the ClickUp task, the DB submission status is updated to `sent_to_marketing` so the row does not remain in Isabella's `/reviews` queue.
@@ -38,6 +38,10 @@ When a chef submits a menu, a ClickUp task is automatically created with the gen
   - `CLICKUP_MARKETING_WATCHER_GROUP_NAME` defaults to `Marketing`; `CLICKUP_MARKETING_WATCHER_GROUP_ID` can pin the lookup to one or more group IDs
   - `CLICKUP_WATCHER_USER_IDS` can add explicit watcher user IDs when group lookup is unavailable
   - Watcher lookup/update failures are logged and returned as task-creation warnings, but they do not block task creation or DOCX attachment upload
+- ClickUp reviewer notification behavior:
+  - Reviewer-routed tasks create one assigned comment per configured `CLICKUP_ASSIGNEE_ID` user ID after the task is created
+  - The comment includes the project, property, service period, date needed, and submission id when available
+  - Comment failures are logged and returned as task-creation warnings, but they do not block task creation or DOCX attachment upload
 
 ## Inbound Flow (ClickUp Webhook → Corrections)
 

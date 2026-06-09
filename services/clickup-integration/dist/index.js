@@ -222,6 +222,33 @@ async function addMarketingWatchersToTask(taskId) {
     await axios_1.default.put(`https://api.clickup.com/api/v2/task/${taskId}`, { watchers: { add: watcherIds, rem: [] } }, { headers: clickupHeaders });
     return watcherIds.length;
 }
+function buildReviewerNotificationComment(input) {
+    const lines = [
+        'New Menu Manager submission is ready for Isabella review.',
+        input.projectName ? `Project: ${input.projectName}` : '',
+        input.property ? `Property: ${input.property}` : '',
+        input.servicePeriod ? `Service period: ${input.servicePeriod}` : '',
+        input.dateNeeded ? `Date needed: ${input.dateNeeded}` : '',
+        input.submissionId ? `Submission ID: ${input.submissionId}` : '',
+    ].filter(Boolean);
+    return lines.join('\n');
+}
+async function addReviewerNotificationCommentsToTask(taskId, reviewerAssigneeIds, context) {
+    const assigneeIds = uniqueNumbers(reviewerAssigneeIds);
+    if (!assigneeIds.length) {
+        console.warn('No ClickUp reviewer user IDs resolved for review notifications.');
+        return 0;
+    }
+    const commentText = buildReviewerNotificationComment(context);
+    for (const assignee of assigneeIds) {
+        await axios_1.default.post(`https://api.clickup.com/api/v2/task/${taskId}/comment`, {
+            comment_text: commentText,
+            assignee,
+            notify_all: true,
+        }, { headers: clickupHeaders });
+    }
+    return assigneeIds.length;
+}
 async function assignMarketingToApprovedTask(taskId) {
     const marketingAssigneeIds = await resolveMarketingUserIds();
     if (!marketingAssigneeIds.length) {
@@ -1281,6 +1308,7 @@ app.post('/create-task', async (req, res) => {
         const warnings = [];
         const routeToMarketing = (0, clickup_handoff_rules_1.isIsabellaSubmission)(submitterEmail);
         let marketingAssigneeIds = [];
+        let reviewerAssigneeIds = [];
         if (routeToMarketing) {
             try {
                 marketingAssigneeIds = await resolveMarketingUserIds();
@@ -1340,7 +1368,7 @@ app.post('/create-task', async (req, res) => {
             }
         }
         else if (CLICKUP_ASSIGNEE_ID) {
-            const reviewerAssigneeIds = parseClickUpUserIds(CLICKUP_ASSIGNEE_ID);
+            reviewerAssigneeIds = parseClickUpUserIds(CLICKUP_ASSIGNEE_ID);
             if (reviewerAssigneeIds.length) {
                 taskPayload.assignees = reviewerAssigneeIds;
                 taskPayload.notify_all = true;
@@ -1359,6 +1387,25 @@ app.post('/create-task', async (req, res) => {
         const taskId = taskResponse.data.id;
         console.log(`ClickUp task created: ${taskId}`);
         let attachmentUploadFailed = false;
+        if (!routeToMarketing && reviewerAssigneeIds.length) {
+            try {
+                const notificationCount = await addReviewerNotificationCommentsToTask(taskId, reviewerAssigneeIds, {
+                    projectName,
+                    property,
+                    servicePeriod,
+                    dateNeeded,
+                    submissionId,
+                });
+                if (notificationCount > 0) {
+                    console.log(`Added ${notificationCount} ClickUp reviewer notification comment(s) to task ${taskId}`);
+                }
+            }
+            catch (notificationError) {
+                const errorDetail = notificationError.response?.data?.err || notificationError.message;
+                warnings.push(`Reviewer notification comment failed: ${errorDetail}`);
+                console.error(`Failed to add reviewer notification comment to ClickUp task ${taskId}:`, errorDetail);
+            }
+        }
         try {
             const watcherCount = await addMarketingWatchersToTask(taskId);
             if (watcherCount > 0) {

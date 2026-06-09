@@ -19,23 +19,24 @@ importScripts('/js/diff-core.js', '/js/redline-preview.js');
                 payload.baselinePreviewText || '',
                 payload.baselineAnnotations || []
             );
-            const baselineResolverText = payload.baselineResolverText ||
-                redlinePreview.stripExistingDeletions(payload.baselinePreviewText || '', annotationMap);
-            const resolvedPreview = redlinePreview.resolveExistingAnnotationRevisions(
-                baselineResolverText || payload.baselineText || '',
-                payload.revisedText || '',
-                payload.baselinePreviewText || payload.baselineText || '',
-                annotationMap,
-                { baselineHtml: payload.baselineHtml || '' }
-            );
+            const canonicalBaseline = payload.baselineOriginalText
+                ? {
+                    originalText: payload.baselineOriginalText || '',
+                    originalHtml: payload.baselineOriginalHtml || payload.baselineHtml || '',
+                }
+                : redlinePreview.buildRevisionComparisonFromAnnotatedPreview(
+                    payload.baselinePreviewText || payload.baselineText || '',
+                    annotationMap,
+                    {
+                        baselineText: payload.baselineText || '',
+                        baselineHtml: payload.baselineHtml || '',
+                    }
+                );
             const rendered = redlinePreview.renderPersistentPreview(
-                resolvedPreview.basePreviewText,
-                resolvedPreview.revisedPreviewText,
+                canonicalBaseline.originalText || payload.baselineText || '',
+                payload.revisedText || '',
                 {
-                    annotationMap: resolvedPreview.annotationMap,
-                    revisedAnnotationMap: resolvedPreview.revisedAnnotationMap,
-                    includeExistingAnnotations: true,
-                    baselineHtml: resolvedPreview.baselineHtml || '',
+                    baselineHtml: canonicalBaseline.originalHtml || payload.baselineHtml || '',
                     revisedHtml: payload.revisedHtml || '',
                 }
             );

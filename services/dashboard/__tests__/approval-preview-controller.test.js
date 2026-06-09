@@ -168,6 +168,26 @@ describe('approval preview controller worker queue', () => {
         expect(preview.innerHTML).toBe('<p>right request</p>');
     });
 
+    test('sends canonical original text to the worker instead of replay resolver state', async () => {
+        const { controller } = createController();
+        const worker = FakeWorker.instances[0];
+
+        const render = controller.renderLatestPreview({
+            revisedText: 'ALPHA 14',
+            revisedHtml: '<p>ALPHA 14</p>',
+            forceRender: true,
+        });
+        const message = worker.messages[0];
+
+        expect(message.baselineOriginalText).toBe('ALPHA 12');
+        expect(message.baselineOriginalHtml).toContain('ALPHA 12');
+        expect(message).not.toHaveProperty('baselineResolverText');
+        expect(message).toHaveProperty('baselinePreviewText', 'ALPHA 1213');
+
+        worker.respond(message, { html: '<p>canonical</p>' });
+        await expect(render).resolves.toMatchObject({ html: '<p>canonical</p>' });
+    });
+
     test('times out a stuck worker render and clears the loading state', async () => {
         const { controller, loading, diffSummary } = createController();
         const worker = FakeWorker.instances[0];

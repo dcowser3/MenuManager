@@ -264,6 +264,20 @@ describe('browser approval finalize route', () => {
         expect(createCall[1].assignees).toEqual([114079264]);
         expect(createCall[1].notify_all).toBe(true);
 
+        const notificationCommentCall = axios.post.mock.calls.find((call) =>
+            String(call[0]).includes('https://api.clickup.com/api/v2/task/cu_123/comment')
+        );
+        expect(notificationCommentCall).toBeTruthy();
+        expect(notificationCommentCall[1]).toEqual({
+            comment_text: [
+                'New Menu Manager submission is ready for Isabella review.',
+                'Project: Spring Menu',
+                'Property: Toro - Chicago',
+            ].join('\n'),
+            assignee: 114079264,
+            notify_all: true,
+        });
+
         const groupCall = axios.get.mock.calls.find((call) =>
             String(call[0]).includes('https://api.clickup.com/api/v2/group?')
         );
@@ -276,6 +290,36 @@ describe('browser approval finalize route', () => {
         );
         expect(watcherCall).toBeTruthy();
         expect(watcherCall[1]).toEqual({ watchers: { add: [201, 202], rem: [] } });
+    });
+
+    test('keeps task creation successful when reviewer notification comment fails', async () => {
+        axios.post.mockImplementation(async (url) => {
+            const urlStr = String(url);
+            if (urlStr.includes('https://api.clickup.com/api/v2/list/list_123/task')) {
+                return { data: { id: 'cu_notify_fail' } };
+            }
+            if (urlStr.includes('https://api.clickup.com/api/v2/task/cu_notify_fail/comment')) {
+                const error = new Error('ClickUp comment rejected');
+                error.response = { data: { err: 'comment permission denied' } };
+                throw error;
+            }
+            return { data: {} };
+        });
+
+        const response = await invokeJsonHandler(createTaskHandler, {
+            body: {
+                submissionId: 'sub-notify-fail',
+                submitterName: 'Chef Test',
+                submitterEmail: 'chef@example.com',
+                projectName: 'Spring Menu',
+                property: 'Toro - Chicago',
+            },
+        });
+
+        expect(response.status).toBe(200);
+        expect(response.body.success).toBe(true);
+        expect(response.body.taskId).toBe('cu_notify_fail');
+        expect(response.body.warning).toContain('Reviewer notification comment failed: comment permission denied');
     });
 
     test('routes Isabella submissions directly to To Do with Marketing as assignees when corrections status is approved', async () => {
@@ -330,6 +374,9 @@ describe('browser approval finalize route', () => {
         expect(createCall[1].assignees).toEqual([201, 202]);
         expect(createCall[1].assignees).not.toContain(114079264);
         expect(createCall[1].notify_all).toBeUndefined();
+        expect(axios.post.mock.calls.some((call) =>
+            String(call[0]).includes('https://api.clickup.com/api/v2/task/cu_isa/comment')
+        )).toBe(false);
 
         const dbUpdateCall = axios.put.mock.calls.find((call) =>
             String(call[0]).includes('http://localhost:3004/submissions/form-isa')

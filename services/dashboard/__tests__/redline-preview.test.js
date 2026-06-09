@@ -646,6 +646,81 @@ describe('redline preview helpers', () => {
         expect(rendered.deletions).toBe(1);
     });
 
+    test('builds canonical original and fixed text before rendering approval editor changes', () => {
+        const baselinePreviewText = '6oz WagyuMignon FiletPrime MignonTenderloin, charred poblano rajas D 52';
+        const baselineText = 'Mignon Prime Tenderloin, charred poblano rajas D 52';
+        const revisedText = 'Prime Tenderloin, charred poblano rajas D 52';
+        const annotationMap = {};
+
+        function mark(start, end, type) {
+            for (let i = start; i < end; i++) {
+                annotationMap[i] = type;
+            }
+        }
+
+        mark(0, 3, 'del');
+        mark(4, 9, 'del');
+        mark(9, 15, 'ins');
+        mark(16, 21, 'del');
+        mark(21, 26, 'ins');
+        mark(27, 33, 'del');
+        mark(33, 43, 'ins');
+        mark(43, 44, 'ins');
+
+        const comparison = redlinePreview.buildRevisionComparisonFromAnnotatedPreview(
+            baselinePreviewText,
+            annotationMap,
+            {
+                baselineText,
+                baselineHtml: '<p><span class="existing-del">6oz</span> <span class="existing-del">Wagyu</span><span class="existing-ins">Mignon</span> <span class="existing-del">Filet</span><span class="existing-ins">Prime</span> <span class="existing-del">Mignon</span><span class="existing-ins">Tenderloin,</span> charred poblano rajas D 52</p>',
+            }
+        );
+        const rendered = redlinePreview.renderPersistentPreview(comparison.originalText, revisedText, {
+            baselineHtml: comparison.originalHtml,
+        });
+        const renderedText = redlinePreview.previewHtmlToPlainText(rendered.html);
+
+        expect(comparison.originalText).toBe('6oz Wagyu Filet Mignon charred poblano rajas D 52');
+        expect(comparison.currentText).toBe(baselineText);
+        expect(comparison.editorHtml).not.toContain('existing-del');
+        expect(comparison.editorHtml).not.toContain('existing-ins');
+        expect(renderedText).toContain('6oz Wagyu Filet Mignon Prime Tenderloin, charred');
+        expect(renderedText).not.toContain('6oz WagyuMignon FiletPrime6oz');
+        expect(renderedText).not.toContain('WagyuFiletPrime');
+        expect(rendered.html).not.toContain('existing-del');
+        expect(rendered.html).not.toContain('existing-ins');
+    });
+
+    test('does not align separator-only rows with edited dish text', () => {
+        const originalText = [
+            'Tan Burger, bacon morita jam, garlic aioli, lettuce, tomato, red onion, cheddar cheese, fries* D,G 26',
+            '6oz Wagyu Filet Mignon charred poblano rajas, roasted fingerling potato, creamy sun-dried chili sauce * D 52',
+            '-----------------------------------------------------------------------------------------------------',
+            'Three Course Prix Fixe',
+            'choice of one entrada, one plato fuerte and postre 39',
+            'Entradas',
+        ].join('\n');
+        const currentText = [
+            'Tan Burger, bacon morita jam, garlic aioli, lettuce, tomato, red onion, cheddar cheese, fries* D,G 26',
+            'Prime Tenderloin, test* D 52',
+            '-----------------------------------------------------------------------------------------------------',
+            'Three Course Prix Fixe',
+            'choice of one entrada, one plato fuerte and postre 39',
+            'Entradas',
+        ].join('\n');
+
+        const rendered = redlinePreview.renderPersistentPreview(originalText, currentText);
+        const renderedText = redlinePreview.previewHtmlToPlainText(rendered.html);
+
+        expect(renderedText).toContain('Prime Tenderloin, test* D 52');
+        expect(renderedText).toContain('-----------------------------------------------------------------------------------------------------\nThree Course Prix Fixe');
+        expect(rendered.html).not.toMatch(/persistent-(?:del|ins)[^>]*>Three<\/span>/);
+        expect(rendered.html).not.toMatch(/persistent-(?:del|ins)[^>]*>Course<\/span>/);
+        expect(rendered.html).not.toMatch(/persistent-(?:del|ins)[^>]*>Prix<\/span>/);
+        expect(rendered.html).not.toMatch(/persistent-(?:del|ins)[^>]*>Fixe<\/span>/);
+        expect(rendered.html).not.toMatch(/persistent-(?:del|ins)[^>]*>-<\/span>/);
+    });
+
     test('keeps adjacent imported deletion/insertion pairs separated after a new edit', () => {
         const baselinePreviewText = [
             'Chimichanga, adobo marinated chicken, black beans, sour cream, pico de gallo, red pickled onions, cotija cheese, pickled jalapenojalapeño D, G,ET M ,SL 160',

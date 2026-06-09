@@ -302,6 +302,58 @@ async function addMarketingWatchersToTask(taskId: string): Promise<number> {
     return watcherIds.length;
 }
 
+function buildReviewerNotificationComment(input: {
+    projectName?: string;
+    property?: string;
+    servicePeriod?: string;
+    dateNeeded?: string;
+    submissionId?: string;
+}): string {
+    const lines = [
+        'New Menu Manager submission is ready for Isabella review.',
+        input.projectName ? `Project: ${input.projectName}` : '',
+        input.property ? `Property: ${input.property}` : '',
+        input.servicePeriod ? `Service period: ${input.servicePeriod}` : '',
+        input.dateNeeded ? `Date needed: ${input.dateNeeded}` : '',
+        input.submissionId ? `Submission ID: ${input.submissionId}` : '',
+    ].filter(Boolean);
+
+    return lines.join('\n');
+}
+
+async function addReviewerNotificationCommentsToTask(
+    taskId: string,
+    reviewerAssigneeIds: number[],
+    context: {
+        projectName?: string;
+        property?: string;
+        servicePeriod?: string;
+        dateNeeded?: string;
+        submissionId?: string;
+    }
+): Promise<number> {
+    const assigneeIds = uniqueNumbers(reviewerAssigneeIds);
+    if (!assigneeIds.length) {
+        console.warn('No ClickUp reviewer user IDs resolved for review notifications.');
+        return 0;
+    }
+
+    const commentText = buildReviewerNotificationComment(context);
+    for (const assignee of assigneeIds) {
+        await axios.post(
+            `https://api.clickup.com/api/v2/task/${taskId}/comment`,
+            {
+                comment_text: commentText,
+                assignee,
+                notify_all: true,
+            },
+            { headers: clickupHeaders }
+        );
+    }
+
+    return assigneeIds.length;
+}
+
 async function assignMarketingToApprovedTask(taskId: string): Promise<number> {
     const marketingAssigneeIds = await resolveMarketingUserIds();
     if (!marketingAssigneeIds.length) {
@@ -1700,6 +1752,7 @@ app.post('/create-task', async (req, res) => {
         const warnings: string[] = [];
         const routeToMarketing = isIsabellaSubmission(submitterEmail);
         let marketingAssigneeIds: number[] = [];
+        let reviewerAssigneeIds: number[] = [];
         if (routeToMarketing) {
             try {
                 marketingAssigneeIds = await resolveMarketingUserIds();
@@ -1758,7 +1811,7 @@ app.post('/create-task', async (req, res) => {
                 warnings.push('No Marketing user IDs resolved for Isabella submission assignment.');
             }
         } else if (CLICKUP_ASSIGNEE_ID) {
-            const reviewerAssigneeIds = parseClickUpUserIds(CLICKUP_ASSIGNEE_ID);
+            reviewerAssigneeIds = parseClickUpUserIds(CLICKUP_ASSIGNEE_ID);
             if (reviewerAssigneeIds.length) {
                 taskPayload.assignees = reviewerAssigneeIds;
                 taskPayload.notify_all = true;
@@ -1784,6 +1837,25 @@ app.post('/create-task', async (req, res) => {
         console.log(`ClickUp task created: ${taskId}`);
 
         let attachmentUploadFailed = false;
+
+        if (!routeToMarketing && reviewerAssigneeIds.length) {
+            try {
+                const notificationCount = await addReviewerNotificationCommentsToTask(taskId, reviewerAssigneeIds, {
+                    projectName,
+                    property,
+                    servicePeriod,
+                    dateNeeded,
+                    submissionId,
+                });
+                if (notificationCount > 0) {
+                    console.log(`Added ${notificationCount} ClickUp reviewer notification comment(s) to task ${taskId}`);
+                }
+            } catch (notificationError: any) {
+                const errorDetail = notificationError.response?.data?.err || notificationError.message;
+                warnings.push(`Reviewer notification comment failed: ${errorDetail}`);
+                console.error(`Failed to add reviewer notification comment to ClickUp task ${taskId}:`, errorDetail);
+            }
+        }
 
         try {
             const watcherCount = await addMarketingWatchersToTask(taskId);

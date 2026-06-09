@@ -143,7 +143,7 @@ User reviews differences, submits approval
 - **db** depends on: Supabase (optional), local JSON files (fallback)
 - **supabase-client** is a shared library used by db service
 - **diff-core** is a shared JavaScript library used by dashboard and differ for tokenization, token equality, LCS alignment, grouped insert/delete/equal edits, and projecting inline HTML formatting onto corrected menu text.
-- The browser approval editor uses `diff-core` through `redline-preview.js` plus a worker-backed preview controller; it does not call the `differ` network service for each keystroke. The controller keeps one render in flight, coalesces rapid edits to the latest state, ignores stale worker responses, and clears/retries timed-out renders so the right preview cannot remain stuck on its loading state.
+- The browser approval editor uses `diff-core` through `redline-preview.js` plus a worker-backed preview controller; it does not call the `differ` network service for each keystroke. For imported DOCX redlines, the controller first derives canonical original text and fixed/current text from the imported annotations, then renders each live preview as `original -> current editor text`. The controller keeps one render in flight, coalesces rapid edits to the latest state, ignores stale worker responses, and clears/retries timed-out renders so the right preview cannot remain stuck on its loading state.
 
 ## Dashboard Module Notes
 
