@@ -537,6 +537,121 @@
         return clean;
     }
 
+    function stripExistingDeletionsWithAnnotationMap(baseText, annotationMap) {
+        const source = String(baseText || '');
+        const cleanMap = {};
+        let clean = '';
+
+        for (let i = 0; i < source.length; i++) {
+            const annotation = getExistingAnnotationType(annotationMap || {}, i);
+            if (annotation === 'del') {
+                continue;
+            }
+            if (annotation === 'ins') {
+                cleanMap[clean.length] = annotation;
+            }
+            clean += source[i];
+        }
+
+        return { text: clean, annotationMap: cleanMap };
+    }
+
+    function transferCleanAnnotationsToRevised(cleanBaseText, revisedText, cleanAnnotationMap) {
+        const cleanBase = String(cleanBaseText || '');
+        const revised = String(revisedText || '');
+        const sourceMap = cleanAnnotationMap || {};
+        const revisedMap = {};
+
+        if (!Object.keys(sourceMap).length) {
+            return revisedMap;
+        }
+
+        const baseTokens = tokenizeDiffText(cleanBase);
+        const revisedTokens = tokenizeDiffText(revised);
+        if (!baseTokens.length || !revisedTokens.length) {
+            return revisedMap;
+        }
+
+        const lcs = buildTokenLcs(baseTokens, revisedTokens);
+        let baseIdx = 0;
+        let revisedIdx = 0;
+
+        while (baseIdx < baseTokens.length && revisedIdx < revisedTokens.length) {
+            const baseCommon = lcs.commonBase.has(baseIdx);
+            const revisedCommon = lcs.commonRev.has(revisedIdx);
+            const baseToken = baseTokens[baseIdx];
+            const revisedToken = revisedTokens[revisedIdx];
+
+            if (baseCommon && revisedCommon && diffTokensEqual(baseToken, revisedToken)) {
+                const length = Math.min(
+                    baseToken.end - baseToken.start,
+                    revisedToken.end - revisedToken.start
+                );
+                for (let c = 0; c < length; c++) {
+                    const annotation = getExistingAnnotationType(sourceMap, baseToken.start + c);
+                    if (annotation) {
+                        revisedMap[revisedToken.start + c] = annotation;
+                    }
+                }
+                baseIdx++;
+                revisedIdx++;
+                continue;
+            }
+
+            if (baseIdx < baseTokens.length && !baseCommon) {
+                baseIdx++;
+                continue;
+            }
+            if (revisedIdx < revisedTokens.length && !revisedCommon) {
+                revisedIdx++;
+                continue;
+            }
+
+            baseIdx++;
+            revisedIdx++;
+        }
+
+        return revisedMap;
+    }
+
+    function shiftAnnotationMapForInsert(annotationMap, offset, textLength, annotationType) {
+        const nextMap = {};
+        const insertAt = Math.max(0, offset || 0);
+        const insertedLength = Math.max(0, textLength || 0);
+        const nextBoundaries = {};
+
+        Object.keys(annotationMap || {}).forEach(function (key) {
+            const idx = Number(key);
+            if (!Number.isInteger(idx)) return;
+            const nextIdx = idx >= insertAt ? idx + insertedLength : idx;
+            nextMap[nextIdx] = annotationMap[key];
+        });
+
+        const boundaries = annotationMap && annotationMap._boundaries
+            ? annotationMap._boundaries
+            : {};
+        Object.keys(boundaries).forEach(function (key) {
+            const idx = Number(key);
+            if (!Number.isInteger(idx)) return;
+            const nextIdx = idx >= insertAt ? idx + insertedLength : idx;
+            nextBoundaries[nextIdx] = true;
+        });
+
+        const type = annotationType === 'del' || annotationType === 'ins' ? annotationType : null;
+        if (type) {
+            for (let i = 0; i < insertedLength; i++) {
+                nextMap[insertAt + i] = type;
+            }
+            nextBoundaries[insertAt] = true;
+            nextBoundaries[insertAt + insertedLength] = true;
+        }
+
+        if (Object.keys(nextBoundaries).length) {
+            nextMap._boundaries = nextBoundaries;
+        }
+        return nextMap;
+    }
+
     function buildExistingDeletionAnchors(baseText, annotationMap) {
         const source = String(baseText || '');
         const anchors = [];
@@ -722,9 +837,10 @@
         return { text: text, annotationMap: nextMap };
     }
 
-    function reinsertExistingDeletionsForGroups(cleanBaseText, revisedText, groups, revertedIndexes, mapOffset) {
+    function reinsertExistingDeletionsForGroups(cleanBaseText, revisedText, groups, revertedIndexes, mapOffset, options) {
         const cleanBase = String(cleanBaseText || '');
         const revised = String(revisedText || '');
+        const settings = options || {};
         const offsetMapper = mapOffset || createBaselineOffsetMapper(cleanBase, revised);
         const reverted = revertedIndexes || new Set();
         const inserts = [];
@@ -770,6 +886,7 @@
         });
 
         let output = revised;
+        let outputAnnotationMap = settings.revisedAnnotationMap || {};
         inserts.forEach(function (insert) {
             const text = buildBoundaryPreservingDeletionText(
                 insert.text,
@@ -779,8 +896,81 @@
                 insert.endsAtLineEnd
             );
             output = output.slice(0, insert.offset) + text + output.slice(insert.offset);
+            outputAnnotationMap = shiftAnnotationMapForInsert(
+                outputAnnotationMap,
+                insert.offset,
+                text.length,
+                'del'
+            );
         });
+        if (settings.returnAnnotationMap) {
+            return {
+                text: output,
+                annotationMap: outputAnnotationMap
+            };
+        }
         return output;
+    }
+
+    function tokenizeAnnotatedDiffText(text, globalOffset, annotationMap) {
+        const tokens = tokenizeDiffText(text);
+        if (!annotationMap || !Object.keys(annotationMap).length) {
+            return tokens;
+        }
+
+        const output = [];
+        tokens.forEach(function (token) {
+            if (!token || token.end <= token.start) return;
+
+            let chunkStart = token.start;
+            let currentType = getExistingAnnotationType(annotationMap, globalOffset + token.start);
+            for (let idx = token.start + 1; idx < token.end; idx++) {
+                const absoluteIdx = globalOffset + idx;
+                const nextType = getExistingAnnotationType(annotationMap, absoluteIdx);
+                if (
+                    nextType === currentType &&
+                    !(annotationMap._boundaries && annotationMap._boundaries[absoluteIdx])
+                ) {
+                    continue;
+                }
+
+                const value = token.value.slice(chunkStart - token.start, idx - token.start);
+                if (value) {
+                    output.push({
+                        value,
+                        start: chunkStart,
+                        end: idx,
+                        type: getDiffTokenTypeForAnnotatedChunk(value, token.type),
+                        normalized: normalizeAnnotatedTokenValue(value),
+                    });
+                }
+                chunkStart = idx;
+                currentType = nextType;
+            }
+
+            const value = token.value.slice(chunkStart - token.start);
+            if (value) {
+                output.push({
+                    value,
+                    start: chunkStart,
+                    end: token.end,
+                    type: getDiffTokenTypeForAnnotatedChunk(value, token.type),
+                    normalized: normalizeAnnotatedTokenValue(value),
+                });
+            }
+        });
+
+        return output;
+    }
+
+    function normalizeAnnotatedTokenValue(value) {
+        const token = tokenizeDiffText(value)[0];
+        return token ? token.normalized : String(value || '');
+    }
+
+    function getDiffTokenTypeForAnnotatedChunk(value, fallbackType) {
+        const token = tokenizeDiffText(value)[0];
+        return token ? token.type : fallbackType;
     }
 
     function collapseRevertedGroupsInHtml(html, revertedIndexes) {
@@ -950,6 +1140,12 @@
         const groups = buildExistingAnnotationGroups(previewBase, annotations);
         const revertedIndexes = new Set();
         const mapOffset = createBaselineOffsetMapper(cleanBase, revised);
+        const cleanBaseAnnotations = stripExistingDeletionsWithAnnotationMap(previewBase, annotations);
+        const revisedAnnotationMap = transferCleanAnnotationsToRevised(
+            cleanBaseAnnotations.text || cleanBase,
+            revised,
+            cleanBaseAnnotations.annotationMap
+        );
 
         groups.forEach(function (group) {
             if (groupWasRevertedToOriginal(group, cleanBase, revised, mapOffset)) {
@@ -958,19 +1154,52 @@
         });
 
         if (!revertedIndexes.size) {
+            const revisedPreview = reinsertExistingDeletionsForGroups(
+                cleanBase,
+                revised,
+                groups,
+                revertedIndexes,
+                mapOffset,
+                {
+                    revisedAnnotationMap,
+                    returnAnnotationMap: true
+                }
+            );
             return {
                 basePreviewText: previewBase,
-                revisedPreviewText: reinsertExistingDeletionsForGroups(cleanBase, revised, groups, revertedIndexes, mapOffset),
+                revisedPreviewText: revisedPreview.text,
                 annotationMap: annotations,
+                revisedAnnotationMap: revisedPreview.annotationMap,
                 baselineHtml: settings.baselineHtml || ''
             };
         }
 
         const resolvedBase = buildResolvedBasePreview(previewBase, annotations, groups, revertedIndexes);
+        const resolvedCleanAnnotations = stripExistingDeletionsWithAnnotationMap(
+            resolvedBase.text,
+            resolvedBase.annotationMap
+        );
+        const resolvedRevisedAnnotationMap = transferCleanAnnotationsToRevised(
+            resolvedCleanAnnotations.text || cleanBase,
+            revised,
+            resolvedCleanAnnotations.annotationMap
+        );
+        const revisedPreview = reinsertExistingDeletionsForGroups(
+            cleanBase,
+            revised,
+            groups,
+            revertedIndexes,
+            mapOffset,
+            {
+                revisedAnnotationMap: resolvedRevisedAnnotationMap,
+                returnAnnotationMap: true
+            }
+        );
         return {
             basePreviewText: resolvedBase.text,
-            revisedPreviewText: reinsertExistingDeletionsForGroups(cleanBase, revised, groups, revertedIndexes, mapOffset),
+            revisedPreviewText: revisedPreview.text,
             annotationMap: resolvedBase.annotationMap,
+            revisedAnnotationMap: revisedPreview.annotationMap,
             baselineHtml: collapseRevertedGroupsInHtml(settings.baselineHtml || '', revertedIndexes)
         };
     }
@@ -1531,6 +1760,7 @@
     function renderPersistentPreview(baseText, revisedText, options) {
         const settings = options || {};
         const annotationMap = settings.annotationMap || {};
+        const revisedAnnotationMap = settings.revisedAnnotationMap || {};
         const includeExistingAnnotations = !!settings.includeExistingAnnotations;
         const baselineHtml = settings.baselineHtml || '';
         const revisedHtml = settings.revisedHtml || '';
@@ -1650,8 +1880,19 @@
                 ].join('<br>');
             }
 
-            const baseTokens = tokenizeDiffText(baseSegment);
-            const revisedTokens = tokenizeDiffText(revisedSegment);
+            const hasRevisedAnnotationMap = !!(
+                revisedAnnotationMap &&
+                Object.keys(revisedAnnotationMap).some(function (key) {
+                    return Number.isInteger(Number(key));
+                })
+            );
+            const shouldUseAnnotatedTokens = includeExistingAnnotations && hasRevisedAnnotationMap;
+            const baseTokens = shouldUseAnnotatedTokens
+                ? tokenizeAnnotatedDiffText(baseSegment, baseOffset, annotationMap)
+                : tokenizeDiffText(baseSegment);
+            const revisedTokens = shouldUseAnnotatedTokens
+                ? tokenizeAnnotatedDiffText(revisedSegment, revisedOffset, revisedAnnotationMap)
+                : tokenizeDiffText(revisedSegment);
             const lcs = buildTokenLcs(baseTokens, revisedTokens);
             let segmentHtml = '';
             let i = 0;

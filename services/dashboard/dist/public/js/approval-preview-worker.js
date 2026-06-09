@@ -33,6 +33,7 @@ importScripts('/js/diff-core.js', '/js/redline-preview.js');
                 resolvedPreview.revisedPreviewText,
                 {
                     annotationMap: resolvedPreview.annotationMap,
+                    revisedAnnotationMap: resolvedPreview.revisedAnnotationMap,
                     includeExistingAnnotations: true,
                     baselineHtml: resolvedPreview.baselineHtml || '',
                     revisedHtml: payload.revisedHtml || '',

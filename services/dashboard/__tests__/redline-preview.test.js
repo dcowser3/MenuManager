@@ -603,6 +603,49 @@ describe('redline preview helpers', () => {
         expect(rendered.deletions).toBe(0);
     });
 
+    test('keeps adjacent imported replacement tokens from duplicating after deleting one accepted word', () => {
+        const baselinePreviewText = '6oz WagyuMignon FiletPrime MignonTenderloin, charred poblano rajas D 52';
+        const baselineText = ' Mignon Prime Tenderloin, charred poblano rajas D 52';
+        const revisedText = ' Prime Tenderloin, charred poblano rajas D 52';
+        const annotationMap = {};
+
+        function mark(start, end, type) {
+            for (let i = start; i < end; i++) {
+                annotationMap[i] = type;
+            }
+        }
+
+        mark(0, 3, 'del');
+        mark(4, 9, 'del');
+        mark(9, 15, 'ins');
+        mark(16, 21, 'del');
+        mark(21, 26, 'ins');
+        mark(27, 33, 'del');
+        mark(33, 43, 'ins');
+        mark(43, 44, 'ins');
+
+        const resolved = redlinePreview.resolveExistingAnnotationRevisions(
+            baselineText,
+            revisedText,
+            baselinePreviewText,
+            annotationMap
+        );
+        const rendered = redlinePreview.renderPersistentPreview(resolved.basePreviewText, resolved.revisedPreviewText, {
+            annotationMap: resolved.annotationMap,
+            revisedAnnotationMap: resolved.revisedAnnotationMap,
+            includeExistingAnnotations: true,
+        });
+        const renderedText = redlinePreview.previewHtmlToPlainText(rendered.html);
+
+        expect(renderedText).toContain('6oz WagyuMignon FiletPrime MignonTenderloin, charred');
+        expect(renderedText).not.toContain('6oz WagyuMignon FiletPrime6oz');
+        expect(renderedText).not.toContain('6ozWagyuFiletPrime');
+        expect(renderedText).not.toContain('WagyuFiletPrime');
+        expect(rendered.html).not.toContain('<span class="persistent-ins">WagyuFilet</span>');
+        expect(rendered.insertions).toBe(0);
+        expect(rendered.deletions).toBe(1);
+    });
+
     test('keeps adjacent imported deletion/insertion pairs separated after a new edit', () => {
         const baselinePreviewText = [
             'Chimichanga, adobo marinated chicken, black beans, sour cream, pico de gallo, red pickled onions, cotija cheese, pickled jalapenojalapeño D, G,ET M ,SL 160',

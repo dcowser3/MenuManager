@@ -141,6 +141,7 @@
                 resolvedPreview.revisedPreviewText,
                 {
                     annotationMap: resolvedPreview.annotationMap,
+                    revisedAnnotationMap: resolvedPreview.revisedAnnotationMap,
                     includeExistingAnnotations: true,
                     baselineHtml: resolvedPreview.baselineHtml || '',
                     revisedHtml,

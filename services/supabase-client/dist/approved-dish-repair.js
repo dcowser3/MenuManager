@@ -306,6 +306,7 @@ async function loadActiveApprovedDishRows(supabase) {
             .order('service_period', { ascending: true })
             .order('menu_category', { ascending: true })
             .order('dish_name', { ascending: true })
+            .order('id', { ascending: true })
             .range(from, from + PAGE_SIZE - 1);
         if (error) {
             throw new Error(`Failed to load active approved dishes: ${error.message}`);
