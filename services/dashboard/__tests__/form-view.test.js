@@ -177,8 +177,10 @@ describe('dashboard form modification source chooser', () => {
 
         expect(template).toContain('If this keeps happening or blocks your submission, email');
         expect(template).toContain('supportLink.href = \'mailto:<%= supportEmail %>\';');
-        expect(template).toContain('If you are stuck, email <a href="mailto:<%= supportEmail %>"><%= supportEmail %></a>.');
-        expect(template).toContain('Need help? Email <a href="mailto:<%= supportEmail %>"><%= supportEmail %></a>.');
+        expect(template).toContain('include screenshots with your email');
+        expect(template).toContain('If you are stuck, email <a href="mailto:<%= supportEmail %>"><%= supportEmail %></a> and include screenshots with your email.');
+        expect(template).toContain('Need help? Email <a href="mailto:<%= supportEmail %>"><%= supportEmail %></a> and include screenshots with your email.');
+        expect(template).toContain('Please fill in all required fields. Missing fields are highlighted below.');
     });
 
     test('allows final submit after edits made following the second AI check', () => {

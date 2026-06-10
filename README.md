@@ -67,8 +67,8 @@ Menu Manager is an AI-powered service designed to automate the review process fo
 - Rich-text form submissions above Express's default 100 KB JSON body limit are accepted by the dashboard and DB services; override `JSON_BODY_LIMIT`, `DASHBOARD_JSON_BODY_LIMIT`, or `DB_JSON_BODY_LIMIT` only when deployment needs a different cap
 - Public form attempts now emit lightweight `form_attempt_logs` telemetry for baseline uploads, Basic AI Check, final submit, and parser-level `413` failures so failed preserve-redlines submissions can be diagnosed even when no final submission row exists
 - Production public-form failure events also email `FORM_ATTEMPT_ALERT_EMAIL`, defaulting to `dcowser@richardsandoval.com`, through the dashboard SMTP transport
-- Required-field validation now highlights missing submitter, project-details, and approval inputs directly in the form
-- The submission form footer and blocking/red form errors list `PUBLIC_FORM_SUPPORT_EMAIL` (default `dcowser@richardsandoval.com`) as the support contact for help.
+- Required-field validation now highlights missing submitter, project-details, and approval inputs directly in the form, and the top required-fields alert tells submitters that missing fields are highlighted below.
+- The submission form footer and blocking/red form errors list `PUBLIC_FORM_SUPPORT_EMAIL` (default `dcowser@richardsandoval.com`) as the support contact for help and ask submitters to include screenshots with support emails.
 - Isabella's review queue is available by direct link at `/reviews` (legacy `/review-queue` still redirects there), but it is intentionally not linked from the public welcome dashboard and `/dashboard` now returns to the welcome screen. The queue lists submissions whose Menu Manager DB status still needs human review and links each row to the browser approval editor. Isabella-submitted direct handoffs that have already been sent to ClickUp/Marketing are excluded from this queue.
 - Notification system
 - Approved dishes are extracted automatically when the ClickUp-reviewed DOCX is marked approved

@@ -27,7 +27,7 @@ All variables are configured in `.env` at the project root. See `.env.example` f
 | `INTERNAL_REVIEWER_EMAIL` | Email address that receives internal review notifications |
 | `ALERT_EMAIL` | Email address that receives system alert emails such as SharePoint upload, webhook, and extraction failures |
 | `FORM_ATTEMPT_ALERT_EMAIL` | Email address that receives production public-form failure alerts such as `413` submit errors (default: `dcowser@richardsandoval.com`) |
-| `PUBLIC_FORM_SUPPORT_EMAIL` | Email address shown to submitters in the form footer and blocking/red form errors (default: `dcowser@richardsandoval.com`) |
+| `PUBLIC_FORM_SUPPORT_EMAIL` | Email address shown to submitters in the form footer and blocking/red form errors; support copy asks submitters to include screenshots with the email (default: `dcowser@richardsandoval.com`) |
 | `AI_REVIEW_MODEL` | OpenAI model used by AI review service (default: `gpt-4o-mini`) |
 | `APPROVED_DISH_AI_QUALITY_TIMEOUT_MS` | DB-service timeout in milliseconds when asking ai-review to classify questionable extracted dish rows (default: `20000`) |
 | `BASIC_AI_CHECK_TIMEOUT_MS` | Dashboard timeout in milliseconds for background public-form Basic AI Check calls to ai-review (default: `120000`; falls back to `AI_REVIEW_QA_TIMEOUT_MS` if set) |

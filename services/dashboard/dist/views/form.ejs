@@ -2222,7 +2222,7 @@
                     Menu was edited after AI check. Re-run AI Check before submitting.
                 </div>
                 <div id="criticalErrorBanner" class="critical-error-banner">
-                    Resolve or override all critical errors before submitting. If you are stuck, email <a href="mailto:<%= supportEmail %>"><%= supportEmail %></a>.
+                    Resolve or override all critical errors before submitting. If you are stuck, email <a href="mailto:<%= supportEmail %>"><%= supportEmail %></a> and include screenshots with your email.
                 </div>
                 <button id="submitBtn" class="btn btn-success" onclick="submitMenu()">
                     Submit Menu for Review
@@ -2232,7 +2232,7 @@
     </div>
 
     <footer class="support-footer">
-        Need help? Email <a href="mailto:<%= supportEmail %>"><%= supportEmail %></a>.
+        Need help? Email <a href="mailto:<%= supportEmail %>"><%= supportEmail %></a> and include screenshots with your email.
     </footer>
 
     <!-- Fullscreen Menu View Modal -->
@@ -5001,12 +5001,12 @@
             if (type === 'error') {
                 const support = document.createElement('span');
                 support.className = 'alert-support';
-                support.appendChild(document.createTextNode('If this keeps happening or blocks your submission, email '));
+                support.appendChild(document.createTextNode(' If this keeps happening or blocks your submission, email '));
                 const supportLink = document.createElement('a');
                 supportLink.href = 'mailto:<%= supportEmail %>';
                 supportLink.textContent = '<%= supportEmail %>';
                 support.appendChild(supportLink);
-                support.appendChild(document.createTextNode('.'));
+                support.appendChild(document.createTextNode(' and include screenshots with your email.'));
                 alert.appendChild(support);
             }
 
@@ -5109,7 +5109,7 @@
             const approvalValid = applyApprovalFieldValidationErrors();
 
             if (submitterMissing || projectFieldsMissing || !approvalValid || !menuContent) {
-                showAlert('Please fill in all required fields', 'error');
+                showAlert('Please fill in all required fields. Missing fields are highlighted below.', 'error');
                 if (submitterMissing) {
                     window.scrollTo({ top: 0, behavior: 'smooth' });
                 } else if (projectFieldsMissing || !menuContent) {

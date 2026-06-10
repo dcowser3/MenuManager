@@ -75,6 +75,22 @@ function mergeFooterText(...values: string[]): string {
     return lines.join('\n');
 }
 
+function hasRequiredSubmissionValue(value: unknown): boolean {
+    if (value === null || value === undefined) return false;
+    if (typeof value === 'string') return value.trim().length > 0;
+    return !!value;
+}
+
+export function getMissingRequiredSubmissionFieldLabels(fields: Record<string, unknown>): string[] {
+    return Object.entries(fields)
+        .filter(([, value]) => !hasRequiredSubmissionValue(value))
+        .map(([label]) => label);
+}
+
+function buildMissingRequiredSubmissionFieldsError(labels: string[]): string {
+    return `Please complete these required fields: ${labels.join(', ')}.`;
+}
+
 export function createSubmissionWorkflowHandlers(deps: SubmissionWorkflowDeps) {
     const publicSupportEmail = deps.PUBLIC_FORM_SUPPORT_EMAIL || 'dcowser@richardsandoval.com';
 
@@ -216,8 +232,25 @@ export function createSubmissionWorkflowHandlers(deps: SubmissionWorkflowDeps) {
             const propertyCatalog = await deps.getPropertyCatalogFromDb();
             const normalizedCityCountry = deps.resolveCityCountryFromCatalog(normalizedProperty, propertyCatalog) || safeCityCountryInput;
 
-            if (!safeSubmitterName || !safeSubmitterEmail || !safeSubmitterJobTitle || !safeProjectName || !normalizedProperty || !safeOrientation || !safeMenuType || !safeServicePeriod || !safeTemplateType || !safeDateNeeded || !safeAssetType || !safeMenuContent) {
-                return res.status(400).json({ error: 'All fields are required' });
+            const missingRequiredFields = getMissingRequiredSubmissionFieldLabels({
+                'submitter name': safeSubmitterName,
+                'submitter email': safeSubmitterEmail,
+                'submitter job title': safeSubmitterJobTitle,
+                'project name': safeProjectName,
+                property: normalizedProperty,
+                orientation: safeOrientation,
+                'menu type': safeMenuType,
+                'service period': safeServicePeriod,
+                'template type': safeTemplateType,
+                'date needed': safeDateNeeded,
+                'asset type': safeAssetType,
+                'menu content': safeMenuContent,
+            });
+            if (missingRequiredFields.length) {
+                return res.status(400).json({
+                    error: buildMissingRequiredSubmissionFieldsError(missingRequiredFields),
+                    missingFields: missingRequiredFields,
+                });
             }
             if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(safeSubmitterEmail)) {
                 return res.status(400).json({ error: 'A valid submitter email is required' });
@@ -234,18 +267,49 @@ export function createSubmissionWorkflowHandlers(deps: SubmissionWorkflowDeps) {
                     error: `Turnaround days must be at least ${minTurnaroundDays} for ${safeSubmissionMode === 'modification' ? 'modification' : 'new'} submissions`
                 });
             }
-            if (wantsDigital && (!digitalWidth || !digitalHeight)) {
-                return res.status(400).json({ error: 'Digital width and height are required' });
+            if (wantsDigital) {
+                const missingDigitalFields = getMissingRequiredSubmissionFieldLabels({
+                    'digital width': digitalWidth,
+                    'digital height': digitalHeight,
+                });
+                if (missingDigitalFields.length) {
+                    return res.status(400).json({
+                        error: buildMissingRequiredSubmissionFieldsError(missingDigitalFields),
+                        missingFields: missingDigitalFields,
+                    });
+                }
             }
             if (wantsPrint) {
-                if (!printRegion || !folded || !cropMarks || !bleedMarks || !fileSizeLimit) {
-                    return res.status(400).json({ error: 'All print fields are required for print assets' });
+                const missingPrintFields = getMissingRequiredSubmissionFieldLabels({
+                    'print region': printRegion,
+                    folded,
+                    'crop marks': cropMarks,
+                    'bleed marks': bleedMarks,
+                    'file size limit': fileSizeLimit,
+                });
+                if (missingPrintFields.length) {
+                    return res.status(400).json({
+                        error: buildMissingRequiredSubmissionFieldsError(missingPrintFields),
+                        missingFields: missingPrintFields,
+                    });
                 }
-                if (printRegion === 'US' && (!printWidth || !printHeight)) {
-                    return res.status(400).json({ error: 'US print requires print width and height' });
+                if (printRegion === 'US') {
+                    const missingUsPrintFields = getMissingRequiredSubmissionFieldLabels({
+                        'print width': printWidth,
+                        'print height': printHeight,
+                    });
+                    if (missingUsPrintFields.length) {
+                        return res.status(400).json({
+                            error: buildMissingRequiredSubmissionFieldsError(missingUsPrintFields),
+                            missingFields: missingUsPrintFields,
+                        });
+                    }
                 }
                 if (printRegion === 'NON_US' && !printSize) {
-                    return res.status(400).json({ error: 'Non-US print requires A-size selection' });
+                    return res.status(400).json({
+                        error: buildMissingRequiredSubmissionFieldsError(['A-size selection']),
+                        missingFields: ['A-size selection'],
+                    });
                 }
             }
             if (safeSubmissionMode === 'modification' && !safeRevisionBaseSubmissionId && !safeRevisionBaselineDocPath) {

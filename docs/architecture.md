@@ -40,7 +40,7 @@ Chef opens web form (/form)
   ▼
 Fills form (submitter info, project details, menu type, service period, approval attestation, menu content)
   Note: property must be selected from canonical list; separate free-text location field is removed.
-  Client validation marks missing required inputs in submitter, project-details, and approval sections before submission.
+  Client validation marks missing required inputs in submitter, project-details, and approval sections before submission, and the main required-fields alert tells submitters those fields are highlighted below.
   │
   ▼
 Runs AI Check
@@ -163,7 +163,7 @@ The approval editor has a standalone Venga redline fixture harness in `scripts/a
 The public form also emits compact `form_attempt_logs` telemetry keyed by a browser-generated attempt id. Baseline upload, preserve-redlines extraction, Basic AI Check, final submit, and parser-level `413` events record mode/source metadata, payload length estimates, and critical AI suggestions without persisting full menu bodies.
 Basic AI Check treats the model's corrected-menu block as untrusted generated text. The prompt asks the model to preserve every submitted line in order, and the dashboard applies a structure guard before rendering the response: if the corrected text loses too many original tokens, becomes much shorter, or drops many lines, the dashboard falls back to the submitted text while keeping review suggestions.
 Brand-new menu submissions can import a DOCX through `/api/form/menu-doc-upload`. That route shares the clean DOCX extraction handler with `/api/modification/baseline-upload`, then the browser fills the menu editor, detected project fields, allergen key, and raw-food notice controls before Basic AI Check.
-The submission form footer shows `dcowser@richardsandoval.com` as the support contact for submitter help.
+The submission form footer shows `dcowser@richardsandoval.com` as the support contact for submitter help and asks submitters to include screenshots with support emails.
 
 ## ClickUp Integration Module Notes
 

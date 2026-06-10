@@ -347,6 +347,24 @@ describe('Dashboard Modification Workflow (local, mocked externals)', () => {
         expect(submissionCall[1].menu_content_html).toContain('Guacamole with roasted poblano salsa');
     });
 
+    test('lists missing required fields when submit validation fails', async () => {
+        const response = await invokeJsonHandler(submitHandler, buildNewSubmissionPayload({
+            submitterEmail: '',
+            projectName: '',
+            assetType: '',
+            menuContent: '',
+        }));
+
+        expect(response.status).toBe(400);
+        expect(response.body).toEqual({
+            error: 'Please complete these required fields: submitter email, project name, asset type, menu content.',
+            missingFields: ['submitter email', 'project name', 'asset type', 'menu content'],
+        });
+        expect(mockedAxios.post.mock.calls.some((c) =>
+            String(c[0]).includes('/submissions')
+        )).toBe(false);
+    });
+
     test('accepts modification submission using DB baseline and persists revision fields', async () => {
         const payload = {
             submitterName: 'Chef Test',
