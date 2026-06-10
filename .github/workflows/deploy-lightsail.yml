@@ -59,6 +59,9 @@ jobs:
 
           ssh \
             -i ~/.ssh/lightsail_deploy_key \
+            -o ServerAliveInterval=30 \
+            -o ServerAliveCountMax=120 \
+            -o TCPKeepAlive=yes \
             -p "$LIGHTSAIL_SSH_PORT" \
             "$LIGHTSAIL_USER@$LIGHTSAIL_HOST" \
             "DEPLOY_PATH=$remote_path DEPLOY_REF=$remote_ref bash -se" <<'REMOTE'

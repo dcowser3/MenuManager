@@ -90,6 +90,8 @@ docker compose up -d --build --remove-orphans
 
 Before rebuilding, the workflow runs `docker system prune -af` to clear unused images and build cache on small Lightsail disks. It does not pass `--volumes`, so the named `/app/tmp` and `/app/logs` volumes are preserved.
 
+The SSH command uses keepalives so long, quiet Docker rebuilds do not drop the GitHub Actions connection.
+
 ### Server assumptions
 
 - The app is already cloned on the Lightsail instance.
