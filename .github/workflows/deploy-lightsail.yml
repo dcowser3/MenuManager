@@ -1,0 +1,96 @@
+name: Deploy to Lightsail
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: lightsail-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy production compose stack
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      LIGHTSAIL_HOST: ${{ secrets.LIGHTSAIL_HOST }}
+      LIGHTSAIL_USER: ${{ secrets.LIGHTSAIL_USER || 'ubuntu' }}
+      LIGHTSAIL_SSH_KEY: ${{ secrets.LIGHTSAIL_SSH_KEY }}
+      LIGHTSAIL_SSH_PORT: ${{ secrets.LIGHTSAIL_SSH_PORT || '22' }}
+      LIGHTSAIL_DEPLOY_PATH: ${{ secrets.LIGHTSAIL_DEPLOY_PATH || '/home/ubuntu/MenuManager' }}
+      LIGHTSAIL_KNOWN_HOSTS: ${{ secrets.LIGHTSAIL_KNOWN_HOSTS }}
+
+    steps:
+      - name: Validate deployment secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${LIGHTSAIL_HOST:?Missing LIGHTSAIL_HOST repository secret}"
+          : "${LIGHTSAIL_USER:?Missing LIGHTSAIL_USER repository secret}"
+          : "${LIGHTSAIL_SSH_KEY:?Missing LIGHTSAIL_SSH_KEY repository secret}"
+          : "${LIGHTSAIL_SSH_PORT:?Missing LIGHTSAIL_SSH_PORT repository secret}"
+          : "${LIGHTSAIL_DEPLOY_PATH:?Missing LIGHTSAIL_DEPLOY_PATH repository secret}"
+
+      - name: Configure SSH
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$LIGHTSAIL_SSH_KEY" > ~/.ssh/lightsail_deploy_key
+          chmod 600 ~/.ssh/lightsail_deploy_key
+
+          if [ -n "$LIGHTSAIL_KNOWN_HOSTS" ]; then
+            printf '%s\n' "$LIGHTSAIL_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          else
+            ssh-keyscan -p "$LIGHTSAIL_SSH_PORT" "$LIGHTSAIL_HOST" > ~/.ssh/known_hosts
+          fi
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Deploy on Lightsail
+        shell: bash
+        run: |
+          set -euo pipefail
+          remote_path="$(printf '%q' "$LIGHTSAIL_DEPLOY_PATH")"
+          remote_ref="$(printf '%q' "$GITHUB_REF_NAME")"
+
+          ssh \
+            -i ~/.ssh/lightsail_deploy_key \
+            -p "$LIGHTSAIL_SSH_PORT" \
+            "$LIGHTSAIL_USER@$LIGHTSAIL_HOST" \
+            "DEPLOY_PATH=$remote_path DEPLOY_REF=$remote_ref bash -se" <<'REMOTE'
+          set -euo pipefail
+
+          cd "$DEPLOY_PATH"
+          git fetch --prune origin
+          git checkout -B "$DEPLOY_REF" "origin/$DEPLOY_REF"
+          git reset --hard "origin/$DEPLOY_REF"
+
+          if docker ps >/dev/null 2>&1; then
+            DOCKER=(docker)
+          elif sudo -n docker ps >/dev/null 2>&1; then
+            DOCKER=(sudo docker)
+          else
+            echo "Docker is not available for this user. Add the deploy user to the docker group or allow passwordless sudo for docker." >&2
+            exit 1
+          fi
+
+          if "${DOCKER[@]}" compose version >/dev/null 2>&1; then
+            COMPOSE=("${DOCKER[@]}" compose)
+          elif command -v docker-compose >/dev/null 2>&1; then
+            COMPOSE=(docker-compose)
+          else
+            echo "Docker Compose is not installed. Install the docker compose plugin or docker-compose." >&2
+            exit 1
+          fi
+
+          "${COMPOSE[@]}" up -d --build --remove-orphans
+          "${COMPOSE[@]}" ps
+
+          if command -v curl >/dev/null 2>&1; then
+            curl -fsS --retry 10 --retry-connrefused --retry-delay 3 http://localhost:3005/ >/dev/null
+          fi
+          REMOTE

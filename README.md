@@ -34,7 +34,7 @@ Menu Manager is an AI-powered service designed to automate the review process fo
 - Required service-period classification on submission (`breakfast`, `brunch`, `lunch`, `dinner`, `happy_hour`, `holiday`, `other`)
 - AI-powered two-tier review (general QA + detailed corrections)
 - Basic AI Check runs deterministic pre-AI corrections before calling the model: approved exact spelling/diacritic replacements, allergen-code formatting, strong raw-item markers with the asterisk attached to the last dish/description word, curated guards promoted from accepted human-review explanations, and accepted human-reviewed correction rules from learning are applied first so the AI prompt can focus on contextual issues. The same deterministic cleanup is reapplied to the model's corrected menu before returning results, and the older post-AI safety net still applies objective fixes the model reports but forgets to place in corrected text, filters false allergen alphabetization suggestions, and preserves a leading standalone `Menu` title.
-- Basic AI Check rejects structurally unsafe corrected-menu responses that are much shorter than the submitted text or omit many submitted words/lines, so a model summary cannot replace the chef's menu content.
+- Basic AI Check rejects structurally unsafe corrected-menu responses that drop any meaningful submitted line, become much shorter than the submitted text, or omit many submitted words/lines, so a model summary or deletion cannot replace the chef's menu content.
 - Basic AI Check also enforces price integrity after the model responds: if the AI adds a price to an unpriced line or changes an existing submitted price value, the backend removes/restores that price before showing the corrected menu and keeps or creates the critical Missing Price blocker for human review.
 - Basic AI Check treats a bare trailing whole number as a valid item price even when the item has no allergen-code cluster, and it can suppress false Missing Price suggestions when a model wraps the item description onto a continuation line.
 - Basic AI Check suppresses missing-price false positives on add-on rows when an option already has a same-line price, such as `add chorizo 5 | mushrooms V 4`.
@@ -467,7 +467,7 @@ Additional notes:
 - `CLAUDE.md` — Project map and agent conventions (~66 lines)
 - `docs/` — Detailed documentation (architecture, design decisions, environment, roadmap)
 - `docs/design-docs/` — Feature design documents (ClickUp, critical errors, autofill, etc.)
-- `docs/aws-deployment.md` — AWS deployment guide (EC2 + Docker Compose, ECS notes)
+- `docs/aws-deployment.md` — AWS deployment guide (Lightsail/EC2 + Docker Compose, GitHub Actions auto-deploys, ECS notes)
 - `archive/` — Historical documentation from Phase 1
 
 ## Running Tests

@@ -2605,6 +2605,7 @@ Note: Use ONLY these allergen codes when checking allergen compliance. Do not us
         // Call AI Review service's QA endpoint
         let finalPrompt = qaPrompt;
         finalPrompt = `${finalPrompt}\n\nIMPORTANT CORRECTED MENU STRUCTURE RULES:\n- The CORRECTED MENU section must contain every submitted menu line in the same order.\n- Do not summarize, shorten, condense, omit, merge, reorder, or rewrite the menu structure.\n- Do not add section headings or line breaks that were not in the submitted menu.\n- Apply only high-confidence corrections inline and leave all other text unchanged.`;
+        finalPrompt = `${finalPrompt}\n- Never delete submitted dishes, beverages, options, headings, or standalone item lines. If a line seems wrong, duplicated, invalid, or not orderable, leave it in CORRECTED MENU and report the issue in SUGGESTIONS.`;
         diagnosticsPromptSections.push('corrected_menu_structure_rules');
         if (BASIC_AI_PRECHECK_ENABLED) {
             finalPrompt = `${finalPrompt}\n\nIMPORTANT PRE-AI DETERMINISTIC CHECKS:\n- Allowlisted spelling, diacritic, allergen-code formatting, raw-marker placement, and accepted correction-rule replacements have already been applied before this AI review.\n- Do not re-report those already-applied deterministic edits as remaining suggestions.\n- Focus on remaining semantic, contextual, uncertain, or reviewer-needed issues.`;

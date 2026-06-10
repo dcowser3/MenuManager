@@ -38,6 +38,62 @@ describe('assessCorrectedMenuStructure', () => {
         expect(result.reasons).toContain('too_few_lines');
     });
 
+    it('rejects a corrected menu that drops one submitted beverage option', () => {
+        const original = [
+            'BEVERAGE OPTIONS',
+            'MIX AND MATCH BEER BUCKETS - 35',
+            '(choose 5 of the following)',
+            'Dos Equis Lager',
+            'Modelo Especial',
+            'Modelo Negra',
+            'Corona Extra',
+            'Corona Light',
+            'Monopolio IPA',
+            'Tecate',
+            'Pacifico',
+            'Non Alcoholic',
+            'Athletic N/A',
+            'Lagunitas N/A',
+            'Margarita pitchers - 65',
+            '(add flavor for 5 - Strawberry, Passion Fruit, Maya, or Mango)',
+        ].join('\n');
+        const corrected = [
+            'BEVERAGE OPTIONS',
+            'MIX AND MATCH CERVEZA BUCKETS - 35',
+            '(choose 5 of the following)',
+            'Dos Equis Lager',
+            'Modelo Especial',
+            'Modelo Negra',
+            'Corona Extra',
+            'Corona Light',
+            'Monopolio IPA',
+            'Tecate',
+            'Pacifico',
+            'Non Alcoholic',
+            'Athletic N/A',
+            'Margarita pitchers - 65',
+            '(add flavor for 5 - Strawberry, Passion Fruit, Maya, or Mango)',
+        ].join('\n');
+
+        const result = assessCorrectedMenuStructure(original, corrected);
+
+        expect(result.safe).toBe(false);
+        expect(result.reasons).toContain('corrected_menu_dropped_lines');
+        expect(result.reasons).toContain('missing_submitted_line');
+        expect(result.metrics.missingMeaningfulLineSamples).toContain('Lagunitas N/A');
+    });
+
+    it('allows normal one-line spelling corrections without treating the line as dropped', () => {
+        const result = assessCorrectedMenuStructure(
+            'Non Alcoholic\nAheletic N/A\nLagunitas N/A',
+            'Non Alcoholic\nAthletic N/A\nLagunitas N/A'
+        );
+
+        expect(result.safe).toBe(true);
+        expect(result.reasons).toEqual([]);
+        expect(result.metrics.missingMeaningfulLineCount).toBe(0);
+    });
+
     it('rejects a condensed wall-of-text response that omits most submitted words', () => {
         const original = Array.from({ length: 40 }, (_, i) =>
             `Dish ${i + 1} description with avocado corn poblano chili sesame mango coconut allergen code G,V price ${20 + i}`

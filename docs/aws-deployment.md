@@ -54,6 +54,14 @@ docker compose up -d --build
 
 Note: On some Ubuntu images, the command is `docker-compose` (with a dash).
 
+For routine deploys, prefer the combined rebuild/recreate command:
+
+```
+docker compose up -d --build --remove-orphans
+```
+
+This replaces the separate `docker compose build && docker compose up -d` flow while also removing containers for services that were deleted or renamed in `docker-compose.yml`.
+
 Logs:
 ```
 docker compose logs -f dashboard
@@ -71,6 +79,54 @@ volumes:
   - /opt/menumanager/tmp:/app/tmp
   - /opt/menumanager/logs:/app/logs
 ```
+
+## Automated Lightsail Deploys from GitHub
+
+The repository includes `.github/workflows/deploy-lightsail.yml`, which runs on pushes to `main` and can also be started manually from GitHub Actions. The workflow connects to the Lightsail instance over SSH, syncs the server checkout to the pushed commit, and runs:
+
+```
+docker compose up -d --build --remove-orphans
+```
+
+### Server assumptions
+
+- The app is already cloned on the Lightsail instance.
+- The server checkout can already fetch from GitHub with `git pull` or `git fetch`.
+- The deploy user can run Docker either directly or with passwordless `sudo docker`.
+- Production secrets stay in the server-side `.env`; they are not stored in GitHub Actions.
+- Do not edit tracked repo files directly on the server. The workflow uses `git reset --hard origin/main` so the running checkout exactly matches the pushed commit.
+
+### Create a deploy SSH key
+
+Create a dedicated key for GitHub Actions, then add the public key to the Lightsail user's `~/.ssh/authorized_keys`.
+
+```
+ssh-keygen -t ed25519 -C "github-actions-menumanager-lightsail" -f ./menumanager_lightsail_deploy
+ssh-copy-id -i ./menumanager_lightsail_deploy.pub ubuntu@<lightsail-static-ip>
+```
+
+If `ssh-copy-id` is not available, connect to Lightsail and append the `.pub` file contents to `~/.ssh/authorized_keys` for the deploy user.
+
+### Add GitHub repository secrets
+
+In GitHub, open the repo settings and go to **Secrets and variables** -> **Actions**. Add:
+
+| Secret | Example | Notes |
+|--------|---------|-------|
+| `LIGHTSAIL_HOST` | `203.0.113.10` | Use the Lightsail static IP or DNS name. |
+| `LIGHTSAIL_USER` | `ubuntu` | Optional in the workflow, but set it explicitly if your image uses `bitnami`, `ec2-user`, or another user. |
+| `LIGHTSAIL_SSH_KEY` | contents of `menumanager_lightsail_deploy` | Paste the private key, including the BEGIN/END lines. |
+| `LIGHTSAIL_SSH_PORT` | `22` | Optional unless SSH uses a custom port. |
+| `LIGHTSAIL_DEPLOY_PATH` | `/home/ubuntu/MenuManager` | Optional if your repo lives at this default path. |
+| `LIGHTSAIL_KNOWN_HOSTS` | output of `ssh-keyscan -p 22 <host>` | Optional but recommended to pin the server host key. |
+
+Generate the optional known-hosts value with:
+
+```
+ssh-keyscan -p 22 <lightsail-static-ip>
+```
+
+After the secrets are saved, pushing to `main` deploys automatically. To test without a new commit, open **Actions** -> **Deploy to Lightsail** -> **Run workflow**.
 
 ## Option B: EC2 + Docker Compose (More Control)
 

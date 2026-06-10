@@ -878,6 +878,63 @@ describe('Dashboard Modification Workflow (local, mocked externals)', () => {
         });
     });
 
+    test('basic-check rejects AI corrected menus that remove a submitted beverage item', async () => {
+        mockedAxios.post = jest.fn(async (url, payload) => {
+            const urlStr = String(url);
+            if (urlStr.includes('/run-qa-check')) {
+                const reviewedText = (payload && typeof payload.text === 'string') ? payload.text : '';
+                const corrected = reviewedText
+                    .split('\n')
+                    .filter((line) => line.trim() !== 'Lagunitas N/A')
+                    .join('\n');
+                return {
+                    data: {
+                        feedback: `=== CORRECTED MENU ===\n${corrected}\n=== END CORRECTED MENU ===\n=== SUGGESTIONS ===\n[]\n=== END SUGGESTIONS ===`
+                    }
+                };
+            }
+            return { data: {} };
+        });
+
+        const payload = {
+            menuContent: [
+                'BEVERAGE OPTIONS',
+                'MIX AND MATCH BEER BUCKETS - 35',
+                '(choose 5 of the following)',
+                'Dos Equis Lager',
+                'Modelo Especial',
+                'Modelo Negra',
+                'Corona Extra',
+                'Corona Light',
+                'Monopolio IPA',
+                'Tecate',
+                'Pacifico',
+                'Non Alcoholic',
+                'Athletic N/A',
+                'Lagunitas N/A',
+                'Margarita pitchers - 65',
+                '(add flavor for 5 - Strawberry, Passion Fruit, Maya, or Mango)',
+            ].join('\n'),
+            baselineMenuContent: '',
+            reviewMode: 'full',
+            allergens: '',
+            menuType: 'standard',
+            templateType: 'food_beverage',
+        };
+
+        const response = await invokeJsonHandler(basicCheckHandler, payload, {
+            headers: { 'x-menumanager-debug-basic-check': '1' },
+        });
+
+        expect(response.status).toBe(200);
+        expect(response.body.success).toBe(true);
+        expect(response.body.correctedMenu).toBe(payload.menuContent);
+        expect(response.body.hasChanges).toBe(false);
+        expect(response.body.basicCheckDiagnostics.structureGuard.safe).toBe(false);
+        expect(response.body.basicCheckDiagnostics.structureGuard.reasons).toContain('missing_submitted_line');
+        expect(response.body.basicCheckDiagnostics.structureGuard.metrics.missingMeaningfulLineSamples).toContain('Lagunitas N/A');
+    });
+
     test('basic-check suppresses missing-price false positive for priced add-on option rows', async () => {
         mockedAxios.post = jest.fn(async (url, payload) => {
             const urlStr = String(url);
