@@ -88,6 +88,8 @@ The repository includes `.github/workflows/deploy-lightsail.yml`, which runs on 
 docker compose up -d --build --remove-orphans
 ```
 
+Before rebuilding, the workflow runs `docker system prune -af` to clear unused images and build cache on small Lightsail disks. It does not pass `--volumes`, so the named `/app/tmp` and `/app/logs` volumes are preserved.
+
 ### Server assumptions
 
 - The app is already cloned on the Lightsail instance.

@@ -87,6 +87,7 @@ jobs:
             exit 1
           fi
 
+          "${DOCKER[@]}" system prune -af
           "${COMPOSE[@]}" up -d --build --remove-orphans
           "${COMPOSE[@]}" ps
 
