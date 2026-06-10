@@ -178,9 +178,48 @@ describe('dashboard form modification source chooser', () => {
         expect(template).toContain('If this keeps happening or blocks your submission, email');
         expect(template).toContain('supportLink.href = \'mailto:<%= supportEmail %>\';');
         expect(template).toContain('include screenshots with your email');
-        expect(template).toContain('If you are stuck, email <a href="mailto:<%= supportEmail %>"><%= supportEmail %></a> and include screenshots with your email.');
-        expect(template).toContain('Need help? Email <a href="mailto:<%= supportEmail %>"><%= supportEmail %></a> and include screenshots with your email.');
+        expect(template).toContain('If you are stuck,');
+        expect(template).toContain('Need help?');
         expect(template).toContain('Please fill in all required fields. Missing fields are highlighted below.');
+    });
+
+    test('offers a one-click problem report wherever support guidance appears', () => {
+        const template = fs.readFileSync(
+            path.join(__dirname, '..', 'views', 'form.ejs'),
+            'utf8'
+        );
+
+        // Button in error alerts, the critical-error banner, and the footer.
+        expect(template).toContain("reportBtn.textContent = 'Report this problem';");
+        expect(template).toContain("sendProblemReport({ trigger: 'error_alert', context: message, sourceButton: reportBtn })");
+        expect(template).toContain("onclick=\"sendProblemReport({ trigger: 'critical_error_banner', sourceButton: this })\"");
+        expect(template).toContain('id="footerReportProblemBtn"');
+        expect(template).toContain("onclick=\"sendProblemReport({ trigger: 'support_footer', sourceButton: this })\"");
+        // Discloses what gets sent.
+        expect(template).toContain('sends us a screenshot of this page and your form details');
+    });
+
+    test('problem report captures the page and full client state before any UI changes', () => {
+        const template = fs.readFileSync(
+            path.join(__dirname, '..', 'views', 'form.ejs'),
+            'utf8'
+        );
+
+        expect(template).toContain('async function sendProblemReport(options)');
+        expect(template).toContain("script.src = '/js/html2canvas.min.js';");
+        expect(template).toContain('function collectClientStateSnapshot()');
+        expect(template).toContain('function collectFormFieldValues()');
+        expect(template).toContain("fetch('/api/form/error-report'");
+        expect(template).toContain('function recordClientAlert(type, message)');
+        expect(template).toContain('recordClientAlert(type, message);');
+        // Screenshot is captured before the "Sending report…" UI swap so the
+        // open error alert is part of the image.
+        const captureIndex = template.indexOf('screenshotDataUrl = await capturePageScreenshot();');
+        const sendingLabelIndex = template.indexOf("btn.textContent = 'Sending report…';");
+        expect(captureIndex).toBeGreaterThan(-1);
+        expect(sendingLabelIndex).toBeGreaterThan(captureIndex);
+        // The failure alert must not offer another report button (no loops).
+        expect(template).toContain('noReportAction: true');
     });
 
     test('allows final submit after edits made following the second AI check', () => {

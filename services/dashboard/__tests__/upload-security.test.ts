@@ -1,4 +1,9 @@
-import { buildMenuFilename, sanitizeStoredFileName } from '../lib/upload-security';
+import {
+    buildMenuFilename,
+    sanitizePlainTextInput,
+    sanitizeRichTextHtml,
+    sanitizeStoredFileName,
+} from '../lib/upload-security';
 
 describe('buildMenuFilename', () => {
     test('names generated menus as restaurant, service period, and date', () => {
@@ -37,5 +42,23 @@ describe('sanitizeStoredFileName', () => {
     test('preserves Unicode letters while removing reserved filename characters', () => {
         expect(sanitizeStoredFileName('Tān/Dinner:5.14.26.docx')).toBe('Dinner_5.14.26.docx');
         expect(sanitizeStoredFileName('Tān_Dinner_5.14.26.docx')).toBe('Tān_Dinner_5.14.26.docx');
+    });
+
+    test('strips path traversal segments', () => {
+        expect(sanitizeStoredFileName('../../etc/passwd', 'upload.bin')).toBe('passwd');
+        expect(sanitizeStoredFileName('menu?.docx', 'upload.bin')).toBe('menu_.docx');
+    });
+});
+
+describe('sanitizeRichTextHtml', () => {
+    test('removes active content from rich HTML', () => {
+        const html = '<p onclick="alert(1)">Safe</p><script>alert(2)</script><a href="javascript:alert(3)">Link</a>';
+        expect(sanitizeRichTextHtml(html)).toBe('<p>Safe</p><a href="alert(3)">Link</a>');
+    });
+});
+
+describe('sanitizePlainTextInput', () => {
+    test('strips control characters from plain text inputs', () => {
+        expect(sanitizePlainTextInput(' Chef\u0000 Name \n', { multiline: true })).toBe('Chef Name');
     });
 });

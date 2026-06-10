@@ -613,6 +613,24 @@
             text-decoration: underline;
         }
 
+        .report-problem-btn {
+            padding: 2px 10px;
+            border: 1px solid currentColor;
+            background: transparent;
+            color: inherit;
+            cursor: pointer;
+            font-size: 0.85em;
+            border-radius: 3px;
+            font-weight: 600;
+            font-family: inherit;
+            letter-spacing: inherit;
+        }
+
+        .report-problem-btn:disabled {
+            opacity: 0.6;
+            cursor: default;
+        }
+
         .alert-info {
             background: rgba(139, 115, 85, 0.08);
             color: var(--color-secondary);
@@ -2222,7 +2240,9 @@
                     Menu was edited after AI check. Re-run AI Check before submitting.
                 </div>
                 <div id="criticalErrorBanner" class="critical-error-banner">
-                    Resolve or override all critical errors before submitting. If you are stuck, email <a href="mailto:<%= supportEmail %>"><%= supportEmail %></a> and include screenshots with your email.
+                    Resolve or override all critical errors before submitting. If you are stuck,
+                    <button type="button" class="report-problem-btn" onclick="sendProblemReport({ trigger: 'critical_error_banner', sourceButton: this })" title="Emails our support team a screenshot of this page plus the details you have filled in">Report this problem</button>
+                    (sends us a screenshot of this page and your form details) or email <a href="mailto:<%= supportEmail %>"><%= supportEmail %></a>.
                 </div>
                 <button id="submitBtn" class="btn btn-success" onclick="submitMenu()">
                     Submit Menu for Review
@@ -2232,7 +2252,9 @@
     </div>
 
     <footer class="support-footer">
-        Need help? Email <a href="mailto:<%= supportEmail %>"><%= supportEmail %></a> and include screenshots with your email.
+        Need help?
+        <button type="button" id="footerReportProblemBtn" class="report-problem-btn" onclick="sendProblemReport({ trigger: 'support_footer', sourceButton: this })" title="Emails our support team a screenshot of this page plus the details you have filled in">Report this problem</button>
+        (sends us a screenshot of this page and your form details) or email <a href="mailto:<%= supportEmail %>"><%= supportEmail %></a>.
     </footer>
 
     <!-- Fullscreen Menu View Modal -->
@@ -4988,7 +5010,227 @@
             }
         });
 
+        // ===== User problem reports ("Report this problem") =====
+        // Captures a screenshot of the page plus a JSON snapshot of everything
+        // filled in, and emails both to support via /api/form/error-report.
+        const recentClientAlerts = [];
+        const MAX_RECENT_CLIENT_ALERTS = 20;
+        const SCREENSHOT_MAX_DATA_URL_CHARS = 3500000;
+        const REPORT_MAX_BODY_CHARS = 4500000;
+        let problemReportInFlight = false;
+        let html2canvasLoaderPromise = null;
+
+        function recordClientAlert(type, message) {
+            try {
+                recentClientAlerts.push({
+                    time: new Date().toISOString(),
+                    type: `${type || 'info'}`,
+                    message: `${message || ''}`.slice(0, 1000)
+                });
+                if (recentClientAlerts.length > MAX_RECENT_CLIENT_ALERTS) recentClientAlerts.shift();
+            } catch (error) {
+                // Alert telemetry must never break the alert itself.
+            }
+        }
+
+        function loadHtml2Canvas() {
+            if (window.html2canvas) return Promise.resolve(window.html2canvas);
+            if (!html2canvasLoaderPromise) {
+                html2canvasLoaderPromise = new Promise((resolve, reject) => {
+                    const script = document.createElement('script');
+                    script.src = '/js/html2canvas.min.js';
+                    script.onload = () => resolve(window.html2canvas);
+                    script.onerror = () => {
+                        html2canvasLoaderPromise = null;
+                        reject(new Error('screenshot library failed to load'));
+                    };
+                    document.head.appendChild(script);
+                });
+            }
+            return html2canvasLoaderPromise;
+        }
+
+        async function capturePageScreenshot() {
+            const html2canvasFn = await loadHtml2Canvas();
+            const pageWidth = Math.max(document.documentElement.clientWidth || 0, document.body.scrollWidth || 0, 1);
+            // Stay under mobile-Safari canvas area limits on very long pages.
+            const heightCap = Math.min(document.body.scrollHeight || 4000, Math.floor(14000000 / pageWidth));
+            const capture = html2canvasFn(document.body, {
+                useCORS: true,
+                logging: false,
+                scale: 1,
+                height: heightCap,
+                windowWidth: document.documentElement.clientWidth
+            });
+            const timeout = new Promise((_, reject) =>
+                setTimeout(() => reject(new Error('screenshot capture timed out')), 15000));
+            const canvas = await Promise.race([capture, timeout]);
+            let dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+            if (dataUrl.length > SCREENSHOT_MAX_DATA_URL_CHARS) dataUrl = canvas.toDataURL('image/jpeg', 0.55);
+            if (dataUrl.length > SCREENSHOT_MAX_DATA_URL_CHARS) throw new Error('screenshot too large to send');
+            return dataUrl;
+        }
+
+        function collectFormFieldValues() {
+            const fields = {};
+            document.querySelectorAll('input, select, textarea').forEach((el) => {
+                if (el.type === 'password') return;
+                if (el.type === 'radio') {
+                    if (el.checked) fields[el.name || el.id] = el.value;
+                    return;
+                }
+                const key = el.id || el.name;
+                if (!key) return;
+                if (el.type === 'file') {
+                    fields[key] = Array.from(el.files || []).map((file) => `${file.name} (${file.size} bytes)`);
+                } else if (el.type === 'checkbox') {
+                    fields[key] = el.checked;
+                } else {
+                    fields[key] = el.value;
+                }
+            });
+            return fields;
+        }
+
+        function collectClientStateSnapshot() {
+            let menuText = '';
+            let menuHtml = '';
+            try { menuText = (quill && quill.getText) ? quill.getText() : ''; } catch (error) { menuText = `[unavailable: ${error.message}]`; }
+            try { menuHtml = (quill && quill.root) ? quill.root.innerHTML : ''; } catch (error) { menuHtml = `[unavailable: ${error.message}]`; }
+            const persistentPreviewBody = document.getElementById('persistentPreviewBody');
+            const step2 = document.getElementById('step2');
+            return {
+                capturedAt: new Date().toISOString(),
+                attemptId: formAttemptId,
+                page: {
+                    url: window.location.href,
+                    userAgent: navigator.userAgent,
+                    viewport: `${window.innerWidth}x${window.innerHeight} @${window.devicePixelRatio || 1}x`,
+                    visibleStep: (step2 && !step2.classList.contains('hidden')) ? 'step2' : 'step1'
+                },
+                fields: collectFormFieldValues(),
+                menuEditor: {
+                    menuTextLength: menuText.length,
+                    menuHtmlLength: menuHtml.length,
+                    menuText,
+                    menuHtml
+                },
+                appState: {
+                    submissionMode,
+                    revisionSource,
+                    revisionBaselineFileName,
+                    revisionBaselineDocPath,
+                    revisionBaseSubmissionId,
+                    unapprovedMode,
+                    aiCheckHasRun,
+                    aiCheckCompletedCount,
+                    requiresAiRerun,
+                    isEditMode,
+                    criticalErrorOverrides,
+                    persistentDiffSummary,
+                    uploadedMenuImagePath,
+                    uploadedMenuImageFileName,
+                    importedNewMenuDocFileName,
+                    baseMenuTextLength: (baseApprovedMenuContent || '').length,
+                    persistentDiffHtmlLength: persistentPreviewBody ? persistentPreviewBody.innerHTML.length : 0
+                },
+                aiCheck: {
+                    hasRun: aiCheckHasRun,
+                    suggestions: ((aiCheckResults && aiCheckResults.suggestions) || []).slice(0, 50),
+                    hasCriticalErrors: !!(aiCheckResults && aiCheckResults.hasCriticalErrors),
+                    lastDiagnostics: window.lastBasicCheckDiagnostics || null
+                },
+                recentAlerts: recentClientAlerts.slice()
+            };
+        }
+
+        async function sendProblemReport(options) {
+            const opts = options || {};
+            if (problemReportInFlight) return;
+            problemReportInFlight = true;
+            const btn = opts.sourceButton || null;
+            const originalLabel = btn ? btn.textContent : '';
+            if (btn) {
+                btn.disabled = true;
+                btn.textContent = 'Capturing page…';
+            }
+
+            try {
+                // Capture before any UI changes so the screenshot shows exactly
+                // what the user is looking at, including the open error alert.
+                let screenshotDataUrl = null;
+                let screenshotError = '';
+                try {
+                    screenshotDataUrl = await capturePageScreenshot();
+                } catch (error) {
+                    screenshotError = (error && error.message) ? error.message : 'screenshot capture failed';
+                }
+
+                if (btn) btn.textContent = 'Sending report…';
+
+                const state = collectClientStateSnapshot();
+                const payload = {
+                    attemptId: formAttemptId,
+                    trigger: opts.trigger || 'unknown',
+                    context: opts.context || '',
+                    pageUrl: window.location.href,
+                    userAgent: navigator.userAgent,
+                    viewport: state.page.viewport,
+                    submitterName: document.getElementById('submitterName')?.value?.trim() || '',
+                    submitterEmail: document.getElementById('submitterEmail')?.value?.trim() || '',
+                    projectName: document.getElementById('projectName')?.value?.trim() || '',
+                    property: document.getElementById('property')?.value?.trim() || '',
+                    submissionMode,
+                    recentAlerts: recentClientAlerts.slice(),
+                    screenshotError,
+                    screenshotDataUrl,
+                    state
+                };
+
+                let body = JSON.stringify(payload);
+                if (body.length > REPORT_MAX_BODY_CHARS && payload.screenshotDataUrl) {
+                    payload.screenshotDataUrl = null;
+                    payload.screenshotError = 'screenshot dropped: report payload too large';
+                    body = JSON.stringify(payload);
+                }
+                if (body.length > REPORT_MAX_BODY_CHARS) {
+                    payload.state = { droppedReason: 'state snapshot too large', fields: state.fields, appState: state.appState, recentAlerts: state.recentAlerts };
+                    body = JSON.stringify(payload);
+                }
+
+                const response = await fetch('/api/form/error-report', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', ...getAttemptHeaders() },
+                    body
+                });
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok) throw new Error(data.error || `Failed to send the report (status ${response.status})`);
+
+                if (btn) {
+                    btn.textContent = 'Report sent ✓';
+                    setTimeout(() => {
+                        btn.disabled = false;
+                        btn.textContent = originalLabel;
+                    }, 8000);
+                }
+                showAlert('Problem report sent. It includes a screenshot of this page and the details you filled in, so the team can investigate without needing anything else from you.', 'success');
+            } catch (error) {
+                if (btn) {
+                    btn.disabled = false;
+                    btn.textContent = originalLabel;
+                }
+                logFormAttempt('error_report_client_failed', {
+                    errorMessage: (error && error.message) ? error.message : 'unknown error',
+                    details: { trigger: opts.trigger || 'unknown' }
+                });
+                showAlert('Could not send the problem report automatically (' + ((error && error.message) || 'unknown error') + ').', 'error', { noReportAction: true });
+            } finally {
+                problemReportInFlight = false;
+            }
+        }
+
         function showAlert(message, type = 'info', options = {}) {
+            recordClientAlert(type, message);
             const container = document.getElementById('alertContainer');
             const alert = document.createElement('div');
             alert.className = `alert alert-${type} show`;
@@ -5001,12 +5243,27 @@
             if (type === 'error') {
                 const support = document.createElement('span');
                 support.className = 'alert-support';
-                support.appendChild(document.createTextNode(' If this keeps happening or blocks your submission, email '));
                 const supportLink = document.createElement('a');
                 supportLink.href = 'mailto:<%= supportEmail %>';
                 supportLink.textContent = '<%= supportEmail %>';
-                support.appendChild(supportLink);
-                support.appendChild(document.createTextNode(' and include screenshots with your email.'));
+                if (options.noReportAction) {
+                    support.appendChild(document.createTextNode(' If this keeps happening or blocks your submission, email '));
+                    support.appendChild(supportLink);
+                    support.appendChild(document.createTextNode(' and include screenshots with your email.'));
+                } else {
+                    support.appendChild(document.createTextNode(' If this keeps happening or blocks your submission, '));
+                    const reportBtn = document.createElement('button');
+                    reportBtn.type = 'button';
+                    reportBtn.className = 'report-problem-btn';
+                    reportBtn.textContent = 'Report this problem';
+                    reportBtn.title = 'Emails our support team a screenshot of this page plus the details you have filled in';
+                    // The alert intentionally stays open so the screenshot captures it.
+                    reportBtn.onclick = () => sendProblemReport({ trigger: 'error_alert', context: message, sourceButton: reportBtn });
+                    support.appendChild(reportBtn);
+                    support.appendChild(document.createTextNode(' (sends us a screenshot of this page and your form details) or email '));
+                    support.appendChild(supportLink);
+                    support.appendChild(document.createTextNode('.'));
+                }
                 alert.appendChild(support);
             }
 

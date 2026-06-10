@@ -26,8 +26,9 @@ All variables are configured in `.env` at the project root. See `.env.example` f
 | `SMTP_REQUIRE_TLS` | Set `true` to require STARTTLS. Defaults to `true` when `SMTP_AUTH=none`, otherwise `false`. |
 | `INTERNAL_REVIEWER_EMAIL` | Email address that receives internal review notifications |
 | `ALERT_EMAIL` | Email address that receives system alert emails such as SharePoint upload, webhook, and extraction failures |
-| `FORM_ATTEMPT_ALERT_EMAIL` | Email address that receives production public-form failure alerts such as `413` submit errors (default: `dcowser@richardsandoval.com`) |
-| `PUBLIC_FORM_SUPPORT_EMAIL` | Email address shown to submitters in the form footer and blocking/red form errors; support copy asks submitters to include screenshots with the email (default: `dcowser@richardsandoval.com`) |
+| `FORM_ATTEMPT_ALERT_EMAIL` | Email address that receives production public-form failure alerts such as `413` submit errors, plus user-initiated "Report this problem" emails with the page screenshot and client-state JSON attached (default: `dcowser@richardsandoval.com`) |
+| `PUBLIC_FORM_SUPPORT_EMAIL` | Email address shown to submitters in the form footer and blocking/red form errors as the manual fallback next to the "Report this problem" button (default: `dcowser@richardsandoval.com`) |
+| `ERROR_REPORT_FORCE_EMAIL` | Set `true` to send "Report this problem" emails outside production (normally they only email in production; the report is always saved to `tmp/error-reports/` and logged to `form_attempt_logs`) |
 | `AI_REVIEW_MODEL` | OpenAI model used by AI review service (default: `gpt-4o-mini`) |
 | `APPROVED_DISH_AI_QUALITY_TIMEOUT_MS` | DB-service timeout in milliseconds when asking ai-review to classify questionable extracted dish rows (default: `20000`) |
 | `BASIC_AI_CHECK_TIMEOUT_MS` | Dashboard timeout in milliseconds for background public-form Basic AI Check calls to ai-review (default: `120000`; falls back to `AI_REVIEW_QA_TIMEOUT_MS` if set) |
@@ -87,6 +88,8 @@ Operational failures are logged to the `system_alerts` table in Supabase. When S
 Public form journeys also write compact telemetry to `form_attempt_logs` when Supabase is configured and the table from `supabase/schema.sql` has been applied. These rows are keyed by browser-generated `attempt_id` and capture step-level events such as baseline uploads, Basic AI Check completion, final submit failures, request body size estimates, critical AI suggestions, and parser-level `413` failures. The logs intentionally store lengths and structured summaries rather than full menu content.
 
 In production, public-form failure events also send an email through the dashboard SMTP transport to `FORM_ATTEMPT_ALERT_EMAIL` (or `dcowser@richardsandoval.com` when unset). Local development and non-production environments do not send these form failure emails.
+
+User-initiated "Report this problem" reports follow the same production gate (override with `ERROR_REPORT_FORCE_EMAIL=true`): the email attaches the submitter's full-page screenshot and a `client-state.json` snapshot of everything filled in. Regardless of email, every report is saved under `tmp/error-reports/<timestamp>-<attemptId>/` and logged to `form_attempt_logs` as `user_error_report`. See [design-docs/user-error-reports.md](design-docs/user-error-reports.md).
 
 For Microsoft 365 IP-based SMTP relay, configure the Exchange Online connector to trust the production server's outbound public IP address and use:
 

@@ -20,4 +20,19 @@ describe('sanitizeStoredFileName', () => {
         expect((0, upload_security_1.sanitizeStoredFileName)('Tān/Dinner:5.14.26.docx')).toBe('Dinner_5.14.26.docx');
         expect((0, upload_security_1.sanitizeStoredFileName)('Tān_Dinner_5.14.26.docx')).toBe('Tān_Dinner_5.14.26.docx');
     });
+    test('strips path traversal segments', () => {
+        expect((0, upload_security_1.sanitizeStoredFileName)('../../etc/passwd', 'upload.bin')).toBe('passwd');
+        expect((0, upload_security_1.sanitizeStoredFileName)('menu?.docx', 'upload.bin')).toBe('menu_.docx');
+    });
+});
+describe('sanitizeRichTextHtml', () => {
+    test('removes active content from rich HTML', () => {
+        const html = '<p onclick="alert(1)">Safe</p><script>alert(2)</script><a href="javascript:alert(3)">Link</a>';
+        expect((0, upload_security_1.sanitizeRichTextHtml)(html)).toBe('<p>Safe</p><a href="alert(3)">Link</a>');
+    });
+});
+describe('sanitizePlainTextInput', () => {
+    test('strips control characters from plain text inputs', () => {
+        expect((0, upload_security_1.sanitizePlainTextInput)(' Chef\u0000 Name \n', { multiline: true })).toBe('Chef Name');
+    });
 });

@@ -1,0 +1,12 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "dashboard",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["services/dashboard/dist/index.js"],
+      "port": 3005,
+      "autoPort": false
+    }
+  ]
+}

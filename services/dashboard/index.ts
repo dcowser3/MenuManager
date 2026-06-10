@@ -52,6 +52,12 @@ import {
 } from './lib/clickup-handoff';
 import { logFormAttemptEvent } from './lib/form-attempt-logging';
 import {
+    buildErrorReportEmail,
+    decodeScreenshotDataUrl,
+    normalizeErrorReport,
+    shouldEmailErrorReport,
+} from './lib/error-report';
+import {
     buildFallbackPropertyCatalog,
     normalizePropertyCatalogRecord,
     PropertyCatalogRecord,
@@ -2305,6 +2311,111 @@ app.post('/api/form/attempt-log', async (req, res) => {
     } catch (error: any) {
         console.error('Error logging form attempt:', error.message);
         res.status(500).json({ error: 'Failed to log form attempt' });
+    }
+});
+
+/**
+ * Form API: user-initiated problem report ("Report this problem" button).
+ * Receives a full-page screenshot + JSON snapshot of the client form state,
+ * saves both under tmp/error-reports/, logs to form_attempt_logs, and emails
+ * the support inbox with the screenshot and state attached.
+ */
+const errorReportCooldowns = new Map<string, number>();
+const ERROR_REPORT_COOLDOWN_MS = 15 * 1000;
+
+function getErrorReportsDir(): string {
+    return path.join(getRepoRoot(), 'tmp', 'error-reports');
+}
+
+app.post('/api/form/error-report', async (req, res) => {
+    try {
+        const report = normalizeErrorReport(req.body);
+
+        const cooldownKey = report.attemptId || req.ip || 'unknown';
+        const lastReport = errorReportCooldowns.get(cooldownKey) || 0;
+        if (Date.now() - lastReport < ERROR_REPORT_COOLDOWN_MS) {
+            return res.status(429).json({ error: 'A report was just sent. Please wait a few seconds before sending another.' });
+        }
+        errorReportCooldowns.set(cooldownKey, Date.now());
+
+        const screenshot = decodeScreenshotDataUrl(req.body?.screenshotDataUrl);
+        const stateJson = JSON.stringify(report.state ?? {}, null, 2);
+
+        // Disk copy first so the report survives even when SMTP/Supabase are unavailable.
+        const reportDirName = `${new Date().toISOString().replace(/[:.]/g, '-')}-${report.attemptId.replace(/[^a-zA-Z0-9_-]/g, '')}`.slice(0, 120);
+        const reportDir = path.join(getErrorReportsDir(), reportDirName);
+        let savedTo: string | null = null;
+        try {
+            await fs.mkdir(reportDir, { recursive: true });
+            const { state, ...summary } = report;
+            await fs.writeFile(path.join(reportDir, 'report.json'), JSON.stringify(summary, null, 2));
+            await fs.writeFile(path.join(reportDir, 'client-state.json'), stateJson);
+            if (screenshot) {
+                await fs.writeFile(path.join(reportDir, `screenshot.${screenshot.extension}`), screenshot.buffer);
+            }
+            savedTo = reportDir;
+        } catch (saveError: any) {
+            console.error('Failed to save error report to disk:', saveError.message);
+        }
+
+        void logFormAttemptEvent({
+            attemptId: report.attemptId,
+            eventType: 'user_error_report',
+            route: '/api/form/error-report',
+            submitterEmail: report.submitterEmail,
+            submitterName: report.submitterName,
+            projectName: report.projectName,
+            property: report.property,
+            submissionMode: report.submissionMode,
+            errorMessage: report.context || 'User clicked Report this problem',
+            details: {
+                trigger: report.trigger,
+                pageUrl: report.pageUrl,
+                userAgent: report.userAgent,
+                viewport: report.viewport,
+                hasScreenshot: !!screenshot,
+                screenshotBytes: screenshot?.buffer.length || 0,
+                screenshotError: report.screenshotError || null,
+                stateJsonLength: stateJson.length,
+                savedTo,
+                recentAlerts: report.recentAlerts,
+            },
+        });
+
+        let emailed = false;
+        if (alertTransporter && FORM_ATTEMPT_ALERT_EMAIL && shouldEmailErrorReport()) {
+            const { subject, html } = buildErrorReportEmail(report, {
+                hasScreenshot: !!screenshot,
+                dashboardUrl: DASHBOARD_URL,
+            });
+            const attachments: any[] = [
+                { filename: 'client-state.json', content: stateJson, contentType: 'application/json' },
+            ];
+            if (screenshot) {
+                attachments.push({
+                    filename: `screenshot.${screenshot.extension}`,
+                    content: screenshot.buffer,
+                    contentType: screenshot.contentType,
+                });
+            }
+            try {
+                await alertTransporter.sendMail({
+                    from: `"Menu Manager Alerts" <${smtpFromAddress}>`,
+                    to: FORM_ATTEMPT_ALERT_EMAIL,
+                    subject,
+                    html,
+                    attachments,
+                });
+                emailed = true;
+            } catch (mailError: any) {
+                console.error('Failed to email error report:', mailError.message);
+            }
+        }
+
+        res.json({ success: true, emailed });
+    } catch (error: any) {
+        console.error('Error handling problem report:', error.message);
+        res.status(500).json({ error: 'Failed to send problem report' });
     }
 });
 
