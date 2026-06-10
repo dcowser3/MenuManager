@@ -1,9 +1,12 @@
 const {
     addBusinessDays,
     clampExtractedDateNeeded,
+    findSearchMatchRange,
     findCatalogMatchesFromHints,
     isValidDateInputValue,
+    normalizeSearchText,
     parseExtractedSize,
+    searchTextIncludes,
     shouldBlockSubmitForStaleAiCheck,
     tokenizePropertyHint,
 } = require('../public/js/form-helpers');
@@ -207,6 +210,20 @@ describe('property catalog hint matching', () => {
             'Maya - Le Royal Meridien - Dubai',
             'Maya - Le Meridien - Dubai',
         ]);
+    });
+});
+
+describe('accent-insensitive form search helpers', () => {
+    test('normalizes tone marks so plain text searches match accented labels', () => {
+        expect(normalizeSearchText('tán - New York')).toBe('tan - new york');
+        expect(searchTextIncludes('tán - New York', 'tan')).toBe(true);
+        expect(searchTextIncludes('Tan Project', 'tán')).toBe(true);
+    });
+
+    test('returns the original text range for accent-insensitive highlights', () => {
+        expect(findSearchMatchRange('tán - New York', 'tan')).toEqual({ start: 0, end: 3 });
+        expect(findSearchMatchRange('Project tàn menu', 'tan')).toEqual({ start: 8, end: 11 });
+        expect(findSearchMatchRange('Tamayo - Denver', 'tan')).toBeNull();
     });
 });
 

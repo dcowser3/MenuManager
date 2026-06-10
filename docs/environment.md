@@ -34,6 +34,8 @@ All variables are configured in `.env` at the project root. See `.env.example` f
 | `BASIC_AI_CHECK_TIMEOUT_MS` | Dashboard timeout in milliseconds for background public-form Basic AI Check calls to ai-review (default: `120000`; falls back to `AI_REVIEW_QA_TIMEOUT_MS` if set) |
 | `AI_REVIEW_SUBMIT_TIMEOUT_MS` | Dashboard timeout in milliseconds for the post-submit full AI review handoff (default: `BASIC_AI_CHECK_TIMEOUT_MS`, normally `120000`) |
 | `BASIC_AI_CHECK_JOB_TTL_MS` | How long dashboard keeps completed/failed Basic AI Check job results available for polling before cleanup (default: `900000`) |
+| `BASIC_AI_CHECK_AUDIT_ENABLED` | Writes bounded Basic AI Check request/response audit rows to Supabase `basic_ai_check_audits` when Supabase is configured (default: `true`; set `false` to disable) |
+| `BASIC_AI_CHECK_AUDIT_MAX_CHARS` | Maximum characters retained per large Basic AI Check audit text field such as reviewed text, prompt, raw feedback, and corrected menu (default: `120000`) |
 | `BASIC_AI_CHECK_DEBUG_ENABLED` | Allows opt-in Basic AI Check diagnostics responses when the request includes `debugBasicCheck`; defaults to enabled outside production and disabled in production |
 | `BASIC_AI_CHECK_DEBUG_MAX_CHARS` | Maximum characters retained per diagnostic text field such as AI prompt, reviewed text, and raw feedback (default: `60000`) |
 | `BASIC_AI_PRECHECK_DISABLED` | Set `true` to disable deterministic pre-AI Basic AI Check corrections for A/B testing against prompt-first behavior (default: enabled) |
@@ -86,6 +88,8 @@ These are optional. If `CLICKUP_API_TOKEN` or `CLICKUP_LIST_ID` are not set, the
 Operational failures are logged to the `system_alerts` table in Supabase. When SMTP is configured and `ALERT_EMAIL` is set, services also send an email notification for alert events.
 
 Public form journeys also write compact telemetry to `form_attempt_logs` when Supabase is configured and the table from `supabase/schema.sql` has been applied. These rows are keyed by browser-generated `attempt_id` and capture step-level events such as baseline uploads, Basic AI Check completion, final submit failures, request body size estimates, critical AI suggestions, and parser-level `413` failures. The logs intentionally store lengths and structured summaries rather than full menu content.
+
+Basic AI Check additionally writes durable audit rows to `basic_ai_check_audits` unless `BASIC_AI_CHECK_AUDIT_ENABLED=false`. Each row stores bounded JSON copies of the exact `ai-review` request body (`text` and `prompt`), raw AI response or failure, parsed corrected-menu block, guard diagnostics, deterministic pre/post-AI corrections, and the final corrected menu returned to the browser. Use `BASIC_AI_CHECK_AUDIT_MAX_CHARS` to cap large text fields.
 
 In production, public-form failure events also send an email through the dashboard SMTP transport to `FORM_ATTEMPT_ALERT_EMAIL` (or `dcowser@richardsandoval.com` when unset). Local development and non-production environments do not send these form failure emails.
 

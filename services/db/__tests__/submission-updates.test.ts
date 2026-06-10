@@ -96,6 +96,8 @@ describe('submission update hardening', () => {
     const updateHandler = getRouteHandler('put', '/submissions/:id');
     const pendingHandler = getRouteHandler('get', '/submissions/pending');
     const approvedListHandler = getRouteHandler('get', '/submissions/approved-list');
+    const submissionSearchHandler = getRouteHandler('get', '/submissions/search');
+    const submitterProfileSearchHandler = getRouteHandler('get', '/submitter-profiles/search');
     const createCorrectionRuleHandler = getRouteHandler('post', '/correction-rules');
     const originalInternalApiToken = process.env.INTERNAL_API_TOKEN;
 
@@ -161,6 +163,19 @@ describe('submission update hardening', () => {
                         submitter_name: 'Carlos',
                         submitter_email: 'carlos@example.com',
                     },
+                    'form-201': {
+                        id: 'form-201',
+                        source: 'form',
+                        status: 'approved',
+                        project_name: 'Summer Menu',
+                        property: 'tán - New York',
+                        filename: 'tan-summer.docx',
+                        final_path: '/Users/deriancowser/Documents/MenuManager/tmp/documents/tan/Summer Menu/form-201/approved/form-201-approved.docx',
+                        service_period: 'dinner',
+                        reviewed_at: '2026-05-10T10:00:00.000Z',
+                        submitter_name: 'Chef Tàn',
+                        submitter_email: 'tan@example.com',
+                    },
                     'design-1': {
                         id: 'design-1',
                         source: 'design_approval',
@@ -184,6 +199,22 @@ describe('submission update hardening', () => {
                         created_at: '2026-05-08T10:05:00.000Z',
                     },
                 ]);
+            }
+            if (normalized.endsWith('submitter_profiles.json')) {
+                return JSON.stringify({
+                    'chef-tan': {
+                        name: 'Chef Tàn',
+                        email: 'tan@example.com',
+                        jobTitle: 'Executive Chef',
+                        lastUsed: '2026-05-10T10:00:00.000Z',
+                    },
+                    carlos: {
+                        name: 'Carlos',
+                        email: 'carlos@example.com',
+                        jobTitle: 'Chef',
+                        lastUsed: '2026-05-08T10:00:00.000Z',
+                    },
+                });
             }
             return JSON.stringify({});
         });
@@ -350,6 +381,36 @@ describe('submission update hardening', () => {
             status: 'approved',
             servicePeriod: 'dinner',
         });
+    });
+
+    test('searches approved submissions without requiring tone marks', async () => {
+        const response = await invokeJsonHandler(submissionSearchHandler, {
+            query: { q: 'tan', limit: '20' },
+        });
+
+        expect(response.status).toBe(200);
+        expect(response.body).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                id: 'form-201',
+                projectName: 'Summer Menu',
+                property: 'tán - New York',
+                submitterName: 'Chef Tàn',
+            }),
+        ]));
+    });
+
+    test('searches submitter profiles without requiring tone marks', async () => {
+        const response = await invokeJsonHandler(submitterProfileSearchHandler, {
+            query: { q: 'tan' },
+        });
+
+        expect(response.status).toBe(200);
+        expect(response.body).toEqual([
+            expect.objectContaining({
+                name: 'Chef Tàn',
+                email: 'tan@example.com',
+            }),
+        ]);
     });
 
     test('creates freeform correction rules with menu scope and nullable exact text', async () => {

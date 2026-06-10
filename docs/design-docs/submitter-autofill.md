@@ -9,6 +9,7 @@ Returning users can quickly fill forms using saved profiles and past project dat
 Available on both `/form` and `/design-approval`.
 
 - Type 2+ characters in the "Your Name" field to see matching profiles
+- Search ignores accent/tone marks, so typing `tan` can match saved names such as `Tàn`.
 - Selecting a profile auto-fills name, email, and job title (fields remain editable)
 - Profiles are saved automatically on each form submission (fire-and-forget)
 - Keyboard navigation: ArrowUp/Down to highlight, Enter to select, Escape to dismiss
@@ -22,12 +23,14 @@ Available on `/form` only.
 - "Load from Recent" dropdown appears in Project Details card when past projects exist
 - Populates all project fields except Date Needed (always fresh per submission)
 - Groups submissions by project name, shows most recent of each
+- Project search ignores accent/tone marks in the typed query and stored project names.
 
 ## Property Catalog (Canonical)
 
 Available on `/form` and learning rule workflows.
 
 - Property is selected from a configured list (type-to-search + pick), not free text.
+- Property search ignores accent/tone marks in the typed query and catalog names; selecting a suggestion still writes the configured canonical property value.
 - The property value must match one of the configured properties (validated server-side).
 - The previous free-text location field is removed; location metadata is derived from selected property.
 - The `Hotel Name` input is temporarily removed from the chef form UI.
@@ -50,6 +53,7 @@ Available on `/form` and learning rule workflows.
 - `GET /submissions/recent-projects` — get recent unique projects
 - `GET /properties` — canonical property list for submission/learning UIs
 - `GET /properties/validate?name=` — validate a property name against canonical list
+- `GET /submissions/search?q=` — search approved baselines for modifications; search matching ignores accent/tone marks across project/property/service/submitter fields.
 
 **Dashboard proxies:**
 - `GET /api/submitter-profiles/search` → db service

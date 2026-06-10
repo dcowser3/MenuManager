@@ -34,10 +34,13 @@ jest.mock('child_process', () => ({
 jest.mock('mammoth', () => ({
     extractRawText: jest.fn().mockResolvedValue({ value: 'Guacamole - $12' }),
 }));
+const mockSupabaseInsert = jest.fn();
+const mockSupabaseFrom = jest.fn(() => ({ insert: mockSupabaseInsert }));
 jest.mock('@menumanager/supabase-client', () => ({
     __esModule: true,
     buildDishNameFormattingAnchors: jest.requireActual('../../supabase-client/src/dish-extractor').buildDishNameFormattingAnchors,
     isSupabaseConfigured: jest.fn(() => false),
+    getSupabaseClient: jest.fn(() => ({ from: mockSupabaseFrom })),
     extractAndStoreDishes: jest.fn().mockResolvedValue({ added: 0 }),
     logAlert: jest.fn().mockResolvedValue(undefined),
     buildAlertEmailHtml: jest.fn(() => ''),
@@ -46,7 +49,8 @@ jest.mock('@menumanager/supabase-client', () => ({
 const axios = require('axios').default;
 const fs = require('fs');
 const path = require('path');
-const { logAlert } = require('@menumanager/supabase-client');
+const supabaseClient = require('@menumanager/supabase-client');
+const { logAlert } = supabaseClient;
 const dashboardModule = require('../index');
 const app = dashboardModule.default;
 const { shouldNotifyFormAttemptFailure } = dashboardModule;
@@ -147,6 +151,10 @@ describe('Dashboard Modification Workflow (local, mocked externals)', () => {
         fs.promises.readFile.mockClear();
         fs.promises.readdir.mockClear();
         fs.promises.readFile.mockResolvedValue('');
+        mockSupabaseInsert.mockClear();
+        mockSupabaseInsert.mockResolvedValue({ error: null });
+        mockSupabaseFrom.mockClear();
+        supabaseClient.isSupabaseConfigured.mockReturnValue(false);
         logAlert.mockClear();
 
         mockedAxios.post = jest.fn(async (url, payload) => {
@@ -818,6 +826,56 @@ describe('Dashboard Modification Workflow (local, mocked externals)', () => {
             'Guacamole',
             'Market Salad',
         ]);
+    });
+
+    test('basic-check writes a durable AI request and response audit row', async () => {
+        supabaseClient.isSupabaseConfigured.mockReturnValue(true);
+        const payload = {
+            attemptId: 'attempt-audit-1',
+            submitterEmail: 'chef@example.com',
+            projectName: 'FIFA Menu',
+            property: 'Maya - New York',
+            servicePeriod: 'Holidays & Events',
+            templateType: 'food_beverage',
+            submissionMode: 'new',
+            menuContent: 'Athletic N/A\nLagunitas N/A',
+            baselineMenuContent: '',
+            reviewMode: 'full',
+            allergens: '',
+            menuType: 'standard',
+        };
+
+        const response = await invokeJsonHandler(basicCheckHandler, payload, {
+            headers: { 'x-menumanager-basic-check-id': 'check-audit-1' },
+        });
+        await flushAsyncJobs();
+
+        expect(response.status).toBe(200);
+        expect(response.body.success).toBe(true);
+        expect(mockSupabaseFrom).toHaveBeenCalledWith('basic_ai_check_audits');
+        const auditPayload = mockSupabaseInsert.mock.calls
+            .map(([insertPayload]) => insertPayload)
+            .find((insertPayload) => insertPayload && insertPayload.ai_request);
+
+        expect(auditPayload).toMatchObject({
+            attempt_id: 'attempt-audit-1',
+            check_id: 'check-audit-1',
+            event_type: 'completed',
+            project_name: 'FIFA Menu',
+            property: 'Maya - New York',
+            ai_request: expect.objectContaining({
+                text: payload.menuContent,
+            }),
+            ai_response: expect.objectContaining({
+                rawFeedback: expect.stringContaining('Lagunitas N/A'),
+            }),
+            parsed_response: expect.objectContaining({
+                correctedMenu: payload.menuContent,
+            }),
+            final_result: expect.objectContaining({
+                correctedMenu: payload.menuContent,
+            }),
+        });
     });
 
     test('basic-check suppresses missing-price false positive for priced add-on option rows', async () => {

@@ -611,6 +611,21 @@ function normalizeApprovedLookupValue(value) {
         .replace(/[_-]+/g, ' ')
         .replace(/\s+/g, ' ');
 }
+function normalizeSearchValue(value) {
+    return `${value || ''}`
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .trim()
+        .toLowerCase()
+        .replace(/[_-]+/g, ' ')
+        .replace(/\s+/g, ' ');
+}
+function searchFieldsInclude(values, query) {
+    const normalizedQuery = normalizeSearchValue(query);
+    if (normalizedQuery.length < 2)
+        return false;
+    return normalizeSearchValue(values.filter(Boolean).join(' ')).includes(normalizedQuery);
+}
 function getRawPayloadObject(submission) {
     const rawPayload = submission?.raw_payload;
     if (!rawPayload)
@@ -1052,16 +1067,26 @@ app.get('/submissions/approved-list', async (req, res) => {
 // IMPORTANT: Must come BEFORE /submissions/:id
 app.get('/submissions/search', async (req, res) => {
     try {
-        const q = (req.query.q || '').trim().toLowerCase();
+        const q = (req.query.q || '').trim();
+        const normalizedQuery = normalizeSearchValue(q);
         const limit = Math.min(parseInt(req.query.limit || '20', 10), 50);
         const preferredProperty = `${req.query.property || ''}`.trim();
         const preferredServicePeriod = `${req.query.servicePeriod || ''}`.trim();
-        if (q.length < 2) {
+        if (normalizedQuery.length < 2) {
             return res.json([]);
         }
         let sourceRows = [];
         if ((0, supabase_client_1.isSupabaseConfigured)()) {
             const supabase = (0, supabase_client_1.getSupabaseClient)();
+            const rowsById = new Map();
+            const addRows = (rows = []) => {
+                rows.forEach((row) => {
+                    const key = `${row?.id || row?.legacy_id || JSON.stringify(row)}`;
+                    if (!rowsById.has(key)) {
+                        rowsById.set(key, row);
+                    }
+                });
+            };
             const like = `%${q}%`;
             const { data, error } = await supabase
                 .from(SUBMISSIONS_TABLE)
@@ -1075,7 +1100,31 @@ app.get('/submissions/search', async (req, res) => {
             if (error) {
                 throw new Error(error.message);
             }
-            sourceRows = data || [];
+            addRows(data || []);
+            const { data: recentData, error: recentError } = await supabase
+                .from(SUBMISSIONS_TABLE)
+                .select('*')
+                .in('status', APPROVED_SUBMISSION_STATUSES)
+                .not('final_path', 'is', null)
+                .order('reviewed_at', { ascending: false })
+                .order('updated_at', { ascending: false })
+                .limit(500);
+            if (recentError) {
+                throw new Error(recentError.message);
+            }
+            addRows(recentData || []);
+            sourceRows = Array.from(rowsById.values())
+                .filter((s) => searchFieldsInclude([
+                s.project_name,
+                s.property,
+                s.service_period,
+                s.filename,
+                s.submitter_name,
+                s.submitter_email,
+                s.hotel_name,
+                s.city_country,
+            ], q))
+                .slice(0, limit);
         }
         else {
             const submissions = JSON.parse(await fs_1.promises.readFile(SUBMISSIONS_DB, 'utf-8'));
@@ -1083,22 +1132,16 @@ app.get('/submissions/search', async (req, res) => {
             sourceRows = Object.values(submissions)
                 .filter((s) => approvedStatuses.has((s.status || '').toLowerCase()))
                 .filter((s) => !!s.final_path)
-                .filter((s) => {
-                const haystack = [
-                    s.project_name,
-                    s.property,
-                    s.service_period,
-                    s.filename,
-                    s.submitter_name,
-                    s.submitter_email,
-                    s.hotel_name,
-                    s.city_country,
-                ]
-                    .filter(Boolean)
-                    .join(' ')
-                    .toLowerCase();
-                return haystack.includes(q);
-            })
+                .filter((s) => searchFieldsInclude([
+                s.project_name,
+                s.property,
+                s.service_period,
+                s.filename,
+                s.submitter_name,
+                s.submitter_email,
+                s.hotel_name,
+                s.city_country,
+            ], q))
                 .sort((a, b) => getApprovedTimestamp(b) - getApprovedTimestamp(a))
                 .slice(0, limit);
         }
@@ -1244,12 +1287,22 @@ app.get('/submissions/latest-approved', async (req, res) => {
 // Submitter profile search
 app.get('/submitter-profiles/search', async (req, res) => {
     try {
-        const q = (req.query.q || '').trim().toLowerCase();
-        if (q.length < 2) {
+        const q = (req.query.q || '').trim();
+        const normalizedQuery = normalizeSearchValue(q);
+        if (normalizedQuery.length < 2) {
             return res.json([]);
         }
         if ((0, supabase_client_1.isSupabaseConfigured)()) {
             const supabase = (0, supabase_client_1.getSupabaseClient)();
+            const profilesByKey = new Map();
+            const addProfiles = (profiles = []) => {
+                profiles.forEach((profile) => {
+                    const key = `${profile?.email || profile?.id || profile?.name || JSON.stringify(profile)}`.toLowerCase();
+                    if (!profilesByKey.has(key)) {
+                        profilesByKey.set(key, profile);
+                    }
+                });
+            };
             const like = `%${q}%`;
             const { data, error } = await supabase
                 .from(SUBMITTER_PROFILES_TABLE)
@@ -1258,7 +1311,19 @@ app.get('/submitter-profiles/search', async (req, res) => {
                 .order('last_used', { ascending: false })
                 .limit(8);
             if (!error && data) {
-                return res.json(data.map((p) => ({
+                addProfiles(data || []);
+                const { data: recentData, error: recentError } = await supabase
+                    .from(SUBMITTER_PROFILES_TABLE)
+                    .select('*')
+                    .order('last_used', { ascending: false })
+                    .limit(200);
+                if (!recentError && recentData) {
+                    addProfiles(recentData);
+                }
+                return res.json(Array.from(profilesByKey.values())
+                    .filter((p) => searchFieldsInclude([p.name], q))
+                    .slice(0, 8)
+                    .map((p) => ({
                     name: p.name || '',
                     email: p.email || '',
                     jobTitle: p.job_title || '',
@@ -1268,7 +1333,7 @@ app.get('/submitter-profiles/search', async (req, res) => {
         }
         const profiles = JSON.parse(await fs_1.promises.readFile(PROFILES_DB, 'utf-8'));
         const matches = Object.values(profiles)
-            .filter((p) => p.name.toLowerCase().includes(q))
+            .filter((p) => searchFieldsInclude([p.name], q))
             .sort((a, b) => new Date(b.lastUsed).getTime() - new Date(a.lastUsed).getTime())
             .slice(0, 8);
         res.json(matches);

@@ -28,6 +28,7 @@ Menu Manager is an AI-powered service designed to automate the review process fo
 ### Current (Phase 1)
 - Web form for chef submissions
 - Canonical property selection (type-to-search, value must match configured list)
+- Form search fields are accent/tone-mark insensitive, so searching `tan` finds configured names such as `tán` while preserving the canonical selected value.
 - The dashboard includes a fallback property catalog so deployed forms can still search and validate properties if the DB property endpoint is temporarily unavailable
 - DOCX template uploads can prefill project details and resolve split outlet/hotel/city hints to a canonical property when the match is unique
 - Required service-period classification on submission (`breakfast`, `brunch`, `lunch`, `dinner`, `happy_hour`, `holiday`, `other`)
@@ -40,7 +41,7 @@ Menu Manager is an AI-powered service designed to automate the review process fo
 - Basic AI Check recognizes embedded set-menu sections inside standard menus, such as `Quick Lunch Menu $38` with `choice of one appetizer & one entree`; included dishes do not need item prices, explicit `+` premium prices are allowed, and bare included-item prices are flagged as critical `Set Menu Item Price` issues without being auto-removed.
 - Basic AI Check deterministically bolds high-confidence dish-name prefixes in the reviewed menu HTML using the shared approved-dish extractor; uncertain rows, ambiguous rows, dot-leader price-grid rows, and likely continuation/ingredient lines are left unbolded, and the same bolded preview HTML is submitted into generated DOCX / handoff artifacts.
 - Basic AI Check now runs as an async dashboard job: the form starts a check, keeps submit blocked while it polls status, then unlocks only after AI results arrive or an explicit AI-unavailable/manual-review fallback is returned.
-- If a chef edits the reviewed menu after the first Basic AI Check, the form still requires one re-run. After the second completed Basic AI Check, later edits are allowed through final submit so the chef can keep an intentional correction the AI keeps undoing.
+- If a chef edits the reviewed menu after the first Basic AI Check, the form still requires one re-run and the main submission button runs that Basic AI Check again when it is the next required step. After the second completed Basic AI Check, later edits are allowed through final submit so the chef can keep an intentional correction the AI keeps undoing.
 - If the Basic AI Check service call fails, the public form keeps any deterministic pre-AI corrections that were already applied, shows an AI-unavailable warning, and allows the submission to continue to manual review instead of blocking the chef on a red error.
 - For local debugging, open the form with `?debugBasicCheck=1` to include Basic AI Check diagnostics in the Network response and `window.lastBasicCheckDiagnostics`; production requires `BASIC_AI_CHECK_DEBUG_ENABLED=true`.
 - `npm run smoke:basic-ai-check` runs a live async Basic AI Check smoke test against `DASHBOARD_URL` and can be configured to alert on AI-unavailable fallback.
@@ -65,7 +66,7 @@ Menu Manager is an AI-powered service designed to automate the review process fo
 - Modification uploads with preserved redlines remain usable even if project metadata extraction cannot be parsed from the DOCX
 - Public upload endpoints now enforce a 15 MB cap, validate file signatures, and sanitize stored rich-text/filename input before downstream processing; menu filenames preserve Unicode letters such as accented characters and tone marks
 - Rich-text form submissions above Express's default 100 KB JSON body limit are accepted by the dashboard and DB services; override `JSON_BODY_LIMIT`, `DASHBOARD_JSON_BODY_LIMIT`, or `DB_JSON_BODY_LIMIT` only when deployment needs a different cap
-- Public form attempts now emit lightweight `form_attempt_logs` telemetry for baseline uploads, Basic AI Check, final submit, and parser-level `413` failures so failed preserve-redlines submissions can be diagnosed even when no final submission row exists
+- Public form attempts now emit lightweight `form_attempt_logs` telemetry for baseline uploads, Basic AI Check, final submit, and parser-level `413` failures so failed preserve-redlines submissions can be diagnosed even when no final submission row exists; Basic AI Check also writes durable `basic_ai_check_audits` rows with the bounded AI request body, raw response, parsed response, and final guarded result
 - Production public-form failure events also email `FORM_ATTEMPT_ALERT_EMAIL`, defaulting to `dcowser@richardsandoval.com`, through the dashboard SMTP transport
 - Required-field validation now highlights missing submitter, project-details, and approval inputs directly in the form, and the top required-fields alert tells submitters that missing fields are highlighted below.
 - The submission form footer, blocking/red form errors, and the critical-error banner now offer a one-click **"Report this problem"** button that emails support (`FORM_ATTEMPT_ALERT_EMAIL`) a full-page screenshot plus a JSON snapshot of everything filled in — exact client-side state, recent on-page errors, browser/viewport — and also saves the report to `tmp/error-reports/` and `form_attempt_logs`; `PUBLIC_FORM_SUPPORT_EMAIL` (default `dcowser@richardsandoval.com`) remains the manual email fallback. See [docs/design-docs/user-error-reports.md](docs/design-docs/user-error-reports.md).
@@ -347,6 +348,8 @@ AI_REVIEW_MODEL=gpt-4o-mini
 BASIC_AI_CHECK_TIMEOUT_MS=120000
 AI_REVIEW_SUBMIT_TIMEOUT_MS=120000
 BASIC_AI_CHECK_JOB_TTL_MS=900000
+BASIC_AI_CHECK_AUDIT_ENABLED=true
+BASIC_AI_CHECK_AUDIT_MAX_CHARS=120000
 
 # Service URLs (override in cloud deployments)
 DB_SERVICE_URL=http://localhost:3004

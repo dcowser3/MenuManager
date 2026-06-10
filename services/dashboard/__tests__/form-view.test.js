@@ -183,6 +183,18 @@ describe('dashboard form modification source chooser', () => {
         expect(template).toContain('Please fill in all required fields. Missing fields are highlighted below.');
     });
 
+    test('uses accent-insensitive matching for form autocomplete searches', () => {
+        const template = fs.readFileSync(
+            path.join(__dirname, '..', 'views', 'form.ejs'),
+            'utf8'
+        );
+
+        expect(template).toContain('window.formHelpers.findSearchMatchRange');
+        expect(template).toContain('window.formHelpers.searchTextIncludes(p.projectName || \'\', query)');
+        expect(template).toContain('window.formHelpers.searchTextIncludes(name || \'\', query)');
+        expect(template).toContain('window.formHelpers.normalizeSearchText(query).trim()');
+    });
+
     test('offers a one-click problem report wherever support guidance appears', () => {
         const template = fs.readFileSync(
             path.join(__dirname, '..', 'views', 'form.ejs'),
@@ -235,5 +247,19 @@ describe('dashboard form modification source chooser', () => {
         expect(template).toContain('if (!skipAiReview && shouldBlockSubmitForStaleAiCheck())');
         expect(template).toContain('submittedWithPostSecondAiEdit: requiresAiRerun && !shouldBlockSubmitForStaleAiCheck()');
         expect(template).not.toContain('if (!skipAiReview && requiresAiRerun)');
+    });
+
+    test('uses the main submit button to re-run a stale AI check', () => {
+        const template = fs.readFileSync(
+            path.join(__dirname, '..', 'views', 'form.ejs'),
+            'utf8'
+        );
+
+        expect(template).toContain('id="submitBtn" class="btn btn-success" onclick="handleSubmitButtonClick()"');
+        expect(template).toContain('async function handleSubmitButtonClick()');
+        expect(template).toContain('if (shouldBlockSubmitForStaleAiCheck()) {\n                await rerunAICheck({ source: \'submit_button\' });');
+        expect(template).toContain("submitBtn.textContent = 'Run Basic AI Check';");
+        expect(template).toContain("submitBtn.classList.remove('blocked');\n                submitBtn.textContent = 'Run Basic AI Check';");
+        expect(template).toContain("submitBtn.innerHTML = '<span class=\"spinner\"></span>Running AI Check...';");
     });
 });

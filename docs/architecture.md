@@ -31,6 +31,7 @@ Chef opens web form (/form)
   ├─ Autocomplete: dashboard → GET /api/submitter-profiles/search → db service
   ├─ Property catalog: dashboard → GET /api/properties → db service (`properties` table / local mirror)
   ├─ Recent projects: dashboard → GET /api/recent-projects → db service
+  │  Note: submitter, recent-project, property, and approved-baseline searches ignore accent/tone marks while preserving canonical selected values.
   ├─ Mode: New submission OR Modification
   │   ├─ Modification (DB): dashboard → GET /api/submissions/search → db service
   │   └─ Modification (upload): dashboard → POST /api/modification/baseline-upload
@@ -60,6 +61,7 @@ Reviews AI suggestions
   Critical errors (missing price, incomplete dish name) block submission
   User fixes via edit + re-run, or overrides
   Note: an edit after the first Basic AI Check still requires one re-run.
+        During that required re-run state, the main submission button runs Basic AI Check again.
         After the second completed Basic AI Check, later edits can be submitted without another AI pass
         so chefs can keep intentional text the AI repeatedly changes.
   │
@@ -160,7 +162,7 @@ The dashboard service still uses a single Express entrypoint, but the highest-ri
 `services/dashboard/index.ts` now primarily composes dependencies, mounts routes, and keeps shared helpers that are still used across multiple dashboard areas.
 The dashboard accepts chef form JSON/urlencoded bodies up to `DASHBOARD_JSON_BODY_LIMIT` (or `JSON_BODY_LIMIT`, default `5mb`) so rich menu HTML and persistent redline previews can pass through the public submit route without tripping Express's default 100 KB parser cap.
 The approval editor has a standalone Venga redline fixture harness in `scripts/approval-editor-harness.js`, with browser regression and benchmark commands in the root `package.json`, so the reusable preview path can be tested without ClickUp or DB state.
-The public form also emits compact `form_attempt_logs` telemetry keyed by a browser-generated attempt id. Baseline upload, preserve-redlines extraction, Basic AI Check, final submit, and parser-level `413` events record mode/source metadata, payload length estimates, and critical AI suggestions without persisting full menu bodies.
+The public form also emits compact `form_attempt_logs` telemetry keyed by a browser-generated attempt id. Baseline upload, preserve-redlines extraction, Basic AI Check, final submit, and parser-level `413` events record mode/source metadata, payload length estimates, and critical AI suggestions without persisting full menu bodies. Basic AI Check writes larger bounded `basic_ai_check_audits` rows with the exact `ai-review` request body, raw response/failure, parsed corrected menu, guard diagnostics, and final browser result so production incidents can be reconstructed without enabling debug responses for submitters.
 Basic AI Check treats the model's corrected-menu block as untrusted generated text. The prompt asks the model to preserve every submitted line in order, and the dashboard applies a structure guard before rendering the response: if the corrected text loses too many original tokens, becomes much shorter, or drops many lines, the dashboard falls back to the submitted text while keeping review suggestions.
 Brand-new menu submissions can import a DOCX through `/api/form/menu-doc-upload`. That route shares the clean DOCX extraction handler with `/api/modification/baseline-upload`, then the browser fills the menu editor, detected project fields, allergen key, and raw-food notice controls before Basic AI Check.
 The submission form footer shows `dcowser@richardsandoval.com` as the support contact for submitter help and asks submitters to include screenshots with support emails.

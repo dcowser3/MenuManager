@@ -74,6 +74,7 @@ const embedded_set_menu_guard_1 = require("./lib/embedded-set-menu-guard");
 const corrected_menu_structure_guard_1 = require("./lib/corrected-menu-structure-guard");
 const price_integrity_guard_1 = require("./lib/price-integrity-guard");
 const pre_ai_deterministic_rules_1 = require("./lib/pre-ai-deterministic-rules");
+const basic_ai_check_audit_1 = require("./lib/basic-ai-check-audit");
 var upload_security_2 = require("./lib/upload-security");
 Object.defineProperty(exports, "sanitizePlainTextInput", { enumerable: true, get: function () { return upload_security_2.sanitizePlainTextInput; } });
 Object.defineProperty(exports, "sanitizeRichTextHtml", { enumerable: true, get: function () { return upload_security_2.sanitizeRichTextHtml; } });
@@ -2131,7 +2132,7 @@ app.post('/api/form/error-report', async (req, res) => {
  */
 async function handleBasicCheck(req, res) {
     const attemptId = req.body?.attemptId || req.get('x-menumanager-attempt-id');
-    const basicCheckId = (0, upload_security_1.sanitizePlainTextInput)(req.get?.('x-menumanager-basic-check-id'), { maxLength: 100 }) || undefined;
+    const basicCheckId = (0, upload_security_1.sanitizePlainTextInput)(req.get?.('x-menumanager-basic-check-id'), { maxLength: 100 }) || crypto_1.default.randomUUID();
     const diagnosticsRequested = wantsBasicCheckDiagnostics(req);
     try {
         const menuContent = (0, upload_security_1.sanitizePlainTextInput)(req.body?.menuContent, { multiline: true, maxLength: upload_security_1.MAX_LONG_TEXT_LENGTH });
@@ -2316,6 +2317,37 @@ Note: Use ONLY these allergen codes when checking allergen compliance. Do not us
             finalPrompt = `${finalPrompt}\n\n${(0, embedded_set_menu_guard_1.buildEmbeddedSetMenuPromptSection)(embeddedSetMenuAnalysis)}`;
             diagnosticsPromptSections.push('embedded_set_menu_rules');
         }
+        const buildAiRequestAudit = () => ({
+            url: `${AI_REVIEW_URL}/run-qa-check`,
+            timeoutMs: BASIC_AI_CHECK_TIMEOUT_MS,
+            textLength: preCheckedReviewBody.length,
+            promptLength: finalPrompt.length,
+            text: preCheckedReviewBody,
+            prompt: finalPrompt,
+            promptSections: diagnosticsPromptSections,
+        });
+        const buildBasicCheckAuditEvent = (eventType, statusCode, extra = {}) => ({
+            attemptId,
+            checkId: basicCheckId,
+            eventType,
+            route: '/api/form/basic-check',
+            statusCode,
+            submitterEmail: req.body?.submitterEmail,
+            submitterName: req.body?.submitterName,
+            projectName: req.body?.projectName,
+            property: req.body?.property,
+            servicePeriod: req.body?.servicePeriod,
+            templateType: req.body?.templateType,
+            submissionMode: req.body?.submissionMode,
+            revisionSource: req.body?.revisionSource,
+            revisionBaselineFileName: req.body?.revisionBaselineFileName,
+            reviewMode: changedOnlyMode ? 'changed_only' : 'full',
+            changedLineCount,
+            menuTextLength: menuContent.length,
+            preAiTextLength: preCheckedReviewBody.length,
+            promptLength: finalPrompt.length,
+            ...extra,
+        });
         const getDeterministicFallbackMenu = () => {
             if (preAiDeterministic.appliedCorrections.length === 0) {
                 return menuContent;
@@ -2372,6 +2404,33 @@ Note: Use ONLY these allergen codes when checking allergen compliance. Do not us
                     aiFailure,
                 },
             });
+            await (0, basic_ai_check_audit_1.logBasicAiCheckAudit)(buildBasicCheckAuditEvent('ai_unavailable', 200, {
+                correctedMenuTextLength: deterministicFallbackMenu.length,
+                suggestionsCount: 0,
+                criticalSuggestionsCount: 0,
+                aiRequest: buildAiRequestAudit(),
+                aiResponse: {
+                    aiFailure,
+                },
+                deterministicDiagnostics: {
+                    preAiDeterministic: {
+                        enabled: BASIC_AI_PRECHECK_ENABLED,
+                        appliedCorrectionCount: preAiDeterministic.appliedCorrections.length,
+                        learnedRulesConsidered: preAiDeterministic.learnedRulesConsidered,
+                        learnedRulesApplied: preAiDeterministic.learnedRulesApplied,
+                        appliedCorrections: preAiDeterministic.appliedCorrections,
+                    },
+                },
+                finalResult: {
+                    correctedMenu: deterministicFallbackMenu,
+                    hasChanges: deterministicFallbackMenu !== menuContent,
+                    hasCriticalErrors: false,
+                    aiUnavailable: true,
+                    manualReviewRequired: true,
+                    reviewSkippedReason: fallbackMessage,
+                },
+                errorMessage: errorDetails.message || 'AI call failed',
+            }));
             const basicCheckDiagnostics = diagnosticsRequested ? {
                 checkId: basicCheckId,
                 reviewMode: changedOnlyMode ? 'changed_only' : 'full',
@@ -2462,6 +2521,36 @@ Note: Use ONLY these allergen codes when checking allergen compliance. Do not us
                     aiFailure,
                 },
             });
+            await (0, basic_ai_check_audit_1.logBasicAiCheckAudit)(buildBasicCheckAuditEvent('malformed_response', 200, {
+                correctedMenuTextLength: deterministicFallbackMenu.length,
+                suggestionsCount: 0,
+                criticalSuggestionsCount: 0,
+                aiRequest: buildAiRequestAudit(),
+                aiResponse: {
+                    status: qaResponse?.status,
+                    statusText: qaResponse?.statusText,
+                    body: qaResponse?.data,
+                    aiFailure,
+                },
+                deterministicDiagnostics: {
+                    preAiDeterministic: {
+                        enabled: BASIC_AI_PRECHECK_ENABLED,
+                        appliedCorrectionCount: preAiDeterministic.appliedCorrections.length,
+                        learnedRulesConsidered: preAiDeterministic.learnedRulesConsidered,
+                        learnedRulesApplied: preAiDeterministic.learnedRulesApplied,
+                        appliedCorrections: preAiDeterministic.appliedCorrections,
+                    },
+                },
+                finalResult: {
+                    correctedMenu: deterministicFallbackMenu,
+                    hasChanges: deterministicFallbackMenu !== menuContent,
+                    hasCriticalErrors: false,
+                    aiUnavailable: true,
+                    manualReviewRequired: true,
+                    reviewSkippedReason: fallbackMessage,
+                },
+                errorMessage: aiFailure.message,
+            }));
             const basicCheckDiagnostics = diagnosticsRequested ? {
                 checkId: basicCheckId,
                 reviewMode: changedOnlyMode ? 'changed_only' : 'full',
@@ -2638,6 +2727,83 @@ Note: Use ONLY these allergen codes when checking allergen compliance. Do not us
                 },
             },
         });
+        await (0, basic_ai_check_audit_1.logBasicAiCheckAudit)(buildBasicCheckAuditEvent('completed', 200, {
+            correctedMenuTextLength: finalCorrectedMenu.length,
+            responseTextLength: `${feedback || ''}`.length,
+            suggestionsCount: finalSuggestions.length,
+            criticalSuggestionsCount: criticalSuggestions.length,
+            aiRequest: buildAiRequestAudit(),
+            aiResponse: {
+                status: qaResponse?.status,
+                statusText: qaResponse?.statusText,
+                rawFeedbackLength: `${feedback || ''}`.length,
+                rawFeedback: feedback || '',
+            },
+            parsedResponse: {
+                correctedMenuLength: parsed.correctedMenu.length,
+                correctedMenu: parsed.correctedMenu,
+                suggestions: parsed.suggestions,
+            },
+            deterministicDiagnostics: {
+                preAiDeterministic: {
+                    enabled: BASIC_AI_PRECHECK_ENABLED,
+                    appliedCorrectionCount: preAiDeterministic.appliedCorrections.length,
+                    learnedRulesConsidered: preAiDeterministic.learnedRulesConsidered,
+                    learnedRulesApplied: preAiDeterministic.learnedRulesApplied,
+                    appliedCorrections: preAiDeterministic.appliedCorrections,
+                },
+                postAiDeterministic: {
+                    enabled: BASIC_AI_PRECHECK_ENABLED,
+                    appliedCorrectionCount: postAiDeterministic.appliedCorrections.length,
+                    learnedRulesConsidered: postAiDeterministic.learnedRulesConsidered,
+                    learnedRulesApplied: postAiDeterministic.learnedRulesApplied,
+                    appliedCorrections: postAiDeterministic.appliedCorrections,
+                    correctedMenu: postAiDeterministic.menuText,
+                },
+            },
+            guardDiagnostics: {
+                titleGuard,
+                structureGuard,
+                allergenGuard: {
+                    droppedSuggestions: allergenGuard.droppedSuggestions,
+                    correctedMenuChanged: allergenGuard.correctedMenu !== guardedCorrectedMenu,
+                },
+                autoApply: {
+                    suggestionsBeforeCount: allergenGuard.suggestions.length,
+                    suggestionsAfterCount: appliedHc.suggestions.length,
+                    correctedMenuChanged: appliedHc.menuText !== allergenGuard.correctedMenu,
+                    remainingSuggestions: appliedHc.suggestions,
+                },
+                embeddedSetMenu: {
+                    sections: embeddedSetMenuAnalysis.sections,
+                    issues: embeddedSetMenuAnalysis.issues,
+                    restoredPrices: setMenuGuard.restoredPrices,
+                    synthesizedSuggestions: setMenuGuard.synthesizedSuggestions,
+                    droppedSuggestions: setMenuGuard.droppedSuggestions,
+                    correctedMenuChanged: setMenuGuard.correctedMenu !== appliedHc.menuText,
+                    suggestionsAfterGuard: setMenuGuard.suggestions,
+                },
+                priceIntegrityGuard: {
+                    changes: priceIntegrityGuard.changes,
+                    correctedMenuChanged: priceIntegrityGuard.correctedMenu !== setMenuGuard.correctedMenu,
+                    suggestionsAfterGuard: priceIntegrityGuard.suggestions,
+                },
+                reconciliation: {
+                    droppedSuggestions: reconciliation.droppedSuggestions,
+                    suggestionsAfterReconciliation: reconciledSuggestions,
+                },
+            },
+            finalResult: {
+                correctedMenu: finalCorrectedMenu,
+                suggestions: finalSuggestions,
+                hasChanges: finalHasChanges,
+                hasCriticalErrors,
+                dishNameFormatting: {
+                    anchorCount: dishNameFormatting.length,
+                    anchors: dishNameFormatting,
+                },
+            },
+        }));
         const basicCheckDiagnostics = diagnosticsRequested ? {
             checkId: basicCheckId,
             reviewMode: changedOnlyMode ? 'changed_only' : 'full',

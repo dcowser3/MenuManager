@@ -36,7 +36,7 @@ For modification flows, the baseline text must come from one of:
 - `I'll make menu changes here`:
   - No modification source is preselected; the chef must choose a path before loading a baseline.
   - The database option is labeled `Choose from database (recommended)`.
-  - Search approved submissions by project/property/service period/submitter. Submitted ClickUp tasks do not appear here until an approved DOCX has been processed and the submission status is `approved`.
+  - Search approved submissions by project/property/service period/submitter. Search ignores accent/tone marks, so plain-text queries can find accented project, property, or submitter names. Submitted ClickUp tasks do not appear here until an approved DOCX has been processed and the submission status is `approved`.
   - Results are newest-first, with exact property + service-period matches prioritized when those fields are already selected.
   - Each result indicates whether it is the latest approved baseline for its property/service period.
   - Load approved baseline text into editor.
@@ -190,7 +190,7 @@ When a chef uploads an unapproved DOCX:
    - Annotation wrapping splits tokens at imported redline boundaries, so adjacent DOCX deletion/insertion runs such as `neapolitan` + `Neapolitan` remain separately styled after a later live edit.
    - Tokenization, token equality, and LCS alignment come from `@menumanager/diff-core`, the same shared helper package used by the backend differ service.
    - Runs the AI check in full-review mode for uploaded unapproved DOCX content, while approved-baseline modification flows keep changed-only review. The AI-review extractor reads clean current left-editor text.
-   - Requires one re-run when the chef edits after the first Basic AI Check. Once a second Basic AI Check completes, later edits do not block final submit, which lets chefs keep intentional wording when AI repeatedly applies an unwanted correction.
+   - Requires one re-run when the chef edits after the first Basic AI Check; during that state, the main submission button runs Basic AI Check again instead of acting as a disabled submit gate. Once a second Basic AI Check completes, later edits do not block final submit, which lets chefs keep intentional wording when AI repeatedly applies an unwanted correction.
    - After AI review, the corrected accepted text is projected into the rich editor first; AI highlight offsets and the right preview then use the actual rich-editor text so browser/Quill normalization cannot drop the final character of a highlighted range.
    - The right preview compares the synthetic original to the corrected accepted text, so uploaded redlines and AI changes share one reusable diff path.
    - Root cause note: apparent row-combining bugs came from offset/range drift after rich HTML projection, a same-line-count positional diff shortcut that could cascade after one Quill blank-line shift, and unsafe preview text serialization that stripped `<br>` instead of converting it to a newline. The preview now validates cloned rich ranges against their fallback text, line-matches multi-row diffs even when line counts are equal, computes AI highlight ranges after Quill has normalized the editor HTML, and uses a preview-HTML-to-text serializer that preserves row breaks.

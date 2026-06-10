@@ -71,6 +71,51 @@
             .filter((token) => token.length >= 2 && !noise.has(token));
     }
 
+    function normalizeSearchText(text) {
+        return String(text || '')
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .toLowerCase();
+    }
+
+    function searchTextIncludes(text, query) {
+        const normalizedQuery = normalizeSearchText(query).trim();
+        if (!normalizedQuery) return false;
+        return normalizeSearchText(text).includes(normalizedQuery);
+    }
+
+    function findSearchMatchRange(text, query) {
+        const raw = String(text || '');
+        const normalizedQuery = normalizeSearchText(query).trim();
+        if (!raw || !normalizedQuery) return null;
+
+        let normalizedText = '';
+        const indexMap = [];
+        let originalIndex = 0;
+
+        for (const char of Array.from(raw)) {
+            const start = originalIndex;
+            const end = start + char.length;
+            const normalizedChar = normalizeSearchText(char);
+
+            for (const normalizedPart of Array.from(normalizedChar)) {
+                normalizedText += normalizedPart;
+                indexMap.push({ start, end });
+            }
+
+            originalIndex = end;
+        }
+
+        const normalizedStart = normalizedText.indexOf(normalizedQuery);
+        if (normalizedStart < 0) return null;
+
+        const normalizedEnd = normalizedStart + normalizedQuery.length - 1;
+        const start = indexMap[normalizedStart]?.start;
+        const end = indexMap[normalizedEnd]?.end;
+        if (start === undefined || end === undefined || end <= start) return null;
+        return { start, end };
+    }
+
     function findCatalogMatchesFromHints(catalog, hints) {
         if (!Array.isArray(catalog) || !catalog.length) return [];
         const outletTokens = tokenizePropertyHint(hints && hints.outlet);
@@ -112,7 +157,10 @@
         addBusinessDays,
         clampExtractedDateNeeded,
         isValidDateInputValue,
+        normalizeSearchText,
         parseExtractedSize,
+        searchTextIncludes,
+        findSearchMatchRange,
         tokenizePropertyHint,
         findCatalogMatchesFromHints,
         shouldBlockSubmitForStaleAiCheck,

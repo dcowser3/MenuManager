@@ -2244,7 +2244,7 @@
                     <button type="button" class="report-problem-btn" onclick="sendProblemReport({ trigger: 'critical_error_banner', sourceButton: this })" title="Emails our support team a screenshot of this page plus the details you have filled in">Report this problem</button>
                     (sends us a screenshot of this page and your form details) or email <a href="mailto:<%= supportEmail %>"><%= supportEmail %></a>.
                 </div>
-                <button id="submitBtn" class="btn btn-success" onclick="submitMenu()">
+                <button id="submitBtn" class="btn btn-success" onclick="handleSubmitButtonClick()">
                     Submit Menu for Review
                 </button>
             </div>
@@ -4171,9 +4171,8 @@
                 return;
             }
 
-            const queryLower = query.toLowerCase();
             dropdown.innerHTML = profiles.map((p, i) => {
-                const nameHtml = highlightMatch(p.name, queryLower);
+                const nameHtml = highlightMatch(p.name, query);
                 const detail = [p.email, p.jobTitle].filter(Boolean).join(' · ');
                 return `<div class="autocomplete-item" data-index="${i}" onmousedown="selectSubmitter(${i})">
                     <div class="ac-name">${nameHtml}</div>
@@ -4185,10 +4184,11 @@
         }
 
         function highlightMatch(text, query) {
-            const escaped = escapeHtml(text);
-            const queryEscaped = escapeHtml(query);
-            const regex = new RegExp(`(${queryEscaped.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
-            return escaped.replace(regex, '<span class="ac-match">$1</span>');
+            const raw = `${text || ''}`;
+            const helper = window.formHelpers && window.formHelpers.findSearchMatchRange;
+            const range = typeof helper === 'function' ? helper(raw, query) : null;
+            if (!range) return escapeHtml(raw);
+            return `${escapeHtml(raw.slice(0, range.start))}<span class="ac-match">${escapeHtml(raw.slice(range.start, range.end))}</span>${escapeHtml(raw.slice(range.end))}`;
         }
 
         function selectSubmitter(index) {
@@ -4458,9 +4458,10 @@
         }
 
         function onProjectNameInput(value) {
-            const query = (value || '').trim().toLowerCase();
+            const query = (value || '').trim();
+            const normalizedQuery = window.formHelpers.normalizeSearchText(query).trim();
             const dropdown = document.getElementById('projectDropdown');
-            if (query.length < 2) {
+            if (normalizedQuery.length < 2) {
                 dropdown.classList.remove('show');
                 projectSuggestResults = [];
                 projectSuggestHighlightIndex = -1;
@@ -4469,9 +4470,9 @@
 
             const seen = new Set();
             projectSuggestResults = recentProjectsData
-                .filter(p => (p.projectName || '').toLowerCase().includes(query))
+                .filter(p => window.formHelpers.searchTextIncludes(p.projectName || '', query))
                 .filter(p => {
-                    const key = `${(p.projectName || '').toLowerCase()}|${(p.property || '').toLowerCase()}`;
+                    const key = `${window.formHelpers.normalizeSearchText(p.projectName || '')}|${window.formHelpers.normalizeSearchText(p.property || '')}`;
                     if (seen.has(key)) return false;
                     seen.add(key);
                     return true;
@@ -4525,9 +4526,10 @@
         }
 
         function onPropertyInput(value) {
-            const query = (value || '').trim().toLowerCase();
+            const query = (value || '').trim();
+            const normalizedQuery = window.formHelpers.normalizeSearchText(query).trim();
             const dropdown = document.getElementById('propertyDropdown');
-            if (query.length < 2) {
+            if (normalizedQuery.length < 2) {
                 dropdown.classList.remove('show');
                 propertySuggestResults = [];
                 propertySuggestHighlightIndex = -1;
@@ -4539,9 +4541,9 @@
 
             const seen = new Set();
             propertySuggestResults = propertyCatalogData
-                .filter((name) => (name || '').toLowerCase().includes(query))
+                .filter((name) => window.formHelpers.searchTextIncludes(name || '', query))
                 .filter((name) => {
-                    const key = (name || '').toLowerCase();
+                    const key = window.formHelpers.normalizeSearchText(name || '');
                     if (seen.has(key)) return false;
                     seen.add(key);
                     return true;
@@ -5853,14 +5855,16 @@
             if (!aiCheckHasRun) {
                 submitBtn.disabled = true;
                 submitBtn.classList.add('blocked');
+                submitBtn.textContent = 'Run Basic AI Check';
                 banner.classList.remove('show');
                 staleBanner.classList.remove('show');
                 return;
             }
 
             if (staleAiCheckBlocksSubmit) {
-                submitBtn.disabled = true;
-                submitBtn.classList.add('blocked');
+                submitBtn.disabled = false;
+                submitBtn.classList.remove('blocked');
+                submitBtn.textContent = 'Run Basic AI Check';
                 banner.classList.remove('show');
                 staleBanner.classList.add('show');
                 return;
@@ -5869,6 +5873,7 @@
             if (!aiCheckResults || !aiCheckResults.suggestions) {
                 submitBtn.disabled = false;
                 submitBtn.classList.remove('blocked');
+                submitBtn.textContent = 'Submit Menu for Review';
                 banner.classList.remove('show');
                 staleBanner.classList.remove('show');
                 return;
@@ -5881,11 +5886,13 @@
             if (unresolvedCritical) {
                 submitBtn.disabled = true;
                 submitBtn.classList.add('blocked');
+                submitBtn.textContent = 'Submit Menu for Review';
                 banner.classList.add('show');
                 staleBanner.classList.remove('show');
             } else {
                 submitBtn.disabled = false;
                 submitBtn.classList.remove('blocked');
+                submitBtn.textContent = 'Submit Menu for Review';
                 banner.classList.remove('show');
                 staleBanner.classList.remove('show');
             }
@@ -5905,10 +5912,23 @@
             updateSubmitButtonState();
         }
 
-        async function rerunAICheck() {
+        async function rerunAICheck(options = {}) {
             const rerunBtn = document.getElementById('rerunCheckBtn');
-            rerunBtn.disabled = true;
-            rerunBtn.textContent = 'Re-running...';
+            const submitBtn = document.getElementById('submitBtn');
+            const launchedFromSubmitButton = options.source === 'submit_button';
+
+            if (isEditMode) {
+                toggleEditMode();
+            }
+
+            if (rerunBtn) {
+                rerunBtn.disabled = true;
+                rerunBtn.textContent = 'Re-running...';
+            }
+            if (submitBtn && (launchedFromSubmitButton || shouldBlockSubmitForStaleAiCheck())) {
+                submitBtn.disabled = true;
+                submitBtn.innerHTML = '<span class="spinner"></span>Running AI Check...';
+            }
 
             // Get current edited text using the same normalized extractor as the initial AI check.
             // Raw innerText adds browser-generated newlines around block elements on each render.
@@ -5997,9 +6017,20 @@
                 });
                 showAlert('Error re-running AI check: ' + error.message, 'error');
             } finally {
-                rerunBtn.disabled = false;
-                rerunBtn.textContent = 'Re-run AI Check';
+                if (rerunBtn) {
+                    rerunBtn.disabled = false;
+                    rerunBtn.textContent = 'Re-run AI Check';
+                }
+                updateSubmitButtonState();
             }
+        }
+
+        async function handleSubmitButtonClick() {
+            if (shouldBlockSubmitForStaleAiCheck()) {
+                await rerunAICheck({ source: 'submit_button' });
+                return;
+            }
+            await submitMenu();
         }
 
         function showStep2(results) {
