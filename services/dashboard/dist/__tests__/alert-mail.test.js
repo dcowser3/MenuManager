@@ -83,10 +83,33 @@ describe('alert mail transport', () => {
             expect(sendCalls[0].url).toContain('alerts%40example.com');
             expect(sendCalls[0].init.headers.Authorization).toBe('Bearer tok');
         });
-        test('falls back to SMTP when Graph fails and reports both errors when SMTP also fails', async () => {
+        test('writes directly into the recipient inbox when sendMail lacks Mail.Send', async () => {
+            const calls = [];
+            const fetchImpl = async (url, init) => {
+                calls.push({ url, init });
+                if (url.includes('/oauth2/'))
+                    return fakeResponse(200, { access_token: 'tok', expires_in: 3600 });
+                if (url.includes('/sendMail'))
+                    return fakeResponse(403, { error: { code: 'ErrorAccessDenied' } });
+                return fakeResponse(201, { id: 'msg-1' });
+            };
+            const result = await (0, alert_mail_1.sendAlertMail)(MESSAGE, { graphConfig: (0, alert_mail_1.buildGraphMailConfig)(GRAPH_ENV), fetchImpl });
+            expect(result).toEqual({ transport: 'graph-inbox-write', attachmentsDropped: false });
+            const inboxCall = calls.find((c) => c.url.includes('/mailFolders/inbox/messages'));
+            expect(inboxCall).toBeDefined();
+            expect(inboxCall.url).toContain('support%40example.com');
+            const payload = JSON.parse(inboxCall.init.body);
+            expect(payload.singleValueExtendedProperties).toEqual([{ id: 'Integer 0x0E07', value: '4' }]);
+            expect(payload.from.emailAddress).toEqual({ name: 'Menu Manager Alerts', address: 'alerts@example.com' });
+            expect(payload.attachments).toHaveLength(2);
+            expect(payload.saveToSentItems).toBeUndefined();
+        });
+        test('falls back to SMTP when Graph fails and reports all errors when SMTP also fails', async () => {
             const fetchImpl = async (url) => url.includes('/oauth2/')
                 ? fakeResponse(200, { access_token: 'tok', expires_in: 3600 })
-                : fakeResponse(403, { error: { code: 'ErrorAccessDenied' } });
+                : url.includes('/sendMail')
+                    ? fakeResponse(403, { error: { code: 'ErrorAccessDenied' } })
+                    : fakeResponse(404, { error: { code: 'ErrorInvalidUser' } });
             const sendMail = jest.fn().mockResolvedValue({});
             const viaSmtp = await (0, alert_mail_1.sendAlertMail)(MESSAGE, {
                 graphConfig: (0, alert_mail_1.buildGraphMailConfig)(GRAPH_ENV),
@@ -106,7 +129,7 @@ describe('alert mail transport', () => {
                 graphConfig: (0, alert_mail_1.buildGraphMailConfig)(GRAPH_ENV),
                 smtpTransporter: failingSmtp,
                 fetchImpl,
-            })).rejects.toThrow(/graph: .*403.*\| smtp: Connection timeout/);
+            })).rejects.toThrow(/graph: .*403.*Graph inbox write failed \(404\).*\| smtp: Connection timeout/);
         });
         test('drops attachments when the Graph payload exceeds the size limit', async () => {
             const sendBodies = [];

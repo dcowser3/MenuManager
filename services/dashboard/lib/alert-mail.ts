@@ -38,7 +38,7 @@ export interface SendAlertMailDeps {
 }
 
 export interface SendAlertMailResult {
-    transport: 'graph' | 'smtp';
+    transport: 'graph' | 'graph-inbox-write' | 'smtp';
     attachmentsDropped: boolean;
 }
 
@@ -167,8 +167,55 @@ async function sendViaGraph(
 }
 
 /**
- * Send an alert email via Graph when configured, falling back to SMTP.
- * Throws only when every configured transport fails; callers fire-and-forget.
+ * Interim path while the Mail.Send permission awaits admin consent: with the
+ * already-granted Mail.ReadWrite application permission, write the alert
+ * directly into the recipient's inbox (alerts always go to an in-tenant
+ * support mailbox). PR_MESSAGE_FLAGS=4 clears the draft flag so the message
+ * lands as a normal unread item. Out-of-tenant recipients 404 and fall
+ * through to SMTP.
+ */
+async function sendViaGraphInboxWrite(
+    config: GraphMailConfig,
+    message: AlertMailMessage,
+    fetchImpl: typeof fetch
+): Promise<SendAlertMailResult> {
+    const token = await getGraphToken(config, fetchImpl);
+
+    const buildBody = (msg: AlertMailMessage) => {
+        const payload = buildGraphSendMailRequest(msg).message;
+        return JSON.stringify({
+            ...payload,
+            from: { emailAddress: { name: msg.fromName, address: config.mailboxAddress } },
+            singleValueExtendedProperties: [{ id: 'Integer 0x0E07', value: '4' }],
+        });
+    };
+
+    let attachmentsDropped = false;
+    let body = buildBody(message);
+    if (body.length > GRAPH_MAX_REQUEST_CHARS && (message.attachments || []).length) {
+        attachmentsDropped = true;
+        body = buildBody(withoutAttachments(message));
+    }
+
+    const response = await fetchImpl(
+        `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(message.to)}/mailFolders/inbox/messages`,
+        {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+            body,
+        }
+    );
+    if (!response.ok) {
+        const errorText = (await response.text().catch(() => '')).slice(0, 400);
+        throw new Error(`Graph inbox write failed (${response.status}): ${errorText}`);
+    }
+    return { transport: 'graph-inbox-write', attachmentsDropped };
+}
+
+/**
+ * Send an alert email via Graph when configured (sendMail, then direct
+ * inbox write), falling back to SMTP. Throws only when every configured
+ * transport fails; callers fire-and-forget.
  */
 export async function sendAlertMail(message: AlertMailMessage, deps: SendAlertMailDeps): Promise<SendAlertMailResult> {
     const fetchImpl = deps.fetchImpl || (globalThis.fetch as typeof fetch | undefined);
@@ -179,6 +226,11 @@ export async function sendAlertMail(message: AlertMailMessage, deps: SendAlertMa
             return await sendViaGraph(deps.graphConfig, message, fetchImpl);
         } catch (error: any) {
             graphError = error;
+        }
+        try {
+            return await sendViaGraphInboxWrite(deps.graphConfig, message, fetchImpl);
+        } catch (error: any) {
+            graphError = new Error(`${graphError ? `${graphError.message} | ` : ''}${error.message}`);
         }
     }
 
