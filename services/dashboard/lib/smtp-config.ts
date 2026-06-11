@@ -43,6 +43,12 @@ export function buildSmtpRuntimeConfig(env: Env = process.env as Env): SmtpRunti
         host,
         port: readPort(env.SMTP_PORT, authMode === 'none' ? 25 : 587),
         secure: readBoolean(env.SMTP_SECURE, false),
+        // Fail fast instead of nodemailer's multi-minute defaults: an
+        // unreachable relay (e.g. blocked outbound port 25) must not hold
+        // sockets open while callers fire-and-forget.
+        connectionTimeout: 10000,
+        greetingTimeout: 10000,
+        socketTimeout: 60000,
     };
 
     if (readBoolean(env.SMTP_REQUIRE_TLS, authMode === 'none')) {

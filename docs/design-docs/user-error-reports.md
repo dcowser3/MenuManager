@@ -39,6 +39,7 @@ Each placement discloses what is sent: "(sends us a screenshot of this page and 
 - **Server lib:** `services/dashboard/lib/error-report.ts` — normalization/truncation, data-URL decoding (PNG/JPEG only, 4MB decoded cap), email builder, send gate.
 - **Route:** `POST /api/form/error-report` in `services/dashboard/index.ts`, 15-second per-attempt cooldown (429) against double-clicks.
 - **Disk copy always happens first**, so reports survive missing SMTP/Supabase config; the email send failure is logged but never fails the request.
+- **The email is fire-and-forget** (repo convention for non-critical side effects): the route responds as soon as the report is persisted and returns `emailQueued`, never awaiting SMTP. This matters operationally — an unreachable relay once held the response past nginx's 60s proxy timeout and turned every production report into a 504. The shared dashboard SMTP transport (`lib/smtp-config.ts`) also sets `connectionTimeout`/`greetingTimeout` 10s and `socketTimeout` 60s instead of nodemailer's multi-minute defaults; a failed send logs to console and writes an `error_report_email_failed` row to `system_alerts` with the on-disk path of the saved report.
 
 ## Email gating
 
@@ -54,3 +55,4 @@ Mirrors the form-attempt failure email: sends only when SMTP is configured **and
 
 - `services/dashboard/__tests__/error-report.test.ts` — normalization, truncation bounds, data-URL decoding, email gating, HTML escaping.
 - `services/dashboard/__tests__/form-view.test.js` — button wiring on all three surfaces, capture-before-UI-change ordering, no-recursion flag.
+- `services/dashboard/__tests__/smtp-config.test.ts` — auth modes and the fail-fast transport timeouts.

@@ -2383,7 +2383,9 @@ app.post('/api/form/error-report', async (req, res) => {
             },
         });
 
-        let emailed = false;
+        // Fire-and-forget: the email must never block (or 504) the chef's
+        // request. The report is already safe on disk + in form_attempt_logs.
+        let emailQueued = false;
         if (alertTransporter && FORM_ATTEMPT_ALERT_EMAIL && shouldEmailErrorReport()) {
             const { subject, html } = buildErrorReportEmail(report, {
                 hasScreenshot: !!screenshot,
@@ -2399,21 +2401,33 @@ app.post('/api/form/error-report', async (req, res) => {
                     contentType: screenshot.contentType,
                 });
             }
-            try {
-                await alertTransporter.sendMail({
-                    from: `"Menu Manager Alerts" <${smtpFromAddress}>`,
-                    to: FORM_ATTEMPT_ALERT_EMAIL,
-                    subject,
-                    html,
-                    attachments,
-                });
-                emailed = true;
-            } catch (mailError: any) {
+            emailQueued = true;
+            alertTransporter.sendMail({
+                from: `"Menu Manager Alerts" <${smtpFromAddress}>`,
+                to: FORM_ATTEMPT_ALERT_EMAIL,
+                subject,
+                html,
+                attachments,
+            }).then(() => {
+                console.log(`Error report ${report.attemptId} emailed to ${FORM_ATTEMPT_ALERT_EMAIL}`);
+            }).catch((mailError: any) => {
                 console.error('Failed to email error report:', mailError.message);
-            }
+                logAlert({
+                    alert_type: 'error_report_email_failed',
+                    severity: 'warning',
+                    service: 'dashboard',
+                    message: `Could not email user problem report ${report.attemptId} (saved at ${savedTo || 'disk save failed'})`,
+                    details: {
+                        attemptId: report.attemptId,
+                        smtpError: mailError.message,
+                        savedTo,
+                        submitterEmail: report.submitterEmail || null,
+                    },
+                });
+            });
         }
 
-        res.json({ success: true, emailed });
+        res.json({ success: true, emailQueued });
     } catch (error: any) {
         console.error('Error handling problem report:', error.message);
         res.status(500).json({ error: 'Failed to send problem report' });
