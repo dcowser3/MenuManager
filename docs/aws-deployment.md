@@ -92,6 +92,8 @@ Before rebuilding, the workflow runs `docker system prune -af` to clear unused i
 
 The SSH command uses keepalives so long, quiet Docker rebuilds do not drop the GitHub Actions connection.
 
+After containers start, the workflow waits up to 90 seconds for `http://localhost:3005/` to answer before marking the deploy failed.
+
 ### Server assumptions
 
 - The app is already cloned on the Lightsail instance.
