@@ -60,6 +60,8 @@ All variables are configured in `.env` at the project root. See `.env.example` f
 | `GRAPH_CLIENT_ID` | Azure app client ID used for SharePoint/Microsoft Graph access |
 | `GRAPH_TENANT_ID` | Azure tenant ID used for SharePoint/Microsoft Graph access |
 | `GRAPH_CLIENT_SECRET` | Azure app client secret used for SharePoint/Microsoft Graph access |
+| `GRAPH_MAILBOX_ADDRESS` | Mailbox the dashboard sends alert/problem-report email **as** via Graph `sendMail` (falls back to `GRAPH_USER_EMAIL`). Must be a real licensed or shared mailbox — a distribution list returns `ErrorInvalidUser`. Requires the app registration to have the `Mail.Send` application permission with admin consent. |
+| `ALERT_MAIL_GRAPH_DISABLED` | Set `true` to skip the Graph transport for dashboard alert email and use SMTP only |
 
 ## ClickUp Integration
 
@@ -91,7 +93,9 @@ Public form journeys also write compact telemetry to `form_attempt_logs` when Su
 
 Basic AI Check additionally writes durable audit rows to `basic_ai_check_audits` unless `BASIC_AI_CHECK_AUDIT_ENABLED=false`. Each row stores bounded JSON copies of the exact `ai-review` request body (`text` and `prompt`), raw AI response or failure, parsed corrected-menu block, guard diagnostics, deterministic pre/post-AI corrections, and the final corrected menu returned to the browser. Use `BASIC_AI_CHECK_AUDIT_MAX_CHARS` to cap large text fields.
 
-In production, public-form failure events also send an email through the dashboard SMTP transport to `FORM_ATTEMPT_ALERT_EMAIL` (or `dcowser@richardsandoval.com` when unset). Local development and non-production environments do not send these form failure emails.
+In production, public-form failure events also send an email to `FORM_ATTEMPT_ALERT_EMAIL` (or `dcowser@richardsandoval.com` when unset). Local development and non-production environments do not send these form failure emails.
+
+Dashboard alert email (system alerts, form-failure alerts, user problem reports) prefers **Microsoft Graph `sendMail`** over HTTPS when `GRAPH_TENANT_ID`/`GRAPH_CLIENT_ID`/`GRAPH_CLIENT_SECRET` plus a sender mailbox (`GRAPH_MAILBOX_ADDRESS` or `GRAPH_USER_EMAIL`) are configured, falling back to SMTP otherwise. This matters in production: Lightsail blocks outbound port 25 by default, so the Microsoft 365 IP-relay SMTP path times out. Graph requires the `Mail.Send` application permission with admin consent on the app registration.
 
 User-initiated "Report this problem" reports follow the same production gate (override with `ERROR_REPORT_FORCE_EMAIL=true`): the email attaches the submitter's full-page screenshot and a `client-state.json` snapshot of everything filled in. Regardless of email, every report is saved under `tmp/error-reports/<timestamp>-<attemptId>/` and logged to `form_attempt_logs` as `user_error_report`. See [design-docs/user-error-reports.md](design-docs/user-error-reports.md).
 

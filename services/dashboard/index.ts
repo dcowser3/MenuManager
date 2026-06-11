@@ -58,6 +58,11 @@ import {
     shouldEmailErrorReport,
 } from './lib/error-report';
 import {
+    buildGraphMailConfig,
+    canSendAlertMail,
+    sendAlertMail,
+} from './lib/alert-mail';
+import {
     buildFallbackPropertyCatalog,
     normalizePropertyCatalogRecord,
     PropertyCatalogRecord,
@@ -202,11 +207,18 @@ function cleanupBasicCheckJobs(): void {
     }
 }
 
-// SMTP for admin alerts (reuses existing SMTP config)
+// Alert email transports: Graph (HTTPS, preferred — Lightsail blocks outbound
+// port 25) with SMTP fallback when only SMTP is configured.
 const smtpConfig = buildSmtpRuntimeConfig();
 const hasSmtpConfig = smtpConfig.enabled;
 const smtpFromAddress = smtpConfig.fromAddress;
 const alertTransporter = hasSmtpConfig ? nodemailer.createTransport(smtpConfig.transportOptions as any) : null;
+const graphMailConfig = buildGraphMailConfig();
+const alertMailDeps = {
+    graphConfig: graphMailConfig,
+    smtpTransporter: alertTransporter,
+    smtpFromAddress,
+};
 
 // Alert dedup: 15-min cooldown per alert_type
 const alertCooldowns = new Map<string, number>();
@@ -227,14 +239,14 @@ function sendAdminAlert(alert: SystemAlert): void {
     logAlert(alert);
 
     // Send email
-    if (alertTransporter && ALERT_EMAIL) {
+    if (canSendAlertMail(alertMailDeps) && ALERT_EMAIL) {
         const severityLabel = alert.severity.toUpperCase();
-        alertTransporter.sendMail({
-            from: `"Menu Manager Alerts" <${smtpFromAddress}>`,
+        sendAlertMail({
+            fromName: 'Menu Manager Alerts',
             to: ALERT_EMAIL,
             subject: `[${severityLabel}] ${alert.alert_type.replace(/_/g, ' ')} — Menu Manager`,
             html: buildAlertEmailHtml(alert, DASHBOARD_URL),
-        }).catch((err: any) => console.error('Failed to send alert email:', err.message));
+        }, alertMailDeps).catch((err: any) => console.error('Failed to send alert email:', err.message));
     }
 }
 
@@ -263,7 +275,7 @@ function formAttemptValue(event: Record<string, any>, camelKey: string, snakeKey
 
 function sendFormAttemptFailureEmail(event: Record<string, any>): void {
     if (!shouldNotifyFormAttemptFailure(event)) return;
-    if (!alertTransporter || !FORM_ATTEMPT_ALERT_EMAIL) return;
+    if (!canSendAlertMail(alertMailDeps) || !FORM_ATTEMPT_ALERT_EMAIL) return;
 
     const attemptId = `${formAttemptValue(event, 'attemptId', 'attempt_id') || 'unknown'}`;
     const eventType = `${formAttemptValue(event, 'eventType', 'event_type') || 'form_attempt_failed'}`;
@@ -308,8 +320,8 @@ function sendFormAttemptFailureEmail(event: Record<string, any>): void {
         ? `<h3>Critical Suggestions</h3><pre style="background:#f5f5f5;padding:12px;overflow:auto;font-size:12px">${escapeEmailHtml(JSON.stringify(criticalSuggestions, null, 2))}</pre>`
         : '';
 
-    alertTransporter.sendMail({
-        from: `"Menu Manager Alerts" <${smtpFromAddress}>`,
+    sendAlertMail({
+        fromName: 'Menu Manager Alerts',
         to: FORM_ATTEMPT_ALERT_EMAIL,
         subject,
         html: `
@@ -322,7 +334,7 @@ function sendFormAttemptFailureEmail(event: Record<string, any>): void {
                 <details style="margin:12px 0"><summary style="cursor:pointer;font-weight:bold">Details</summary><pre style="background:#f5f5f5;padding:12px;overflow:auto;font-size:12px">${escapeEmailHtml(JSON.stringify(details, null, 2))}</pre></details>
             </div>
         `,
-    }).catch((err: any) => console.error('Failed to send form attempt alert email:', err.message));
+    }, alertMailDeps).catch((err: any) => console.error('Failed to send form attempt alert email:', err.message));
 }
 
 function getRepoRoot(): string {
@@ -2386,7 +2398,7 @@ app.post('/api/form/error-report', async (req, res) => {
         // Fire-and-forget: the email must never block (or 504) the chef's
         // request. The report is already safe on disk + in form_attempt_logs.
         let emailQueued = false;
-        if (alertTransporter && FORM_ATTEMPT_ALERT_EMAIL && shouldEmailErrorReport()) {
+        if (canSendAlertMail(alertMailDeps) && FORM_ATTEMPT_ALERT_EMAIL && shouldEmailErrorReport()) {
             const { subject, html } = buildErrorReportEmail(report, {
                 hasScreenshot: !!screenshot,
                 dashboardUrl: DASHBOARD_URL,
@@ -2402,14 +2414,14 @@ app.post('/api/form/error-report', async (req, res) => {
                 });
             }
             emailQueued = true;
-            alertTransporter.sendMail({
-                from: `"Menu Manager Alerts" <${smtpFromAddress}>`,
+            sendAlertMail({
+                fromName: 'Menu Manager Alerts',
                 to: FORM_ATTEMPT_ALERT_EMAIL,
                 subject,
                 html,
                 attachments,
-            }).then(() => {
-                console.log(`Error report ${report.attemptId} emailed to ${FORM_ATTEMPT_ALERT_EMAIL}`);
+            }, alertMailDeps).then((result) => {
+                console.log(`Error report ${report.attemptId} emailed to ${FORM_ATTEMPT_ALERT_EMAIL} via ${result.transport}${result.attachmentsDropped ? ' (attachments dropped for size)' : ''}`);
             }).catch((mailError: any) => {
                 console.error('Failed to email error report:', mailError.message);
                 logAlert({

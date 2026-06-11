@@ -64,6 +64,7 @@ const approved_menus_1 = require("./lib/approved-menus");
 const clickup_handoff_1 = require("./lib/clickup-handoff");
 const form_attempt_logging_1 = require("./lib/form-attempt-logging");
 const error_report_1 = require("./lib/error-report");
+const alert_mail_1 = require("./lib/alert-mail");
 const property_catalog_1 = require("./lib/property-catalog");
 const apply_high_confidence_suggestions_1 = require("./lib/apply-high-confidence-suggestions");
 const allergen_suggestion_guard_1 = require("./lib/allergen-suggestion-guard");
@@ -166,11 +167,18 @@ function cleanupBasicCheckJobs() {
         }
     }
 }
-// SMTP for admin alerts (reuses existing SMTP config)
+// Alert email transports: Graph (HTTPS, preferred — Lightsail blocks outbound
+// port 25) with SMTP fallback when only SMTP is configured.
 const smtpConfig = (0, smtp_config_1.buildSmtpRuntimeConfig)();
 const hasSmtpConfig = smtpConfig.enabled;
 const smtpFromAddress = smtpConfig.fromAddress;
 const alertTransporter = hasSmtpConfig ? nodemailer_1.default.createTransport(smtpConfig.transportOptions) : null;
+const graphMailConfig = (0, alert_mail_1.buildGraphMailConfig)();
+const alertMailDeps = {
+    graphConfig: graphMailConfig,
+    smtpTransporter: alertTransporter,
+    smtpFromAddress,
+};
 // Alert dedup: 15-min cooldown per alert_type
 const alertCooldowns = new Map();
 const ALERT_COOLDOWN_MS = 15 * 60 * 1000;
@@ -188,14 +196,14 @@ function sendAdminAlert(alert) {
     // Log to Supabase
     (0, supabase_client_1.logAlert)(alert);
     // Send email
-    if (alertTransporter && ALERT_EMAIL) {
+    if ((0, alert_mail_1.canSendAlertMail)(alertMailDeps) && ALERT_EMAIL) {
         const severityLabel = alert.severity.toUpperCase();
-        alertTransporter.sendMail({
-            from: `"Menu Manager Alerts" <${smtpFromAddress}>`,
+        (0, alert_mail_1.sendAlertMail)({
+            fromName: 'Menu Manager Alerts',
             to: ALERT_EMAIL,
             subject: `[${severityLabel}] ${alert.alert_type.replace(/_/g, ' ')} — Menu Manager`,
             html: (0, supabase_client_1.buildAlertEmailHtml)(alert, DASHBOARD_URL),
-        }).catch((err) => console.error('Failed to send alert email:', err.message));
+        }, alertMailDeps).catch((err) => console.error('Failed to send alert email:', err.message));
     }
 }
 function shouldNotifyFormAttemptFailure(event) {
@@ -220,7 +228,7 @@ function formAttemptValue(event, camelKey, snakeKey = camelKey) {
 function sendFormAttemptFailureEmail(event) {
     if (!shouldNotifyFormAttemptFailure(event))
         return;
-    if (!alertTransporter || !FORM_ATTEMPT_ALERT_EMAIL)
+    if (!(0, alert_mail_1.canSendAlertMail)(alertMailDeps) || !FORM_ATTEMPT_ALERT_EMAIL)
         return;
     const attemptId = `${formAttemptValue(event, 'attemptId', 'attempt_id') || 'unknown'}`;
     const eventType = `${formAttemptValue(event, 'eventType', 'event_type') || 'form_attempt_failed'}`;
@@ -261,8 +269,8 @@ function sendFormAttemptFailureEmail(event) {
     const criticalHtml = Array.isArray(criticalSuggestions) && criticalSuggestions.length
         ? `<h3>Critical Suggestions</h3><pre style="background:#f5f5f5;padding:12px;overflow:auto;font-size:12px">${escapeEmailHtml(JSON.stringify(criticalSuggestions, null, 2))}</pre>`
         : '';
-    alertTransporter.sendMail({
-        from: `"Menu Manager Alerts" <${smtpFromAddress}>`,
+    (0, alert_mail_1.sendAlertMail)({
+        fromName: 'Menu Manager Alerts',
         to: FORM_ATTEMPT_ALERT_EMAIL,
         subject,
         html: `
@@ -275,7 +283,7 @@ function sendFormAttemptFailureEmail(event) {
                 <details style="margin:12px 0"><summary style="cursor:pointer;font-weight:bold">Details</summary><pre style="background:#f5f5f5;padding:12px;overflow:auto;font-size:12px">${escapeEmailHtml(JSON.stringify(details, null, 2))}</pre></details>
             </div>
         `,
-    }).catch((err) => console.error('Failed to send form attempt alert email:', err.message));
+    }, alertMailDeps).catch((err) => console.error('Failed to send form attempt alert email:', err.message));
 }
 function getRepoRoot() {
     const candidates = [
@@ -2093,7 +2101,7 @@ app.post('/api/form/error-report', async (req, res) => {
         // Fire-and-forget: the email must never block (or 504) the chef's
         // request. The report is already safe on disk + in form_attempt_logs.
         let emailQueued = false;
-        if (alertTransporter && FORM_ATTEMPT_ALERT_EMAIL && (0, error_report_1.shouldEmailErrorReport)()) {
+        if ((0, alert_mail_1.canSendAlertMail)(alertMailDeps) && FORM_ATTEMPT_ALERT_EMAIL && (0, error_report_1.shouldEmailErrorReport)()) {
             const { subject, html } = (0, error_report_1.buildErrorReportEmail)(report, {
                 hasScreenshot: !!screenshot,
                 dashboardUrl: DASHBOARD_URL,
@@ -2109,14 +2117,14 @@ app.post('/api/form/error-report', async (req, res) => {
                 });
             }
             emailQueued = true;
-            alertTransporter.sendMail({
-                from: `"Menu Manager Alerts" <${smtpFromAddress}>`,
+            (0, alert_mail_1.sendAlertMail)({
+                fromName: 'Menu Manager Alerts',
                 to: FORM_ATTEMPT_ALERT_EMAIL,
                 subject,
                 html,
                 attachments,
-            }).then(() => {
-                console.log(`Error report ${report.attemptId} emailed to ${FORM_ATTEMPT_ALERT_EMAIL}`);
+            }, alertMailDeps).then((result) => {
+                console.log(`Error report ${report.attemptId} emailed to ${FORM_ATTEMPT_ALERT_EMAIL} via ${result.transport}${result.attachmentsDropped ? ' (attachments dropped for size)' : ''}`);
             }).catch((mailError) => {
                 console.error('Failed to email error report:', mailError.message);
                 (0, supabase_client_1.logAlert)({
