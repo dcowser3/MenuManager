@@ -19,6 +19,7 @@
     "preai:ab-replay": "node scripts/pre-ai-ab-replay.js",
     "review:eval": "node scripts/review-eval.js",
     "rules:manifest": "node scripts/generate-rules-manifest.js",
+    "improve:cycle": "node scripts/improvement-cycle.js",
     "prompt:rewrite": "node scripts/prompt-rewrite.js",
     "backfill:audit-links": "node scripts/backfill-audit-submission-links.js",
     "sharepoint:sync-property": "node scripts/sync-sharepoint-property.js"

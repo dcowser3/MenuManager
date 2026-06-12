@@ -13,7 +13,7 @@ Automates the manual "collect ~10 reviewer corrections, ask an AI how to improve
 | C1 | Replayable review pipeline (`qa-prompt-builder`, `review-pipeline` libs) | Implemented |
 | C2 | Eval harness (`npm run review:eval`) | Implemented |
 | B | Generated code-rules manifest (`npm run rules:manifest`) | Implemented |
-| D | Improvement cycle (`npm run improve:cycle`) + proposal page extension | Planned |
+| D | Improvement cycle (`npm run improve:cycle`) + proposal page extension | Implemented |
 | E | Daily Lightsail cron + runbook | Planned |
 
 ## Phase A — Training-triple data capture (Implemented)
@@ -78,6 +78,21 @@ The handler keeps HTTP concerns (fallbacks, audits, diagnostics, logging) and de
 Outputs: committed `docs/references/code-rules-manifest.{md,json}` (code-only, deterministic — no timestamps) and `tmp/rules-manifest/manifest-full.{json,md}` (code + live accepted rules; the Phase D LLM input).
 
 Drift prevention (`services/dashboard/__tests__/review-rules-manifest.test.ts`): the committed markdown must byte-match a regeneration; every replacement / prompt section / critical type / known guard module must be covered; ids must be unique. Adding a new guard requires a manifest entry plus an addition to the test's known-guards list.
+
+## Phase D — Improvement cycle (Implemented)
+
+`npm run improve:cycle` ([scripts/improvement-cycle.js](../../scripts/improvement-cycle.js); testable core in [services/dashboard/lib/improvement-cycle-core.ts](../../services/dashboard/lib/improvement-cycle-core.ts)):
+
+1. **Lock + gate**: `tmp/improvement-cycle/.lock` (stale after 6h) plus one-proposal-per-day (`cycle_id` = `YYYY-MM-DD`). Exits quietly when unconsumed corrections < `IMPROVE_MIN_NEW_CORRECTIONS` (default 1) or a proposal is already pending — an idle day costs one count query, $0. `--force`, `--skip-eval`, `--dry-run` flags.
+2. **Effective prompt**: latest approved proposal from `prompt_proposals` beats `qa_prompt.txt` (the file is baked into the Docker image, so dashboard-approved prompts would be reverted on redeploy — the dashboard now also restores it at startup via `syncEffectivePromptFromDb()`).
+3. **Context**: effective prompt + full rules manifest (code + accepted DB rules) + new corrections with reviewer explanations + before/after DOCX excerpts + latest eval snapshot.
+4. **LLM analysis** (`IMPROVE_MODEL`, JSON mode, temp 0.2): returns `{analysis, proposed_prompt, proposed_replacement_rules[], code_recommendations[]}`. Validation drops rules with unsafe change types (only spelling/diacritic/terminology/grammar/punctuation/capitalization survive) or missing fields, with logged warnings. Code recommendations are descriptions for a human engineer — never auto-applied.
+5. **Auto-eval**: spawns the eval harness twice — baseline (current prompt + live rules) and candidate (proposed prompt + `candidate:` rules) — and stores `eval_summary` + `eval_status` (`passed`/`regressed`/`failed`/`skipped`). Regressed proposals are stored and flagged, never dropped.
+6. **Store + notify**: inserts the `prompt_proposals` row (`source: improvement_cycle`), marks the corrections consumed (`prompt_cycle_id`), writes artifacts to `tmp/improvement-cycle/<cycle>/`, and emails `IMPROVE_NOTIFY_EMAIL || FORM_ATTEMPT_ALERT_EMAIL` via the Graph alert-mail transport with a link to `/learning/prompt-proposal`.
+
+**Dashboard** (`/learning/prompt-proposal`): the proposal page now shows the eval verdict (baseline vs candidate composites, improved/same/regressed, per-case regression table), the proposed replacement rules as a checked-by-default checkbox list, and the code recommendations. On approve, the review route writes the prompt (as before), records `accepted_rules`, and inserts each checked rule into `correction_rules` (`status: accepted`, `source: system`, `submission_id: proposal-<id>`) so the pre-AI deterministic pass applies them immediately. `npm run prompt:rewrite` remains as a manual fallback until the cycle has run in production.
+
+**Required manual step:** apply `supabase/migrations/20260612_extend_prompt_proposals.sql` in the Supabase SQL editor (with the two earlier migrations) before the first production cycle — the proposal insert uses the new columns.
 
 ## Eval dataset contract
 

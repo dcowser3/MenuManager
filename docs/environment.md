@@ -62,6 +62,13 @@ All variables are configured in `.env` at the project root. See `.env.example` f
 | `GRAPH_CLIENT_SECRET` | Azure app client secret used for SharePoint/Microsoft Graph access |
 | `GRAPH_MAILBOX_ADDRESS` | Mailbox the dashboard sends alert/problem-report email **as** via Graph `sendMail` (falls back to `GRAPH_USER_EMAIL`). Must be a real licensed or shared mailbox — a distribution list returns `ErrorInvalidUser`. Requires the app registration to have the `Mail.Send` application permission with admin consent. |
 | `ALERT_MAIL_GRAPH_DISABLED` | Set `true` to skip the Graph transport for dashboard alert email and use SMTP only |
+| `IMPROVE_MIN_NEW_CORRECTIONS` | Improvement-cycle gate: minimum unconsumed reviewer corrections before a proposal is generated (default: `1`) |
+| `IMPROVE_MODEL` | OpenAI model for the improvement-cycle analysis call (default: `PROMPT_REWRITE_MODEL` or `gpt-4o`) |
+| `IMPROVE_NOTIFY_EMAIL` | Recipient for "proposal ready" emails (default: `FORM_ATTEMPT_ALERT_EMAIL`) |
+| `IMPROVE_SKIP_EVAL` | Set `1` to skip the auto-eval step of the improvement cycle (proposal stored with `eval_status: skipped`) |
+| `IMPROVE_EVAL_LIMIT` | Cap the number of eval cases per improvement-cycle run (default: all) |
+| `REVIEW_EVAL_MODEL` | OpenAI model for the review eval harness (default: `AI_REVIEW_MODEL` or `gpt-4o-mini`) |
+| `DASHBOARD_PUBLIC_URL` | Base URL used in improvement-cycle notification email links (default: `http://localhost:3005`) |
 
 ## ClickUp Integration
 

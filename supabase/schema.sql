@@ -566,6 +566,14 @@ CREATE TABLE IF NOT EXISTS prompt_proposals (
     final_prompt TEXT,
     reviewed_at TIMESTAMPTZ,
 
+    -- Improvement-cycle extensions (migration 20260612)
+    proposed_rules JSONB,                   -- deterministic replacement-rule candidates
+    code_recommendations JSONB,             -- human-implemented code suggestions
+    eval_summary JSONB,                     -- baseline/candidate eval results + regressions
+    eval_status VARCHAR(30),                -- 'passed' | 'regressed' | 'skipped' | 'failed'
+    accepted_rules JSONB,                   -- reviewer-selected subset recorded at approval
+    source VARCHAR(30) DEFAULT 'prompt_rewrite',  -- 'prompt_rewrite' | 'improvement_cycle'
+
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 

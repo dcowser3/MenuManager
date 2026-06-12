@@ -2243,7 +2243,7 @@ app.put('/prompt-proposals/:id', async (req, res) => {
         }
         const updates = req.body || {};
         const allowedFields = {};
-        const editable = ['status', 'reviewer_name', 'reviewer_notes', 'final_prompt', 'reviewed_at'];
+        const editable = ['status', 'reviewer_name', 'reviewer_notes', 'final_prompt', 'reviewed_at', 'accepted_rules'];
         for (const key of editable) {
             if (updates[key] !== undefined) {
                 allowedFields[key] = updates[key];

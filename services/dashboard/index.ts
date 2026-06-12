@@ -103,6 +103,10 @@ import {
     reconcileCriticalSuggestionsAgainstCorrectedMenu,
     runPostAiPipeline,
 } from './lib/review-pipeline';
+import {
+    mapProposedRuleToCorrectionRulePayload,
+    pickEffectivePrompt,
+} from './lib/improvement-cycle-core';
 
 export {
     sanitizePlainTextInput,
@@ -1940,23 +1944,40 @@ app.get('/learning/prompt-proposal', async (_req, res) => {
 app.post('/api/learning/prompt-proposal/:id/review', async (req, res) => {
     try {
         const { id } = req.params;
-        const { status, reviewer_name, reviewer_notes, final_prompt } = req.body || {};
+        const { status, reviewer_name, reviewer_notes, final_prompt, accepted_rule_indexes } = req.body || {};
 
         if (!status || !['approved', 'approved_modified', 'rejected'].includes(status)) {
             return res.status(400).json({ error: 'status must be approved, approved_modified, or rejected' });
         }
 
-        // Update proposal status
+        // Fetch the proposal first so accepted proposed_rules can be inserted.
+        let proposalRecord: any = null;
+        try {
+            const proposalResponse = await internalApi.get(`${DB_SERVICE_URL}/prompt-proposals/${encodeURIComponent(id)}`, { timeout: 5000 });
+            proposalRecord = proposalResponse.data;
+        } catch (fetchError: any) {
+            console.warn('Could not load proposal before review (proposed rules will be skipped):', fetchError.message);
+        }
+
+        const approved = status === 'approved' || status === 'approved_modified';
+        const proposedRules: any[] = Array.isArray(proposalRecord?.proposed_rules) ? proposalRecord.proposed_rules : [];
+        const selectedIndexes: number[] = Array.isArray(accepted_rule_indexes)
+            ? accepted_rule_indexes.map((value: any) => Number.parseInt(`${value}`, 10)).filter((value: number) => Number.isInteger(value) && value >= 0 && value < proposedRules.length)
+            : [];
+        const acceptedRules = approved ? selectedIndexes.map((index) => proposedRules[index]) : [];
+
+        // Update proposal status (+ record which rules the reviewer accepted)
         const response = await internalApi.put(`${DB_SERVICE_URL}/prompt-proposals/${encodeURIComponent(id)}`, {
             status,
             reviewer_name: reviewer_name || null,
             reviewer_notes: reviewer_notes || null,
             final_prompt: final_prompt || null,
             reviewed_at: new Date().toISOString(),
+            accepted_rules: acceptedRules.length ? acceptedRules : null,
         }, { timeout: 5000 });
 
         // If approved, write the new prompt to qa_prompt.txt
-        if (status === 'approved' || status === 'approved_modified') {
+        if (approved) {
             const promptToWrite = final_prompt || response.data?.proposed_prompt;
             if (promptToWrite) {
                 const qaPromptPath = path.join(getRepoRoot(), 'sop-processor', 'qa_prompt.txt');
@@ -1965,7 +1986,27 @@ app.post('/api/learning/prompt-proposal/:id/review', async (req, res) => {
             }
         }
 
-        res.json({ success: true, proposal: response.data });
+        // Insert accepted deterministic replacement rules as accepted correction_rules
+        // so the pre-AI pass starts applying them immediately.
+        const ruleResults: Array<{ index: number; ok: boolean; error?: string }> = [];
+        for (const [position, rule] of acceptedRules.entries()) {
+            const index = selectedIndexes[position];
+            try {
+                const payload = mapProposedRuleToCorrectionRulePayload(rule, id, index, reviewer_name || null);
+                await internalApi.post(`${DB_SERVICE_URL}/correction-rules`, payload, { timeout: 5000 });
+                ruleResults.push({ index, ok: true });
+            } catch (ruleError: any) {
+                console.error(`Failed to save accepted proposal rule ${index}:`, ruleError.message);
+                ruleResults.push({ index, ok: false, error: ruleError.message });
+            }
+        }
+
+        res.json({
+            success: true,
+            proposal: response.data,
+            acceptedRuleCount: ruleResults.filter((r) => r.ok).length,
+            failedRules: ruleResults.filter((r) => !r.ok),
+        });
     } catch (error: any) {
         console.error('Error reviewing prompt proposal:', error.message);
         res.status(500).json({ error: 'Failed to review prompt proposal' });
@@ -4155,7 +4196,35 @@ function compareWords(docxLine: string, pdfLine: string): { diffs: Difference[];
     return { diffs, wordAlignments };
 }
 
+// The runtime prompt file is baked into the Docker image, so a prompt approved
+// through the dashboard would be silently reverted by the next redeploy. On
+// startup, restore the latest approved proposal from the DB when it differs.
+async function syncEffectivePromptFromDb(): Promise<void> {
+    try {
+        if (!isSupabaseConfigured()) return;
+        const supabase = (await import('@menumanager/supabase-client')).getSupabaseClient();
+        const { data: approvedProposals, error } = await supabase
+            .from('prompt_proposals')
+            .select('status, final_prompt, proposed_prompt, reviewed_at')
+            .in('status', ['approved', 'approved_modified'])
+            .order('reviewed_at', { ascending: false })
+            .limit(5);
+        if (error || !approvedProposals?.length) return;
+
+        const qaPromptPath = path.join(getRepoRoot(), 'sop-processor', 'qa_prompt.txt');
+        const filePrompt = await fs.readFile(qaPromptPath, 'utf-8');
+        const effective = pickEffectivePrompt(approvedProposals, filePrompt);
+        if (effective.source === 'approved_proposal' && effective.prompt !== filePrompt) {
+            await fs.writeFile(qaPromptPath, effective.prompt, 'utf-8');
+            console.log('Restored approved QA prompt from prompt_proposals (file was stale after redeploy).');
+        }
+    } catch (error: any) {
+        console.warn('Effective-prompt sync skipped:', error?.message || error);
+    }
+}
+
 if (require.main === module) {
+    void syncEffectivePromptFromDb();
     app.listen(port, () => {
         console.log(`📊 Dashboard service listening at http://localhost:${port}`);
         console.log(`   Access dashboard: http://localhost:${port}`);

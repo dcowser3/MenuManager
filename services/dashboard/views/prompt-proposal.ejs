@@ -136,7 +136,8 @@
     <div class="container">
         <% if (!proposal) { %>
             <div class="empty">
-                No prompt proposals yet. Run <code>npm run prompt:rewrite</code> to generate one from accumulated corrections.
+                No prompt proposals yet. The daily improvement cycle (<code>npm run improve:cycle</code>) generates one automatically
+                when new annotated corrections exist; <code>npm run prompt:rewrite</code> remains the manual fallback.
             </div>
         <% } else { %>
             <div class="card">
@@ -166,6 +167,16 @@
                         <div class="meta-value"><%= proposal.llm_model || 'N/A' %></div>
                     </div>
                     <div class="meta-item">
+                        <div class="meta-label">Source</div>
+                        <div class="meta-value"><%= proposal.source === 'improvement_cycle' ? 'Improvement cycle' : 'Prompt rewrite' %></div>
+                    </div>
+                    <% if (proposal.eval_status) { %>
+                        <div class="meta-item">
+                            <div class="meta-label">Eval</div>
+                            <div class="meta-value"><span class="badge <%= proposal.eval_status === 'passed' ? 'approved' : (proposal.eval_status === 'regressed' ? 'rejected' : 'pending') %>"><%= proposal.eval_status %></span></div>
+                        </div>
+                    <% } %>
+                    <div class="meta-item">
                         <div class="meta-label">Generated</div>
                         <div class="meta-value"><%= proposal.created_at ? new Date(proposal.created_at).toLocaleString() : 'N/A' %></div>
                     </div>
@@ -181,6 +192,103 @@
             <% if (proposal.llm_analysis) { %>
                 <h3 class="section-title">LLM Analysis</h3>
                 <div class="analysis-box"><%= proposal.llm_analysis %></div>
+            <% } %>
+
+            <% const evalSummary = proposal.eval_summary || null; %>
+            <% if (evalSummary) { %>
+                <h3 class="section-title">Eval Results (baseline vs candidate over historical menus)</h3>
+                <div class="card">
+                    <% if (evalSummary.error) { %>
+                        <div class="status-msg err">Eval failed: <%= evalSummary.error %></div>
+                    <% } else { %>
+                        <div class="meta-grid">
+                            <div class="meta-item">
+                                <div class="meta-label">Cases Compared</div>
+                                <div class="meta-value"><%= evalSummary.comparedCases || 0 %></div>
+                            </div>
+                            <div class="meta-item">
+                                <div class="meta-label">Baseline Composite</div>
+                                <div class="meta-value"><%= evalSummary.baseline ? (evalSummary.baseline.avgComposite * 100).toFixed(2) + '%' : 'n/a' %></div>
+                            </div>
+                            <div class="meta-item">
+                                <div class="meta-label">Candidate Composite</div>
+                                <div class="meta-value"><%= evalSummary.candidate ? (evalSummary.candidate.avgComposite * 100).toFixed(2) + '%' : 'n/a' %></div>
+                            </div>
+                            <div class="meta-item">
+                                <div class="meta-label">Avg Delta</div>
+                                <div class="meta-value"><%= ((evalSummary.avgDelta || 0) * 100).toFixed(3) %> pp</div>
+                            </div>
+                            <div class="meta-item">
+                                <div class="meta-label">Improved / Same / Regressed</div>
+                                <div class="meta-value"><%= evalSummary.improved || 0 %> / <%= evalSummary.same || 0 %> / <%= evalSummary.regressed || 0 %></div>
+                            </div>
+                            <div class="meta-item">
+                                <div class="meta-label">Correction F1 (candidate)</div>
+                                <div class="meta-value"><%= evalSummary.candidate ? (evalSummary.candidate.correctionF1 * 100).toFixed(1) + '%' : 'n/a' %></div>
+                            </div>
+                        </div>
+                        <% if ((evalSummary.regressions || []).length) { %>
+                            <div class="small" style="margin-bottom:.4rem">Regressed cases (candidate scored worse than current process):</div>
+                            <table>
+                                <thead><tr><th>Case</th><th>Composite Delta</th></tr></thead>
+                                <tbody>
+                                <% evalSummary.regressions.forEach((r) => { %>
+                                    <tr><td><%= r.label %></td><td><%= (r.delta * 100).toFixed(3) %> pp</td></tr>
+                                <% }) %>
+                                </tbody>
+                            </table>
+                        <% } %>
+                    <% } %>
+                </div>
+            <% } %>
+
+            <% const proposedRules = Array.isArray(proposal.proposed_rules) ? proposal.proposed_rules : []; %>
+            <% if (proposedRules.length) { %>
+                <h3 class="section-title">Proposed Deterministic Replacement Rules</h3>
+                <div class="card">
+                    <div class="small" style="margin-bottom:.5rem">
+                        Checked rules are saved as accepted correction rules on approval and start applying in the pre-AI deterministic pass immediately. Uncheck any you do not want.
+                    </div>
+                    <table>
+                        <thead>
+                            <tr>
+                                <% if (proposal.status === 'pending') { %><th style="width:36px">Use</th><% } %>
+                                <th>From</th><th>To</th><th>Type</th><th>Scope</th><th>Why</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                        <% proposedRules.forEach((rule, index) => { %>
+                            <tr>
+                                <% if (proposal.status === 'pending') { %>
+                                    <td><input type="checkbox" class="proposed-rule-checkbox" data-rule-index="<%= index %>" checked></td>
+                                <% } %>
+                                <td><code><%= rule.original_text %></code></td>
+                                <td><code><%= rule.corrected_text %></code></td>
+                                <td><%= rule.change_type %></td>
+                                <td><%= rule.is_location_specific ? (rule.location || 'location-specific') : 'Global' %> · <%= rule.applies_to_menu_type || 'all' %></td>
+                                <td class="small"><%= rule.rule %></td>
+                            </tr>
+                        <% }) %>
+                        </tbody>
+                    </table>
+                </div>
+            <% } %>
+
+            <% const codeRecommendations = Array.isArray(proposal.code_recommendations) ? proposal.code_recommendations : []; %>
+            <% if (codeRecommendations.length) { %>
+                <h3 class="section-title">Code Recommendations (for an engineer — not auto-applied)</h3>
+                <% codeRecommendations.forEach((rec) => { %>
+                    <div class="card">
+                        <strong><%= rec.title %></strong>
+                        <div style="margin-top:.4rem; white-space:pre-wrap;"><%= rec.description %></div>
+                        <% if (rec.target_file_hint || (rec.manifest_rule_ids || []).length) { %>
+                            <div class="small" style="margin-top:.4rem">
+                                <%= rec.target_file_hint ? `Likely file: ${rec.target_file_hint}` : '' %>
+                                <%= (rec.manifest_rule_ids || []).length ? ` · Related manifest rules: ${rec.manifest_rule_ids.join(', ')}` : '' %>
+                            </div>
+                        <% } %>
+                    </div>
+                <% }) %>
             <% } %>
 
             <h3 class="section-title">Diff View</h3>
@@ -300,6 +408,9 @@
             // (unchanged for "as-is", potentially edited for "with edits")
             if (status === 'approved' || status === 'approved_modified') {
                 body.final_prompt = proposedText;
+                body.accepted_rule_indexes = Array.from(
+                    document.querySelectorAll('.proposed-rule-checkbox:checked')
+                ).map((checkbox) => Number.parseInt(checkbox.dataset.ruleIndex, 10));
             }
 
             statusEl.textContent = 'Submitting...';
