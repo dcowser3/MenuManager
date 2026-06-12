@@ -74,9 +74,11 @@ If approved → new base prompt takes effect
 
 ## Data Model
 
-### `correction_rules` Table (Supabase)
+### `correction_rules` Storage
 
-Replaces: `location_specific_rules.json` (local file)
+Primary production storage is the Supabase `correction_rules` table. For local development and degraded Supabase/schema states, the DB service also maintains a JSON fallback at `tmp/db/correction_rules.json`; create/list/update routes merge that fallback so reviewers can still save and review rules from the learning dashboard while Supabase is unavailable.
+
+Replaces: `location_specific_rules.json` (legacy local file)
 
 ```sql
 CREATE TABLE IF NOT EXISTS correction_rules (
@@ -93,8 +95,9 @@ CREATE TABLE IF NOT EXISTS correction_rules (
                                          -- 'capitalization', 'content', 'formatting'
 
     -- Human annotation (the important part)
-    rule TEXT NOT NULL,                   -- Human-written rule / reasoning
-                                         -- e.g., "Jalapeño always needs the ñ per RSH brand guide"
+    rule TEXT NOT NULL,                   -- Human-written explanation / reasoning;
+                                         -- curators decide final rule wording later
+                                         -- e.g., "This dish uses tartar sauce; it is not a raw tartare preparation."
     applies_to_menu_type VARCHAR(50) DEFAULT 'all',
                                          -- 'all', 'food', or 'beverage'
     is_location_specific BOOLEAN DEFAULT false,
@@ -180,9 +183,9 @@ Reviewers can also add an accepted rule directly from `GET /learning` without op
 
 | Field | Current | New |
 |-------|---------|-----|
-| Explanation | Free text | Renamed to **"Rule"** — the actionable instruction |
+| Explanation | Free text | Labeled **"Correction Explanation"** — reviewer context, not the final canonical rule |
 | Restaurant | Hidden, auto-filled | Visible, editable |
-| Location | Dropdown | Dropdown + **"Location-specific?"** checkbox |
+| Location | Dropdown | Dropdown + **"Limit to specific property?"** checkbox |
 | Shared locations | Multi-select | Renamed to **"Other applicable locations"** |
 | Project name | Not captured | Added from submission metadata |
 | Change type | Not captured | Auto-detected + editable dropdown |
@@ -360,8 +363,8 @@ The differ service stores comparison history under `LEARNING_DATA_DIR` when set,
 ### Submission Detail (`/learning/submission/:submissionId`)
 
 **Enhance annotation form:**
-- Add "Rule" label (replacing "Explanation")
-- Add "Location-specific?" checkbox
+- Add "Correction Explanation" label so reviewers explain the correction without implying they are writing the final rule
+- Add "Limit to specific property?" checkbox
 - Add "Project name" field (auto-filled)
 - Add "Change type" dropdown (auto-detected, editable)
 - Show system-proposed rules inline with accept/modify UI

@@ -34,14 +34,26 @@ function renderLearningSubmission() {
     }, { filename: viewPath });
 }
 describe('learning-submission view', () => {
-    test('keeps quoted dish text out of the Save Rule button markup', () => {
+    test('keeps quoted dish text out of the Save Explanation button markup', () => {
         const html = renderLearningSubmission();
         const saveButton = html.match(/<button[^>]*class="btn save-rule-btn"[^>]*>([\s\S]*?)<\/button>/);
         expect(saveButton).not.toBeNull();
         expect(saveButton?.[0]).toContain('data-dish-index="0"');
-        expect(saveButton?.[1]).toBe('Save Rule');
+        expect(saveButton?.[1]).toBe('Save Explanation');
         expect(saveButton?.[0]).not.toContain("abuelita's chocolate sauce");
         expect(html).not.toContain("onclick='saveDishRule");
+    });
+    test('describes reviewer annotation as a correction explanation, not a rule', () => {
+        const html = renderLearningSubmission();
+        expect(html).toContain('Explain this correction; the final rule is decided later');
+        expect(html).toContain('Correction Explanation *');
+        expect(html).toContain('Should this explanation be limited to specific properties?');
+        expect(html).toContain('Limit to specific property?');
+        expect(html).toContain('Saved Correction Explanations For This Submission');
+        expect(html).toContain('No saved explanations yet.');
+        expect(html).toContain('Explanation is required.');
+        expect(html).not.toContain('Write the actionable rule this correction represents');
+        expect(html).not.toContain('Does this rule apply to specific properties?');
     });
     test('escapes embedded correction JSON so script tags cannot break the page', () => {
         const html = renderLearningSubmission();

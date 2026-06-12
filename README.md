@@ -50,6 +50,7 @@ Menu Manager is an AI-powered service designed to automate the review process fo
 - Pending system-proposed learning rules can expand evidence examples showing the exact AI draft line and final approved DOCX line from eligible human-review approvals. Quick approvals, imports/backfills, AI-only changes, identical final docs, and duplicate finalizations do not feed new rule counts.
 - Eligible human-review comparisons also store bold-formatting audit signals when the final approved DOCX changes leading bold text on an otherwise identical line; when the original submission DOCX is available, differ flags whether the submitter already had the final bolding before AI changed it. These formatting signals do not create design-facing redlines or automatic replacement rules.
 - The learning dashboard shows active pre-AI rules in a compact section, lets reviewers add accepted manual rules with all/food/beverage and property scope, collapses the accepted-rule audit log, hides stale system proposals without current eligible evidence, and no longer displays the full AI prompt inline.
+- Correction-rule saves use Supabase in production and fall back to `tmp/db/correction_rules.json` during local development or degraded Supabase/schema states, so reviewer annotations from `/learning/submission/:id` can still be saved instead of returning a generic 500.
 - Review highlights and persistent redlines surface punctuation/separator edits such as hyphen, comma, slash, and pipe changes
 - New-menu AI review preserves pasted inline formatting such as bold dish names by projecting source HTML styles onto the corrected text with shared `diff-core` token alignment before applying green AI-change highlights.
 - Modification previews preserve bold/italic inline styling from uploaded prior approved DOCX baselines, including DOCX non-breaking-space text, body-only rich HTML with preserved footer text, and live edits, by using the shared `diff-core` rich text range mapper.
@@ -172,7 +173,7 @@ Browser approval editor prototype:
 - Once a menu reaches approved state, the final DOCX is downloadable from `/approved-menus` for Carlos or other operations users
 - The learning dashboard shows each learned submission by menu/project name with supporting property/service details, and lets reviewers delete an individual learned submission row when test data should not remain in the training history; this removes that submission from differ training data and rebuilds detected patterns without touching the property catalog.
 - Learned spelling/diacritic patterns now come only from changed lines that still match the same dish, so removed or replacement dishes do not create bogus reusable rules.
-- Learning review `Save Rule` controls keep dish text out of inline button handlers, so apostrophes or quotes in corrected menu text cannot corrupt the button or block saving.
+- Learning review `Save Explanation` controls keep dish text out of inline button handlers, so apostrophes or quotes in corrected menu text cannot corrupt the button or block saving.
 
 Approval editor regression harness:
 
@@ -201,7 +202,7 @@ Design approval entry point:
 - Submitters can type to search, but the selected value must match an allowed property.
 - The old separate free-text location field is removed; location metadata is derived from the selected property.
 - The form-side `Hotel Name` input is currently removed from chef entry flow.
-- Learning dashboards reuse the same property list for location-specific rule assignment and filtering; when `Location-specific rule?` is unchecked, reviewer annotations and manually added rules save as global rules without requiring a configured property. Rules can also be scoped to all menus, food menus, or beverage menus.
+- Learning dashboards reuse the same property list for location-specific assignment and filtering; when the location-specific scope checkbox is unchecked, reviewer annotations and manually added rules save as global rules without requiring a configured property. Rules can also be scoped to all menus, food menus, or beverage menus.
 - Properties can also store SharePoint routing metadata:
   - base SharePoint folder path
   - resolved drive/library metadata

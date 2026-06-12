@@ -205,12 +205,12 @@
                             <div class="annotation-group">
                                 <div class="annotation-header">
                                     <span class="annotation-title">Correction Details</span>
-                                    <span class="annotation-hint">Write the actionable rule this correction represents</span>
+                                    <span class="annotation-hint">Explain this correction; the final rule is decided later</span>
                                 </div>
                                 <div class="annotation-fields three-col">
                                     <div class="annotation-field full-width">
-                                        <label for="rule-<%= idx %>">Rule *</label>
-                                        <textarea id="rule-<%= idx %>" placeholder="e.g., Jalape&#241;o always needs the &#241; per RSH brand guide"></textarea>
+                                        <label for="rule-<%= idx %>">Correction Explanation *</label>
+                                        <textarea id="rule-<%= idx %>" placeholder="e.g., This dish uses tartar sauce; it is not a raw tartare preparation."></textarea>
                                     </div>
                                     <div class="annotation-field">
                                         <label for="menu-scope-<%= idx %>">Menu Scope</label>
@@ -243,13 +243,13 @@
                             <div class="annotation-group">
                                 <div class="annotation-header">
                                     <span class="annotation-title">Property Scope</span>
-                                    <span class="annotation-hint">Does this rule apply to specific properties?</span>
+                                    <span class="annotation-hint">Should this explanation be limited to specific properties?</span>
                                 </div>
                                 <div class="annotation-fields">
                                     <div class="annotation-field full-width">
                                         <div class="location-check">
                                             <input type="checkbox" id="loc-specific-<%= idx %>" onchange="toggleLocFields(<%= idx %>)">
-                                            <label for="loc-specific-<%= idx %>">Location-specific rule?</label>
+                                            <label for="loc-specific-<%= idx %>">Limit to specific property?</label>
                                         </div>
                                     </div>
                                 </div>
@@ -279,7 +279,7 @@
                             </div>
 
                             <div style="margin-top: .5rem;">
-                                <button type="button" class="btn save-rule-btn" data-dish-index="<%= idx %>">Save Rule</button>
+                                <button type="button" class="btn save-rule-btn" data-dish-index="<%= idx %>">Save Explanation</button>
                                 <span class="save-status" id="save-status-<%= idx %>"></span>
                             </div>
                         </div>
@@ -289,9 +289,9 @@
         <% } %>
 
         <div class="card">
-            <h3 style="margin-top:0; font-size:.9rem; text-transform:uppercase; letter-spacing:.1em; color:var(--muted);">Saved Rules For This Submission</h3>
+            <h3 style="margin-top:0; font-size:.9rem; text-transform:uppercase; letter-spacing:.1em; color:var(--muted);">Saved Correction Explanations For This Submission</h3>
             <% if (!savedCorrectionRules || savedCorrectionRules.length === 0) { %>
-                <div>No saved rules yet.</div>
+                <div>No saved explanations yet.</div>
             <% } else { %>
                 <table>
                     <thead>
@@ -299,7 +299,7 @@
                             <th>Created</th>
                             <th>Original</th>
                             <th>Corrected</th>
-                            <th>Rule</th>
+                            <th>Explanation</th>
                             <th>Menu Scope</th>
                             <th>Restaurant</th>
                             <th>Location</th>
@@ -364,7 +364,7 @@
             }
 
             if (!rule) {
-                statusEl.textContent = 'Rule is required.';
+                statusEl.textContent = 'Explanation is required.';
                 statusEl.className = 'save-status err';
                 return;
             }
@@ -394,7 +394,7 @@
                 });
                 const data = await response.json();
                 if (!response.ok) {
-                    throw new Error(data.error || 'Failed to save rule');
+                    throw new Error(data.error || 'Failed to save explanation');
                 }
                 statusEl.textContent = 'Saved.';
                 statusEl.className = 'save-status ok';

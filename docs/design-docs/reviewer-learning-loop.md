@@ -40,6 +40,7 @@ The differ skips learning for quick approvals, imports/backfills, AI-only change
 - Route: `GET /learning` (dashboard service)
 - Displays learned rules with confidence, status, and activity
 - Displays pending `correction_rules` for accept/reject review and accepted rules that can feed deterministic pre-AI checks
+- Uses Supabase as the production correction-rule store, with a `tmp/db/correction_rules.json` fallback for local development or degraded Supabase/schema states so reviewer annotations do not fail at save time.
 - Shows compact active pre-AI rules first, including curated code guards promoted from accepted human explanations and accepted exact replacement rules.
 - Lets reviewers add accepted manual rules directly from the learning dashboard, with all/food/beverage menu scope and the same global or configured-property scope used by correction annotations.
 - Hides the full AI prompt from the learning dashboard; prompt review remains on the prompt proposal page.
@@ -68,7 +69,7 @@ The differ skips learning for quick approvals, imports/backfills, AI-only change
   - global scope, or a primary location when the rule is marked location-specific
   - additional configured locations that should share the same location-specific rule
 - Data is saved as reviewer correction-rule annotations. Accepted exact spelling, diacritic, terminology, grammar, and punctuation rules can be applied by the Basic AI Check deterministic pre-AI pass when the rule scope matches the submitted property and template type. Broad freeform rules without before/after text stay as manual guidance/prompt material.
-- The learning submission page stores correction context in page-level script data and has `Save Rule` buttons reference corrections by index, so quoted dish text cannot break the button markup.
+- The learning submission page stores correction context in page-level script data and has `Save Explanation` buttons reference corrections by index, so quoted dish text cannot break the button markup.
 
 ### APIs
 

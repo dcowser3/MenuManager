@@ -53,6 +53,7 @@ const REPORTS_DB = path.join(DB_DIR, 'reports.json');
 const PROFILES_DB = path.join(DB_DIR, 'submitter_profiles.json');
 const ASSETS_DB = path.join(DB_DIR, 'assets.json');
 const PROPERTIES_DB = path.join(DB_DIR, 'properties.json');
+const CORRECTION_RULES_DB = path.join(DB_DIR, 'correction_rules.json');
 const SUBMISSIONS_TABLE = 'submissions';
 const SUBMITTER_PROFILES_TABLE = 'submitter_profiles';
 const ASSETS_TABLE = 'assets';
@@ -790,6 +791,147 @@ async function findLatestApprovedByProjectProperty(projectName, property) {
         .filter((submission) => normalizeApprovedLookupValue(submission.project_name) === projectKey)
         .sort((a, b) => getApprovedTimestamp(b) - getApprovedTimestamp(a))[0] || null;
 }
+function normalizeCorrectionRuleMenuScope(value) {
+    const normalized = `${value || 'all'}`.trim().toLowerCase();
+    return ['all', 'food', 'beverage'].includes(normalized) ? normalized : '';
+}
+function buildCorrectionRuleStorageRecord(record) {
+    if (!record.submission_id || !record.correction_id || !record.rule) {
+        return null;
+    }
+    const appliesToMenuType = normalizeCorrectionRuleMenuScope(record.applies_to_menu_type);
+    if (!appliesToMenuType) {
+        return null;
+    }
+    return {
+        submission_id: `${record.submission_id}`,
+        correction_id: `${record.correction_id}`,
+        original_text: record.original_text || null,
+        corrected_text: record.corrected_text || null,
+        change_type: record.change_type || null,
+        rule: `${record.rule}`,
+        applies_to_menu_type: appliesToMenuType,
+        is_location_specific: record.is_location_specific || false,
+        project_name: record.project_name || null,
+        restaurant_name: record.restaurant_name || '',
+        location: record.location || 'All properties (global rule)',
+        other_applicable_locations: Array.isArray(record.other_applicable_locations)
+            ? record.other_applicable_locations
+            : [],
+        reviewer_name: record.reviewer_name || null,
+        source: record.source || 'human',
+        status: record.status || 'accepted',
+        occurrences: Number(record.occurrences || 1),
+        confidence: record.confidence || null,
+        submission_ids: Array.isArray(record.submission_ids) ? record.submission_ids : null,
+    };
+}
+async function readLocalCorrectionRules() {
+    try {
+        const raw = await fs_1.promises.readFile(CORRECTION_RULES_DB, 'utf-8');
+        const parsed = JSON.parse(raw);
+        return Array.isArray(parsed) ? parsed : [];
+    }
+    catch {
+        return [];
+    }
+}
+async function writeLocalCorrectionRules(rules) {
+    await fs_1.promises.mkdir(DB_DIR, { recursive: true });
+    await fs_1.promises.writeFile(CORRECTION_RULES_DB, JSON.stringify(rules, null, 2));
+}
+function localCorrectionRuleId() {
+    return `rule_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+}
+async function createLocalCorrectionRule(record) {
+    const rules = await readLocalCorrectionRules();
+    const now = new Date().toISOString();
+    const localRecord = {
+        ...record,
+        id: record.id || localCorrectionRuleId(),
+        created_at: record.created_at || now,
+        updated_at: record.updated_at || now,
+    };
+    rules.push(localRecord);
+    await writeLocalCorrectionRules(rules);
+    return localRecord;
+}
+function filterCorrectionRules(rules, query) {
+    return rules
+        .filter((rule) => !query.submission_id || rule.submission_id === query.submission_id)
+        .filter((rule) => !query.status || rule.status === query.status)
+        .filter((rule) => !query.source || rule.source === query.source);
+}
+function correctionRuleDedupeKey(rule) {
+    return [
+        rule.submission_id,
+        rule.correction_id,
+        rule.original_text || '',
+        rule.corrected_text || '',
+        rule.rule,
+        rule.source,
+    ].join('\u0000');
+}
+function mergeCorrectionRules(primary, fallback) {
+    const ids = new Set();
+    const keys = new Set();
+    const merged = [];
+    for (const rule of [...primary, ...fallback]) {
+        const id = `${rule.id || ''}`.trim();
+        const key = correctionRuleDedupeKey(rule);
+        if ((id && ids.has(id)) || keys.has(key)) {
+            continue;
+        }
+        if (id)
+            ids.add(id);
+        keys.add(key);
+        merged.push(rule);
+    }
+    return merged.sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
+}
+function buildCorrectionRuleUpdateFields(updates) {
+    const allowedFields = {};
+    const editable = [
+        'status',
+        'rule',
+        'is_location_specific',
+        'other_applicable_locations',
+        'change_type',
+        'restaurant_name',
+        'location',
+        'project_name',
+        'reviewer_name',
+        'applies_to_menu_type',
+    ];
+    for (const key of editable) {
+        if (updates[key] !== undefined) {
+            allowedFields[key] = updates[key];
+        }
+    }
+    if (allowedFields.applies_to_menu_type !== undefined) {
+        const normalized = normalizeCorrectionRuleMenuScope(allowedFields.applies_to_menu_type);
+        if (!normalized) {
+            throw new Error('applies_to_menu_type must be all, food, or beverage');
+        }
+        allowedFields.applies_to_menu_type = normalized;
+    }
+    return allowedFields;
+}
+async function updateLocalCorrectionRule(id, updates) {
+    const rules = await readLocalCorrectionRules();
+    const index = rules.findIndex((rule) => `${rule.id || ''}` === id);
+    if (index < 0) {
+        return null;
+    }
+    const next = {
+        ...rules[index],
+        ...updates,
+        updated_at: new Date().toISOString(),
+    };
+    rules[index] = next;
+    await writeLocalCorrectionRules(rules);
+    return next;
+}
 // Ensure DB directory and files exist
 async function initDb() {
     try {
@@ -799,6 +941,7 @@ async function initDb() {
         await fs_1.promises.access(PROFILES_DB).catch(() => fs_1.promises.writeFile(PROFILES_DB, '{}'));
         await fs_1.promises.access(ASSETS_DB).catch(() => fs_1.promises.writeFile(ASSETS_DB, '[]'));
         await fs_1.promises.access(PROPERTIES_DB).catch(() => fs_1.promises.writeFile(PROPERTIES_DB, JSON.stringify(buildDefaultPropertyCatalog(), null, 2)));
+        await fs_1.promises.access(CORRECTION_RULES_DB).catch(() => fs_1.promises.writeFile(CORRECTION_RULES_DB, '[]'));
     }
     catch (error) {
         console.error('Failed to initialize database:', error);
@@ -1875,46 +2018,36 @@ app.post('/reports', async (req, res) => {
 const CORRECTION_RULES_TABLE = 'correction_rules';
 app.post('/correction-rules', async (req, res) => {
     try {
-        if (!(0, supabase_client_1.isSupabaseConfigured)()) {
-            return res.status(503).json({ error: 'Supabase not configured — correction_rules require Supabase' });
-        }
         const record = req.body || {};
-        if (!record.submission_id || !record.correction_id || !record.rule) {
+        const storageRecord = buildCorrectionRuleStorageRecord(record);
+        if (!storageRecord) {
+            if (record.submission_id
+                && record.correction_id
+                && record.rule
+                && !normalizeCorrectionRuleMenuScope(record.applies_to_menu_type)) {
+                return res.status(400).json({ error: 'applies_to_menu_type must be all, food, or beverage' });
+            }
             return res.status(400).json({ error: 'submission_id, correction_id, and rule are required' });
         }
-        const appliesToMenuType = `${record.applies_to_menu_type || 'all'}`.trim().toLowerCase();
-        if (!['all', 'food', 'beverage'].includes(appliesToMenuType)) {
-            return res.status(400).json({ error: 'applies_to_menu_type must be all, food, or beverage' });
+        if ((0, supabase_client_1.isSupabaseConfigured)()) {
+            try {
+                const supabase = (0, supabase_client_1.getSupabaseClient)();
+                const { data, error } = await supabase
+                    .from(CORRECTION_RULES_TABLE)
+                    .insert(storageRecord)
+                    .select()
+                    .single();
+                if (error) {
+                    throw new Error(error.message);
+                }
+                return res.status(201).json(data);
+            }
+            catch (error) {
+                console.error('Supabase correction rule insert failed, falling back local:', error.message);
+            }
         }
-        const supabase = (0, supabase_client_1.getSupabaseClient)();
-        const { data, error } = await supabase
-            .from(CORRECTION_RULES_TABLE)
-            .insert({
-            submission_id: record.submission_id,
-            correction_id: record.correction_id,
-            original_text: record.original_text || null,
-            corrected_text: record.corrected_text || null,
-            change_type: record.change_type || null,
-            rule: record.rule,
-            applies_to_menu_type: appliesToMenuType,
-            is_location_specific: record.is_location_specific || false,
-            project_name: record.project_name || null,
-            restaurant_name: record.restaurant_name || '',
-            location: record.location || 'All properties (global rule)',
-            other_applicable_locations: record.other_applicable_locations || [],
-            reviewer_name: record.reviewer_name || null,
-            source: record.source || 'human',
-            status: record.status || 'accepted',
-            occurrences: record.occurrences || 1,
-            confidence: record.confidence || null,
-            submission_ids: record.submission_ids || null,
-        })
-            .select()
-            .single();
-        if (error) {
-            throw new Error(error.message);
-        }
-        res.status(201).json(data);
+        const localRecord = await createLocalCorrectionRule(storageRecord);
+        res.status(201).json(localRecord);
     }
     catch (error) {
         console.error('Error creating correction rule:', error.message);
@@ -1923,30 +2056,38 @@ app.post('/correction-rules', async (req, res) => {
 });
 app.get('/correction-rules', async (req, res) => {
     try {
-        if (!(0, supabase_client_1.isSupabaseConfigured)()) {
-            return res.json([]);
-        }
-        const supabase = (0, supabase_client_1.getSupabaseClient)();
-        let query = supabase
-            .from(CORRECTION_RULES_TABLE)
-            .select('*')
-            .order('created_at', { ascending: false });
-        if (req.query.submission_id) {
-            query = query.eq('submission_id', req.query.submission_id);
-        }
-        if (req.query.status) {
-            query = query.eq('status', req.query.status);
-        }
-        if (req.query.source) {
-            query = query.eq('source', req.query.source);
+        const localRules = filterCorrectionRules(await readLocalCorrectionRules(), req.query);
+        let supabaseRules = [];
+        if ((0, supabase_client_1.isSupabaseConfigured)()) {
+            try {
+                const supabase = (0, supabase_client_1.getSupabaseClient)();
+                let query = supabase
+                    .from(CORRECTION_RULES_TABLE)
+                    .select('*')
+                    .order('created_at', { ascending: false });
+                if (req.query.submission_id) {
+                    query = query.eq('submission_id', req.query.submission_id);
+                }
+                if (req.query.status) {
+                    query = query.eq('status', req.query.status);
+                }
+                if (req.query.source) {
+                    query = query.eq('source', req.query.source);
+                }
+                const limit = Math.min(parseInt(req.query.limit || '200', 10), 500);
+                query = query.limit(limit);
+                const { data, error } = await query;
+                if (error) {
+                    throw new Error(error.message);
+                }
+                supabaseRules = data || [];
+            }
+            catch (error) {
+                console.error('Supabase correction rule fetch failed, falling back local:', error.message);
+            }
         }
         const limit = Math.min(parseInt(req.query.limit || '200', 10), 500);
-        query = query.limit(limit);
-        const { data, error } = await query;
-        if (error) {
-            throw new Error(error.message);
-        }
-        res.json(data || []);
+        res.json(mergeCorrectionRules(supabaseRules, localRules).slice(0, limit));
     }
     catch (error) {
         console.error('Error fetching correction rules:', error.message);
@@ -1956,20 +2097,27 @@ app.get('/correction-rules', async (req, res) => {
 // IMPORTANT: Must come BEFORE any /:id route in correction-rules
 app.get('/correction-rules/pending', async (req, res) => {
     try {
-        if (!(0, supabase_client_1.isSupabaseConfigured)()) {
-            return res.json([]);
+        const localRules = filterCorrectionRules(await readLocalCorrectionRules(), { ...req.query, status: 'pending' });
+        let supabaseRules = [];
+        if ((0, supabase_client_1.isSupabaseConfigured)()) {
+            try {
+                const supabase = (0, supabase_client_1.getSupabaseClient)();
+                const { data, error } = await supabase
+                    .from(CORRECTION_RULES_TABLE)
+                    .select('*')
+                    .eq('status', 'pending')
+                    .order('created_at', { ascending: false })
+                    .limit(100);
+                if (error) {
+                    throw new Error(error.message);
+                }
+                supabaseRules = data || [];
+            }
+            catch (error) {
+                console.error('Supabase pending correction rule fetch failed, falling back local:', error.message);
+            }
         }
-        const supabase = (0, supabase_client_1.getSupabaseClient)();
-        const { data, error } = await supabase
-            .from(CORRECTION_RULES_TABLE)
-            .select('*')
-            .eq('status', 'pending')
-            .order('created_at', { ascending: false })
-            .limit(100);
-        if (error) {
-            throw new Error(error.message);
-        }
-        res.json(data || []);
+        res.json(mergeCorrectionRules(supabaseRules, localRules).slice(0, 100));
     }
     catch (error) {
         console.error('Error fetching pending correction rules:', error.message);
@@ -1978,43 +2126,42 @@ app.get('/correction-rules/pending', async (req, res) => {
 });
 app.put('/correction-rules/:id', async (req, res) => {
     try {
-        if (!(0, supabase_client_1.isSupabaseConfigured)()) {
-            return res.status(503).json({ error: 'Supabase not configured' });
-        }
         const { id } = req.params;
         const updates = req.body || {};
-        // Only allow specific fields to be updated
-        const allowedFields = {};
-        const editable = ['status', 'rule', 'is_location_specific', 'other_applicable_locations',
-            'change_type', 'restaurant_name', 'location', 'project_name', 'reviewer_name',
-            'applies_to_menu_type'];
-        for (const key of editable) {
-            if (updates[key] !== undefined) {
-                allowedFields[key] = updates[key];
-            }
+        let allowedFields;
+        try {
+            allowedFields = buildCorrectionRuleUpdateFields(updates);
         }
-        if (allowedFields.applies_to_menu_type !== undefined
-            && !['all', 'food', 'beverage'].includes(`${allowedFields.applies_to_menu_type}`.trim().toLowerCase())) {
-            return res.status(400).json({ error: 'applies_to_menu_type must be all, food, or beverage' });
-        }
-        if (allowedFields.applies_to_menu_type !== undefined) {
-            allowedFields.applies_to_menu_type = `${allowedFields.applies_to_menu_type}`.trim().toLowerCase();
+        catch (error) {
+            return res.status(400).json({ error: error.message });
         }
         if (Object.keys(allowedFields).length === 0) {
             return res.status(400).json({ error: 'No valid fields to update' });
         }
         allowedFields.updated_at = new Date().toISOString();
-        const supabase = (0, supabase_client_1.getSupabaseClient)();
-        const { data, error } = await supabase
-            .from(CORRECTION_RULES_TABLE)
-            .update(allowedFields)
-            .eq('id', id)
-            .select()
-            .single();
-        if (error) {
-            throw new Error(error.message);
+        if ((0, supabase_client_1.isSupabaseConfigured)()) {
+            try {
+                const supabase = (0, supabase_client_1.getSupabaseClient)();
+                const { data, error } = await supabase
+                    .from(CORRECTION_RULES_TABLE)
+                    .update(allowedFields)
+                    .eq('id', id)
+                    .select()
+                    .single();
+                if (error) {
+                    throw new Error(error.message);
+                }
+                return res.json(data);
+            }
+            catch (error) {
+                console.error('Supabase correction rule update failed, falling back local:', error.message);
+            }
         }
-        res.json(data);
+        const localRule = await updateLocalCorrectionRule(id, allowedFields);
+        if (!localRule) {
+            return res.status(404).json({ error: 'Correction rule not found' });
+        }
+        res.json(localRule);
     }
     catch (error) {
         console.error('Error updating correction rule:', error.message);

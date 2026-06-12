@@ -99,6 +99,9 @@ describe('submission update hardening', () => {
     const submissionSearchHandler = getRouteHandler('get', '/submissions/search');
     const submitterProfileSearchHandler = getRouteHandler('get', '/submitter-profiles/search');
     const createCorrectionRuleHandler = getRouteHandler('post', '/correction-rules');
+    const listCorrectionRulesHandler = getRouteHandler('get', '/correction-rules');
+    const pendingCorrectionRulesHandler = getRouteHandler('get', '/correction-rules/pending');
+    const updateCorrectionRuleHandler = getRouteHandler('put', '/correction-rules/:id');
     const originalInternalApiToken = process.env.INTERNAL_API_TOKEN;
 
     beforeEach(() => {
@@ -215,6 +218,56 @@ describe('submission update hardening', () => {
                         lastUsed: '2026-05-08T10:00:00.000Z',
                     },
                 });
+            }
+            if (normalized.endsWith('correction_rules.json')) {
+                return JSON.stringify([
+                    {
+                        id: 'local-rule-1',
+                        submission_id: 'form-123',
+                        correction_id: 'dish-1',
+                        original_text: 'tartare',
+                        corrected_text: 'tartar',
+                        change_type: 'content',
+                        rule: 'Use tartar when referring to the sauce.',
+                        applies_to_menu_type: 'all',
+                        is_location_specific: false,
+                        project_name: 'Oyster Menu',
+                        restaurant_name: 'Test Restaurant',
+                        location: 'All properties (global rule)',
+                        other_applicable_locations: [],
+                        reviewer_name: null,
+                        source: 'human',
+                        status: 'accepted',
+                        occurrences: 1,
+                        confidence: null,
+                        submission_ids: null,
+                        created_at: '2026-06-10T10:00:00.000Z',
+                        updated_at: '2026-06-10T10:00:00.000Z',
+                    },
+                    {
+                        id: 'local-rule-pending',
+                        submission_id: 'form-124',
+                        correction_id: 'system-1',
+                        original_text: 'veggies',
+                        corrected_text: 'vegetables',
+                        change_type: 'terminology',
+                        rule: 'Use vegetables instead of veggies.',
+                        applies_to_menu_type: 'food',
+                        is_location_specific: false,
+                        project_name: 'Lunch Menu',
+                        restaurant_name: 'Test Restaurant',
+                        location: 'All properties (global rule)',
+                        other_applicable_locations: [],
+                        reviewer_name: null,
+                        source: 'system',
+                        status: 'pending',
+                        occurrences: 2,
+                        confidence: 0.9,
+                        submission_ids: ['form-123', 'form-124'],
+                        created_at: '2026-06-11T10:00:00.000Z',
+                        updated_at: '2026-06-11T10:00:00.000Z',
+                    },
+                ]);
             }
             return JSON.stringify({});
         });
@@ -448,5 +501,113 @@ describe('submission update hardening', () => {
             applies_to_menu_type: 'beverage',
             rule: 'Beverage menus should keep zero-proof section names.',
         }));
+    });
+
+    test('creates correction rules in local JSON when Supabase is unavailable', async () => {
+        const response = await invokeJsonHandler(createCorrectionRuleHandler, {
+            body: {
+                submission_id: 'form-123',
+                correction_id: 'dish-2',
+                original_text: 'East Coast Oysters tartare',
+                corrected_text: 'East Coast Oysters tartar',
+                change_type: 'content',
+                rule: 'Use tartar when referring to the sauce.',
+                applies_to_menu_type: 'all',
+                is_location_specific: false,
+                restaurant_name: 'Test Restaurant',
+                location: 'All properties (global rule)',
+            },
+        });
+
+        expect(response.status).toBe(201);
+        expect(response.body.id).toMatch(/^rule_/);
+        expect(response.body.rule).toBe('Use tartar when referring to the sauce.');
+        expect(fs.promises.writeFile).toHaveBeenCalledWith(
+            expect.stringContaining('correction_rules.json'),
+            expect.stringContaining('East Coast Oysters tartar')
+        );
+    });
+
+    test('falls back to local JSON when Supabase correction rule insert fails', async () => {
+        const insert = jest.fn(() => ({
+            select: jest.fn(() => ({
+                single: jest.fn(async () => ({
+                    data: null,
+                    error: { message: 'column other_applicable_locations does not exist' },
+                })),
+            })),
+        }));
+        const from = jest.fn(() => ({ insert }));
+        (isSupabaseConfigured as jest.Mock).mockReturnValue(true);
+        (getSupabaseClient as jest.Mock).mockReturnValue({ from });
+
+        const response = await invokeJsonHandler(createCorrectionRuleHandler, {
+            body: {
+                submission_id: 'form-123',
+                correction_id: 'dish-3',
+                original_text: 'chipotle tartare',
+                corrected_text: 'chipotle tartar',
+                change_type: 'content',
+                rule: 'Use tartar when referring to the sauce.',
+                applies_to_menu_type: 'all',
+                is_location_specific: false,
+                restaurant_name: 'Test Restaurant',
+                location: 'All properties (global rule)',
+            },
+        });
+
+        expect(response.status).toBe(201);
+        expect(response.body.id).toMatch(/^rule_/);
+        expect(insert).toHaveBeenCalled();
+        expect(fs.promises.writeFile).toHaveBeenCalledWith(
+            expect.stringContaining('correction_rules.json'),
+            expect.stringContaining('chipotle tartar')
+        );
+    });
+
+    test('lists local correction rules with query filters', async () => {
+        const response = await invokeJsonHandler(listCorrectionRulesHandler, {
+            query: { submission_id: 'form-123', status: 'accepted' },
+        });
+
+        expect(response.status).toBe(200);
+        expect(response.body).toEqual([
+            expect.objectContaining({
+                id: 'local-rule-1',
+                corrected_text: 'tartar',
+                status: 'accepted',
+            }),
+        ]);
+    });
+
+    test('lists pending correction rules from local fallback storage', async () => {
+        const response = await invokeJsonHandler(pendingCorrectionRulesHandler);
+
+        expect(response.status).toBe(200);
+        expect(response.body).toEqual([
+            expect.objectContaining({
+                id: 'local-rule-pending',
+                source: 'system',
+                status: 'pending',
+            }),
+        ]);
+    });
+
+    test('updates local correction rules when Supabase is unavailable', async () => {
+        const response = await invokeJsonHandler(updateCorrectionRuleHandler, {
+            params: { id: 'local-rule-pending' },
+            body: { status: 'accepted', reviewer_name: 'Isabella' },
+        });
+
+        expect(response.status).toBe(200);
+        expect(response.body).toMatchObject({
+            id: 'local-rule-pending',
+            status: 'accepted',
+            reviewer_name: 'Isabella',
+        });
+        expect(fs.promises.writeFile).toHaveBeenCalledWith(
+            expect.stringContaining('correction_rules.json'),
+            expect.stringContaining('"reviewer_name": "Isabella"')
+        );
     });
 });
