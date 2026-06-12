@@ -39,7 +39,7 @@ export type PreAiDeterministicResult = {
     learnedRulesApplied: number;
 };
 
-type ReplacementRule = {
+export type ReplacementRule = {
     from: string;
     to: string;
     type: PreAiAppliedCorrection['type'];
@@ -51,7 +51,7 @@ const COMMON_ALLERGEN_CODES = new Set([
     'V', 'VG',
 ]);
 
-const BUILT_IN_REPLACEMENTS: ReplacementRule[] = [
+export const BUILT_IN_REPLACEMENTS: ReplacementRule[] = [
     // Diacritics that are safe enough to apply before the AI review.
     { from: 'aji amarillo', to: 'ají amarillo', type: 'Diacritics' },
     { from: 'aji panca', to: 'ají panca', type: 'Diacritics' },

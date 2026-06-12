@@ -1,0 +1,1703 @@
+{
+  "entries": [
+    {
+      "id": "pre-ai/replacement/aji-amarillo",
+      "layer": "pre_ai_deterministic",
+      "category": "diacritics",
+      "title": "aji amarillo -> ají amarillo",
+      "description": "Built-in exact diacritics replacement applied before the AI review (word-boundary, case-preserving).",
+      "examples": [
+        {
+          "before": "aji amarillo",
+          "after": "ají amarillo"
+        }
+      ],
+      "implementation": {
+        "file": "services/dashboard/lib/pre-ai-deterministic-rules.ts",
+        "exportName": "BUILT_IN_REPLACEMENTS"
+      },
+      "data": {
+        "from": "aji amarillo",
+        "to": "ají amarillo",
+        "type": "Diacritics"
+      },
+      "source": "code_data"
+    },
+    {
+      "id": "pre-ai/replacement/aji-panca",
+      "layer": "pre_ai_deterministic",
+      "category": "diacritics",
+      "title": "aji panca -> ají panca",
+      "description": "Built-in exact diacritics replacement applied before the AI review (word-boundary, case-preserving).",
+      "examples": [
+        {
+          "before": "aji panca",
+          "after": "ají panca"
+        }
+      ],
+      "implementation": {
+        "file": "services/dashboard/lib/pre-ai-deterministic-rules.ts",
+        "exportName": "BUILT_IN_REPLACEMENTS"
+      },
+      "data": {
+        "from": "aji panca",
+        "to": "ají panca",
+        "type": "Diacritics"
+      },
+      "source": "code_data"
+    },
+    {
+      "id": "pre-ai/replacement/chile-de-arbol",
+      "layer": "pre_ai_deterministic",
+      "category": "diacritics",
+      "title": "chile de arbol -> chile de árbol",
+      "description": "Built-in exact diacritics replacement applied before the AI review (word-boundary, case-preserving).",
+      "examples": [
+        {
+          "before": "chile de arbol",
+          "after": "chile de árbol"
+        }
+      ],
+      "implementation": {
+        "file": "services/dashboard/lib/pre-ai-deterministic-rules.ts",
+        "exportName": "BUILT_IN_REPLACEMENTS"
+      },
+      "data": {
+        "from": "chile de arbol",
+        "to": "chile de árbol",
+        "type": "Diacritics"
+      },
+      "source": "code_data"
+    },
+    {
+      "id": "pre-ai/replacement/creme-brulee",
+      "layer": "pre_ai_deterministic",
+      "category": "diacritics",
+      "title": "creme brulee -> crème brûlée",
+      "description": "Built-in exact diacritics replacement applied before the AI review (word-boundary, case-preserving).",
+      "examples": [
+        {
+          "before": "creme brulee",
+          "after": "crème brûlée"
+        }
+      ],
+      "implementation": {
+        "file": "services/dashboard/lib/pre-ai-deterministic-rules.ts",
+        "exportName": "BUILT_IN_REPLACEMENTS"
+      },
+      "data": {
+        "from": "creme brulee",
+        "to": "crème brûlée",
+        "type": "Diacritics"
+      },
+      "source": "code_data"
+    },
+    {
+      "id": "pre-ai/replacement/creme-fraiche",
+      "layer": "pre_ai_deterministic",
+      "category": "diacritics",
+      "title": "creme fraiche -> crème fraîche",
+      "description": "Built-in exact diacritics replacement applied before the AI review (word-boundary, case-preserving).",
+      "examples": [
+        {
+          "before": "creme fraiche",
+          "after": "crème fraîche"
+        }
+      ],
+      "implementation": {
+        "file": "services/dashboard/lib/pre-ai-deterministic-rules.ts",
+        "exportName": "BUILT_IN_REPLACEMENTS"
+      },
+      "data": {
+        "from": "creme fraiche",
+        "to": "crème fraîche",
+        "type": "Diacritics"
+      },
+      "source": "code_data"
+    },
+    {
+      "id": "pre-ai/replacement/aji",
+      "layer": "pre_ai_deterministic",
+      "category": "diacritics",
+      "title": "aji -> ají",
+      "description": "Built-in exact diacritics replacement applied before the AI review (word-boundary, case-preserving).",
+      "examples": [
+        {
+          "before": "aji",
+          "after": "ají"
+        }
+      ],
+      "implementation": {
+        "file": "services/dashboard/lib/pre-ai-deterministic-rules.ts",
+        "exportName": "BUILT_IN_REPLACEMENTS"
+      },
+      "data": {
+        "from": "aji",
+        "to": "ají",
+        "type": "Diacritics"
+      },
+      "source": "code_data"
+    },
+    {
+      "id": "pre-ai/replacement/albarino",
+      "layer": "pre_ai_deterministic",
+      "category": "diacritics",
+      "title": "albarino -> albariño",
+      "description": "Built-in exact diacritics replacement applied before the AI review (word-boundary, case-preserving).",
+      "examples": [
+        {
+          "before": "albarino",
+          "after": "albariño"
+        }
+      ],
+      "implementation": {
+        "file": "services/dashboard/lib/pre-ai-deterministic-rules.ts",
+        "exportName": "BUILT_IN_REPLACEMENTS"
+      },
+      "data": {
+        "from": "albarino",
+        "to": "albariño",
+        "type": "Diacritics"
+      },
+      "source": "code_data"
+    },
+    {
+      "id": "pre-ai/replacement/anejo",
+      "layer": "pre_ai_deterministic",
+      "category": "diacritics",
+      "title": "anejo -> añejo",
+      "description": "Built-in exact diacritics replacement applied before the AI review (word-boundary, case-preserving).",
+      "examples": [
+        {
+          "before": "anejo",
+          "after": "añejo"
+        }
+      ],
+      "implementation": {
+        "file": "services/dashboard/lib/pre-ai-deterministic-rules.ts",
+        "exportName": "BUILT_IN_REPLACEMENTS"
+      },
+      "data": {
+        "from": "anejo",
+        "to": "añejo",
+        "type": "Diacritics"
+      },
+      "source": "code_data"
+    },
+    {
+      "id": "pre-ai/replacement/cachaca",
+      "layer": "pre_ai_deterministic",
+      "category": "diacritics",
+      "title": "cachaca -> cachaça",
+      "description": "Built-in exact diacritics replacement applied before the AI review (word-boundary, case-preserving).",
+      "examples": [
+        {
+          "before": "cachaca",
+          "after": "cachaça"
+        }
+      ],
+      "implementation": {
+        "file": "services/dashboard/lib/pre-ai-deterministic-rules.ts",
+        "exportName": "BUILT_IN_REPLACEMENTS"
+      },
+      "data": {
+        "from": "cachaca",
+        "to": "cachaça",
+        "type": "Diacritics"
+      },
+      "source": "code_data"
+    },
+    {
+      "id": "pre-ai/replacement/cafe",
+      "layer": "pre_ai_deterministic",
+      "category": "diacritics",
+      "title": "cafe -> café",
+      "description": "Built-in exact diacritics replacement applied before the AI review (word-boundary, case-preserving).",
+      "examples": [
+        {
+          "before": "cafe",
+          "after": "café"
+        }
+      ],
+      "implementation": {
+        "file": "services/dashboard/lib/pre-ai-deterministic-rules.ts",
+        "exportName": "BUILT_IN_REPLACEMENTS"
+      },
+      "data": {
+        "from": "cafe",
+        "to": "café",
+        "type": "Diacritics"
+      },
+      "source": "code_data"
+    },
+    {
+      "id": "pre-ai/replacement/camaron",
+      "layer": "pre_ai_deterministic",
+      "category": "diacritics",
+      "title": "camaron -> camarón",
+      "description": "Built-in exact diacritics replacement applied before the AI review (word-boundary, case-preserving).",
+      "examples": [
+        {
+          "before": "camaron",
+          "after": "camarón"
+        }
+      ],
+      "implementation": {
+        "file": "services/dashboard/lib/pre-ai-deterministic-rules.ts",
+        "exportName": "BUILT_IN_REPLACEMENTS"
+      },
+      "data": {
+        "from": "camaron",
+        "to": "camarón",
+        "type": "Diacritics"
+      },
+      "source": "code_data"
+    },
+    {
+      "id": "pre-ai/replacement/chicharron",
+      "layer": "pre_ai_deterministic",
+      "category": "diacritics",
+      "title": "chicharron -> chicharrón",
+      "description": "Built-in exact diacritics replacement applied before the AI review (word-boundary, case-preserving).",
+      "examples": [
+        {
+          "before": "chicharron",
+          "after": "chicharrón"
+        }
+      ],
+      "implementation": {
+        "file": "services/dashboard/lib/pre-ai-deterministic-rules.ts",
+        "exportName": "BUILT_IN_REPLACEMENTS"
+      },
+      "data": {
+        "from": "chicharron",
+        "to": "chicharrón",
+        "type": "Diacritics"
+      },
+      "source": "code_data"
+    },
+    {
+      "id": "pre-ai/replacement/cocteles",
+      "layer": "pre_ai_deterministic",
+      "category": "diacritics",
+      "title": "cocteles -> cócteles",
+      "description": "Built-in exact diacritics replacement applied before the AI review (word-boundary, case-preserving).",
+      "examples": [
+        {
+          "before": "cocteles",
+          "after": "cócteles"
+        }
+      ],
+      "implementation": {
+        "file": "services/dashboard/lib/pre-ai-deterministic-rules.ts",
+        "exportName": "BUILT_IN_REPLACEMENTS"
+      },
+      "data": {
+        "from": "cocteles",
+        "to": "cócteles",
+        "type": "Diacritics"
+      },
+      "source": "code_data"
+    },
+    {
+      "id": "pre-ai/replacement/crepes",
+      "layer": "pre_ai_deterministic",
+      "category": "diacritics",
+      "title": "crepes -> crêpes",
+      "description": "Built-in exact diacritics replacement applied before the AI review (word-boundary, case-preserving).",
+      "examples": [
+        {
+          "before": "crepes",
+          "after": "crêpes"
+        }
+      ],
+      "implementation": {
+        "file": "services/dashboard/lib/pre-ai-deterministic-rules.ts",
+        "exportName": "BUILT_IN_REPLACEMENTS"
+      },
+      "data": {
+        "from": "crepes",
+        "to": "crêpes",
+        "type": "Diacritics"
+      },
+      "source": "code_data"
+    },
+    {
+      "id": "pre-ai/replacement/entree",
+      "layer": "pre_ai_deterministic",
+      "category": "diacritics",
+      "title": "entree -> entrée",
+      "description": "Built-in exact diacritics replacement applied before the AI review (word-boundary, case-preserving).",
+      "examples": [
+        {
+          "before": "entree",
+          "after": "entrée"
+        }
+      ],
+      "implementation": {
+        "file": "services/dashboard/lib/pre-ai-deterministic-rules.ts",
+        "exportName": "BUILT_IN_REPLACEMENTS"
+      },
+      "data": {
+        "from": "entree",
+        "to": "entrée",
+        "type": "Diacritics"
+      },
+      "source": "code_data"
+    },
+    {
+      "id": "pre-ai/replacement/flambeed",
+      "layer": "pre_ai_deterministic",
+      "category": "diacritics",
+      "title": "flambeed -> flambéed",
+      "description": "Built-in exact diacritics replacement applied before the AI review (word-boundary, case-preserving).",
+      "examples": [
+        {
+          "before": "flambeed",
+          "after": "flambéed"
+        }
+      ],
+      "implementation": {
+        "file": "services/dashboard/lib/pre-ai-deterministic-rules.ts",
+        "exportName": "BUILT_IN_REPLACEMENTS"
+      },
+      "data": {
+        "from": "flambeed",
+        "to": "flambéed",
+        "type": "Diacritics"
+      },
+      "source": "code_data"
+    },
+    {
+      "id": "pre-ai/replacement/genoise",
+      "layer": "pre_ai_deterministic",
+      "category": "diacritics",
+      "title": "genoise -> génoise",
+      "description": "Built-in exact diacritics replacement applied before the AI review (word-boundary, case-preserving).",
+      "examples": [
+        {
+          "before": "genoise",
+          "after": "génoise"
+        }
+      ],
+      "implementation": {
+        "file": "services/dashboard/lib/pre-ai-deterministic-rules.ts",
+        "exportName": "BUILT_IN_REPLACEMENTS"
+      },
+      "data": {
+        "from": "genoise",
+        "to": "génoise",
+        "type": "Diacritics"
+      },
+      "source": "code_data"
+    },
+    {
+      "id": "pre-ai/replacement/jalapeno",
+      "layer": "pre_ai_deterministic",
+      "category": "diacritics",
+      "title": "jalapeno -> jalapeño",
+      "description": "Built-in exact diacritics replacement applied before the AI review (word-boundary, case-preserving).",
+      "examples": [
+        {
+          "before": "jalapeno",
+          "after": "jalapeño"
+        }
+      ],
+      "implementation": {
+        "file": "services/dashboard/lib/pre-ai-deterministic-rules.ts",
+        "exportName": "BUILT_IN_REPLACEMENTS"
+      },
+      "data": {
+        "from": "jalapeno",
+        "to": "jalapeño",
+        "type": "Diacritics"
+      },
+      "source": "code_data"
+    },
+    {
+      "id": "pre-ai/replacement/pina",
+      "layer": "pre_ai_deterministic",
+      "category": "diacritics",
+      "title": "pina -> piña",
+      "description": "Built-in exact diacritics replacement applied before the AI review (word-boundary, case-preserving).",
+      "examples": [
+        {
+          "before": "pina",
+          "after": "piña"
+        }
+      ],
+      "implementation": {
+        "file": "services/dashboard/lib/pre-ai-deterministic-rules.ts",
+        "exportName": "BUILT_IN_REPLACEMENTS"
+      },
+      "data": {
+        "from": "pina",
+        "to": "piña",
+        "type": "Diacritics"
+      },
+      "source": "code_data"
+    },
+    {
+      "id": "pre-ai/replacement/puree",
+      "layer": "pre_ai_deterministic",
+      "category": "diacritics",
+      "title": "puree -> purée",
+      "description": "Built-in exact diacritics replacement applied before the AI review (word-boundary, case-preserving).",
+      "examples": [
+        {
+          "before": "puree",
+          "after": "purée"
+        }
+      ],
+      "implementation": {
+        "file": "services/dashboard/lib/pre-ai-deterministic-rules.ts",
+        "exportName": "BUILT_IN_REPLACEMENTS"
+      },
+      "data": {
+        "from": "puree",
+        "to": "purée",
+        "type": "Diacritics"
+      },
+      "source": "code_data"
+    },
+    {
+      "id": "pre-ai/replacement/rhone",
+      "layer": "pre_ai_deterministic",
+      "category": "diacritics",
+      "title": "rhone -> rhône",
+      "description": "Built-in exact diacritics replacement applied before the AI review (word-boundary, case-preserving).",
+      "examples": [
+        {
+          "before": "rhone",
+          "after": "rhône"
+        }
+      ],
+      "implementation": {
+        "file": "services/dashboard/lib/pre-ai-deterministic-rules.ts",
+        "exportName": "BUILT_IN_REPLACEMENTS"
+      },
+      "data": {
+        "from": "rhone",
+        "to": "rhône",
+        "type": "Diacritics"
+      },
+      "source": "code_data"
+    },
+    {
+      "id": "pre-ai/replacement/sauteed",
+      "layer": "pre_ai_deterministic",
+      "category": "diacritics",
+      "title": "sauteed -> sautéed",
+      "description": "Built-in exact diacritics replacement applied before the AI review (word-boundary, case-preserving).",
+      "examples": [
+        {
+          "before": "sauteed",
+          "after": "sautéed"
+        }
+      ],
+      "implementation": {
+        "file": "services/dashboard/lib/pre-ai-deterministic-rules.ts",
+        "exportName": "BUILT_IN_REPLACEMENTS"
+      },
+      "data": {
+        "from": "sauteed",
+        "to": "sautéed",
+        "type": "Diacritics"
+      },
+      "source": "code_data"
+    },
+    {
+      "id": "pre-ai/replacement/saute",
+      "layer": "pre_ai_deterministic",
+      "category": "diacritics",
+      "title": "saute -> sauté",
+      "description": "Built-in exact diacritics replacement applied before the AI review (word-boundary, case-preserving).",
+      "examples": [
+        {
+          "before": "saute",
+          "after": "sauté"
+        }
+      ],
+      "implementation": {
+        "file": "services/dashboard/lib/pre-ai-deterministic-rules.ts",
+        "exportName": "BUILT_IN_REPLACEMENTS"
+      },
+      "data": {
+        "from": "saute",
+        "to": "sauté",
+        "type": "Diacritics"
+      },
+      "source": "code_data"
+    },
+    {
+      "id": "pre-ai/replacement/taquenos",
+      "layer": "pre_ai_deterministic",
+      "category": "diacritics",
+      "title": "taquenos -> taqueños",
+      "description": "Built-in exact diacritics replacement applied before the AI review (word-boundary, case-preserving).",
+      "examples": [
+        {
+          "before": "taquenos",
+          "after": "taqueños"
+        }
+      ],
+      "implementation": {
+        "file": "services/dashboard/lib/pre-ai-deterministic-rules.ts",
+        "exportName": "BUILT_IN_REPLACEMENTS"
+      },
+      "data": {
+        "from": "taquenos",
+        "to": "taqueños",
+        "type": "Diacritics"
+      },
+      "source": "code_data"
+    },
+    {
+      "id": "pre-ai/replacement/tajin",
+      "layer": "pre_ai_deterministic",
+      "category": "diacritics",
+      "title": "tajin -> tajín",
+      "description": "Built-in exact diacritics replacement applied before the AI review (word-boundary, case-preserving).",
+      "examples": [
+        {
+          "before": "tajin",
+          "after": "tajín"
+        }
+      ],
+      "implementation": {
+        "file": "services/dashboard/lib/pre-ai-deterministic-rules.ts",
+        "exportName": "BUILT_IN_REPLACEMENTS"
+      },
+      "data": {
+        "from": "tajin",
+        "to": "tajín",
+        "type": "Diacritics"
+      },
+      "source": "code_data"
+    },
+    {
+      "id": "pre-ai/replacement/tampiquena",
+      "layer": "pre_ai_deterministic",
+      "category": "diacritics",
+      "title": "tampiquena -> tampiqueña",
+      "description": "Built-in exact diacritics replacement applied before the AI review (word-boundary, case-preserving).",
+      "examples": [
+        {
+          "before": "tampiquena",
+          "after": "tampiqueña"
+        }
+      ],
+      "implementation": {
+        "file": "services/dashboard/lib/pre-ai-deterministic-rules.ts",
+        "exportName": "BUILT_IN_REPLACEMENTS"
+      },
+      "data": {
+        "from": "tampiquena",
+        "to": "tampiqueña",
+        "type": "Diacritics"
+      },
+      "source": "code_data"
+    },
+    {
+      "id": "pre-ai/replacement/huancaina",
+      "layer": "pre_ai_deterministic",
+      "category": "diacritics",
+      "title": "huancaina -> huancaína",
+      "description": "Built-in exact diacritics replacement applied before the AI review (word-boundary, case-preserving).",
+      "examples": [
+        {
+          "before": "huancaina",
+          "after": "huancaína"
+        }
+      ],
+      "implementation": {
+        "file": "services/dashboard/lib/pre-ai-deterministic-rules.ts",
+        "exportName": "BUILT_IN_REPLACEMENTS"
+      },
+      "data": {
+        "from": "huancaina",
+        "to": "huancaína",
+        "type": "Diacritics"
+      },
+      "source": "code_data"
+    },
+    {
+      "id": "pre-ai/replacement/ceasar",
+      "layer": "pre_ai_deterministic",
+      "category": "spelling",
+      "title": "ceasar -> caesar",
+      "description": "Built-in exact spelling replacement applied before the AI review (word-boundary, case-preserving).",
+      "examples": [
+        {
+          "before": "ceasar",
+          "after": "caesar"
+        }
+      ],
+      "implementation": {
+        "file": "services/dashboard/lib/pre-ai-deterministic-rules.ts",
+        "exportName": "BUILT_IN_REPLACEMENTS"
+      },
+      "data": {
+        "from": "ceasar",
+        "to": "caesar",
+        "type": "Spelling"
+      },
+      "source": "code_data"
+    },
+    {
+      "id": "pre-ai/replacement/cesar",
+      "layer": "pre_ai_deterministic",
+      "category": "spelling",
+      "title": "cesar -> caesar",
+      "description": "Built-in exact spelling replacement applied before the AI review (word-boundary, case-preserving).",
+      "examples": [
+        {
+          "before": "cesar",
+          "after": "caesar"
+        }
+      ],
+      "implementation": {
+        "file": "services/dashboard/lib/pre-ai-deterministic-rules.ts",
+        "exportName": "BUILT_IN_REPLACEMENTS"
+      },
+      "data": {
+        "from": "cesar",
+        "to": "caesar",
+        "type": "Spelling"
+      },
+      "source": "code_data"
+    },
+    {
+      "id": "pre-ai/replacement/mozarella",
+      "layer": "pre_ai_deterministic",
+      "category": "spelling",
+      "title": "mozarella -> mozzarella",
+      "description": "Built-in exact spelling replacement applied before the AI review (word-boundary, case-preserving).",
+      "examples": [
+        {
+          "before": "mozarella",
+          "after": "mozzarella"
+        }
+      ],
+      "implementation": {
+        "file": "services/dashboard/lib/pre-ai-deterministic-rules.ts",
+        "exportName": "BUILT_IN_REPLACEMENTS"
+      },
+      "data": {
+        "from": "mozarella",
+        "to": "mozzarella",
+        "type": "Spelling"
+      },
+      "source": "code_data"
+    },
+    {
+      "id": "pre-ai/replacement/parmesian",
+      "layer": "pre_ai_deterministic",
+      "category": "spelling",
+      "title": "parmesian -> parmesan",
+      "description": "Built-in exact spelling replacement applied before the AI review (word-boundary, case-preserving).",
+      "examples": [
+        {
+          "before": "parmesian",
+          "after": "parmesan"
+        }
+      ],
+      "implementation": {
+        "file": "services/dashboard/lib/pre-ai-deterministic-rules.ts",
+        "exportName": "BUILT_IN_REPLACEMENTS"
+      },
+      "data": {
+        "from": "parmesian",
+        "to": "parmesan",
+        "type": "Spelling"
+      },
+      "source": "code_data"
+    },
+    {
+      "id": "pre-ai/replacement/shitake",
+      "layer": "pre_ai_deterministic",
+      "category": "spelling",
+      "title": "shitake -> shiitake",
+      "description": "Built-in exact spelling replacement applied before the AI review (word-boundary, case-preserving).",
+      "examples": [
+        {
+          "before": "shitake",
+          "after": "shiitake"
+        }
+      ],
+      "implementation": {
+        "file": "services/dashboard/lib/pre-ai-deterministic-rules.ts",
+        "exportName": "BUILT_IN_REPLACEMENTS"
+      },
+      "data": {
+        "from": "shitake",
+        "to": "shiitake",
+        "type": "Spelling"
+      },
+      "source": "code_data"
+    },
+    {
+      "id": "pre-ai/replacement/passion-fruits",
+      "layer": "pre_ai_deterministic",
+      "category": "spelling",
+      "title": "passion fruits -> passion fruit",
+      "description": "Built-in exact spelling replacement applied before the AI review (word-boundary, case-preserving).",
+      "examples": [
+        {
+          "before": "passion fruits",
+          "after": "passion fruit"
+        }
+      ],
+      "implementation": {
+        "file": "services/dashboard/lib/pre-ai-deterministic-rules.ts",
+        "exportName": "BUILT_IN_REPLACEMENTS"
+      },
+      "data": {
+        "from": "passion fruits",
+        "to": "passion fruit",
+        "type": "Spelling"
+      },
+      "source": "code_data"
+    },
+    {
+      "id": "pre-ai/replacement/passionfruit",
+      "layer": "pre_ai_deterministic",
+      "category": "spelling",
+      "title": "passionfruit -> passion fruit",
+      "description": "Built-in exact spelling replacement applied before the AI review (word-boundary, case-preserving).",
+      "examples": [
+        {
+          "before": "passionfruit",
+          "after": "passion fruit"
+        }
+      ],
+      "implementation": {
+        "file": "services/dashboard/lib/pre-ai-deterministic-rules.ts",
+        "exportName": "BUILT_IN_REPLACEMENTS"
+      },
+      "data": {
+        "from": "passionfruit",
+        "to": "passion fruit",
+        "type": "Spelling"
+      },
+      "source": "code_data"
+    },
+    {
+      "id": "pre-ai/replacement/yuzu-kosho",
+      "layer": "pre_ai_deterministic",
+      "category": "spelling",
+      "title": "yuzu-kosho -> yuzu kosho",
+      "description": "Built-in exact spelling replacement applied before the AI review (word-boundary, case-preserving).",
+      "examples": [
+        {
+          "before": "yuzu-kosho",
+          "after": "yuzu kosho"
+        }
+      ],
+      "implementation": {
+        "file": "services/dashboard/lib/pre-ai-deterministic-rules.ts",
+        "exportName": "BUILT_IN_REPLACEMENTS"
+      },
+      "data": {
+        "from": "yuzu-kosho",
+        "to": "yuzu kosho",
+        "type": "Spelling"
+      },
+      "source": "code_data"
+    },
+    {
+      "id": "pre-ai/replacement/yuzukosho",
+      "layer": "pre_ai_deterministic",
+      "category": "spelling",
+      "title": "yuzukosho -> yuzu kosho",
+      "description": "Built-in exact spelling replacement applied before the AI review (word-boundary, case-preserving).",
+      "examples": [
+        {
+          "before": "yuzukosho",
+          "after": "yuzu kosho"
+        }
+      ],
+      "implementation": {
+        "file": "services/dashboard/lib/pre-ai-deterministic-rules.ts",
+        "exportName": "BUILT_IN_REPLACEMENTS"
+      },
+      "data": {
+        "from": "yuzukosho",
+        "to": "yuzu kosho",
+        "type": "Spelling"
+      },
+      "source": "code_data"
+    },
+    {
+      "id": "pre-ai/replacement/yuzu-khoso",
+      "layer": "pre_ai_deterministic",
+      "category": "spelling",
+      "title": "yuzu khoso -> yuzu kosho",
+      "description": "Built-in exact spelling replacement applied before the AI review (word-boundary, case-preserving).",
+      "examples": [
+        {
+          "before": "yuzu khoso",
+          "after": "yuzu kosho"
+        }
+      ],
+      "implementation": {
+        "file": "services/dashboard/lib/pre-ai-deterministic-rules.ts",
+        "exportName": "BUILT_IN_REPLACEMENTS"
+      },
+      "data": {
+        "from": "yuzu khoso",
+        "to": "yuzu kosho",
+        "type": "Spelling"
+      },
+      "source": "code_data"
+    },
+    {
+      "id": "pre-ai/replacement/dulche-de-leche",
+      "layer": "pre_ai_deterministic",
+      "category": "spelling",
+      "title": "dulche de leche -> dulce de leche",
+      "description": "Built-in exact spelling replacement applied before the AI review (word-boundary, case-preserving).",
+      "examples": [
+        {
+          "before": "dulche de leche",
+          "after": "dulce de leche"
+        }
+      ],
+      "implementation": {
+        "file": "services/dashboard/lib/pre-ai-deterministic-rules.ts",
+        "exportName": "BUILT_IN_REPLACEMENTS"
+      },
+      "data": {
+        "from": "dulche de leche",
+        "to": "dulce de leche",
+        "type": "Spelling"
+      },
+      "source": "code_data"
+    },
+    {
+      "id": "pre-ai/replacement/dry-chili",
+      "layer": "pre_ai_deterministic",
+      "category": "spelling",
+      "title": "dry chili -> dried chili",
+      "description": "Built-in exact spelling replacement applied before the AI review (word-boundary, case-preserving).",
+      "examples": [
+        {
+          "before": "dry chili",
+          "after": "dried chili"
+        }
+      ],
+      "implementation": {
+        "file": "services/dashboard/lib/pre-ai-deterministic-rules.ts",
+        "exportName": "BUILT_IN_REPLACEMENTS"
+      },
+      "data": {
+        "from": "dry chili",
+        "to": "dried chili",
+        "type": "Spelling"
+      },
+      "source": "code_data"
+    },
+    {
+      "id": "pre-ai/replacement/honey-comb",
+      "layer": "pre_ai_deterministic",
+      "category": "spelling",
+      "title": "honey comb -> honeycomb",
+      "description": "Built-in exact spelling replacement applied before the AI review (word-boundary, case-preserving).",
+      "examples": [
+        {
+          "before": "honey comb",
+          "after": "honeycomb"
+        }
+      ],
+      "implementation": {
+        "file": "services/dashboard/lib/pre-ai-deterministic-rules.ts",
+        "exportName": "BUILT_IN_REPLACEMENTS"
+      },
+      "data": {
+        "from": "honey comb",
+        "to": "honeycomb",
+        "type": "Spelling"
+      },
+      "source": "code_data"
+    },
+    {
+      "id": "pre-ai/replacement/chipothle",
+      "layer": "pre_ai_deterministic",
+      "category": "spelling",
+      "title": "chipothle -> chipotle",
+      "description": "Built-in exact spelling replacement applied before the AI review (word-boundary, case-preserving).",
+      "examples": [
+        {
+          "before": "chipothle",
+          "after": "chipotle"
+        }
+      ],
+      "implementation": {
+        "file": "services/dashboard/lib/pre-ai-deterministic-rules.ts",
+        "exportName": "BUILT_IN_REPLACEMENTS"
+      },
+      "data": {
+        "from": "chipothle",
+        "to": "chipotle",
+        "type": "Spelling"
+      },
+      "source": "code_data"
+    },
+    {
+      "id": "pre-ai/replacement/chipotl",
+      "layer": "pre_ai_deterministic",
+      "category": "spelling",
+      "title": "chipotl -> chipotle",
+      "description": "Built-in exact spelling replacement applied before the AI review (word-boundary, case-preserving).",
+      "examples": [
+        {
+          "before": "chipotl",
+          "after": "chipotle"
+        }
+      ],
+      "implementation": {
+        "file": "services/dashboard/lib/pre-ai-deterministic-rules.ts",
+        "exportName": "BUILT_IN_REPLACEMENTS"
+      },
+      "data": {
+        "from": "chipotl",
+        "to": "chipotle",
+        "type": "Spelling"
+      },
+      "source": "code_data"
+    },
+    {
+      "id": "pre-ai/replacement/nappa",
+      "layer": "pre_ai_deterministic",
+      "category": "spelling",
+      "title": "nappa -> napa",
+      "description": "Built-in exact spelling replacement applied before the AI review (word-boundary, case-preserving).",
+      "examples": [
+        {
+          "before": "nappa",
+          "after": "napa"
+        }
+      ],
+      "implementation": {
+        "file": "services/dashboard/lib/pre-ai-deterministic-rules.ts",
+        "exportName": "BUILT_IN_REPLACEMENTS"
+      },
+      "data": {
+        "from": "nappa",
+        "to": "napa",
+        "type": "Spelling"
+      },
+      "source": "code_data"
+    },
+    {
+      "id": "pre-ai/replacement/sea-food",
+      "layer": "pre_ai_deterministic",
+      "category": "spelling",
+      "title": "sea food -> seafood",
+      "description": "Built-in exact spelling replacement applied before the AI review (word-boundary, case-preserving).",
+      "examples": [
+        {
+          "before": "sea food",
+          "after": "seafood"
+        }
+      ],
+      "implementation": {
+        "file": "services/dashboard/lib/pre-ai-deterministic-rules.ts",
+        "exportName": "BUILT_IN_REPLACEMENTS"
+      },
+      "data": {
+        "from": "sea food",
+        "to": "seafood",
+        "type": "Spelling"
+      },
+      "source": "code_data"
+    },
+    {
+      "id": "pre-ai/replacement/pak-coy",
+      "layer": "pre_ai_deterministic",
+      "category": "spelling",
+      "title": "pak coy -> pak choy",
+      "description": "Built-in exact spelling replacement applied before the AI review (word-boundary, case-preserving).",
+      "examples": [
+        {
+          "before": "pak coy",
+          "after": "pak choy"
+        }
+      ],
+      "implementation": {
+        "file": "services/dashboard/lib/pre-ai-deterministic-rules.ts",
+        "exportName": "BUILT_IN_REPLACEMENTS"
+      },
+      "data": {
+        "from": "pak coy",
+        "to": "pak choy",
+        "type": "Spelling"
+      },
+      "source": "code_data"
+    },
+    {
+      "id": "pre-ai/replacement/cashu",
+      "layer": "pre_ai_deterministic",
+      "category": "spelling",
+      "title": "cashu -> cashew",
+      "description": "Built-in exact spelling replacement applied before the AI review (word-boundary, case-preserving).",
+      "examples": [
+        {
+          "before": "cashu",
+          "after": "cashew"
+        }
+      ],
+      "implementation": {
+        "file": "services/dashboard/lib/pre-ai-deterministic-rules.ts",
+        "exportName": "BUILT_IN_REPLACEMENTS"
+      },
+      "data": {
+        "from": "cashu",
+        "to": "cashew",
+        "type": "Spelling"
+      },
+      "source": "code_data"
+    },
+    {
+      "id": "pre-ai/replacement/local-grown",
+      "layer": "pre_ai_deterministic",
+      "category": "spelling",
+      "title": "local grown -> locally grown",
+      "description": "Built-in exact spelling replacement applied before the AI review (word-boundary, case-preserving).",
+      "examples": [
+        {
+          "before": "local grown",
+          "after": "locally grown"
+        }
+      ],
+      "implementation": {
+        "file": "services/dashboard/lib/pre-ai-deterministic-rules.ts",
+        "exportName": "BUILT_IN_REPLACEMENTS"
+      },
+      "data": {
+        "from": "local grown",
+        "to": "locally grown",
+        "type": "Spelling"
+      },
+      "source": "code_data"
+    },
+    {
+      "id": "pre-ai/replacement/jasmin",
+      "layer": "pre_ai_deterministic",
+      "category": "spelling",
+      "title": "jasmin -> jasmine",
+      "description": "Built-in exact spelling replacement applied before the AI review (word-boundary, case-preserving).",
+      "examples": [
+        {
+          "before": "jasmin",
+          "after": "jasmine"
+        }
+      ],
+      "implementation": {
+        "file": "services/dashboard/lib/pre-ai-deterministic-rules.ts",
+        "exportName": "BUILT_IN_REPLACEMENTS"
+      },
+      "data": {
+        "from": "jasmin",
+        "to": "jasmine",
+        "type": "Spelling"
+      },
+      "source": "code_data"
+    },
+    {
+      "id": "pre-ai/replacement/brussels-sprout",
+      "layer": "pre_ai_deterministic",
+      "category": "spelling",
+      "title": "brussels sprout -> brussels sprouts",
+      "description": "Built-in exact spelling replacement applied before the AI review (word-boundary, case-preserving).",
+      "examples": [
+        {
+          "before": "brussels sprout",
+          "after": "brussels sprouts"
+        }
+      ],
+      "implementation": {
+        "file": "services/dashboard/lib/pre-ai-deterministic-rules.ts",
+        "exportName": "BUILT_IN_REPLACEMENTS"
+      },
+      "data": {
+        "from": "brussels sprout",
+        "to": "brussels sprouts",
+        "type": "Spelling"
+      },
+      "source": "code_data"
+    },
+    {
+      "id": "pre-ai/replacement/veggies",
+      "layer": "pre_ai_deterministic",
+      "category": "spelling",
+      "title": "veggies -> vegetables",
+      "description": "Built-in exact spelling replacement applied before the AI review (word-boundary, case-preserving).",
+      "examples": [
+        {
+          "before": "veggies",
+          "after": "vegetables"
+        }
+      ],
+      "implementation": {
+        "file": "services/dashboard/lib/pre-ai-deterministic-rules.ts",
+        "exportName": "BUILT_IN_REPLACEMENTS"
+      },
+      "data": {
+        "from": "veggies",
+        "to": "vegetables",
+        "type": "Spelling"
+      },
+      "source": "code_data"
+    },
+    {
+      "id": "pre-ai/replacement/chilli",
+      "layer": "pre_ai_deterministic",
+      "category": "spelling",
+      "title": "chilli -> chili",
+      "description": "Built-in exact spelling replacement applied before the AI review (word-boundary, case-preserving).",
+      "examples": [
+        {
+          "before": "chilli",
+          "after": "chili"
+        }
+      ],
+      "implementation": {
+        "file": "services/dashboard/lib/pre-ai-deterministic-rules.ts",
+        "exportName": "BUILT_IN_REPLACEMENTS"
+      },
+      "data": {
+        "from": "chilli",
+        "to": "chili",
+        "type": "Spelling"
+      },
+      "source": "code_data"
+    },
+    {
+      "id": "pre-ai/replacement/pepper-corn",
+      "layer": "pre_ai_deterministic",
+      "category": "spelling",
+      "title": "pepper corn -> peppercorn",
+      "description": "Built-in exact spelling replacement applied before the AI review (word-boundary, case-preserving).",
+      "examples": [
+        {
+          "before": "pepper corn",
+          "after": "peppercorn"
+        }
+      ],
+      "implementation": {
+        "file": "services/dashboard/lib/pre-ai-deterministic-rules.ts",
+        "exportName": "BUILT_IN_REPLACEMENTS"
+      },
+      "data": {
+        "from": "pepper corn",
+        "to": "peppercorn",
+        "type": "Spelling"
+      },
+      "source": "code_data"
+    },
+    {
+      "id": "pre-ai/allergen-cluster-normalization",
+      "layer": "pre_ai_deterministic",
+      "category": "allergen_codes",
+      "title": "Allergen code cluster formatting",
+      "description": "Allergen-code clusters on a dish line are normalized to uppercase, comma-separated with no spaces, in alphabetical order. Only runs on clusters of known allergen codes.",
+      "examples": [
+        {
+          "before": "crispy squid g, d,V 18",
+          "after": "crispy squid D,G,V 18"
+        }
+      ],
+      "implementation": {
+        "file": "services/dashboard/lib/pre-ai-deterministic-rules.ts",
+        "exportName": "normalizeAllergenClusterOnLine"
+      },
+      "source": "code_metadata"
+    },
+    {
+      "id": "pre-ai/tres-leches-vegetarian-code",
+      "layer": "pre_ai_deterministic",
+      "category": "allergen_codes",
+      "title": "Tres Leches requires vegetarian code",
+      "description": "Tres Leches dessert lines must carry the V (vegetarian) allergen code; it is added to the cluster when missing. Curated code guard promoted from accepted human-review explanations.",
+      "examples": [
+        {
+          "before": "tres leches, vanilla cream D,G 14",
+          "after": "tres leches, vanilla cream D,G,V 14"
+        }
+      ],
+      "implementation": {
+        "file": "services/dashboard/lib/pre-ai-deterministic-rules.ts",
+        "exportName": "ensureTresLechesVegetarianCodeOnLine"
+      },
+      "source": "code_metadata"
+    },
+    {
+      "id": "pre-ai/raw-asterisk-placement",
+      "layer": "pre_ai_deterministic",
+      "category": "raw_markers",
+      "title": "Raw-marker spacing normalization (pre-AI, conservative)",
+      "description": "When a dish line has exactly one raw marker, spacing drift is fixed: the marker attaches to the last dish/description word and is separated from allergen codes. Lines with zero or multiple markers are left for the post-AI pass.",
+      "examples": [
+        {
+          "before": "tuna tartare , avocado * D 18",
+          "after": "tuna tartare, avocado* D 18"
+        }
+      ],
+      "implementation": {
+        "file": "services/dashboard/lib/pre-ai-deterministic-rules.ts",
+        "exportName": "normalizeRawAsteriskPlacementForLine"
+      },
+      "source": "code_metadata"
+    },
+    {
+      "id": "pre-ai/raw-asterisk-insertion",
+      "layer": "pre_ai_deterministic",
+      "category": "raw_markers",
+      "title": "Missing raw-marker insertion for strong raw terms",
+      "description": "Adds a missing raw marker to dishes containing strong raw/undercooked terms: tartare, sashimi, raw/uncooked ceviche, crudo, tiradito, poke, raw or half-shell oysters, explicit raw tuna/salmon/hamachi/fish/beef, poached egg, sunny-side-up egg.",
+      "examples": [
+        {
+          "before": "salmon sashimi, ponzu 19",
+          "after": "salmon sashimi, ponzu* 19"
+        }
+      ],
+      "implementation": {
+        "file": "services/dashboard/lib/pre-ai-deterministic-rules.ts",
+        "exportName": "shouldAddRawAsterisk"
+      },
+      "source": "code_metadata"
+    },
+    {
+      "id": "pre-ai/accepted-correction-rules",
+      "layer": "pre_ai_deterministic",
+      "category": "learned_rules",
+      "title": "Accepted reviewer correction rules (exact replacements)",
+      "description": "Accepted correction_rules rows with safe change types (spelling, diacritic, terminology, grammar, punctuation; both texts <= 240 chars) are applied as exact replacements when the rule scope matches the submitted property and template type. Broad content rules stay reviewer/prompt material. See the dynamic_correction_rule entries for the currently accepted set.",
+      "implementation": {
+        "file": "services/dashboard/lib/pre-ai-deterministic-rules.ts",
+        "exportName": "applyAcceptedCorrectionRules"
+      },
+      "source": "code_metadata"
+    },
+    {
+      "id": "pre-ai/footer-normalization",
+      "layer": "pre_ai_deterministic",
+      "category": "footer",
+      "title": "Managed footer extraction before review",
+      "description": "Allergen legend lines, the canonical foodborne-illness notice, and price/welcome boilerplate are detected and removed from the review body before deterministic checks and the AI call; the extracted allergen legend becomes the effective allergen key when none was provided.",
+      "implementation": {
+        "file": "services/dashboard/lib/menu-footer.ts",
+        "exportName": "normalizeMenuFooter"
+      },
+      "source": "code_metadata"
+    },
+    {
+      "id": "parse/severity-default-normal",
+      "layer": "parse_normalization",
+      "category": "severity",
+      "title": "Missing severity defaults to normal",
+      "description": "AI suggestions without a severity are assigned severity \"normal\" before any critical forcing runs.",
+      "implementation": {
+        "file": "services/dashboard/lib/review-pipeline.ts",
+        "exportName": "parseAIResponse"
+      },
+      "source": "code_metadata"
+    },
+    {
+      "id": "parse/prix-fixe-phrase-critical",
+      "layer": "parse_normalization",
+      "category": "severity",
+      "title": "Prix-fixe top-price and course-numbering phrases force critical",
+      "description": "Suggestions whose description/recommendation mention a prix fixe price at the top of the menu, or prix-fixe course numbering, are forced to critical severity even when the AI omitted the type.",
+      "implementation": {
+        "file": "services/dashboard/lib/review-pipeline.ts",
+        "exportName": "parseAIResponse"
+      },
+      "source": "code_metadata"
+    },
+    {
+      "id": "parse/missing-price-description-fallback",
+      "layer": "parse_normalization",
+      "category": "severity",
+      "title": "Missing price / dish-name description fallback",
+      "description": "Non-critical suggestions whose description matches missing-price or missing/incomplete-dish-name phrasing are reclassified to the corresponding critical type (safety net for mistyped AI output).",
+      "implementation": {
+        "file": "services/dashboard/lib/review-pipeline.ts",
+        "exportName": "parseAIResponse"
+      },
+      "source": "code_metadata"
+    },
+    {
+      "id": "parse/raw-asterisk-canonicalization",
+      "layer": "parse_normalization",
+      "category": "raw_markers",
+      "title": "Raw-marker canonicalization (post-AI, aggressive)",
+      "description": "Every raw marker on a dish line of the AI-corrected menu is stripped and exactly one is reinserted at the canonical position: attached to the last description word, before trailing allergen codes and price. Titles, legends, and the raw notice are skipped.",
+      "examples": [
+        {
+          "before": "Steak Tartare*, capers, egg yolk D,G 24",
+          "after": "Steak Tartare, capers, egg yolk* D,G 24"
+        }
+      ],
+      "implementation": {
+        "file": "services/dashboard/lib/review-pipeline.ts",
+        "exportName": "normalizeRawAsteriskPlacement"
+      },
+      "source": "code_metadata"
+    },
+    {
+      "id": "post-ai/deterministic-re-run",
+      "layer": "post_ai_guard",
+      "category": "deterministic",
+      "title": "Post-AI deterministic cleanup",
+      "description": "The full deterministic pre-AI pass is re-applied to the AI-corrected menu so the model cannot reintroduce drift (unsorted allergen clusters, spaced raw markers, reverted replacements).",
+      "implementation": {
+        "file": "services/dashboard/lib/pre-ai-deterministic-rules.ts",
+        "exportName": "runPreAiDeterministicChecks"
+      },
+      "source": "code_metadata"
+    },
+    {
+      "id": "post-ai/menu-title-guard",
+      "layer": "post_ai_guard",
+      "category": "structure",
+      "title": "Leading menu title preservation",
+      "description": "Restores a leading \"Menu\"/\"Menus\" title line when the AI-corrected output dropped it.",
+      "implementation": {
+        "file": "services/dashboard/lib/menu-title-guard.ts",
+        "exportName": "preserveLeadingMenuTitle"
+      },
+      "source": "code_metadata"
+    },
+    {
+      "id": "post-ai/structure-guard",
+      "layer": "post_ai_guard",
+      "category": "structure",
+      "title": "Corrected-menu structure guard",
+      "description": "Rejects an AI-corrected menu that distorts line structure (merged, split, omitted, or reordered lines) and falls back to the pre-AI text; suggestions still apply.",
+      "implementation": {
+        "file": "services/dashboard/lib/corrected-menu-structure-guard.ts",
+        "exportName": "assessCorrectedMenuStructure"
+      },
+      "source": "code_metadata"
+    },
+    {
+      "id": "post-ai/allergen-suggestion-guard",
+      "layer": "post_ai_guard",
+      "category": "allergen_codes",
+      "title": "Allergen alphabetization suggestion guard",
+      "description": "Drops AI suggestions asking to alphabetize allergen codes when the corrected menu already has them in the required order.",
+      "implementation": {
+        "file": "services/dashboard/lib/allergen-suggestion-guard.ts",
+        "exportName": "guardAllergenAlphabetizationSuggestions"
+      },
+      "source": "code_metadata"
+    },
+    {
+      "id": "post-ai/high-confidence-auto-apply",
+      "layer": "post_ai_guard",
+      "category": "auto_apply",
+      "title": "High-confidence suggestion auto-apply",
+      "description": "High-confidence spelling/grammar suggestions with an extractable from->to pair are applied directly to the corrected menu and removed from the remaining suggestion list.",
+      "implementation": {
+        "file": "services/dashboard/lib/apply-high-confidence-suggestions.ts",
+        "exportName": "applyHighConfidenceSuggestionsToMenu"
+      },
+      "source": "code_metadata"
+    },
+    {
+      "id": "post-ai/embedded-set-menu-guard",
+      "layer": "post_ai_guard",
+      "category": "pricing",
+      "title": "Embedded set-menu price guard",
+      "description": "For detected embedded set menus (package title + total price + choice-of headings): restores included set-section dish prices the AI removed, drops false Missing Price suggestions for included dishes, and synthesizes critical Set Menu Item Price suggestions for bare included-item prices.",
+      "implementation": {
+        "file": "services/dashboard/lib/embedded-set-menu-guard.ts",
+        "exportName": "guardEmbeddedSetMenuPrices"
+      },
+      "source": "code_metadata"
+    },
+    {
+      "id": "post-ai/price-integrity-guard",
+      "layer": "post_ai_guard",
+      "category": "pricing",
+      "title": "Price integrity guard",
+      "description": "Prevents the AI from adding or changing trailing prices: corrected-menu prices are reconciled against the submitted text and unauthorized price edits are reverted.",
+      "implementation": {
+        "file": "services/dashboard/lib/price-integrity-guard.ts",
+        "exportName": "guardCorrectedMenuPrices"
+      },
+      "source": "code_metadata"
+    },
+    {
+      "id": "post-ai/footer-strip",
+      "layer": "post_ai_guard",
+      "category": "footer",
+      "title": "Managed footer strip on corrected output",
+      "description": "The corrected menu is stripped of managed footer content (allergen legend, raw notice, price/welcome boilerplate) before reconciliation, mirroring the pre-review normalization.",
+      "implementation": {
+        "file": "services/dashboard/lib/menu-footer.ts",
+        "exportName": "stripManagedFooterText"
+      },
+      "source": "code_metadata"
+    },
+    {
+      "id": "reconcile/critical-resolution",
+      "layer": "reconciliation",
+      "category": "severity",
+      "title": "Resolved-critical reconciliation",
+      "description": "Critical suggestions already resolved in the corrected menu are dropped: Missing Price when the matched line (including continuation lines) now ends in a price; Incomplete Dish Name when the line gained substance or the flagged token is gone.",
+      "implementation": {
+        "file": "services/dashboard/lib/review-pipeline.ts",
+        "exportName": "reconcileCriticalSuggestionsAgainstCorrectedMenuWithDiagnostics"
+      },
+      "source": "code_metadata"
+    },
+    {
+      "id": "reconcile/prix-fixe-enforcement",
+      "layer": "reconciliation",
+      "category": "prix_fixe",
+      "title": "Prix-fixe deterministic critical checks",
+      "description": "For prix fixe menus: synthesizes a critical PRICING STRUCTURE suggestion when no top-level price (incl. PP/per-person/pairing formats) appears in the first five lines, synthesizes critical COURSE NUMBERING when two or more course headings lack numbers, and removes AI course-numbering false positives when numbers are present. Prix fixe menus are exempt from per-dish missing-price criticals.",
+      "implementation": {
+        "file": "services/dashboard/lib/review-pipeline.ts",
+        "exportName": "enforcePrixFixeCriticalChecks"
+      },
+      "source": "code_metadata"
+    },
+    {
+      "id": "prompt/prix_fixe",
+      "layer": "prompt_section",
+      "category": "prompt",
+      "title": "Prompt section: prix_fixe",
+      "description": "Prix fixe pricing/course-numbering rules; suppresses per-dish missing-price flags and requires a single top price plus numbered courses. Applies when: menuType === 'prix_fixe'.",
+      "implementation": {
+        "file": "services/dashboard/lib/qa-prompt-builder.ts",
+        "exportName": "buildFinalPrompt"
+      },
+      "data": {
+        "sectionId": "prix_fixe",
+        "description": "Prix fixe pricing/course-numbering rules; suppresses per-dish missing-price flags and requires a single top price plus numbered courses.",
+        "appliesWhen": "menuType === 'prix_fixe'"
+      },
+      "source": "code_data"
+    },
+    {
+      "id": "prompt/allergens",
+      "layer": "prompt_section",
+      "category": "prompt",
+      "title": "Prompt section: allergens",
+      "description": "Injects the custom or footer-extracted allergen key and restricts allergen checking to those codes. Applies when: effective allergen legend is non-empty.",
+      "implementation": {
+        "file": "services/dashboard/lib/qa-prompt-builder.ts",
+        "exportName": "buildFinalPrompt"
+      },
+      "data": {
+        "sectionId": "allergens",
+        "description": "Injects the custom or footer-extracted allergen key and restricts allergen checking to those codes.",
+        "appliesWhen": "effective allergen legend is non-empty"
+      },
+      "source": "code_data"
+    },
+    {
+      "id": "prompt/corrected_menu_structure_rules",
+      "layer": "prompt_section",
+      "category": "prompt",
+      "title": "Prompt section: corrected_menu_structure_rules",
+      "description": "Requires the CORRECTED MENU block to preserve every submitted line in order with no merges, splits, reorders, or deletions. Applies when: always.",
+      "implementation": {
+        "file": "services/dashboard/lib/qa-prompt-builder.ts",
+        "exportName": "buildFinalPrompt"
+      },
+      "data": {
+        "sectionId": "corrected_menu_structure_rules",
+        "description": "Requires the CORRECTED MENU block to preserve every submitted line in order with no merges, splits, reorders, or deletions.",
+        "appliesWhen": "always"
+      },
+      "source": "code_data"
+    },
+    {
+      "id": "prompt/pre_ai_deterministic_checks",
+      "layer": "prompt_section",
+      "category": "prompt",
+      "title": "Prompt section: pre_ai_deterministic_checks",
+      "description": "Tells the model deterministic pre-AI fixes were already applied so it does not re-report them. Applies when: BASIC_AI_PRECHECK_ENABLED.",
+      "implementation": {
+        "file": "services/dashboard/lib/qa-prompt-builder.ts",
+        "exportName": "buildFinalPrompt"
+      },
+      "data": {
+        "sectionId": "pre_ai_deterministic_checks",
+        "description": "Tells the model deterministic pre-AI fixes were already applied so it does not re-report them.",
+        "appliesWhen": "BASIC_AI_PRECHECK_ENABLED"
+      },
+      "source": "code_data"
+    },
+    {
+      "id": "prompt/changed_only_scope",
+      "layer": "prompt_section",
+      "category": "prompt",
+      "title": "Prompt section: changed_only_scope",
+      "description": "Restricts a revision review to changed excerpts only and pins the corrected output to the same lines. Applies when: reviewMode === 'changed_only' with a baseline.",
+      "implementation": {
+        "file": "services/dashboard/lib/qa-prompt-builder.ts",
+        "exportName": "buildFinalPrompt"
+      },
+      "data": {
+        "sectionId": "changed_only_scope",
+        "description": "Restricts a revision review to changed excerpts only and pins the corrected output to the same lines.",
+        "appliesWhen": "reviewMode === 'changed_only' with a baseline"
+      },
+      "source": "code_data"
+    },
+    {
+      "id": "prompt/footer_rules",
+      "layer": "prompt_section",
+      "category": "prompt",
+      "title": "Prompt section: footer_rules",
+      "description": "Excludes the allergen legend and the canonical foodborne-illness footer from review scope. Applies when: always.",
+      "implementation": {
+        "file": "services/dashboard/lib/qa-prompt-builder.ts",
+        "exportName": "buildFinalPrompt"
+      },
+      "data": {
+        "sectionId": "footer_rules",
+        "description": "Excludes the allergen legend and the canonical foodborne-illness footer from review scope.",
+        "appliesWhen": "always"
+      },
+      "source": "code_data"
+    },
+    {
+      "id": "prompt/add_on_price_rules",
+      "layer": "prompt_section",
+      "category": "prompt",
+      "title": "Prompt section: add_on_price_rules",
+      "description": "Treats numbers after add-on options (pipe/slash separated) as that option price; prevents false Missing Price flags on add-on rows. Applies when: always.",
+      "implementation": {
+        "file": "services/dashboard/lib/qa-prompt-builder.ts",
+        "exportName": "buildFinalPrompt"
+      },
+      "data": {
+        "sectionId": "add_on_price_rules",
+        "description": "Treats numbers after add-on options (pipe/slash separated) as that option price; prevents false Missing Price flags on add-on rows.",
+        "appliesWhen": "always"
+      },
+      "source": "code_data"
+    },
+    {
+      "id": "prompt/standard_item_price_rules",
+      "layer": "prompt_section",
+      "category": "prompt",
+      "title": "Prompt section: standard_item_price_rules",
+      "description": "Treats a trailing whole number as a valid price even without allergen codes before it. Applies when: always.",
+      "implementation": {
+        "file": "services/dashboard/lib/qa-prompt-builder.ts",
+        "exportName": "buildFinalPrompt"
+      },
+      "data": {
+        "sectionId": "standard_item_price_rules",
+        "description": "Treats a trailing whole number as a valid price even without allergen codes before it.",
+        "appliesWhen": "always"
+      },
+      "source": "code_data"
+    },
+    {
+      "id": "prompt/embedded_set_menu_rules",
+      "layer": "prompt_section",
+      "category": "prompt",
+      "title": "Prompt section: embedded_set_menu_rules",
+      "description": "Explains detected embedded set-menu sections (package title + total price + choice-of headings) so included dishes are not flagged for missing prices. Applies when: embedded set-menu sections detected in a non prix-fixe menu.",
+      "implementation": {
+        "file": "services/dashboard/lib/qa-prompt-builder.ts",
+        "exportName": "buildFinalPrompt"
+      },
+      "data": {
+        "sectionId": "embedded_set_menu_rules",
+        "description": "Explains detected embedded set-menu sections (package title + total price + choice-of headings) so included dishes are not flagged for missing prices.",
+        "appliesWhen": "embedded set-menu sections detected in a non prix-fixe menu"
+      },
+      "source": "code_data"
+    },
+    {
+      "id": "parse/forced-critical/missing-price",
+      "layer": "parse_normalization",
+      "category": "severity",
+      "title": "Forced critical type: Missing Price",
+      "description": "AI suggestions with the exact type \"Missing Price\" are always forced to critical severity (blocks submission until overridden).",
+      "implementation": {
+        "file": "services/dashboard/lib/review-pipeline.ts",
+        "exportName": "FORCED_CRITICAL_EXACT_TYPES"
+      },
+      "data": {
+        "type": "Missing Price",
+        "match": "exact"
+      },
+      "source": "code_data"
+    },
+    {
+      "id": "parse/forced-critical/incomplete-dish-name",
+      "layer": "parse_normalization",
+      "category": "severity",
+      "title": "Forced critical type: Incomplete Dish Name",
+      "description": "AI suggestions with the exact type \"Incomplete Dish Name\" are always forced to critical severity (blocks submission until overridden).",
+      "implementation": {
+        "file": "services/dashboard/lib/review-pipeline.ts",
+        "exportName": "FORCED_CRITICAL_EXACT_TYPES"
+      },
+      "data": {
+        "type": "Incomplete Dish Name",
+        "match": "exact"
+      },
+      "source": "code_data"
+    },
+    {
+      "id": "parse/forced-critical/set-menu-item-price",
+      "layer": "parse_normalization",
+      "category": "severity",
+      "title": "Forced critical type: set menu item price",
+      "description": "AI suggestions whose lowercased type equals \"set menu item price\" are always forced to critical severity.",
+      "implementation": {
+        "file": "services/dashboard/lib/review-pipeline.ts",
+        "exportName": "FORCED_CRITICAL_NORMALIZED_TYPES"
+      },
+      "data": {
+        "type": "set menu item price",
+        "match": "lowercased"
+      },
+      "source": "code_data"
+    },
+    {
+      "id": "parse/forced-critical/course-progression",
+      "layer": "parse_normalization",
+      "category": "severity",
+      "title": "Forced critical type: course progression",
+      "description": "AI suggestions whose lowercased type equals \"course progression\" are always forced to critical severity.",
+      "implementation": {
+        "file": "services/dashboard/lib/review-pipeline.ts",
+        "exportName": "FORCED_CRITICAL_NORMALIZED_TYPES"
+      },
+      "data": {
+        "type": "course progression",
+        "match": "lowercased"
+      },
+      "source": "code_data"
+    },
+    {
+      "id": "parse/forced-critical/pricing-structure",
+      "layer": "parse_normalization",
+      "category": "severity",
+      "title": "Forced critical type: pricing structure",
+      "description": "AI suggestions whose lowercased type equals \"pricing structure\" are always forced to critical severity.",
+      "implementation": {
+        "file": "services/dashboard/lib/review-pipeline.ts",
+        "exportName": "FORCED_CRITICAL_NORMALIZED_TYPES"
+      },
+      "data": {
+        "type": "pricing structure",
+        "match": "lowercased"
+      },
+      "source": "code_data"
+    }
+  ]
+}

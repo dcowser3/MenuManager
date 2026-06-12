@@ -12,7 +12,7 @@ Automates the manual "collect ~10 reviewer corrections, ask an AI how to improve
 | A | Raw pre-review input capture + submission↔audit linkage | Implemented |
 | C1 | Replayable review pipeline (`qa-prompt-builder`, `review-pipeline` libs) | Implemented |
 | C2 | Eval harness (`npm run review:eval`) | Implemented |
-| B | Generated code-rules manifest (`npm run rules:manifest`) | Planned |
+| B | Generated code-rules manifest (`npm run rules:manifest`) | Implemented |
 | D | Improvement cycle (`npm run improve:cycle`) + proposal page extension | Planned |
 | E | Daily Lightsail cron + runbook | Planned |
 
@@ -66,6 +66,18 @@ The handler keeps HTTP concerns (fallbacks, audits, diagnostics, logging) and de
 - **Scoring** per case: document similarity (strict + raw-asterisk-style-normalized, via `services/dashboard/lib/text-similarity.ts` — also now consumed by `preai:ab-replay`) and correction-level precision/recall/F1 via `services/differ/lib/eval-scoring.ts` (`scoreCorrections` uses the differ's replacement-signal extractor: signals(raw→candidate) vs signals(raw→truth) → TP/FP/FN per kind, plus residual candidate→truth diffs). Composite = style similarity when no word-level signals, else `0.6*similarity + 0.4*F1`. Known scope: dish-name identity changes and whole-word swaps are excluded from token scoring by the differ's conservative guards — they surface in similarity/residual metrics instead.
 - **Baseline compare**: `--baseline <report dir or json>` lists per-case composite deltas, improvements, regressions; exits non-zero when regressions exist (`process.exitCode = 2`) so the improvement cycle can gate on it.
 - Reports land in `tmp/review-eval/<timestamp>-<label>/report.{json,md}`.
+
+## Phase B — Generated rules manifest (Implemented)
+
+`npm run rules:manifest` ([scripts/generate-rules-manifest.js](../../scripts/generate-rules-manifest.js)) emits a single catalog of every review rule applied in code, built by [services/dashboard/lib/review-rules-manifest.ts](../../services/dashboard/lib/review-rules-manifest.ts):
+
+- **Data-driven entries (cannot drift):** `BUILT_IN_REPLACEMENTS` (now exported), `QA_PROMPT_SECTIONS`, and `FORCED_CRITICAL_*` type lists are imported from the real implementation arrays — one manifest entry per item.
+- **Hand-authored metadata:** each functional rule and guard (allergen-cluster normalizer, tres-leches V-code, raw-marker passes, all six post-AI guard modules, reconciliation, prix-fixe enforcement, footer handling) gets one entry with an `implementation: file#export` pointer.
+- **Dynamic entries:** accepted `correction_rules` from the DB are appended at generation time.
+
+Outputs: committed `docs/references/code-rules-manifest.{md,json}` (code-only, deterministic — no timestamps) and `tmp/rules-manifest/manifest-full.{json,md}` (code + live accepted rules; the Phase D LLM input).
+
+Drift prevention (`services/dashboard/__tests__/review-rules-manifest.test.ts`): the committed markdown must byte-match a regeneration; every replacement / prompt section / critical type / known guard module must be covered; ids must be unique. Adding a new guard requires a manifest entry plus an addition to the test's known-guards list.
 
 ## Eval dataset contract
 

@@ -1,12 +1,13 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.BUILT_IN_REPLACEMENTS = void 0;
 exports.runPreAiDeterministicChecks = runPreAiDeterministicChecks;
 const COMMON_ALLERGEN_CODES = new Set([
     'A', 'C', 'CE', 'D', 'DF', 'E', 'ET', 'F', 'G', 'GF', 'L', 'M', 'MO',
     'MU', 'N', 'P', 'PN', 'S', 'SE', 'SF', 'SL', 'SS', 'SU', 'SY', 'T', 'TN',
     'V', 'VG',
 ]);
-const BUILT_IN_REPLACEMENTS = [
+exports.BUILT_IN_REPLACEMENTS = [
     // Diacritics that are safe enough to apply before the AI review.
     { from: 'aji amarillo', to: 'ají amarillo', type: 'Diacritics' },
     { from: 'aji panca', to: 'ají panca', type: 'Diacritics' },
@@ -430,7 +431,7 @@ function runPreAiDeterministicChecks(menuText, options = {}) {
     const appliedCorrections = [];
     lines = lines.map((line, lineIndex) => {
         let nextLine = line;
-        for (const rule of BUILT_IN_REPLACEMENTS) {
+        for (const rule of exports.BUILT_IN_REPLACEMENTS) {
             const result = applyReplacementRule(nextLine, lineIndex, rule, 'built_in');
             nextLine = result.line;
             appliedCorrections.push(...result.corrections);

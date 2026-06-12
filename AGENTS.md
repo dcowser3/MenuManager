@@ -96,6 +96,9 @@ Docker is the default local workflow: `./dev-up.sh` uses [docker-compose.dev.yml
 ### SOP rules (the actual menu rules the AI checks against)
 → [docs/references/sop-rules.md](docs/references/sop-rules.md)
 
+### Code rules manifest (every review rule applied in code, all layers)
+→ [docs/references/code-rules-manifest.md](docs/references/code-rules-manifest.md) — GENERATED; regenerate with `npm run rules:manifest` after changing deterministic rules, guards, prompt sections, or critical types.
+
 ### Meeting prep
 → [docs/meeting-prep-2026-02.md](docs/meeting-prep-2026-02.md)
 
