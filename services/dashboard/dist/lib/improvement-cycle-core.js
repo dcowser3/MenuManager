@@ -11,6 +11,7 @@ exports.summarizeEvalReport = summarizeEvalReport;
 exports.buildProposalEvalSummary = buildProposalEvalSummary;
 exports.evalStatusFromSummary = evalStatusFromSummary;
 exports.mapProposedRuleToCorrectionRulePayload = mapProposedRuleToCorrectionRulePayload;
+exports.buildCodeRecommendationIssue = buildCodeRecommendationIssue;
 function shouldRunCycle(input) {
     if (input.pendingProposalExists) {
         return { run: false, reason: 'a pending proposal is already awaiting review' };
@@ -175,6 +176,31 @@ function mapProposedRuleToCorrectionRulePayload(rule, proposalId, index, reviewe
         status: 'accepted',
     };
 }
+// Builds the GitHub issue filed when a reviewer approves a proposal that
+// carries code recommendations. The body is self-contained so the issue can be
+// handed directly to an engineer or a coding agent.
+function buildCodeRecommendationIssue(recommendation, proposal, dashboardUrl) {
+    const baseUrl = `${dashboardUrl || ''}`.replace(/\/+$/, '');
+    const bodyLines = [
+        recommendation.description,
+        '',
+        '---',
+        '',
+        `- Proposed by the automated improvement cycle (proposal \`${proposal.cycle_id || proposal.id}\`), approved by a reviewer on the prompt-proposal page${baseUrl ? ` (${baseUrl}/learning/prompt-proposal)` : ''}.`,
+    ];
+    if (recommendation.target_file_hint) {
+        bodyLines.push(`- Likely implementation file: \`${recommendation.target_file_hint}\``);
+    }
+    if (recommendation.manifest_rule_ids.length) {
+        bodyLines.push(`- Related code-rules-manifest entries: ${recommendation.manifest_rule_ids.map((id) => `\`${id}\``).join(', ')} (see docs/references/code-rules-manifest.md)`);
+    }
+    bodyLines.push('', '### Implementation checklist', '', '- [ ] Implement the rule/guard described above', '- [ ] Add jest coverage for the new behavior', '- [ ] Add a manifest entry in `services/dashboard/lib/review-rules-manifest.ts` and run `npm run rules:manifest`', '- [ ] Run `npm run review:eval -- --label <change>` and compare against the latest baseline');
+    return {
+        title: `[improvement-cycle] ${recommendation.title}`.slice(0, 250),
+        body: bodyLines.join('\n'),
+        labels: ['improvement-cycle'],
+    };
+}
 exports.IMPROVEMENT_SYSTEM_PROMPT = `You are the review-process engineer for an AI menu editor at Richard Sandoval Hospitality (RSH).
 
 The review process has TWO halves:
@@ -196,6 +222,11 @@ Prompt rewrite rules:
 - Do NOT duplicate rules the deterministic code layer already enforces (see manifest).
 - For location-specific rules, add them in a clearly labeled subsection.
 - Return the COMPLETE rewritten prompt, not a diff. If no prompt change is warranted, return the current prompt unchanged.
+
+Handling contradictions (policy changes):
+- When a new correction or manual reviewer rule contradicts older corrections, existing accepted rules, or current prompt text, the NEWEST human intent wins. Update or remove the conflicting older guidance rather than keeping both.
+- Call the conflict out explicitly in your analysis: name the old rule/behavior, the new rule, and which menus the change will affect going forward.
+- The eval replays HISTORICAL menus, so an intentional policy change can show up as "regressions" on old menus that were approved under the old policy. When you expect this, say so in your analysis ("regressions on menus containing X are the intended policy change, not errors") so the reviewer can read the eval verdict correctly.
 
 Respond with ONLY a JSON object in this exact shape:
 {

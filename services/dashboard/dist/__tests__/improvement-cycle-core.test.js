@@ -106,6 +106,36 @@ describe('eval summary + status', () => {
         expect((0, improvement_cycle_core_1.evalStatusFromSummary)({ ...summary, candidate: null })).toBe('failed');
     });
 });
+describe('buildCodeRecommendationIssue', () => {
+    test('builds a self-contained issue with checklist, manifest pointers, and label', () => {
+        const issue = (0, improvement_cycle_core_1.buildCodeRecommendationIssue)({
+            title: 'Add soft-boiled egg raw-marker coverage',
+            description: 'Extend shouldAddRawAsterisk to treat soft-boiled eggs like poached eggs.',
+            manifest_rule_ids: ['pre-ai/raw-asterisk-insertion'],
+            target_file_hint: 'services/dashboard/lib/pre-ai-deterministic-rules.ts',
+        }, { id: 'prop-9', cycle_id: '2026-06-12' }, 'https://menus.example.com/');
+        expect(issue.title).toBe('[improvement-cycle] Add soft-boiled egg raw-marker coverage');
+        expect(issue.labels).toEqual(['improvement-cycle']);
+        expect(issue.body).toContain('soft-boiled eggs like poached eggs');
+        expect(issue.body).toContain('`2026-06-12`');
+        expect(issue.body).toContain('https://menus.example.com/learning/prompt-proposal');
+        expect(issue.body).toContain('pre-ai/raw-asterisk-insertion');
+        expect(issue.body).toContain('services/dashboard/lib/pre-ai-deterministic-rules.ts');
+        expect(issue.body).toContain('npm run rules:manifest');
+        expect(issue.body).toContain('npm run review:eval');
+    });
+    test('omits optional pointers when absent and truncates very long titles', () => {
+        const issue = (0, improvement_cycle_core_1.buildCodeRecommendationIssue)({
+            title: 'T'.repeat(300),
+            description: 'Desc.',
+            manifest_rule_ids: [],
+            target_file_hint: null,
+        }, { id: 'prop-1' }, '');
+        expect(issue.title.length).toBeLessThanOrEqual(250);
+        expect(issue.body).not.toContain('Likely implementation file');
+        expect(issue.body).not.toContain('Related code-rules-manifest entries');
+    });
+});
 describe('mapProposedRuleToCorrectionRulePayload', () => {
     test('maps a global rule with accepted status and system source', () => {
         const payload = (0, improvement_cycle_core_1.mapProposedRuleToCorrectionRulePayload)({

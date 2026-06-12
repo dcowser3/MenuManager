@@ -92,6 +92,15 @@ Drift prevention (`services/dashboard/__tests__/review-rules-manifest.test.ts`):
 
 **Dashboard** (`/learning/prompt-proposal`): the proposal page now shows the eval verdict (baseline vs candidate composites, improved/same/regressed, per-case regression table), the proposed replacement rules as a checked-by-default checkbox list, and the code recommendations. On approve, the review route writes the prompt (as before), records `accepted_rules`, and inserts each checked rule into `correction_rules` (`status: accepted`, `source: system`, `submission_id: proposal-<id>`) so the pre-AI deterministic pass applies them immediately. `npm run prompt:rewrite` remains as a manual fallback until the cycle has run in production.
 
+**Code recommendations → GitHub issues:** approving a proposal also files each code recommendation as a GitHub issue (`[improvement-cycle] <title>`, label `improvement-cycle`) with the description, manifest pointers, likely implementation file, and an implementation checklist (jest coverage, manifest entry, eval comparison). Requires `GITHUB_TOKEN` (+ optional `GITHUB_REPO`); skipped with a log line when unconfigured, and a failed GitHub call never blocks the approval. Issues rather than auto-PRs by design: recommendations are specs, not implemented code — an engineer (or a coding agent pointed at the issue) implements them with tests. Wiring an agent to auto-draft PRs from these issues is a possible future step.
+
+### Handling intentional policy changes (contradicting past corrections)
+
+Reviewers can add manual rules on the learning dashboard that *contradict* past approved menus (e.g. deciding a word should now be handled differently). Two mechanisms keep the loop honest:
+
+1. **Eval ground-truth normalization (default):** the eval harness re-bases each historical human final onto the policy under evaluation — the run's deterministic rules (built-ins + accepted + candidate rules) are applied to the ground truth before scoring. A deliberate replacement-rule change therefore stops counting as a "regression" on menus approved under the old policy, while genuine regressions still surface. `--raw-ground-truth` disables this for forensic comparisons against historical finals verbatim. Since most manual learning-page rules are exact replacements, this covers the common case mechanically.
+2. **LLM conflict handling (prompt-lane changes):** the improvement-cycle system prompt instructs the model that the newest human intent wins, to update/remove conflicting older guidance rather than keeping both, and to state explicitly in its analysis which eval "regressions" are the intended policy change — so the reviewer can read a `regressed` verdict correctly. The human reviewing the proposal stays the referee.
+
 **Required manual step:** apply `supabase/migrations/20260612_extend_prompt_proposals.sql` in the Supabase SQL editor (with the two earlier migrations) before the first production cycle — the proposal insert uses the new columns.
 
 ## Phase E — Scheduling on Lightsail (Implemented)

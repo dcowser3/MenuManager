@@ -31,6 +31,12 @@
  *   --rules live|snapshot:<f>|candidate:<f>   Accepted correction-rules source (default live)
  *   --no-deterministic         Disable the deterministic pre/post passes
  *   --no-ai                    Skip the AI call (echo feedback); deterministic-only eval
+ *   --raw-ground-truth         Score against historical finals verbatim instead of
+ *                              normalizing them through the run's deterministic rules.
+ *                              By default ground truth is re-based onto CURRENT policy
+ *                              so intentional rule changes (e.g. a new replacement the
+ *                              marketing team added) do not read as regressions on
+ *                              menus approved under the old policy.
  *   --limit <n>                Max cases
  *   --case <id>                Run only the case with this id (repeatable)
  *   --baseline <report.json>   Compare against a previous run's report
@@ -84,6 +90,7 @@ function parseArgs(argv) {
         rules: 'live',
         deterministic: true,
         ai: true,
+        normalizeGroundTruth: true,
         limit: Number.POSITIVE_INFINITY,
         cases: [],
         baseline: '',
@@ -103,6 +110,7 @@ function parseArgs(argv) {
         else if (arg === '--rules') args.rules = argv[++i] || args.rules;
         else if (arg === '--no-deterministic') args.deterministic = false;
         else if (arg === '--no-ai') args.ai = false;
+        else if (arg === '--raw-ground-truth') args.normalizeGroundTruth = false;
         else if (arg === '--limit') args.limit = Number.parseInt(argv[++i] || '', 10);
         else if (arg === '--case') args.cases.push(argv[++i] || '');
         else if (arg === '--baseline') args.baseline = path.resolve(argv[++i] || '');
@@ -485,6 +493,22 @@ async function runEval(args, dataset, rulesInfo, libs) {
     const { runFullReviewPipeline } = libs.reviewPipeline;
     const { normalizeComparable, boundedLevenshteinSimilarity } = libs.textSimilarity;
     const { scoreCorrections, compositeCaseScore } = libs.evalScoring;
+    const { runPreAiDeterministicChecks } = libs.preAiRules;
+
+    // Re-base the historical human final onto the policy under evaluation: the
+    // run's deterministic rules (built-ins + accepted + any candidate rules)
+    // are applied to the ground truth so an intentional policy change is not
+    // scored as a regression on menus approved under the old policy.
+    const resolveScoringTruth = (evalCase) => {
+        if (!args.normalizeGroundTruth) return evalCase.ground_truth;
+        return runPreAiDeterministicChecks(evalCase.ground_truth, {
+            enabled: true,
+            property: evalCase.context.property,
+            templateType: evalCase.context.templateType,
+            allergenLegend: evalCase.context.allergens,
+            acceptedCorrectionRules: rulesInfo.rules,
+        }).menuText;
+    };
 
     const basePrompt = fs.readFileSync(args.prompt, 'utf8');
     const usageTotals = { apiCalls: 0, cacheHits: 0, promptTokens: 0, completionTokens: 0 };
@@ -515,10 +539,11 @@ async function runEval(args, dataset, rulesInfo, libs) {
             }, aiCaller);
 
             const candidate = result.finalCorrectedMenu;
-            const truthStrict = normalizeComparable(evalCase.ground_truth);
+            const scoringTruth = resolveScoringTruth(evalCase);
+            const truthStrict = normalizeComparable(scoringTruth);
             const candidateStrict = normalizeComparable(candidate);
             const inputStrict = normalizeComparable(evalCase.raw_input);
-            const truthStyle = normalizeComparable(evalCase.ground_truth, { normalizeRawAsteriskStyle: true });
+            const truthStyle = normalizeComparable(scoringTruth, { normalizeRawAsteriskStyle: true });
             const candidateStyle = normalizeComparable(candidate, { normalizeRawAsteriskStyle: true });
             const inputStyle = normalizeComparable(evalCase.raw_input, { normalizeRawAsteriskStyle: true });
 
@@ -526,7 +551,7 @@ async function runEval(args, dataset, rulesInfo, libs) {
             const candidateSimilarity = boundedLevenshteinSimilarity(candidateStrict, truthStrict);
             const inputStyleSimilarity = boundedLevenshteinSimilarity(inputStyle, truthStyle);
             const candidateStyleSimilarity = boundedLevenshteinSimilarity(candidateStyle, truthStyle);
-            const corrections = scoreCorrections(evalCase.raw_input, candidate, evalCase.ground_truth);
+            const corrections = scoreCorrections(evalCase.raw_input, candidate, scoringTruth);
             const composite = compositeCaseScore(candidateStyleSimilarity, corrections);
 
             caseReports.push({
@@ -706,6 +731,11 @@ function buildMarkdown(report) {
     lines.push('- Composite = style-normalized similarity when no word-level corrections exist; otherwise 0.6 * similarity + 0.4 * correction F1.');
     lines.push('- Word-level scoring uses the differ learning-signal extractor; dish-name identity changes and whole-word swaps surface in similarity/residual diffs instead of TP/FP/FN.');
     lines.push('- Eval AI calls use temperature 0 + a fixed seed for repeatability; production uses the API default temperature.');
+    if (report.config.normalizeGroundTruth) {
+        lines.push('- Ground truth was normalized through this run\'s deterministic rules (current policy), so intentional rule changes do not count as regressions on menus approved under older policy. Use --raw-ground-truth to compare against historical finals verbatim.');
+    } else {
+        lines.push('- Ground truth was used verbatim (--raw-ground-truth): scores reflect historical finals exactly as approved, including superseded policy.');
+    }
     lines.push('');
     return lines.join('\n');
 }
@@ -731,6 +761,7 @@ async function main() {
         reviewPipeline: requireLib('dashboard', 'lib/review-pipeline'),
         textSimilarity: requireLib('dashboard', 'lib/text-similarity'),
         evalScoring: requireLib('differ', 'lib/eval-scoring'),
+        preAiRules: requireLib('dashboard', 'lib/pre-ai-deterministic-rules'),
     };
     const rulesInfo = await resolveCorrectionRules(args.rules);
 
@@ -761,6 +792,7 @@ async function main() {
             rules: args.rules,
             rulesDescription: rulesInfo.description,
             rulesCount: rulesInfo.rules.length,
+            normalizeGroundTruth: args.normalizeGroundTruth,
             dataset: args.dataset,
         },
         summary: aggregate(caseReports),

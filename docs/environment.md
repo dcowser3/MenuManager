@@ -69,6 +69,8 @@ All variables are configured in `.env` at the project root. See `.env.example` f
 | `IMPROVE_EVAL_LIMIT` | Cap the number of eval cases per improvement-cycle run (default: all) |
 | `REVIEW_EVAL_MODEL` | OpenAI model for the review eval harness (default: `AI_REVIEW_MODEL` or `gpt-4o-mini`) |
 | `DASHBOARD_PUBLIC_URL` | Base URL used in improvement-cycle notification email links (default: `http://localhost:3005`) |
+| `GITHUB_TOKEN` | GitHub personal access token with `issues:write` on `GITHUB_REPO`. When set, approving a proposal files each code recommendation as a GitHub issue; when unset, issue filing is skipped with a log line |
+| `GITHUB_REPO` | Repository for improvement-cycle issues (default: `dcowser3/MenuManager`) |
 
 ## ClickUp Integration
 

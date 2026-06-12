@@ -1654,6 +1654,45 @@ app.get('/learning/prompt-proposal', async (_req, res) => {
         res.status(500).render('error', { message: 'Failed to load prompt proposal page' });
     }
 });
+// Files approved code recommendations as GitHub issues. Best-effort: requires
+// GITHUB_TOKEN (a PAT with issues:write on GITHUB_REPO); skips with a log when
+// unconfigured so approval never blocks on GitHub availability.
+async function createCodeRecommendationIssues(recommendations, proposal) {
+    if (!recommendations.length)
+        return [];
+    const token = `${process.env.GITHUB_TOKEN || ''}`.trim();
+    const repo = `${process.env.GITHUB_REPO || 'dcowser3/MenuManager'}`.trim();
+    if (!token) {
+        console.log(`GITHUB_TOKEN not configured; skipped filing ${recommendations.length} code recommendation issue(s).`);
+        return recommendations.map((rec) => ({ title: rec.title, ok: false, error: 'GITHUB_TOKEN not configured' }));
+    }
+    const results = [];
+    for (const recommendation of recommendations) {
+        try {
+            const issue = (0, improvement_cycle_core_1.buildCodeRecommendationIssue)(recommendation, proposal, process.env.DASHBOARD_PUBLIC_URL || '');
+            const response = await fetch(`https://api.github.com/repos/${repo}/issues`, {
+                method: 'POST',
+                headers: {
+                    Authorization: `Bearer ${token}`,
+                    Accept: 'application/vnd.github+json',
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(issue),
+            });
+            if (!response.ok) {
+                throw new Error(`GitHub ${response.status}: ${(await response.text()).slice(0, 200)}`);
+            }
+            const created = await response.json();
+            console.log(`Filed code recommendation issue: ${created.html_url}`);
+            results.push({ title: recommendation.title, ok: true, url: created.html_url });
+        }
+        catch (error) {
+            console.error(`Failed to file code recommendation issue "${recommendation.title}":`, error.message);
+            results.push({ title: recommendation.title, ok: false, error: error.message });
+        }
+    }
+    return results;
+}
 /**
  * Approve or reject a prompt proposal
  */
@@ -1712,11 +1751,21 @@ app.post('/api/learning/prompt-proposal/:id/review', async (req, res) => {
                 ruleResults.push({ index, ok: false, error: ruleError.message });
             }
         }
+        // File each code recommendation as a GitHub issue so it becomes a
+        // trackable engineering task (requires GITHUB_TOKEN; skipped otherwise).
+        const codeRecommendations = approved && Array.isArray(proposalRecord?.code_recommendations)
+            ? proposalRecord.code_recommendations
+            : [];
+        const issueResults = await createCodeRecommendationIssues(codeRecommendations, {
+            id,
+            cycle_id: proposalRecord?.cycle_id,
+        });
         res.json({
             success: true,
             proposal: response.data,
             acceptedRuleCount: ruleResults.filter((r) => r.ok).length,
             failedRules: ruleResults.filter((r) => !r.ok),
+            issues: issueResults,
         });
     }
     catch (error) {
