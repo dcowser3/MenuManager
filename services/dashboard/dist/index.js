@@ -66,24 +66,20 @@ const form_attempt_logging_1 = require("./lib/form-attempt-logging");
 const error_report_1 = require("./lib/error-report");
 const alert_mail_1 = require("./lib/alert-mail");
 const property_catalog_1 = require("./lib/property-catalog");
-const apply_high_confidence_suggestions_1 = require("./lib/apply-high-confidence-suggestions");
-const allergen_suggestion_guard_1 = require("./lib/allergen-suggestion-guard");
-const menu_title_guard_1 = require("./lib/menu-title-guard");
 const learning_correction_rules_1 = require("./lib/learning-correction-rules");
 const learning_submissions_1 = require("./lib/learning-submissions");
 const embedded_set_menu_guard_1 = require("./lib/embedded-set-menu-guard");
-const corrected_menu_structure_guard_1 = require("./lib/corrected-menu-structure-guard");
-const price_integrity_guard_1 = require("./lib/price-integrity-guard");
 const pre_ai_deterministic_rules_1 = require("./lib/pre-ai-deterministic-rules");
 const basic_ai_check_audit_1 = require("./lib/basic-ai-check-audit");
+const menu_footer_1 = require("./lib/menu-footer");
+const qa_prompt_builder_1 = require("./lib/qa-prompt-builder");
+const review_pipeline_1 = require("./lib/review-pipeline");
 var upload_security_2 = require("./lib/upload-security");
 Object.defineProperty(exports, "sanitizePlainTextInput", { enumerable: true, get: function () { return upload_security_2.sanitizePlainTextInput; } });
 Object.defineProperty(exports, "sanitizeRichTextHtml", { enumerable: true, get: function () { return upload_security_2.sanitizeRichTextHtml; } });
 Object.defineProperty(exports, "sanitizeStoredFileName", { enumerable: true, get: function () { return upload_security_2.sanitizeStoredFileName; } });
 const execAsync = (0, util_1.promisify)(child_process_1.exec);
 const DEFAULT_ALLERGEN_KEY = 'G contains gluten | V vegetarian | D contains dairy | S contain shellfish | N contain nuts | VG vegan';
-const RAW_NOTICE_TEXT = '*consuming raw or undercooked meats, poultry, seafood, shellfish, or eggs may increase your risk of foodborne illness.';
-const RAW_NOTICE_PATTERN = /\*?\s*consuming raw or undercooked meats,\s*poultry,\s*seafood(?:,\s*shellfish)?,\s*or eggs may increase your risk of foodborne illness\.?/i;
 const DB_SERVICE_URL = process.env.DB_SERVICE_URL || 'http://localhost:3004';
 const AI_REVIEW_URL = process.env.AI_REVIEW_URL || 'http://localhost:3002';
 const DIFFER_SERVICE_URL = process.env.DIFFER_SERVICE_URL || 'http://localhost:3006';
@@ -348,126 +344,8 @@ const EMPTY_EXTRACTED_PROJECT = {
     dateNeeded: '',
     size: '',
 };
-function normalizeWhitespace(value) {
-    return (value || '').replace(/\s+/g, ' ').trim();
-}
-function isLikelyAllergenLegendLine(line) {
-    const normalized = normalizeWhitespace(line);
-    if (!normalized || !normalized.includes('|'))
-        return false;
-    const parts = normalized.split('|').map((part) => part.trim()).filter(Boolean);
-    if (parts.length < 3)
-        return false;
-    const codeParts = parts.filter((part) => /^\*?[A-Z]{1,3}\s+.+/.test(part));
-    return codeParts.length >= Math.max(2, Math.floor(parts.length * 0.6));
-}
-function isLikelyRawNoticeLine(line) {
-    const normalized = normalizeWhitespace(line).toLowerCase();
-    if (!normalized)
-        return false;
-    return normalized.includes('raw or undercooked') && normalized.includes('foodborne illness');
-}
-function parseParenthesizedAllergenLegend(line) {
-    const normalized = normalizeWhitespace(line);
-    if (!normalized || !normalized.includes('(') || !normalized.includes(')'))
-        return '';
-    const footerBody = normalized.split(/\b(?:ALL\s+PRICES|WE\s+WELCOME|CONSUMPTION\s+OF\s+RAW|CONSUMING\s+RAW|FOODBORNE\s+ILLNESS)\b/i)[0];
-    const pattern = /\(\s*([A-Za-z]{1,3})\s*\)\s*([A-Za-z][A-Za-z\s/&-]*?)(?=\s*\(\s*[A-Za-z]{1,3}\s*\)|$)/g;
-    const pairs = [];
-    let match;
-    while ((match = pattern.exec(footerBody)) !== null) {
-        const code = match[1].toUpperCase();
-        const label = normalizeWhitespace(match[2]).toLowerCase();
-        if (label) {
-            pairs.push({ code, label });
-        }
-    }
-    if (pairs.length < 4)
-        return '';
-    const keywordHits = pairs.filter(({ label }) => /(allergen|gluten|dairy|fish|nuts?|egg|vegan|vegetarian|crustacean|soy|sesame|celery|mustard|shellfish|sulphites?|lupin)/i.test(label)).length;
-    if (keywordHits < 2)
-        return '';
-    return pairs.map(({ code, label }) => `${code} ${label}`).join(' | ');
-}
-function isLikelyAllergenLegendHeader(line) {
-    return /^allergen\s+key(?:\s+\(optional\))?$/i.test(normalizeWhitespace(line));
-}
-function extractAllergenLegendLine(line) {
-    if (isLikelyAllergenLegendLine(line)) {
-        return normalizeAllergenLegend(line);
-    }
-    return parseParenthesizedAllergenLegend(line);
-}
-function normalizeAllergenLegend(text) {
-    const normalized = (text || '').trim();
-    if (!normalized)
-        return '';
-    const lines = normalized
-        .split('\n')
-        .map((line) => normalizeWhitespace(line))
-        .filter(Boolean);
-    if (lines.length === 1 && lines[0].includes('|')) {
-        return lines[0]
-            .split('|')
-            .map((part) => normalizeWhitespace(part))
-            .filter(Boolean)
-            .join(' | ');
-    }
-    return lines.join(' | ');
-}
-function normalizeMenuFooter(text, fallbackAllergens = '') {
-    const lines = (text || '').split('\n').map((line) => line.trim());
-    const menuLines = [];
-    let allergenLines = [];
-    const preservedFooterLines = [];
-    let hadRawNotice = false;
-    let inFooter = false;
-    for (const line of lines) {
-        const allergenLine = extractAllergenLegendLine(line);
-        const isHeader = isLikelyAllergenLegendHeader(line);
-        const isRawNotice = isLikelyRawNoticeLine(line);
-        const isPriceFooter = /^all\s+prices\b/i.test(normalizeWhitespace(line));
-        const isWelcomeFooter = /^we\s+welcome\s+enquiries\b/i.test(normalizeWhitespace(line));
-        if (allergenLine || isHeader) {
-            inFooter = true;
-            if (allergenLine)
-                allergenLines.push(allergenLine);
-            continue;
-        }
-        if (isRawNotice)
-            hadRawNotice = true;
-        if (inFooter || isPriceFooter || isWelcomeFooter || isRawNotice) {
-            if (line)
-                preservedFooterLines.push(line);
-            continue;
-        }
-        menuLines.push(line);
-    }
-    while (menuLines.length && menuLines[0] === '')
-        menuLines.shift();
-    while (menuLines.length && menuLines[menuLines.length - 1] === '')
-        menuLines.pop();
-    const collapsed = [];
-    let prevEmpty = false;
-    for (const line of menuLines) {
-        if (!line) {
-            if (!prevEmpty)
-                collapsed.push('');
-            prevEmpty = true;
-        }
-        else {
-            collapsed.push(line);
-            prevEmpty = false;
-        }
-    }
-    const extractedAllergenLine = allergenLines.join(' | ');
-    return {
-        body: collapsed.join('\n'),
-        normalizedAllergenLine: normalizeAllergenLegend(extractedAllergenLine || fallbackAllergens),
-        hadRawNotice,
-        preservedFooterText: preservedFooterLines.join('\n'),
-    };
-}
+// Menu footer helpers (normalizeMenuFooter, allergen legend parsing, raw-notice
+// detection) moved to ./lib/menu-footer so the offline review pipeline shares them.
 async function fetchAcceptedCorrectionRulesForPreAi() {
     if (!BASIC_AI_PRECHECK_ENABLED || !BASIC_AI_LEARNED_PRECHECK_ENABLED) {
         return [];
@@ -498,15 +376,15 @@ function stripManagedFooterFromHtml(html) {
     let stripped = '';
     let lastIndex = 0;
     while ((match = regex.exec(html)) !== null) {
-        const text = normalizeWhitespace(decodeHtmlText(match[0]));
+        const text = (0, menu_footer_1.normalizeWhitespace)(decodeHtmlText(match[0]));
         const isPriceFooter = /^all\s+prices\b/i.test(text);
         const isWelcomeFooter = /^we\s+welcome\s+enquiries\b/i.test(text);
-        if (isLikelyAllergenLegendLine(text) ||
-            parseParenthesizedAllergenLegend(text) ||
-            isLikelyAllergenLegendHeader(text) ||
+        if ((0, menu_footer_1.isLikelyAllergenLegendLine)(text) ||
+            (0, menu_footer_1.parseParenthesizedAllergenLegend)(text) ||
+            (0, menu_footer_1.isLikelyAllergenLegendHeader)(text) ||
             isPriceFooter ||
             isWelcomeFooter ||
-            isLikelyRawNoticeLine(text)) {
+            (0, menu_footer_1.isLikelyRawNoticeLine)(text)) {
             stripped += html.substring(lastIndex, match.index);
             lastIndex = regex.lastIndex;
         }
@@ -707,7 +585,7 @@ async function extractBaselineFromDocx(filePath) {
     const projectDetails = detailsData.project_details || {};
     const rawCleanedText = cleanData.cleaned_menu_content || cleanData.menu_content || '';
     const rawCleanedHtml = cleanData.cleaned_menu_html || '';
-    const footer = normalizeMenuFooter(rawCleanedText, detailsData.allergen_key || '');
+    const footer = (0, menu_footer_1.normalizeMenuFooter)(rawCleanedText, detailsData.allergen_key || '');
     const approvedMenuContent = [footer.body, footer.preservedFooterText].filter(Boolean).join('\n');
     return {
         approvedMenuContent,
@@ -1207,7 +1085,7 @@ const submissionWorkflowHandlers = (0, submission_workflow_1.createSubmissionWor
     getSubmissionDocumentDir,
     getPropertyCatalogFromDb,
     resolveCityCountryFromCatalog,
-    normalizeMenuFooter,
+    normalizeMenuFooter: menu_footer_1.normalizeMenuFooter,
     stripManagedFooterFromHtml,
     detectRawUndercookedContent,
     generateDocxFromForm,
@@ -1227,10 +1105,10 @@ const approvalWorkflowHandlers = (0, approval_workflow_1.createApprovalWorkflowH
     getSubmissionDocumentDir,
     extractDishesAfterApproval,
     coalesceString,
-    normalizeMenuFooter,
-    stripManagedFooterText,
+    normalizeMenuFooter: menu_footer_1.normalizeMenuFooter,
+    stripManagedFooterText: menu_footer_1.stripManagedFooterText,
     stripManagedFooterFromHtml,
-    normalizeAllergenLegend,
+    normalizeAllergenLegend: menu_footer_1.normalizeAllergenLegend,
     detectRawUndercookedContent,
     textToParagraphHtml: approval_baseline_1.textToParagraphHtml,
     generateDocxFromForm,
@@ -2229,8 +2107,8 @@ async function handleBasicCheck(req, res) {
             }
             textForReview = changedOnlyText.text;
         }
-        const reviewFooterMetadata = normalizeMenuFooter(textForReview, allergens || '');
-        const sanitizedMenuContent = normalizeMenuFooter(menuContent, allergens || '');
+        const reviewFooterMetadata = (0, menu_footer_1.normalizeMenuFooter)(textForReview, allergens || '');
+        const sanitizedMenuContent = (0, menu_footer_1.normalizeMenuFooter)(menuContent, allergens || '');
         const effectiveReviewAllergens = allergens || reviewFooterMetadata.normalizedAllergenLine;
         const acceptedCorrectionRules = await fetchAcceptedCorrectionRulesForPreAi();
         const preAiDeterministic = (0, pre_ai_deterministic_rules_1.runPreAiDeterministicChecks)(reviewFooterMetadata.body, {
@@ -2255,91 +2133,16 @@ async function handleBasicCheck(req, res) {
         console.log('===========================');
         // Load QA prompt
         const qaPromptPath = path.join(getRepoRoot(), 'sop-processor', 'qa_prompt.txt');
-        let qaPrompt = await fs_1.promises.readFile(qaPromptPath, 'utf-8');
-        // If prix fixe menu type, inject special rules
-        if (menuType === 'prix_fixe') {
-            const prixFixeSection = `
-**PRIX FIXE / PRE-FIX MENU RULES:**
-This is a PRIX FIXE (pre-fix) menu. Apply these special rules:
-
-1. **PRICING STRUCTURE**: Prix fixe menus should have:
-   - A single prix fixe price at the TOP of the menu (format: 00.00PP, 00.00pp, or just a whole number)
-   - Treat PP/pp as "per person" and count prices like "50.00pp" as valid top-level prices
-   - Optional wine/alcohol pairing price listed alongside (e.g., "185 | 85 wine pairing")
-   - Individual dishes do NOT need their own prices - this is CORRECT for prix fixe menus
-   - Do NOT flag missing prices on individual courses/dishes
-
-2. **COURSE NUMBERING**: Prix fixe menus MUST have numbered courses:
-   - Each course should be preceded by its course number (1, 2, 3, etc.)
-   - Numbers can be on their own line above the course name
-   - Example format:
-     1
-     First Course
-     dish name, description
-
-     2
-     Second Course
-     dish name, description
-   - FLAG if course numbers are missing
-
-3. **COURSE STRUCTURE**: Look for proper course progression:
-   - Courses should flow logically (appetizer → main → dessert, or similar)
-   - Each course section should have clear separation
-
-4. **WHAT TO CHECK**:
-   - Prix fixe price present at top (FLAG if missing)
-   - Course numbers present (FLAG if missing)
-   - All other standard rules still apply (spelling, accents, allergens, etc.)
-
-5. **WHAT NOT TO FLAG**:
-   - Missing prices on individual dishes (this is normal for prix fixe)
-   - Individual items without their own pricing
-   - Do NOT set severity to "critical" for missing individual dish prices on prix fixe menus
-`;
-            // Insert at the beginning of the rules section
-            qaPrompt = qaPrompt.replace('## RSH MENU GUIDELINES - COMPREHENSIVE RULES', `## RSH MENU GUIDELINES - COMPREHENSIVE RULES\n${prixFixeSection}`);
-            console.log('Injected prix fixe rules into prompt');
-            diagnosticsPromptSections.push('prix_fixe');
-        }
-        // If custom or extracted allergens are provided, inject them into the prompt
-        if (effectiveReviewAllergens && effectiveReviewAllergens.trim()) {
-            const allergenSection = `
-**CUSTOM ALLERGEN KEY FOR THIS MENU:**
-Use the following allergen codes for reviewing this menu:
-${effectiveReviewAllergens}
-
-Note: Use ONLY these allergen codes when checking allergen compliance. Do not use any other allergen codes not defined above.
-`;
-            // Insert after "### 7. ALLERGENS" when present; append for test/minimal prompts.
-            qaPrompt = qaPrompt.includes('### 7. ALLERGENS')
-                ? qaPrompt.replace('### 7. ALLERGENS', `### 7. ALLERGENS\n${allergenSection}`)
-                : `${qaPrompt}\n${allergenSection}`;
-            console.log('Injected custom allergens into prompt');
-            diagnosticsPromptSections.push('allergens');
-        }
-        // Call AI Review service's QA endpoint
-        let finalPrompt = qaPrompt;
-        finalPrompt = `${finalPrompt}\n\nIMPORTANT CORRECTED MENU STRUCTURE RULES:\n- The CORRECTED MENU section must contain every submitted menu line in the same order.\n- Do not summarize, shorten, condense, omit, merge, reorder, or rewrite the menu structure.\n- Do not add section headings or line breaks that were not in the submitted menu.\n- Apply only high-confidence corrections inline and leave all other text unchanged.`;
-        finalPrompt = `${finalPrompt}\n- Never delete submitted dishes, beverages, options, headings, or standalone item lines. If a line seems wrong, duplicated, invalid, or not orderable, leave it in CORRECTED MENU and report the issue in SUGGESTIONS.`;
-        diagnosticsPromptSections.push('corrected_menu_structure_rules');
-        if (BASIC_AI_PRECHECK_ENABLED) {
-            finalPrompt = `${finalPrompt}\n\nIMPORTANT PRE-AI DETERMINISTIC CHECKS:\n- Allowlisted spelling, diacritic, allergen-code formatting, raw-marker placement, and accepted correction-rule replacements have already been applied before this AI review.\n- Do not re-report those already-applied deterministic edits as remaining suggestions.\n- Focus on remaining semantic, contextual, uncertain, or reviewer-needed issues.`;
-            diagnosticsPromptSections.push('pre_ai_deterministic_checks');
-        }
-        if (changedOnlyMode) {
-            finalPrompt = `${finalPrompt}\n\nIMPORTANT SCOPE FOR THIS REVIEW:\nYou are reviewing ONLY changed excerpts from a menu revision.\nDo NOT flag unchanged baseline content.\nReturn issues only for the changed excerpts provided.\nThe CORRECTED MENU section MUST contain exactly the same lines you received, in the same order, with high-confidence corrections applied to each line. Do not add, remove, merge, split, or reorder lines.`;
-            diagnosticsPromptSections.push('changed_only_scope');
-        }
-        finalPrompt = `${finalPrompt}\n\nIMPORTANT FOOTER RULES:\n- Do NOT review or suggest changes for the allergen legend/footer boilerplate.\n- Do NOT review or suggest changes for the standard foodborne illness warning/footer boilerplate.\n- The canonical foodborne illness warning is: ${RAW_NOTICE_TEXT}\n- Those footer lines are system-managed outside this review scope.`;
-        diagnosticsPromptSections.push('footer_rules');
-        finalPrompt = `${finalPrompt}\n\nIMPORTANT ADD-ON PRICE RULES:\n- For add-on or enhancement rows with options separated by pipes or slashes, treat a number immediately after an option as that option's price.\n- Do NOT flag an add-on option as missing a price when the option appears on the same row with a numeric price, such as \"add chorizo 5 | mushrooms V 4\".`;
-        diagnosticsPromptSections.push('add_on_price_rules');
-        finalPrompt = `${finalPrompt}\n\nIMPORTANT STANDARD ITEM PRICE RULES:\n- A trailing whole number at the end of a standard menu item is a valid price even when there are no allergen codes before it.\n- Do NOT flag a line like \"Short Rib al Carbón, housemade tomatillo sauce, pickled red onion 54\" as Missing Price.`;
-        diagnosticsPromptSections.push('standard_item_price_rules');
-        if (embeddedSetMenuAnalysis.sections.length > 0) {
-            finalPrompt = `${finalPrompt}\n\n${(0, embedded_set_menu_guard_1.buildEmbeddedSetMenuPromptSection)(embeddedSetMenuAnalysis)}`;
-            diagnosticsPromptSections.push('embedded_set_menu_rules');
-        }
+        const qaPrompt = await fs_1.promises.readFile(qaPromptPath, 'utf-8');
+        const promptInfo = (0, qa_prompt_builder_1.buildFinalPrompt)(qaPrompt, {
+            menuType,
+            effectiveAllergens: effectiveReviewAllergens,
+            changedOnlyMode,
+            precheckEnabled: BASIC_AI_PRECHECK_ENABLED,
+            embeddedSetMenuAnalysis,
+        });
+        const finalPrompt = promptInfo.prompt;
+        diagnosticsPromptSections.push(...promptInfo.sections);
         const buildAiRequestAudit = () => ({
             url: `${AI_REVIEW_URL}/run-qa-check`,
             timeoutMs: BASIC_AI_CHECK_TIMEOUT_MS,
@@ -2637,35 +2440,22 @@ Note: Use ONLY these allergen codes when checking allergen compliance. Do not us
             console.log('Raw feedback length:', `${feedback || ''}`.length);
         }
         console.log('=== END RAW FEEDBACK ===');
-        // Parse the new format: corrected menu + suggestions
-        const parsed = parseAIResponse(feedback, preCheckedReviewBody);
-        const postAiDeterministic = (0, pre_ai_deterministic_rules_1.runPreAiDeterministicChecks)(parsed.correctedMenu, {
-            enabled: BASIC_AI_PRECHECK_ENABLED,
+        // Parse + post-AI pipeline: deterministic cleanup, guard chain, reconciliation,
+        // and prix-fixe critical enforcement (shared with the offline eval harness).
+        const postPipeline = (0, review_pipeline_1.runPostAiPipeline)({
+            feedback,
+            preCheckedReviewBody,
+            menuType,
             property,
             templateType,
-            allergenLegend: effectiveReviewAllergens,
+            effectiveReviewAllergens,
             acceptedCorrectionRules,
+            embeddedSetMenuAnalysis,
+            precheckEnabled: BASIC_AI_PRECHECK_ENABLED,
+            checkId: basicCheckId,
         });
-        const titleGuard = (0, menu_title_guard_1.preserveLeadingMenuTitle)(preCheckedReviewBody, postAiDeterministic.menuText);
-        const structureGuard = (0, corrected_menu_structure_guard_1.assessCorrectedMenuStructure)(preCheckedReviewBody, titleGuard.correctedMenu);
-        const guardedCorrectedMenu = structureGuard.safe ? titleGuard.correctedMenu : preCheckedReviewBody;
-        if (!structureGuard.safe) {
-            console.warn('AI corrected menu rejected by structure guard:', {
-                checkId: basicCheckId,
-                reasons: structureGuard.reasons,
-                metrics: structureGuard.metrics,
-            });
-        }
-        const allergenGuard = (0, allergen_suggestion_guard_1.guardAllergenAlphabetizationSuggestions)(guardedCorrectedMenu, parsed.suggestions);
-        const appliedHc = (0, apply_high_confidence_suggestions_1.applyHighConfidenceSuggestionsToMenu)(allergenGuard.correctedMenu, allergenGuard.suggestions);
-        const setMenuGuard = (0, embedded_set_menu_guard_1.guardEmbeddedSetMenuPrices)(preCheckedReviewBody, appliedHc.menuText, appliedHc.suggestions, embeddedSetMenuAnalysis);
-        const priceIntegrityGuard = (0, price_integrity_guard_1.guardCorrectedMenuPrices)(preCheckedReviewBody, setMenuGuard.correctedMenu, setMenuGuard.suggestions);
-        const correctedAfterHighConfidence = priceIntegrityGuard.correctedMenu;
-        const suggestionsAfterAutoApply = priceIntegrityGuard.suggestions;
-        const correctedMenuSanitized = stripManagedFooterText(correctedAfterHighConfidence);
+        const { parsed, postAiDeterministic, titleGuard, structureGuard, guardedCorrectedMenu, allergenGuard, appliedHc, setMenuGuard, priceIntegrityGuard, correctedAfterHighConfidence, correctedMenuSanitized, reconciliation, reconciledSuggestions, finalSuggestions, hasCriticalErrors, criticalSuggestions, } = postPipeline;
         const originalMenuSanitized = sanitizedMenuContent.body;
-        const reconciliation = reconcileCriticalSuggestionsAgainstCorrectedMenuWithDiagnostics(correctedMenuSanitized, suggestionsAfterAutoApply);
-        const reconciledSuggestions = reconciliation.suggestions;
         console.log('=== PARSED RESPONSE ===');
         console.log('Corrected menu length:', correctedMenuSanitized.length);
         console.log('Suggestions count:', parsed.suggestions.length);
@@ -2679,12 +2469,6 @@ Note: Use ONLY these allergen codes when checking allergen compliance. Do not us
         console.log('Reconciled suggestions count:', reconciledSuggestions.length);
         console.log('Has changes:', correctedMenuSanitized !== originalMenuSanitized);
         console.log('===========================');
-        let finalSuggestions = reconciledSuggestions;
-        if (menuType === 'prix_fixe') {
-            finalSuggestions = enforcePrixFixeCriticalChecks(correctedMenuSanitized, finalSuggestions);
-        }
-        const hasCriticalErrors = finalSuggestions.some(s => s.severity === 'critical');
-        const criticalSuggestions = finalSuggestions.filter(s => s.severity === 'critical');
         let changedOnlyMergedMenu = menuContent;
         if (changedOnlyMode) {
             const mergeResult = mergeChangedLineCorrections(menuContent, baselineMenuContent, correctedAfterHighConfidence);
@@ -3075,63 +2859,7 @@ app.get('/api/form/basic-check/status/:checkId', (req, res) => {
         error: job.error,
     });
 });
-function enforcePrixFixeCriticalChecks(menuContent, suggestions) {
-    const existing = [...(suggestions || [])];
-    const nonEmptyLines = (menuContent || '').split('\n').map((l) => l.trim()).filter(Boolean);
-    const topWindow = nonEmptyLines.slice(0, 5);
-    const topPricePattern = /^\$?\d+(?:[.,]\d+)?(?:\s*\|\s*\$?\d+(?:[.,]\d+)?)?(?:\s*(?:pp|per\s*person|wine\s*pairing))?$/i;
-    const hasTopPrixFixePrice = topWindow.some((line) => topPricePattern.test(line));
-    const headingPattern = /\b(appetizers?|starters?|specialties|mains?|entrees?|desserts?|first course|second course|third course|course)\b/i;
-    const headingIndexes = nonEmptyLines
-        .map((line, idx) => ({ line, idx }))
-        .filter(({ line }) => headingPattern.test(line));
-    const hasCourseHeadings = headingIndexes.length >= 2;
-    let missingCourseNumbers = false;
-    if (hasCourseHeadings) {
-        missingCourseNumbers = headingIndexes.some(({ idx, line }) => {
-            const thisLineNumbered = /^\d+\b/.test(line);
-            const prevLine = idx > 0 ? nonEmptyLines[idx - 1] : '';
-            const prevLineNumberOnly = /^\d+$/.test(prevLine);
-            return !(thisLineNumbered || prevLineNumberOnly);
-        });
-    }
-    const hasTopPriceSuggestion = existing.some((s) => {
-        const combined = `${s.type || ''} ${s.description || ''} ${s.recommendation || ''}`.toLowerCase();
-        return /prix\s*fixe/.test(combined) && /price.*top|top.*price|single.*price/.test(combined);
-    });
-    const hasCourseNumberSuggestion = existing.some((s) => {
-        const combined = `${s.type || ''} ${s.description || ''} ${s.recommendation || ''}`.toLowerCase();
-        return /course numbering|numbered courses|course number/.test(combined);
-    });
-    if (!hasTopPrixFixePrice && !hasTopPriceSuggestion) {
-        existing.push({
-            type: 'PRICING STRUCTURE',
-            confidence: 'high',
-            severity: 'critical',
-            menuItem: 'Prix Fixe Menu',
-            description: 'Prix fixe menu is missing a single top-level price at the top of the menu.',
-            recommendation: 'Add a single prix fixe price at the top (optionally with pairing price, e.g., "185 | 85 wine pairing").'
-        });
-    }
-    if (hasCourseHeadings && missingCourseNumbers && !hasCourseNumberSuggestion) {
-        existing.push({
-            type: 'COURSE NUMBERING',
-            confidence: 'high',
-            severity: 'critical',
-            menuItem: 'Course Headings',
-            description: 'Prix fixe courses are present but not numbered.',
-            recommendation: 'Prefix course headings with numbers (1, 2, 3...) or place a number line directly above each course heading.'
-        });
-    }
-    // Remove course numbering suggestions if numbers ARE present (AI false positive)
-    if (hasCourseHeadings && !missingCourseNumbers) {
-        return existing.filter((s) => {
-            const combined = `${s.type || ''} ${s.description || ''} ${s.recommendation || ''}`.toLowerCase();
-            return !/course numbering|numbered courses|course number|not numbered/.test(combined);
-        });
-    }
-    return existing;
-}
+// enforcePrixFixeCriticalChecks moved to ./lib/review-pipeline.
 function extractChangedLinesForReview(baselineText, currentText) {
     const baseLines = baselineText.split('\n').map(l => l.trim()).filter(Boolean);
     const currLines = currentText.split('\n').map(l => l.trim()).filter(Boolean);
@@ -3200,124 +2928,9 @@ function buildBasicCheckDishNameFormatting(menuContent, options) {
         return [];
     }
 }
-function stripDiacritics(input) {
-    return (input || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-}
-// fetchLearnedPromptOverlay() removed in Learning Pipeline v2.
-// Rules now flow through correction_rules table, not auto-injected overlay.
-function normalizeForSuggestionMatch(input) {
-    return stripDiacritics(input || '')
-        .toLowerCase()
-        .replace(/[^a-z0-9\s]/g, ' ')
-        .replace(/\s+/g, ' ')
-        .trim();
-}
-function looksLikePriceOnLine(line) {
-    const compact = (line || '').trim();
-    // Handles "... - 8", "... 14", "... $12", "... 12.50"
-    return /(?:^|[\s\-|])\$?\d{1,3}(?:[.,]\d{1,2})?\s*$/.test(compact);
-}
-function isLikelyContinuationLine(previousLine, nextLine) {
-    const previous = (previousLine || '').trim();
-    const next = (nextLine || '').trim();
-    if (!previous || !next)
-        return false;
-    if (/^[A-Z][A-Za-zÀ-ÖØ-öø-ÿ\s&'’-]{1,40}$/.test(next) && !next.includes(',')) {
-        return false;
-    }
-    if (/^[A-ZÀ-ÖØ-Þ0-9][^,\n]{1,80},/.test(next)) {
-        return false;
-    }
-    if (/[,:;/&-]\s*$/.test(previous)) {
-        return true;
-    }
-    return /^[a-zà-öø-ÿ]/.test(next);
-}
-function extendLineWithContinuations(lines, startIndex) {
-    let combined = lines[startIndex] || '';
-    for (let i = startIndex + 1; i < Math.min(lines.length, startIndex + 3); i++) {
-        if (!isLikelyContinuationLine(combined, lines[i])) {
-            break;
-        }
-        combined = `${combined.trimEnd()} ${lines[i].trim()}`;
-        if (looksLikePriceOnLine(combined)) {
-            break;
-        }
-    }
-    return combined;
-}
-function findCorrectedLineForMenuItem(correctedMenu, menuItem) {
-    const itemNorm = normalizeForSuggestionMatch(menuItem || '');
-    if (!itemNorm)
-        return null;
-    const itemVariants = new Set([itemNorm]);
-    const addOnMatch = itemNorm.match(/^(?:add|enhance|extra)\s+(.+)$/);
-    if (addOnMatch && addOnMatch[1]) {
-        itemVariants.add(addOnMatch[1].trim());
-    }
-    const lines = (correctedMenu || '').split('\n').map(l => l.trim()).filter(Boolean);
-    for (let i = 0; i < lines.length; i++) {
-        const line = lines[i];
-        const lineNorm = normalizeForSuggestionMatch(line);
-        if ([...itemVariants].some((variant) => variant && lineNorm.includes(variant))) {
-            return extendLineWithContinuations(lines, i);
-        }
-    }
-    return null;
-}
-function isCriticalResolvedByCorrectedMenu(suggestion, correctedMenu) {
-    const type = (suggestion.type || '').toLowerCase();
-    const line = findCorrectedLineForMenuItem(correctedMenu, suggestion.menuItem || '');
-    if (!line)
-        return false;
-    if (type.includes('missing price')) {
-        return looksLikePriceOnLine(line);
-    }
-    if (type.includes('incomplete dish name')) {
-        const itemNorm = normalizeForSuggestionMatch(suggestion.menuItem || '');
-        const lineNorm = normalizeForSuggestionMatch(line);
-        const remainder = lineNorm.replace(itemNorm, '').trim();
-        if (remainder.length >= 6) {
-            return true;
-        }
-        // If AI explicitly referenced a malformed token and it's now gone, treat as resolved.
-        const combined = `${suggestion.description || ''} ${suggestion.recommendation || ''}`;
-        const quotedTokenMatch = combined.match(/['"]([^'"]{2,30})['"]/);
-        if (quotedTokenMatch && quotedTokenMatch[1]) {
-            const tokenNorm = normalizeForSuggestionMatch(quotedTokenMatch[1]);
-            if (tokenNorm && !lineNorm.includes(tokenNorm)) {
-                return true;
-            }
-        }
-    }
-    return false;
-}
-function reconcileCriticalSuggestionsAgainstCorrectedMenu(correctedMenu, suggestions) {
-    return reconcileCriticalSuggestionsAgainstCorrectedMenuWithDiagnostics(correctedMenu, suggestions).suggestions;
-}
-function reconcileCriticalSuggestionsAgainstCorrectedMenuWithDiagnostics(correctedMenu, suggestions) {
-    if (!Array.isArray(suggestions) || suggestions.length === 0) {
-        return { suggestions: [], droppedSuggestions: [] };
-    }
-    const kept = [];
-    const droppedSuggestions = [];
-    for (const s of suggestions) {
-        if (s.severity !== 'critical') {
-            kept.push(s);
-            continue;
-        }
-        if (isCriticalResolvedByCorrectedMenu(s, correctedMenu)) {
-            droppedSuggestions.push({
-                suggestion: s,
-                reason: 'critical_resolved_in_corrected_menu',
-                matchedLine: findCorrectedLineForMenuItem(correctedMenu, s.menuItem || ''),
-            });
-            continue;
-        }
-        kept.push(s);
-    }
-    return { suggestions: kept, droppedSuggestions };
-}
+// stripDiacritics / normalizeForSuggestionMatch / price-line and continuation helpers /
+// findCorrectedLineForMenuItem / isCriticalResolvedByCorrectedMenu moved to ./lib/review-pipeline.
+// reconcileCriticalSuggestionsAgainstCorrectedMenu(+WithDiagnostics) moved to ./lib/review-pipeline.
 /**
  * Form API: Menu image upload (optional)
  */
@@ -3327,115 +2940,8 @@ app.post('/api/form/menu-image-upload', upload.single('menuImage'), submissionWo
  */
 app.post('/api/form/submit', submissionWorkflowHandlers.submitMenu);
 app.post('/api/approval/:submissionId/submit', approvalWorkflowHandlers.submitBrowserApproval);
-/**
- * NEW: Parse AI response that contains corrected menu + suggestions
- */
-function parseAIResponse(feedback, originalMenu) {
-    // Extract corrected menu between markers
-    const correctedMenuMatch = feedback.match(/=== CORRECTED MENU ===\s*\n([\s\S]*?)\n=== END CORRECTED MENU ===/);
-    const correctedMenuRaw = correctedMenuMatch ? correctedMenuMatch[1].trim() : originalMenu;
-    // Extract suggestions JSON between markers
-    const suggestionsMatch = feedback.match(/=== SUGGESTIONS ===\s*\n([\s\S]*?)\n=== END SUGGESTIONS ===/);
-    let suggestions = [];
-    if (suggestionsMatch) {
-        try {
-            const jsonStr = suggestionsMatch[1].trim();
-            suggestions = JSON.parse(jsonStr);
-            console.log(`Parsed ${suggestions.length} suggestions from JSON`);
-        }
-        catch (e) {
-            console.error('Failed to parse suggestions JSON:', e);
-            console.log('Raw suggestions text:', suggestionsMatch[1]);
-        }
-    }
-    // Normalize severity on all suggestions
-    suggestions = suggestions.map(s => {
-        const type = (s.type || '').toString().trim().toLowerCase();
-        const descLower = (s.description || '').toLowerCase();
-        const recLower = (s.recommendation || '').toLowerCase();
-        const combined = `${descLower} ${recLower}`;
-        // Default missing severity to "normal"
-        if (!s.severity) {
-            s.severity = 'normal';
-        }
-        const isPrixFixeTopPriceIssue = /prix\s*fixe/.test(combined) &&
-            /(price at the top|single price at the top|include a prix fixe price at the top|top of the menu)/.test(combined);
-        const isCourseNumberingIssue = type === 'course numbering' ||
-            (/prix\s*fixe/.test(combined) && /course number|numbered courses|preceded by its course number/.test(combined));
-        // Force critical severity for known critical types (safety net)
-        if (s.type === 'Missing Price' ||
-            s.type === 'Incomplete Dish Name' ||
-            type === 'set menu item price' ||
-            type === 'course progression' ||
-            type === 'pricing structure' ||
-            isPrixFixeTopPriceIssue ||
-            isCourseNumberingIssue) {
-            s.severity = 'critical';
-        }
-        // Fallback regex: if description mentions missing price/dish name but type/severity wasn't set
-        if (s.severity !== 'critical') {
-            if (/missing\s+price|no\s+price|price\s+is\s+missing/.test(descLower) && s.type !== 'Missing Price') {
-                s.type = 'Missing Price';
-                s.severity = 'critical';
-            }
-            else if (/missing\s+dish\s+name|incomplete\s+dish\s+name|no\s+dish\s+name/.test(descLower) && s.type !== 'Incomplete Dish Name') {
-                s.type = 'Incomplete Dish Name';
-                s.severity = 'critical';
-            }
-        }
-        return s;
-    });
-    const correctedMenu = normalizeRawAsteriskPlacement(correctedMenuRaw);
-    return {
-        correctedMenu,
-        suggestions
-    };
-}
-function normalizeRawAsteriskPlacement(text) {
-    const lines = (text || '').split('\n');
-    return lines
-        .map((line) => normalizeRawAsteriskPlacementForLine(line))
-        .join('\n');
-}
-function normalizeRawAsteriskPlacementForLine(line) {
-    const original = line || '';
-    const trimmed = original.trim();
-    if (!trimmed)
-        return original;
-    if (RAW_NOTICE_PATTERN.test(trimmed))
-        return original;
-    if (!trimmed.includes('*'))
-        return original;
-    // Remove all raw markers first; we'll reinsert exactly one at canonical position.
-    let working = trimmed.replace(/\*/g, '').replace(/\s{2,}/g, ' ').trim();
-    // Skip obvious non-dish lines (titles/legends).
-    if (/^[A-Za-zÀ-ÖØ-öø-ÿ0-9 '&\-]+$/.test(working) && !working.includes(',')) {
-        return original;
-    }
-    if (working.includes(' | ') && /[A-Za-z]{2,}\s+[A-Za-z]{2,}/.test(working)) {
-        return original;
-    }
-    let trailingPrice = '';
-    let trailingAllergens = '';
-    const priceMatch = working.match(/\s+(\$?\d+(?:[.,]\d+)?(?:\s*\|\s*\d+(?:[.,]\d+)?)?)\s*$/);
-    if (priceMatch) {
-        trailingPrice = priceMatch[1];
-        working = working.slice(0, priceMatch.index).trim();
-    }
-    const allergenMatch = working.match(/\s+([A-Z]{1,3}(?:,[A-Z]{1,3})*)\s*$/);
-    if (allergenMatch) {
-        trailingAllergens = allergenMatch[1];
-        working = working.slice(0, allergenMatch.index).trim();
-    }
-    // If we extracted any suffix, place marker before suffix; otherwise keep at line end.
-    if (trailingAllergens || trailingPrice) {
-        return `${working} *${trailingAllergens ? ` ${trailingAllergens}` : ''}${trailingPrice ? ` ${trailingPrice}` : ''}`.trim();
-    }
-    return `${working}*`;
-}
-function stripManagedFooterText(text, fallbackAllergens = '') {
-    return normalizeMenuFooter(text, fallbackAllergens).body;
-}
+// parseAIResponse, raw-asterisk normalization, and stripManagedFooterText moved
+// to ./lib/review-pipeline and ./lib/menu-footer.
 function stripRawNoticeFromHtml(html) {
     return stripManagedFooterFromHtml(html);
 }

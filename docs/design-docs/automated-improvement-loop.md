@@ -10,7 +10,7 @@ Automates the manual "collect ~10 reviewer corrections, ask an AI how to improve
 | Phase | Deliverable | Status |
 |-------|------------|--------|
 | A | Raw pre-review input capture + submission↔audit linkage | Implemented |
-| C1 | Replayable review pipeline (`qa-prompt-builder`, `review-pipeline` libs) | Planned |
+| C1 | Replayable review pipeline (`qa-prompt-builder`, `review-pipeline` libs) | Implemented |
 | C2 | Eval harness (`npm run review:eval`) | Planned |
 | B | Generated code-rules manifest (`npm run rules:manifest`) | Planned |
 | D | Improvement cycle (`npm run improve:cycle`) + proposal page extension | Planned |
@@ -45,6 +45,16 @@ Until then the dashboard degrades safely (verified live): audit inserts and subm
 ### Why both link directions
 
 `submissions.form_attempt_id` is authoritative (rides the normal submission payload; survives the db-service JSON fallback). `basic_ai_check_audits.submission_id` is a denormalized convenience so eval-dataset queries on the audits table need no join; it is best-effort (Supabase-only, fire-and-forget).
+
+## Phase C1 — Replayable review pipeline (Implemented)
+
+The Basic AI Check transformation steps were extracted verbatim from `handleBasicCheck` into reusable libs so the production route and the offline eval harness run the same code:
+
+- `services/dashboard/lib/menu-footer.ts` — `normalizeMenuFooter`, allergen-legend parsing, raw-notice detection, `stripManagedFooterText`, `RAW_NOTICE_TEXT/PATTERN`.
+- `services/dashboard/lib/qa-prompt-builder.ts` — `buildFinalPrompt(basePrompt, ctx)` (prix-fixe injection, allergen key, structure/footer/price rules, changed-only scope, embedded set-menu section) plus the `QA_PROMPT_SECTIONS` registry consumed by the rules manifest.
+- `services/dashboard/lib/review-pipeline.ts` — `parseAIResponse` (severity normalization; forced-critical types exported as `FORCED_CRITICAL_EXACT_TYPES` / `FORCED_CRITICAL_NORMALIZED_TYPES`), post-AI raw-asterisk canonicalization, `enforcePrixFixeCriticalChecks`, critical-suggestion reconciliation, `runPostAiPipeline()` (the full guard chain: post-AI deterministic → title guard → structure guard → allergen guard → high-confidence auto-apply → embedded set-menu guard → price integrity guard → footer strip → reconciliation → prix-fixe enforcement), and `runFullReviewPipeline(rawText, opts, aiCaller)` for offline replay (full mode; `changed_only` stays route-level).
+
+The handler keeps HTTP concerns (fallbacks, audits, diagnostics, logging) and destructures every guard intermediate from `runPostAiPipeline` so audit payloads are unchanged. The two raw-asterisk normalizers are intentionally different passes: pre-AI (`pre-ai-deterministic-rules.ts`) only fixes spacing on single-marker lines; post-AI (`review-pipeline.ts`) strips all markers and reinserts one at the canonical position.
 
 ## Eval dataset contract (consumed by Phase C2)
 
