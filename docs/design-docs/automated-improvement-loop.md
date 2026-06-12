@@ -14,7 +14,7 @@ Automates the manual "collect ~10 reviewer corrections, ask an AI how to improve
 | C2 | Eval harness (`npm run review:eval`) | Implemented |
 | B | Generated code-rules manifest (`npm run rules:manifest`) | Implemented |
 | D | Improvement cycle (`npm run improve:cycle`) + proposal page extension | Implemented |
-| E | Daily Lightsail cron + runbook | Planned |
+| E | Daily Lightsail cron + runbook | Implemented |
 
 ## Phase A — Training-triple data capture (Implemented)
 
@@ -93,6 +93,27 @@ Drift prevention (`services/dashboard/__tests__/review-rules-manifest.test.ts`):
 **Dashboard** (`/learning/prompt-proposal`): the proposal page now shows the eval verdict (baseline vs candidate composites, improved/same/regressed, per-case regression table), the proposed replacement rules as a checked-by-default checkbox list, and the code recommendations. On approve, the review route writes the prompt (as before), records `accepted_rules`, and inserts each checked rule into `correction_rules` (`status: accepted`, `source: system`, `submission_id: proposal-<id>`) so the pre-AI deterministic pass applies them immediately. `npm run prompt:rewrite` remains as a manual fallback until the cycle has run in production.
 
 **Required manual step:** apply `supabase/migrations/20260612_extend_prompt_proposals.sql` in the Supabase SQL editor (with the two earlier migrations) before the first production cycle — the proposal insert uses the new columns.
+
+## Phase E — Scheduling on Lightsail (Implemented)
+
+The deploy workflow ([.github/workflows/deploy-lightsail.yml](../../.github/workflows/deploy-lightsail.yml)) installs the cron idempotently on every deploy — no manual host setup:
+
+```cron
+15 9 * * * /usr/bin/flock -n /tmp/menumanager-improve.lock <DEPLOY_PATH>/scripts/run-improvement-cycle-cron.sh >> /tmp/menumanager-improve-cron.log 2>&1
+```
+
+[scripts/run-improvement-cycle-cron.sh](../../scripts/run-improvement-cycle-cron.sh) detects `docker` vs `sudo docker` (same logic as the deploy) and runs `node /app/scripts/improvement-cycle.js` inside the dashboard container, where the compose `.env`, built `dist/`, and the persistent `menumanager_tmp`/`menumanager_logs` volumes live. 09:15 UTC = overnight US, so proposals are waiting at the start of the day.
+
+Idempotency layers: host `flock` → script lock file (`tmp/improvement-cycle/.lock`, stale 6h) → one proposal per `cycle_id` (day) → pending-proposal gate.
+
+### Runbook
+
+- **Cycle log:** `menumanager_logs` volume → `docker compose exec dashboard tail -50 /app/logs/improvement-cycle.log`. Cron wrapper issues land in `/tmp/menumanager-improve-cron.log` on the host.
+- **Verify the cron is installed:** `crontab -l | grep improvement-cycle` on the Lightsail host (the deploy logs print "Improvement-cycle cron installed").
+- **Run manually:** `docker compose exec dashboard node /app/scripts/improvement-cycle.js` (add `--dry-run` to inspect the assembled context without an LLM call, `--force` to bypass the gate, `--skip-eval` to skip the eval step).
+- **Kill switch:** remove the crontab line (`crontab -e`) or set `IMPROVE_MIN_NEW_CORRECTIONS` very high in `.env` and restart.
+- **First production run checklist:** (1) apply the three Supabase migrations (`20260610`, `20260611`, `20260612` — see Phase A/D notes); (2) run once manually with `--dry-run`, then for real; (3) review and approve/reject the proposal at `/learning/prompt-proposal`; (4) confirm the next gated day logs a skip line and nothing else.
+- **Eval dataset in production:** the python venv is not in the production image, so curated DOCX pairs are skipped with warnings there — production cases (Supabase) still work. Build the full dataset locally with `npm run review:eval -- --build-dataset --source all --dataset-only`; it persists on the `menumanager_tmp` volume. Use `IMPROVE_EVAL_LIMIT` to cap eval cost initially.
 
 ## Eval dataset contract
 

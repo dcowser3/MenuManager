@@ -39,7 +39,13 @@ const pre_ai_deterministic_rules_1 = require("../lib/pre-ai-deterministic-rules"
 const qa_prompt_builder_1 = require("../lib/qa-prompt-builder");
 const review_pipeline_1 = require("../lib/review-pipeline");
 const review_rules_manifest_1 = require("../lib/review-rules-manifest");
-const REPO_ROOT = path.resolve(__dirname, '..', '..', '..');
+// Resolve the repo root from either the source layout (__tests__) or the
+// compiled layout (dist/__tests__), which sits one level deeper.
+const REPO_ROOT_CANDIDATES = [
+    path.resolve(__dirname, '..', '..', '..'),
+    path.resolve(__dirname, '..', '..', '..', '..'),
+];
+const REPO_ROOT = REPO_ROOT_CANDIDATES.find((candidate) => fs.existsSync(path.join(candidate, 'docs', 'references'))) || REPO_ROOT_CANDIDATES[0];
 const COMMITTED_MD = path.join(REPO_ROOT, 'docs', 'references', 'code-rules-manifest.md');
 // Every guard module wired into runPostAiPipeline must be represented in the
 // manifest. Adding a new guard file requires both a manifest entry and an

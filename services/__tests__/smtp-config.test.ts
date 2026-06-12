@@ -20,7 +20,9 @@ describe.each(builders)('%s SMTP config', (_serviceName, buildSmtpRuntimeConfig)
         expect(config.enabled).toBe(true);
         expect(config.authMode).toBe('none');
         expect(config.fromAddress).toBe('no-reply@richardsandoval.com');
-        expect(config.transportOptions).toEqual({
+        // The dashboard builder additionally sets connection/greeting/socket
+        // timeouts (problem-report 504 fix); the shared fields must still match.
+        expect(config.transportOptions).toMatchObject({
             host: 'richardsandoval-com.mail.protection.outlook.com',
             port: 25,
             secure: false,
@@ -38,7 +40,7 @@ describe.each(builders)('%s SMTP config', (_serviceName, buildSmtpRuntimeConfig)
         expect(config.enabled).toBe(true);
         expect(config.authMode).toBe('login');
         expect(config.fromAddress).toBe('sender@example.com');
-        expect(config.transportOptions).toEqual({
+        expect(config.transportOptions).toMatchObject({
             host: 'smtp.office365.com',
             port: 587,
             secure: false,

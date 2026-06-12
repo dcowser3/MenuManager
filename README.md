@@ -196,6 +196,25 @@ Use these `.feature` files for business-readable ClickUp action rules and submis
 Design approval entry point:
 - The DOCX-vs-PDF design approval tool remains in the codebase, but the welcome-page card is currently disabled and labeled `Feature Coming Soon`.
 
+## Automated Review Improvement
+
+A daily cycle turns annotated reviewer corrections into eval-backed improvement proposals (see [docs/design-docs/automated-improvement-loop.md](docs/design-docs/automated-improvement-loop.md)):
+
+1. Reviewers annotate corrections on the learning dashboard as usual (`/learning/submission/...`).
+2. Every day at 09:15 UTC a cron on the Lightsail host runs `npm run improve:cycle` inside the dashboard container. It exits immediately (no AI cost) unless there are new annotated corrections and no proposal is already pending.
+3. When there is material, an LLM analyzes the corrections against the current prompt **and** the [code rules manifest](docs/references/code-rules-manifest.md), then proposes: a prompt rewrite, deterministic replacement-rule candidates, and code recommendations for an engineer.
+4. The eval harness (`npm run review:eval`) automatically replays historical menus under both the current and the proposed configuration; the proposal is stored with a passed/regressed verdict and per-case regressions.
+5. You get an email; review at `/learning/prompt-proposal` — approve the prompt, check/uncheck the proposed rules, and read the code recommendations. Nothing is applied without approval.
+
+Useful commands:
+
+```bash
+npm run improve:cycle -- --dry-run     # inspect the assembled LLM context, no call
+npm run review:eval -- --limit 5       # replay a few historical menus and score them
+npm run rules:manifest                 # regenerate the code-rules manifest after rule changes
+npm run backfill:audit-links -- --apply  # link pre-existing audits to submissions
+```
+
 ## Property Catalog
 
 - The form property field is now restricted to a canonical list managed by the DB service.
