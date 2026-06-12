@@ -16,7 +16,7 @@ When a chef submits a menu, a ClickUp task is automatically created with the gen
 - Uploads optional menu image attachment when provided in the form (`menuImageUpload`)
 - Adds Isabella as the assignee when `CLICKUP_ASSIGNEE_ID` is configured, sets ClickUp's task-level `notify_all` flag, and then creates an assigned reviewer comment with `notify_all: true`. The extra assigned comment gives ClickUp a second notification event for Isabella when the service is using Isabella's own API token as the task creator.
 - Resolves the configured Marketing ClickUp User Group to its member user IDs and adds those users as task watchers after task creation
-- If the submitter email is `isabella@richardsandoval.com`, creates the task directly in `CLICKUP_POST_APPROVAL_STATUS` (`To Do` by default) and assigns the resolved Marketing users instead of the Isabella assignee. This direct handoff does not use `CLICKUP_CORRECTIONS_STATUS`, so a separate review-complete trigger such as `approved` will not place Isabella submissions in the `approved` column during creation.
+- If the submitter email is `isabella@richardsandoval.com`, creates the task directly in `CLICKUP_POST_APPROVAL_STATUS` (`To Do` by default) and assigns the resolved Marketing users instead of the Isabella assignee. This direct handoff does not use `CLICKUP_CORRECTIONS_STATUS`, and the webhook treats ClickUp's `Approved` status as passive/manual, so Isabella submissions are not placed in or pulled back from the `Approved` column by automation.
 - After a direct Isabella handoff successfully creates the ClickUp task, the DB submission status is updated to `sent_to_marketing` so the row does not remain in Isabella's `/reviews` queue.
 - Stores `clickup_task_id` on the submission record
 - `due_date` is set from the form’s `YYYY-MM-DD` value using **noon UTC** on that calendar day so the task due date matches the chef’s date in US (and most other) timezones; naive `new Date("YYYY-MM-DD")` uses UTC midnight and showed up one day early in ClickUp for Americas users
@@ -47,10 +47,11 @@ When a chef submits a menu, a ClickUp task is automatically created with the gen
 
 - ClickUp sends `taskStatusUpdated` events to `POST /webhook/clickup`
 - Filters for review-complete statuses: `CLICKUP_CORRECTIONS_STATUSES` when set, `CLICKUP_CORRECTIONS_STATUS`, and `CLICKUP_POST_APPROVAL_STATUS` (`To Do` by default)
+- Treats ClickUp status `Approved` as passive/manual. A move into `Approved` is ignored before the service fetches the task, downloads attachments, finalizes the submission, changes status, or changes assignees, even if `approved` is accidentally configured as a correction status.
 - Ignores review-complete events for tasks whose ClickUp `list.id` does not match `CLICKUP_LIST_ID`, so workspace-wide Marketing task updates do not create Menu Manager alerts
 - Looks up submission via `GET /submissions/by-clickup-task/:taskId` on the DB service
 - Retries that submission lookup on transient `404` / `No submission found` responses using `CLICKUP_WEBHOOK_SUBMISSION_LOOKUP_RETRIES` and `CLICKUP_WEBHOOK_SUBMISSION_LOOKUP_RETRY_DELAY_MS`; this covers the brief race where ClickUp sends the status webhook before Menu Manager has persisted the returned `clickup_task_id`
-- Skips submissions already marked as Isabella direct handoffs (`status: sent_to_marketing` plus Isabella submitter email), so a later manual move from `To Do` to a review-complete status such as `approved` does not download an attachment, re-run finalization, move the task back, or change assignees
+- Skips submissions already marked as Isabella direct handoffs (`status: sent_to_marketing` plus Isabella submitter email), so a later review-complete webhook does not download an attachment, re-run finalization, move the task, or change assignees
 - Downloads the latest attachment from the ClickUp task
 - If no usable ClickUp attachment exists at approval time, falls back to the locally stored submitted DOCX so "perfect as submitted" menus can still be finalized
 - Extracts canonical approved menu text from the corrected DOCX
@@ -203,7 +204,7 @@ Examples:
   - `scripts/clickup-webhook-reset.sh`
 - Re-register after deleting old hooks:
   - `scripts/clickup-webhook-reset.sh --delete-existing`
-- Re-register and backfill missed To Do/approved tasks:
+- Re-register and backfill missed `To Do` tasks:
   - `scripts/clickup-webhook-reset.sh --delete-existing --backfill-pending`
 - Pre-demo strict mode (recommended):
   - `scripts/clickup-webhook-reset.sh --demo-ready`
@@ -240,7 +241,7 @@ use this exact sequence:
    - in ClickUp, toggle test task away from `To Do`, then back to `To Do`
 4. Verify:
    - ngrok: `POST /webhook/clickup` -> `200`
-   - `logs/clickup-integration.log` contains task approved + corrected file download lines.
+   - `logs/clickup-integration.log` contains task moved to `To Do` + corrected file download lines.
 
 Why this happens:
 - The webhook secret rotates when a webhook is re-created.

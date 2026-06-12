@@ -5,11 +5,16 @@ const {
     normalizeClickUpLabel,
 } = require('../../../services/clickup-integration/lib/clickup-handoff-rules');
 
-const REVIEW_COMPLETE_STATUSES = new Set(['approved', 'to do']);
+const PASSIVE_STATUSES = new Set(['approved']);
+const REVIEW_COMPLETE_STATUSES = new Set(['to do']);
 const POST_APPROVAL_STATUS = 'to do';
 
 function decideClickUpActions(submission, nextStatus) {
     const normalizedNextStatus = normalizeClickUpLabel(nextStatus);
+    if (PASSIVE_STATUSES.has(normalizedNextStatus)) {
+        return { skipped: true, reason: 'passive manual ClickUp status', actions: [] };
+    }
+
     if (!REVIEW_COMPLETE_STATUSES.has(normalizedNextStatus)) {
         return { skipped: true, reason: 'not a review-complete status', actions: [] };
     }
@@ -72,6 +77,11 @@ Then('ClickUp task status is not moved again', function () {
 Then('the approval webhook skips reprocessing the submission', function () {
     assert.equal(this.clickUpDecision.skipped, true);
     assert.match(this.clickUpDecision.reason, /direct Isabella-to-Marketing handoff/);
+});
+
+Then('the approval webhook ignores the status change', function () {
+    assert.equal(this.clickUpDecision.skipped, true);
+    assert.match(this.clickUpDecision.reason, /passive manual ClickUp status|not a review-complete status/);
 });
 
 Then('ClickUp task status and assignees are not mutated', function () {

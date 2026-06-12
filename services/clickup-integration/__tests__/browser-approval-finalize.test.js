@@ -854,14 +854,36 @@ describe('browser approval finalize route', () => {
         expect(statusCall).toBeFalsy();
     });
 
-    test('skips Isabella direct handoff when the task is later moved to approved', async () => {
+    test('ignores approved status webhooks without loading or mutating the task', async () => {
+        const response = await invokeWebhookHandler(webhookHandler, {
+            body: {
+                event: 'taskStatusUpdated',
+                task_id: 'cu_manual_approved',
+                history_items: [
+                    {
+                        field: 'status',
+                        before: { status: 'pending initial isa review' },
+                        after: { status: 'approved' },
+                    },
+                ],
+            },
+        });
+
+        expect(response.status).toBe(200);
+        expect(response.body).toBe('OK');
+        expect(axios.get).not.toHaveBeenCalled();
+        expect(axios.post).not.toHaveBeenCalled();
+        expect(axios.put).not.toHaveBeenCalled();
+    });
+
+    test('skips Isabella direct handoff when a review-complete webhook is received later', async () => {
         axios.get.mockImplementation(async (url) => {
             const urlStr = String(url);
             if (urlStr === 'https://api.clickup.com/api/v2/task/cu_isa_direct') {
                 return {
                     data: {
                         id: 'cu_isa_direct',
-                        status: { status: 'approved' },
+                        status: { status: 'to do' },
                         list: { id: 'list_123' },
                         attachments: [
                             {
@@ -904,8 +926,8 @@ describe('browser approval finalize route', () => {
                 history_items: [
                     {
                         field: 'status',
-                        before: { status: 'to do' },
-                        after: { status: 'approved' },
+                        before: { status: 'approved' },
+                        after: { status: 'to do' },
                     },
                 ],
             },

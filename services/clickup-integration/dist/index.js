@@ -34,10 +34,12 @@ const CLICKUP_ASSIGNEE_ID = process.env.CLICKUP_ASSIGNEE_ID;
 const CLICKUP_TEAM_ID = process.env.CLICKUP_TEAM_ID;
 const CLICKUP_WEBHOOK_URL = process.env.CLICKUP_WEBHOOK_URL;
 const CLICKUP_WEBHOOK_SECRET = process.env.CLICKUP_WEBHOOK_SECRET;
+const CLICKUP_DEFAULT_POST_APPROVAL_STATUS = 'to do';
+const CLICKUP_PASSIVE_STATUS_LABELS = new Set(['approved']);
 const CLICKUP_INITIAL_REVIEW_STATUS = (process.env.CLICKUP_INITIAL_REVIEW_STATUS || 'pending initial isa review').trim();
-const CLICKUP_CORRECTIONS_STATUS = normalizeStatus(process.env.CLICKUP_CORRECTIONS_STATUS || 'to do');
-const CLICKUP_POST_APPROVAL_STATUS = (process.env.CLICKUP_POST_APPROVAL_STATUS || 'to do').trim();
-const CLICKUP_ISABELLA_DIRECT_STATUS = CLICKUP_POST_APPROVAL_STATUS || 'to do';
+const CLICKUP_CORRECTIONS_STATUS = normalizeStatus(process.env.CLICKUP_CORRECTIONS_STATUS || CLICKUP_DEFAULT_POST_APPROVAL_STATUS);
+const CLICKUP_POST_APPROVAL_STATUS = resolvePostApprovalStatus(process.env.CLICKUP_POST_APPROVAL_STATUS);
+const CLICKUP_ISABELLA_DIRECT_STATUS = CLICKUP_POST_APPROVAL_STATUS || CLICKUP_DEFAULT_POST_APPROVAL_STATUS;
 const CLICKUP_MARKETING_WATCHER_GROUP_NAME = (process.env.CLICKUP_MARKETING_WATCHER_GROUP_NAME || 'Marketing').trim();
 const CLICKUP_MARKETING_WATCHER_GROUP_ID = process.env.CLICKUP_MARKETING_WATCHER_GROUP_ID || '';
 const CLICKUP_WATCHER_USER_IDS = process.env.CLICKUP_WATCHER_USER_IDS || '';
@@ -571,24 +573,31 @@ function pickMostRecentCorrectedAttachment(attachments, submittedFilename) {
 function normalizeStatus(value) {
     return String(value || '').trim().toLowerCase();
 }
+function resolvePostApprovalStatus(value) {
+    const configured = String(value || '').trim() || CLICKUP_DEFAULT_POST_APPROVAL_STATUS;
+    return CLICKUP_PASSIVE_STATUS_LABELS.has(normalizeStatus(configured))
+        ? CLICKUP_DEFAULT_POST_APPROVAL_STATUS
+        : configured;
+}
 function parseStatusList(value) {
     return String(value || '')
         .split(',')
         .map(normalizeStatus)
         .filter(Boolean);
 }
+function addReviewCompleteStatus(statuses, status) {
+    const normalized = normalizeStatus(status);
+    if (!normalized || CLICKUP_PASSIVE_STATUS_LABELS.has(normalized))
+        return;
+    statuses.add(normalized);
+}
 function buildReviewCompleteStatuses() {
     const statuses = new Set();
     for (const status of parseStatusList(process.env.CLICKUP_CORRECTIONS_STATUSES)) {
-        statuses.add(status);
+        addReviewCompleteStatus(statuses, status);
     }
-    if (CLICKUP_CORRECTIONS_STATUS) {
-        statuses.add(CLICKUP_CORRECTIONS_STATUS);
-    }
-    const postApprovalStatus = normalizeStatus(CLICKUP_POST_APPROVAL_STATUS);
-    if (postApprovalStatus) {
-        statuses.add(postApprovalStatus);
-    }
+    addReviewCompleteStatus(statuses, CLICKUP_CORRECTIONS_STATUS);
+    addReviewCompleteStatus(statuses, CLICKUP_POST_APPROVAL_STATUS);
     if (statuses.size === 0) {
         statuses.add('to do');
     }
