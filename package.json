@@ -17,6 +17,7 @@
     "smoke:basic-ai-check": "node scripts/basic-ai-check-smoke.js",
     "prompt:optimize": "node scripts/prompt-optimize.js",
     "preai:ab-replay": "node scripts/pre-ai-ab-replay.js",
+    "review:eval": "node scripts/review-eval.js",
     "prompt:rewrite": "node scripts/prompt-rewrite.js",
     "backfill:audit-links": "node scripts/backfill-audit-submission-links.js",
     "sharepoint:sync-property": "node scripts/sync-sharepoint-property.js"

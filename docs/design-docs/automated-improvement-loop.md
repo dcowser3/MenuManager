@@ -11,7 +11,7 @@ Automates the manual "collect ~10 reviewer corrections, ask an AI how to improve
 |-------|------------|--------|
 | A | Raw pre-review input capture + submission↔audit linkage | Implemented |
 | C1 | Replayable review pipeline (`qa-prompt-builder`, `review-pipeline` libs) | Implemented |
-| C2 | Eval harness (`npm run review:eval`) | Planned |
+| C2 | Eval harness (`npm run review:eval`) | Implemented |
 | B | Generated code-rules manifest (`npm run rules:manifest`) | Planned |
 | D | Improvement cycle (`npm run improve:cycle`) + proposal page extension | Planned |
 | E | Daily Lightsail cron + runbook | Planned |
@@ -56,7 +56,18 @@ The Basic AI Check transformation steps were extracted verbatim from `handleBasi
 
 The handler keeps HTTP concerns (fallbacks, audits, diagnostics, logging) and destructures every guard intermediate from `runPostAiPipeline` so audit payloads are unchanged. The two raw-asterisk normalizers are intentionally different passes: pre-AI (`pre-ai-deterministic-rules.ts`) only fixes spacing on single-marker lines; post-AI (`review-pipeline.ts`) strips all markers and reinserts one at the canonical position.
 
-## Eval dataset contract (consumed by Phase C2)
+## Phase C2 — Eval harness (Implemented)
+
+`npm run review:eval` ([scripts/review-eval.js](../../scripts/review-eval.js)) replays historical menus through the full production pipeline (`runFullReviewPipeline`) and scores the output against the human-approved final.
+
+- **Dataset** (`--build-dataset`, cached at `tmp/review-eval/dataset.jsonl`): production cases from Supabase (approved submissions; raw input from the Phase A audit columns, falling back to `ai_request.text` marked `degraded: audit_post_deterministic`, then `submissions.menu_content` marked `degraded: submitted_content`) plus curated DOCX pairs (`Training Menus/` + Zengo samples, extracted via the docx-redliner venv).
+- **Config**: `--prompt <file>`, `--model` (default `REVIEW_EVAL_MODEL || AI_REVIEW_MODEL || gpt-4o-mini`), `--rules live|snapshot:<f>|candidate:<f>` (candidate = live accepted + proposed file), `--no-deterministic`, `--no-ai` (echo feedback; deterministic-only), `--limit`, `--case <id>`.
+- **Determinism + cost**: temperature 0, fixed seed, responses cached at `tmp/review-eval/cache/` keyed by sha256(model|temp|seed|prompt|text) — re-running an unchanged config is free and reproduces identical scores.
+- **Scoring** per case: document similarity (strict + raw-asterisk-style-normalized, via `services/dashboard/lib/text-similarity.ts` — also now consumed by `preai:ab-replay`) and correction-level precision/recall/F1 via `services/differ/lib/eval-scoring.ts` (`scoreCorrections` uses the differ's replacement-signal extractor: signals(raw→candidate) vs signals(raw→truth) → TP/FP/FN per kind, plus residual candidate→truth diffs). Composite = style similarity when no word-level signals, else `0.6*similarity + 0.4*F1`. Known scope: dish-name identity changes and whole-word swaps are excluded from token scoring by the differ's conservative guards — they surface in similarity/residual metrics instead.
+- **Baseline compare**: `--baseline <report dir or json>` lists per-case composite deltas, improvements, regressions; exits non-zero when regressions exist (`process.exitCode = 2`) so the improvement cycle can gate on it.
+- Reports land in `tmp/review-eval/<timestamp>-<label>/report.{json,md}`.
+
+## Eval dataset contract
 
 A production eval case is assembled as:
 
