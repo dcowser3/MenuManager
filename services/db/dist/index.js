@@ -413,6 +413,7 @@ const SUPABASE_SUBMISSION_COLUMNS = new Set([
     'revision_baseline_file_name',
     'base_approved_menu_content',
     'chef_persistent_diff',
+    'form_attempt_id',
     'approved_menu_content_raw',
     'approved_menu_content',
     'approved_text_extracted_at',

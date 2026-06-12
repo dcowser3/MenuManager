@@ -70,6 +70,9 @@ CREATE TABLE submissions (
     -- Full payload mirror for future-proofing and audits
     raw_payload JSONB,
 
+    -- Form attempt that produced this submission; joins to basic_ai_check_audits.attempt_id
+    form_attempt_id VARCHAR(100),
+
     -- Status tracking
     status VARCHAR(50) NOT NULL DEFAULT 'processing',
     -- Possible statuses:
@@ -98,6 +101,7 @@ CREATE TABLE submissions (
 CREATE INDEX idx_submissions_status ON submissions(status);
 CREATE INDEX idx_submissions_created_at ON submissions(created_at DESC);
 CREATE INDEX idx_submissions_clickup_task_id ON submissions(clickup_task_id);
+CREATE INDEX IF NOT EXISTS idx_submissions_form_attempt ON submissions(form_attempt_id);
 
 -- ============================================================================
 -- 1b. SUBMITTER PROFILES (autocomplete cache)
@@ -663,6 +667,9 @@ CREATE TABLE IF NOT EXISTS basic_ai_check_audits (
     guard_diagnostics JSONB,
     deterministic_diagnostics JSONB,
     error_message TEXT,
+    menu_content_raw TEXT,                     -- raw client menu content BEFORE deterministic pre-AI checks
+    baseline_menu_content_raw TEXT,            -- baseline content for changed_only revision reviews
+    submission_id VARCHAR(100),                -- back-link set at submit time (best-effort)
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -671,6 +678,7 @@ CREATE INDEX IF NOT EXISTS idx_basic_ai_check_audits_check ON basic_ai_check_aud
 CREATE INDEX IF NOT EXISTS idx_basic_ai_check_audits_created ON basic_ai_check_audits(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_basic_ai_check_audits_project ON basic_ai_check_audits(property, project_name);
 CREATE INDEX IF NOT EXISTS idx_basic_ai_check_audits_event ON basic_ai_check_audits(event_type);
+CREATE INDEX IF NOT EXISTS idx_basic_ai_check_audits_submission ON basic_ai_check_audits(submission_id);
 
 -- ============================================================================
 -- ROW LEVEL SECURITY (RLS) - Enable later when auth is added

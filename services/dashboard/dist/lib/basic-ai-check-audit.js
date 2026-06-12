@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.isBasicAiCheckAuditEnabled = isBasicAiCheckAuditEnabled;
 exports.normalizeBasicAiCheckAuditEvent = normalizeBasicAiCheckAuditEvent;
+exports.linkBasicAiCheckAuditsToSubmission = linkBasicAiCheckAuditsToSubmission;
 exports.logBasicAiCheckAudit = logBasicAiCheckAudit;
 const supabase_client_1 = require("@menumanager/supabase-client");
 const upload_security_1 = require("./upload-security");
@@ -107,7 +108,45 @@ function normalizeBasicAiCheckAuditEvent(event, env = process.env) {
         guard_diagnostics: truncateJson(event.guardDiagnostics ?? null, maxChars),
         deterministic_diagnostics: truncateJson(event.deterministicDiagnostics ?? null, maxChars),
         error_message: textOrNull(event.errorMessage, 1000, true),
+        menu_content_raw: typeof event.menuContentRaw === 'string'
+            ? truncateString(event.menuContentRaw, maxChars)
+            : null,
+        baseline_menu_content_raw: typeof event.baselineMenuContentRaw === 'string' && event.baselineMenuContentRaw
+            ? truncateString(event.baselineMenuContentRaw, maxChars)
+            : null,
+        submission_id: textOrNull(event.submissionId, 100),
     };
+}
+async function linkBasicAiCheckAuditsToSubmission(attemptId, submissionId) {
+    try {
+        if (!isBasicAiCheckAuditEnabled())
+            return;
+        if (!(0, supabase_client_1.isSupabaseConfigured)())
+            return;
+        const attempt = (0, upload_security_1.sanitizePlainTextInput)(attemptId, { maxLength: 100 });
+        const submission = (0, upload_security_1.sanitizePlainTextInput)(submissionId, { maxLength: 100 });
+        if (!attempt || !submission)
+            return;
+        const supabase = (0, supabase_client_1.getSupabaseClient)();
+        const { error } = await supabase
+            .from('basic_ai_check_audits')
+            .update({ submission_id: submission })
+            .eq('attempt_id', attempt)
+            .is('submission_id', null);
+        if (error) {
+            console.error('Failed to link Basic AI Check audits to submission:', error.message);
+        }
+    }
+    catch (error) {
+        console.error('Basic AI Check audit submission link failed:', error.message);
+    }
+}
+// Columns added by migration 20260611_add_review_training_links.sql. If that
+// migration has not been applied yet, retry the insert without them so the
+// pre-existing audit stream keeps flowing instead of dropping rows.
+const TRAINING_LINK_AUDIT_COLUMNS = ['menu_content_raw', 'baseline_menu_content_raw', 'submission_id'];
+function isMissingTrainingLinkColumnError(message) {
+    return TRAINING_LINK_AUDIT_COLUMNS.some((column) => `${message || ''}`.includes(column));
 }
 async function logBasicAiCheckAudit(event) {
     try {
@@ -116,9 +155,26 @@ async function logBasicAiCheckAudit(event) {
         if (!(0, supabase_client_1.isSupabaseConfigured)())
             return;
         const supabase = (0, supabase_client_1.getSupabaseClient)();
+        const normalized = normalizeBasicAiCheckAuditEvent(event);
         const { error } = await supabase
             .from('basic_ai_check_audits')
-            .insert(normalizeBasicAiCheckAuditEvent(event));
+            .insert(normalized);
+        if (error && isMissingTrainingLinkColumnError(error.message)) {
+            const legacyRecord = { ...normalized };
+            for (const column of TRAINING_LINK_AUDIT_COLUMNS) {
+                delete legacyRecord[column];
+            }
+            const { error: retryError } = await supabase
+                .from('basic_ai_check_audits')
+                .insert(legacyRecord);
+            if (retryError) {
+                console.error('Failed to log Basic AI Check audit (legacy retry):', retryError.message);
+            }
+            else {
+                console.warn('Basic AI Check audit stored without training-link columns; apply migration 20260611_add_review_training_links.sql');
+            }
+            return;
+        }
         if (error) {
             console.error('Failed to log Basic AI Check audit:', error.message);
         }

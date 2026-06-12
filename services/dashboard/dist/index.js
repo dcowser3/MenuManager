@@ -1213,6 +1213,7 @@ const submissionWorkflowHandlers = (0, submission_workflow_1.createSubmissionWor
     generateDocxFromForm,
     sendAdminAlert,
     isClientInputError: upload_security_1.isClientInputError,
+    linkBasicAiCheckAuditsToSubmission: basic_ai_check_audit_1.linkBasicAiCheckAuditsToSubmission,
 });
 const approvalWorkflowHandlers = (0, approval_workflow_1.createApprovalWorkflowHandlers)({
     axios: internalApi,
@@ -2368,6 +2369,8 @@ Note: Use ONLY these allergen codes when checking allergen compliance. Do not us
             menuTextLength: menuContent.length,
             preAiTextLength: preCheckedReviewBody.length,
             promptLength: finalPrompt.length,
+            menuContentRaw: menuContent,
+            baselineMenuContentRaw: changedOnlyMode ? baselineMenuContent : undefined,
             ...extra,
         });
         const getDeterministicFallbackMenu = () => {

@@ -269,6 +269,7 @@ function createSubmissionWorkflowHandlers(deps) {
             const hadRawNotice = footerMetadata.hadRawNotice || explicitFooterMetadata.hadRawNotice;
             const shouldAddRawNotice = !hadRawNotice && !suppressedRawFlag && (selectedRawFlag || detectedRawFlag);
             const submissionId = `form-${Date.now()}`;
+            const formAttemptId = (0, upload_security_1.sanitizePlainTextInput)((typeof req.get === 'function' ? req.get('x-menumanager-attempt-id') : '') || req.body?.attemptId, { maxLength: 100 }) || null;
             const localTestingRequest = isLocalDashboardRequest(req);
             const docxPath = await deps.generateDocxFromForm(submissionId, {
                 projectName: safeProjectName,
@@ -370,9 +371,14 @@ function createSubmissionWorkflowHandlers(deps) {
                 revision_baseline_file_name: safeRevisionBaselineFileName || null,
                 base_approved_menu_content: safeBaseApprovedMenuContent || null,
                 chef_persistent_diff: chefPersistentDiff ? JSON.stringify(chefPersistentDiff) : null,
+                form_attempt_id: formAttemptId,
             };
             await deps.axios.post(`${deps.DB_SERVICE_URL}/submissions`, submissionRecordPayload);
             console.log(`✓ Submission created in database: ${submissionId}`);
+            if (formAttemptId && deps.linkBasicAiCheckAuditsToSubmission) {
+                deps.linkBasicAiCheckAuditsToSubmission(formAttemptId, submissionId)
+                    .catch((err) => console.error('Failed to link basic check audits to submission:', err.message));
+            }
             deps.axios.post(`${deps.DB_SERVICE_URL}/assets`, {
                 submission_id: submissionId,
                 asset_type: 'original_docx',

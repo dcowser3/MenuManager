@@ -1,5 +1,8 @@
 const mockInsert = jest.fn();
-const mockFrom = jest.fn(() => ({ insert: mockInsert }));
+const mockUpdateIs = jest.fn();
+const mockUpdateEq = jest.fn(() => ({ is: mockUpdateIs }));
+const mockUpdate = jest.fn(() => ({ eq: mockUpdateEq }));
+const mockFrom = jest.fn(() => ({ insert: mockInsert, update: mockUpdate }));
 const mockIsSupabaseConfigured = jest.fn(() => true);
 
 jest.mock('@menumanager/supabase-client', () => ({
@@ -10,6 +13,7 @@ jest.mock('@menumanager/supabase-client', () => ({
 
 import {
     isBasicAiCheckAuditEnabled,
+    linkBasicAiCheckAuditsToSubmission,
     logBasicAiCheckAudit,
     normalizeBasicAiCheckAuditEvent,
 } from '../lib/basic-ai-check-audit';
@@ -18,6 +22,7 @@ describe('Basic AI Check audit logging', () => {
     beforeEach(() => {
         jest.clearAllMocks();
         mockInsert.mockResolvedValue({ error: null });
+        mockUpdateIs.mockResolvedValue({ error: null });
         mockIsSupabaseConfigured.mockReturnValue(true);
         delete process.env.BASIC_AI_CHECK_AUDIT_ENABLED;
         delete process.env.BASIC_AI_CHECK_AUDIT_MAX_CHARS;
@@ -95,6 +100,74 @@ describe('Basic AI Check audit logging', () => {
             eventType: 'completed',
         });
 
+        expect(mockFrom).not.toHaveBeenCalled();
+    });
+
+    test('stores raw menu content and submission link fields, truncating long content', () => {
+        const normalized = normalizeBasicAiCheckAuditEvent({
+            attemptId: 'attempt-raw',
+            eventType: 'completed',
+            menuContentRaw: 'GUACAMOLE  fresh avocado 12\n'.repeat(3),
+            baselineMenuContentRaw: '',
+            submissionId: ' form-1749600000000 ',
+        }, {
+            BASIC_AI_CHECK_AUDIT_MAX_CHARS: '30',
+        });
+
+        expect(normalized.menu_content_raw).toContain('GUACAMOLE');
+        expect(normalized.menu_content_raw).toContain('...[truncated');
+        expect(normalized.baseline_menu_content_raw).toBeNull();
+        expect(normalized.submission_id).toBe('form-1749600000000');
+    });
+
+    test('defaults raw content fields to null when absent', () => {
+        const normalized = normalizeBasicAiCheckAuditEvent({
+            attemptId: 'attempt-no-raw',
+            eventType: 'completed',
+        });
+
+        expect(normalized.menu_content_raw).toBeNull();
+        expect(normalized.baseline_menu_content_raw).toBeNull();
+        expect(normalized.submission_id).toBeNull();
+    });
+
+    test('linkBasicAiCheckAuditsToSubmission updates unlinked audit rows for the attempt', async () => {
+        await linkBasicAiCheckAuditsToSubmission('attempt-123', 'form-1749600000000');
+
+        expect(mockFrom).toHaveBeenCalledWith('basic_ai_check_audits');
+        expect(mockUpdate).toHaveBeenCalledWith({ submission_id: 'form-1749600000000' });
+        expect(mockUpdateEq).toHaveBeenCalledWith('attempt_id', 'attempt-123');
+        expect(mockUpdateIs).toHaveBeenCalledWith('submission_id', null);
+    });
+
+    test('retries without training-link columns when the migration is not applied yet', async () => {
+        mockInsert
+            .mockResolvedValueOnce({ error: { message: "Could not find the 'menu_content_raw' column of 'basic_ai_check_audits' in the schema cache" } })
+            .mockResolvedValueOnce({ error: null });
+
+        await logBasicAiCheckAudit({
+            attemptId: 'attempt-legacy',
+            eventType: 'completed',
+            menuContentRaw: 'GUACAMOLE 12',
+            submissionId: 'form-1',
+        });
+
+        expect(mockInsert).toHaveBeenCalledTimes(2);
+        const retryPayload = mockInsert.mock.calls[1][0];
+        expect(retryPayload).not.toHaveProperty('menu_content_raw');
+        expect(retryPayload).not.toHaveProperty('baseline_menu_content_raw');
+        expect(retryPayload).not.toHaveProperty('submission_id');
+        expect(retryPayload.attempt_id).toBe('attempt-legacy');
+    });
+
+    test('linkBasicAiCheckAuditsToSubmission no-ops without Supabase or ids', async () => {
+        mockIsSupabaseConfigured.mockReturnValue(false);
+        await linkBasicAiCheckAuditsToSubmission('attempt-123', 'form-1');
+        expect(mockFrom).not.toHaveBeenCalled();
+
+        mockIsSupabaseConfigured.mockReturnValue(true);
+        await linkBasicAiCheckAuditsToSubmission('', 'form-1');
+        await linkBasicAiCheckAuditsToSubmission('attempt-123', '');
         expect(mockFrom).not.toHaveBeenCalled();
     });
 });

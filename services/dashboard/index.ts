@@ -86,7 +86,7 @@ import {
     AcceptedCorrectionRule,
     runPreAiDeterministicChecks,
 } from './lib/pre-ai-deterministic-rules';
-import { logBasicAiCheckAudit } from './lib/basic-ai-check-audit';
+import { logBasicAiCheckAudit, linkBasicAiCheckAuditsToSubmission } from './lib/basic-ai-check-audit';
 
 export {
     sanitizePlainTextInput,
@@ -1423,6 +1423,7 @@ const submissionWorkflowHandlers = createSubmissionWorkflowHandlers({
     generateDocxFromForm,
     sendAdminAlert,
     isClientInputError,
+    linkBasicAiCheckAuditsToSubmission,
 });
 
 const approvalWorkflowHandlers = createApprovalWorkflowHandlers({
@@ -2683,6 +2684,8 @@ Note: Use ONLY these allergen codes when checking allergen compliance. Do not us
             menuTextLength: menuContent.length,
             preAiTextLength: preCheckedReviewBody.length,
             promptLength: finalPrompt.length,
+            menuContentRaw: menuContent,
+            baselineMenuContentRaw: changedOnlyMode ? baselineMenuContent : undefined,
             ...extra,
         });
 

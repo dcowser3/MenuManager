@@ -40,6 +40,7 @@ type SubmissionWorkflowDeps = {
     generateDocxFromForm: (submissionId: string, formData: any, options?: { outputPath?: string }) => Promise<string>;
     sendAdminAlert: (alert: any) => void;
     isClientInputError: (error: any) => boolean;
+    linkBasicAiCheckAuditsToSubmission?: (attemptId: string, submissionId: string) => Promise<void>;
 };
 
 function getRequestHostname(req: any): string {
@@ -346,6 +347,10 @@ export function createSubmissionWorkflowHandlers(deps: SubmissionWorkflowDeps) {
             const shouldAddRawNotice = !hadRawNotice && !suppressedRawFlag && (selectedRawFlag || detectedRawFlag);
 
             const submissionId = `form-${Date.now()}`;
+            const formAttemptId = sanitizePlainTextInput(
+                (typeof req.get === 'function' ? req.get('x-menumanager-attempt-id') : '') || req.body?.attemptId,
+                { maxLength: 100 }
+            ) || null;
             const localTestingRequest = isLocalDashboardRequest(req);
             const docxPath = await deps.generateDocxFromForm(submissionId, {
                 projectName: safeProjectName,
@@ -455,11 +460,17 @@ export function createSubmissionWorkflowHandlers(deps: SubmissionWorkflowDeps) {
                 revision_baseline_file_name: safeRevisionBaselineFileName || null,
                 base_approved_menu_content: safeBaseApprovedMenuContent || null,
                 chef_persistent_diff: chefPersistentDiff ? JSON.stringify(chefPersistentDiff) : null,
+                form_attempt_id: formAttemptId,
             };
 
             await deps.axios.post(`${deps.DB_SERVICE_URL}/submissions`, submissionRecordPayload);
 
             console.log(`✓ Submission created in database: ${submissionId}`);
+
+            if (formAttemptId && deps.linkBasicAiCheckAuditsToSubmission) {
+                deps.linkBasicAiCheckAuditsToSubmission(formAttemptId, submissionId)
+                    .catch((err: any) => console.error('Failed to link basic check audits to submission:', err.message));
+            }
 
             deps.axios.post(`${deps.DB_SERVICE_URL}/assets`, {
                 submission_id: submissionId,
