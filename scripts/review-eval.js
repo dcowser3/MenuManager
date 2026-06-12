@@ -271,9 +271,10 @@ async function buildProductionCases() {
         console.warn('SUPABASE_URL not configured; skipping production cases.');
         return [];
     }
+    // allergens is not a dedicated column; it lives inside the raw_payload mirror.
     const { data: submissions, error } = await supabase
         .from('submissions')
-        .select('id, legacy_id, project_name, property, template_type, menu_type, service_period, allergens, menu_content, approved_menu_content, form_attempt_id, created_at')
+        .select('id, legacy_id, project_name, property, template_type, menu_type, service_period, allergens:raw_payload->>allergens, menu_content, approved_menu_content, form_attempt_id, created_at')
         .eq('status', 'approved')
         .not('approved_menu_content', 'is', null)
         .order('created_at', { ascending: true })
@@ -367,6 +368,9 @@ async function buildDataset(args) {
         }
     }
     const usable = cases.filter((c) => `${c.raw_input || ''}`.trim() && `${c.ground_truth || ''}`.trim());
+    // Curated pairs first: they carry the cleanest ground truth, so --limit /
+    // IMPROVE_EVAL_LIMIT subsets prefer them over degraded production cases.
+    usable.sort((a, b) => Number(a.source === 'production') - Number(b.source === 'production'));
     await fsp.mkdir(path.dirname(args.dataset), { recursive: true });
     await fsp.writeFile(args.dataset, usable.map((c) => JSON.stringify(c)).join('\n') + (usable.length ? '\n' : ''));
     console.log(`Dataset built: ${usable.length} cases -> ${args.dataset}`);
