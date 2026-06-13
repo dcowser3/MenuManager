@@ -53,6 +53,8 @@ For cloud deploy, point `DOCUMENT_STORAGE_ROOT` to a persistent mounted volume/p
 
 Without persistent storage, files on ephemeral disks may be lost on restart/redeploy.
 
+Storage-root diagnostics are kept in deployment documentation and logs, not rendered on the Learning Rules dashboard, so rule-review users do not see container-local paths such as `/app/tmp/documents` during normal operation.
+
 ### Cloud Deployment Checklist (Required)
 
 1. Provision persistent disk/volume for the app service.

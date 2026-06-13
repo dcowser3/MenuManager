@@ -1457,7 +1457,6 @@ app.get('/learning', async (_req, res) => {
             learningSubmissions: decoratedLearningSubmissions,
             propertyOptions,
             differStatus,
-            documentStorageRoot: process.env.DOCUMENT_STORAGE_ROOT || '',
         });
     }
     catch (error) {

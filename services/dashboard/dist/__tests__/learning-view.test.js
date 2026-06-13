@@ -34,11 +34,18 @@ function renderLearningView(overrides = {}) {
             submissionsError: '',
         },
         basePrompt: '',
-        documentStorageRoot: '',
         ...overrides,
     }, { filename: viewPath });
 }
 describe('learning dashboard view', () => {
+    test('does not expose deployment storage-path diagnostics in the page chrome', () => {
+        const html = renderLearningView({
+            documentStorageRoot: '/app/tmp/documents',
+        });
+        expect(html).not.toContain('Cloud Deployment Note');
+        expect(html).not.toContain('DOCUMENT_STORAGE_ROOT');
+        expect(html).not.toContain('/app/tmp/documents');
+    });
     test('shows menu names in the recent learned submissions column', () => {
         const html = renderLearningView({
             learningSubmissions: [{

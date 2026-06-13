@@ -427,14 +427,6 @@
     </div>
 
     <div class="container">
-        <div class="panel">
-            <strong>Cloud Deployment Note:</strong>
-            <% if (documentStorageRoot) { %>
-                `DOCUMENT_STORAGE_ROOT` is set to <code><%= documentStorageRoot %></code>.
-            <% } else { %>
-                `DOCUMENT_STORAGE_ROOT` is not set. Files are currently stored under <code>tmp/documents</code>, which may be ephemeral in cloud deployments.
-            <% } %>
-        </div>
         <% if (differStatus && (!differStatus.rulesOk || !differStatus.trainingOk)) { %>
             <div class="panel warn">
                 <strong>Differ Connectivity Warning:</strong>
