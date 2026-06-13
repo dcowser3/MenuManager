@@ -184,7 +184,7 @@ async function sendProposalEmail({ cycleId, evalStatus, evalSummary, correctionC
         const alertMail = requireDashboardLib('alert-mail');
         const graphConfig = alertMail.buildGraphMailConfig();
         const deps = { graphConfig, smtpTransporter: null, smtpFromAddress: '' };
-        const to = process.env.IMPROVE_NOTIFY_EMAIL || process.env.FORM_ATTEMPT_ALERT_EMAIL;
+        const to = process.env.IMPROVE_NOTIFY_EMAIL || process.env.FORM_ATTEMPT_ALERT_EMAIL || 'dcowser@richardsandoval.com';
         if (!to || !alertMail.canSendAlertMail(deps)) {
             console.log('Notification email skipped (no recipient or mail transport configured).');
             return;
@@ -344,7 +344,9 @@ async function main() {
         ].join('\n'));
         const userPrompt = [
             '## Current QA Prompt',
+            core.CURRENT_PROMPT_BEGIN_MARKER,
             effective.prompt,
+            core.CURRENT_PROMPT_END_MARKER,
             '',
             '## Code Rules Manifest (deterministic layers — you cannot edit these, but propose replacement rules and code recommendations against them)',
             manifestMarkdown,
@@ -376,9 +378,9 @@ async function main() {
         } catch (error) {
             throw new Error(`LLM returned non-JSON output: ${llmResult.content.slice(0, 300)}`);
         }
-        const validated = core.validateImprovementLlmOutput(parsedOutput);
+        const validated = core.validateImprovementLlmOutput(parsedOutput, { currentPrompt: effective.prompt });
         for (const warning of validated.warnings) console.warn(`LLM output warning: ${warning}`);
-        console.log(`Proposed prompt: ${validated.proposed_prompt.length} chars; rules: ${validated.proposed_replacement_rules.length}; code recommendations: ${validated.code_recommendations.length}`);
+        console.log(`Proposed prompt: ${validated.promptUnchanged ? 'UNCHANGED (current prompt kept)' : `${validated.proposed_prompt.length} chars`}; rules: ${validated.proposed_replacement_rules.length}; code recommendations: ${validated.code_recommendations.length}`);
 
         // 8. Auto-eval baseline vs candidate.
         const artifactsDir = path.join(repoRoot, 'tmp', 'improvement-cycle', cycleId);

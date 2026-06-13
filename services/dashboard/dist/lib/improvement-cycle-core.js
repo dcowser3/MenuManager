@@ -3,7 +3,7 @@
 // gating, effective-prompt resolution, LLM-output validation, eval summarization,
 // and the mapping from LLM-proposed rules to correction_rules payloads.
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.IMPROVEMENT_SYSTEM_PROMPT = exports.PROPOSED_RULE_CHANGE_TYPES = void 0;
+exports.IMPROVEMENT_SYSTEM_PROMPT = exports.CURRENT_PROMPT_END_MARKER = exports.CURRENT_PROMPT_BEGIN_MARKER = exports.PROMPT_UNCHANGED_SENTINEL = exports.PROPOSED_RULE_CHANGE_TYPES = void 0;
 exports.shouldRunCycle = shouldRunCycle;
 exports.pickEffectivePrompt = pickEffectivePrompt;
 exports.validateImprovementLlmOutput = validateImprovementLlmOutput;
@@ -48,18 +48,59 @@ exports.PROPOSED_RULE_CHANGE_TYPES = new Set([
     'punctuation',
     'capitalization',
 ]);
+// Sentinel the LLM returns instead of echoing the full prompt when no prompt
+// change is warranted (echoing ~20k chars invites truncation/leak artifacts).
+exports.PROMPT_UNCHANGED_SENTINEL = 'UNCHANGED';
+// User-prompt delimiters around the current prompt, and context-section headers
+// that must never appear inside a proposed prompt. If they do, the model echoed
+// its input context back; the proposal prompt is garbage even when the analysis
+// and rules are sound, so we fall back to "unchanged".
+exports.CURRENT_PROMPT_BEGIN_MARKER = '=== BEGIN CURRENT PROMPT ===';
+exports.CURRENT_PROMPT_END_MARKER = '=== END CURRENT PROMPT ===';
+const CONTEXT_LEAK_MARKERS = [
+    exports.CURRENT_PROMPT_BEGIN_MARKER,
+    exports.CURRENT_PROMPT_END_MARKER,
+    '## Code Rules Manifest',
+    '## New Reviewer Corrections',
+    '## Sample Before/After Documents',
+];
 function asText(value, maxLength = 100000) {
     return `${value ?? ''}`.trim().slice(0, maxLength);
 }
-function validateImprovementLlmOutput(raw) {
+function validateImprovementLlmOutput(raw, opts = {}) {
     const warnings = [];
     const parsed = (raw && typeof raw === 'object' ? raw : {});
-    const proposedPrompt = asText(parsed.proposed_prompt);
+    let proposedPrompt = asText(parsed.proposed_prompt);
+    let promptUnchanged = false;
     if (!proposedPrompt) {
         throw new Error('LLM output is missing proposed_prompt');
     }
-    if (proposedPrompt.length < 500) {
+    if (proposedPrompt === exports.PROMPT_UNCHANGED_SENTINEL) {
+        if (!opts.currentPrompt) {
+            throw new Error('LLM returned UNCHANGED but no current prompt was provided to substitute');
+        }
+        proposedPrompt = opts.currentPrompt;
+        promptUnchanged = true;
+    }
+    else {
+        const leakedMarker = CONTEXT_LEAK_MARKERS.find((marker) => proposedPrompt.includes(marker));
+        if (leakedMarker && opts.currentPrompt) {
+            warnings.push(`proposed_prompt echoed input context (contains "${leakedMarker}"); treating the prompt as unchanged`);
+            proposedPrompt = opts.currentPrompt;
+            promptUnchanged = true;
+        }
+        else if (leakedMarker) {
+            throw new Error(`proposed_prompt echoed input context (contains "${leakedMarker}")`);
+        }
+        else if (opts.currentPrompt && proposedPrompt === opts.currentPrompt.trim()) {
+            promptUnchanged = true;
+        }
+    }
+    if (!promptUnchanged && proposedPrompt.length < 500) {
         warnings.push(`proposed_prompt is suspiciously short (${proposedPrompt.length} chars)`);
+    }
+    if (!promptUnchanged && opts.currentPrompt && proposedPrompt.length > opts.currentPrompt.length * 1.6) {
+        warnings.push(`proposed_prompt grew from ${opts.currentPrompt.length} to ${proposedPrompt.length} chars; review for bloat or echoed context`);
     }
     const rules = [];
     for (const [index, value] of (Array.isArray(parsed.proposed_replacement_rules) ? parsed.proposed_replacement_rules : []).entries()) {
@@ -113,6 +154,7 @@ function validateImprovementLlmOutput(raw) {
     return {
         analysis: asText(parsed.analysis, 20000),
         proposed_prompt: proposedPrompt,
+        promptUnchanged,
         proposed_replacement_rules: rules,
         code_recommendations: recommendations,
         warnings,
@@ -221,7 +263,8 @@ Prompt rewrite rules:
 - Do NOT remove existing rules unless a correction explicitly contradicts them.
 - Do NOT duplicate rules the deterministic code layer already enforces (see manifest).
 - For location-specific rules, add them in a clearly labeled subsection.
-- Return the COMPLETE rewritten prompt, not a diff. If no prompt change is warranted, return the current prompt unchanged.
+- The current prompt is provided between "=== BEGIN CURRENT PROMPT ===" and "=== END CURRENT PROMPT ===" markers. Your proposed_prompt must contain ONLY the rewritten prompt text itself — never the markers, the Code Rules Manifest, the corrections list, or any other context sections from this message.
+- Return the COMPLETE rewritten prompt, not a diff. If no prompt change is warranted, set "proposed_prompt" to exactly "UNCHANGED" instead of echoing the prompt back.
 
 Handling contradictions (policy changes):
 - When a new correction or manual reviewer rule contradicts older corrections, existing accepted rules, or current prompt text, the NEWEST human intent wins. Update or remove the conflicting older guidance rather than keeping both.

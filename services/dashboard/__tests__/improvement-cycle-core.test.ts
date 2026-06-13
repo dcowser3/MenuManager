@@ -95,6 +95,36 @@ describe('validateImprovementLlmOutput', () => {
         expect(output.warnings.some((w) => w.includes('suspiciously short'))).toBe(true);
         expect(output.proposed_replacement_rules[0].applies_to_menu_type).toBe('all');
     });
+
+    test('UNCHANGED sentinel substitutes the current prompt', () => {
+        const output = validateImprovementLlmOutput(
+            { proposed_prompt: 'UNCHANGED', analysis: 'No prompt change needed.' },
+            { currentPrompt: 'THE CURRENT PROMPT' }
+        );
+        expect(output.promptUnchanged).toBe(true);
+        expect(output.proposed_prompt).toBe('THE CURRENT PROMPT');
+        expect(output.warnings).toEqual([]);
+    });
+
+    test('echoed input context falls back to unchanged with a warning', () => {
+        const output = validateImprovementLlmOutput(
+            { proposed_prompt: 'Some prompt...\n## Code Rules Manifest\n| aji | ají |' },
+            { currentPrompt: 'THE CURRENT PROMPT' }
+        );
+        expect(output.promptUnchanged).toBe(true);
+        expect(output.proposed_prompt).toBe('THE CURRENT PROMPT');
+        expect(output.warnings.some((w) => w.includes('echoed input context'))).toBe(true);
+    });
+
+    test('an identical rewrite is recognized as unchanged and oversized rewrites warn', () => {
+        const current = 'P'.repeat(1000);
+        const identical = validateImprovementLlmOutput({ proposed_prompt: current }, { currentPrompt: current });
+        expect(identical.promptUnchanged).toBe(true);
+
+        const bloated = validateImprovementLlmOutput({ proposed_prompt: 'Q'.repeat(2000) }, { currentPrompt: current });
+        expect(bloated.promptUnchanged).toBe(false);
+        expect(bloated.warnings.some((w) => w.includes('review for bloat'))).toBe(true);
+    });
 });
 
 describe('eval summary + status', () => {
