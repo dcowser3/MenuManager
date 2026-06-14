@@ -159,6 +159,22 @@ describe('redline preview helpers', () => {
         expect(displayHtml).toContain('<span class="existing-ins">new</span>');
     });
 
+    test('strips leading empty blocks from extracted rich menu HTML', () => {
+        const html = [
+            '<p><br></p>',
+            '<p>&nbsp;</p>',
+            '<p><strong>Menu</strong></p>',
+            '<p><br></p>',
+            '<p><strong>Guacamole</strong>, tomato VG 20</p>',
+        ].join('');
+
+        expect(redlinePreview.stripLeadingEmptyBlocks(html)).toBe([
+            '<p><strong>Menu</strong></p>',
+            '<p><br></p>',
+            '<p><strong>Guacamole</strong>, tomato VG 20</p>',
+        ].join(''));
+    });
+
     test('builds synthetic original and current text from uploaded redline HTML', () => {
         const baselineHtml = [
             '<p><strong>Alambre <span class="existing-ins">Skewers</span>,</strong> steak D 30</p>',
@@ -210,6 +226,29 @@ describe('redline preview helpers', () => {
         expect(rendered.html).not.toContain('shri<span class="persistent-ins">*</span>mp');
         expect(rendered.html).not.toContain('avocadMexican');
         expect(rendered.html).not.toContain('Mexicancan');
+    });
+
+    test('drops extracted leading blank paragraph before building uploaded-redline editor HTML', () => {
+        const baselineHtml = [
+            '<p><br></p>',
+            '<p><strong>Menu</strong></p>',
+            '<p><strong>Tán Ceviche,</strong> lobster <span class="existing-del">25</span><span class="existing-ins">26</span></p>',
+        ].join('');
+
+        const comparison = redlinePreview.buildRevisionComparisonFromAnnotatedHtml(baselineHtml);
+
+        expect(comparison.editorHtml).toBe([
+            '<p><strong>Menu</strong></p>',
+            '<p><strong>Tán Ceviche,</strong> lobster 26</p>',
+        ].join(''));
+        expect(comparison.originalHtml).toBe([
+            '<p><strong>Menu</strong></p>',
+            '<p><strong>Tán Ceviche,</strong> lobster 25</p>',
+        ].join(''));
+        expect(comparison.currentText.startsWith('\n')).toBe(false);
+        expect(comparison.originalText.startsWith('\n')).toBe(false);
+        expect(comparison.currentText).toBe('Menu\nTán Ceviche, lobster 26');
+        expect(comparison.originalText).toBe('Menu\nTán Ceviche, lobster 25');
     });
 
     test('keeps adjacent inserted and deleted menu rows from interleaving in the preview', () => {

@@ -84,6 +84,36 @@ describe('dashboard form modification source chooser', () => {
         expect(template).not.toContain('max-height: 600px;');
     });
 
+    test('aligns the shared Step 2 editor with the first visible right-side work box', () => {
+        const template = fs.readFileSync(
+            path.join(__dirname, '..', 'views', 'form.ejs'),
+            'utf8'
+        );
+
+        expect(template).toContain('class="reviewed-content-container" data-step2-editor-box');
+        expect(template).toContain('class="ai-suggestions-section" data-step2-right-workbox');
+        expect(template).toContain('class="persistent-preview show" data-step2-right-workbox');
+        expect(template).toContain('class="suggestions-list" data-step2-right-align-box');
+        expect(template).toContain('class="persistent-preview-body" data-step2-right-align-box');
+        expect(template).toContain('function alignStep2EditorWorkbox()');
+        expect(template).toContain("document.querySelector('[data-step2-editor-box]')");
+        expect(template).toContain("document.querySelectorAll('[data-step2-right-workbox]')");
+        expect(template).toContain("firstVisibleRightWorkbox.querySelector('[data-step2-right-align-box]')");
+        expect(template).toContain('rightWorkboxes.find(isStep2WorkboxVisible)');
+        expect(template).toContain('firstVisibleRightWorkbox.style.marginTop');
+        expect(template).toContain("window.addEventListener('resize', syncStep2EditorWorkboxAlignment);");
+    });
+
+    test('keeps Step 2 editor and preview text top padding aligned', () => {
+        const template = fs.readFileSync(
+            path.join(__dirname, '..', 'views', 'form.ejs'),
+            'utf8'
+        );
+
+        expect(template).toContain('padding: 0.75rem 1.5rem 1.5rem;');
+        expect(template).toContain('padding: 0.75rem;');
+    });
+
     test('excludes imported deletions from uploaded-unapproved AI review text', () => {
         const template = fs.readFileSync(
             path.join(__dirname, '..', 'views', 'form.ejs'),

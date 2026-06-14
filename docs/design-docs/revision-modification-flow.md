@@ -54,6 +54,8 @@ For modification flows, the baseline text must come from one of:
 - Right-side persistent preview shows live diff against approved baseline:
   - Deletions: red strike-through
   - Insertions: yellow highlight
+- The Step 2 paired editor layout aligns the left editor with the first visible right-side work box (AI suggestions or persistent preview) through shared data hooks and matched top padding, so database baseline edits, uploaded unapproved DOCX edits, and brand-new submissions all start their scrollable text boxes and first menu rows at the same vertical position.
+- Extracted DOCX rich HTML drops leading empty paragraphs before rendering the browser editor, so template spacing above the first real menu line does not appear as an extra editable blank row.
 - Separator and punctuation edits are diffed as first-class changes, so hyphen/comma/slash rewrites render as explicit insertions/deletions instead of being treated as unchanged text.
 - In normal modification mode, AI review is scoped to changed lines only (computed against approved baseline).
 - In uploaded unapproved/redlined DOCX mode, AI review runs against the full accepted visible menu text. Existing redline edits can already contain typos, so the full candidate text must be reviewed even when the chef makes no additional browser edits after upload. Imported deletion/cross-out spans (`existing-del`, `persistent-del`, DOCX strikethrough equivalents) are removed from the AI-review text so deleted dishes are not corrected.

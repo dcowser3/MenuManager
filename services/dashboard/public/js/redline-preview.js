@@ -170,6 +170,15 @@
             .replace(/\sstyle=(["'])(?=[^"']*background)[^"']*\1/gi, '');
     }
 
+    function stripLeadingEmptyBlocks(html) {
+        let source = String(html || '');
+        const leadingEmptyBlockPattern = /^\s*<(p|div)\b[^>]*>(?:\s|&nbsp;|<br\s*\/?>)*<\/\1>\s*/i;
+        while (leadingEmptyBlockPattern.test(source)) {
+            source = source.replace(leadingEmptyBlockPattern, '');
+        }
+        return source;
+    }
+
     function stripExistingAnnotationsForEditor(html) {
         const source = stripTransientReviewHighlights(html);
 
@@ -278,7 +287,7 @@
     }
 
     function buildRevisionComparisonFromAnnotatedHtml(html) {
-        const source = stripTransientReviewHighlights(html || '');
+        const source = stripLeadingEmptyBlocks(stripTransientReviewHighlights(html || ''));
         const deletionClassPattern = /\b(?:existing-del|persistent-del)\b/;
         const insertionClassPattern = /\b(?:existing-ins|persistent-ins)\b/;
 
@@ -2191,6 +2200,7 @@
         buildAnnotationMapFromHtml,
         htmlLinesToParagraphs,
         stripTransientReviewHighlights,
+        stripLeadingEmptyBlocks,
         stripExistingAnnotationsForEditor,
         buildRevisionComparisonFromAnnotatedHtml,
         buildRevisionComparisonFromAnnotatedPreview,
