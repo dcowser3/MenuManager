@@ -22,7 +22,8 @@
     "improve:cycle": "node scripts/improvement-cycle.js",
     "prompt:rewrite": "node scripts/prompt-rewrite.js",
     "backfill:audit-links": "node scripts/backfill-audit-submission-links.js",
-    "sharepoint:sync-property": "node scripts/sync-sharepoint-property.js"
+    "sharepoint:sync-property": "node scripts/sync-sharepoint-property.js",
+    "reconcile:correction-rules": "node scripts/reconcile-correction-rules.js"
   },
   "keywords": [],
   "author": "",

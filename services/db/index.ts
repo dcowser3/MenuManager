@@ -2479,6 +2479,40 @@ app.put('/prompt-proposals/:id', async (req, res) => {
     }
 });
 
+// Critical Supabase columns whose absence silently routes writes to the local
+// JSON fallback (invisible to the improvement cycle, which reads Supabase). A
+// missing column here means a migration was not applied — surface it loudly
+// instead of losing reviewer data. Update when a migration adds load-bearing columns.
+const CRITICAL_SUPABASE_SCHEMA: Record<string, string[]> = {
+    correction_rules: ['applies_to_menu_type', 'prompt_cycle_id', 'consumed_at', 'submission_ids'],
+    submissions: ['form_attempt_id', 'approved_menu_content'],
+    basic_ai_check_audits: ['menu_content_raw', 'submission_id'],
+    prompt_proposals: ['proposed_rules', 'eval_status', 'accepted_rules', 'source'],
+};
+
+async function verifyCriticalSupabaseSchema(): Promise<void> {
+    try {
+        if (!isSupabaseConfigured()) return;
+        const supabase = getSupabaseClient();
+        for (const [table, columns] of Object.entries(CRITICAL_SUPABASE_SCHEMA)) {
+            const { error } = await supabase.from(table).select(columns.join(',')).limit(1);
+            if (error) {
+                const message = `Supabase schema drift on ${table}: ${error.message}. Apply the pending migration in supabase/migrations — until then writes fall to local JSON and are invisible to the improvement cycle.`;
+                console.error(`SCHEMA DRIFT: ${message}`);
+                logAlert({
+                    alert_type: 'supabase_schema_drift',
+                    severity: 'error',
+                    service: 'db',
+                    message,
+                    details: { table, expectedColumns: columns, error: error.message },
+                });
+            }
+        }
+    } catch (error: any) {
+        console.error('Supabase schema verification failed:', error.message);
+    }
+}
+
 if (require.main === module) {
     app.listen(port, () => {
         console.log(`db service listening at http://localhost:${port}`);
@@ -2488,6 +2522,7 @@ if (require.main === module) {
             console.log('Supabase mirror: disabled (missing SUPABASE_URL/SUPABASE_*_KEY)');
         }
         initDb();
+        void verifyCriticalSupabaseSchema();
     });
 }
 

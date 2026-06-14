@@ -124,6 +124,19 @@ Idempotency layers: host `flock` → script lock file (`tmp/improvement-cycle/.l
 - **First production run checklist:** (1) apply the three Supabase migrations (`20260610`, `20260611`, `20260612` — see Phase A/D notes); (2) run once manually with `--dry-run`, then for real; (3) review and approve/reject the proposal at `/learning/prompt-proposal`; (4) confirm the next gated day logs a skip line and nothing else.
 - **Eval dataset in production:** the python venv is not in the production image, so curated DOCX pairs are skipped with warnings there — production cases (Supabase) still work. Build the full dataset locally with `npm run review:eval -- --build-dataset --source all --dataset-only`; it persists on the `menumanager_tmp` volume. Use `IMPROVE_EVAL_LIMIT` to cap eval cost initially.
 
+## Operational note: Supabase schema drift (correction rules)
+
+The dashboard saves reviewer correction rules through the db service, which writes to Supabase and falls back to a local JSON file (`tmp/db/correction_rules.json` on the `menumanager_tmp` volume) when the Supabase insert fails. The improvement cycle reads Supabase **directly**, so any rule that only reached the local fallback is invisible to it.
+
+In June 2026 this bit us: production `correction_rules` was missing the `applies_to_menu_type` column (migration never applied), so *every* reviewer correction since the column became required failed its Supabase insert and silently accumulated in the local fallback — the cycle saw nothing and emitted no proposals.
+
+Fix + recovery (in order):
+
+1. Apply `supabase/migrations/20260614_add_correction_rules_menu_scope.sql` in the Supabase SQL editor. New saves land in Supabase again.
+2. Run `npm run reconcile:correction-rules` **inside a container that mounts the volume** (`docker compose exec -T dashboard node /app/scripts/reconcile-correction-rules.js` — dry run; add `--apply`) to upsert the stranded local rules into Supabase. Idempotent (dedupe by submission_id + correction_id).
+
+Prevention: the db service runs `verifyCriticalSupabaseSchema()` on startup and logs a loud `supabase_schema_drift` system alert (via `system_alerts`) when a load-bearing column is missing from `correction_rules`, `submissions`, `basic_ai_check_audits`, or `prompt_proposals`. Update `CRITICAL_SUPABASE_SCHEMA` in `services/db/index.ts` when a migration adds load-bearing columns. This makes the next missed migration scream instead of silently dropping data.
+
 ## Eval dataset contract
 
 A production eval case is assembled as:
