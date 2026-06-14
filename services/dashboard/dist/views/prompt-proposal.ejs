@@ -88,6 +88,12 @@
         .diff-line { white-space: pre-wrap; }
         .diff-add { background: var(--diff-add-bg); color: var(--diff-add-text); }
         .diff-del { background: var(--diff-del-bg); color: var(--diff-del-text); }
+        .diff-eq { color: var(--muted); }
+        .diff-fold { color: var(--muted); text-align: center; font-size: .66rem; padding: .2rem 0; background: #f6f6f4; letter-spacing: .04em; }
+        .diff-summary { margin-bottom: .5rem; }
+        .diff-summary.unchanged { padding: .6rem .75rem; border: 1px solid var(--border); background: var(--bg-alt); color: var(--text); }
+        .diff-add-text { color: var(--diff-add-text); font-weight: 600; }
+        .diff-del-text { color: var(--diff-del-text); font-weight: 600; }
         .analysis-box {
             border: 1px solid var(--border);
             background: var(--bg-alt);
@@ -291,28 +297,16 @@
                 <% }) %>
             <% } %>
 
-            <h3 class="section-title">Diff View</h3>
-            <div class="diff-view" id="diffView">
-                <% if (proposal.prompt_diff) { %>
-                    <% proposal.prompt_diff.split('\n').forEach((line) => { %>
-                        <% if (line.startsWith('+ ')) { %>
-                            <div class="diff-line diff-add"><%= line %></div>
-                        <% } else if (line.startsWith('- ')) { %>
-                            <div class="diff-line diff-del"><%= line %></div>
-                        <% } else { %>
-                            <div class="diff-line"><%= line %></div>
-                        <% } %>
-                    <% }) %>
-                <% } else { %>
-                    <div class="small">No diff available</div>
-                <% } %>
-            </div>
+            <h3 class="section-title">Prompt Changes</h3>
+            <div id="promptDiffSummary" class="diff-summary small">Computing changes…</div>
+            <div class="diff-view" id="diffView"></div>
 
-            <h3 class="section-title">Side-by-Side</h3>
+            <h3 class="section-title">Full Text (current vs proposed)</h3>
+            <div class="small" style="margin-bottom:.5rem">The proposed side is editable — changes here update the diff above live and are used for "Approve With Edits".</div>
             <div class="prompt-grid">
                 <div class="prompt-block">
                     <h3>Current Prompt</h3>
-                    <textarea class="prompt-text" readonly><%= proposal.current_prompt || '' %></textarea>
+                    <textarea class="prompt-text" id="currentPrompt" readonly><%= proposal.current_prompt || '' %></textarea>
                 </div>
                 <div class="prompt-block">
                     <h3>Proposed Prompt</h3>
@@ -383,6 +377,95 @@
             </table>
         <% } %>
     </div>
+
+    <% if (proposal) { %>
+    <script>
+        // Client-side line diff of current vs proposed prompt, with context
+        // folding and an explicit no-change banner. Computed from the textareas
+        // so it works for every proposal regardless of any stored diff.
+        (function () {
+            var currentEl = document.getElementById('currentPrompt');
+            var proposedEl = document.getElementById('proposedPrompt');
+            var viewEl = document.getElementById('diffView');
+            var summaryEl = document.getElementById('promptDiffSummary');
+            if (!currentEl || !proposedEl || !viewEl || !summaryEl) return;
+
+            function escapeHtml(s) {
+                return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            }
+
+            function lineDiff(aText, bText) {
+                var a = aText.split('\n'), b = bText.split('\n');
+                var n = a.length, m = b.length;
+                var dp = [];
+                for (var i = 0; i <= n; i++) dp.push(new Int32Array(m + 1));
+                for (var i = n - 1; i >= 0; i--) {
+                    for (var j = m - 1; j >= 0; j--) {
+                        dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+                    }
+                }
+                var out = [], i = 0, j = 0;
+                while (i < n && j < m) {
+                    if (a[i] === b[j]) { out.push({ t: 'eq', text: a[i] }); i++; j++; }
+                    else if (dp[i + 1][j] >= dp[i][j + 1]) { out.push({ t: 'del', text: a[i] }); i++; }
+                    else { out.push({ t: 'add', text: b[j] }); j++; }
+                }
+                while (i < n) out.push({ t: 'del', text: a[i++] });
+                while (j < m) out.push({ t: 'add', text: b[j++] });
+                return out;
+            }
+
+            function render() {
+                var diff = lineDiff(currentEl.value, proposedEl.value);
+                var adds = 0, dels = 0;
+                for (var k = 0; k < diff.length; k++) {
+                    if (diff[k].t === 'add') adds++;
+                    else if (diff[k].t === 'del') dels++;
+                }
+
+                if (adds === 0 && dels === 0) {
+                    summaryEl.className = 'diff-summary small unchanged';
+                    summaryEl.innerHTML = '<strong>No changes to the base prompt.</strong> This proposal\'s improvements are in the correction rules above — the prompt text itself is identical to what is live now.';
+                    viewEl.style.display = 'none';
+                    return;
+                }
+
+                summaryEl.className = 'diff-summary small';
+                summaryEl.innerHTML = '<span class="diff-add-text">+' + adds + ' added</span> &nbsp;·&nbsp; <span class="diff-del-text">−' + dels + ' removed</span> &nbsp;(lines; green = new wording, red = removed)';
+                viewEl.style.display = '';
+
+                var CONTEXT = 3;
+                var keep = new Array(diff.length);
+                for (var k = 0; k < diff.length; k++) {
+                    if (diff[k].t !== 'eq') {
+                        for (var c = Math.max(0, k - CONTEXT); c <= Math.min(diff.length - 1, k + CONTEXT); c++) keep[c] = true;
+                    }
+                }
+
+                var rows = [], fold = 0;
+                function flush() {
+                    if (fold > 0) {
+                        rows.push('<div class="diff-fold">⋯ ' + fold + ' unchanged line' + (fold === 1 ? '' : 's') + ' ⋯</div>');
+                        fold = 0;
+                    }
+                }
+                for (var k = 0; k < diff.length; k++) {
+                    if (!keep[k]) { fold++; continue; }
+                    flush();
+                    var d = diff[k];
+                    var cls = d.t === 'add' ? 'diff-add' : (d.t === 'del' ? 'diff-del' : 'diff-eq');
+                    var prefix = d.t === 'add' ? '+ ' : (d.t === 'del' ? '- ' : '  ');
+                    rows.push('<div class="diff-line ' + cls + '">' + escapeHtml(prefix + d.text) + '</div>');
+                }
+                flush();
+                viewEl.innerHTML = rows.join('');
+            }
+
+            render();
+            proposedEl.addEventListener('input', render);
+        })();
+    </script>
+    <% } %>
 
     <% if (proposal && proposal.status === 'pending') { %>
     <script>

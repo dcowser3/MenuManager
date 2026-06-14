@@ -83,6 +83,18 @@ describe('prompt-proposal view', () => {
         expect(html).toContain('accepted_rule_indexes');
         expect(html).toContain('Improvement cycle');
     });
+    test('renders the client-side diff scaffold (current/proposed textareas + diff containers)', () => {
+        const html = renderProposalView({ proposal: baseProposal });
+        // The diff is computed in the browser from these elements; assert they exist.
+        expect(html).toContain('id="currentPrompt"');
+        expect(html).toContain('id="proposedPrompt"');
+        expect(html).toContain('id="diffView"');
+        expect(html).toContain('id="promptDiffSummary"');
+        expect(html).toContain('Prompt Changes');
+        expect(html).toContain('function lineDiff');
+        // The old never-populated stored-diff path is gone.
+        expect(html).not.toContain('No diff available');
+    });
     test('renders regressed eval results with the regression table and hides checkboxes when reviewed', () => {
         const html = renderProposalView({
             proposal: {
