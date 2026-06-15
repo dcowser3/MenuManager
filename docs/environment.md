@@ -53,6 +53,7 @@ All variables are configured in `.env` at the project root. See `.env.example` f
 | `DOCUMENT_STORAGE_ROOT` | Root directory for persisted menu DOCX assets (default: `tmp/documents`) |
 | `JSON_BODY_LIMIT` | Shared Express JSON/urlencoded body limit for services that need larger rich-text payloads (default where used: `5mb`) |
 | `DASHBOARD_JSON_BODY_LIMIT` | Dashboard-specific override for chef form JSON/urlencoded bodies (default: `JSON_BODY_LIMIT` or `5mb`) |
+| `ERROR_REPORT_JSON_BODY_LIMIT` | Dashboard-specific JSON body limit for `/api/form/error-report`, which carries screenshot data plus client state (default: `15mb`; fronting proxy body limits must be at least this high) |
 | `DB_JSON_BODY_LIMIT` | DB-service-specific override for internal submission and raw-payload JSON bodies (default: `JSON_BODY_LIMIT` or `5mb`) |
 | `LEARNING_DATA_DIR` | Root directory for differ comparison history and learned-rule snapshots (default: `tmp/learning`) |
 | `LEARNING_MIN_OCCURRENCES` | Minimum repeated corrections needed before a learned rule is active (default: `2`) |
@@ -63,6 +64,9 @@ All variables are configured in `.env` at the project root. See `.env.example` f
 | `GRAPH_MAILBOX_ADDRESS` | Mailbox the dashboard sends alert/problem-report email **as** via Graph `sendMail` (falls back to `GRAPH_USER_EMAIL`). Must be a real licensed or shared mailbox — a distribution list returns `ErrorInvalidUser`. Requires the app registration to have the `Mail.Send` application permission with admin consent. |
 | `ALERT_MAIL_GRAPH_DISABLED` | Set `true` to skip the Graph transport for dashboard alert email and use SMTP only |
 | `GRAPH_CLIENT_SECRET_EXPIRES` | The Azure expiry date of `GRAPH_CLIENT_SECRET` (`YYYY-MM-DD`, from App registrations → Certificates & secrets). The dashboard logs it on startup and the daily improvement cycle raises a `graph_secret_warning`/`graph_secret_expired` system alert as it nears/passes expiry, so the secret never lapses silently and takes down Graph email + SharePoint. Update it whenever you rotate the secret. |
+| `ERROR_REPORT_TRIAGE_MODEL` | OpenAI model for AI-generated problem-report triage proposals (default: `IMPROVE_MODEL`, then `AI_REVIEW_MODEL`, then `gpt-4o-mini`) |
+| `ERROR_REPORT_AI_TRIAGE_DISABLED` | Set `true` to disable production AI triage proposal emails for problem reports |
+| `ERROR_REPORT_AI_TRIAGE_FORCE` | Set `true` to allow AI triage proposal emails outside production when `OPENAI_API_KEY` is configured |
 | `IMPROVE_MIN_NEW_CORRECTIONS` | Improvement-cycle gate: minimum unconsumed reviewer corrections before a proposal is generated (default: `1`) |
 | `IMPROVE_MODEL` | OpenAI model for the improvement-cycle analysis call (default: `PROMPT_REWRITE_MODEL` or `gpt-4o`) |
 | `IMPROVE_NOTIFY_EMAIL` | Recipient for "proposal ready" emails (default: `FORM_ATTEMPT_ALERT_EMAIL`) |
@@ -184,6 +188,7 @@ The learning dashboard can delete an individual learned submission through the d
 
 - Dashboard uploads are capped at 15 MB per file.
 - Dashboard chef form JSON bodies and DB submission/raw-payload JSON bodies default to a 5 MB cap so preserved rich HTML and redline previews do not fail at Express's 100 KB default.
+- Dashboard user problem reports use a separate 15 MB JSON cap by default so screenshot data and client state can be saved server-side without raising every form/API endpoint.
 - Modification baseline uploads only accept `.docx`.
 - Design approval uploads accept `.docx` plus `.pdf`.
 - Optional menu reference uploads accept `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, or `.pdf`.

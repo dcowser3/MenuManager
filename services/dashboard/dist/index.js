@@ -90,7 +90,31 @@ const FORM_ATTEMPT_ALERT_EMAIL = process.env.FORM_ATTEMPT_ALERT_EMAIL || 'dcowse
 const PUBLIC_FORM_SUPPORT_EMAIL = process.env.PUBLIC_FORM_SUPPORT_EMAIL || 'dcowser@richardsandoval.com';
 const DASHBOARD_URL = process.env.DASHBOARD_URL || 'http://localhost:3005';
 const JSON_BODY_LIMIT = process.env.DASHBOARD_JSON_BODY_LIMIT || process.env.JSON_BODY_LIMIT || '5mb';
+const ERROR_REPORT_JSON_BODY_LIMIT = process.env.ERROR_REPORT_JSON_BODY_LIMIT || '15mb';
+const ERROR_REPORT_BODY_SAFETY_BYTES = 512 * 1024;
+const ERROR_REPORT_CLIENT_MAX_BODY_BYTES = Math.max(1024 * 1024, parseBodyLimitBytes(ERROR_REPORT_JSON_BODY_LIMIT, 15 * 1024 * 1024) - ERROR_REPORT_BODY_SAFETY_BYTES);
+const ERROR_REPORT_TRIAGE_MODEL = process.env.ERROR_REPORT_TRIAGE_MODEL || process.env.IMPROVE_MODEL || process.env.AI_REVIEW_MODEL || 'gpt-4o-mini';
 const internalApi = (0, internal_auth_1.createInternalApiClient)(axios_1.default);
+function parseBodyLimitBytes(value, fallback) {
+    const text = `${value || ''}`.trim().toLowerCase();
+    if (!text)
+        return fallback;
+    const match = /^(\d+(?:\.\d+)?)\s*(b|kb|k|mb|m|gb|g)?$/.exec(text);
+    if (!match)
+        return fallback;
+    const amount = Number(match[1]);
+    if (!Number.isFinite(amount) || amount <= 0)
+        return fallback;
+    const unit = match[2] || 'b';
+    const multiplier = unit === 'gb' || unit === 'g'
+        ? 1024 * 1024 * 1024
+        : unit === 'mb' || unit === 'm'
+            ? 1024 * 1024
+            : unit === 'kb' || unit === 'k'
+                ? 1024
+                : 1;
+    return Math.floor(amount * multiplier);
+}
 function parsePositiveInteger(value, fallback) {
     const parsed = Number(value);
     if (!Number.isFinite(parsed) || parsed <= 0) {
@@ -501,11 +525,16 @@ app.get('/js/diff-core.js', (_req, res) => {
     res.sendFile(path.join(getRepoRoot(), 'services', 'diff-core', 'src', 'index.js'));
 });
 app.use(express_1.default.static(path.join(__dirname, 'public')));
+// Problem reports intentionally carry screenshot data + client state. Keep this
+// path-specific parser before the dashboard-wide 5mb form body limit.
+app.use('/api/form/error-report', express_1.default.json({ limit: ERROR_REPORT_JSON_BODY_LIMIT }));
 app.use(express_1.default.json({ limit: JSON_BODY_LIMIT }));
 app.use(express_1.default.urlencoded({ extended: false, limit: JSON_BODY_LIMIT }));
 app.use((error, _req, res, next) => {
     if (error?.type === 'entity.too.large') {
         const req = _req;
+        const isErrorReportRoute = (req.originalUrl || req.url || '').startsWith('/api/form/error-report');
+        const configuredLimit = isErrorReportRoute ? ERROR_REPORT_JSON_BODY_LIMIT : JSON_BODY_LIMIT;
         const attemptEvent = {
             attemptId: req.get('x-menumanager-attempt-id'),
             eventType: 'payload_too_large',
@@ -518,11 +547,11 @@ app.use((error, _req, res, next) => {
             submissionMode: req.get('x-menumanager-submit-mode'),
             revisionSource: req.get('x-menumanager-revision-source'),
             details: {
-                configuredLimit: JSON_BODY_LIMIT,
+                configuredLimit,
                 contentLength: req.get('content-length') || null,
                 method: req.method,
             },
-            errorMessage: `Request body exceeded ${JSON_BODY_LIMIT}`,
+            errorMessage: `Request body exceeded ${configuredLimit}`,
         };
         void (0, form_attempt_logging_1.logFormAttemptEvent)(attemptEvent);
         sendFormAttemptFailureEmail(attemptEvent);
@@ -530,7 +559,7 @@ app.use((error, _req, res, next) => {
             alert_type: 'form_payload_too_large',
             severity: 'warning',
             service: 'dashboard',
-            message: `Form request body exceeded ${JSON_BODY_LIMIT} on ${req.originalUrl || req.url}`,
+            message: `Form request body exceeded ${configuredLimit} on ${req.originalUrl || req.url}`,
             details: {
                 attemptId: req.get('x-menumanager-attempt-id') || null,
                 route: req.originalUrl || req.url,
@@ -540,11 +569,13 @@ app.use((error, _req, res, next) => {
                 property: req.get('x-menumanager-property') || null,
                 submissionMode: req.get('x-menumanager-submit-mode') || null,
                 revisionSource: req.get('x-menumanager-revision-source') || null,
-                configuredLimit: JSON_BODY_LIMIT,
+                configuredLimit,
             },
         });
         return res.status(413).json({
-            error: `Submission payload is too large. Reduce pasted rich formatting or email ${PUBLIC_FORM_SUPPORT_EMAIL} if the menu content must exceed ${JSON_BODY_LIMIT}.`,
+            error: isErrorReportRoute
+                ? `Problem report payload is too large. Email ${PUBLIC_FORM_SUPPORT_EMAIL} with screenshots if this keeps blocking you.`
+                : `Submission payload is too large. Reduce pasted rich formatting or email ${PUBLIC_FORM_SUPPORT_EMAIL} if the menu content must exceed ${JSON_BODY_LIMIT}.`,
         });
     }
     if (error instanceof SyntaxError && 'body' in error) {
@@ -752,6 +783,7 @@ app.get('/form', async (_req, res) => {
         propertyOptions,
         propertyCatalog,
         supportEmail: PUBLIC_FORM_SUPPORT_EMAIL,
+        errorReportMaxBodyBytes: ERROR_REPORT_CLIENT_MAX_BODY_BYTES,
     });
 });
 /**
@@ -2014,9 +2046,67 @@ const ERROR_REPORT_COOLDOWN_MS = 15 * 1000;
 function getErrorReportsDir() {
     return path.join(getRepoRoot(), 'tmp', 'error-reports');
 }
+function generateErrorReportIncidentId() {
+    const timestamp = new Date().toISOString()
+        .replace(/[-:]/g, '')
+        .replace(/\.\d{3}Z$/, 'Z');
+    return `err-${timestamp}-${crypto_1.default.randomUUID().slice(0, 8)}`;
+}
+async function requestErrorReportAiTriage(report, incident) {
+    if (!(0, error_report_1.shouldRunErrorReportAiTriage)()) {
+        return '';
+    }
+    const apiKey = process.env.OPENAI_API_KEY;
+    const prompt = (0, error_report_1.buildErrorReportTriagePrompt)(report, incident);
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+            Authorization: `Bearer ${apiKey}`,
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+            model: ERROR_REPORT_TRIAGE_MODEL,
+            temperature: 0.2,
+            messages: [
+                {
+                    role: 'system',
+                    content: 'You are a senior production support engineer for Menu Manager. Be concise, practical, and explicit about uncertainty.',
+                },
+                { role: 'user', content: prompt },
+            ],
+        }),
+    });
+    if (!response.ok) {
+        const body = await response.text().catch(() => '');
+        throw new Error(`OpenAI triage request failed (${response.status}): ${body.slice(0, 400)}`);
+    }
+    const data = await response.json();
+    return data?.choices?.[0]?.message?.content || '';
+}
+async function sendErrorReportAiTriageEmail(report, incident) {
+    if (!(0, alert_mail_1.canSendAlertMail)(alertMailDeps) || !FORM_ATTEMPT_ALERT_EMAIL || !(0, error_report_1.shouldRunErrorReportAiTriage)()) {
+        return;
+    }
+    const proposal = await requestErrorReportAiTriage(report, incident);
+    if (!proposal.trim()) {
+        return;
+    }
+    const { subject, html } = (0, error_report_1.buildErrorReportTriageEmail)(report, incident, proposal, {
+        model: ERROR_REPORT_TRIAGE_MODEL,
+        dashboardUrl: DASHBOARD_URL,
+    });
+    const result = await (0, alert_mail_1.sendAlertMail)({
+        fromName: 'Menu Manager Alerts',
+        to: FORM_ATTEMPT_ALERT_EMAIL,
+        subject,
+        html,
+    }, alertMailDeps);
+    console.log(`AI triage for error report ${incident.incidentId} emailed to ${FORM_ATTEMPT_ALERT_EMAIL} via ${result.transport}`);
+}
 app.post('/api/form/error-report', async (req, res) => {
     try {
         const report = (0, error_report_1.normalizeErrorReport)(req.body);
+        const incidentId = generateErrorReportIncidentId();
         const cooldownKey = report.attemptId || req.ip || 'unknown';
         const lastReport = errorReportCooldowns.get(cooldownKey) || 0;
         if (Date.now() - lastReport < ERROR_REPORT_COOLDOWN_MS) {
@@ -2026,13 +2116,16 @@ app.post('/api/form/error-report', async (req, res) => {
         const screenshot = (0, error_report_1.decodeScreenshotDataUrl)(req.body?.screenshotDataUrl);
         const stateJson = JSON.stringify(report.state ?? {}, null, 2);
         // Disk copy first so the report survives even when SMTP/Supabase are unavailable.
-        const reportDirName = `${new Date().toISOString().replace(/[:.]/g, '-')}-${report.attemptId.replace(/[^a-zA-Z0-9_-]/g, '')}`.slice(0, 120);
-        const reportDir = path.join(getErrorReportsDir(), reportDirName);
+        const reportDir = path.join(getErrorReportsDir(), incidentId);
         let savedTo = null;
         try {
             await fs_1.promises.mkdir(reportDir, { recursive: true });
             const { state, ...summary } = report;
-            await fs_1.promises.writeFile(path.join(reportDir, 'report.json'), JSON.stringify(summary, null, 2));
+            await fs_1.promises.writeFile(path.join(reportDir, 'report.json'), JSON.stringify({
+                incidentId,
+                savedAt: new Date().toISOString(),
+                ...summary,
+            }, null, 2));
             await fs_1.promises.writeFile(path.join(reportDir, 'client-state.json'), stateJson);
             if (screenshot) {
                 await fs_1.promises.writeFile(path.join(reportDir, `screenshot.${screenshot.extension}`), screenshot.buffer);
@@ -2053,6 +2146,7 @@ app.post('/api/form/error-report', async (req, res) => {
             submissionMode: report.submissionMode,
             errorMessage: report.context || 'User clicked Report this problem',
             details: {
+                incidentId,
                 trigger: report.trigger,
                 pageUrl: report.pageUrl,
                 userAgent: report.userAgent,
@@ -2070,36 +2164,30 @@ app.post('/api/form/error-report', async (req, res) => {
         let emailQueued = false;
         if ((0, alert_mail_1.canSendAlertMail)(alertMailDeps) && FORM_ATTEMPT_ALERT_EMAIL && (0, error_report_1.shouldEmailErrorReport)()) {
             const { subject, html } = (0, error_report_1.buildErrorReportEmail)(report, {
+                incidentId,
+                savedTo,
+                stateJsonLength: stateJson.length,
+                screenshotBytes: screenshot?.buffer.length || 0,
                 hasScreenshot: !!screenshot,
                 dashboardUrl: DASHBOARD_URL,
             });
-            const attachments = [
-                { filename: 'client-state.json', content: stateJson, contentType: 'application/json' },
-            ];
-            if (screenshot) {
-                attachments.push({
-                    filename: `screenshot.${screenshot.extension}`,
-                    content: screenshot.buffer,
-                    contentType: screenshot.contentType,
-                });
-            }
             emailQueued = true;
             (0, alert_mail_1.sendAlertMail)({
                 fromName: 'Menu Manager Alerts',
                 to: FORM_ATTEMPT_ALERT_EMAIL,
                 subject,
                 html,
-                attachments,
             }, alertMailDeps).then((result) => {
-                console.log(`Error report ${report.attemptId} emailed to ${FORM_ATTEMPT_ALERT_EMAIL} via ${result.transport}${result.attachmentsDropped ? ' (attachments dropped for size)' : ''}`);
+                console.log(`Error report ${incidentId} emailed to ${FORM_ATTEMPT_ALERT_EMAIL} via ${result.transport}`);
             }).catch((mailError) => {
                 console.error('Failed to email error report:', mailError.message);
                 (0, supabase_client_1.logAlert)({
                     alert_type: 'error_report_email_failed',
                     severity: 'warning',
                     service: 'dashboard',
-                    message: `Could not email user problem report ${report.attemptId} (saved at ${savedTo || 'disk save failed'})`,
+                    message: `Could not email user problem report ${incidentId} (saved at ${savedTo || 'disk save failed'})`,
                     details: {
+                        incidentId,
                         attemptId: report.attemptId,
                         smtpError: mailError.message,
                         savedTo,
@@ -2108,7 +2196,27 @@ app.post('/api/form/error-report', async (req, res) => {
                 });
             });
         }
-        res.json({ success: true, emailQueued });
+        void sendErrorReportAiTriageEmail(report, {
+            incidentId,
+            savedTo,
+            stateJsonLength: stateJson.length,
+            screenshotBytes: screenshot?.buffer.length || 0,
+        }).catch((triageError) => {
+            console.error('Failed to generate/email AI triage for problem report:', triageError.message);
+            (0, supabase_client_1.logAlert)({
+                alert_type: 'error_report_ai_triage_failed',
+                severity: 'warning',
+                service: 'dashboard',
+                message: `Could not generate AI triage proposal for user problem report ${incidentId}`,
+                details: {
+                    incidentId,
+                    attemptId: report.attemptId,
+                    error: triageError.message,
+                    savedTo,
+                },
+            });
+        });
+        res.json({ success: true, incidentId, emailQueued });
     }
     catch (error) {
         console.error('Error handling problem report:', error.message);

@@ -224,6 +224,8 @@ The approval editor route remains `/approval/<submissionId>`. In local mode, sub
 - In production only, these public-form failure events send an email to `FORM_ATTEMPT_ALERT_EMAIL` (default `dcowser@richardsandoval.com`) through the dashboard SMTP settings. If no email arrives, check SMTP credentials and the dashboard logs for `Failed to send form attempt alert email`.
 - Submitters also see `PUBLIC_FORM_SUPPORT_EMAIL` in blocking/red form errors so they have a direct fallback while SMTP alerting is being configured; the support copy asks them to include screenshots with the email.
 
+If the failure is from the **"Report this problem"** button instead of final submit, `/api/form/error-report` uses its own `ERROR_REPORT_JSON_BODY_LIMIT` parser (default `15mb`) before the dashboard-wide 5 MB parser. The client measures UTF-8 bytes, keeps the screenshot when possible, and compacts/minimizes state before dropping the screenshot as a final fallback. A production `error_report_client_failed` event with `status 413` usually means the deployed form is stale, `dist/views/form.ejs` was not rebuilt, `ERROR_REPORT_JSON_BODY_LIMIT` is lower than expected, or the fronting proxy/body limit is below the app limit. Successful reports save full details under `tmp/error-reports/<incidentId>/`; use the incident id from the email to inspect `report.json`, `client-state.json`, and any screenshot.
+
 If ClickUp approval is updating the `submissions` row but you are not seeing rows in `approved_dishes`, test the extractor directly before debugging webhook delivery:
 
 ```bash

@@ -21,3 +21,4 @@ Catalog of design decisions and feature documentation for Menu Manager.
 | [Learning Pipeline v2](learning-pipeline-v2.md) | Design | Human-in-the-loop prompt evolution: no auto-injection, rich correction context, weekly LLM prompt rewrite |
 | [Automated Improvement Loop](automated-improvement-loop.md) | In progress | Daily gated cycle: new corrections → LLM proposal (prompt + rules) → eval against historical menus → human approval |
 | [User Error Reports](user-error-reports.md) | Complete | One-click "Report this problem" button that emails support a full-page screenshot + client form-state JSON |
+| [Production Support Auto-Triage](production-support-auto-triage.md) | Design | Future auto-reply flow for obvious AI false-positive blockers reported from production |

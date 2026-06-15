@@ -35,6 +35,13 @@ export interface DecodedScreenshot {
     extension: 'png' | 'jpg';
 }
 
+export interface ErrorReportIncidentMetadata {
+    incidentId: string;
+    savedTo?: string | null;
+    stateJsonLength?: number;
+    screenshotBytes?: number;
+}
+
 function text(value: unknown, maxLength: number, multiline = false): string {
     return sanitizePlainTextInput(value, { maxLength, multiline });
 }
@@ -133,6 +140,15 @@ export function shouldEmailErrorReport(env: Record<string, string | undefined> =
     return ['1', 'true', 'yes', 'on'].includes(`${env.ERROR_REPORT_FORCE_EMAIL || ''}`.trim().toLowerCase());
 }
 
+export function shouldRunErrorReportAiTriage(env: Record<string, string | undefined> = process.env): boolean {
+    const disabled = ['1', 'true', 'yes', 'on'].includes(`${env.ERROR_REPORT_AI_TRIAGE_DISABLED || ''}`.trim().toLowerCase());
+    if (disabled) return false;
+    const hasKey = !!env.OPENAI_API_KEY && env.OPENAI_API_KEY !== 'your-openai-api-key-here';
+    if (!hasKey) return false;
+    if (env.NODE_ENV === 'production') return true;
+    return ['1', 'true', 'yes', 'on'].includes(`${env.ERROR_REPORT_AI_TRIAGE_FORCE || ''}`.trim().toLowerCase());
+}
+
 function escapeHtml(value: unknown): string {
     return `${value ?? ''}`
         .replace(/&/g, '&amp;')
@@ -144,12 +160,13 @@ function escapeHtml(value: unknown): string {
 
 export function buildErrorReportEmail(
     report: NormalizedErrorReport,
-    options: { hasScreenshot: boolean; dashboardUrl?: string }
+    options: { hasScreenshot: boolean; dashboardUrl?: string } & ErrorReportIncidentMetadata
 ): { subject: string; html: string } {
     const subjectTarget = report.projectName || report.property || report.submitterEmail || report.attemptId;
-    const subject = `[Menu Manager] User problem report: ${subjectTarget}`;
+    const subject = `[Menu Manager] Incident ${options.incidentId}: ${subjectTarget}`;
 
     const rows: Array<[string, string]> = [
+        ['Incident ID', options.incidentId],
         ['Reported By', [report.submitterName, report.submitterEmail].filter(Boolean).join(' — ')],
         ['Property', report.property],
         ['Project', report.projectName],
@@ -160,7 +177,9 @@ export function buildErrorReportEmail(
         ['Page', report.pageUrl],
         ['Viewport', report.viewport],
         ['Browser', report.userAgent],
-        ['Screenshot', options.hasScreenshot ? 'Attached' : `Not captured${report.screenshotError ? ` (${report.screenshotError})` : ''}`],
+        ['Saved On Server', options.savedTo || 'not saved'],
+        ['State JSON', `${options.stateJsonLength || 0} chars saved`],
+        ['Screenshot', options.hasScreenshot ? `${options.screenshotBytes || 0} bytes saved on server` : `Not captured${report.screenshotError ? ` (${report.screenshotError})` : ''}`],
     ];
 
     const htmlRows = rows
@@ -181,13 +200,115 @@ export function buildErrorReportEmail(
 
     const html = [
         '<div style="font-family:Arial,sans-serif;font-size:14px;color:#222">',
-        '<h2 style="margin:0 0 12px">A submitter clicked “Report this problem”</h2>',
-        '<p style="margin:0 0 14px">The full client-side form state is attached as <strong>client-state.json</strong>; the page screenshot is attached when capture succeeded.</p>',
+        `<h2 style="margin:0 0 12px">Incident ${escapeHtml(options.incidentId)} reported from the public form</h2>`,
+        '<p style="margin:0 0 14px">The full report is saved by the dashboard. Use the incident id with Codex/support to inspect the saved JSON, screenshot, and attempt telemetry.</p>',
         `<table style="border-collapse:collapse;border:1px solid #ddd">${htmlRows}</table>`,
         alertsBlock,
         dashboardLink,
         '</div>',
     ].join('');
 
+    return { subject, html };
+}
+
+function compactForPrompt(value: unknown, depth = 0): any {
+    if (value === null || value === undefined) return value ?? null;
+    if (depth >= 4) return '[max depth reached]';
+    if (typeof value === 'string') {
+        if (value.length <= 5000) return value;
+        return `${value.slice(0, 5000)}... [truncated ${value.length - 5000} chars]`;
+    }
+    if (typeof value === 'number' || typeof value === 'boolean') return value;
+    if (Array.isArray(value)) return value.slice(0, 40).map((item) => compactForPrompt(item, depth + 1));
+    if (typeof value === 'object') {
+        return Object.fromEntries(
+            Object.entries(value as Record<string, unknown>)
+                .slice(0, 80)
+                .map(([key, entryValue]) => [key, compactForPrompt(entryValue, depth + 1)])
+        );
+    }
+    return `${value}`;
+}
+
+export function buildErrorReportTriagePrompt(
+    report: NormalizedErrorReport,
+    incident: ErrorReportIncidentMetadata
+): string {
+    const state = report.state || {};
+    const compactState = {
+        page: state.page,
+        appState: state.appState,
+        aiCheck: state.aiCheck,
+        menuEditor: state.menuEditor
+            ? {
+                menuTextLength: state.menuEditor.menuTextLength,
+                menuHtmlLength: state.menuEditor.menuHtmlLength,
+                menuTextPreview: compactForPrompt(state.menuEditor.menuText || ''),
+                menuHtmlPreview: compactForPrompt(state.menuEditor.menuHtml || ''),
+            }
+            : undefined,
+        recentAlerts: state.recentAlerts || report.recentAlerts,
+    };
+
+    return [
+        'You are triaging a production Menu Manager public-form incident.',
+        '',
+        'App context:',
+        '- Menu Manager is an Express/EJS microservice app for chef menu submission review.',
+        '- Dashboard service runs the public form, Basic AI Check, modification/redline flows, and ClickUp handoff.',
+        '- Problem reports are saved under tmp/error-reports/<incidentId>/ with report.json, client-state.json, and screenshot when captured.',
+        '- Common failure areas: payload/body limits, stale Basic AI Check state, uploaded-unapproved redline extraction, critical AI suggestions, form validation, DB/Supabase persistence, ClickUp handoff, Graph/SMTP alert mail.',
+        '',
+        'Write a concise engineering triage proposal with:',
+        '1. likely cause',
+        '2. evidence from the incident',
+        '3. immediate operator action',
+        '4. recommended code/config fix',
+        '5. what to verify next',
+        '',
+        'Incident metadata:',
+        JSON.stringify({
+            incidentId: incident.incidentId,
+            savedTo: incident.savedTo || null,
+            stateJsonLength: incident.stateJsonLength || 0,
+            screenshotBytes: incident.screenshotBytes || 0,
+            attemptId: report.attemptId,
+            trigger: report.trigger,
+            context: report.context,
+            pageUrl: report.pageUrl,
+            submitterEmail: report.submitterEmail,
+            property: report.property,
+            projectName: report.projectName,
+            submissionMode: report.submissionMode,
+            userAgent: report.userAgent,
+            viewport: report.viewport,
+            screenshotError: report.screenshotError,
+            recentAlerts: report.recentAlerts,
+        }, null, 2),
+        '',
+        'Compact client state:',
+        JSON.stringify(compactForPrompt(compactState), null, 2),
+    ].join('\n');
+}
+
+export function buildErrorReportTriageEmail(
+    report: NormalizedErrorReport,
+    incident: ErrorReportIncidentMetadata,
+    proposal: string,
+    options: { model: string; dashboardUrl?: string }
+): { subject: string; html: string } {
+    const subjectTarget = report.projectName || report.property || report.submitterEmail || report.attemptId;
+    const subject = `[Menu Manager] AI triage for ${incident.incidentId}: ${subjectTarget}`;
+    const dashboardLink = options.dashboardUrl
+        ? `<p style="margin-top:18px"><a href="${escapeHtml(options.dashboardUrl)}/learning">Open form attempts dashboard</a></p>`
+        : '';
+    const html = [
+        '<div style="font-family:Arial,sans-serif;font-size:14px;color:#222">',
+        `<h2 style="margin:0 0 12px">AI triage proposal for ${escapeHtml(incident.incidentId)}</h2>`,
+        `<p style="margin:0 0 12px;color:#555">Model: ${escapeHtml(options.model)}. Saved report: ${escapeHtml(incident.savedTo || 'not saved')}.</p>`,
+        `<pre style="white-space:pre-wrap;background:#f7f7f7;border:1px solid #ddd;padding:12px">${escapeHtml(proposal)}</pre>`,
+        dashboardLink,
+        '</div>',
+    ].join('');
     return { subject, html };
 }

@@ -355,6 +355,38 @@ describe('Dashboard Modification Workflow (local, mocked externals)', () => {
         expect(submissionCall[1].menu_content_html).toContain('Guacamole with roasted poblano salsa');
     });
 
+    test('accepts problem reports larger than the dashboard form JSON limit', async () => {
+        const response = await postJsonOverHttp('/api/form/error-report', {
+            attemptId: `error-report-large-${Date.now()}`,
+            trigger: 'critical_error_banner',
+            context: 'Resolve or override all critical errors before submitting.',
+            pageUrl: 'http://localhost:3005/form',
+            userAgent: 'jest',
+            viewport: '1440x900 @2x',
+            submitterEmail: 'chef@example.com',
+            projectName: 'Dinner a la carte',
+            property: 'Aqimero - Ritz-Carlton - Philadelphia',
+            submissionMode: 'modification',
+            recentAlerts: [{ time: '2026-06-15T12:00:00.000Z', type: 'error', message: 'critical blocker' }],
+            screenshotDataUrl: null,
+            state: {
+                menuEditor: {
+                    menuTextLength: 6_000_000,
+                    menuHtmlLength: 6_000_000,
+                    menuText: 'Guacamole '.repeat(600_000),
+                },
+            },
+        });
+
+        expect(response.status).toBe(200);
+        expect(response.body.success).toBe(true);
+        expect(response.body.incidentId).toMatch(/^err-/);
+        expect(fs.promises.writeFile).toHaveBeenCalledWith(
+            expect.stringContaining('client-state.json'),
+            expect.any(String)
+        );
+    });
+
     test('lists missing required fields when submit validation fails', async () => {
         const response = await invokeJsonHandler(submitHandler, buildNewSubmissionPayload({
             submitterEmail: '',

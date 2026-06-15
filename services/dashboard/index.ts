@@ -53,9 +53,12 @@ import {
 import { logFormAttemptEvent } from './lib/form-attempt-logging';
 import {
     buildErrorReportEmail,
+    buildErrorReportTriageEmail,
+    buildErrorReportTriagePrompt,
     decodeScreenshotDataUrl,
     normalizeErrorReport,
     shouldEmailErrorReport,
+    shouldRunErrorReportAiTriage,
 } from './lib/error-report';
 import {
     buildGraphMailConfig,
@@ -127,7 +130,32 @@ const FORM_ATTEMPT_ALERT_EMAIL = process.env.FORM_ATTEMPT_ALERT_EMAIL || 'dcowse
 const PUBLIC_FORM_SUPPORT_EMAIL = process.env.PUBLIC_FORM_SUPPORT_EMAIL || 'dcowser@richardsandoval.com';
 const DASHBOARD_URL = process.env.DASHBOARD_URL || 'http://localhost:3005';
 const JSON_BODY_LIMIT = process.env.DASHBOARD_JSON_BODY_LIMIT || process.env.JSON_BODY_LIMIT || '5mb';
+const ERROR_REPORT_JSON_BODY_LIMIT = process.env.ERROR_REPORT_JSON_BODY_LIMIT || '15mb';
+const ERROR_REPORT_BODY_SAFETY_BYTES = 512 * 1024;
+const ERROR_REPORT_CLIENT_MAX_BODY_BYTES = Math.max(
+    1024 * 1024,
+    parseBodyLimitBytes(ERROR_REPORT_JSON_BODY_LIMIT, 15 * 1024 * 1024) - ERROR_REPORT_BODY_SAFETY_BYTES
+);
+const ERROR_REPORT_TRIAGE_MODEL = process.env.ERROR_REPORT_TRIAGE_MODEL || process.env.IMPROVE_MODEL || process.env.AI_REVIEW_MODEL || 'gpt-4o-mini';
 const internalApi = createInternalApiClient(axios);
+
+function parseBodyLimitBytes(value: string | undefined, fallback: number): number {
+    const text = `${value || ''}`.trim().toLowerCase();
+    if (!text) return fallback;
+    const match = /^(\d+(?:\.\d+)?)\s*(b|kb|k|mb|m|gb|g)?$/.exec(text);
+    if (!match) return fallback;
+    const amount = Number(match[1]);
+    if (!Number.isFinite(amount) || amount <= 0) return fallback;
+    const unit = match[2] || 'b';
+    const multiplier = unit === 'gb' || unit === 'g'
+        ? 1024 * 1024 * 1024
+        : unit === 'mb' || unit === 'm'
+            ? 1024 * 1024
+            : unit === 'kb' || unit === 'k'
+                ? 1024
+                : 1;
+    return Math.floor(amount * multiplier);
+}
 
 function parsePositiveInteger(value: string | undefined, fallback: number): number {
     const parsed = Number(value);
@@ -634,11 +662,16 @@ app.get('/js/diff-core.js', (_req, res) => {
     res.sendFile(path.join(getRepoRoot(), 'services', 'diff-core', 'src', 'index.js'));
 });
 app.use(express.static(path.join(__dirname, 'public')));
+// Problem reports intentionally carry screenshot data + client state. Keep this
+// path-specific parser before the dashboard-wide 5mb form body limit.
+app.use('/api/form/error-report', express.json({ limit: ERROR_REPORT_JSON_BODY_LIMIT }));
 app.use(express.json({ limit: JSON_BODY_LIMIT }));
 app.use(express.urlencoded({ extended: false, limit: JSON_BODY_LIMIT }));
 app.use((error: any, _req: express.Request, res: express.Response, next: express.NextFunction) => {
     if (error?.type === 'entity.too.large') {
         const req = _req as express.Request;
+        const isErrorReportRoute = (req.originalUrl || req.url || '').startsWith('/api/form/error-report');
+        const configuredLimit = isErrorReportRoute ? ERROR_REPORT_JSON_BODY_LIMIT : JSON_BODY_LIMIT;
         const attemptEvent = {
             attemptId: req.get('x-menumanager-attempt-id'),
             eventType: 'payload_too_large',
@@ -651,11 +684,11 @@ app.use((error: any, _req: express.Request, res: express.Response, next: express
             submissionMode: req.get('x-menumanager-submit-mode'),
             revisionSource: req.get('x-menumanager-revision-source'),
             details: {
-                configuredLimit: JSON_BODY_LIMIT,
+                configuredLimit,
                 contentLength: req.get('content-length') || null,
                 method: req.method,
             },
-            errorMessage: `Request body exceeded ${JSON_BODY_LIMIT}`,
+            errorMessage: `Request body exceeded ${configuredLimit}`,
         };
         void logFormAttemptEvent(attemptEvent);
         sendFormAttemptFailureEmail(attemptEvent);
@@ -663,7 +696,7 @@ app.use((error: any, _req: express.Request, res: express.Response, next: express
             alert_type: 'form_payload_too_large',
             severity: 'warning',
             service: 'dashboard',
-            message: `Form request body exceeded ${JSON_BODY_LIMIT} on ${req.originalUrl || req.url}`,
+            message: `Form request body exceeded ${configuredLimit} on ${req.originalUrl || req.url}`,
             details: {
                 attemptId: req.get('x-menumanager-attempt-id') || null,
                 route: req.originalUrl || req.url,
@@ -673,11 +706,13 @@ app.use((error: any, _req: express.Request, res: express.Response, next: express
                 property: req.get('x-menumanager-property') || null,
                 submissionMode: req.get('x-menumanager-submit-mode') || null,
                 revisionSource: req.get('x-menumanager-revision-source') || null,
-                configuredLimit: JSON_BODY_LIMIT,
+                configuredLimit,
             },
         });
         return res.status(413).json({
-            error: `Submission payload is too large. Reduce pasted rich formatting or email ${PUBLIC_FORM_SUPPORT_EMAIL} if the menu content must exceed ${JSON_BODY_LIMIT}.`,
+            error: isErrorReportRoute
+                ? `Problem report payload is too large. Email ${PUBLIC_FORM_SUPPORT_EMAIL} with screenshots if this keeps blocking you.`
+                : `Submission payload is too large. Reduce pasted rich formatting or email ${PUBLIC_FORM_SUPPORT_EMAIL} if the menu content must exceed ${JSON_BODY_LIMIT}.`,
         });
     }
     if (error instanceof SyntaxError && 'body' in error) {
@@ -932,6 +967,7 @@ app.get('/form', async (_req, res) => {
         propertyOptions,
         propertyCatalog,
         supportEmail: PUBLIC_FORM_SUPPORT_EMAIL,
+        errorReportMaxBodyBytes: ERROR_REPORT_CLIENT_MAX_BODY_BYTES,
     });
 });
 
@@ -2316,9 +2352,80 @@ function getErrorReportsDir(): string {
     return path.join(getRepoRoot(), 'tmp', 'error-reports');
 }
 
+function generateErrorReportIncidentId(): string {
+    const timestamp = new Date().toISOString()
+        .replace(/[-:]/g, '')
+        .replace(/\.\d{3}Z$/, 'Z');
+    return `err-${timestamp}-${crypto.randomUUID().slice(0, 8)}`;
+}
+
+async function requestErrorReportAiTriage(report: ReturnType<typeof normalizeErrorReport>, incident: {
+    incidentId: string;
+    savedTo: string | null;
+    stateJsonLength: number;
+    screenshotBytes: number;
+}): Promise<string> {
+    if (!shouldRunErrorReportAiTriage()) {
+        return '';
+    }
+    const apiKey = process.env.OPENAI_API_KEY;
+    const prompt = buildErrorReportTriagePrompt(report, incident);
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+            Authorization: `Bearer ${apiKey}`,
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+            model: ERROR_REPORT_TRIAGE_MODEL,
+            temperature: 0.2,
+            messages: [
+                {
+                    role: 'system',
+                    content: 'You are a senior production support engineer for Menu Manager. Be concise, practical, and explicit about uncertainty.',
+                },
+                { role: 'user', content: prompt },
+            ],
+        }),
+    });
+    if (!response.ok) {
+        const body = await response.text().catch(() => '');
+        throw new Error(`OpenAI triage request failed (${response.status}): ${body.slice(0, 400)}`);
+    }
+    const data: any = await response.json();
+    return data?.choices?.[0]?.message?.content || '';
+}
+
+async function sendErrorReportAiTriageEmail(report: ReturnType<typeof normalizeErrorReport>, incident: {
+    incidentId: string;
+    savedTo: string | null;
+    stateJsonLength: number;
+    screenshotBytes: number;
+}): Promise<void> {
+    if (!canSendAlertMail(alertMailDeps) || !FORM_ATTEMPT_ALERT_EMAIL || !shouldRunErrorReportAiTriage()) {
+        return;
+    }
+    const proposal = await requestErrorReportAiTriage(report, incident);
+    if (!proposal.trim()) {
+        return;
+    }
+    const { subject, html } = buildErrorReportTriageEmail(report, incident, proposal, {
+        model: ERROR_REPORT_TRIAGE_MODEL,
+        dashboardUrl: DASHBOARD_URL,
+    });
+    const result = await sendAlertMail({
+        fromName: 'Menu Manager Alerts',
+        to: FORM_ATTEMPT_ALERT_EMAIL,
+        subject,
+        html,
+    }, alertMailDeps);
+    console.log(`AI triage for error report ${incident.incidentId} emailed to ${FORM_ATTEMPT_ALERT_EMAIL} via ${result.transport}`);
+}
+
 app.post('/api/form/error-report', async (req, res) => {
     try {
         const report = normalizeErrorReport(req.body);
+        const incidentId = generateErrorReportIncidentId();
 
         const cooldownKey = report.attemptId || req.ip || 'unknown';
         const lastReport = errorReportCooldowns.get(cooldownKey) || 0;
@@ -2331,13 +2438,16 @@ app.post('/api/form/error-report', async (req, res) => {
         const stateJson = JSON.stringify(report.state ?? {}, null, 2);
 
         // Disk copy first so the report survives even when SMTP/Supabase are unavailable.
-        const reportDirName = `${new Date().toISOString().replace(/[:.]/g, '-')}-${report.attemptId.replace(/[^a-zA-Z0-9_-]/g, '')}`.slice(0, 120);
-        const reportDir = path.join(getErrorReportsDir(), reportDirName);
+        const reportDir = path.join(getErrorReportsDir(), incidentId);
         let savedTo: string | null = null;
         try {
             await fs.mkdir(reportDir, { recursive: true });
             const { state, ...summary } = report;
-            await fs.writeFile(path.join(reportDir, 'report.json'), JSON.stringify(summary, null, 2));
+            await fs.writeFile(path.join(reportDir, 'report.json'), JSON.stringify({
+                incidentId,
+                savedAt: new Date().toISOString(),
+                ...summary,
+            }, null, 2));
             await fs.writeFile(path.join(reportDir, 'client-state.json'), stateJson);
             if (screenshot) {
                 await fs.writeFile(path.join(reportDir, `screenshot.${screenshot.extension}`), screenshot.buffer);
@@ -2358,6 +2468,7 @@ app.post('/api/form/error-report', async (req, res) => {
             submissionMode: report.submissionMode,
             errorMessage: report.context || 'User clicked Report this problem',
             details: {
+                incidentId,
                 trigger: report.trigger,
                 pageUrl: report.pageUrl,
                 userAgent: report.userAgent,
@@ -2376,36 +2487,30 @@ app.post('/api/form/error-report', async (req, res) => {
         let emailQueued = false;
         if (canSendAlertMail(alertMailDeps) && FORM_ATTEMPT_ALERT_EMAIL && shouldEmailErrorReport()) {
             const { subject, html } = buildErrorReportEmail(report, {
+                incidentId,
+                savedTo,
+                stateJsonLength: stateJson.length,
+                screenshotBytes: screenshot?.buffer.length || 0,
                 hasScreenshot: !!screenshot,
                 dashboardUrl: DASHBOARD_URL,
             });
-            const attachments: any[] = [
-                { filename: 'client-state.json', content: stateJson, contentType: 'application/json' },
-            ];
-            if (screenshot) {
-                attachments.push({
-                    filename: `screenshot.${screenshot.extension}`,
-                    content: screenshot.buffer,
-                    contentType: screenshot.contentType,
-                });
-            }
             emailQueued = true;
             sendAlertMail({
                 fromName: 'Menu Manager Alerts',
                 to: FORM_ATTEMPT_ALERT_EMAIL,
                 subject,
                 html,
-                attachments,
             }, alertMailDeps).then((result) => {
-                console.log(`Error report ${report.attemptId} emailed to ${FORM_ATTEMPT_ALERT_EMAIL} via ${result.transport}${result.attachmentsDropped ? ' (attachments dropped for size)' : ''}`);
+                console.log(`Error report ${incidentId} emailed to ${FORM_ATTEMPT_ALERT_EMAIL} via ${result.transport}`);
             }).catch((mailError: any) => {
                 console.error('Failed to email error report:', mailError.message);
                 logAlert({
                     alert_type: 'error_report_email_failed',
                     severity: 'warning',
                     service: 'dashboard',
-                    message: `Could not email user problem report ${report.attemptId} (saved at ${savedTo || 'disk save failed'})`,
+                    message: `Could not email user problem report ${incidentId} (saved at ${savedTo || 'disk save failed'})`,
                     details: {
+                        incidentId,
                         attemptId: report.attemptId,
                         smtpError: mailError.message,
                         savedTo,
@@ -2414,8 +2519,28 @@ app.post('/api/form/error-report', async (req, res) => {
                 });
             });
         }
+        void sendErrorReportAiTriageEmail(report, {
+            incidentId,
+            savedTo,
+            stateJsonLength: stateJson.length,
+            screenshotBytes: screenshot?.buffer.length || 0,
+        }).catch((triageError: any) => {
+            console.error('Failed to generate/email AI triage for problem report:', triageError.message);
+            logAlert({
+                alert_type: 'error_report_ai_triage_failed',
+                severity: 'warning',
+                service: 'dashboard',
+                message: `Could not generate AI triage proposal for user problem report ${incidentId}`,
+                details: {
+                    incidentId,
+                    attemptId: report.attemptId,
+                    error: triageError.message,
+                    savedTo,
+                },
+            });
+        });
 
-        res.json({ success: true, emailQueued });
+        res.json({ success: true, incidentId, emailQueued });
     } catch (error: any) {
         console.error('Error handling problem report:', error.message);
         res.status(500).json({ error: 'Failed to send problem report' });

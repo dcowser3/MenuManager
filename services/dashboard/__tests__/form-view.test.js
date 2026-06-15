@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const vm = require('vm');
 
 describe('dashboard form modification source chooser', () => {
     test('defaults to modification mode without choosing a modification source', () => {
@@ -251,6 +252,17 @@ describe('dashboard form modification source chooser', () => {
         expect(template).toContain("script.src = '/js/html2canvas.min.js';");
         expect(template).toContain('function collectClientStateSnapshot()');
         expect(template).toContain('function collectFormFieldValues()');
+        expect(template).toContain('function normalizeScreenshotCloneForHtml2Canvas(clonedDocument)');
+        expect(template).toContain('onclone: normalizeScreenshotCloneForHtml2Canvas');
+        expect(template).not.toContain('color-mix(');
+        expect(template).toContain('const REPORT_MAX_BODY_BYTES = <%= errorReportMaxBodyBytes %>;');
+        expect(template).toContain('function serializeProblemReportPayload(payload, state)');
+        expect(template).toContain('byteLength(body) <= REPORT_MAX_BODY_BYTES');
+        expect(template).toContain('buildCompactProblemReportState(state)');
+        expect(template).toContain('buildMinimalProblemReportState(state)');
+        expect(template).toContain('state snapshot minimized to stay under report payload limit');
+        expect(template).not.toContain('REPORT_MAX_BODY_CHARS');
+        expect(template).toContain('const incidentNote = data.incidentId');
         expect(template).toContain("fetch('/api/form/error-report'");
         expect(template).toContain('function recordClientAlert(type, message)');
         expect(template).toContain('recordClientAlert(type, message);');
@@ -262,6 +274,117 @@ describe('dashboard form modification source chooser', () => {
         expect(sendingLabelIndex).toBeGreaterThan(captureIndex);
         // The failure alert must not offer another report button (no loops).
         expect(template).toContain('noReportAction: true');
+    });
+
+    test('problem report screenshot helper converts Safari CSS color functions', () => {
+        const template = fs.readFileSync(
+            path.join(__dirname, '..', 'views', 'form.ejs'),
+            'utf8'
+        );
+        const start = template.indexOf('function parseScreenshotColorComponent(value)');
+        const end = template.indexOf('async function capturePageScreenshot()');
+        expect(start).toBeGreaterThan(-1);
+        expect(end).toBeGreaterThan(start);
+
+        const helperCode = template.slice(start, end);
+        const sandbox = { result: null };
+        vm.runInNewContext(`
+            ${helperCode}
+            result = {
+                srgb: fallbackCssColorForScreenshot('color(srgb 0.12 0.34 0.56 / 0.7)'),
+                displayP3: fallbackCssColorForScreenshot('color(display-p3 1 50% 0)'),
+                normalRgb: fallbackCssColorForScreenshot('rgb(1, 2, 3)')
+            };
+        `, sandbox);
+
+        expect(sandbox.result.srgb).toBe('rgba(31, 87, 143, 0.7)');
+        expect(sandbox.result.displayP3).toBe('rgb(255, 127, 0)');
+        expect(sandbox.result.normalRgb).toBeNull();
+    });
+
+    test('problem report serializer compacts oversized payloads by byte size', () => {
+        const template = fs.readFileSync(
+            path.join(__dirname, '..', 'views', 'form.ejs'),
+            'utf8'
+        );
+        const start = template.indexOf('function truncateReportText(value, maxChars)');
+        const end = template.indexOf('async function sendProblemReport(options)');
+        expect(start).toBeGreaterThan(-1);
+        expect(end).toBeGreaterThan(start);
+
+        const serializerCode = template.slice(start, end);
+        const sandbox = {
+            Buffer,
+            result: null,
+        };
+        vm.runInNewContext(`
+            function byteLength(value) {
+                const text = typeof value === 'string' ? value : JSON.stringify(value || '');
+                return Buffer.byteLength(text, 'utf8');
+            }
+            const REPORT_MAX_BODY_BYTES = 14000000;
+            ${serializerCode}
+            const state = {
+                capturedAt: '2026-06-15T12:00:00.000Z',
+                page: { url: 'http://localhost:3005/form', userAgent: 'jest', viewport: '1440x900 @2x' },
+                fields: { projectName: 'Dinner', pastedRichText: 'é'.repeat(4000000) },
+                menuEditor: {
+                    menuTextLength: 4000000,
+                    menuHtmlLength: 4000000,
+                    menuText: 'é'.repeat(4000000),
+                    menuHtml: '<p>' + 'é'.repeat(4000000) + '</p>'
+                },
+                appState: { submissionMode: 'modification', revisionSource: 'uploaded_unapproved', persistentDiffHtmlLength: 1500000 },
+                aiCheck: { hasRun: true, hasCriticalErrors: true, suggestions: [{ message: 'Missing price'.repeat(10000) }] },
+                recentAlerts: [{ time: '2026-06-15T12:00:00.000Z', type: 'error', message: 'critical blocker' }]
+            };
+            const payload = {
+                attemptId: 'attempt-oversized',
+                trigger: 'critical_error_banner',
+                context: 'Resolve critical errors',
+                pageUrl: state.page.url,
+                userAgent: state.page.userAgent,
+                viewport: state.page.viewport,
+                submitterEmail: 'chef@example.com',
+                projectName: 'Dinner',
+                property: 'Aqimero',
+                submissionMode: 'modification',
+                recentAlerts: state.recentAlerts,
+                screenshotError: '',
+                screenshotDataUrl: 'data:image/jpeg;base64,' + 'A'.repeat(3500000),
+                state
+            };
+            const body = serializeProblemReportPayload(payload, state);
+            result = { bytes: byteLength(body), parsed: JSON.parse(body) };
+        `, sandbox);
+
+        expect(sandbox.result.bytes).toBeLessThanOrEqual(14000000);
+        expect(sandbox.result.parsed.screenshotDataUrl).toContain('data:image/jpeg;base64,');
+        expect(sandbox.result.parsed.screenshotError).not.toContain('screenshot dropped');
+        expect(sandbox.result.parsed.state.droppedReason).toContain('compact state');
+        expect(sandbox.result.parsed.state.menuEditor.menuText.length).toBeLessThan(100000);
+    });
+
+    test('final submit success clears stale error report alerts', () => {
+        const template = fs.readFileSync(
+            path.join(__dirname, '..', 'views', 'form.ejs'),
+            'utf8'
+        );
+        const submitStart = template.indexOf('async function submitMenu(skipAiReview = false)');
+        const submitEnd = template.indexOf('function prepareForNextSubmission()');
+        expect(submitStart).toBeGreaterThan(-1);
+        expect(submitEnd).toBeGreaterThan(submitStart);
+
+        const submitCode = template.slice(submitStart, submitEnd);
+        const successAlertIndex = submitCode.indexOf("showAlert('Menu submitted successfully. Sent to ClickUp for team review. You can submit another menu now.', 'success');");
+        const clearIndex = submitCode.lastIndexOf('clearErrorAlerts();', successAlertIndex);
+        expect(successAlertIndex).toBeGreaterThan(-1);
+        expect(clearIndex).toBeGreaterThan(-1);
+
+        const prepareStart = submitEnd;
+        const prepareEnd = template.indexOf('function escapeHtml(text)', prepareStart);
+        const prepareCode = template.slice(prepareStart, prepareEnd);
+        expect(prepareCode).toContain('clearErrorAlerts();');
     });
 
     test('allows final submit after edits made following the second AI check', () => {

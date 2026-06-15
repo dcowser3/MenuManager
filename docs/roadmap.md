@@ -38,6 +38,7 @@
 - **Extended menu content validation**: Additional critical error types beyond prices and dish names (e.g., missing allergen codes). The severity/blocking infrastructure is already in place.
 - **Approved dishes search/review tools**: Expand the searchable approved-dishes data into dedicated reviewer/admin workflows.
 - **ClickUp-linked browser approval workflow**: Local prototype is implemented for testing. The next step is validating end-to-end reviewer usage and deciding whether to keep both the browser and Word-doc approval paths. See `docs/design-docs/clickup-linked-approval-workflow-proposal.md`.
+- **Production support auto-triage**: Classify user-initiated problem reports and, for allowlisted AI false-positive blockers, automatically email submitters with safe override guidance. See `docs/design-docs/production-support-auto-triage.md`.
 
 ## Planned Services
 
