@@ -179,14 +179,51 @@ function findLatestEvalReport() {
     return dirs.length ? path.join(root, dirs[0], 'report.json') : null;
 }
 
-async function sendProposalEmail({ cycleId, evalStatus, evalSummary, correctionCount, ruleCount, recommendationCount }) {
+// Build the same Graph + SMTP mail deps the dashboard uses for alert email, so
+// the cycle delivers through whatever transport is configured (previously it
+// passed smtpTransporter:null and could only use Graph). On Lightsail, Graph
+// (HTTPS) is the working transport since outbound port 25 is blocked.
+function buildCycleMailDeps(alertMail) {
+    const deps = { graphConfig: alertMail.buildGraphMailConfig(), smtpTransporter: null, smtpFromAddress: '' };
+    try {
+        const { buildSmtpRuntimeConfig } = requireDashboardLib('smtp-config');
+        const smtpConfig = buildSmtpRuntimeConfig();
+        if (smtpConfig.enabled && smtpConfig.transportOptions) {
+            const nodemailer = require(require.resolve('nodemailer', {
+                paths: [path.join(repoRoot, 'services', 'dashboard'), repoRoot],
+            }));
+            deps.smtpTransporter = nodemailer.createTransport(smtpConfig.transportOptions);
+            deps.smtpFromAddress = smtpConfig.fromAddress;
+        }
+    } catch (error) {
+        console.warn(`SMTP transport unavailable for cycle email: ${error.message}`);
+    }
+    return deps;
+}
+
+async function recordEmailAlert(supabase, severity, message, details) {
+    try {
+        await supabase.from('system_alerts').insert({
+            alert_type: 'improvement_cycle_email_failed',
+            severity,
+            service: 'improvement-cycle',
+            message,
+            details,
+        });
+    } catch (error) {
+        console.warn(`Could not record email alert: ${error.message}`);
+    }
+}
+
+async function sendProposalEmail(supabase, { cycleId, evalStatus, evalSummary, correctionCount, ruleCount, recommendationCount }) {
+    const to = process.env.IMPROVE_NOTIFY_EMAIL || process.env.FORM_ATTEMPT_ALERT_EMAIL || 'dcowser@richardsandoval.com';
     try {
         const alertMail = requireDashboardLib('alert-mail');
-        const graphConfig = alertMail.buildGraphMailConfig();
-        const deps = { graphConfig, smtpTransporter: null, smtpFromAddress: '' };
-        const to = process.env.IMPROVE_NOTIFY_EMAIL || process.env.FORM_ATTEMPT_ALERT_EMAIL || 'dcowser@richardsandoval.com';
-        if (!to || !alertMail.canSendAlertMail(deps)) {
-            console.log('Notification email skipped (no recipient or mail transport configured).');
+        const deps = buildCycleMailDeps(alertMail);
+        if (!alertMail.canSendAlertMail(deps)) {
+            const msg = `Proposal ${cycleId} is ready but no mail transport is configured (Graph needs GRAPH_MAILBOX_ADDRESS + Mail.Send consent; SMTP port 25 is blocked on Lightsail). Review it at /learning/prompt-proposal.`;
+            console.log(msg);
+            await recordEmailAlert(supabase, 'warning', msg, { cycleId, recipient: to, reason: 'no_transport' });
             return;
         }
         const baseUrl = (process.env.DASHBOARD_PUBLIC_URL || 'http://localhost:3005').replace(/\/+$/, '');
@@ -211,7 +248,9 @@ async function sendProposalEmail({ cycleId, evalStatus, evalSummary, correctionC
         }, deps);
         console.log(`Notification email sent to ${to}.`);
     } catch (error) {
-        console.warn(`Notification email failed: ${error.message}`);
+        const msg = `Proposal ${cycleId} email failed to send to ${to}: ${error.message}. Review it at /learning/prompt-proposal.`;
+        console.warn(msg);
+        await recordEmailAlert(supabase, 'warning', msg, { cycleId, recipient: to, error: error.message });
     }
 }
 
@@ -469,7 +508,7 @@ async function main() {
         if (evalSummary) {
             await fsp.writeFile(path.join(artifactsDir, 'eval_summary.json'), JSON.stringify(evalSummary, null, 2));
         }
-        await sendProposalEmail({
+        await sendProposalEmail(supabase, {
             cycleId,
             evalStatus,
             evalSummary,
