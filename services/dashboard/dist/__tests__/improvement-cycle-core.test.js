@@ -137,6 +137,35 @@ describe('eval summary + status', () => {
         expect((0, improvement_cycle_core_1.evalStatusFromSummary)({ ...summary, candidate: null })).toBe('failed');
     });
 });
+describe('evaluateSecretExpiry', () => {
+    const now = Date.parse('2026-06-15T00:00:00Z');
+    test('unknown when unset or unparseable', () => {
+        expect((0, improvement_cycle_core_1.evaluateSecretExpiry)('', now).status).toBe('unknown');
+        expect((0, improvement_cycle_core_1.evaluateSecretExpiry)(undefined, now).status).toBe('unknown');
+        expect((0, improvement_cycle_core_1.evaluateSecretExpiry)('not-a-date', now).status).toBe('unknown');
+    });
+    test('ok well before expiry', () => {
+        const r = (0, improvement_cycle_core_1.evaluateSecretExpiry)('2026-12-01', now);
+        expect(r.status).toBe('ok');
+        expect(r.daysLeft).toBeGreaterThan(30);
+    });
+    test('warning within the threshold window', () => {
+        const r = (0, improvement_cycle_core_1.evaluateSecretExpiry)('2026-07-01', now, 30);
+        expect(r.status).toBe('warning');
+        expect(r.daysLeft).toBe(16);
+        expect(r.message).toContain('expires in 16');
+    });
+    test('expired after the date', () => {
+        const r = (0, improvement_cycle_core_1.evaluateSecretExpiry)('2026-06-01', now);
+        expect(r.status).toBe('expired');
+        expect(r.daysLeft).toBeLessThan(0);
+        expect(r.message).toContain('EXPIRED');
+    });
+    test('custom warn window', () => {
+        expect((0, improvement_cycle_core_1.evaluateSecretExpiry)('2026-08-01', now, 30).status).toBe('ok');
+        expect((0, improvement_cycle_core_1.evaluateSecretExpiry)('2026-08-01', now, 90).status).toBe('warning');
+    });
+});
 describe('buildCodeRecommendationIssue', () => {
     test('builds a self-contained issue with checklist, manifest pointers, and label', () => {
         const issue = (0, improvement_cycle_core_1.buildCodeRecommendationIssue)({

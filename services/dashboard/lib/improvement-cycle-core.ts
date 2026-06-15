@@ -8,6 +8,47 @@ export type CycleGateInput = {
     minNewCorrections: number;
 };
 
+export type SecretExpiryStatus = 'unknown' | 'ok' | 'warning' | 'expired';
+
+// Azure client secrets expire and then fail silently, taking down ALL Graph
+// features at once (alert/proposal email + SharePoint). Track the expiry date
+// in GRAPH_CLIENT_SECRET_EXPIRES (YYYY-MM-DD, from Azure) so we can warn ahead
+// of time instead of discovering it from a mystery outage.
+export function evaluateSecretExpiry(
+    expiresIso: string | undefined | null,
+    nowMs: number,
+    warnDays = 30
+): { status: SecretExpiryStatus; daysLeft: number | null; message: string } {
+    const raw = `${expiresIso || ''}`.trim();
+    if (!raw) {
+        return {
+            status: 'unknown',
+            daysLeft: null,
+            message: 'GRAPH_CLIENT_SECRET_EXPIRES is not set — secret-expiry monitoring is off. Set it to the secret\'s Azure expiry date (YYYY-MM-DD) to get advance warnings.',
+        };
+    }
+    const expMs = Date.parse(raw);
+    if (!Number.isFinite(expMs)) {
+        return { status: 'unknown', daysLeft: null, message: `GRAPH_CLIENT_SECRET_EXPIRES="${raw}" is not a valid date (use YYYY-MM-DD).` };
+    }
+    const daysLeft = Math.floor((expMs - nowMs) / 86_400_000);
+    if (daysLeft < 0) {
+        return {
+            status: 'expired',
+            daysLeft,
+            message: `Graph client secret EXPIRED ${-daysLeft} day(s) ago (${raw}). Email and SharePoint will fail until you create a new secret in Azure and update GRAPH_CLIENT_SECRET + GRAPH_CLIENT_SECRET_EXPIRES on the host.`,
+        };
+    }
+    if (daysLeft <= warnDays) {
+        return {
+            status: 'warning',
+            daysLeft,
+            message: `Graph client secret expires in ${daysLeft} day(s) (${raw}). Rotate it in Azure and update GRAPH_CLIENT_SECRET + GRAPH_CLIENT_SECRET_EXPIRES before then to avoid an email/SharePoint outage.`,
+        };
+    }
+    return { status: 'ok', daysLeft, message: `Graph client secret valid for ${daysLeft} more day(s) (expires ${raw}).` };
+}
+
 export function shouldRunCycle(input: CycleGateInput): { run: boolean; reason: string } {
     if (input.pendingProposalExists) {
         return { run: false, reason: 'a pending proposal is already awaiting review' };

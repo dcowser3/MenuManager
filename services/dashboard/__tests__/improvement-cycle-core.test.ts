@@ -2,6 +2,7 @@ import {
     buildCodeRecommendationIssue,
     buildProposalEvalSummary,
     evalStatusFromSummary,
+    evaluateSecretExpiry,
     mapProposedRuleToCorrectionRulePayload,
     pickEffectivePrompt,
     shouldRunCycle,
@@ -167,6 +168,41 @@ describe('eval summary + status', () => {
         expect(evalStatusFromSummary(null)).toBe('skipped');
         expect(evalStatusFromSummary({ ...summary, error: 'boom' } as any)).toBe('failed');
         expect(evalStatusFromSummary({ ...summary, candidate: null } as any)).toBe('failed');
+    });
+});
+
+describe('evaluateSecretExpiry', () => {
+    const now = Date.parse('2026-06-15T00:00:00Z');
+
+    test('unknown when unset or unparseable', () => {
+        expect(evaluateSecretExpiry('', now).status).toBe('unknown');
+        expect(evaluateSecretExpiry(undefined, now).status).toBe('unknown');
+        expect(evaluateSecretExpiry('not-a-date', now).status).toBe('unknown');
+    });
+
+    test('ok well before expiry', () => {
+        const r = evaluateSecretExpiry('2026-12-01', now);
+        expect(r.status).toBe('ok');
+        expect(r.daysLeft).toBeGreaterThan(30);
+    });
+
+    test('warning within the threshold window', () => {
+        const r = evaluateSecretExpiry('2026-07-01', now, 30);
+        expect(r.status).toBe('warning');
+        expect(r.daysLeft).toBe(16);
+        expect(r.message).toContain('expires in 16');
+    });
+
+    test('expired after the date', () => {
+        const r = evaluateSecretExpiry('2026-06-01', now);
+        expect(r.status).toBe('expired');
+        expect(r.daysLeft).toBeLessThan(0);
+        expect(r.message).toContain('EXPIRED');
+    });
+
+    test('custom warn window', () => {
+        expect(evaluateSecretExpiry('2026-08-01', now, 30).status).toBe('ok');
+        expect(evaluateSecretExpiry('2026-08-01', now, 90).status).toBe('warning');
     });
 });
 

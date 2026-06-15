@@ -105,6 +105,7 @@ import {
 } from './lib/review-pipeline';
 import {
     buildCodeRecommendationIssue,
+    evaluateSecretExpiry,
     mapProposedRuleToCorrectionRulePayload,
     pickEffectivePrompt,
 } from './lib/improvement-cycle-core';
@@ -4298,6 +4299,8 @@ if (require.main === module) {
         } else {
             console.log('   Alert mail: NO transport configured — emails will not send. Set GRAPH_MAILBOX_ADDRESS + GRAPH_CLIENT_ID/TENANT_ID/CLIENT_SECRET (Graph) for Lightsail.');
         }
+        const secretExpiry = evaluateSecretExpiry(process.env.GRAPH_CLIENT_SECRET_EXPIRES, Date.now());
+        console.log(`   Graph secret: ${secretExpiry.message}`);
     });
 }
 

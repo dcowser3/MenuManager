@@ -248,9 +248,40 @@ async function sendProposalEmail(supabase, { cycleId, evalStatus, evalSummary, c
         }, deps);
         console.log(`Notification email sent to ${to}.`);
     } catch (error) {
-        const msg = `Proposal ${cycleId} email failed to send to ${to}: ${error.message}. Review it at /learning/prompt-proposal.`;
+        const looksLikeSecretExpiry = /AADSTS7000222|AADSTS700024|invalid_client|expired|invalid client secret/i.test(error.message || '');
+        const hint = looksLikeSecretExpiry
+            ? ' This looks like an expired/invalid Graph client secret — create a new one in Azure and update GRAPH_CLIENT_SECRET + GRAPH_CLIENT_SECRET_EXPIRES.'
+            : '';
+        const msg = `Proposal ${cycleId} email failed to send to ${to}: ${error.message}.${hint} Review it at /learning/prompt-proposal.`;
         console.warn(msg);
-        await recordEmailAlert(supabase, 'warning', msg, { cycleId, recipient: to, error: error.message });
+        await recordEmailAlert(supabase, looksLikeSecretExpiry ? 'error' : 'warning', msg, { cycleId, recipient: to, error: error.message, likelySecretExpiry: looksLikeSecretExpiry });
+    }
+}
+
+// Daily Graph client-secret expiry check. Runs before the gate so it fires
+// every day regardless of whether a proposal is generated. Secrets fail
+// silently on expiry and take down all Graph features (email + SharePoint).
+async function checkGraphSecretExpiry(supabase, core) {
+    const result = core.evaluateSecretExpiry(process.env.GRAPH_CLIENT_SECRET_EXPIRES, Date.now());
+    if (result.status === 'ok') {
+        console.log(result.message);
+        return;
+    }
+    if (result.status === 'unknown') {
+        console.warn(result.message);
+        return;
+    }
+    console.warn(`GRAPH SECRET ${result.status.toUpperCase()}: ${result.message}`);
+    try {
+        await supabase.from('system_alerts').insert({
+            alert_type: `graph_secret_${result.status}`,
+            severity: result.status === 'expired' ? 'error' : 'warning',
+            service: 'improvement-cycle',
+            message: result.message,
+            details: { daysLeft: result.daysLeft, expires: process.env.GRAPH_CLIENT_SECRET_EXPIRES || null },
+        });
+    } catch (error) {
+        console.warn(`Could not record secret-expiry alert: ${error.message}`);
     }
 }
 
@@ -263,6 +294,9 @@ async function main() {
 
     console.log(`Improvement Cycle — ${cycleId}`);
     console.log('='.repeat(50));
+
+    // Daily health check (runs even when the gate below skips the cycle).
+    await checkGraphSecretExpiry(supabase, core);
 
     // Idempotency: one proposal per day.
     const { data: existing } = await supabase

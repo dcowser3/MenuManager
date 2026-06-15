@@ -3825,6 +3825,8 @@ if (require.main === module) {
         else {
             console.log('   Alert mail: NO transport configured — emails will not send. Set GRAPH_MAILBOX_ADDRESS + GRAPH_CLIENT_ID/TENANT_ID/CLIENT_SECRET (Graph) for Lightsail.');
         }
+        const secretExpiry = (0, improvement_cycle_core_1.evaluateSecretExpiry)(process.env.GRAPH_CLIENT_SECRET_EXPIRES, Date.now());
+        console.log(`   Graph secret: ${secretExpiry.message}`);
     });
 }
 exports.default = app;
