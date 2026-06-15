@@ -4287,6 +4287,17 @@ if (require.main === module) {
         console.log(`   Form submission: http://localhost:${port}/form`);
         console.log(`   Design approval: http://localhost:${port}/design-approval`);
         console.log(`   Training dashboard: http://localhost:${port}/training`);
+        // Surface alert-mail transport state so a misconfigured prod env (the
+        // reason cron/proposal emails silently don't send) is visible in logs.
+        const graphReady = graphMailConfig.enabled;
+        const smtpReady = !!alertTransporter;
+        if (graphReady) {
+            console.log(`   Alert mail: Graph enabled (sends as ${graphMailConfig.mailboxAddress})${smtpReady ? ' + SMTP fallback' : ''}`);
+        } else if (smtpReady) {
+            console.log('   Alert mail: SMTP only (Graph disabled — set GRAPH_MAILBOX_ADDRESS; note Lightsail blocks outbound port 25)');
+        } else {
+            console.log('   Alert mail: NO transport configured — emails will not send. Set GRAPH_MAILBOX_ADDRESS + GRAPH_CLIENT_ID/TENANT_ID/CLIENT_SECRET (Graph) for Lightsail.');
+        }
     });
 }
 
