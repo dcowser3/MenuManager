@@ -103,6 +103,42 @@ describe('reconcileCriticalSuggestionsAgainstCorrectedMenuWithDiagnostics', () =
         expect(result.droppedSuggestions[0].reason).toBe('critical_resolved_in_corrected_menu');
         expect(result.suggestions.map((s) => s.menuItem)).toEqual(['TACOS', 'TACOS']);
     });
+    test('drops incomplete-dish-name false positives for standalone selection instructions', () => {
+        const corrected = [
+            'Specialties',
+            'choose one',
+            'Avocado Toast, sourdough bread, sunny-side-up egg G,V',
+        ].join('\n');
+        const result = (0, review_pipeline_1.reconcileCriticalSuggestionsAgainstCorrectedMenuWithDiagnostics)(corrected, [
+            {
+                type: 'Incomplete Dish Name',
+                severity: 'critical',
+                menuItem: 'choose one',
+                description: "The instruction 'choose one' does not provide a valid dish name.",
+                recommendation: 'Consider renaming or providing a dish name.',
+            },
+        ]);
+        expect(result.suggestions).toEqual([]);
+        expect(result.droppedSuggestions).toHaveLength(1);
+        expect(result.droppedSuggestions[0]).toMatchObject({
+            reason: 'critical_false_positive_selection_instruction',
+            matchedLine: 'choose one',
+        });
+    });
+    test('keeps incomplete-dish-name criticals for description-only dish rows', () => {
+        const corrected = 'Specialties\ngrilled, served with salsa 24';
+        const result = (0, review_pipeline_1.reconcileCriticalSuggestionsAgainstCorrectedMenuWithDiagnostics)(corrected, [
+            {
+                type: 'Incomplete Dish Name',
+                severity: 'critical',
+                menuItem: 'grilled, served with salsa 24',
+                description: 'This item is missing a dish name.',
+                recommendation: 'Add a dish name.',
+            },
+        ]);
+        expect(result.droppedSuggestions).toEqual([]);
+        expect(result.suggestions).toHaveLength(1);
+    });
 });
 describe('runPostAiPipeline (full guard chain)', () => {
     const menu = 'DINNER MENU\n\nGUACAMOLE\nfresh avocado, lime 12\n\nCAESAR SALAD\nromaine, parmesan 14';
@@ -157,5 +193,34 @@ describe('runPostAiPipeline (full guard chain)', () => {
         });
         expect(result.hasCriticalErrors).toBe(true);
         expect(result.criticalSuggestions.map((s) => s.type)).toEqual(expect.arrayContaining(['PRICING STRUCTURE', 'COURSE NUMBERING']));
+    });
+    test('does not block submission when AI flags a choice instruction as an incomplete dish name', () => {
+        const brunchMenu = [
+            'Endless Bubbles & Brunch',
+            'Includes 4 courses & endless bubbly cocktails 85',
+            '',
+            'Specialties',
+            'choose one',
+            'Avocado Toast, sourdough bread, sunny-side-up egg G,V',
+        ].join('\n');
+        const result = (0, review_pipeline_1.runPostAiPipeline)({
+            feedback: buildFeedback(brunchMenu, [
+                {
+                    type: 'Incomplete Dish Name',
+                    severity: 'critical',
+                    confidence: 'critical',
+                    menuItem: 'choose one',
+                    description: "The instruction 'choose one' does not provide a valid dish name.",
+                    recommendation: 'Consider renaming or providing a dish name.',
+                },
+            ]),
+            preCheckedReviewBody: brunchMenu,
+            acceptedCorrectionRules: [],
+            embeddedSetMenuAnalysis: { sections: [], issues: [] },
+            precheckEnabled: false,
+        });
+        expect(result.hasCriticalErrors).toBe(false);
+        expect(result.criticalSuggestions).toEqual([]);
+        expect(result.reconciliation.droppedSuggestions[0].reason).toBe('critical_false_positive_selection_instruction');
     });
 });

@@ -27,6 +27,7 @@ Critical errors are detected and enforced across three layers. This is not a cle
 
 ### Layer 1: AI Prompt (`sop-processor/qa_prompt.txt`)
 Tells the AI which suggestion types to mark `severity: "critical"`. The AI may or may not comply.
+The prompt also tells the model that standalone selection instructions such as `choose one`, `choice of one`, `select two`, and `pick your entree` are not dish entries and should not be flagged as incomplete dish names or missing prices.
 
 ### Layer 2: Severity Normalizer (`services/dashboard/index.ts` → `parseAIResponse`)
 A backend safety net that forces `critical` severity on known types regardless of what the AI returned:
@@ -62,6 +63,8 @@ Filters out critical suggestions where the corrected menu already resolved the i
 Missing-price reconciliation also handles add-on/enhancement rows. If the AI reports an item such as `add mushrooms`, the matcher checks both the full phrase and the option name without the leading add-on verb, so a same-line option like `add chorizo 5 | mushrooms V 4` counts as priced and does not block submission.
 
 Missing-price reconciliation treats a bare trailing whole number as a valid price even without allergen codes before it. If the model wraps an item into a continuation line, such as splitting `Short Rib al Carbón, ... roasted tomato salsa,` from `butter lettuce, pickled red onion 54`, the matcher joins likely continuation lines before checking for the trailing price.
+
+Incomplete-dish-name reconciliation drops model false positives on short standalone selection instructions. Lines such as `choose one`, `choice of one`, `select two`, and `pick your entree` are preserved in the corrected menu but treated as menu instructions, not dish entries, so they do not block submission.
 
 ### Auto-Applied Objective Corrections (`applyHighConfidenceSuggestionsToMenu`)
 Before critical blocking is calculated, the dashboard applies exact objective spelling/grammar recommendations such as `Change 'avocad' to 'avocado'` to the corrected menu text when the target token is still present. If the corrected menu already contains the replacement, the stale suggestion is removed. High-confidence raw-item asterisk suggestions are also applied before allergen/price suffixes. This is intentionally defensive because the model can occasionally put an auto-correctable fix in SUGGESTIONS or mark it as `critical`; these items should appear as applied AI changes, not chef-blocking errors.

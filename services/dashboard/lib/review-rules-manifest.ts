@@ -222,6 +222,16 @@ const FUNCTIONAL_ENTRIES: ManifestRuleEntry[] = [
         source: 'code_metadata',
     },
     {
+        id: 'reconcile/selection-instruction-critical-filter',
+        layer: 'reconciliation',
+        category: 'severity',
+        title: 'Selection instruction critical false-positive filter',
+        description: 'Incomplete Dish Name critical suggestions are dropped when the matched line is a standalone selection instruction such as "choose one", "choice of one", "select two", or "pick your entree". These lines are preserved as menu instructions, not dish entries.',
+        examples: [{ before: 'choose one -> Incomplete Dish Name critical', after: 'choose one -> no blocker' }],
+        implementation: { file: REVIEW_PIPELINE_FILE, exportName: 'reconcileCriticalSuggestionsAgainstCorrectedMenuWithDiagnostics' },
+        source: 'code_metadata',
+    },
+    {
         id: 'reconcile/prix-fixe-enforcement',
         layer: 'reconciliation',
         category: 'prix_fixe',

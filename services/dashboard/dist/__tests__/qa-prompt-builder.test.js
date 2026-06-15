@@ -22,6 +22,7 @@ describe('buildFinalPrompt (extracted from handleBasicCheck)', () => {
             'footer_rules',
             'add_on_price_rules',
             'standard_item_price_rules',
+            'selection_instruction_rules',
         ]);
         expect(prompt.startsWith(BASE_PROMPT)).toBe(true);
         expect(prompt).toContain('IMPORTANT CORRECTED MENU STRUCTURE RULES:');
@@ -31,6 +32,8 @@ describe('buildFinalPrompt (extracted from handleBasicCheck)', () => {
         expect(prompt).toContain('add chorizo 5 | mushrooms V 4');
         expect(prompt).toContain('IMPORTANT STANDARD ITEM PRICE RULES:');
         expect(prompt).toContain('Short Rib al Carbón');
+        expect(prompt).toContain('IMPORTANT SELECTION INSTRUCTION RULES:');
+        expect(prompt).toContain('choose one');
         expect(prompt).not.toContain('PRIX FIXE / PRE-FIX MENU RULES');
         expect(prompt).not.toContain('IMPORTANT PRE-AI DETERMINISTIC CHECKS');
         expect(prompt).not.toContain('IMPORTANT SCOPE FOR THIS REVIEW');
@@ -84,6 +87,7 @@ describe('buildFinalPrompt (extracted from handleBasicCheck)', () => {
             'footer_rules',
             'add_on_price_rules',
             'standard_item_price_rules',
+            'selection_instruction_rules',
         ]);
         expect(prompt).toContain('You are reviewing ONLY changed excerpts from a menu revision.');
     });

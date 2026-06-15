@@ -157,6 +157,12 @@ Treats a trailing whole number as a valid price even without allergen codes befo
 
 - id: `prompt/standard_item_price_rules` · category: prompt · implementation: `services/dashboard/lib/qa-prompt-builder.ts#buildFinalPrompt`
 
+### Prompt section: selection_instruction_rules
+
+Treats standalone selection instructions such as "choose one" as menu instructions, not dish entries with incomplete names. Applies when: always.
+
+- id: `prompt/selection_instruction_rules` · category: prompt · implementation: `services/dashboard/lib/qa-prompt-builder.ts#buildFinalPrompt`
+
 ### Prompt section: embedded_set_menu_rules
 
 Explains detected embedded set-menu sections (package title + total price + choice-of headings) so included dishes are not flagged for missing prices. Applies when: embedded set-menu sections detected in a non prix-fixe menu.
@@ -277,6 +283,13 @@ The corrected menu is stripped of managed footer content (allergen legend, raw n
 Critical suggestions already resolved in the corrected menu are dropped: Missing Price when the matched line (including continuation lines) now ends in a price; Incomplete Dish Name when the line gained substance or the flagged token is gone.
 
 - id: `reconcile/critical-resolution` · category: severity · implementation: `services/dashboard/lib/review-pipeline.ts#reconcileCriticalSuggestionsAgainstCorrectedMenuWithDiagnostics`
+
+### Selection instruction critical false-positive filter
+
+Incomplete Dish Name critical suggestions are dropped when the matched line is a standalone selection instruction such as "choose one", "choice of one", "select two", or "pick your entree". These lines are preserved as menu instructions, not dish entries.
+- `choose one -> Incomplete Dish Name critical` -> `choose one -> no blocker`
+
+- id: `reconcile/selection-instruction-critical-filter` · category: severity · implementation: `services/dashboard/lib/review-pipeline.ts#reconcileCriticalSuggestionsAgainstCorrectedMenuWithDiagnostics`
 
 ### Prix-fixe deterministic critical checks
 

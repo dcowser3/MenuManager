@@ -94,6 +94,44 @@ function findCorrectedLineForMenuItem(correctedMenu, menuItem) {
     }
     return null;
 }
+function isLikelySelectionInstructionLine(line) {
+    const compact = (line || '').trim();
+    if (!compact || compact.length > 100)
+        return false;
+    if (/[,.]/.test(compact))
+        return false;
+    const normalized = normalizeForSuggestionMatch(compact);
+    if (!normalized)
+        return false;
+    const countWord = '(?:one|two|three|four|five|six|seven|eight|nine|ten|[1-9][0-9]?)';
+    const optionWord = '(?:appetizer|starter|entree|main|dessert|side|protein|course|dish|item|option|selection)s?';
+    const numberedInstructionPatterns = [
+        new RegExp(`^(?:please )?(?:choose|select|pick) (?:any |up to |one of |your )?${countWord}\\b(?: .*)?$`),
+        new RegExp(`^(?:your )?choice of (?:any )?${countWord}\\b(?: .*)?$`),
+    ];
+    const optionInstructionPatterns = [
+        new RegExp(`^(?:please )?(?:choose|select|pick) (?:your )?${optionWord}$`),
+        new RegExp(`^(?:your )?choice of ${optionWord}$`),
+    ];
+    return [...numberedInstructionPatterns, ...optionInstructionPatterns].some((pattern) => pattern.test(normalized));
+}
+function isIncompleteDishNameSelectionInstructionFalsePositive(suggestion, correctedMenu) {
+    const type = (suggestion.type || '').toLowerCase();
+    if (!type.includes('incomplete dish name'))
+        return null;
+    const menuItem = suggestion.menuItem || '';
+    const line = findCorrectedLineForMenuItem(correctedMenu, menuItem);
+    if (!line)
+        return null;
+    if (!isLikelySelectionInstructionLine(line))
+        return null;
+    const itemNorm = normalizeForSuggestionMatch(menuItem);
+    const lineNorm = normalizeForSuggestionMatch(line);
+    if (itemNorm !== lineNorm && !isLikelySelectionInstructionLine(menuItem)) {
+        return null;
+    }
+    return { matchedLine: line };
+}
 function isCriticalResolvedByCorrectedMenu(suggestion, correctedMenu) {
     const type = (suggestion.type || '').toLowerCase();
     const line = findCorrectedLineForMenuItem(correctedMenu, suggestion.menuItem || '');
@@ -133,6 +171,15 @@ function reconcileCriticalSuggestionsAgainstCorrectedMenuWithDiagnostics(correct
     for (const s of suggestions) {
         if (s.severity !== 'critical') {
             kept.push(s);
+            continue;
+        }
+        const selectionInstructionFalsePositive = isIncompleteDishNameSelectionInstructionFalsePositive(s, correctedMenu);
+        if (selectionInstructionFalsePositive) {
+            droppedSuggestions.push({
+                suggestion: s,
+                reason: 'critical_false_positive_selection_instruction',
+                matchedLine: selectionInstructionFalsePositive.matchedLine,
+            });
             continue;
         }
         if (isCriticalResolvedByCorrectedMenu(s, correctedMenu)) {

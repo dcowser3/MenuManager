@@ -1455,6 +1455,24 @@
       "source": "code_metadata"
     },
     {
+      "id": "reconcile/selection-instruction-critical-filter",
+      "layer": "reconciliation",
+      "category": "severity",
+      "title": "Selection instruction critical false-positive filter",
+      "description": "Incomplete Dish Name critical suggestions are dropped when the matched line is a standalone selection instruction such as \"choose one\", \"choice of one\", \"select two\", or \"pick your entree\". These lines are preserved as menu instructions, not dish entries.",
+      "examples": [
+        {
+          "before": "choose one -> Incomplete Dish Name critical",
+          "after": "choose one -> no blocker"
+        }
+      ],
+      "implementation": {
+        "file": "services/dashboard/lib/review-pipeline.ts",
+        "exportName": "reconcileCriticalSuggestionsAgainstCorrectedMenuWithDiagnostics"
+      },
+      "source": "code_metadata"
+    },
+    {
       "id": "reconcile/prix-fixe-enforcement",
       "layer": "reconciliation",
       "category": "prix_fixe",
@@ -1598,6 +1616,23 @@
       "data": {
         "sectionId": "standard_item_price_rules",
         "description": "Treats a trailing whole number as a valid price even without allergen codes before it.",
+        "appliesWhen": "always"
+      },
+      "source": "code_data"
+    },
+    {
+      "id": "prompt/selection_instruction_rules",
+      "layer": "prompt_section",
+      "category": "prompt",
+      "title": "Prompt section: selection_instruction_rules",
+      "description": "Treats standalone selection instructions such as \"choose one\" as menu instructions, not dish entries with incomplete names. Applies when: always.",
+      "implementation": {
+        "file": "services/dashboard/lib/qa-prompt-builder.ts",
+        "exportName": "buildFinalPrompt"
+      },
+      "data": {
+        "sectionId": "selection_instruction_rules",
+        "description": "Treats standalone selection instructions such as \"choose one\" as menu instructions, not dish entries with incomplete names.",
         "appliesWhen": "always"
       },
       "source": "code_data"

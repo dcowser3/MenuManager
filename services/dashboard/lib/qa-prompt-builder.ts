@@ -14,6 +14,7 @@ export type QaPromptSectionId =
     | 'footer_rules'
     | 'add_on_price_rules'
     | 'standard_item_price_rules'
+    | 'selection_instruction_rules'
     | 'embedded_set_menu_rules';
 
 // Registry of every runtime prompt section. Consumed by the review-rules
@@ -49,6 +50,10 @@ export const QA_PROMPT_SECTIONS: Record<QaPromptSectionId, { description: string
     },
     standard_item_price_rules: {
         description: 'Treats a trailing whole number as a valid price even without allergen codes before it.',
+        appliesWhen: 'always',
+    },
+    selection_instruction_rules: {
+        description: 'Treats standalone selection instructions such as "choose one" as menu instructions, not dish entries with incomplete names.',
         appliesWhen: 'always',
     },
     embedded_set_menu_rules: {
@@ -157,6 +162,9 @@ Note: Use ONLY these allergen codes when checking allergen compliance. Do not us
 
     finalPrompt = `${finalPrompt}\n\nIMPORTANT STANDARD ITEM PRICE RULES:\n- A trailing whole number at the end of a standard menu item is a valid price even when there are no allergen codes before it.\n- Do NOT flag a line like \"Short Rib al Carbón, housemade tomatillo sauce, pickled red onion 54\" as Missing Price.`;
     sections.push('standard_item_price_rules');
+
+    finalPrompt = `${finalPrompt}\n\nIMPORTANT SELECTION INSTRUCTION RULES:\n- Standalone choice/instruction lines such as \"choose one\", \"choice of one\", \"select two\", or \"pick your entree\" are not dish entries.\n- Preserve those instruction lines in CORRECTED MENU, but do NOT flag them as Incomplete Dish Name or Missing Price.`;
+    sections.push('selection_instruction_rules');
 
     if (ctx.embeddedSetMenuAnalysis.sections.length > 0) {
         finalPrompt = `${finalPrompt}\n\n${buildEmbeddedSetMenuPromptSection(ctx.embeddedSetMenuAnalysis as any)}`;
