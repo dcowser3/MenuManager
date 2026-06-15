@@ -217,6 +217,19 @@ describe('mapProposedRuleToCorrectionRulePayload', () => {
             restaurant_name: 'All RSH restaurants',
             reviewer_name: 'Derian',
         });
+        // Born consumed (by proposal id when no cycle given) so it does not
+        // re-enter the gate as a new correction next cycle.
+        expect(payload.prompt_cycle_id).toBe('proposal-abc-123');
+    });
+
+    test('marks the rule consumed by the proposal cycle when provided', () => {
+        const payload = mapProposedRuleToCorrectionRulePayload({
+            original_text: 'a', corrected_text: 'b', change_type: 'spelling', rule: 'why',
+            applies_to_menu_type: 'all', is_location_specific: false, location: null, other_applicable_locations: [],
+        }, 'p1', 0, null, { cycleId: '2026-06-13', consumedAt: '2026-06-13T12:00:00Z' });
+
+        expect(payload.prompt_cycle_id).toBe('2026-06-13');
+        expect(payload.consumed_at).toBe('2026-06-13T12:00:00Z');
     });
 
     test('keeps location fields for location-specific rules', () => {

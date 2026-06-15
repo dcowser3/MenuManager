@@ -126,6 +126,8 @@ type CorrectionRuleRecord = {
     occurrences: number;
     confidence: number | null;
     submission_ids: string[] | null;
+    prompt_cycle_id?: string | null;
+    consumed_at?: string | null;
     created_at?: string;
     updated_at?: string;
 };
@@ -892,6 +894,8 @@ function buildCorrectionRuleStorageRecord(record: any): CorrectionRuleRecord | n
         occurrences: Number(record.occurrences || 1),
         confidence: record.confidence || null,
         submission_ids: Array.isArray(record.submission_ids) ? record.submission_ids : null,
+        prompt_cycle_id: record.prompt_cycle_id || null,
+        consumed_at: record.consumed_at || null,
     };
 }
 

@@ -200,7 +200,7 @@ function evalStatusFromSummary(summary) {
 // buildCorrectionRuleRecord / POST /correction-rules. Status is accepted (the
 // human approved it on the proposal page); source stays 'system' so provenance
 // is clear in the learning dashboard.
-function mapProposedRuleToCorrectionRulePayload(rule, proposalId, index, reviewerName) {
+function mapProposedRuleToCorrectionRulePayload(rule, proposalId, index, reviewerName, opts = {}) {
     return {
         submission_id: `proposal-${proposalId}`,
         correction_id: `proposal-${proposalId}-rule-${index}`,
@@ -216,6 +216,11 @@ function mapProposedRuleToCorrectionRulePayload(rule, proposalId, index, reviewe
         reviewer_name: reviewerName,
         source: 'system',
         status: 'accepted',
+        // Born consumed by the proposal cycle that surfaced it, so an
+        // approval-inserted rule does not re-enter the gate as a "new"
+        // correction next cycle. (Fresh human-added rules stay unconsumed.)
+        prompt_cycle_id: opts.cycleId || `proposal-${proposalId}`,
+        consumed_at: opts.consumedAt || null,
     };
 }
 // Builds the GitHub issue filed when a reviewer approves a proposal that

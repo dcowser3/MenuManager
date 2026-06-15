@@ -825,6 +825,8 @@ function buildCorrectionRuleStorageRecord(record) {
         occurrences: Number(record.occurrences || 1),
         confidence: record.confidence || null,
         submission_ids: Array.isArray(record.submission_ids) ? record.submission_ids : null,
+        prompt_cycle_id: record.prompt_cycle_id || null,
+        consumed_at: record.consumed_at || null,
     };
 }
 async function readLocalCorrectionRules() {

@@ -2034,7 +2034,10 @@ app.post('/api/learning/prompt-proposal/:id/review', async (req, res) => {
         for (const [position, rule] of acceptedRules.entries()) {
             const index = selectedIndexes[position];
             try {
-                const payload = mapProposedRuleToCorrectionRulePayload(rule, id, index, reviewer_name || null);
+                const payload = mapProposedRuleToCorrectionRulePayload(rule, id, index, reviewer_name || null, {
+                    cycleId: proposalRecord?.cycle_id || `proposal-${id}`,
+                    consumedAt: new Date().toISOString(),
+                });
                 await internalApi.post(`${DB_SERVICE_URL}/correction-rules`, payload, { timeout: 5000 });
                 ruleResults.push({ index, ok: true });
             } catch (ruleError: any) {

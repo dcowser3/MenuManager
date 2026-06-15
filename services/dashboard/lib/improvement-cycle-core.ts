@@ -273,7 +273,8 @@ export function mapProposedRuleToCorrectionRulePayload(
     rule: ProposedReplacementRule,
     proposalId: string,
     index: number,
-    reviewerName: string | null
+    reviewerName: string | null,
+    opts: { cycleId?: string | null; consumedAt?: string | null } = {}
 ): Record<string, unknown> {
     return {
         submission_id: `proposal-${proposalId}`,
@@ -290,6 +291,11 @@ export function mapProposedRuleToCorrectionRulePayload(
         reviewer_name: reviewerName,
         source: 'system',
         status: 'accepted',
+        // Born consumed by the proposal cycle that surfaced it, so an
+        // approval-inserted rule does not re-enter the gate as a "new"
+        // correction next cycle. (Fresh human-added rules stay unconsumed.)
+        prompt_cycle_id: opts.cycleId || `proposal-${proposalId}`,
+        consumed_at: opts.consumedAt || null,
     };
 }
 
