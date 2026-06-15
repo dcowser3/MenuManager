@@ -3,9 +3,10 @@
 // gating, effective-prompt resolution, LLM-output validation, eval summarization,
 // and the mapping from LLM-proposed rules to correction_rules payloads.
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.IMPROVEMENT_SYSTEM_PROMPT = exports.CURRENT_PROMPT_END_MARKER = exports.CURRENT_PROMPT_BEGIN_MARKER = exports.PROMPT_UNCHANGED_SENTINEL = exports.PROPOSED_RULE_CHANGE_TYPES = void 0;
+exports.IMPROVEMENT_SYSTEM_PROMPT = exports.CONTEXT_DEPENDENT_TERMS = exports.CURRENT_PROMPT_END_MARKER = exports.CURRENT_PROMPT_BEGIN_MARKER = exports.PROMPT_UNCHANGED_SENTINEL = exports.PROPOSED_RULE_CHANGE_TYPES = void 0;
 exports.shouldRunCycle = shouldRunCycle;
 exports.pickEffectivePrompt = pickEffectivePrompt;
+exports.involvesContextDependentTerm = involvesContextDependentTerm;
 exports.validateImprovementLlmOutput = validateImprovementLlmOutput;
 exports.summarizeEvalReport = summarizeEvalReport;
 exports.buildProposalEvalSummary = buildProposalEvalSummary;
@@ -64,6 +65,20 @@ const CONTEXT_LEAK_MARKERS = [
     '## New Reviewer Corrections',
     '## Sample Before/After Documents',
 ];
+// Terms whose correct form depends on what the dish actually IS, not on
+// spelling — a blind find-replace would corrupt legitimate uses. These can
+// never be deterministic replacement rules; the AI must reason from dish
+// context in the prompt instead. tartare (raw chopped protein) vs tartar (a
+// sauce) is the canonical case. Match on whole words, case-insensitive.
+exports.CONTEXT_DEPENDENT_TERMS = ['tartare', 'tartar'];
+function involvesContextDependentTerm(...texts) {
+    for (const term of exports.CONTEXT_DEPENDENT_TERMS) {
+        const pattern = new RegExp(`\\b${term}\\b`, 'i');
+        if (texts.some((text) => pattern.test(`${text || ''}`)))
+            return term;
+    }
+    return null;
+}
 function asText(value, maxLength = 100000) {
     return `${value ?? ''}`.trim().slice(0, maxLength);
 }
@@ -119,6 +134,11 @@ function validateImprovementLlmOutput(raw, opts = {}) {
         }
         if (!exports.PROPOSED_RULE_CHANGE_TYPES.has(changeType)) {
             warnings.push(`rule ${index + 1} dropped: change_type "${changeType}" is not deterministic-safe`);
+            continue;
+        }
+        const contextTerm = involvesContextDependentTerm(originalText, correctedText);
+        if (contextTerm) {
+            warnings.push(`rule ${index + 1} dropped: "${contextTerm}" is context-dependent (depends on the dish) and must be AI prompt reasoning, not a deterministic replacement`);
             continue;
         }
         const menuType = asText(rule.applies_to_menu_type, 20).toLowerCase();
@@ -262,6 +282,10 @@ Decide the right lane for each fix:
 - Prompt change: contextual, semantic, or judgment rules -> rewrite the prompt.
 - Replacement rule: an exact, always-safe text replacement (spelling, diacritic, terminology, grammar, punctuation, capitalization) -> propose it as a deterministic replacement rule instead of bloating the prompt.
 - Code recommendation: logic that needs new code (formatting passes, structural guards, new critical checks) -> describe it precisely for a human engineer; reference manifest rule ids where relevant.
+
+CRITICAL — a text correction is "always-safe" (replacement-rule eligible) ONLY if the corrected form is right in EVERY context the word appears. If the correct form depends on what the dish actually is, it is NOT a replacement rule — it is a reasoning instruction for the prompt, and the prompt must teach the model to infer the right form from dish context.
+- Canonical example: "tartare" (a raw chopped-protein preparation, e.g. beef/tuna tartare) vs "tartar" (a sauce/condiment). A reviewer changing "poblano tartare" to "poblano tartar" because it is the sauce does NOT mean "tartare -> tartar" everywhere — that would corrupt legitimate raw tartare dishes. Add a prompt rule telling the model to decide between "tartare" and "tartar" based on whether the item is a raw protein dish or a sauce, NOT a replacement rule.
+- Apply the same test to any homograph/near-homophone whose meaning shifts the spelling. When unsure, prefer the prompt lane.
 
 Prompt rewrite rules:
 - Keep the same structure, section numbering, and formatting conventions.

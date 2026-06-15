@@ -87,6 +87,18 @@ describe('validateImprovementLlmOutput', () => {
         expect(output.code_recommendations[0].title).toBe('Add guard');
     });
 
+    test('drops context-dependent terminology (tartare/tartar) from replacement rules', () => {
+        const output = validateImprovementLlmOutput({
+            proposed_prompt: 'P'.repeat(600),
+            proposed_replacement_rules: [
+                { ...validRule, original_text: 'poblano tartare', corrected_text: 'poblano tartar', change_type: 'terminology' },
+                validRule, // veggies -> vegetables, safe, should survive
+            ],
+        });
+        expect(output.proposed_replacement_rules.map((r) => r.original_text)).toEqual(['veggies']);
+        expect(output.warnings.some((w) => /context-dependent/.test(w) && /tartar/.test(w))).toBe(true);
+    });
+
     test('warns on a suspiciously short prompt and normalizes menu scope', () => {
         const output = validateImprovementLlmOutput({
             proposed_prompt: 'short prompt',
