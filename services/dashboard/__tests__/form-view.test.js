@@ -85,16 +85,56 @@ describe('dashboard form modification source chooser', () => {
         expect(template).not.toContain('max-height: 600px;');
     });
 
-    test('aligns the shared Step 2 editor with the first visible right-side work box', () => {
+    test('renders AI suggestions above the side-by-side menu boxes after review', () => {
+        const template = fs.readFileSync(
+            path.join(__dirname, '..', 'views', 'form.ejs'),
+            'utf8'
+        );
+
+        const containerStart = template.indexOf('<div class="step2-container">');
+        const suggestionsStart = template.indexOf('id="aiSuggestionsSection" class="ai-suggestions-section"', containerStart);
+        const leftPanelStart = template.indexOf('<div class="step2-left-panel">', containerStart);
+        const rightPanelStart = template.indexOf('<div class="step2-right-panel">', containerStart);
+
+        expect(containerStart).toBeGreaterThan(-1);
+        expect(suggestionsStart).toBeGreaterThan(containerStart);
+        expect(leftPanelStart).toBeGreaterThan(suggestionsStart);
+        expect(rightPanelStart).toBeGreaterThan(leftPanelStart);
+        expect(template).toContain('.ai-suggestions-section');
+        expect(template).toContain('grid-column: 1 / -1;');
+        expect(template).toContain('.ai-suggestions-section .suggestions-list');
+        expect(template).toContain('flex-direction: column;');
+        expect(template).toContain('max-height: min(420px, 45vh);');
+        expect(template).toContain('@media (max-width: 900px)');
+        expect(template).toContain('class="suggestions-list"');
+        expect(template).not.toContain('grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));');
+        expect(template).not.toContain('id="aiSuggestionsSection" class="ai-suggestions-section" data-step2-right-workbox');
+        expect(template).not.toContain('class="suggestions-list" data-step2-right-align-box');
+    });
+
+    test('renders apply buttons only through direct suggestion change pairs', () => {
+        const template = fs.readFileSync(
+            path.join(__dirname, '..', 'views', 'form.ejs'),
+            'utf8'
+        );
+
+        expect(template).toContain('function getSuggestionChangePair(suggestion)');
+        expect(template).toContain('window.formHelpers.extractSuggestionChangePair');
+        expect(template).toContain('window.formHelpers.applySuggestionChangeToText');
+        expect(template).toContain('function applySuggestionChange(idx)');
+        expect(template).toContain('class="suggestion-apply-btn" onclick="applySuggestionChange(${idx})"');
+        expect(template).toContain("button.textContent = 'Applied';");
+        expect(template).toContain('markAiCheckStale();');
+    });
+
+    test('aligns the shared Step 2 editor with the persistent preview work box', () => {
         const template = fs.readFileSync(
             path.join(__dirname, '..', 'views', 'form.ejs'),
             'utf8'
         );
 
         expect(template).toContain('class="reviewed-content-container" data-step2-editor-box');
-        expect(template).toContain('class="ai-suggestions-section" data-step2-right-workbox');
         expect(template).toContain('class="persistent-preview show" data-step2-right-workbox');
-        expect(template).toContain('class="suggestions-list" data-step2-right-align-box');
         expect(template).toContain('class="persistent-preview-body" data-step2-right-align-box');
         expect(template).toContain('function alignStep2EditorWorkbox()');
         expect(template).toContain("document.querySelector('[data-step2-editor-box]')");
@@ -113,6 +153,62 @@ describe('dashboard form modification source chooser', () => {
 
         expect(template).toContain('padding: 0.75rem 1.5rem 1.5rem;');
         expect(template).toContain('padding: 0.75rem;');
+    });
+
+    test('scrolls to the moved side-by-side review boxes after AI completes', () => {
+        const template = fs.readFileSync(
+            path.join(__dirname, '..', 'views', 'form.ejs'),
+            'utf8'
+        );
+
+        expect(template).toContain('function scrollAiReviewResultsIntoView()');
+        expect(template).toContain("const reviewPanel = document.querySelector('.step2-container');");
+        expect(template).toContain("reviewPanel.scrollIntoView({ behavior: 'auto', block: 'start' });");
+        expect(template).toContain('function suspendViewportScrollAnchoring()');
+        expect(template).toContain("root.style.overflowAnchor = 'none';");
+        expect(template).toContain('const restoreScrollAnchoring = suspendViewportScrollAnchoring();');
+        expect(template).toContain('function floatMenuToBottom(onSettled)');
+        expect(template).toContain('flipMove(menu, function () { slot.appendChild(menu); }, settle);');
+        expect(template).toContain('setTimeout(cleanup, 600);');
+
+        const firstRunStart = template.indexOf('showStep2(data);\n                floatMenuToBottom(scrollAiReviewResultsIntoView);');
+        const firstRunEnd = template.indexOf('if (data.aiUnavailable)', firstRunStart);
+        expect(firstRunStart).toBeGreaterThan(-1);
+        expect(template.slice(firstRunStart, firstRunEnd)).not.toContain('scrollAiReviewResultsIntoView();');
+
+        const rerunStart = template.indexOf('// Re-render step 2 with new results');
+        const rerunEnd = template.indexOf('if (data.aiUnavailable)', rerunStart);
+        expect(rerunStart).toBeGreaterThan(-1);
+        expect(template.slice(rerunStart, rerunEnd)).toContain('floatMenuToBottom(scrollAiReviewResultsIntoView);');
+    });
+
+    test('renders action alerts as fixed growl toasts with countdown progress', () => {
+        const template = fs.readFileSync(
+            path.join(__dirname, '..', 'views', 'form.ejs'),
+            'utf8'
+        );
+
+        expect(template).toContain('id="alertContainer" aria-live="polite" aria-atomic="false"');
+        expect(template).toContain('#alertContainer');
+        expect(template).toContain('position: fixed;');
+        expect(template).toContain('right: 1rem;');
+        expect(template).toContain('.toast-progress');
+        expect(template).toContain('@keyframes toastProgressShrink');
+        expect(template).toContain('const DEFAULT_ALERT_DURATIONS = {');
+        expect(template).toContain("progress.className = 'toast-progress';");
+        expect(template).toContain("progress.style.setProperty('--toast-duration', `${autoDismissMs}ms`);");
+        expect(template).toContain('dismissTimer = setTimeout(dismissAlert, autoDismissMs);');
+    });
+
+    test('does not duplicate the in-panel auto-corrections message as a growl', () => {
+        const template = fs.readFileSync(
+            path.join(__dirname, '..', 'views', 'form.ejs'),
+            'utf8'
+        );
+
+        expect(template).toContain('Auto-Corrected');
+        expect(template).toContain('Green highlights show inserted or modified text');
+        expect(template).not.toContain("showAlert('Auto-corrections applied! Green highlights show the changes.', 'success');");
     });
 
     test('excludes imported deletions from uploaded-unapproved AI review text', () => {

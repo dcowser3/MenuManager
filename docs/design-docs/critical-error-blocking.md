@@ -73,6 +73,16 @@ Allergen-code alphabetization suggestions also pass through a deterministic guar
 
 A leading standalone `Menu` line is treated as a document title, not a singular category. If the model deletes it or pluralizes it to `Menus`, the dashboard restores the original title line before diffing, highlighting, and critical-error reconciliation.
 
+### Remaining Suggestions Versus Applied Changes
+
+The system intentionally separates applied edits from reviewer-needed suggestions:
+
+- `CORRECTED MENU` is the only model output lane that should change the menu automatically, and the dashboard still runs deterministic guards before displaying it.
+- Remaining JSON suggestions are yellow or red review cards. They are not automatically applied unless `applyHighConfidenceSuggestionsToMenu` can prove an objective exact replacement, a separate deterministic guard owns that rule, or the user presses `Apply Change` on a card with a direct non-identical before/after pair.
+- No-op direct-change recommendations, such as `Change 'SS,SY' to 'SS,SY'`, are treated as non-actionable UI suggestions because there is no text change to apply.
+- Allergen-code suggestions are conservative by default. Custom or extracted allergen keys can introduce property-specific codes, and the common-code parser includes codes such as `ET`. Because deleting an allergen code can create a food-safety issue, a low/medium confidence suggestion like removing an extra allergen code stays in the suggestions panel until a human confirms the code is invalid for that dish/menu.
+- Price and missing-dish-name issues also stay in suggestions because the AI cannot invent authoritative prices or dish names. Critical severity controls blocking; it does not mean the system can safely rewrite the menu.
+
 ## User Flow
 
 1. Critical errors appear as red cards with a "CRITICAL" badge in the suggestions panel

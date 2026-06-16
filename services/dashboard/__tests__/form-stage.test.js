@@ -36,6 +36,7 @@ function filledApproval(overrides) {
         approval1: 'yes',
         approver1Name: 'Grace GM',
         approver1Position: 'General Manager',
+        approver1Email: 'grace@example.com',
     }, overrides || {});
 }
 
@@ -117,9 +118,11 @@ describe('assetFieldsFilled (print conditionals)', () => {
 });
 
 describe('approvalFieldsFilled', () => {
-    test('requires all three primary approver fields', () => {
+    test('requires all primary approver fields including email', () => {
         expect(approvalFieldsFilled(filledApproval())).toBe(true);
         expect(approvalFieldsFilled(filledApproval({ approver1Name: '' }))).toBe(false);
+        expect(approvalFieldsFilled(filledApproval({ approver1Position: '' }))).toBe(false);
+        expect(approvalFieldsFilled(filledApproval({ approver1Email: '' }))).toBe(false);
     });
 });
 

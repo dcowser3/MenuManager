@@ -46,7 +46,7 @@ describe('upload-first submission form structure', () => {
         expect(t).toContain('function applyUnapprovedUploadData(data, file)');
         expect(t).toContain('function applyStageReveals()');
         expect(t).toContain('function setSectionRevealed(id, shouldReveal)');
-        expect(t).toContain('function floatMenuToBottom()');
+        expect(t).toContain('function floatMenuToBottom(onSettled)');
         expect(t).toContain('function initUploadFirstLayout()');
         expect(t).toContain('initUploadFirstLayout();');
         // single upload path always uses the preserve-redlines extraction
@@ -74,6 +74,22 @@ describe('upload-first submission form structure', () => {
         expect(t).toContain('id="submitterInfoCard"');
         expect(t).toContain("setSectionRevealed('submitterStage', reveal.submitter)");
         expect(t).toContain('submitterStage.appendChild(submitterCard)');
+    });
+
+    test('requires a primary approver email and gates the submitter reveal on it', () => {
+        const t = readForm();
+        // Required email input for the primary approver + its error slot.
+        expect(t).toContain('id="approver1Email" required');
+        expect(t).toContain('id="approver1EmailError"');
+        // Optional email for the additional approver.
+        expect(t).toContain('id="approver2Email"');
+        // Carried into the stage snapshot so form-stage.js can gate on it.
+        expect(t).toContain("approver1Email: val('approver1Email')");
+        // Validation requires it and checks the format.
+        expect(t).toContain('function isValidEmailAddress(value)');
+        expect(t).toContain("setGenericFieldError('approver1Email', approver1Email ? '' : 'Please enter the approver email')");
+        // Submitted in the approvals payload.
+        expect(t).toContain("email: document.getElementById('approver1Email').value.trim()");
     });
 
     test('highlights empty required fields (needs-input), not auto-filled ones', () => {

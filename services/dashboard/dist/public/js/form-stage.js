@@ -79,7 +79,8 @@
         if (!formState) return false;
         return nonEmpty(formState.approval1)
             && nonEmpty(formState.approver1Name)
-            && nonEmpty(formState.approver1Position);
+            && nonEmpty(formState.approver1Position)
+            && nonEmpty(formState.approver1Email);
     }
 
     // Submitter identity fields are filled (revealed after approval).

@@ -270,6 +270,11 @@
             flex-direction: column;
         }
 
+        /* Email sits on its own full-width row beneath the 3-up fields. */
+        .approval-field-full {
+            grid-column: 1 / -1;
+        }
+
         .approval-field label {
             font-size: 0.65rem;
             font-weight: 500;
@@ -619,17 +624,111 @@
             margin-top: 1rem;
         }
 
-        /* Alerts */
+        /* Alerts / growl toasts */
+        #alertContainer {
+            position: fixed;
+            top: 1rem;
+            right: 1rem;
+            z-index: 1400;
+            width: min(420px, calc(100vw - 2rem));
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+            pointer-events: none;
+        }
+
         .alert {
             padding: 1rem 1.5rem;
-            margin-bottom: 1rem;
+            margin-bottom: 0;
             border: 1px solid;
+            border-left-width: 4px;
             font-size: 0.9rem;
             display: none;
+            position: relative;
+            overflow: hidden;
+            box-shadow: 0 12px 30px rgba(44, 44, 44, 0.16);
+            pointer-events: auto;
+            transform: translateY(-6px);
+            opacity: 0;
+            animation: alertToastIn 160ms ease-out forwards;
         }
 
         .alert.show {
             display: block;
+        }
+
+        .alert.closing {
+            animation: alertToastOut 160ms ease-in forwards;
+        }
+
+        @keyframes alertToastIn {
+            to {
+                transform: translateY(0);
+                opacity: 1;
+            }
+        }
+
+        @keyframes alertToastOut {
+            to {
+                transform: translateY(-6px);
+                opacity: 0;
+            }
+        }
+
+        .alert-message {
+            display: block;
+            padding-right: 1.75rem;
+        }
+
+        .alert-dismiss {
+            position: absolute;
+            top: 0.45rem;
+            right: 0.55rem;
+            border: 0;
+            background: transparent;
+            color: currentColor;
+            cursor: pointer;
+            font-size: 1rem;
+            line-height: 1;
+            opacity: 0.65;
+        }
+
+        .alert-dismiss:hover {
+            opacity: 1;
+        }
+
+        .alert-action {
+            margin-left: 0.75rem;
+            padding: 2px 10px;
+            border: 1px solid currentColor;
+            background: transparent;
+            color: inherit;
+            cursor: pointer;
+            font-size: 0.8em;
+            border-radius: 3px;
+            font-weight: 600;
+            font-family: inherit;
+        }
+
+        a.alert-action {
+            text-decoration: underline;
+        }
+
+        .toast-progress {
+            position: absolute;
+            left: 0;
+            bottom: 0;
+            width: 100%;
+            height: 3px;
+            background: currentColor;
+            opacity: 0.55;
+            transform-origin: left center;
+            animation: toastProgressShrink var(--toast-duration, 5000ms) linear forwards;
+        }
+
+        @keyframes toastProgressShrink {
+            from { transform: scaleX(1); }
+            to { transform: scaleX(0); }
         }
 
         .alert-success {
@@ -715,6 +814,7 @@
             grid-template-columns: 2fr 1fr;
             gap: 1rem;
             margin-top: 1rem;
+            align-items: start;
         }
 
         .step2-container.revision-split {
@@ -728,6 +828,17 @@
             padding: 1rem;
             display: flex;
             flex-direction: column;
+        }
+
+        @media (max-width: 900px) {
+            .step2-container,
+            .step2-container.revision-split {
+                grid-template-columns: 1fr;
+            }
+
+            .ai-suggestions-section {
+                grid-column: 1;
+            }
         }
 
         /* Panel Header */
@@ -852,12 +963,36 @@
         }
 
         /* AI Suggestions Panel */
+        .ai-suggestions-section {
+            grid-column: 1 / -1;
+            background: var(--color-background);
+            border: 1px solid var(--color-border);
+            padding: 1rem;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .ai-suggestions-section h3 {
+            text-align: center;
+            margin-bottom: 0.25rem;
+            font-family: var(--font-heading);
+            font-size: 1.1rem;
+            font-weight: 500;
+        }
+
         .suggestions-list {
             flex: 1;
             background: rgba(184, 134, 11, 0.05);
             border: 1px solid rgba(184, 134, 11, 0.2);
             padding: 1rem;
             overflow-y: auto;
+        }
+
+        .ai-suggestions-section .suggestions-list {
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+            max-height: min(420px, 45vh);
         }
 
         .suggestion-item {
@@ -870,6 +1005,11 @@
 
         .suggestion-item:last-child {
             margin-bottom: 0;
+        }
+
+        .ai-suggestions-section .suggestion-item {
+            margin-bottom: 0;
+            width: 100%;
         }
 
         .suggestion-type {
@@ -980,6 +1120,40 @@
         .suggestion-item.critical-error.overridden .suggestion-type,
         .suggestion-item.critical-error.overridden .suggestion-detail {
             text-decoration: line-through;
+        }
+
+        .suggestion-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+            margin-top: 0.6rem;
+        }
+
+        .suggestion-apply-btn {
+            padding: 0.4rem 0.75rem;
+            font-size: 0.65rem;
+            font-family: var(--font-body);
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            background: transparent;
+            color: var(--color-success);
+            border: 1px solid rgba(74, 124, 89, 0.55);
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .suggestion-apply-btn:hover:not(:disabled) {
+            background: rgba(74, 124, 89, 0.08);
+        }
+
+        .suggestion-apply-btn:disabled {
+            cursor: default;
+            opacity: 0.6;
+        }
+
+        .suggestion-item.applied {
+            border-left-color: var(--color-success);
+            background: rgba(74, 124, 89, 0.05);
         }
 
         .critical-error-banner {
@@ -1738,6 +1912,10 @@
             min-height: 0;
         }
 
+        .step2-right-panel .persistent-preview {
+            margin-top: 0;
+        }
+
         .persistent-preview.show {
             display: block;
         }
@@ -1815,7 +1993,7 @@
             <a href="/">Back to Dashboard</a>
         </div>
 
-        <div id="alertContainer"></div>
+        <div id="alertContainer" aria-live="polite" aria-atomic="false"></div>
 
         <!-- Upload-first landing: the only thing visible on page load -->
         <div id="uploadStage" class="card upload-stage">
@@ -2148,6 +2326,12 @@
                             <input type="text" id="approver1Position" required placeholder="e.g., Executive Chef">
                             <div id="approver1PositionError" class="field-error hidden"></div>
                         </div>
+                        <div class="approval-field approval-field-full">
+                            <label>Approver Email *</label>
+                            <input type="email" id="approver1Email" required placeholder="approver@example.com">
+                            <div id="approver1EmailError" class="field-error hidden"></div>
+                            <span class="approval-hint" style="margin-top:0.35rem">A copy of the submitted menu is emailed to this address.</span>
+                        </div>
                     </div>
                 </div>
 
@@ -2173,6 +2357,11 @@
                         <div class="approval-field">
                             <label>Position</label>
                             <input type="text" id="approver2Position" placeholder="Position">
+                        </div>
+                        <div class="approval-field approval-field-full">
+                            <label>Approver Email</label>
+                            <input type="email" id="approver2Email" placeholder="approver@example.com">
+                            <div id="approver2EmailError" class="field-error hidden"></div>
                         </div>
                     </div>
                 </div>
@@ -2359,6 +2548,13 @@
             </div>
 
             <div class="step2-container">
+                <div id="aiSuggestionsSection" class="ai-suggestions-section">
+                    <h3>AI Suggestions</h3>
+                    <p class="panel-subtitle">Recommended corrections</p>
+                    <div id="suggestionsDisplay" class="suggestions-list"></div>
+                    <div class="ai-temp-note">AI highlights are temporary. Chef revision redlines are persistent.</div>
+                </div>
+
                 <div class="step2-left-panel">
                     <div class="panel-header">
                         <h3>Your Menu</h3>
@@ -2394,12 +2590,6 @@
                 </div>
 
                 <div class="step2-right-panel">
-                    <div id="aiSuggestionsSection" class="ai-suggestions-section" data-step2-right-workbox>
-                        <h3 style="text-align: center; margin-bottom: 0.25rem; font-family: var(--font-heading); font-size: 1.1rem; font-weight: 500;">AI Suggestions</h3>
-                        <p class="panel-subtitle">Recommended corrections</p>
-                        <div id="suggestionsDisplay" class="suggestions-list" data-step2-right-align-box></div>
-                        <div class="ai-temp-note">AI highlights are temporary. Chef revision redlines are persistent.</div>
-                    </div>
                     <div id="persistentPreviewSection" class="persistent-preview show" data-step2-right-workbox>
                         <h4>Persistent Revision Preview (What Design Will Receive)</h4>
                         <div id="persistentPreviewBody" class="persistent-preview-body" data-step2-right-align-box></div>
@@ -2567,6 +2757,7 @@
                 approval1: val('approval1'),
                 approver1Name: val('approver1Name'),
                 approver1Position: val('approver1Position'),
+                approver1Email: val('approver1Email'),
                 aiCheckHasRun: aiCheckHasRun
             };
         }
@@ -2612,7 +2803,7 @@
             const required = [
                 'projectName', 'property', 'menuType', 'servicePeriod', 'templateType',
                 'turnaroundDays', 'dateNeeded', 'assetType', 'orientation',
-                'approval1', 'approver1Name', 'approver1Position',
+                'approval1', 'approver1Name', 'approver1Position', 'approver1Email',
                 'submitterName', 'submitterEmail', 'submitterJobTitle'
             ];
             if (isPrint) {
@@ -2708,8 +2899,15 @@
         // FLIP: smoothly animate `node` from its current on-screen position to
         // wherever it lands after `mutate()` moves it in the DOM. No-ops (but
         // still performs the move) under prefers-reduced-motion.
-        function flipMove(node, mutate) {
-            if (!node) { if (typeof mutate === 'function') mutate(); return; }
+        function flipMove(node, mutate, onSettled) {
+            const settle = function () {
+                if (typeof onSettled === 'function') onSettled();
+            };
+            if (!node) {
+                if (typeof mutate === 'function') mutate();
+                settle();
+                return;
+            }
             const reduceMotion = window.matchMedia
                 && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
             const first = node.getBoundingClientRect();
@@ -2717,17 +2915,26 @@
             const last = node.getBoundingClientRect();
             const dx = first.left - last.left;
             const dy = first.top - last.top;
-            if (reduceMotion || (!dx && !dy)) return;
+            if (reduceMotion || (!dx && !dy)) {
+                requestAnimationFrame(settle);
+                return;
+            }
             node.classList.remove('flip-animating');
             node.style.transform = 'translate(' + dx + 'px, ' + dy + 'px)';
             requestAnimationFrame(function () {
                 node.classList.add('flip-animating');
                 node.style.transform = '';
-                const cleanup = function () {
+                let settled = false;
+                const cleanup = function (event) {
+                    if (event && event.target !== node) return;
+                    if (settled) return;
+                    settled = true;
                     node.classList.remove('flip-animating');
                     node.removeEventListener('transitionend', cleanup);
+                    settle();
                 };
                 node.addEventListener('transitionend', cleanup);
+                setTimeout(cleanup, 600);
             });
         }
 
@@ -3165,14 +3372,15 @@
                 'orientation',
                 'approval1',
                 'approver1Name',
-                'approver1Position'
+                'approver1Position',
+                'approver1Email'
             ].forEach((fieldId) => {
                 const field = document.getElementById(fieldId);
                 if (!field) return;
 
                 const clearFn = () => {
                     clearGenericFieldError(fieldId);
-                    if (['approval1', 'approver1Name', 'approver1Position'].includes(fieldId)) {
+                    if (['approval1', 'approver1Name', 'approver1Position', 'approver1Email'].includes(fieldId)) {
                         syncApprovalsCardErrorState();
                     } else {
                         syncProjectDetailsCardErrorState();
@@ -3458,17 +3666,37 @@
             return hasProjectFieldErrors;
         }
 
+        // Mirrors the server-side check in submission-workflow.ts.
+        function isValidEmailAddress(value) {
+            return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || '').trim());
+        }
+
         function applyApprovalFieldValidationErrors() {
             const approval1 = document.getElementById('approval1').value;
             const approver1Name = document.getElementById('approver1Name').value.trim();
             const approver1Position = document.getElementById('approver1Position').value.trim();
+            const approver1Email = document.getElementById('approver1Email').value.trim();
 
             setGenericFieldError('approval1', approval1 ? '' : 'Please confirm approval');
             setGenericFieldError('approver1Name', approver1Name ? '' : 'Please enter the approver name');
             setGenericFieldError('approver1Position', approver1Position ? '' : 'Please enter the approver position');
+            setGenericFieldError('approver1Email', approver1Email ? '' : 'Please enter the approver email');
 
-            if (!approval1 || !approver1Name || !approver1Position) {
+            if (!approval1 || !approver1Name || !approver1Position || !approver1Email) {
                 setApprovalsCardError('Please complete the required approval fields');
+                return false;
+            }
+
+            if (!isValidEmailAddress(approver1Email)) {
+                setGenericFieldError('approver1Email', 'Please enter a valid email address');
+                setApprovalsCardError('Please enter a valid approver email address');
+                return false;
+            }
+
+            const approver2Email = document.getElementById('approver2Email').value.trim();
+            if (approver2Email && !isValidEmailAddress(approver2Email)) {
+                setGenericFieldError('approver2Email', 'Please enter a valid email address');
+                setApprovalsCardError('Please enter a valid email for the additional approver');
                 return false;
             }
 
@@ -4575,17 +4803,56 @@
             setSectionRevealed('submitStage', reveal.submit);
         }
 
+        function suspendViewportScrollAnchoring() {
+            const root = document.documentElement;
+            if (!root || !root.style) return function () {};
+            const previous = root.style.overflowAnchor;
+            root.style.overflowAnchor = 'none';
+            let restored = false;
+            return function restoreScrollAnchoring() {
+                if (restored) return;
+                restored = true;
+                root.style.overflowAnchor = previous;
+            };
+        }
+
         // After the AI check, FLIP-float the menu side-by-side down to the bottom
         // slot (just above submit) so the AI's changes sit where the chef is looking.
-        function floatMenuToBottom() {
-            if (menuFloatedDown) return;
+        function floatMenuToBottom(onSettled) {
+            const restoreScrollAnchoring = suspendViewportScrollAnchoring();
+            const settle = function () {
+                if (typeof onSettled === 'function') onSettled();
+                setTimeout(restoreScrollAnchoring, 250);
+            };
+            if (menuFloatedDown) {
+                requestAnimationFrame(settle);
+                return;
+            }
             const menu = document.querySelector('.step2-container');
             const slot = document.getElementById('menuBottomSlot');
-            if (!menu || !slot) return;
-            flipMove(menu, function () { slot.appendChild(menu); });
+            if (!menu || !slot) {
+                settle();
+                return;
+            }
+            flipMove(menu, function () { slot.appendChild(menu); }, settle);
             menuFloatedDown = true;
             const block = document.getElementById('menuSplitBlock');
             if (block) block.classList.remove('revealed', 'show');
+        }
+
+        function scrollAiReviewResultsIntoView() {
+            const reviewPanel = document.querySelector('.step2-container');
+            if (!reviewPanel) return;
+            const scroll = function () {
+                reviewPanel.scrollIntoView({ behavior: 'auto', block: 'start' });
+            };
+            if (typeof window.requestAnimationFrame === 'function') {
+                window.requestAnimationFrame(function () {
+                    window.requestAnimationFrame(scroll);
+                });
+            } else {
+                setTimeout(scroll, 0);
+            }
         }
 
         // One-time layout setup: relocate the menu side-by-side under the upload,
@@ -5421,6 +5688,8 @@
                 document.getElementById('approval2').value = '';
                 document.getElementById('approver2Name').value = '';
                 document.getElementById('approver2Position').value = '';
+                document.getElementById('approver2Email').value = '';
+                clearGenericFieldError('approver2Email');
             }
         }
 
@@ -6000,13 +6269,20 @@
         }
 
         function showAlert(message, type = 'info', options = {}) {
+            const DEFAULT_ALERT_DURATIONS = {
+                success: 6000,
+                info: 6000,
+                warning: 9000,
+                error: 0
+            };
             recordClientAlert(type, message);
             const container = document.getElementById('alertContainer');
             const alert = document.createElement('div');
             alert.className = `alert alert-${type} show`;
-            alert.style.position = 'relative';
+            alert.setAttribute('role', type === 'error' ? 'alert' : 'status');
 
             const msgSpan = document.createElement('span');
+            msgSpan.className = 'alert-message';
             msgSpan.textContent = message;
             alert.appendChild(msgSpan);
 
@@ -6037,21 +6313,29 @@
                 alert.appendChild(support);
             }
 
-            // Dismiss button for persistent alerts
-            if (((type === 'warning' || type === 'error') && !options.temporary) || options.persistent) {
-                const dismiss = document.createElement('span');
-                dismiss.textContent = ' ✕';
-                dismiss.style.cssText = 'cursor:pointer;margin-left:12px;font-weight:bold;opacity:.7';
-                dismiss.onclick = () => alert.remove();
-                alert.appendChild(dismiss);
-            }
+            let dismissTimer = null;
+            const dismissAlert = () => {
+                if (dismissTimer) clearTimeout(dismissTimer);
+                if (!alert.isConnected || alert.classList.contains('closing')) return;
+                alert.classList.add('closing');
+                setTimeout(() => alert.remove(), 180);
+            };
+
+            const dismiss = document.createElement('button');
+            dismiss.type = 'button';
+            dismiss.className = 'alert-dismiss';
+            dismiss.setAttribute('aria-label', 'Dismiss notification');
+            dismiss.textContent = '×';
+            dismiss.onclick = dismissAlert;
+            alert.appendChild(dismiss);
 
             // Retry button
             if (options.onRetry) {
                 const retryBtn = document.createElement('button');
+                retryBtn.type = 'button';
+                retryBtn.className = 'alert-action';
                 retryBtn.textContent = 'Retry';
-                retryBtn.style.cssText = 'margin-left:12px;padding:2px 10px;border:1px solid currentColor;background:transparent;color:inherit;cursor:pointer;font-size:.8em;border-radius:3px';
-                retryBtn.onclick = () => { alert.remove(); options.onRetry(); };
+                retryBtn.onclick = () => { dismissAlert(); options.onRetry(); };
                 alert.appendChild(retryBtn);
             }
 
@@ -6061,10 +6345,10 @@
                     if (typeof action.onClick === 'function') {
                         const button = document.createElement('button');
                         button.type = 'button';
+                        button.className = 'alert-action';
                         button.textContent = action.label;
-                        button.style.cssText = 'margin-left:12px;padding:2px 10px;border:1px solid currentColor;background:transparent;color:inherit;cursor:pointer;font-size:.8em;border-radius:3px;font-weight:600';
                         button.onclick = () => {
-                            alert.remove();
+                            dismissAlert();
                             action.onClick();
                         };
                         alert.appendChild(button);
@@ -6072,22 +6356,33 @@
                     }
                     if (!action.href) return;
                     const link = document.createElement('a');
+                    link.className = 'alert-action';
                     link.href = action.href;
                     link.textContent = action.label;
                     link.target = action.target || '_self';
                     link.rel = 'noopener';
-                    link.style.cssText = 'margin-left:12px;color:inherit;font-weight:600;text-decoration:underline';
                     alert.appendChild(link);
                 });
             }
 
-            const autoDismissMs = Number(options.autoDismissMs || 0) ||
-                (((type === 'success' || type === 'info') && !options.persistent) ? 5000 : 0);
+            const hasExplicitAutoDismiss = Object.prototype.hasOwnProperty.call(options, 'autoDismissMs');
+            const autoDismissMs = options.persistent
+                ? 0
+                : (hasExplicitAutoDismiss
+                    ? Number(options.autoDismissMs || 0)
+                    : (DEFAULT_ALERT_DURATIONS[type] || 0));
+
+            if (autoDismissMs > 0) {
+                const progress = document.createElement('div');
+                progress.className = 'toast-progress';
+                progress.style.setProperty('--toast-duration', `${autoDismissMs}ms`);
+                alert.appendChild(progress);
+            }
 
             container.appendChild(alert);
 
             if (autoDismissMs > 0 && !options.persistent) {
-                setTimeout(() => alert.remove(), autoDismissMs);
+                dismissTimer = setTimeout(dismissAlert, autoDismissMs);
             }
         }
 
@@ -6335,7 +6630,7 @@
                     }
                 });
                 showStep2(data);
-                floatMenuToBottom();
+                floatMenuToBottom(scrollAiReviewResultsIntoView);
                 applyStageReveals();
                 if (data.aiUnavailable) {
                     showAlert(data.reviewSkippedReason || 'AI check is temporarily unavailable. You can still submit this menu for manual review.', 'warning', {
@@ -6606,6 +6901,12 @@
             return redlinePreview.computeInsertedTokenRanges(original, corrected);
         }
 
+        function getSuggestionChangePair(suggestion) {
+            const helper = window.formHelpers && window.formHelpers.extractSuggestionChangePair;
+            if (typeof helper !== 'function') return null;
+            return helper(suggestion && suggestion.recommendation);
+        }
+
         function renderSuggestionCard(suggestion, idx) {
             const isCritical = suggestion.severity === 'critical';
             const confidenceClass = `confidence-${suggestion.confidence}`;
@@ -6626,6 +6927,14 @@
                 overrideBtnHtml = `<button class="${btnClass}" onclick="overrideCriticalError(${idx})">${btnText}</button>`;
             }
 
+            const changePair = !isCritical ? getSuggestionChangePair(suggestion) : null;
+            const applyBtnHtml = changePair
+                ? `<button class="suggestion-apply-btn" onclick="applySuggestionChange(${idx})">Apply Change</button>`
+                : '';
+            const actionsHtml = (applyBtnHtml || overrideBtnHtml)
+                ? `<div class="suggestion-actions">${applyBtnHtml}${overrideBtnHtml}</div>`
+                : '';
+
             return `
                 <div class="suggestion-item ${criticalClass} ${overriddenClass}" data-suggestion-index="${idx}">
                     <div class="suggestion-type">
@@ -6635,7 +6944,7 @@
                     ${suggestion.menuItem ? `<div style="font-weight: 600; color: var(--color-text); font-size: 0.75rem; margin: 0.25rem 0;">Item: ${escapeHtml(suggestion.menuItem)}</div>` : ''}
                     <div class="suggestion-detail">${escapeHtml(suggestion.description)}</div>
                     <div style="color: var(--color-success); font-size: 0.75rem; margin-top: 0.25rem;"><strong>Recommendation:</strong> ${escapeHtml(suggestion.recommendation)}</div>
-                    ${overrideBtnHtml}
+                    ${actionsHtml}
                 </div>
             `;
         }
@@ -6703,6 +7012,61 @@
             }
 
             updateSubmitButtonState();
+        }
+
+        function applySuggestionChange(idx) {
+            const helper = window.formHelpers && window.formHelpers.applySuggestionChangeToText;
+            const suggestion = aiCheckResults && aiCheckResults.suggestions && aiCheckResults.suggestions[idx];
+            if (typeof helper !== 'function' || !suggestion) {
+                showAlert('This suggestion cannot be applied automatically.', 'warning');
+                return;
+            }
+
+            const reviewedArea = document.getElementById('reviewedContentArea');
+            const currentText = extractCleanTextFromReviewedArea(reviewedArea);
+            const result = helper(currentText, suggestion);
+            if (!result.applied) {
+                const message = result.reason === 'ambiguous_match'
+                    ? 'This suggestion matched more than one place. Please edit the menu text manually.'
+                    : 'This suggestion no longer matches the current menu text.';
+                showAlert(message, 'warning');
+                return;
+            }
+
+            const currentHtml = stripAiReviewTransientFormatting(reviewedArea.innerHTML || '');
+            setQuillReviewedHtmlFromText(result.menuText, currentHtml);
+            applyDishNameFormattingAnchors(result.menuText, aiCheckResults?.dishNameFormatting || []);
+
+            const updatedText = extractCleanTextFromReviewedArea(quill.root) || result.menuText;
+            const changes = computeLineDiff(aiCheckResults.originalMenu || currentText, updatedText);
+            aiChanges = changes.map(change => ({
+                start: change.start,
+                length: change.length,
+                word: change.word
+            }));
+            changes.forEach(change => {
+                quill.formatText(change.start, change.length, {
+                    background: 'rgba(74, 124, 89, 0.2)'
+                });
+            });
+
+            displayReviewedContent(quill.root.innerHTML);
+            const diffBase = (unapprovedMode && unapprovedDiffBaseline)
+                ? unapprovedDiffBaseline
+                : (baseApprovedMenuContent || (aiCheckResults?.originalMenu || currentText));
+            renderPersistentPreview(diffBase, updatedText, quill.root.innerHTML || '');
+            markAiCheckStale();
+
+            const card = document.querySelector(`.suggestion-item[data-suggestion-index="${idx}"]`);
+            if (card) {
+                card.classList.add('applied');
+                const button = card.querySelector('.suggestion-apply-btn');
+                if (button) {
+                    button.disabled = true;
+                    button.textContent = 'Applied';
+                }
+            }
+            showAlert('Suggestion applied. Re-run AI Check when you are ready to refresh the remaining suggestions.', 'success');
         }
 
         async function rerunAICheck(options = {}) {
@@ -6789,7 +7153,7 @@
 
                 // Re-render step 2 with new results
                 showStep2(data);
-                floatMenuToBottom();
+                floatMenuToBottom(scrollAiReviewResultsIntoView);
                 applyStageReveals();
                 if (data.aiUnavailable) {
                     showAlert(data.reviewSkippedReason || 'AI check is temporarily unavailable. You can still submit this menu for manual review.', 'warning', {
@@ -7024,7 +7388,6 @@
                 }
 
                 suggestionsDisplay.innerHTML = html;
-                showAlert('Auto-corrections applied! Green highlights show the changes.', 'success');
             } else if (sortedSuggestions.length > 0) {
                 suggestionsDisplay.innerHTML = sortedSuggestions.map((suggestion, idx) => renderSuggestionCard(suggestion, idx)).join('');
             } else {
@@ -7122,17 +7485,20 @@
             const approvals = [{
                 approved: document.getElementById('approval1').value === 'yes',
                 name: document.getElementById('approver1Name').value.trim(),
-                position: document.getElementById('approver1Position').value.trim()
+                position: document.getElementById('approver1Position').value.trim(),
+                email: document.getElementById('approver1Email').value.trim()
             }];
 
             const approval2 = document.getElementById('approval2').value;
             const approver2Name = document.getElementById('approver2Name').value.trim();
             const approver2Position = document.getElementById('approver2Position').value.trim();
+            const approver2Email = document.getElementById('approver2Email').value.trim();
             if (approval2 && approver2Name && approver2Position) {
                 approvals.push({
                     approved: approval2 === 'yes',
                     name: approver2Name,
-                    position: approver2Position
+                    position: approver2Position,
+                    email: approver2Email
                 });
             }
 

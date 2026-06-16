@@ -18,7 +18,7 @@ A simpler, **upload-first** flow that reveals one thing at a time, driven by the
 6. Required project fields filled → **Required Approval** animates in.
 7. Approval filled → **Submitter Information** animates in (revealed last, as its own stage).
 8. Submitter info filled → the **Review with AI** button appears.
-9. Pressing AI → the side-by-side **floats down** (FLIP) to sit just above Submit, so the AI's changes are right where the chef is looking.
+9. Pressing AI → AI suggestions render as a full-width strip above the two menu boxes, then the side-by-side **floats down** (FLIP) to sit just above Submit and the viewport scrolls to the moved review area.
 10. Submit.
 
 Reveal order is `menu + project details → approval → submitter info → AI` (`MenuFormStage.computeRevealState`). The Submitter Information card is relocated into `#submitterStage` on init so it appears last.
@@ -37,6 +37,11 @@ This was a **re-sequencing + progressive-disclosure** change over the existing m
 - `onMenuUpload()` always POSTs to `/api/modification/unapproved-upload` (preserve-redlines), applies the extracted payload (`applyUnapprovedUploadData`), auto-fills project details (`applyExtractedProjectToForm`), enters revision-tracking mode (the existing side-by-side), then `applyStageReveals()`.
 - Progressively-disclosed sections are wrapped in `.reveal` containers (`#menuSplitBlock`, `#detailsStage`, `#approvalStage`, `#aiActionStage`, `#submitStage`). `applyStageReveals()` (called on every `input`/`change`) toggles a `.revealed`/`.show` class for the CSS fade+slide, gated by `MenuFormStage.computeRevealState`.
 - The menu side-by-side is the existing `.step2-container`; on init it is relocated under the upload (`#menuSplitBlock`). After the AI check, `floatMenuToBottom()` FLIP-animates it into `#menuBottomSlot` just above Submit.
+- After the AI check and after re-runs, `floatMenuToBottom(scrollAiReviewResultsIntoView)` waits for the FLIP move to settle and then scrolls to the moved `.step2-container`, so the chef sees the AI-reviewed side-by-side instead of remaining on the metadata/approval area. The move temporarily disables viewport scroll anchoring to avoid Chrome jumping above the target before the final scroll.
+- AI suggestions are a full-width first row in `.step2-container`, displayed as stacked full-width cards with capped panel height. The reviewed menu and persistent preview remain the second row, so both menu bodies start at matching vertical positions after AI review.
+- Suggestion cards show `Apply Change` only when the recommendation contains a direct, non-identical before/after pair such as `Change 'PN.TN' to 'PN,TN'`. Applying the change updates the reviewed menu, refreshes the persistent preview, and marks the AI check stale so the user can re-run review before submit.
+- Action feedback from `showAlert()` renders as fixed top-right growl toasts with dismiss controls. Temporary success/info/warning toasts include a shrinking progress bar; persistent toasts remain visible until dismissed so action links and blocking guidance are not lost off-screen. The in-panel Auto-Corrected card is the only auto-correction completion message, avoiding a duplicate growl.
+- AI review highlights currently mark inserted visible tokens only. Tiny punctuation insertions may be technically highlighted but subtle, and whitespace-only layout corrections are not highlighted by the current token-range helper.
 - Internally the flow is always a preserve-redlines **modification** (`submissionMode='modification'`, `unapprovedMode=true`), so the redline/submit plumbing is unchanged. The submit reads the live `#reviewedContentArea`.
 
 ### Animation
@@ -52,6 +57,26 @@ CSS `.reveal`/`.show` transitions for the reveals; a ~30-line `flipMove(node, mu
 
 `services/dashboard/index.ts` now reads `PORT` (`const port = Number(process.env.PORT) || 3005`) so the app can run alongside a Docker-bound 3005 for local browser verification (see the `dashboard-preview` config in `.claude/launch.json`).
 
+### Approver email + submission confirmation emails
+
+- The Required Approval card now collects an **Approver Email** — required for the primary approver, optional for the additional approver — rendered as a full-width row beneath the approved/name/position fields. The submitter stage stays gated until the primary approver email is filled (`MenuFormStage.approvalFieldsFilled`), and client validation requires a well-formed address (`isValidEmailAddress`, mirroring the server regex). The email rides along in each entry of the `approvals` payload (`{ approved, name, position, email }`).
+- Server-side, [`request-normalization.ts`](../../services/dashboard/lib/request-normalization.ts) `normalizeApprovals()` now trims/caps each approval entry and lowercases the email instead of passing the raw client array through. The email is persisted in the stored `approvals` JSON.
+- After a submission record is created, [`submission-workflow.ts`](../../services/dashboard/lib/submission-workflow.ts) fires `sendSubmissionConfirmationEmails` (fire-and-forget — a mail failure never fails the submission). It emails the **submitter and each distinct, valid approver email** a copy of the generated `.docx`. Recipient de-duplication and the HTML/subject builders are pure functions in [`submission-confirmation-mail.ts`](../../services/dashboard/lib/submission-confirmation-mail.ts); `index.ts` reads the docx and sends via the existing `sendAlertMail` transport (Microsoft Graph over HTTPS, SMTP fallback — the same path admin alerts use, so no new config). When no transport is configured (local dev) the send is skipped with a log line; oversized attachments are stripped with a dashboard-link fallback by `sendAlertMail`.
+
+### Two flows + a flag-controlled default (production pilot)
+
+Both flows are kept and served from stable URLs so the new upload-first flow can be **piloted in production before everyone is switched over**:
+
+| URL | View | Notes |
+|-----|------|-------|
+| `/form` | default flow | The canonical URL the dashboard links to. Serves whichever flow `NEW_SUBMISSION_FORM_DEFAULT` selects. |
+| `/form-new` | [`form.ejs`](../../services/dashboard/views/form.ejs) | The new upload-first flow, always available — hand this link to testers. |
+| `/form-legacy` | [`form-legacy.ejs`](../../services/dashboard/views/form-legacy.ejs) (a snapshot of the `main` `form.ejs`) | The pre-redesign multi-section flow, always available. |
+
+`NEW_SUBMISSION_FORM_DEFAULT` (env, default off → legacy) controls only what `/form` renders; `/form-new` and `/form-legacy` are unconditional. **Current default is the legacy flow** so live submissions keep working unchanged while the new flow is piloted at `/form-new`. To **switch** once piloting is done, set `NEW_SUBMISSION_FORM_DEFAULT=true` (or flip the constant and redeploy) — every existing dashboard link/bookmark to `/form` follows automatically, no view edits needed. All three routes share `renderSubmissionForm()` and the same render locals.
+
+The same **Approver Email** field (required primary, optional additional) was added to **both** flows, so they collect identical data and produce identical confirmation emails — the email send lives server-side in `/api/form/submit`, which both forms POST to. The legacy form reuses the same backend endpoints and the (additively-extended) shared `form-helpers.js`.
+
 ## Reused (unchanged)
 
 - Redline diff engine [`public/js/redline-preview.js`](../../services/dashboard/public/js/redline-preview.js) (shared with `approval-editor.ejs`).
@@ -61,7 +86,7 @@ CSS `.reveal`/`.show` transitions for the reveals; a ~30-line `flipMove(node, mu
 
 ## Verification
 
-- Unit: [`__tests__/form-stage.test.js`](../../services/dashboard/__tests__/form-stage.test.js) (stage/reveal logic) and [`__tests__/form-upload-first-view.test.js`](../../services/dashboard/__tests__/form-upload-first-view.test.js) (markup + JS wiring). The 1,191-line `redline-preview.test.js` and the server `modification-workflow.test.js` are unchanged.
+- Unit: [`__tests__/form-stage.test.js`](../../services/dashboard/__tests__/form-stage.test.js) (stage/reveal logic, incl. approver-email gating) and [`__tests__/form-upload-first-view.test.js`](../../services/dashboard/__tests__/form-upload-first-view.test.js) (markup + JS wiring, incl. the approver-email field). Approver-email + confirmation-email server logic: [`__tests__/request-normalization.test.ts`](../../services/dashboard/__tests__/request-normalization.test.ts) (`normalizeApprovals`) and [`__tests__/submission-confirmation-mail.test.ts`](../../services/dashboard/__tests__/submission-confirmation-mail.test.ts) (recipient dedup, subject/HTML). The `/form-legacy` route is covered by [`__tests__/dashboard-route-aliases.test.js`](../../services/dashboard/__tests__/dashboard-route-aliases.test.js). The 1,191-line `redline-preview.test.js` and the server `modification-workflow.test.js` are unchanged.
 - Live: verified via Claude Preview (on `PORT=3017` to avoid the Docker-bound 3005) — initial upload-only state, upload → menu renders with preserved redlines + details reveal, fill → approval reveal, fill → AI button, and the FLIP float-down relocating the menu below the form. The live AI call and full server submit require the AI/db services (run via Docker).
 
 ## Follow-ups
