@@ -61,11 +61,11 @@
         return true;
     }
 
-    // All required submitter + project-detail fields are filled.
+    // All required project-detail fields are filled (submitter info is gated
+    // separately and revealed later in the flow).
     function requiredProjectFieldsFilled(formState) {
         if (!formState) return false;
         var required = [
-            'submitterName', 'submitterEmail', 'submitterJobTitle',
             'projectName', 'property', 'menuType', 'servicePeriod',
             'templateType', 'turnaroundDays', 'dateNeeded', 'assetType', 'orientation'
         ];
@@ -82,6 +82,14 @@
             && nonEmpty(formState.approver1Position);
     }
 
+    // Submitter identity fields are filled (revealed after approval).
+    function submitterFieldsFilled(formState) {
+        if (!formState) return false;
+        return nonEmpty(formState.submitterName)
+            && nonEmpty(formState.submitterEmail)
+            && nonEmpty(formState.submitterJobTitle);
+    }
+
     // Non-beverage submissions skip AI review and go straight to submit.
     function requiresAiReview(templateType) {
         return templateType !== 'non_beverage';
@@ -89,13 +97,14 @@
 
     /**
      * Given a snapshot of the form, decide which sections are revealed.
+     * Order: menu + project details → approval → submitter info → AI button.
      * Returns booleans for each progressively-disclosed section. `submit` is
      * true once the flow is far enough that the submit button should show:
-     * after the AI check has run (AI flow), or right after approval is filled
-     * (non-beverage, no-AI flow).
+     * after the AI check has run (AI flow), or right after submitter info is
+     * filled (non-beverage, no-AI flow).
      */
     function computeRevealState(formState) {
-        var reveal = { menu: false, details: false, approval: false, ai: false, submit: false };
+        var reveal = { menu: false, details: false, approval: false, submitter: false, ai: false, submit: false };
         if (!hasMenu(formState)) return reveal;
 
         reveal.menu = true;
@@ -105,6 +114,9 @@
         reveal.approval = true;
 
         if (!approvalFieldsFilled(formState)) return reveal;
+        reveal.submitter = true;
+
+        if (!submitterFieldsFilled(formState)) return reveal;
 
         if (requiresAiReview(formState.templateType)) {
             reveal.ai = true;
@@ -125,6 +137,7 @@
         assetFieldsFilled: assetFieldsFilled,
         requiredProjectFieldsFilled: requiredProjectFieldsFilled,
         approvalFieldsFilled: approvalFieldsFilled,
+        submitterFieldsFilled: submitterFieldsFilled,
         requiresAiReview: requiresAiReview,
         computeRevealState: computeRevealState
     };

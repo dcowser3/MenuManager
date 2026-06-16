@@ -13,7 +13,7 @@
     <script src="/js/form-helpers.js"></script>
     <script src="/js/diff-core.js"></script>
     <script src="/js/redline-preview.js?v=20260613-extract-leading-trim"></script>
-    <script src="/js/form-stage.js?v=20260615-upload-first"></script>
+    <script src="/js/form-stage.js?v=20260616-reorder-highlights"></script>
     <style>
         :root {
             --color-primary: #2c2c2c;
@@ -162,12 +162,55 @@
             line-height: 1.35;
         }
 
-        /* Extraction-populated field indicator */
-        .field-extracted {
-            background-color: #fff8e1 !important;
-            border-color: #f5b400 !important;
-            box-shadow: 0 0 0 2px rgba(245, 180, 0, 0.15);
-            transition: background-color 0.25s ease, box-shadow 0.25s ease;
+        /* Fields the chef still needs to fill in (empty + currently visible
+           required fields). Auto-filled fields are left un-highlighted. */
+        .needs-input {
+            background-color: #fffaf0 !important;
+            border-color: #e0a106 !important;
+            box-shadow: 0 0 0 2px rgba(224, 161, 6, 0.12);
+            transition: background-color 0.2s ease, box-shadow 0.2s ease;
+        }
+
+        /* "Copy details from a previous submission" shortcut */
+        .project-prefill {
+            margin: 0 0 1.1rem;
+        }
+        .project-prefill-toggle {
+            background: none;
+            border: none;
+            padding: 0;
+            color: var(--color-secondary);
+            font-family: var(--font-body);
+            font-size: 0.85rem;
+            cursor: pointer;
+            text-decoration: underline;
+        }
+        .project-prefill-toggle:hover { color: var(--color-accent); }
+        .project-prefill-panel {
+            margin-top: 0.6rem;
+            padding: 0.75rem;
+            border: 1px solid var(--color-border);
+            background: var(--color-background-alt);
+        }
+        .project-prefill-panel label {
+            display: block;
+            font-size: 0.68rem;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            color: var(--color-text-muted);
+            margin-bottom: 0.35rem;
+        }
+        .project-prefill-panel input {
+            width: 100%;
+            padding: 0.5rem;
+            border: 1px solid var(--color-border);
+            font-family: var(--font-body);
+            font-size: 0.85rem;
+        }
+        .project-prefill-hint {
+            font-size: 0.78rem;
+            color: var(--color-text-light);
+            margin: 0.5rem 0 0;
         }
 
         /* Required Approvals Section */
@@ -1794,7 +1837,7 @@
         <!-- Step 1: Form Fields -->
         <div id="step1">
             <div id="detailsStage" class="reveal">
-            <div class="card">
+            <div class="card" id="submitterInfoCard">
                 <h2>Submitter Information</h2>
                 <div class="form-grid">
                     <div class="form-group autocomplete-wrapper">
@@ -1818,6 +1861,18 @@
 
             <div class="card" id="projectDetailsCard">
                 <h2>Project Details</h2>
+                <!-- Optional shortcut: copy project details from a previous approved submission -->
+                <div class="project-prefill">
+                    <button type="button" id="projectPrefillToggle" class="project-prefill-toggle" onclick="toggleProjectPrefill()">
+                        Copy details from a previous submission
+                    </button>
+                    <div id="projectPrefillPanel" class="project-prefill-panel hidden">
+                        <label for="projectPrefillSearch">Search a previous submission (project, property, submitter)</label>
+                        <input type="text" id="projectPrefillSearch" placeholder="Start typing to search…" autocomplete="off" oninput="onProjectPrefillSearch(this.value)">
+                        <div id="projectPrefillResults" class="search-results"></div>
+                        <p class="project-prefill-hint">Fills the project fields below only — your uploaded menu stays as-is.</p>
+                    </div>
+                </div>
                 <!-- Legacy submission-mode + workflow chooser: hidden in the upload-first
                      flow (always treated as a preserve-redlines modification). Kept in the
                      DOM so existing handlers keep their element refs; removed in cleanup. -->
@@ -2127,6 +2182,10 @@
                 </button>
             </div>
             </div><!-- /#approvalStage -->
+
+            <!-- Submitter Information: revealed last, after approval (the card is
+                 relocated here from #detailsStage on init). -->
+            <div id="submitterStage" class="reveal"></div>
 
             <!-- Menu composition (Example + paste editor) is hidden in the upload-first
                  flow. Kept in the DOM so the Quill editor (#menuEditor) and the allergen
@@ -2534,9 +2593,115 @@
             setSectionRevealed('menuSplitBlock', reveal.menu && !menuFloatedDown);
             setSectionRevealed('detailsStage', reveal.details);
             setSectionRevealed('approvalStage', reveal.approval);
+            setSectionRevealed('submitterStage', reveal.submitter);
             if (typeof updateAiSubmitStageVisibility === 'function') {
                 updateAiSubmitStageVisibility(reveal);
             }
+            refreshNeedsInputHighlights();
+        }
+
+        // Highlight the required fields the chef STILL needs to fill (empty +
+        // currently visible), clearing each as it's completed. Replaces the old
+        // "highlight what was auto-filled" behavior, which was less intuitive.
+        function refreshNeedsInputHighlights() {
+            function val(id) { const el = document.getElementById(id); return el ? (el.value || '') : ''; }
+            const assetType = val('assetType');
+            const isPrint = assetType === 'PRINT' || assetType === 'BOTH';
+            const isDigital = assetType === 'DIGITAL' || assetType === 'BOTH';
+            const required = [
+                'projectName', 'property', 'menuType', 'servicePeriod', 'templateType',
+                'turnaroundDays', 'dateNeeded', 'assetType', 'orientation',
+                'approval1', 'approver1Name', 'approver1Position',
+                'submitterName', 'submitterEmail', 'submitterJobTitle'
+            ];
+            if (isPrint) {
+                required.push('folded', 'printRegion', 'cropMarks', 'bleedMarks', 'fileSizeLimit');
+                if (val('printRegion') === 'NON_US') required.push('printSize');
+                else required.push('widthPrint', 'heightPrint');
+                if (val('fileSizeLimit') === 'yes') required.push('fileSizeLimitMb');
+            }
+            if (isDigital) required.push('widthDigital', 'heightDigital');
+
+            required.forEach(function (id) {
+                const el = document.getElementById(id);
+                if (!el) return;
+                const visible = !!(el.offsetParent || el.getClientRects().length);
+                const empty = !String(el.value || '').trim();
+                if (visible && empty) el.classList.add('needs-input');
+                else el.classList.remove('needs-input');
+            });
+        }
+
+        // ---- Copy project details from a previous submission ----------------
+        // Reuses the approved-submission search + applyProjectPrefill, but fills
+        // ONLY the project-detail fields — the uploaded menu is never touched.
+        let projectPrefillResults = [];
+        let projectPrefillDebounce = null;
+
+        function toggleProjectPrefill() {
+            const panel = document.getElementById('projectPrefillPanel');
+            if (!panel) return;
+            panel.classList.toggle('hidden');
+            if (!panel.classList.contains('hidden')) {
+                const input = document.getElementById('projectPrefillSearch');
+                if (input) input.focus();
+            }
+        }
+
+        function onProjectPrefillSearch(value) {
+            clearTimeout(projectPrefillDebounce);
+            const query = (value || '').trim();
+            const resultsEl = document.getElementById('projectPrefillResults');
+            if (query.length < 2) {
+                if (resultsEl) resultsEl.innerHTML = '';
+                projectPrefillResults = [];
+                return;
+            }
+            projectPrefillDebounce = setTimeout(function () { searchProjectPrefill(query); }, 250);
+        }
+
+        async function searchProjectPrefill(query) {
+            const resultsEl = document.getElementById('projectPrefillResults');
+            try {
+                const { property, servicePeriod } = getCurrentPropertyService();
+                const params = new URLSearchParams({ q: query, limit: '20' });
+                if (property) params.set('property', property);
+                if (servicePeriod) params.set('servicePeriod', servicePeriod);
+                const response = await fetch(`/api/submissions/search?${params.toString()}`);
+                const results = await response.json();
+                if (!response.ok) throw new Error(results.error || 'Search failed');
+                projectPrefillResults = results || [];
+                if (!resultsEl) return;
+                if (!projectPrefillResults.length) {
+                    resultsEl.innerHTML = '<div class="search-result-item">No previous submissions found.</div>';
+                    return;
+                }
+                resultsEl.innerHTML = projectPrefillResults.map(function (r, idx) {
+                    return `
+                    <div class="search-result-item" onclick="selectProjectPrefill(${idx})">
+                        <strong>${escapeHtml(r.projectName || '(Untitled)')}</strong> - ${escapeHtml(r.property || 'Unknown Property')}<br>
+                        <span style="color: var(--color-text-muted);">Service: ${escapeHtml(r.servicePeriod || 'N/A')} | ${escapeHtml(formatApprovedDate(r.reviewedAt || r.updatedAt))}</span>
+                    </div>`;
+                }).join('');
+            } catch (error) {
+                console.error('Project prefill search failed:', error);
+                if (resultsEl) resultsEl.innerHTML = '<div class="search-result-item">Search failed.</div>';
+            }
+        }
+
+        function selectProjectPrefill(index) {
+            const selected = projectPrefillResults[index];
+            if (!selected) return;
+            applyProjectPrefill(selected);
+            refreshNeedsInputHighlights();
+            applyStageReveals();
+            const panel = document.getElementById('projectPrefillPanel');
+            if (panel) panel.classList.add('hidden');
+            const search = document.getElementById('projectPrefillSearch');
+            if (search) search.value = '';
+            const resultsEl = document.getElementById('projectPrefillResults');
+            if (resultsEl) resultsEl.innerHTML = '';
+            showAlert(`Copied project details from "${selected.projectName || 'previous submission'}". Review and adjust as needed.`, 'success');
         }
 
         // FLIP: smoothly animate `node` from its current on-screen position to
@@ -4430,6 +4595,12 @@
             if (menu && block && menu.parentElement !== block) {
                 block.appendChild(menu);
             }
+            // Submitter Information is revealed last — relocate its card into #submitterStage.
+            const submitterCard = document.getElementById('submitterInfoCard');
+            const submitterStage = document.getElementById('submitterStage');
+            if (submitterCard && submitterStage && submitterCard.parentElement !== submitterStage) {
+                submitterStage.appendChild(submitterCard);
+            }
             const step2 = document.getElementById('step2');
             if (step2) step2.classList.remove('hidden');
             applyStageReveals();
@@ -5148,16 +5319,9 @@
         }
 
         function markFieldAsExtracted(fieldId) {
-            const el = document.getElementById(fieldId);
-            if (!el || el.classList.contains('field-extracted')) return;
-            el.classList.add('field-extracted');
-            const clear = () => {
-                el.classList.remove('field-extracted');
-                el.removeEventListener('input', clear);
-                el.removeEventListener('change', clear);
-            };
-            el.addEventListener('input', clear);
-            el.addEventListener('change', clear);
+            // Auto-filled fields are intentionally NOT highlighted anymore — we
+            // highlight the fields the chef still needs to fill instead (see
+            // refreshNeedsInputHighlights). Kept as a no-op for existing callers.
         }
 
         function setFieldValueAndMark(fieldId, value) {

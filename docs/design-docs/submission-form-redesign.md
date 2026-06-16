@@ -13,12 +13,15 @@ A simpler, **upload-first** flow that reveals one thing at a time, driven by the
 1. **Land** → the only thing visible is a prompt to upload the menu `.docx`.
 2. **Upload** → always runs the **preserve-redlines** extraction (no mode/workflow choice).
 3. The **side-by-side** menu appears below the upload: editable menu (left) + persistent redline preview (right).
-4. As much as possible is **auto-filled** from the document.
-5. **Project Details** animates in below the menu (no Menu Image Upload).
+4. As much as possible is **auto-filled** from the document. The fields the chef *still needs to fill* are highlighted (`needs-input`), clearing as each is completed — rather than highlighting the auto-filled ones.
+5. **Project Details** animates in below the menu (no Menu Image Upload). An optional **"Copy details from a previous submission"** shortcut fills the project fields from an approved submission (`applyProjectPrefill`) without touching the uploaded menu.
 6. Required project fields filled → **Required Approval** animates in.
-7. Approval filled → the **Review with AI** button appears.
-8. Pressing AI → the side-by-side **floats down** (FLIP) to sit just above Submit, so the AI's changes are right where the chef is looking.
-9. Submit.
+7. Approval filled → **Submitter Information** animates in (revealed last, as its own stage).
+8. Submitter info filled → the **Review with AI** button appears.
+9. Pressing AI → the side-by-side **floats down** (FLIP) to sit just above Submit, so the AI's changes are right where the chef is looking.
+10. Submit.
+
+Reveal order is `menu + project details → approval → submitter info → AI` (`MenuFormStage.computeRevealState`). The Submitter Information card is relocated into `#submitterStage` on init so it appears last.
 
 ## Approach
 

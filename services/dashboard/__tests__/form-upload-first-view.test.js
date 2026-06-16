@@ -67,4 +67,30 @@ describe('upload-first submission form structure', () => {
         // legacy menu-composition (paste) editor kept only as a hidden backing store
         expect(t).toContain('id="step1MenuCompositionSection" style="display:none"');
     });
+
+    test('submitter info is its own stage, revealed after approval', () => {
+        const t = readForm();
+        expect(t).toContain('id="submitterStage" class="reveal"');
+        expect(t).toContain('id="submitterInfoCard"');
+        expect(t).toContain("setSectionRevealed('submitterStage', reveal.submitter)");
+        expect(t).toContain('submitterStage.appendChild(submitterCard)');
+    });
+
+    test('highlights empty required fields (needs-input), not auto-filled ones', () => {
+        const t = readForm();
+        expect(t).toContain('function refreshNeedsInputHighlights()');
+        expect(t).toContain(".classList.add('needs-input')");
+        expect(t).toContain('.needs-input {');
+        // the old "highlight what was auto-filled" indicator is gone
+        expect(t).not.toContain('field-extracted');
+    });
+
+    test('offers copy-details-from-a-previous-submission in Project Details', () => {
+        const t = readForm();
+        expect(t).toContain('id="projectPrefillToggle"');
+        expect(t).toContain('onProjectPrefillSearch(this.value)');
+        expect(t).toContain('function selectProjectPrefill(index)');
+        expect(t).toContain('applyProjectPrefill(selected)');
+        expect(t).toContain('/api/submissions/search?');
+    });
 });
