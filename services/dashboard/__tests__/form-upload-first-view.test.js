@@ -93,4 +93,14 @@ describe('upload-first submission form structure', () => {
         expect(t).toContain('applyProjectPrefill(selected)');
         expect(t).toContain('/api/submissions/search?');
     });
+
+    test('the Review-with-AI button gives immediate feedback and guards re-entry', () => {
+        const t = readForm();
+        expect(t).toContain('let basicCheckInProgress = false;');
+        expect(t).toContain('if (basicCheckInProgress) return;');
+        expect(t).toContain('function setAiCheckButtonsLoading(loading)');
+        // the visible button (not just the hidden legacy ones) gets the loading state
+        expect(t).toContain("['reviewWithAiBtn', 'runCheckBtn', 'runCheckBtnBottom']");
+        expect(t).toContain('setAiCheckButtonsLoading(true);');
+    });
 });

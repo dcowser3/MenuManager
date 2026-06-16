@@ -2530,6 +2530,7 @@
         const formStage = window.MenuFormStage;
         let menuUploaded = false;
         let menuFloatedDown = false;
+        let basicCheckInProgress = false;
 
         // ---- Progressive-disclosure reveal wiring ----------------------------
         // Snapshot of the form passed to the pure stage logic in form-stage.js.
@@ -6214,14 +6215,45 @@
             return true;
         }
 
+        // Apply/clear the "Running AI Check" loading state on every AI-trigger
+        // button — crucially including the visible #reviewWithAiBtn — so the chef
+        // gets instant feedback and the check can't be double-fired.
+        function setAiCheckButtonsLoading(loading) {
+            ['reviewWithAiBtn', 'runCheckBtn', 'runCheckBtnBottom'].forEach(function (id) {
+                const button = document.getElementById(id);
+                if (!button) return;
+                if (loading) {
+                    if (button.dataset.idleLabel === undefined) button.dataset.idleLabel = button.innerHTML;
+                    button.disabled = true;
+                    button.innerHTML = '<span class="spinner"></span>Running AI Check…';
+                } else {
+                    button.disabled = false;
+                    if (button.dataset.idleLabel !== undefined) {
+                        button.innerHTML = button.dataset.idleLabel;
+                        delete button.dataset.idleLabel;
+                    }
+                }
+            });
+        }
+
         async function runBasicCheck() {
+            // Re-entrancy guard: a slow AI call must not be fired multiple times
+            // by repeated clicks while it's in flight.
+            if (basicCheckInProgress) return;
             if (!validateStep1()) return;
             if (submissionMode === 'modification' && !revisionBaseSubmissionId && !revisionBaselineDocPath) {
                 showAlert('Choose a modification source and load a baseline DOCX first.', 'error');
                 return;
             }
 
+            // Immediate feedback on the actual visible button BEFORE any async work
+            // (the baseline-freshness check and AI request both take a moment).
+            basicCheckInProgress = true;
+            setAiCheckButtonsLoading(true);
+            try {
+
             if (!(await ensureBaselineFreshnessBeforeContinue())) {
+                setAiCheckButtonsLoading(false);
                 return;
             }
 
@@ -6230,14 +6262,6 @@
                 await submitMenu(true);
                 return;
             }
-
-            const topBtn = document.getElementById('runCheckBtn');
-            const bottomBtn = document.getElementById('runCheckBtnBottom');
-            [topBtn, bottomBtn].forEach(button => {
-                if (!button) return;
-                button.disabled = true;
-                button.innerHTML = '<span class="spinner"></span>Running AI Check...';
-            });
 
             let menuContent = '';
             if (isEditMode && document.getElementById('step2').classList.contains('hidden') === false) {
@@ -6334,11 +6358,10 @@
                     errorMessage: error.message
                 });
                 showAlert('Error running AI check: ' + error.message, 'error');
-                [topBtn, bottomBtn].forEach(button => {
-                    if (!button) return;
-                    button.disabled = false;
-                    button.textContent = 'Run Basic AI Check';
-                });
+                setAiCheckButtonsLoading(false);
+            }
+            } finally {
+                basicCheckInProgress = false;
             }
         }
 
