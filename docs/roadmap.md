@@ -1,61 +1,52 @@
-# Implementation Roadmap
+# Roadmap
 
-## Phase Status
+This page tracks product direction at a high level. Keep detailed design and implementation notes in the feature-specific docs under [design-docs/](design-docs/index.md).
 
-| Phase | Task | Status |
-|-------|------|--------|
-| 1 | Set up PostgreSQL database schema | Complete |
-| 2 | Build chef submission form with required approval attestations | Complete |
-| 3 | Create reviewer dashboard (download/upload/approve) | Complete |
-| 4 | Add email notifications at each step | Pending |
-| 5 | Build approved dishes extraction & database | Complete |
-| 6 | ClickUp integration for task creation | Complete |
-| 7 | Deploy to production (Railway) | Pending |
-| 8 | Add authentication & roles (Clerk) | Pending |
-| 9 | Menu content validation (prices, dish names) | Complete |
-| 10 | Submitter autofill & recent project loader | Complete |
-| 11 | Extended content validation (allergens, etc.) | Planned |
+## Current Baseline
 
-## What Exists (Phase 1 - Complete)
+Menu Manager currently has:
 
-- Monorepo architecture with microservices in `services/`
-- Web form for chef submissions with required approval attestations
-- AI-powered two-tier review (general QA + detailed corrections)
-- Reviewer dashboard
-- DOCX parsing and redlining capabilities
-- Notification system via SMTP
-- Supabase database (PostgreSQL)
+- Docker-first local development and Docker Compose production deployment support.
+- Dashboard-owned public submission form for new menus and modification flows.
+- DOCX extraction, template validation, rich-text preservation, and redline-aware uploads.
+- Async Basic AI Check with deterministic pre/post guards and manual-review fallback.
+- Reviewer queue, browser approval editor, and ClickUp-linked Word approval flow.
+- ClickUp task creation, webhook processing, Marketing handoff, and optional SharePoint upload.
+- Approved-menu downloads and approved-dish extraction/search.
+- Differ/learning infrastructure plus a gated automated improvement loop.
+- Supabase-backed persistence with local JSON fallback for development/degraded states.
 
-## In Progress (Phase 2)
+See [current-capabilities.md](current-capabilities.md) for the compact feature-state reference.
 
-- ~~ClickUp integration for task management~~ (Complete)
-- ~~Approved dishes database (running list of all approved dishes)~~ (Complete)
-- Email notifications at each workflow step
-- Role-based access (chef, reviewer, admin)
+## Active Priorities
 
-## Planned (Phase 3)
+| Area | Status | Notes |
+|------|--------|-------|
+| Browser approval workflow | In use / improving | Continue hardening DOCX fidelity, imported redline behavior, and ClickUp finalization reliability. |
+| Approved-dish quality | In use / improving | Continue reducing false positives and improving source provenance. |
+| Production support tooling | In use / improving | Expand incident telemetry, problem-report triage, and operator-facing diagnostics. |
+| Learning/improvement loop | In progress | Keep proposal generation gated by evals and human approval. |
+| SharePoint routing | In progress | Continue property metadata setup, Graph permission hardening, and upload observability. |
 
-- **Extended menu content validation**: Additional critical error types beyond prices and dish names (e.g., missing allergen codes). The severity/blocking infrastructure is already in place.
-- **Approved dishes search/review tools**: Expand the searchable approved-dishes data into dedicated reviewer/admin workflows.
-- **ClickUp-linked browser approval workflow**: Local prototype is implemented for testing. The next step is validating end-to-end reviewer usage and deciding whether to keep both the browser and Word-doc approval paths. See `docs/design-docs/clickup-linked-approval-workflow-proposal.md`.
-- **Production support auto-triage**: Classify user-initiated problem reports and, for allowlisted AI false-positive blockers, automatically email submitters with safe override guidance. See `docs/design-docs/production-support-auto-triage.md`.
+## Planned Work
 
-## Planned Services
+- Role-based access and reviewer/admin permissions.
+- More complete notification coverage across the full workflow.
+- Expanded approved-dish maintenance and editing tools.
+- Additional deterministic menu-content validation beyond current price, dish-name, allergen, and formatting checks.
+- Production support auto-triage for safe, obvious AI false-positive blockers. See [production-support-auto-triage.md](design-docs/production-support-auto-triage.md).
+- Continued deployment hardening for the Docker Compose/Lightsail path. See [aws-deployment.md](aws-deployment.md).
 
-```
-services/
-└── approved-dishes/      # Dish extraction & database service
-```
+## No Longer Planned As Separate Services
 
-## Infrastructure Costs (Starter Tier)
+These capabilities exist, but not as standalone services:
 
-Target: < 100 submissions/month (~$5/month total)
+| Old idea | Current location |
+|----------|------------------|
+| `submission-form` service | Dashboard form routes/views |
+| `workflow-engine` service | Dashboard, ClickUp integration, and DB status transitions |
+| `approved-dishes` service | DB extraction routes, dashboard views, and shared extraction helpers |
 
-| Service | Provider | Cost |
-|---------|----------|------|
-| Hosting | Railway (Hobby) | $5/mo |
-| Database | Supabase (Free) | $0 |
-| Auth | Clerk (Free tier) | $0 |
-| Email | Resend (Free tier) | $0 |
-| Workflows | Inngest (Free tier) | $0 |
-| ClickUp | API (existing subscription) | $0 |
+## Budget Notes
+
+Avoid keeping fixed provider price tables in this roadmap. Provider pricing changes; check current pricing before budgeting. The intended deployment posture is still low-cost: one small Docker host, Supabase, existing ClickUp/Microsoft accounts, and OpenAI usage based on review volume.

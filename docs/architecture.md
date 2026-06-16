@@ -4,22 +4,20 @@
 
 ```
 services/
-├── ai-review/            # Two-tier AI review (QA + corrections)
-├── clickup-integration/  # ClickUp task creation + webhook handler + notifications (port 3007)
-├── dashboard/            # Web interface + submission form (Express + EJS)
-├── db/                   # Database service (JSON-based, migrating to Supabase) + submitter profiles
-├── differ/               # Compares AI draft vs human-approved for training
-├── docx-redliner/        # DOCX redlining/track changes (Python)
-├── parser/               # DOCX validation and text extraction
-└── supabase-client/      # Shared Supabase database client (library)
+├── ai-review/            # Two-tier AI review + approved-dish quality checks (port 3002)
+├── clickup-integration/  # ClickUp task creation + webhook + approval handoff (port 3007)
+├── dashboard/            # Web UI, form, review queue, approval editor, learning tools (port 3005)
+├── db/                   # Submission/property/profile/approved-dish persistence (port 3004)
+├── diff-core/            # Shared tokenization, LCS diff, and rich-text projection helpers
+├── differ/               # Compares AI draft vs human-approved corrections for training (port 3006)
+├── docx-redliner/        # DOCX redlining/track changes and extraction scripts (Python)
+├── internal-auth/        # Shared internal-service auth middleware and axios client
+├── notifier/             # SMTP notification helper (port 3003)
+├── parser/               # DOCX template validation and text extraction (port 3001)
+└── supabase-client/      # Shared Supabase database client
 ```
 
-### Planned Services
-
-```
-services/
-└── approved-dishes/      # Dish extraction & database service
-```
+There is no separate `submission-form`, `workflow-engine`, or `approved-dishes` service. Those capabilities currently live in `dashboard`, `db`, `clickup-integration`, and shared helpers.
 
 ## Data Flows
 
@@ -138,12 +136,15 @@ User reviews differences, submits approval
 
 ## Dependency Directions
 
-- **dashboard** depends on: db, ai-review, parser, clickup-integration, docx-redliner (Python scripts), diff-core
-- **clickup-integration** depends on: db, differ, ClickUp API, SMTP server
+- **dashboard** depends on: db, ai-review, parser, clickup-integration, docx-redliner (Python scripts), diff-core, internal-auth, supabase-client
+- **clickup-integration** depends on: db, differ, ClickUp API, Microsoft Graph/SharePoint when configured, SMTP server
 - **differ** depends on: diff-core
 - **ai-review** depends on: OpenAI API
-- **db** depends on: Supabase (optional), local JSON files (fallback)
-- **supabase-client** is a shared library used by db service
+- **db** depends on: Supabase (optional), local JSON files (fallback), supabase-client, internal-auth
+- **notifier** depends on: SMTP configuration
+- **parser** depends on: docx-redliner Python scripts for DOCX extraction/validation support
+- **supabase-client** is a shared library used by services that read or mirror Supabase data directly.
+- **internal-auth** is a shared library used by internal service callers and protected internal routes
 - **diff-core** is a shared JavaScript library used by dashboard and differ for tokenization, token equality, LCS alignment, grouped insert/delete/equal edits, and projecting inline HTML formatting onto corrected menu text.
 - The browser approval editor uses `diff-core` through `redline-preview.js` plus a worker-backed preview controller; it does not call the `differ` network service for each keystroke. For imported DOCX redlines, the controller first derives canonical original text and fixed/current text from the imported annotations, then renders each live preview as `original -> current editor text`. The controller keeps one render in flight, coalesces rapid edits to the latest state, ignores stale worker responses, and clears/retries timed-out renders so the right preview cannot remain stuck on its loading state.
 
@@ -191,6 +192,7 @@ Shared internal HTTP authentication now lives in the `@menumanager/internal-auth
 |------|---------|
 | 3001 | parser |
 | 3002 | ai-review |
+| 3003 | notifier |
 | 3004 | db |
 | 3005 | dashboard |
 | 3006 | differ |
