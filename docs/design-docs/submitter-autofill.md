@@ -30,7 +30,7 @@ Available on `/form` only.
 Available on `/form` and learning rule workflows.
 
 - Property is selected from a configured list (type-to-search + pick), not free text.
-- Property search ignores accent/tone marks in the typed query and catalog names; selecting a suggestion still writes the configured canonical property value.
+- Property search ignores accent/tone marks and treats punctuation/separators as spaces, so users can type natural queries such as `toro st regis kanai` for `Toro - St. Regis Kanai - Riviera Maya`; selecting a suggestion still writes the configured canonical property value.
 - The property value must match one of the configured properties (validated server-side).
 - The previous free-text location field is removed; location metadata is derived from selected property.
 - The `Hotel Name` input is temporarily removed from the chef form UI.

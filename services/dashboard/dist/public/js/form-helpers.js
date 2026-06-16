@@ -75,13 +75,58 @@
         return String(text || '')
             .normalize('NFD')
             .replace(/[\u0300-\u036f]/g, '')
-            .toLowerCase();
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, ' ')
+            .trim()
+            .replace(/\s+/g, ' ');
     }
 
     function searchTextIncludes(text, query) {
         const normalizedQuery = normalizeSearchText(query).trim();
         if (!normalizedQuery) return false;
-        return normalizeSearchText(text).includes(normalizedQuery);
+        if (normalizeSearchText(text).includes(normalizedQuery)) return true;
+
+        const compactQuery = normalizedQuery.replace(/\s+/g, '');
+        if (!compactQuery) return false;
+        return normalizeSearchText(text).replace(/\s+/g, '').includes(compactQuery);
+    }
+
+    function buildSearchIndex(text, options) {
+        const raw = String(text || '');
+        const compact = !!(options && options.compact);
+        let normalizedText = '';
+        const indexMap = [];
+        let originalIndex = 0;
+        let pendingSeparatorStart = null;
+        let lastOutputWasSpace = true;
+
+        for (const char of Array.from(raw)) {
+            const start = originalIndex;
+            const end = start + char.length;
+            originalIndex = end;
+
+            const normalizedChar = char
+                .normalize('NFD')
+                .replace(/[\u0300-\u036f]/g, '')
+                .toLowerCase();
+
+            for (const normalizedPart of Array.from(normalizedChar)) {
+                if (/^[a-z0-9]$/.test(normalizedPart)) {
+                    if (!compact && pendingSeparatorStart !== null && !lastOutputWasSpace && normalizedText.length > 0) {
+                        normalizedText += ' ';
+                        indexMap.push({ start: pendingSeparatorStart, end: start });
+                    }
+                    normalizedText += normalizedPart;
+                    indexMap.push({ start, end });
+                    pendingSeparatorStart = null;
+                    lastOutputWasSpace = false;
+                } else if (!lastOutputWasSpace && pendingSeparatorStart === null) {
+                    pendingSeparatorStart = start;
+                }
+            }
+        }
+
+        return { normalizedText, indexMap };
     }
 
     function findSearchMatchRange(text, query) {
@@ -89,29 +134,25 @@
         const normalizedQuery = normalizeSearchText(query).trim();
         if (!raw || !normalizedQuery) return null;
 
-        let normalizedText = '';
-        const indexMap = [];
-        let originalIndex = 0;
+        const { normalizedText, indexMap } = buildSearchIndex(raw);
 
-        for (const char of Array.from(raw)) {
-            const start = originalIndex;
-            const end = start + char.length;
-            const normalizedChar = normalizeSearchText(char);
-
-            for (const normalizedPart of Array.from(normalizedChar)) {
-                normalizedText += normalizedPart;
-                indexMap.push({ start, end });
-            }
-
-            originalIndex = end;
+        let activeText = normalizedText;
+        let activeIndexMap = indexMap;
+        let activeQuery = normalizedQuery;
+        let normalizedStart = activeText.indexOf(activeQuery);
+        if (normalizedStart < 0) {
+            activeQuery = normalizedQuery.replace(/\s+/g, '');
+            if (!activeQuery) return null;
+            const compactIndex = buildSearchIndex(raw, { compact: true });
+            activeText = compactIndex.normalizedText;
+            activeIndexMap = compactIndex.indexMap;
+            normalizedStart = activeText.indexOf(activeQuery);
         }
-
-        const normalizedStart = normalizedText.indexOf(normalizedQuery);
         if (normalizedStart < 0) return null;
 
-        const normalizedEnd = normalizedStart + normalizedQuery.length - 1;
-        const start = indexMap[normalizedStart]?.start;
-        const end = indexMap[normalizedEnd]?.end;
+        const normalizedEnd = normalizedStart + activeQuery.length - 1;
+        const start = activeIndexMap[normalizedStart]?.start;
+        const end = activeIndexMap[normalizedEnd]?.end;
         if (start === undefined || end === undefined || end <= start) return null;
         return { start, end };
     }

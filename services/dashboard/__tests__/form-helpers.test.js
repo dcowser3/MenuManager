@@ -214,16 +214,22 @@ describe('property catalog hint matching', () => {
 });
 
 describe('accent-insensitive form search helpers', () => {
-    test('normalizes tone marks so plain text searches match accented labels', () => {
-        expect(normalizeSearchText('tán - New York')).toBe('tan - new york');
+    test('normalizes tone marks and separators so plain text searches match formatted labels', () => {
+        expect(normalizeSearchText('tán - New York')).toBe('tan new york');
         expect(searchTextIncludes('tán - New York', 'tan')).toBe(true);
         expect(searchTextIncludes('Tan Project', 'tán')).toBe(true);
+        expect(searchTextIncludes('Toro - St. Regis Kanai - Riviera Maya', 'toro st regis kanai')).toBe(true);
+        expect(searchTextIncludes('Toro - St. Regis Kanai - Riviera Maya', 'st regis')).toBe(true);
+        expect(searchTextIncludes('dLeña - Washington, D.C.', 'washington dc')).toBe(true);
     });
 
     test('returns the original text range for accent-insensitive highlights', () => {
         expect(findSearchMatchRange('tán - New York', 'tan')).toEqual({ start: 0, end: 3 });
         expect(findSearchMatchRange('Project tàn menu', 'tan')).toEqual({ start: 8, end: 11 });
         expect(findSearchMatchRange('Tamayo - Denver', 'tan')).toBeNull();
+        expect(findSearchMatchRange('Toro - St. Regis Kanai - Riviera Maya', 'toro st regis kanai')).toEqual({ start: 0, end: 22 });
+        expect(findSearchMatchRange('Toro - St. Regis Kanai - Riviera Maya', 'st regis')).toEqual({ start: 7, end: 16 });
+        expect(findSearchMatchRange('dLeña - Washington, D.C.', 'washington dc')).toEqual({ start: 8, end: 23 });
     });
 });
 
