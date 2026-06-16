@@ -7,6 +7,13 @@
       "runtimeArgs": ["services/dashboard/dist/index.js"],
       "port": 3005,
       "autoPort": false
+    },
+    {
+      "name": "dashboard-preview",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": ["-c", "PORT=3017 node services/dashboard/dist/index.js"],
+      "port": 3017,
+      "autoPort": false
     }
   ]
 }

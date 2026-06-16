@@ -13,6 +13,7 @@
     <script src="/js/form-helpers.js"></script>
     <script src="/js/diff-core.js"></script>
     <script src="/js/redline-preview.js?v=20260613-extract-leading-trim"></script>
+    <script src="/js/form-stage.js?v=20260615-upload-first"></script>
     <style>
         :root {
             --color-primary: #2c2c2c;
@@ -1590,6 +1591,100 @@
             display: block;
         }
 
+        /* Progressive-disclosure reveal: sections animate in as the chef
+           progresses through the upload-first flow. A hidden section is fully
+           removed from layout; .show fades + slides it in. */
+        .reveal {
+            display: none;
+        }
+
+        .reveal.revealed {
+            display: block;
+            opacity: 0;
+            transform: translateY(10px);
+            transition: opacity 0.3s ease, transform 0.3s ease;
+            will-change: opacity, transform;
+        }
+
+        .reveal.revealed.show {
+            opacity: 1;
+            transform: none;
+        }
+
+        /* The movable menu side-by-side block animates when it FLIP-moves to the
+           bottom of the form after the AI check runs. */
+        .flip-animating {
+            transition: transform 0.45s cubic-bezier(0.22, 0.61, 0.36, 1);
+            will-change: transform;
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            .reveal.revealed {
+                opacity: 1;
+                transform: none;
+                transition: none;
+            }
+            .flip-animating {
+                transition: none;
+            }
+        }
+
+        /* Upload-first landing card + dropzone */
+        .upload-stage-intro {
+            color: var(--color-text-light);
+            font-size: 0.95rem;
+            margin: 0 0 1rem;
+        }
+
+        .upload-dropzone {
+            display: block;
+            border: 2px dashed var(--color-secondary);
+            background: var(--color-background-alt);
+            padding: 2.5rem 1.5rem;
+            text-align: center;
+            cursor: pointer;
+            transition: border-color 0.2s ease, background-color 0.2s ease;
+        }
+
+        .upload-dropzone:hover,
+        .upload-dropzone.dragover {
+            border-color: var(--color-accent);
+            background: rgba(139, 115, 85, 0.08);
+        }
+
+        .upload-dropzone.uploading {
+            opacity: 0.7;
+            cursor: progress;
+        }
+
+        .upload-dropzone-title {
+            font-family: var(--font-heading);
+            font-size: 1.15rem;
+            font-weight: 500;
+            color: var(--color-primary);
+        }
+
+        .upload-dropzone-sub {
+            font-size: 0.85rem;
+            color: var(--color-text-muted);
+            margin-top: 0.35rem;
+        }
+
+        .upload-status {
+            margin-top: 0.85rem;
+            font-size: 0.9rem;
+            color: var(--color-text-light);
+            min-height: 1.2em;
+        }
+
+        .upload-status.success {
+            color: var(--color-success, #4a7c59);
+        }
+
+        .upload-status.error {
+            color: var(--color-danger, #b3261e);
+        }
+
         .persistent-preview {
             display: none;
             margin-top: 1rem;
@@ -1679,8 +1774,26 @@
 
         <div id="alertContainer"></div>
 
+        <!-- Upload-first landing: the only thing visible on page load -->
+        <div id="uploadStage" class="card upload-stage">
+            <h2>Submit Your Menu</h2>
+            <p class="upload-stage-intro">Upload your menu Word document to get started. We'll read it, preserve any existing redlines, and pull in your project details automatically.</p>
+            <label id="uploadDropzone" class="upload-dropzone" for="menuUploadInput">
+                <input type="file" id="menuUploadInput" accept=".docx" onchange="onMenuUpload()" hidden>
+                <div class="upload-dropzone-inner">
+                    <div class="upload-dropzone-title">Drop your menu .docx here or click to browse</div>
+                    <div class="upload-dropzone-sub">Word document (.docx) — existing redlines preserved</div>
+                </div>
+            </label>
+            <div id="uploadStatus" class="upload-status" aria-live="polite"></div>
+        </div>
+
+        <!-- Movable menu side-by-side (revealed after upload; floats to the bottom after the AI check) -->
+        <div id="menuSplitBlock" class="reveal"></div>
+
         <!-- Step 1: Form Fields -->
         <div id="step1">
+            <div id="detailsStage" class="reveal">
             <div class="card">
                 <h2>Submitter Information</h2>
                 <div class="form-grid">
@@ -1705,7 +1818,10 @@
 
             <div class="card" id="projectDetailsCard">
                 <h2>Project Details</h2>
-                <div class="submission-mode">
+                <!-- Legacy submission-mode + workflow chooser: hidden in the upload-first
+                     flow (always treated as a preserve-redlines modification). Kept in the
+                     DOM so existing handlers keep their element refs; removed in cleanup. -->
+                <div class="submission-mode" style="display:none">
                     <label class="submission-mode-option">
                         <input type="radio" name="submissionMode" id="submissionModeNew" value="new" onchange="onSubmissionModeChange()">
                         Brand New Menu Submission
@@ -1715,7 +1831,7 @@
                         Modification to Existing Menu
                     </label>
                 </div>
-                <div id="modificationSearchSection" class="modification-search show">
+                <div id="modificationSearchSection" class="modification-search show" style="display:none">
                     <div class="modification-source-options">
                         <label class="modification-source-option">
                             <input type="radio" name="modificationWorkflow" id="modWorkflowEditHere" value="edit_here" onchange="onModificationWorkflowChange('edit_here')">
@@ -1941,16 +2057,12 @@
                     </div>
                 </div>
 
-                <div style="margin-top: 0.75rem;">
-                    <label for="menuImageUpload" style="display:block; font-size:0.65rem; font-weight:500; color: var(--color-text-muted); text-transform:uppercase; letter-spacing:0.15em; margin-bottom:0.35rem;">Menu Image Upload (Optional)</label>
-                    <input type="file" id="menuImageUpload" accept="image/*,application/pdf">
-                    <p style="font-size: 0.8rem; color: var(--color-text-light); margin-top: 0.35rem;">
-                        This image or PDF is sent with the ClickUp task as design reference.
-                    </p>
-                </div>
+                <!-- Menu Image Upload removed in the upload-first flow. -->
             </div>
+            </div><!-- /#detailsStage -->
 
             <!-- Required Approval Section -->
+            <div id="approvalStage" class="reveal">
             <div class="card" id="approvalsCard">
                 <h2>Required Approval</h2>
                 <p class="approvals-intro">Confirm this menu has been reviewed and approved before submission.</p>
@@ -2014,9 +2126,12 @@
                     + Add Additional Approver
                 </button>
             </div>
+            </div><!-- /#approvalStage -->
 
-            <!-- Split View: Example + Menu Input -->
-            <div class="split-container" id="step1MenuCompositionSection">
+            <!-- Menu composition (Example + paste editor) is hidden in the upload-first
+                 flow. Kept in the DOM so the Quill editor (#menuEditor) and the allergen
+                 inputs remain available as the menu-text backing store. -->
+            <div class="split-container" id="step1MenuCompositionSection" style="display:none">
                 <div class="split-panel">
                     <h3>Example Format</h3>
                     <p class="panel-subtitle">Your menu should follow this centered format</p>
@@ -2080,17 +2195,18 @@
                 </div>
             </div>
 
-            <div class="btn-container" id="step1RunCheckContainer">
+            <!-- Legacy top AI-check button: superseded by #reviewWithAiBtn at the bottom -->
+            <div class="btn-container" id="step1RunCheckContainer" style="display:none">
                 <button id="runCheckBtn" class="btn btn-primary" onclick="runBasicCheck()">
                     Run Basic AI Check
                 </button>
             </div>
         </div>
 
-        <!-- Step 2: AI Check Results (Hidden initially) -->
+        <!-- Bottom stage: AI action, the floated-down menu, and submit -->
         <div id="step2" class="hidden">
-            <!-- Read-only form fields showing what user selected -->
-            <div id="step2FormFields" class="form-fields-readonly">
+            <!-- Read-only form fields summary: removed from the upload-first flow (kept hidden) -->
+            <div id="step2FormFields" class="form-fields-readonly" style="display:none">
                 <div class="card">
                     <h2>Submitter Information <span style="font-size: 0.7rem; font-weight: 400; color: var(--color-text-muted); text-transform: uppercase; letter-spacing: 0.1em;">(Read Only)</span></h2>
                     <div class="form-grid">
@@ -2232,6 +2348,20 @@
                 </div>
             </div>
 
+            <!-- AI review action: appears once the required approval is filled -->
+            <div id="aiActionStage" class="reveal">
+                <div class="btn-container">
+                    <button id="reviewWithAiBtn" class="btn btn-primary" onclick="runBasicCheck()">
+                        Review with AI
+                    </button>
+                </div>
+            </div>
+
+            <!-- The menu side-by-side floats down into here after the AI check runs -->
+            <div id="menuBottomSlot"></div>
+
+            <!-- Submit: appears after the AI check has run (or right after approval for non-beverage) -->
+            <div id="submitStage" class="reveal">
             <div class="btn-container">
                 <button id="runCheckBtnBottom" class="btn btn-primary hidden" onclick="runBasicCheck()">
                     Run Basic AI Check
@@ -2248,6 +2378,7 @@
                     Submit Menu for Review
                 </button>
             </div>
+            </div><!-- /#submitStage -->
         </div>
     </div>
 
@@ -2337,6 +2468,102 @@
         const RAW_NOTICE_TEXT = '*consuming raw or undercooked meats, poultry, seafood, shellfish, or eggs may increase your risk of foodborne illness.';
         const RAW_NOTICE_REGEX = /\*?\s*consuming raw or undercooked meats,\s*poultry,\s*seafood(?:,\s*shellfish)?,\s*or eggs may increase your risk of foodborne illness\.?/i;
         const redlinePreview = window.MenuRedlinePreview;
+        const formStage = window.MenuFormStage;
+        let menuUploaded = false;
+        let menuFloatedDown = false;
+
+        // ---- Progressive-disclosure reveal wiring ----------------------------
+        // Snapshot of the form passed to the pure stage logic in form-stage.js.
+        function gatherFormStateForStage() {
+            function val(id) {
+                const el = document.getElementById(id);
+                return el ? (el.value || '') : '';
+            }
+            return {
+                menuUploaded: menuUploaded,
+                submitterName: val('submitterName'),
+                submitterEmail: val('submitterEmail'),
+                submitterJobTitle: val('submitterJobTitle'),
+                projectName: val('projectName'),
+                property: val('property'),
+                menuType: val('menuType'),
+                servicePeriod: val('servicePeriod'),
+                templateType: val('templateType'),
+                turnaroundDays: val('turnaroundDays'),
+                dateNeeded: val('dateNeeded'),
+                assetType: val('assetType'),
+                orientation: val('orientation'),
+                widthPrint: val('widthPrint'),
+                heightPrint: val('heightPrint'),
+                printRegion: val('printRegion'),
+                printSize: val('printSize'),
+                folded: val('folded'),
+                cropMarks: val('cropMarks'),
+                bleedMarks: val('bleedMarks'),
+                fileSizeLimit: val('fileSizeLimit'),
+                fileSizeLimitMb: val('fileSizeLimitMb'),
+                widthDigital: val('widthDigital'),
+                heightDigital: val('heightDigital'),
+                approval1: val('approval1'),
+                approver1Name: val('approver1Name'),
+                approver1Position: val('approver1Position'),
+                aiCheckHasRun: aiCheckHasRun
+            };
+        }
+
+        // Reveal (fade + slide) or collapse a .reveal-wrapped section by id.
+        function setSectionRevealed(id, shouldReveal) {
+            const el = document.getElementById(id);
+            if (!el) return;
+            const isRevealed = el.classList.contains('revealed');
+            if (shouldReveal && !isRevealed) {
+                el.classList.add('revealed');
+                requestAnimationFrame(function () {
+                    requestAnimationFrame(function () { el.classList.add('show'); });
+                });
+            } else if (!shouldReveal && isRevealed) {
+                el.classList.remove('revealed', 'show');
+            }
+        }
+
+        // Recompute which progressively-disclosed sections should be visible and
+        // apply it. Safe to call before the new markup exists (missing ids no-op).
+        function applyStageReveals() {
+            if (!formStage) return;
+            const reveal = formStage.computeRevealState(gatherFormStateForStage());
+            setSectionRevealed('menuSplitBlock', reveal.menu && !menuFloatedDown);
+            setSectionRevealed('detailsStage', reveal.details);
+            setSectionRevealed('approvalStage', reveal.approval);
+            if (typeof updateAiSubmitStageVisibility === 'function') {
+                updateAiSubmitStageVisibility(reveal);
+            }
+        }
+
+        // FLIP: smoothly animate `node` from its current on-screen position to
+        // wherever it lands after `mutate()` moves it in the DOM. No-ops (but
+        // still performs the move) under prefers-reduced-motion.
+        function flipMove(node, mutate) {
+            if (!node) { if (typeof mutate === 'function') mutate(); return; }
+            const reduceMotion = window.matchMedia
+                && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+            const first = node.getBoundingClientRect();
+            if (typeof mutate === 'function') mutate();
+            const last = node.getBoundingClientRect();
+            const dx = first.left - last.left;
+            const dy = first.top - last.top;
+            if (reduceMotion || (!dx && !dy)) return;
+            node.classList.remove('flip-animating');
+            node.style.transform = 'translate(' + dx + 'px, ' + dy + 'px)';
+            requestAnimationFrame(function () {
+                node.classList.add('flip-animating');
+                node.style.transform = '';
+                const cleanup = function () {
+                    node.classList.remove('flip-animating');
+                    node.removeEventListener('transitionend', cleanup);
+                };
+                node.addEventListener('transitionend', cleanup);
+            });
+        }
 
         function getOrCreateFormAttemptId() {
             const storageKey = 'menumanager_form_attempt_id';
@@ -2743,6 +2970,9 @@
                 },
                 placeholder: 'Paste your menu content here...'
             });
+
+            // Upload-first layout: only the dropzone shows until a menu is uploaded.
+            initUploadFirstLayout();
 
             const menuContainer = document.querySelector('.menu-input-container');
             const exampleContent = document.querySelector('.example-content');
@@ -4069,6 +4299,142 @@
                 btn.disabled = false;
                 btn.textContent = 'Extract with Redlines';
             }
+        }
+
+        // ---- Upload-first entry point ---------------------------------------
+        // The single dropzone calls this. Always runs the preserve-redlines
+        // extraction, autofills project details, shows the menu side-by-side,
+        // and reveals the next sections.
+        async function onMenuUpload() {
+            const input = document.getElementById('menuUploadInput');
+            const file = input && input.files && input.files[0];
+            if (!file) return;
+            const dropzone = document.getElementById('uploadDropzone');
+            const statusEl = document.getElementById('uploadStatus');
+            const setStatus = function (msg, cls) {
+                if (!statusEl) return;
+                statusEl.textContent = msg;
+                statusEl.className = 'upload-status' + (cls ? ' ' + cls : '');
+            };
+
+            if (dropzone) dropzone.classList.add('uploading');
+            setStatus('Reading "' + file.name + '"…', '');
+
+            const form = new FormData();
+            form.append('baselineDoc', file);
+            try {
+                await logFormAttempt('unapproved_upload_started', {
+                    route: '/api/modification/unapproved-upload',
+                    revisionSource: 'uploaded_unapproved',
+                    revisionBaselineFileName: file.name,
+                    details: { fileName: file.name, fileSize: file.size }
+                });
+                const response = await fetch('/api/modification/unapproved-upload', {
+                    method: 'POST',
+                    headers: getAttemptHeaders({ 'x-menumanager-revision-source': 'uploaded_unapproved' }),
+                    body: form,
+                });
+                const data = await response.json();
+                if (!response.ok) {
+                    throw new Error(data.error || 'Failed to extract menu document');
+                }
+
+                applyUnapprovedUploadData(data, file);
+                menuUploaded = true;
+                enterRevisionTrackingMode();
+                applyStageReveals();
+
+                await logFormAttempt('unapproved_upload_completed', {
+                    route: '/api/modification/unapproved-upload',
+                    statusCode: response.status,
+                    revisionSource: 'uploaded_unapproved',
+                    revisionBaselineFileName,
+                    menuTextLength: baseApprovedMenuContent.length,
+                    menuHtmlLength: unapprovedBaseHtml.length,
+                    details: { fileName: file.name, fileSize: file.size, annotationCount: unapprovedAnnotations.length }
+                });
+                setStatus('Loaded "' + revisionBaselineFileName + '". Existing redlines preserved — review your menu and fill in the details below.', 'success');
+            } catch (error) {
+                console.error(error);
+                await logFormAttempt('unapproved_upload_failed', {
+                    route: '/api/modification/unapproved-upload',
+                    revisionSource: 'uploaded_unapproved',
+                    revisionBaselineFileName: file.name,
+                    errorMessage: error.message,
+                    details: { fileName: file.name, fileSize: file.size }
+                });
+                setStatus('Could not read that file: ' + error.message, 'error');
+            } finally {
+                if (dropzone) dropzone.classList.remove('uploading');
+            }
+        }
+
+        // Apply the extracted unapproved-DOCX payload to form state. Mirrors the
+        // body of the legacy uploadUnapprovedDoc() so the redline/submit plumbing
+        // behaves identically; only the trigger and UI surface changed.
+        function applyUnapprovedUploadData(data, file) {
+            unapprovedMode = true;
+            unapprovedAnnotations = data.annotations || [];
+            unapprovedBaseHtml = stripManagedFooterHtml(data.unapprovedHtml || '');
+            const revisionComparison = redlinePreview.buildRevisionComparisonFromAnnotatedHtml(unapprovedBaseHtml);
+            unapprovedDiffBaseline = revisionComparison.originalText || '';
+            unapprovedOriginalHtml = revisionComparison.originalHtml || '';
+            unapprovedEditorHtml = revisionComparison.editorHtml || '';
+            revisionSource = 'uploaded_unapproved';
+            revisionBaseSubmissionId = null;
+            revisionBaselineDocPath = data.baselineDocPath || '';
+            revisionBaselineFileName = data.baselineFileName || file.name;
+            baseApprovedMenuContent = revisionComparison.currentText || data.visibleText || '';
+            baseApprovedMenuContentHtml = '';
+            persistentDiffSummary = { insertions: 0, deletions: 0 };
+
+            if (data.extractedProject) {
+                applyExtractedProjectToForm(data.extractedProject);
+            }
+            const normalizedBaseline = stripBaselineFooter(data.visibleText || '', data.extractedAllergenKey || '');
+            preservedManagedFooterText = normalizedBaseline.footerText || '';
+            setAllergenInputValue(normalizedBaseline.allergens || '');
+            setContainsRawSelection(!!normalizedBaseline.hadRawNotice);
+            suppressRawNotice = false;
+            setAllergenAutoDetectedBadge(!!normalizedBaseline.allergens);
+
+            baseApprovedMenuContent = revisionComparison.currentText || normalizedBaseline.menu || '';
+            quill.setText(baseApprovedMenuContent || '');
+        }
+
+        // Reveal the AI action button (pre-check) or the submit stage (post-check
+        // / non-beverage). Driven by the pure reveal state from form-stage.js.
+        function updateAiSubmitStageVisibility(reveal) {
+            setSectionRevealed('aiActionStage', reveal.ai && !aiCheckHasRun);
+            setSectionRevealed('submitStage', reveal.submit);
+        }
+
+        // After the AI check, FLIP-float the menu side-by-side down to the bottom
+        // slot (just above submit) so the AI's changes sit where the chef is looking.
+        function floatMenuToBottom() {
+            if (menuFloatedDown) return;
+            const menu = document.querySelector('.step2-container');
+            const slot = document.getElementById('menuBottomSlot');
+            if (!menu || !slot) return;
+            flipMove(menu, function () { slot.appendChild(menu); });
+            menuFloatedDown = true;
+            const block = document.getElementById('menuSplitBlock');
+            if (block) block.classList.remove('revealed', 'show');
+        }
+
+        // One-time layout setup: relocate the menu side-by-side under the upload,
+        // make the (reveal-gated) bottom region present, and start reveal tracking.
+        function initUploadFirstLayout() {
+            const menu = document.querySelector('.step2-container');
+            const block = document.getElementById('menuSplitBlock');
+            if (menu && block && menu.parentElement !== block) {
+                block.appendChild(menu);
+            }
+            const step2 = document.getElementById('step2');
+            if (step2) step2.classList.remove('hidden');
+            applyStageReveals();
+            document.addEventListener('input', applyStageReveals);
+            document.addEventListener('change', applyStageReveals);
         }
 
         function enterRevisionTrackingMode() {
@@ -5781,6 +6147,8 @@
                     }
                 });
                 showStep2(data);
+                floatMenuToBottom();
+                applyStageReveals();
                 if (data.aiUnavailable) {
                     showAlert(data.reviewSkippedReason || 'AI check is temporarily unavailable. You can still submit this menu for manual review.', 'warning', {
                         persistent: true
@@ -6234,6 +6602,8 @@
 
                 // Re-render step 2 with new results
                 showStep2(data);
+                floatMenuToBottom();
+                applyStageReveals();
                 if (data.aiUnavailable) {
                     showAlert(data.reviewSkippedReason || 'AI check is temporarily unavailable. You can still submit this menu for manual review.', 'warning', {
                         persistent: true
@@ -6264,6 +6634,11 @@
         }
 
         async function handleSubmitButtonClick() {
+            // Non-beverage templates skip AI review and submit directly.
+            if (!requiresAiReview()) {
+                await submitMenu(true);
+                return;
+            }
             if (shouldBlockSubmitForStaleAiCheck()) {
                 await rerunAICheck({ source: 'submit_button' });
                 return;
@@ -6294,8 +6669,10 @@
                     menuPanelSubtitle.textContent = 'Chef revision editor (persistent redlines preview on right)';
                 }
             } else {
-                document.getElementById('step1').classList.add('hidden');
-                document.getElementById('step2FormFields').classList.remove('hidden');
+                // Upload-first flow: keep the details + approval sections visible;
+                // the menu side-by-side floats down beneath them instead of
+                // swapping to a separate read-only summary step.
+                document.getElementById('step1').classList.remove('hidden');
                 setAiSuggestionsVisibility(true);
                 if (menuPanelSubtitle) {
                     menuPanelSubtitle.textContent = 'AI-reviewed content (green = AI changes)';

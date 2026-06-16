@@ -23,7 +23,7 @@ This README is intentionally short. Detailed feature notes, runbooks, and design
 
 ```text
 Chef / manager submission
-  -> Dashboard form and DOCX extraction
+  -> Upload-first dashboard form: upload menu DOCX (redlines preserved), project details auto-filled and revealed progressively
   -> Basic AI Check with deterministic pre/post guards
   -> Stored submission and generated original DOCX
   -> Human review in ClickUp or browser approval editor

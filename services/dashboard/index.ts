@@ -645,7 +645,7 @@ async function extractDishesAfterApproval(
 }
 
 const app = express();
-const port = 3005;
+const port = Number(process.env.PORT) || 3005;
 
 // Configure multer for file uploads
 const upload = multer({

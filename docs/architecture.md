@@ -24,25 +24,26 @@ There is no separate `submission-form`, `workflow-engine`, or `approved-dishes` 
 ### Chef Submission Flow
 
 ```
-Chef opens web form (/form)
-  │
-  ├─ Autocomplete: dashboard → GET /api/submitter-profiles/search → db service
-  ├─ Property catalog: dashboard → GET /api/properties → db service (`properties` table / local mirror)
-  ├─ Recent projects: dashboard → GET /api/recent-projects → db service
-  │  Note: submitter, recent-project, property, and approved-baseline searches ignore accent/tone marks while preserving canonical selected values.
-  ├─ Mode: New submission OR Modification
-  │   ├─ Modification (DB): dashboard → GET /api/submissions/search → db service
-  │   └─ Modification (upload): dashboard → POST /api/modification/baseline-upload
-  │      └─ Python extractors: extract_clean_menu_text.py + extract_project_details.py
-  │         Metadata extraction is best-effort; menu extraction should still succeed if project-detail parsing fails.
+Chef opens web form (/form) — only a single "upload your menu .docx" dropzone is shown (upload-first redesign)
   │
   ▼
-Fills form (submitter info, project details, menu type, service period, approval attestation, menu content)
-  Note: property must be selected from canonical list; separate free-text location field is removed.
+Uploads menu .docx (always preserve-redlines)
+  dashboard → POST /api/modification/unapproved-upload (extractUnapprovedFromDocx: visible text, redline HTML + annotations, project details)
+  │  Menu side-by-side appears below the upload: editable menu (left) + persistent redline preview (right).
+  │  Project details are auto-filled best-effort from the document (menu extraction still succeeds if detail parsing fails).
+  │
+  ▼
+Progressive disclosure (client stage controller — public/js/form-stage.js)
+  ├─ Project Details animates in (auto-filled, editable; no Menu Image Upload)
+  │   ├─ Autocomplete: dashboard → GET /api/submitter-profiles/search → db service
+  │   ├─ Property catalog: dashboard → GET /api/properties → db service (`properties` table / local mirror)
+  │   │  Note: searches ignore accent/tone marks while preserving canonical selected values; property must be selected from the canonical list.
+  │   └─ Required project fields filled → Required Approval animates in → approval filled → "Review with AI" button appears
+  │      (non-beverage template skips AI → Submit directly)
   Client validation marks missing required inputs in submitter, project-details, and approval sections before submission, and the main required-fields alert tells submitters those fields are highlighted below.
   │
   ▼
-Runs AI Check
+Runs AI Check  (on completion the menu side-by-side floats down — FLIP — to sit just above Submit)
   dashboard → POST parser (validate DOCX structure)
   browser → POST dashboard /api/form/basic-check/start
   browser → GET dashboard /api/form/basic-check/status/:checkId until complete
