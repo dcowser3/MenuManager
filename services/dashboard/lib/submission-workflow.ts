@@ -39,6 +39,16 @@ type SubmissionWorkflowDeps = {
     detectRawUndercookedContent: (text: string) => boolean;
     generateDocxFromForm: (submissionId: string, formData: any, options?: { outputPath?: string }) => Promise<string>;
     sendAdminAlert: (alert: any) => void;
+    sendSubmissionConfirmationEmails?: (input: {
+        submissionId: string;
+        projectName: string;
+        property: string;
+        submitterName: string;
+        submitterEmail: string;
+        approvals: Array<{ approved: boolean; name: string; position: string; email: string }>;
+        docxPath: string;
+        filename: string;
+    }) => void;
     isClientInputError: (error: any) => boolean;
     linkBasicAiCheckAuditsToSubmission?: (attemptId: string, submissionId: string) => Promise<void>;
 };
@@ -466,6 +476,21 @@ export function createSubmissionWorkflowHandlers(deps: SubmissionWorkflowDeps) {
             await deps.axios.post(`${deps.DB_SERVICE_URL}/submissions`, submissionRecordPayload);
 
             console.log(`✓ Submission created in database: ${submissionId}`);
+
+            // Email the submitter and each approver a copy of the submitted document.
+            // Fire-and-forget: a mail failure must never fail the submission itself.
+            if (deps.sendSubmissionConfirmationEmails) {
+                deps.sendSubmissionConfirmationEmails({
+                    submissionId,
+                    projectName: safeProjectName,
+                    property: normalizedProperty,
+                    submitterName: safeSubmitterName,
+                    submitterEmail: safeSubmitterEmail,
+                    approvals: normalizedApprovals,
+                    docxPath,
+                    filename: generatedMenuFilename,
+                });
+            }
 
             if (formAttemptId && deps.linkBasicAiCheckAuditsToSubmission) {
                 deps.linkBasicAiCheckAuditsToSubmission(formAttemptId, submissionId)

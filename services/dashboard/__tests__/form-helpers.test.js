@@ -1,6 +1,8 @@
 const {
     addBusinessDays,
+    applySuggestionChangeToText,
     clampExtractedDateNeeded,
+    extractSuggestionChangePair,
     findSearchMatchRange,
     findCatalogMatchesFromHints,
     isValidDateInputValue,
@@ -245,5 +247,56 @@ describe('stale AI check submit gate', () => {
     test('allows stale edits after the second completed AI check', () => {
         expect(shouldBlockSubmitForStaleAiCheck(true, 2)).toBe(false);
         expect(shouldBlockSubmitForStaleAiCheck(true, 3)).toBe(false);
+    });
+});
+
+describe('AI suggestion apply helpers', () => {
+    test('extracts a direct change pair from recommendation copy', () => {
+        expect(extractSuggestionChangePair("Change 'PN.TN' to 'PN,TN'.")).toEqual({
+            from: 'PN.TN',
+            to: 'PN,TN',
+        });
+    });
+
+    test('does not extract no-op change pairs', () => {
+        expect(extractSuggestionChangePair("Change 'SS,SY' to 'SS,SY'.")).toBeNull();
+    });
+
+    test('applies direct recommendation to the matching menu item line', () => {
+        const menu = [
+            'Prawns, grilled prawns, macha sauce C,D,E,G,M,PN.TN,S,SS 95',
+            'Other Prawns, grilled prawns, macha sauce C,D,E,G,M,PN.TN,S,SS 95',
+        ].join('\n');
+
+        const result = applySuggestionChangeToText(menu, {
+            menuItem: 'Prawns, grilled prawns, macha sauce',
+            recommendation: "Change 'PN.TN' to 'PN,TN'.",
+        });
+
+        expect(result).toMatchObject({
+            applied: true,
+            reason: 'line_replacement',
+            pair: { from: 'PN.TN', to: 'PN,TN' },
+        });
+        expect(result.menuText).toContain('Prawns, grilled prawns, macha sauce C,D,E,G,M,PN,TN,S,SS 95');
+        expect(result.menuText).toContain('Other Prawns, grilled prawns, macha sauce C,D,E,G,M,PN.TN,S,SS 95');
+    });
+
+    test('refuses ambiguous direct recommendations without a unique menu item line', () => {
+        const menu = [
+            'Chicken Enchilada, adobo chicken SS,SY 160',
+            'Chimichanga, adobo chicken SS,SY 160',
+        ].join('\n');
+
+        const result = applySuggestionChangeToText(menu, {
+            menuItem: '',
+            recommendation: "Change 'SS,SY' to 'SS,S'.",
+        });
+
+        expect(result).toMatchObject({
+            applied: false,
+            reason: 'ambiguous_match',
+        });
+        expect(result.menuText).toBe(menu);
     });
 });

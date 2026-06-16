@@ -375,6 +375,20 @@ function createSubmissionWorkflowHandlers(deps) {
             };
             await deps.axios.post(`${deps.DB_SERVICE_URL}/submissions`, submissionRecordPayload);
             console.log(`✓ Submission created in database: ${submissionId}`);
+            // Email the submitter and each approver a copy of the submitted document.
+            // Fire-and-forget: a mail failure must never fail the submission itself.
+            if (deps.sendSubmissionConfirmationEmails) {
+                deps.sendSubmissionConfirmationEmails({
+                    submissionId,
+                    projectName: safeProjectName,
+                    property: normalizedProperty,
+                    submitterName: safeSubmitterName,
+                    submitterEmail: safeSubmitterEmail,
+                    approvals: normalizedApprovals,
+                    docxPath,
+                    filename: generatedMenuFilename,
+                });
+            }
             if (formAttemptId && deps.linkBasicAiCheckAuditsToSubmission) {
                 deps.linkBasicAiCheckAuditsToSubmission(formAttemptId, submissionId)
                     .catch((err) => console.error('Failed to link basic check audits to submission:', err.message));

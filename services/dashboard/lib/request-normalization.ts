@@ -33,11 +33,33 @@ export type NormalizedSubmissionBody = {
     safeRevisionBaselineFileName: string;
     safeBaseApprovedMenuContent: string;
     safeMenuImageFileName: string;
-    normalizedApprovals: any[];
+    normalizedApprovals: NormalizedApproval[];
     normalizedCriticalOverrides: any[];
     safeRevisionBaselineDocPath: string;
     safeMenuImagePath: string;
 };
+
+export type NormalizedApproval = {
+    approved: boolean;
+    name: string;
+    position: string;
+    email: string;
+};
+
+// Sanitize the chef-supplied approval entries. Each entry is stored as JSON and
+// also drives the post-submit confirmation email, so trim/cap the strings and
+// coerce `approved` to a boolean rather than trusting the raw client payload.
+export function normalizeApprovals(rawApprovals: unknown): NormalizedApproval[] {
+    if (!Array.isArray(rawApprovals)) return [];
+    return rawApprovals
+        .map((entry: any) => ({
+            approved: entry?.approved === true || `${entry?.approved}`.toLowerCase() === 'true' || `${entry?.approved}`.toLowerCase() === 'yes',
+            name: sanitizePlainTextInput(entry?.name, { maxLength: 120 }),
+            position: sanitizePlainTextInput(entry?.position, { maxLength: 120 }),
+            email: sanitizePlainTextInput(entry?.email, { maxLength: 240 }).toLowerCase(),
+        }))
+        .filter((entry) => entry.name || entry.position || entry.email);
+}
 
 export function normalizeSubmissionBody(body: any, tempUploadsDir: string): NormalizedSubmissionBody {
     const safeRevisionBaselineDocPath = body?.revisionBaselineDocPath
@@ -73,7 +95,7 @@ export function normalizeSubmissionBody(body: any, tempUploadsDir: string): Norm
         safeRevisionBaselineFileName: sanitizeStoredFileName(body?.revisionBaselineFileName, 'baseline.docx'),
         safeBaseApprovedMenuContent: sanitizePlainTextInput(body?.baseApprovedMenuContent, { multiline: true, maxLength: MAX_LONG_TEXT_LENGTH }),
         safeMenuImageFileName: sanitizeStoredFileName(body?.menuImageFileName, 'menu-upload'),
-        normalizedApprovals: Array.isArray(body?.approvals) ? body.approvals : [],
+        normalizedApprovals: normalizeApprovals(body?.approvals),
         normalizedCriticalOverrides: Array.isArray(body?.criticalOverrides) ? body.criticalOverrides : [],
         safeRevisionBaselineDocPath,
         safeMenuImagePath,

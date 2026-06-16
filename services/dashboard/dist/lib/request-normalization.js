@@ -1,8 +1,24 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.normalizeApprovals = normalizeApprovals;
 exports.normalizeSubmissionBody = normalizeSubmissionBody;
 exports.normalizeDesignApprovalRequestBody = normalizeDesignApprovalRequestBody;
 const upload_security_1 = require("./upload-security");
+// Sanitize the chef-supplied approval entries. Each entry is stored as JSON and
+// also drives the post-submit confirmation email, so trim/cap the strings and
+// coerce `approved` to a boolean rather than trusting the raw client payload.
+function normalizeApprovals(rawApprovals) {
+    if (!Array.isArray(rawApprovals))
+        return [];
+    return rawApprovals
+        .map((entry) => ({
+        approved: entry?.approved === true || `${entry?.approved}`.toLowerCase() === 'true' || `${entry?.approved}`.toLowerCase() === 'yes',
+        name: (0, upload_security_1.sanitizePlainTextInput)(entry?.name, { maxLength: 120 }),
+        position: (0, upload_security_1.sanitizePlainTextInput)(entry?.position, { maxLength: 120 }),
+        email: (0, upload_security_1.sanitizePlainTextInput)(entry?.email, { maxLength: 240 }).toLowerCase(),
+    }))
+        .filter((entry) => entry.name || entry.position || entry.email);
+}
 function normalizeSubmissionBody(body, tempUploadsDir) {
     const safeRevisionBaselineDocPath = body?.revisionBaselineDocPath
         ? (0, upload_security_1.assertPathInRoot)(`${body.revisionBaselineDocPath}`, tempUploadsDir, 'Baseline upload')
@@ -36,7 +52,7 @@ function normalizeSubmissionBody(body, tempUploadsDir) {
         safeRevisionBaselineFileName: (0, upload_security_1.sanitizeStoredFileName)(body?.revisionBaselineFileName, 'baseline.docx'),
         safeBaseApprovedMenuContent: (0, upload_security_1.sanitizePlainTextInput)(body?.baseApprovedMenuContent, { multiline: true, maxLength: upload_security_1.MAX_LONG_TEXT_LENGTH }),
         safeMenuImageFileName: (0, upload_security_1.sanitizeStoredFileName)(body?.menuImageFileName, 'menu-upload'),
-        normalizedApprovals: Array.isArray(body?.approvals) ? body.approvals : [],
+        normalizedApprovals: normalizeApprovals(body?.approvals),
         normalizedCriticalOverrides: Array.isArray(body?.criticalOverrides) ? body.criticalOverrides : [],
         safeRevisionBaselineDocPath,
         safeMenuImagePath,

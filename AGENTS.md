@@ -88,6 +88,7 @@ Docker is the default local workflow: `./dev-up.sh` uses [docker-compose.dev.yml
 | Design approval (DOCX vs PDF) | [docs/design-docs/design-approval.md](docs/design-docs/design-approval.md) |
 | Approval attestation | [docs/design-docs/approval-attestation.md](docs/design-docs/approval-attestation.md) |
 | Revision / modification flow | [docs/design-docs/revision-modification-flow.md](docs/design-docs/revision-modification-flow.md) |
+| Submission form redesign (upload-first) | [docs/design-docs/submission-form-redesign.md](docs/design-docs/submission-form-redesign.md) |
 | Training pipeline (v1) | [docs/design-docs/training-pipeline.md](docs/design-docs/training-pipeline.md) |
 | Learning pipeline v2 (human-in-the-loop) | [docs/design-docs/learning-pipeline-v2.md](docs/design-docs/learning-pipeline-v2.md) |
 | Automated improvement loop (eval + daily proposal cycle) | [docs/design-docs/automated-improvement-loop.md](docs/design-docs/automated-improvement-loop.md) |

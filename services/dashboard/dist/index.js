@@ -57,6 +57,7 @@ const smtp_config_1 = require("./lib/smtp-config");
 const upload_security_1 = require("./lib/upload-security");
 const internal_auth_1 = require("@menumanager/internal-auth");
 const submission_workflow_1 = require("./lib/submission-workflow");
+const submission_confirmation_mail_1 = require("./lib/submission-confirmation-mail");
 const approval_workflow_1 = require("./lib/approval-workflow");
 const design_approval_workflow_1 = require("./lib/design-approval-workflow");
 const approved_dishes_1 = require("./lib/approved-dishes");
@@ -81,6 +82,12 @@ Object.defineProperty(exports, "sanitizeRichTextHtml", { enumerable: true, get: 
 Object.defineProperty(exports, "sanitizeStoredFileName", { enumerable: true, get: function () { return upload_security_2.sanitizeStoredFileName; } });
 const execAsync = (0, util_1.promisify)(child_process_1.exec);
 const DEFAULT_ALLERGEN_KEY = 'G contains gluten | V vegetarian | D contains dairy | S contain shellfish | N contain nuts | VG vegan';
+// Which flow `/form` serves. Defaults to the proven legacy flow so the new
+// upload-first flow can be piloted at `/form-new` before switching everyone
+// over. Set NEW_SUBMISSION_FORM_DEFAULT=true (env) — or flip this default and
+// redeploy — to make `/form` serve the new flow.
+const NEW_SUBMISSION_FORM_DEFAULT = ['1', 'true', 'yes', 'on']
+    .includes(`${process.env.NEW_SUBMISSION_FORM_DEFAULT || ''}`.trim().toLowerCase());
 const DB_SERVICE_URL = process.env.DB_SERVICE_URL || 'http://localhost:3004';
 const AI_REVIEW_URL = process.env.AI_REVIEW_URL || 'http://localhost:3002';
 const DIFFER_SERVICE_URL = process.env.DIFFER_SERVICE_URL || 'http://localhost:3006';
@@ -306,6 +313,59 @@ function sendFormAttemptFailureEmail(event) {
         `,
     }, alertMailDeps).catch((err) => console.error('Failed to send form attempt alert email:', err.message));
 }
+const SUBMISSION_DOCX_CONTENT_TYPE = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+/**
+ * Email the submitter and each listed approver a copy of the submitted menu
+ * document. Fire-and-forget — invoked after the submission record is created,
+ * uses the same Graph/SMTP transport as admin alerts, and swallows all errors
+ * so mail problems never affect the submission response.
+ */
+function sendSubmissionConfirmationEmails(input) {
+    if (!(0, alert_mail_1.canSendAlertMail)(alertMailDeps)) {
+        console.log(`Submission confirmation email skipped (no mail transport configured): ${input.submissionId}`);
+        return;
+    }
+    const recipients = (0, submission_confirmation_mail_1.buildSubmissionConfirmationRecipients)(input);
+    if (!recipients.length) {
+        console.log(`Submission confirmation email skipped (no valid recipients): ${input.submissionId}`);
+        return;
+    }
+    void (async () => {
+        let attachmentContent = null;
+        try {
+            attachmentContent = await fs_1.promises.readFile(input.docxPath);
+        }
+        catch (readError) {
+            console.error(`Failed to read submitted docx for confirmation email (${input.submissionId}):`, readError.message);
+        }
+        const attachments = attachmentContent
+            ? [{
+                    filename: input.filename || `${input.submissionId}.docx`,
+                    content: attachmentContent,
+                    contentType: SUBMISSION_DOCX_CONTENT_TYPE,
+                }]
+            : [];
+        for (const recipient of recipients) {
+            try {
+                // sendAlertMail transparently strips an oversized attachment and
+                // appends a notice, so a single send covers both cases.
+                const result = await (0, alert_mail_1.sendAlertMail)({
+                    fromName: 'Menu Manager',
+                    to: recipient.to,
+                    subject: (0, submission_confirmation_mail_1.buildSubmissionEmailSubject)(input, recipient.role),
+                    html: (0, submission_confirmation_mail_1.buildSubmissionReceiptHtml)(input, recipient.role, attachments.length === 0, DASHBOARD_URL),
+                    attachments,
+                }, alertMailDeps);
+                if (result.attachmentsDropped) {
+                    console.warn(`Submission confirmation attachment dropped (oversize) for ${recipient.to} (${input.submissionId})`);
+                }
+            }
+            catch (mailError) {
+                console.error(`Failed to send submission confirmation email to ${recipient.to} (${input.submissionId}):`, mailError.message);
+            }
+        }
+    })();
+}
 function getRepoRoot() {
     const candidates = [
         path.resolve(__dirname, '..', '..'), // ts-node from services/dashboard
@@ -510,7 +570,7 @@ async function extractDishesAfterApproval(submissionId, menuContent, property, f
     }
 }
 const app = (0, express_1.default)();
-const port = 3005;
+const port = Number(process.env.PORT) || 3005;
 // Configure multer for file uploads
 const upload = (0, multer_1.default)({
     dest: getTempUploadsDir(),
@@ -774,17 +834,38 @@ app.get('/submit/:token', (req, res) => {
 /**
  * Form Submission Page - New menu submission via form
  */
-app.get('/form', async (_req, res) => {
+async function renderSubmissionForm(res, view, title) {
     const propertyCatalog = await getPropertyCatalogFromDb();
     const propertyOptions = propertyCatalog.map((item) => item.name);
-    res.render('form', {
-        title: 'Submit New Menu',
+    res.render(view, {
+        title,
         defaultAllergenKey: DEFAULT_ALLERGEN_KEY,
         propertyOptions,
         propertyCatalog,
         supportEmail: PUBLIC_FORM_SUPPORT_EMAIL,
         errorReportMaxBodyBytes: ERROR_REPORT_CLIENT_MAX_BODY_BYTES,
     });
+}
+/**
+ * `/form` is the canonical submission URL the dashboard links to. It serves
+ * whichever flow is the current default, controlled by `NEW_SUBMISSION_FORM_DEFAULT`
+ * (see the constant near the top of this file). It defaults to the proven legacy
+ * flow so the new upload-first flow can be piloted at `/form-new` in production
+ * before everyone is switched over — flip the flag to make `/form` serve the new
+ * flow, and all existing dashboard links/bookmarks follow automatically.
+ */
+app.get('/form', async (_req, res) => {
+    const view = NEW_SUBMISSION_FORM_DEFAULT ? 'form' : 'form-legacy';
+    await renderSubmissionForm(res, view, 'Submit New Menu');
+});
+// New upload-first flow — stable URL for piloting (hand this link to testers)
+// regardless of which flow `/form` currently serves.
+app.get('/form-new', async (_req, res) => {
+    await renderSubmissionForm(res, 'form', 'Submit New Menu');
+});
+// Legacy multi-section flow — always available at a stable URL.
+app.get('/form-legacy', async (_req, res) => {
+    await renderSubmissionForm(res, 'form-legacy', 'Submit New Menu (Legacy)');
 });
 /**
  * Design Approval Page - Compare DOCX against PDF
@@ -1123,6 +1204,7 @@ const submissionWorkflowHandlers = (0, submission_workflow_1.createSubmissionWor
     detectRawUndercookedContent,
     generateDocxFromForm,
     sendAdminAlert,
+    sendSubmissionConfirmationEmails,
     isClientInputError: upload_security_1.isClientInputError,
     linkBasicAiCheckAuditsToSubmission: basic_ai_check_audit_1.linkBasicAiCheckAuditsToSubmission,
 });
@@ -3917,7 +3999,8 @@ if (require.main === module) {
     app.listen(port, () => {
         console.log(`📊 Dashboard service listening at http://localhost:${port}`);
         console.log(`   Access dashboard: http://localhost:${port}`);
-        console.log(`   Form submission: http://localhost:${port}/form`);
+        console.log(`   Form submission: http://localhost:${port}/form (${NEW_SUBMISSION_FORM_DEFAULT ? 'new upload-first flow' : 'legacy flow'})`);
+        console.log(`   New-flow pilot:  http://localhost:${port}/form-new`);
         console.log(`   Design approval: http://localhost:${port}/design-approval`);
         console.log(`   Training dashboard: http://localhost:${port}/training`);
         // Surface alert-mail transport state so a misconfigured prod env (the
@@ -3933,6 +4016,11 @@ if (require.main === module) {
         else {
             console.log('   Alert mail: NO transport configured — emails will not send. Set GRAPH_MAILBOX_ADDRESS + GRAPH_CLIENT_ID/TENANT_ID/CLIENT_SECRET (Graph) for Lightsail.');
         }
+        // Submission confirmation emails reuse the alert-mail transport, so they
+        // send wherever incident alerts do. Report it explicitly with the same gate.
+        console.log((0, alert_mail_1.canSendAlertMail)(alertMailDeps)
+            ? '   Submission confirmation emails: ON — submitter + each approver get the submitted DOCX on submit'
+            : '   Submission confirmation emails: OFF — no mail transport; submissions still succeed but no copies are sent');
         const secretExpiry = (0, improvement_cycle_core_1.evaluateSecretExpiry)(process.env.GRAPH_CLIENT_SECRET_EXPIRES, Date.now());
         console.log(`   Graph secret: ${secretExpiry.message}`);
     });

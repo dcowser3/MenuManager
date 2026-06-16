@@ -194,9 +194,137 @@
         return completed < unlockAfter;
     }
 
+    function extractSuggestionChangePair(recommendation) {
+        const text = String(recommendation || '').trim();
+        if (!text) return null;
+
+        const patterns = [
+            /change\s+['']([^'']+)['']\s+to\s+['']([^'']+)['']/i,
+            /change\s+"([^"]+)"\s+to\s+"([^"]+)"/i,
+            /replace\s+['']([^'']+)['']\s+with\s+['']([^'']+)['']/i,
+            /replace\s+"([^"]+)"\s+with\s+"([^"]+)"/i,
+        ];
+
+        for (const pattern of patterns) {
+            const match = text.match(pattern);
+            if (!match || match[1] === undefined || match[2] === undefined) continue;
+            const from = match[1].trim();
+            const to = match[2].trim();
+            if (from && to && from !== to) {
+                return { from, to };
+            }
+        }
+        return null;
+    }
+
+    function normalizeSuggestionLineMatch(text) {
+        return String(text || '')
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+    }
+
+    function replaceFirstLiteral(text, from, to) {
+        const source = String(text || '');
+        const idx = source.indexOf(from);
+        if (idx < 0) return { applied: false, text: source };
+        return {
+            applied: true,
+            text: `${source.slice(0, idx)}${to}${source.slice(idx + from.length)}`,
+        };
+    }
+
+    function countLiteralOccurrences(text, needle) {
+        if (!needle) return 0;
+        let count = 0;
+        let cursor = 0;
+        const source = String(text || '');
+        while (cursor <= source.length) {
+            const idx = source.indexOf(needle, cursor);
+            if (idx < 0) break;
+            count += 1;
+            cursor = idx + Math.max(needle.length, 1);
+        }
+        return count;
+    }
+
+    function applySuggestionChangeToText(menuText, suggestion) {
+        const sourceText = String(menuText || '');
+        const pair = extractSuggestionChangePair(suggestion && suggestion.recommendation);
+        if (!pair) {
+            return {
+                applied: false,
+                menuText: sourceText,
+                pair: null,
+                reason: 'no_direct_change',
+            };
+        }
+
+        const lines = sourceText.split('\n');
+        const itemNorm = normalizeSuggestionLineMatch(suggestion && suggestion.menuItem);
+        const lineIndexesWithFrom = lines
+            .map((line, index) => ({ line, index }))
+            .filter(({ line }) => line.includes(pair.from));
+
+        const itemLineCandidates = itemNorm
+            ? lineIndexesWithFrom.filter(({ line }) => normalizeSuggestionLineMatch(line).includes(itemNorm))
+            : [];
+        const startingItemLineCandidates = itemNorm
+            ? itemLineCandidates.filter(({ line }) => normalizeSuggestionLineMatch(line).startsWith(itemNorm))
+            : [];
+
+        const targetLine = startingItemLineCandidates.length === 1
+            ? startingItemLineCandidates[0]
+            : itemLineCandidates.length === 1
+            ? itemLineCandidates[0]
+            : (lineIndexesWithFrom.length === 1 ? lineIndexesWithFrom[0] : null);
+
+        if (targetLine) {
+            const replaced = replaceFirstLiteral(targetLine.line, pair.from, pair.to);
+            if (!replaced.applied) {
+                return {
+                    applied: false,
+                    menuText: sourceText,
+                    pair,
+                    reason: 'target_not_found',
+                };
+            }
+            const nextLines = lines.slice();
+            nextLines[targetLine.index] = replaced.text;
+            return {
+                applied: true,
+                menuText: nextLines.join('\n'),
+                pair,
+                reason: 'line_replacement',
+            };
+        }
+
+        if (countLiteralOccurrences(sourceText, pair.from) === 1) {
+            const replaced = replaceFirstLiteral(sourceText, pair.from, pair.to);
+            return {
+                applied: replaced.applied,
+                menuText: replaced.text,
+                pair,
+                reason: replaced.applied ? 'unique_replacement' : 'target_not_found',
+            };
+        }
+
+        return {
+            applied: false,
+            menuText: sourceText,
+            pair,
+            reason: lineIndexesWithFrom.length > 1 ? 'ambiguous_match' : 'target_not_found',
+        };
+    }
+
     const api = {
         addBusinessDays,
+        applySuggestionChangeToText,
         clampExtractedDateNeeded,
+        extractSuggestionChangePair,
         isValidDateInputValue,
         normalizeSearchText,
         parseExtractedSize,

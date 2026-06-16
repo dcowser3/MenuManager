@@ -42,6 +42,7 @@ All variables are configured in `.env` at the project root. See `.env.example` f
 | `BASIC_AI_LEARNED_PRECHECK_DISABLED` | Set `true` to keep built-in pre-AI corrections enabled but skip accepted learned correction-rule replacements (default: learned replacements enabled) |
 | `BASIC_AI_LEARNED_RULE_FETCH_TIMEOUT_MS` | Dashboard timeout in milliseconds when loading accepted correction rules from the DB service before Basic AI Check (default: `2500`) |
 | `SOP_DOC_PATH` | Path to SOP document (default: `samples/sop.txt`) |
+| `NEW_SUBMISSION_FORM_DEFAULT` | Which flow `/form` serves. Unset/`false` (default) → the legacy multi-section flow; `true`/`1`/`yes`/`on` → the new upload-first flow. The new flow is always reachable at `/form-new` and the legacy flow at `/form-legacy` regardless of this flag, so the new flow can be piloted before flipping the default. |
 | `DASHBOARD_URL` | Base URL for email links (default: `http://localhost:3005`) |
 | `DB_SERVICE_URL` | Base URL for DB service (default: `http://localhost:3004`) |
 | `AI_REVIEW_URL` | Base URL for AI review service (default: `http://localhost:3002`) |

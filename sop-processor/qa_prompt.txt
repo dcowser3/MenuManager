@@ -83,9 +83,9 @@ Flag these as a suggestion with:
 - severity: "critical"
 - Do NOT auto-correct — leave in SUGGESTIONS only
 
-Do NOT flag standalone menu instructions such as "choose one", "choice of one",
-"select two", or "pick your entree" as incomplete dish names or missing prices.
-These are selection instructions, not dish entries. Preserve them in CORRECTED MENU.
+- Do NOT flag standalone menu instructions such as "choose one", "choice of one",
+- "select two", or "pick your entree" as incomplete dish names or missing prices.
+- These are selection instructions, not dish entries. Preserve them in CORRECTED MENU.
 
 #### 1.4 Allergens
 - Format: Superscript, same line as dish/drink name

@@ -13,6 +13,7 @@
     <script src="/js/form-helpers.js"></script>
     <script src="/js/diff-core.js"></script>
     <script src="/js/redline-preview.js?v=20260613-extract-leading-trim"></script>
+    <script src="/js/form-stage.js?v=20260616-reorder-highlights"></script>
     <style>
         :root {
             --color-primary: #2c2c2c;
@@ -161,12 +162,55 @@
             line-height: 1.35;
         }
 
-        /* Extraction-populated field indicator */
-        .field-extracted {
-            background-color: #fff8e1 !important;
-            border-color: #f5b400 !important;
-            box-shadow: 0 0 0 2px rgba(245, 180, 0, 0.15);
-            transition: background-color 0.25s ease, box-shadow 0.25s ease;
+        /* Fields the chef still needs to fill in (empty + currently visible
+           required fields). Auto-filled fields are left un-highlighted. */
+        .needs-input {
+            background-color: #fffaf0 !important;
+            border-color: #e0a106 !important;
+            box-shadow: 0 0 0 2px rgba(224, 161, 6, 0.12);
+            transition: background-color 0.2s ease, box-shadow 0.2s ease;
+        }
+
+        /* "Copy details from a previous submission" shortcut */
+        .project-prefill {
+            margin: 0 0 1.1rem;
+        }
+        .project-prefill-toggle {
+            background: none;
+            border: none;
+            padding: 0;
+            color: var(--color-secondary);
+            font-family: var(--font-body);
+            font-size: 0.85rem;
+            cursor: pointer;
+            text-decoration: underline;
+        }
+        .project-prefill-toggle:hover { color: var(--color-accent); }
+        .project-prefill-panel {
+            margin-top: 0.6rem;
+            padding: 0.75rem;
+            border: 1px solid var(--color-border);
+            background: var(--color-background-alt);
+        }
+        .project-prefill-panel label {
+            display: block;
+            font-size: 0.68rem;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            color: var(--color-text-muted);
+            margin-bottom: 0.35rem;
+        }
+        .project-prefill-panel input {
+            width: 100%;
+            padding: 0.5rem;
+            border: 1px solid var(--color-border);
+            font-family: var(--font-body);
+            font-size: 0.85rem;
+        }
+        .project-prefill-hint {
+            font-size: 0.78rem;
+            color: var(--color-text-light);
+            margin: 0.5rem 0 0;
         }
 
         /* Required Approvals Section */
@@ -224,6 +268,11 @@
         .approval-field {
             display: flex;
             flex-direction: column;
+        }
+
+        /* Email sits on its own full-width row beneath the 3-up fields. */
+        .approval-field-full {
+            grid-column: 1 / -1;
         }
 
         .approval-field label {
@@ -575,17 +624,111 @@
             margin-top: 1rem;
         }
 
-        /* Alerts */
+        /* Alerts / growl toasts */
+        #alertContainer {
+            position: fixed;
+            top: 1rem;
+            right: 1rem;
+            z-index: 1400;
+            width: min(420px, calc(100vw - 2rem));
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+            pointer-events: none;
+        }
+
         .alert {
             padding: 1rem 1.5rem;
-            margin-bottom: 1rem;
+            margin-bottom: 0;
             border: 1px solid;
+            border-left-width: 4px;
             font-size: 0.9rem;
             display: none;
+            position: relative;
+            overflow: hidden;
+            box-shadow: 0 12px 30px rgba(44, 44, 44, 0.16);
+            pointer-events: auto;
+            transform: translateY(-6px);
+            opacity: 0;
+            animation: alertToastIn 160ms ease-out forwards;
         }
 
         .alert.show {
             display: block;
+        }
+
+        .alert.closing {
+            animation: alertToastOut 160ms ease-in forwards;
+        }
+
+        @keyframes alertToastIn {
+            to {
+                transform: translateY(0);
+                opacity: 1;
+            }
+        }
+
+        @keyframes alertToastOut {
+            to {
+                transform: translateY(-6px);
+                opacity: 0;
+            }
+        }
+
+        .alert-message {
+            display: block;
+            padding-right: 1.75rem;
+        }
+
+        .alert-dismiss {
+            position: absolute;
+            top: 0.45rem;
+            right: 0.55rem;
+            border: 0;
+            background: transparent;
+            color: currentColor;
+            cursor: pointer;
+            font-size: 1rem;
+            line-height: 1;
+            opacity: 0.65;
+        }
+
+        .alert-dismiss:hover {
+            opacity: 1;
+        }
+
+        .alert-action {
+            margin-left: 0.75rem;
+            padding: 2px 10px;
+            border: 1px solid currentColor;
+            background: transparent;
+            color: inherit;
+            cursor: pointer;
+            font-size: 0.8em;
+            border-radius: 3px;
+            font-weight: 600;
+            font-family: inherit;
+        }
+
+        a.alert-action {
+            text-decoration: underline;
+        }
+
+        .toast-progress {
+            position: absolute;
+            left: 0;
+            bottom: 0;
+            width: 100%;
+            height: 3px;
+            background: currentColor;
+            opacity: 0.55;
+            transform-origin: left center;
+            animation: toastProgressShrink var(--toast-duration, 5000ms) linear forwards;
+        }
+
+        @keyframes toastProgressShrink {
+            from { transform: scaleX(1); }
+            to { transform: scaleX(0); }
         }
 
         .alert-success {
@@ -671,6 +814,7 @@
             grid-template-columns: 2fr 1fr;
             gap: 1rem;
             margin-top: 1rem;
+            align-items: start;
         }
 
         .step2-container.revision-split {
@@ -684,6 +828,17 @@
             padding: 1rem;
             display: flex;
             flex-direction: column;
+        }
+
+        @media (max-width: 900px) {
+            .step2-container,
+            .step2-container.revision-split {
+                grid-template-columns: 1fr;
+            }
+
+            .ai-suggestions-section {
+                grid-column: 1;
+            }
         }
 
         /* Panel Header */
@@ -808,12 +963,36 @@
         }
 
         /* AI Suggestions Panel */
+        .ai-suggestions-section {
+            grid-column: 1 / -1;
+            background: var(--color-background);
+            border: 1px solid var(--color-border);
+            padding: 1rem;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .ai-suggestions-section h3 {
+            text-align: center;
+            margin-bottom: 0.25rem;
+            font-family: var(--font-heading);
+            font-size: 1.1rem;
+            font-weight: 500;
+        }
+
         .suggestions-list {
             flex: 1;
             background: rgba(184, 134, 11, 0.05);
             border: 1px solid rgba(184, 134, 11, 0.2);
             padding: 1rem;
             overflow-y: auto;
+        }
+
+        .ai-suggestions-section .suggestions-list {
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+            max-height: min(420px, 45vh);
         }
 
         .suggestion-item {
@@ -826,6 +1005,11 @@
 
         .suggestion-item:last-child {
             margin-bottom: 0;
+        }
+
+        .ai-suggestions-section .suggestion-item {
+            margin-bottom: 0;
+            width: 100%;
         }
 
         .suggestion-type {
@@ -936,6 +1120,40 @@
         .suggestion-item.critical-error.overridden .suggestion-type,
         .suggestion-item.critical-error.overridden .suggestion-detail {
             text-decoration: line-through;
+        }
+
+        .suggestion-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+            margin-top: 0.6rem;
+        }
+
+        .suggestion-apply-btn {
+            padding: 0.4rem 0.75rem;
+            font-size: 0.65rem;
+            font-family: var(--font-body);
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            background: transparent;
+            color: var(--color-success);
+            border: 1px solid rgba(74, 124, 89, 0.55);
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .suggestion-apply-btn:hover:not(:disabled) {
+            background: rgba(74, 124, 89, 0.08);
+        }
+
+        .suggestion-apply-btn:disabled {
+            cursor: default;
+            opacity: 0.6;
+        }
+
+        .suggestion-item.applied {
+            border-left-color: var(--color-success);
+            background: rgba(74, 124, 89, 0.05);
         }
 
         .critical-error-banner {
@@ -1590,6 +1808,100 @@
             display: block;
         }
 
+        /* Progressive-disclosure reveal: sections animate in as the chef
+           progresses through the upload-first flow. A hidden section is fully
+           removed from layout; .show fades + slides it in. */
+        .reveal {
+            display: none;
+        }
+
+        .reveal.revealed {
+            display: block;
+            opacity: 0;
+            transform: translateY(10px);
+            transition: opacity 0.3s ease, transform 0.3s ease;
+            will-change: opacity, transform;
+        }
+
+        .reveal.revealed.show {
+            opacity: 1;
+            transform: none;
+        }
+
+        /* The movable menu side-by-side block animates when it FLIP-moves to the
+           bottom of the form after the AI check runs. */
+        .flip-animating {
+            transition: transform 0.45s cubic-bezier(0.22, 0.61, 0.36, 1);
+            will-change: transform;
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            .reveal.revealed {
+                opacity: 1;
+                transform: none;
+                transition: none;
+            }
+            .flip-animating {
+                transition: none;
+            }
+        }
+
+        /* Upload-first landing card + dropzone */
+        .upload-stage-intro {
+            color: var(--color-text-light);
+            font-size: 0.95rem;
+            margin: 0 0 1rem;
+        }
+
+        .upload-dropzone {
+            display: block;
+            border: 2px dashed var(--color-secondary);
+            background: var(--color-background-alt);
+            padding: 2.5rem 1.5rem;
+            text-align: center;
+            cursor: pointer;
+            transition: border-color 0.2s ease, background-color 0.2s ease;
+        }
+
+        .upload-dropzone:hover,
+        .upload-dropzone.dragover {
+            border-color: var(--color-accent);
+            background: rgba(139, 115, 85, 0.08);
+        }
+
+        .upload-dropzone.uploading {
+            opacity: 0.7;
+            cursor: progress;
+        }
+
+        .upload-dropzone-title {
+            font-family: var(--font-heading);
+            font-size: 1.15rem;
+            font-weight: 500;
+            color: var(--color-primary);
+        }
+
+        .upload-dropzone-sub {
+            font-size: 0.85rem;
+            color: var(--color-text-muted);
+            margin-top: 0.35rem;
+        }
+
+        .upload-status {
+            margin-top: 0.85rem;
+            font-size: 0.9rem;
+            color: var(--color-text-light);
+            min-height: 1.2em;
+        }
+
+        .upload-status.success {
+            color: var(--color-success, #4a7c59);
+        }
+
+        .upload-status.error {
+            color: var(--color-danger, #b3261e);
+        }
+
         .persistent-preview {
             display: none;
             margin-top: 1rem;
@@ -1598,6 +1910,10 @@
             padding: 0.75rem;
             flex: 1;
             min-height: 0;
+        }
+
+        .step2-right-panel .persistent-preview {
+            margin-top: 0;
         }
 
         .persistent-preview.show {
@@ -1677,11 +1993,29 @@
             <a href="/">Back to Dashboard</a>
         </div>
 
-        <div id="alertContainer"></div>
+        <div id="alertContainer" aria-live="polite" aria-atomic="false"></div>
+
+        <!-- Upload-first landing: the only thing visible on page load -->
+        <div id="uploadStage" class="card upload-stage">
+            <h2>Submit Your Menu</h2>
+            <p class="upload-stage-intro">Upload your menu Word document to get started. We'll read it, preserve any existing redlines, and pull in your project details automatically.</p>
+            <label id="uploadDropzone" class="upload-dropzone" for="menuUploadInput">
+                <input type="file" id="menuUploadInput" accept=".docx" onchange="onMenuUpload()" hidden>
+                <div class="upload-dropzone-inner">
+                    <div class="upload-dropzone-title">Drop your menu .docx here or click to browse</div>
+                    <div class="upload-dropzone-sub">Word document (.docx) — existing redlines preserved</div>
+                </div>
+            </label>
+            <div id="uploadStatus" class="upload-status" aria-live="polite"></div>
+        </div>
+
+        <!-- Movable menu side-by-side (revealed after upload; floats to the bottom after the AI check) -->
+        <div id="menuSplitBlock" class="reveal"></div>
 
         <!-- Step 1: Form Fields -->
         <div id="step1">
-            <div class="card">
+            <div id="detailsStage" class="reveal">
+            <div class="card" id="submitterInfoCard">
                 <h2>Submitter Information</h2>
                 <div class="form-grid">
                     <div class="form-group autocomplete-wrapper">
@@ -1705,7 +2039,22 @@
 
             <div class="card" id="projectDetailsCard">
                 <h2>Project Details</h2>
-                <div class="submission-mode">
+                <!-- Optional shortcut: copy project details from a previous approved submission -->
+                <div class="project-prefill">
+                    <button type="button" id="projectPrefillToggle" class="project-prefill-toggle" onclick="toggleProjectPrefill()">
+                        Copy details from a previous submission
+                    </button>
+                    <div id="projectPrefillPanel" class="project-prefill-panel hidden">
+                        <label for="projectPrefillSearch">Search a previous submission (project, property, submitter)</label>
+                        <input type="text" id="projectPrefillSearch" placeholder="Start typing to search…" autocomplete="off" oninput="onProjectPrefillSearch(this.value)">
+                        <div id="projectPrefillResults" class="search-results"></div>
+                        <p class="project-prefill-hint">Fills the project fields below only — your uploaded menu stays as-is.</p>
+                    </div>
+                </div>
+                <!-- Legacy submission-mode + workflow chooser: hidden in the upload-first
+                     flow (always treated as a preserve-redlines modification). Kept in the
+                     DOM so existing handlers keep their element refs; removed in cleanup. -->
+                <div class="submission-mode" style="display:none">
                     <label class="submission-mode-option">
                         <input type="radio" name="submissionMode" id="submissionModeNew" value="new" onchange="onSubmissionModeChange()">
                         Brand New Menu Submission
@@ -1715,7 +2064,7 @@
                         Modification to Existing Menu
                     </label>
                 </div>
-                <div id="modificationSearchSection" class="modification-search show">
+                <div id="modificationSearchSection" class="modification-search show" style="display:none">
                     <div class="modification-source-options">
                         <label class="modification-source-option">
                             <input type="radio" name="modificationWorkflow" id="modWorkflowEditHere" value="edit_here" onchange="onModificationWorkflowChange('edit_here')">
@@ -1941,16 +2290,12 @@
                     </div>
                 </div>
 
-                <div style="margin-top: 0.75rem;">
-                    <label for="menuImageUpload" style="display:block; font-size:0.65rem; font-weight:500; color: var(--color-text-muted); text-transform:uppercase; letter-spacing:0.15em; margin-bottom:0.35rem;">Menu Image Upload (Optional)</label>
-                    <input type="file" id="menuImageUpload" accept="image/*,application/pdf">
-                    <p style="font-size: 0.8rem; color: var(--color-text-light); margin-top: 0.35rem;">
-                        This image or PDF is sent with the ClickUp task as design reference.
-                    </p>
-                </div>
+                <!-- Menu Image Upload removed in the upload-first flow. -->
             </div>
+            </div><!-- /#detailsStage -->
 
             <!-- Required Approval Section -->
+            <div id="approvalStage" class="reveal">
             <div class="card" id="approvalsCard">
                 <h2>Required Approval</h2>
                 <p class="approvals-intro">Confirm this menu has been reviewed and approved before submission.</p>
@@ -1981,6 +2326,12 @@
                             <input type="text" id="approver1Position" required placeholder="e.g., Executive Chef">
                             <div id="approver1PositionError" class="field-error hidden"></div>
                         </div>
+                        <div class="approval-field approval-field-full">
+                            <label>Approver Email *</label>
+                            <input type="email" id="approver1Email" required placeholder="approver@example.com">
+                            <div id="approver1EmailError" class="field-error hidden"></div>
+                            <span class="approval-hint" style="margin-top:0.35rem">A copy of the submitted menu is emailed to this address.</span>
+                        </div>
                     </div>
                 </div>
 
@@ -2007,6 +2358,11 @@
                             <label>Position</label>
                             <input type="text" id="approver2Position" placeholder="Position">
                         </div>
+                        <div class="approval-field approval-field-full">
+                            <label>Approver Email</label>
+                            <input type="email" id="approver2Email" placeholder="approver@example.com">
+                            <div id="approver2EmailError" class="field-error hidden"></div>
+                        </div>
                     </div>
                 </div>
 
@@ -2014,9 +2370,16 @@
                     + Add Additional Approver
                 </button>
             </div>
+            </div><!-- /#approvalStage -->
 
-            <!-- Split View: Example + Menu Input -->
-            <div class="split-container" id="step1MenuCompositionSection">
+            <!-- Submitter Information: revealed last, after approval (the card is
+                 relocated here from #detailsStage on init). -->
+            <div id="submitterStage" class="reveal"></div>
+
+            <!-- Menu composition (Example + paste editor) is hidden in the upload-first
+                 flow. Kept in the DOM so the Quill editor (#menuEditor) and the allergen
+                 inputs remain available as the menu-text backing store. -->
+            <div class="split-container" id="step1MenuCompositionSection" style="display:none">
                 <div class="split-panel">
                     <h3>Example Format</h3>
                     <p class="panel-subtitle">Your menu should follow this centered format</p>
@@ -2080,17 +2443,18 @@
                 </div>
             </div>
 
-            <div class="btn-container" id="step1RunCheckContainer">
+            <!-- Legacy top AI-check button: superseded by #reviewWithAiBtn at the bottom -->
+            <div class="btn-container" id="step1RunCheckContainer" style="display:none">
                 <button id="runCheckBtn" class="btn btn-primary" onclick="runBasicCheck()">
                     Run Basic AI Check
                 </button>
             </div>
         </div>
 
-        <!-- Step 2: AI Check Results (Hidden initially) -->
+        <!-- Bottom stage: AI action, the floated-down menu, and submit -->
         <div id="step2" class="hidden">
-            <!-- Read-only form fields showing what user selected -->
-            <div id="step2FormFields" class="form-fields-readonly">
+            <!-- Read-only form fields summary: removed from the upload-first flow (kept hidden) -->
+            <div id="step2FormFields" class="form-fields-readonly" style="display:none">
                 <div class="card">
                     <h2>Submitter Information <span style="font-size: 0.7rem; font-weight: 400; color: var(--color-text-muted); text-transform: uppercase; letter-spacing: 0.1em;">(Read Only)</span></h2>
                     <div class="form-grid">
@@ -2184,6 +2548,13 @@
             </div>
 
             <div class="step2-container">
+                <div id="aiSuggestionsSection" class="ai-suggestions-section">
+                    <h3>AI Suggestions</h3>
+                    <p class="panel-subtitle">Recommended corrections</p>
+                    <div id="suggestionsDisplay" class="suggestions-list"></div>
+                    <div class="ai-temp-note">AI highlights are temporary. Chef revision redlines are persistent.</div>
+                </div>
+
                 <div class="step2-left-panel">
                     <div class="panel-header">
                         <h3>Your Menu</h3>
@@ -2219,12 +2590,6 @@
                 </div>
 
                 <div class="step2-right-panel">
-                    <div id="aiSuggestionsSection" class="ai-suggestions-section" data-step2-right-workbox>
-                        <h3 style="text-align: center; margin-bottom: 0.25rem; font-family: var(--font-heading); font-size: 1.1rem; font-weight: 500;">AI Suggestions</h3>
-                        <p class="panel-subtitle">Recommended corrections</p>
-                        <div id="suggestionsDisplay" class="suggestions-list" data-step2-right-align-box></div>
-                        <div class="ai-temp-note">AI highlights are temporary. Chef revision redlines are persistent.</div>
-                    </div>
                     <div id="persistentPreviewSection" class="persistent-preview show" data-step2-right-workbox>
                         <h4>Persistent Revision Preview (What Design Will Receive)</h4>
                         <div id="persistentPreviewBody" class="persistent-preview-body" data-step2-right-align-box></div>
@@ -2232,6 +2597,20 @@
                 </div>
             </div>
 
+            <!-- AI review action: appears once the required approval is filled -->
+            <div id="aiActionStage" class="reveal">
+                <div class="btn-container">
+                    <button id="reviewWithAiBtn" class="btn btn-primary" onclick="runBasicCheck()">
+                        Review with AI
+                    </button>
+                </div>
+            </div>
+
+            <!-- The menu side-by-side floats down into here after the AI check runs -->
+            <div id="menuBottomSlot"></div>
+
+            <!-- Submit: appears after the AI check has run (or right after approval for non-beverage) -->
+            <div id="submitStage" class="reveal">
             <div class="btn-container">
                 <button id="runCheckBtnBottom" class="btn btn-primary hidden" onclick="runBasicCheck()">
                     Run Basic AI Check
@@ -2248,6 +2627,7 @@
                     Submit Menu for Review
                 </button>
             </div>
+            </div><!-- /#submitStage -->
         </div>
     </div>
 
@@ -2337,6 +2717,226 @@
         const RAW_NOTICE_TEXT = '*consuming raw or undercooked meats, poultry, seafood, shellfish, or eggs may increase your risk of foodborne illness.';
         const RAW_NOTICE_REGEX = /\*?\s*consuming raw or undercooked meats,\s*poultry,\s*seafood(?:,\s*shellfish)?,\s*or eggs may increase your risk of foodborne illness\.?/i;
         const redlinePreview = window.MenuRedlinePreview;
+        const formStage = window.MenuFormStage;
+        let menuUploaded = false;
+        let menuFloatedDown = false;
+        let basicCheckInProgress = false;
+
+        // ---- Progressive-disclosure reveal wiring ----------------------------
+        // Snapshot of the form passed to the pure stage logic in form-stage.js.
+        function gatherFormStateForStage() {
+            function val(id) {
+                const el = document.getElementById(id);
+                return el ? (el.value || '') : '';
+            }
+            return {
+                menuUploaded: menuUploaded,
+                submitterName: val('submitterName'),
+                submitterEmail: val('submitterEmail'),
+                submitterJobTitle: val('submitterJobTitle'),
+                projectName: val('projectName'),
+                property: val('property'),
+                menuType: val('menuType'),
+                servicePeriod: val('servicePeriod'),
+                templateType: val('templateType'),
+                turnaroundDays: val('turnaroundDays'),
+                dateNeeded: val('dateNeeded'),
+                assetType: val('assetType'),
+                orientation: val('orientation'),
+                widthPrint: val('widthPrint'),
+                heightPrint: val('heightPrint'),
+                printRegion: val('printRegion'),
+                printSize: val('printSize'),
+                folded: val('folded'),
+                cropMarks: val('cropMarks'),
+                bleedMarks: val('bleedMarks'),
+                fileSizeLimit: val('fileSizeLimit'),
+                fileSizeLimitMb: val('fileSizeLimitMb'),
+                widthDigital: val('widthDigital'),
+                heightDigital: val('heightDigital'),
+                approval1: val('approval1'),
+                approver1Name: val('approver1Name'),
+                approver1Position: val('approver1Position'),
+                approver1Email: val('approver1Email'),
+                aiCheckHasRun: aiCheckHasRun
+            };
+        }
+
+        // Reveal (fade + slide) or collapse a .reveal-wrapped section by id.
+        function setSectionRevealed(id, shouldReveal) {
+            const el = document.getElementById(id);
+            if (!el) return;
+            const isRevealed = el.classList.contains('revealed');
+            if (shouldReveal && !isRevealed) {
+                el.classList.add('revealed');
+                requestAnimationFrame(function () {
+                    requestAnimationFrame(function () { el.classList.add('show'); });
+                });
+            } else if (!shouldReveal && isRevealed) {
+                el.classList.remove('revealed', 'show');
+            }
+        }
+
+        // Recompute which progressively-disclosed sections should be visible and
+        // apply it. Safe to call before the new markup exists (missing ids no-op).
+        function applyStageReveals() {
+            if (!formStage) return;
+            const reveal = formStage.computeRevealState(gatherFormStateForStage());
+            setSectionRevealed('menuSplitBlock', reveal.menu && !menuFloatedDown);
+            setSectionRevealed('detailsStage', reveal.details);
+            setSectionRevealed('approvalStage', reveal.approval);
+            setSectionRevealed('submitterStage', reveal.submitter);
+            if (typeof updateAiSubmitStageVisibility === 'function') {
+                updateAiSubmitStageVisibility(reveal);
+            }
+            refreshNeedsInputHighlights();
+        }
+
+        // Highlight the required fields the chef STILL needs to fill (empty +
+        // currently visible), clearing each as it's completed. Replaces the old
+        // "highlight what was auto-filled" behavior, which was less intuitive.
+        function refreshNeedsInputHighlights() {
+            function val(id) { const el = document.getElementById(id); return el ? (el.value || '') : ''; }
+            const assetType = val('assetType');
+            const isPrint = assetType === 'PRINT' || assetType === 'BOTH';
+            const isDigital = assetType === 'DIGITAL' || assetType === 'BOTH';
+            const required = [
+                'projectName', 'property', 'menuType', 'servicePeriod', 'templateType',
+                'turnaroundDays', 'dateNeeded', 'assetType', 'orientation',
+                'approval1', 'approver1Name', 'approver1Position', 'approver1Email',
+                'submitterName', 'submitterEmail', 'submitterJobTitle'
+            ];
+            if (isPrint) {
+                required.push('folded', 'printRegion', 'cropMarks', 'bleedMarks', 'fileSizeLimit');
+                if (val('printRegion') === 'NON_US') required.push('printSize');
+                else required.push('widthPrint', 'heightPrint');
+                if (val('fileSizeLimit') === 'yes') required.push('fileSizeLimitMb');
+            }
+            if (isDigital) required.push('widthDigital', 'heightDigital');
+
+            required.forEach(function (id) {
+                const el = document.getElementById(id);
+                if (!el) return;
+                const visible = !!(el.offsetParent || el.getClientRects().length);
+                const empty = !String(el.value || '').trim();
+                if (visible && empty) el.classList.add('needs-input');
+                else el.classList.remove('needs-input');
+            });
+        }
+
+        // ---- Copy project details from a previous submission ----------------
+        // Reuses the approved-submission search + applyProjectPrefill, but fills
+        // ONLY the project-detail fields — the uploaded menu is never touched.
+        let projectPrefillResults = [];
+        let projectPrefillDebounce = null;
+
+        function toggleProjectPrefill() {
+            const panel = document.getElementById('projectPrefillPanel');
+            if (!panel) return;
+            panel.classList.toggle('hidden');
+            if (!panel.classList.contains('hidden')) {
+                const input = document.getElementById('projectPrefillSearch');
+                if (input) input.focus();
+            }
+        }
+
+        function onProjectPrefillSearch(value) {
+            clearTimeout(projectPrefillDebounce);
+            const query = (value || '').trim();
+            const resultsEl = document.getElementById('projectPrefillResults');
+            if (query.length < 2) {
+                if (resultsEl) resultsEl.innerHTML = '';
+                projectPrefillResults = [];
+                return;
+            }
+            projectPrefillDebounce = setTimeout(function () { searchProjectPrefill(query); }, 250);
+        }
+
+        async function searchProjectPrefill(query) {
+            const resultsEl = document.getElementById('projectPrefillResults');
+            try {
+                const { property, servicePeriod } = getCurrentPropertyService();
+                const params = new URLSearchParams({ q: query, limit: '20' });
+                if (property) params.set('property', property);
+                if (servicePeriod) params.set('servicePeriod', servicePeriod);
+                const response = await fetch(`/api/submissions/search?${params.toString()}`);
+                const results = await response.json();
+                if (!response.ok) throw new Error(results.error || 'Search failed');
+                projectPrefillResults = results || [];
+                if (!resultsEl) return;
+                if (!projectPrefillResults.length) {
+                    resultsEl.innerHTML = '<div class="search-result-item">No previous submissions found.</div>';
+                    return;
+                }
+                resultsEl.innerHTML = projectPrefillResults.map(function (r, idx) {
+                    return `
+                    <div class="search-result-item" onclick="selectProjectPrefill(${idx})">
+                        <strong>${escapeHtml(r.projectName || '(Untitled)')}</strong> - ${escapeHtml(r.property || 'Unknown Property')}<br>
+                        <span style="color: var(--color-text-muted);">Service: ${escapeHtml(r.servicePeriod || 'N/A')} | ${escapeHtml(formatApprovedDate(r.reviewedAt || r.updatedAt))}</span>
+                    </div>`;
+                }).join('');
+            } catch (error) {
+                console.error('Project prefill search failed:', error);
+                if (resultsEl) resultsEl.innerHTML = '<div class="search-result-item">Search failed.</div>';
+            }
+        }
+
+        function selectProjectPrefill(index) {
+            const selected = projectPrefillResults[index];
+            if (!selected) return;
+            applyProjectPrefill(selected);
+            refreshNeedsInputHighlights();
+            applyStageReveals();
+            const panel = document.getElementById('projectPrefillPanel');
+            if (panel) panel.classList.add('hidden');
+            const search = document.getElementById('projectPrefillSearch');
+            if (search) search.value = '';
+            const resultsEl = document.getElementById('projectPrefillResults');
+            if (resultsEl) resultsEl.innerHTML = '';
+            showAlert(`Copied project details from "${selected.projectName || 'previous submission'}". Review and adjust as needed.`, 'success');
+        }
+
+        // FLIP: smoothly animate `node` from its current on-screen position to
+        // wherever it lands after `mutate()` moves it in the DOM. No-ops (but
+        // still performs the move) under prefers-reduced-motion.
+        function flipMove(node, mutate, onSettled) {
+            const settle = function () {
+                if (typeof onSettled === 'function') onSettled();
+            };
+            if (!node) {
+                if (typeof mutate === 'function') mutate();
+                settle();
+                return;
+            }
+            const reduceMotion = window.matchMedia
+                && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+            const first = node.getBoundingClientRect();
+            if (typeof mutate === 'function') mutate();
+            const last = node.getBoundingClientRect();
+            const dx = first.left - last.left;
+            const dy = first.top - last.top;
+            if (reduceMotion || (!dx && !dy)) {
+                requestAnimationFrame(settle);
+                return;
+            }
+            node.classList.remove('flip-animating');
+            node.style.transform = 'translate(' + dx + 'px, ' + dy + 'px)';
+            requestAnimationFrame(function () {
+                node.classList.add('flip-animating');
+                node.style.transform = '';
+                let settled = false;
+                const cleanup = function (event) {
+                    if (event && event.target !== node) return;
+                    if (settled) return;
+                    settled = true;
+                    node.classList.remove('flip-animating');
+                    node.removeEventListener('transitionend', cleanup);
+                    settle();
+                };
+                node.addEventListener('transitionend', cleanup);
+                setTimeout(cleanup, 600);
+            });
+        }
 
         function getOrCreateFormAttemptId() {
             const storageKey = 'menumanager_form_attempt_id';
@@ -2744,6 +3344,9 @@
                 placeholder: 'Paste your menu content here...'
             });
 
+            // Upload-first layout: only the dropzone shows until a menu is uploaded.
+            initUploadFirstLayout();
+
             const menuContainer = document.querySelector('.menu-input-container');
             const exampleContent = document.querySelector('.example-content');
 
@@ -2769,14 +3372,15 @@
                 'orientation',
                 'approval1',
                 'approver1Name',
-                'approver1Position'
+                'approver1Position',
+                'approver1Email'
             ].forEach((fieldId) => {
                 const field = document.getElementById(fieldId);
                 if (!field) return;
 
                 const clearFn = () => {
                     clearGenericFieldError(fieldId);
-                    if (['approval1', 'approver1Name', 'approver1Position'].includes(fieldId)) {
+                    if (['approval1', 'approver1Name', 'approver1Position', 'approver1Email'].includes(fieldId)) {
                         syncApprovalsCardErrorState();
                     } else {
                         syncProjectDetailsCardErrorState();
@@ -3062,17 +3666,37 @@
             return hasProjectFieldErrors;
         }
 
+        // Mirrors the server-side check in submission-workflow.ts.
+        function isValidEmailAddress(value) {
+            return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || '').trim());
+        }
+
         function applyApprovalFieldValidationErrors() {
             const approval1 = document.getElementById('approval1').value;
             const approver1Name = document.getElementById('approver1Name').value.trim();
             const approver1Position = document.getElementById('approver1Position').value.trim();
+            const approver1Email = document.getElementById('approver1Email').value.trim();
 
             setGenericFieldError('approval1', approval1 ? '' : 'Please confirm approval');
             setGenericFieldError('approver1Name', approver1Name ? '' : 'Please enter the approver name');
             setGenericFieldError('approver1Position', approver1Position ? '' : 'Please enter the approver position');
+            setGenericFieldError('approver1Email', approver1Email ? '' : 'Please enter the approver email');
 
-            if (!approval1 || !approver1Name || !approver1Position) {
+            if (!approval1 || !approver1Name || !approver1Position || !approver1Email) {
                 setApprovalsCardError('Please complete the required approval fields');
+                return false;
+            }
+
+            if (!isValidEmailAddress(approver1Email)) {
+                setGenericFieldError('approver1Email', 'Please enter a valid email address');
+                setApprovalsCardError('Please enter a valid approver email address');
+                return false;
+            }
+
+            const approver2Email = document.getElementById('approver2Email').value.trim();
+            if (approver2Email && !isValidEmailAddress(approver2Email)) {
+                setGenericFieldError('approver2Email', 'Please enter a valid email address');
+                setApprovalsCardError('Please enter a valid email for the additional approver');
                 return false;
             }
 
@@ -4071,6 +4695,187 @@
             }
         }
 
+        // ---- Upload-first entry point ---------------------------------------
+        // The single dropzone calls this. Always runs the preserve-redlines
+        // extraction, autofills project details, shows the menu side-by-side,
+        // and reveals the next sections.
+        async function onMenuUpload() {
+            const input = document.getElementById('menuUploadInput');
+            const file = input && input.files && input.files[0];
+            if (!file) return;
+            const dropzone = document.getElementById('uploadDropzone');
+            const statusEl = document.getElementById('uploadStatus');
+            const setStatus = function (msg, cls) {
+                if (!statusEl) return;
+                statusEl.textContent = msg;
+                statusEl.className = 'upload-status' + (cls ? ' ' + cls : '');
+            };
+
+            if (dropzone) dropzone.classList.add('uploading');
+            setStatus('Reading "' + file.name + '"…', '');
+
+            const form = new FormData();
+            form.append('baselineDoc', file);
+            try {
+                await logFormAttempt('unapproved_upload_started', {
+                    route: '/api/modification/unapproved-upload',
+                    revisionSource: 'uploaded_unapproved',
+                    revisionBaselineFileName: file.name,
+                    details: { fileName: file.name, fileSize: file.size }
+                });
+                const response = await fetch('/api/modification/unapproved-upload', {
+                    method: 'POST',
+                    headers: getAttemptHeaders({ 'x-menumanager-revision-source': 'uploaded_unapproved' }),
+                    body: form,
+                });
+                const data = await response.json();
+                if (!response.ok) {
+                    throw new Error(data.error || 'Failed to extract menu document');
+                }
+
+                applyUnapprovedUploadData(data, file);
+                menuUploaded = true;
+                enterRevisionTrackingMode();
+                applyStageReveals();
+
+                await logFormAttempt('unapproved_upload_completed', {
+                    route: '/api/modification/unapproved-upload',
+                    statusCode: response.status,
+                    revisionSource: 'uploaded_unapproved',
+                    revisionBaselineFileName,
+                    menuTextLength: baseApprovedMenuContent.length,
+                    menuHtmlLength: unapprovedBaseHtml.length,
+                    details: { fileName: file.name, fileSize: file.size, annotationCount: unapprovedAnnotations.length }
+                });
+                setStatus('Loaded "' + revisionBaselineFileName + '". Existing redlines preserved — review your menu and fill in the details below.', 'success');
+            } catch (error) {
+                console.error(error);
+                await logFormAttempt('unapproved_upload_failed', {
+                    route: '/api/modification/unapproved-upload',
+                    revisionSource: 'uploaded_unapproved',
+                    revisionBaselineFileName: file.name,
+                    errorMessage: error.message,
+                    details: { fileName: file.name, fileSize: file.size }
+                });
+                setStatus('Could not read that file: ' + error.message, 'error');
+            } finally {
+                if (dropzone) dropzone.classList.remove('uploading');
+            }
+        }
+
+        // Apply the extracted unapproved-DOCX payload to form state. Mirrors the
+        // body of the legacy uploadUnapprovedDoc() so the redline/submit plumbing
+        // behaves identically; only the trigger and UI surface changed.
+        function applyUnapprovedUploadData(data, file) {
+            unapprovedMode = true;
+            unapprovedAnnotations = data.annotations || [];
+            unapprovedBaseHtml = stripManagedFooterHtml(data.unapprovedHtml || '');
+            const revisionComparison = redlinePreview.buildRevisionComparisonFromAnnotatedHtml(unapprovedBaseHtml);
+            unapprovedDiffBaseline = revisionComparison.originalText || '';
+            unapprovedOriginalHtml = revisionComparison.originalHtml || '';
+            unapprovedEditorHtml = revisionComparison.editorHtml || '';
+            revisionSource = 'uploaded_unapproved';
+            revisionBaseSubmissionId = null;
+            revisionBaselineDocPath = data.baselineDocPath || '';
+            revisionBaselineFileName = data.baselineFileName || file.name;
+            baseApprovedMenuContent = revisionComparison.currentText || data.visibleText || '';
+            baseApprovedMenuContentHtml = '';
+            persistentDiffSummary = { insertions: 0, deletions: 0 };
+
+            if (data.extractedProject) {
+                applyExtractedProjectToForm(data.extractedProject);
+            }
+            const normalizedBaseline = stripBaselineFooter(data.visibleText || '', data.extractedAllergenKey || '');
+            preservedManagedFooterText = normalizedBaseline.footerText || '';
+            setAllergenInputValue(normalizedBaseline.allergens || '');
+            setContainsRawSelection(!!normalizedBaseline.hadRawNotice);
+            suppressRawNotice = false;
+            setAllergenAutoDetectedBadge(!!normalizedBaseline.allergens);
+
+            baseApprovedMenuContent = revisionComparison.currentText || normalizedBaseline.menu || '';
+            quill.setText(baseApprovedMenuContent || '');
+        }
+
+        // Reveal the AI action button (pre-check) or the submit stage (post-check
+        // / non-beverage). Driven by the pure reveal state from form-stage.js.
+        function updateAiSubmitStageVisibility(reveal) {
+            setSectionRevealed('aiActionStage', reveal.ai && !aiCheckHasRun);
+            setSectionRevealed('submitStage', reveal.submit);
+        }
+
+        function suspendViewportScrollAnchoring() {
+            const root = document.documentElement;
+            if (!root || !root.style) return function () {};
+            const previous = root.style.overflowAnchor;
+            root.style.overflowAnchor = 'none';
+            let restored = false;
+            return function restoreScrollAnchoring() {
+                if (restored) return;
+                restored = true;
+                root.style.overflowAnchor = previous;
+            };
+        }
+
+        // After the AI check, FLIP-float the menu side-by-side down to the bottom
+        // slot (just above submit) so the AI's changes sit where the chef is looking.
+        function floatMenuToBottom(onSettled) {
+            const restoreScrollAnchoring = suspendViewportScrollAnchoring();
+            const settle = function () {
+                if (typeof onSettled === 'function') onSettled();
+                setTimeout(restoreScrollAnchoring, 250);
+            };
+            if (menuFloatedDown) {
+                requestAnimationFrame(settle);
+                return;
+            }
+            const menu = document.querySelector('.step2-container');
+            const slot = document.getElementById('menuBottomSlot');
+            if (!menu || !slot) {
+                settle();
+                return;
+            }
+            flipMove(menu, function () { slot.appendChild(menu); }, settle);
+            menuFloatedDown = true;
+            const block = document.getElementById('menuSplitBlock');
+            if (block) block.classList.remove('revealed', 'show');
+        }
+
+        function scrollAiReviewResultsIntoView() {
+            const reviewPanel = document.querySelector('.step2-container');
+            if (!reviewPanel) return;
+            const scroll = function () {
+                reviewPanel.scrollIntoView({ behavior: 'auto', block: 'start' });
+            };
+            if (typeof window.requestAnimationFrame === 'function') {
+                window.requestAnimationFrame(function () {
+                    window.requestAnimationFrame(scroll);
+                });
+            } else {
+                setTimeout(scroll, 0);
+            }
+        }
+
+        // One-time layout setup: relocate the menu side-by-side under the upload,
+        // make the (reveal-gated) bottom region present, and start reveal tracking.
+        function initUploadFirstLayout() {
+            const menu = document.querySelector('.step2-container');
+            const block = document.getElementById('menuSplitBlock');
+            if (menu && block && menu.parentElement !== block) {
+                block.appendChild(menu);
+            }
+            // Submitter Information is revealed last — relocate its card into #submitterStage.
+            const submitterCard = document.getElementById('submitterInfoCard');
+            const submitterStage = document.getElementById('submitterStage');
+            if (submitterCard && submitterStage && submitterCard.parentElement !== submitterStage) {
+                submitterStage.appendChild(submitterCard);
+            }
+            const step2 = document.getElementById('step2');
+            if (step2) step2.classList.remove('hidden');
+            applyStageReveals();
+            document.addEventListener('input', applyStageReveals);
+            document.addEventListener('change', applyStageReveals);
+        }
+
         function enterRevisionTrackingMode() {
             if (submissionMode !== 'modification') return;
 
@@ -4782,16 +5587,9 @@
         }
 
         function markFieldAsExtracted(fieldId) {
-            const el = document.getElementById(fieldId);
-            if (!el || el.classList.contains('field-extracted')) return;
-            el.classList.add('field-extracted');
-            const clear = () => {
-                el.classList.remove('field-extracted');
-                el.removeEventListener('input', clear);
-                el.removeEventListener('change', clear);
-            };
-            el.addEventListener('input', clear);
-            el.addEventListener('change', clear);
+            // Auto-filled fields are intentionally NOT highlighted anymore — we
+            // highlight the fields the chef still needs to fill instead (see
+            // refreshNeedsInputHighlights). Kept as a no-op for existing callers.
         }
 
         function setFieldValueAndMark(fieldId, value) {
@@ -4890,6 +5688,8 @@
                 document.getElementById('approval2').value = '';
                 document.getElementById('approver2Name').value = '';
                 document.getElementById('approver2Position').value = '';
+                document.getElementById('approver2Email').value = '';
+                clearGenericFieldError('approver2Email');
             }
         }
 
@@ -5469,13 +6269,20 @@
         }
 
         function showAlert(message, type = 'info', options = {}) {
+            const DEFAULT_ALERT_DURATIONS = {
+                success: 6000,
+                info: 6000,
+                warning: 9000,
+                error: 0
+            };
             recordClientAlert(type, message);
             const container = document.getElementById('alertContainer');
             const alert = document.createElement('div');
             alert.className = `alert alert-${type} show`;
-            alert.style.position = 'relative';
+            alert.setAttribute('role', type === 'error' ? 'alert' : 'status');
 
             const msgSpan = document.createElement('span');
+            msgSpan.className = 'alert-message';
             msgSpan.textContent = message;
             alert.appendChild(msgSpan);
 
@@ -5506,21 +6313,29 @@
                 alert.appendChild(support);
             }
 
-            // Dismiss button for persistent alerts
-            if (((type === 'warning' || type === 'error') && !options.temporary) || options.persistent) {
-                const dismiss = document.createElement('span');
-                dismiss.textContent = ' ✕';
-                dismiss.style.cssText = 'cursor:pointer;margin-left:12px;font-weight:bold;opacity:.7';
-                dismiss.onclick = () => alert.remove();
-                alert.appendChild(dismiss);
-            }
+            let dismissTimer = null;
+            const dismissAlert = () => {
+                if (dismissTimer) clearTimeout(dismissTimer);
+                if (!alert.isConnected || alert.classList.contains('closing')) return;
+                alert.classList.add('closing');
+                setTimeout(() => alert.remove(), 180);
+            };
+
+            const dismiss = document.createElement('button');
+            dismiss.type = 'button';
+            dismiss.className = 'alert-dismiss';
+            dismiss.setAttribute('aria-label', 'Dismiss notification');
+            dismiss.textContent = '×';
+            dismiss.onclick = dismissAlert;
+            alert.appendChild(dismiss);
 
             // Retry button
             if (options.onRetry) {
                 const retryBtn = document.createElement('button');
+                retryBtn.type = 'button';
+                retryBtn.className = 'alert-action';
                 retryBtn.textContent = 'Retry';
-                retryBtn.style.cssText = 'margin-left:12px;padding:2px 10px;border:1px solid currentColor;background:transparent;color:inherit;cursor:pointer;font-size:.8em;border-radius:3px';
-                retryBtn.onclick = () => { alert.remove(); options.onRetry(); };
+                retryBtn.onclick = () => { dismissAlert(); options.onRetry(); };
                 alert.appendChild(retryBtn);
             }
 
@@ -5530,10 +6345,10 @@
                     if (typeof action.onClick === 'function') {
                         const button = document.createElement('button');
                         button.type = 'button';
+                        button.className = 'alert-action';
                         button.textContent = action.label;
-                        button.style.cssText = 'margin-left:12px;padding:2px 10px;border:1px solid currentColor;background:transparent;color:inherit;cursor:pointer;font-size:.8em;border-radius:3px;font-weight:600';
                         button.onclick = () => {
-                            alert.remove();
+                            dismissAlert();
                             action.onClick();
                         };
                         alert.appendChild(button);
@@ -5541,22 +6356,33 @@
                     }
                     if (!action.href) return;
                     const link = document.createElement('a');
+                    link.className = 'alert-action';
                     link.href = action.href;
                     link.textContent = action.label;
                     link.target = action.target || '_self';
                     link.rel = 'noopener';
-                    link.style.cssText = 'margin-left:12px;color:inherit;font-weight:600;text-decoration:underline';
                     alert.appendChild(link);
                 });
             }
 
-            const autoDismissMs = Number(options.autoDismissMs || 0) ||
-                (((type === 'success' || type === 'info') && !options.persistent) ? 5000 : 0);
+            const hasExplicitAutoDismiss = Object.prototype.hasOwnProperty.call(options, 'autoDismissMs');
+            const autoDismissMs = options.persistent
+                ? 0
+                : (hasExplicitAutoDismiss
+                    ? Number(options.autoDismissMs || 0)
+                    : (DEFAULT_ALERT_DURATIONS[type] || 0));
+
+            if (autoDismissMs > 0) {
+                const progress = document.createElement('div');
+                progress.className = 'toast-progress';
+                progress.style.setProperty('--toast-duration', `${autoDismissMs}ms`);
+                alert.appendChild(progress);
+            }
 
             container.appendChild(alert);
 
             if (autoDismissMs > 0 && !options.persistent) {
-                setTimeout(() => alert.remove(), autoDismissMs);
+                dismissTimer = setTimeout(dismissAlert, autoDismissMs);
             }
         }
 
@@ -5684,14 +6510,45 @@
             return true;
         }
 
+        // Apply/clear the "Running AI Check" loading state on every AI-trigger
+        // button — crucially including the visible #reviewWithAiBtn — so the chef
+        // gets instant feedback and the check can't be double-fired.
+        function setAiCheckButtonsLoading(loading) {
+            ['reviewWithAiBtn', 'runCheckBtn', 'runCheckBtnBottom'].forEach(function (id) {
+                const button = document.getElementById(id);
+                if (!button) return;
+                if (loading) {
+                    if (button.dataset.idleLabel === undefined) button.dataset.idleLabel = button.innerHTML;
+                    button.disabled = true;
+                    button.innerHTML = '<span class="spinner"></span>Running AI Check…';
+                } else {
+                    button.disabled = false;
+                    if (button.dataset.idleLabel !== undefined) {
+                        button.innerHTML = button.dataset.idleLabel;
+                        delete button.dataset.idleLabel;
+                    }
+                }
+            });
+        }
+
         async function runBasicCheck() {
+            // Re-entrancy guard: a slow AI call must not be fired multiple times
+            // by repeated clicks while it's in flight.
+            if (basicCheckInProgress) return;
             if (!validateStep1()) return;
             if (submissionMode === 'modification' && !revisionBaseSubmissionId && !revisionBaselineDocPath) {
                 showAlert('Choose a modification source and load a baseline DOCX first.', 'error');
                 return;
             }
 
+            // Immediate feedback on the actual visible button BEFORE any async work
+            // (the baseline-freshness check and AI request both take a moment).
+            basicCheckInProgress = true;
+            setAiCheckButtonsLoading(true);
+            try {
+
             if (!(await ensureBaselineFreshnessBeforeContinue())) {
+                setAiCheckButtonsLoading(false);
                 return;
             }
 
@@ -5700,14 +6557,6 @@
                 await submitMenu(true);
                 return;
             }
-
-            const topBtn = document.getElementById('runCheckBtn');
-            const bottomBtn = document.getElementById('runCheckBtnBottom');
-            [topBtn, bottomBtn].forEach(button => {
-                if (!button) return;
-                button.disabled = true;
-                button.innerHTML = '<span class="spinner"></span>Running AI Check...';
-            });
 
             let menuContent = '';
             if (isEditMode && document.getElementById('step2').classList.contains('hidden') === false) {
@@ -5781,6 +6630,8 @@
                     }
                 });
                 showStep2(data);
+                floatMenuToBottom(scrollAiReviewResultsIntoView);
+                applyStageReveals();
                 if (data.aiUnavailable) {
                     showAlert(data.reviewSkippedReason || 'AI check is temporarily unavailable. You can still submit this menu for manual review.', 'warning', {
                         persistent: true
@@ -5802,11 +6653,10 @@
                     errorMessage: error.message
                 });
                 showAlert('Error running AI check: ' + error.message, 'error');
-                [topBtn, bottomBtn].forEach(button => {
-                    if (!button) return;
-                    button.disabled = false;
-                    button.textContent = 'Run Basic AI Check';
-                });
+                setAiCheckButtonsLoading(false);
+            }
+            } finally {
+                basicCheckInProgress = false;
             }
         }
 
@@ -6051,6 +6901,12 @@
             return redlinePreview.computeInsertedTokenRanges(original, corrected);
         }
 
+        function getSuggestionChangePair(suggestion) {
+            const helper = window.formHelpers && window.formHelpers.extractSuggestionChangePair;
+            if (typeof helper !== 'function') return null;
+            return helper(suggestion && suggestion.recommendation);
+        }
+
         function renderSuggestionCard(suggestion, idx) {
             const isCritical = suggestion.severity === 'critical';
             const confidenceClass = `confidence-${suggestion.confidence}`;
@@ -6071,6 +6927,14 @@
                 overrideBtnHtml = `<button class="${btnClass}" onclick="overrideCriticalError(${idx})">${btnText}</button>`;
             }
 
+            const changePair = !isCritical ? getSuggestionChangePair(suggestion) : null;
+            const applyBtnHtml = changePair
+                ? `<button class="suggestion-apply-btn" onclick="applySuggestionChange(${idx})">Apply Change</button>`
+                : '';
+            const actionsHtml = (applyBtnHtml || overrideBtnHtml)
+                ? `<div class="suggestion-actions">${applyBtnHtml}${overrideBtnHtml}</div>`
+                : '';
+
             return `
                 <div class="suggestion-item ${criticalClass} ${overriddenClass}" data-suggestion-index="${idx}">
                     <div class="suggestion-type">
@@ -6080,7 +6944,7 @@
                     ${suggestion.menuItem ? `<div style="font-weight: 600; color: var(--color-text); font-size: 0.75rem; margin: 0.25rem 0;">Item: ${escapeHtml(suggestion.menuItem)}</div>` : ''}
                     <div class="suggestion-detail">${escapeHtml(suggestion.description)}</div>
                     <div style="color: var(--color-success); font-size: 0.75rem; margin-top: 0.25rem;"><strong>Recommendation:</strong> ${escapeHtml(suggestion.recommendation)}</div>
-                    ${overrideBtnHtml}
+                    ${actionsHtml}
                 </div>
             `;
         }
@@ -6148,6 +7012,61 @@
             }
 
             updateSubmitButtonState();
+        }
+
+        function applySuggestionChange(idx) {
+            const helper = window.formHelpers && window.formHelpers.applySuggestionChangeToText;
+            const suggestion = aiCheckResults && aiCheckResults.suggestions && aiCheckResults.suggestions[idx];
+            if (typeof helper !== 'function' || !suggestion) {
+                showAlert('This suggestion cannot be applied automatically.', 'warning');
+                return;
+            }
+
+            const reviewedArea = document.getElementById('reviewedContentArea');
+            const currentText = extractCleanTextFromReviewedArea(reviewedArea);
+            const result = helper(currentText, suggestion);
+            if (!result.applied) {
+                const message = result.reason === 'ambiguous_match'
+                    ? 'This suggestion matched more than one place. Please edit the menu text manually.'
+                    : 'This suggestion no longer matches the current menu text.';
+                showAlert(message, 'warning');
+                return;
+            }
+
+            const currentHtml = stripAiReviewTransientFormatting(reviewedArea.innerHTML || '');
+            setQuillReviewedHtmlFromText(result.menuText, currentHtml);
+            applyDishNameFormattingAnchors(result.menuText, aiCheckResults?.dishNameFormatting || []);
+
+            const updatedText = extractCleanTextFromReviewedArea(quill.root) || result.menuText;
+            const changes = computeLineDiff(aiCheckResults.originalMenu || currentText, updatedText);
+            aiChanges = changes.map(change => ({
+                start: change.start,
+                length: change.length,
+                word: change.word
+            }));
+            changes.forEach(change => {
+                quill.formatText(change.start, change.length, {
+                    background: 'rgba(74, 124, 89, 0.2)'
+                });
+            });
+
+            displayReviewedContent(quill.root.innerHTML);
+            const diffBase = (unapprovedMode && unapprovedDiffBaseline)
+                ? unapprovedDiffBaseline
+                : (baseApprovedMenuContent || (aiCheckResults?.originalMenu || currentText));
+            renderPersistentPreview(diffBase, updatedText, quill.root.innerHTML || '');
+            markAiCheckStale();
+
+            const card = document.querySelector(`.suggestion-item[data-suggestion-index="${idx}"]`);
+            if (card) {
+                card.classList.add('applied');
+                const button = card.querySelector('.suggestion-apply-btn');
+                if (button) {
+                    button.disabled = true;
+                    button.textContent = 'Applied';
+                }
+            }
+            showAlert('Suggestion applied. Re-run AI Check when you are ready to refresh the remaining suggestions.', 'success');
         }
 
         async function rerunAICheck(options = {}) {
@@ -6234,6 +7153,8 @@
 
                 // Re-render step 2 with new results
                 showStep2(data);
+                floatMenuToBottom(scrollAiReviewResultsIntoView);
+                applyStageReveals();
                 if (data.aiUnavailable) {
                     showAlert(data.reviewSkippedReason || 'AI check is temporarily unavailable. You can still submit this menu for manual review.', 'warning', {
                         persistent: true
@@ -6264,6 +7185,11 @@
         }
 
         async function handleSubmitButtonClick() {
+            // Non-beverage templates skip AI review and submit directly.
+            if (!requiresAiReview()) {
+                await submitMenu(true);
+                return;
+            }
             if (shouldBlockSubmitForStaleAiCheck()) {
                 await rerunAICheck({ source: 'submit_button' });
                 return;
@@ -6294,8 +7220,10 @@
                     menuPanelSubtitle.textContent = 'Chef revision editor (persistent redlines preview on right)';
                 }
             } else {
-                document.getElementById('step1').classList.add('hidden');
-                document.getElementById('step2FormFields').classList.remove('hidden');
+                // Upload-first flow: keep the details + approval sections visible;
+                // the menu side-by-side floats down beneath them instead of
+                // swapping to a separate read-only summary step.
+                document.getElementById('step1').classList.remove('hidden');
                 setAiSuggestionsVisibility(true);
                 if (menuPanelSubtitle) {
                     menuPanelSubtitle.textContent = 'AI-reviewed content (green = AI changes)';
@@ -6460,7 +7388,6 @@
                 }
 
                 suggestionsDisplay.innerHTML = html;
-                showAlert('Auto-corrections applied! Green highlights show the changes.', 'success');
             } else if (sortedSuggestions.length > 0) {
                 suggestionsDisplay.innerHTML = sortedSuggestions.map((suggestion, idx) => renderSuggestionCard(suggestion, idx)).join('');
             } else {
@@ -6558,17 +7485,20 @@
             const approvals = [{
                 approved: document.getElementById('approval1').value === 'yes',
                 name: document.getElementById('approver1Name').value.trim(),
-                position: document.getElementById('approver1Position').value.trim()
+                position: document.getElementById('approver1Position').value.trim(),
+                email: document.getElementById('approver1Email').value.trim()
             }];
 
             const approval2 = document.getElementById('approval2').value;
             const approver2Name = document.getElementById('approver2Name').value.trim();
             const approver2Position = document.getElementById('approver2Position').value.trim();
+            const approver2Email = document.getElementById('approver2Email').value.trim();
             if (approval2 && approver2Name && approver2Position) {
                 approvals.push({
                     approved: approval2 === 'yes',
                     name: approver2Name,
-                    position: approver2Position
+                    position: approver2Position,
+                    email: approver2Email
                 });
             }
 
