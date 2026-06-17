@@ -163,6 +163,10 @@ function asText(value: unknown, maxLength = 100000): string {
     return `${value ?? ''}`.trim().slice(0, maxLength);
 }
 
+function countMarkdownCodeFences(text: string): number {
+    return (text.match(/^```/gm) || []).length;
+}
+
 export function validateImprovementLlmOutput(
     raw: unknown,
     opts: { currentPrompt?: string } = {}
@@ -190,6 +194,15 @@ export function validateImprovementLlmOutput(
         } else if (leakedMarker) {
             throw new Error(`proposed_prompt echoed input context (contains "${leakedMarker}")`);
         } else if (opts.currentPrompt && proposedPrompt === opts.currentPrompt.trim()) {
+            promptUnchanged = true;
+        }
+    }
+    if (!promptUnchanged && opts.currentPrompt) {
+        const currentFenceCount = countMarkdownCodeFences(opts.currentPrompt);
+        const proposedFenceCount = countMarkdownCodeFences(proposedPrompt);
+        if (proposedFenceCount % 2 !== 0 || proposedFenceCount !== currentFenceCount) {
+            warnings.push(`proposed_prompt changed Markdown code fence structure (${currentFenceCount} -> ${proposedFenceCount}); treating the prompt as unchanged`);
+            proposedPrompt = opts.currentPrompt;
             promptUnchanged = true;
         }
     }

@@ -131,6 +131,25 @@ describe('alert mail transport', () => {
                 fetchImpl,
             })).rejects.toThrow(/graph: .*403.*Graph inbox write failed \(404\).*\| smtp: Connection timeout/);
         });
+        test('includes Azure token error details without echoing the submitted secret', async () => {
+            const calls = [];
+            const fetchImpl = async (url) => {
+                calls.push(url);
+                return url.includes('/oauth2/')
+                    ? fakeResponse(401, {
+                        error: 'invalid_client',
+                        error_codes: [7000215],
+                        error_description: 'AADSTS7000215: Invalid client secret provided. secret-1 should not be echoed.',
+                    })
+                    : fakeResponse(202);
+            };
+            await expect((0, alert_mail_1.sendAlertMail)(MESSAGE, {
+                graphConfig: (0, alert_mail_1.buildGraphMailConfig)(GRAPH_ENV),
+                fetchImpl,
+            })).rejects.toThrow(/Graph token request failed \(401\): error=invalid_client; codes=7000215; description=AADSTS7000215: Invalid client secret provided\. <redacted> should not be echoed\./);
+            expect(calls.filter((url) => url.includes('/oauth2/'))).toHaveLength(1);
+            expect(calls.some((url) => url.includes('/mailFolders/inbox/messages'))).toBe(false);
+        });
         test('drops attachments when the Graph payload exceeds the size limit', async () => {
             const sendBodies = [];
             const fetchImpl = async (url, init) => {

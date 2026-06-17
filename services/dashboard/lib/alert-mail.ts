@@ -93,6 +93,31 @@ export function resetGraphTokenCacheForTests(): void {
     cachedGraphToken = null;
 }
 
+async function formatGraphTokenError(response: Response, config: GraphMailConfig): Promise<string> {
+    const raw = (await response.text().catch(() => '')).slice(0, 1000);
+    const redact = (value: string, text: string): string => (value ? text.split(value).join('<redacted>') : text);
+    let details = raw;
+
+    try {
+        const parsed = JSON.parse(raw);
+        const parts = [
+            parsed.error ? `error=${parsed.error}` : null,
+            Array.isArray(parsed.error_codes) && parsed.error_codes.length
+                ? `codes=${parsed.error_codes.join(',')}`
+                : null,
+            parsed.error_description ? `description=${parsed.error_description}` : null,
+        ].filter(Boolean);
+        details = parts.join('; ') || raw;
+    } catch {
+        // Keep the raw response text when Azure returns non-JSON diagnostics.
+    }
+
+    details = redact(config.clientSecret, details);
+    return details
+        ? `Graph token request failed (${response.status}): ${details}`
+        : `Graph token request failed (${response.status})`;
+}
+
 async function getGraphToken(config: GraphMailConfig, fetchImpl: typeof fetch): Promise<string> {
     if (cachedGraphToken && cachedGraphToken.expiresAt > Date.now()) {
         return cachedGraphToken.token;
@@ -109,7 +134,7 @@ async function getGraphToken(config: GraphMailConfig, fetchImpl: typeof fetch): 
         body: body.toString(),
     });
     if (!response.ok) {
-        throw new Error(`Graph token request failed (${response.status})`);
+        throw new Error(await formatGraphTokenError(response, config));
     }
     const data: any = await response.json();
     if (!data?.access_token) {
@@ -227,10 +252,12 @@ export async function sendAlertMail(message: AlertMailMessage, deps: SendAlertMa
         } catch (error: any) {
             graphError = error;
         }
-        try {
-            return await sendViaGraphInboxWrite(deps.graphConfig, message, fetchImpl);
-        } catch (error: any) {
-            graphError = new Error(`${graphError ? `${graphError.message} | ` : ''}${error.message}`);
+        if (!graphError?.message?.startsWith('Graph token request failed')) {
+            try {
+                return await sendViaGraphInboxWrite(deps.graphConfig, message, fetchImpl);
+            } catch (error: any) {
+                graphError = new Error(`${graphError ? `${graphError.message} | ` : ''}${error.message}`);
+            }
         }
     }
 

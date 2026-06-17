@@ -101,6 +101,28 @@ describe('validateImprovementLlmOutput', () => {
         expect(output.proposed_prompt).toBe('THE CURRENT PROMPT');
         expect(output.warnings.some((w) => w.includes('echoed input context'))).toBe(true);
     });
+    test('broken Markdown code fence structure falls back to unchanged with a warning', () => {
+        const current = [
+            'Response format:',
+            '```',
+            '=== CORRECTED MENU ===',
+            '=== END CORRECTED MENU ===',
+            '```',
+            'Rules continue here.',
+        ].join('\n');
+        const proposed = [
+            'Response format:',
+            '```',
+            '=== CORRECTED MENU ===',
+            '=== END CORRECTED MENU ===',
+            'Rules continue here.',
+        ].join('\n');
+        const output = (0, improvement_cycle_core_1.validateImprovementLlmOutput)({ proposed_prompt: proposed, proposed_replacement_rules: [validRule] }, { currentPrompt: current });
+        expect(output.promptUnchanged).toBe(true);
+        expect(output.proposed_prompt).toBe(current);
+        expect(output.proposed_replacement_rules).toHaveLength(1);
+        expect(output.warnings.some((w) => w.includes('code fence structure'))).toBe(true);
+    });
     test('an identical rewrite is recognized as unchanged and oversized rewrites warn', () => {
         const current = 'P'.repeat(1000);
         const identical = (0, improvement_cycle_core_1.validateImprovementLlmOutput)({ proposed_prompt: current }, { currentPrompt: current });

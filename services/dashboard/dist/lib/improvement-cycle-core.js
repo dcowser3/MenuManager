@@ -117,6 +117,9 @@ function involvesContextDependentTerm(...texts) {
 function asText(value, maxLength = 100000) {
     return `${value ?? ''}`.trim().slice(0, maxLength);
 }
+function countMarkdownCodeFences(text) {
+    return (text.match(/^```/gm) || []).length;
+}
 function validateImprovementLlmOutput(raw, opts = {}) {
     const warnings = [];
     const parsed = (raw && typeof raw === 'object' ? raw : {});
@@ -143,6 +146,15 @@ function validateImprovementLlmOutput(raw, opts = {}) {
             throw new Error(`proposed_prompt echoed input context (contains "${leakedMarker}")`);
         }
         else if (opts.currentPrompt && proposedPrompt === opts.currentPrompt.trim()) {
+            promptUnchanged = true;
+        }
+    }
+    if (!promptUnchanged && opts.currentPrompt) {
+        const currentFenceCount = countMarkdownCodeFences(opts.currentPrompt);
+        const proposedFenceCount = countMarkdownCodeFences(proposedPrompt);
+        if (proposedFenceCount % 2 !== 0 || proposedFenceCount !== currentFenceCount) {
+            warnings.push(`proposed_prompt changed Markdown code fence structure (${currentFenceCount} -> ${proposedFenceCount}); treating the prompt as unchanged`);
+            proposedPrompt = opts.currentPrompt;
             promptUnchanged = true;
         }
     }
