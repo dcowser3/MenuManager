@@ -482,6 +482,10 @@ async function main() {
                 const candidateRun = runEvalHarness([
                     '--prompt', candidatePromptPath, '--rules', `candidate:${candidateRulesPath}`,
                     '--baseline', baselineRun.reportPath,
+                    // Back-to-back regression confirmation: re-run the baseline config
+                    // (current prompt + live rules) alongside the candidate so OpenAI's
+                    // temporal temp-0 drift cancels and only real regressions count.
+                    '--baseline-prompt', currentPromptPath, '--baseline-rules', 'live',
                     '--label', `improve-${cycleId}-candidate`, ...limitArgs,
                 ]);
                 if (!candidateRun.ok || !candidateRun.reportPath) {

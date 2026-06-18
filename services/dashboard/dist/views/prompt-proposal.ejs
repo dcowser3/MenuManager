@@ -228,13 +228,19 @@
                                 <div class="meta-label">Improved / Same / Regressed</div>
                                 <div class="meta-value"><%= evalSummary.improved || 0 %> / <%= evalSummary.same || 0 %> / <%= evalSummary.regressed || 0 %></div>
                             </div>
+                            <% if (evalSummary.flaggedRegressed && evalSummary.flaggedRegressed > (evalSummary.regressed || 0)) { %>
+                            <div class="meta-item">
+                                <div class="meta-label">Regression confirmation</div>
+                                <div class="meta-value"><%= evalSummary.flaggedRegressed %> flagged → <%= evalSummary.regressed || 0 %> confirmed (<%= evalSummary.noiseRegressed || 0 %> noise)</div>
+                            </div>
+                            <% } %>
                             <div class="meta-item">
                                 <div class="meta-label">Correction F1 (candidate)</div>
                                 <div class="meta-value"><%= evalSummary.candidate ? (evalSummary.candidate.correctionF1 * 100).toFixed(1) + '%' : 'n/a' %></div>
                             </div>
                         </div>
                         <% if ((evalSummary.regressions || []).length) { %>
-                            <div class="small" style="margin-bottom:.4rem">Regressed cases (candidate scored worse than current process):</div>
+                            <div class="small" style="margin-bottom:.4rem">Confirmed regressions (reproduced on a fresh-seed re-run, not nondeterminism noise):</div>
                             <table>
                                 <thead><tr><th>Case</th><th>Composite Delta</th></tr></thead>
                                 <tbody>

@@ -42,6 +42,18 @@
  *   --baseline <report.json>   Compare against a previous run's report
  *   --label <name>             Label for the output directory
  *   --temperature <t>          Sampling temperature (default 0)
+ *   --seed <n>                 Sampling seed (default 42)
+ *   --noise-epsilon <n>        Baseline-comparison noise floor (default 0.02). Per-case
+ *                              composite deltas smaller than this count as "same".
+ *   --baseline-prompt <file>   Baseline prompt for back-to-back regression confirmation
+ *                              (usually the current/effective prompt the baseline used).
+ *   --baseline-rules <spec>    Baseline correction-rules source for confirmation (default live)
+ *   --no-confirm-regressions   Skip confirmation. By default, each flagged regression is
+ *                              re-checked by re-running the BASELINE and CANDIDATE configs
+ *                              back-to-back (same time window) and kept only if the candidate
+ *                              is still materially below baseline — this cancels OpenAI's
+ *                              temporal temp-0 drift, which otherwise shows as false
+ *                              regressions. Requires --baseline-prompt.
  *   --json                     Print the report JSON to stdout
  */
 
@@ -98,6 +110,13 @@ function parseArgs(argv) {
         temperature: 0,
         seed: 42,
         json: false,
+        // Baseline-comparison noise handling. Per-case composite deltas smaller
+        // than this are "same" (within AI nondeterminism); larger regressions are
+        // re-run with a fresh seed and only kept if they reproduce.
+        noiseEpsilon: 0.02,
+        confirmRegressions: true,
+        baselinePrompt: '',
+        baselineRules: 'live',
     };
     for (let i = 0; i < argv.length; i += 1) {
         const arg = argv[i];
@@ -116,6 +135,11 @@ function parseArgs(argv) {
         else if (arg === '--baseline') args.baseline = path.resolve(argv[++i] || '');
         else if (arg === '--label') args.label = (argv[++i] || '').replace(/[^a-zA-Z0-9_-]/g, '-');
         else if (arg === '--temperature') args.temperature = Number(argv[++i] || '0');
+        else if (arg === '--seed') args.seed = Number.parseInt(argv[++i] || '42', 10);
+        else if (arg === '--noise-epsilon') args.noiseEpsilon = Number(argv[++i] || '0.02');
+        else if (arg === '--no-confirm-regressions') args.confirmRegressions = false;
+        else if (arg === '--baseline-prompt') args.baselinePrompt = path.resolve(argv[++i] || '');
+        else if (arg === '--baseline-rules') args.baselineRules = argv[++i] || args.baselineRules;
         else if (arg === '--json') args.json = true;
         else if (arg === '--help' || arg === '-h') { printHelp(); process.exit(0); }
         else throw new Error(`Unknown argument: ${arg}`);
@@ -493,52 +517,48 @@ function classifyDelta(delta) {
     return 'same';
 }
 
-async function runEval(args, dataset, rulesInfo, libs) {
+function selectCases(args, dataset) {
+    let cases = dataset;
+    if (args.cases.length) {
+        const wanted = new Set(args.cases);
+        cases = cases.filter((c) => wanted.has(c.case_id));
+    }
+    return cases.slice(0, args.limit);
+}
+
+async function runEval(args, dataset, rulesInfo, libs, baselineConfig) {
     const { runFullReviewPipeline } = libs.reviewPipeline;
     const { normalizeComparable, boundedLevenshteinSimilarity } = libs.textSimilarity;
     const { scoreCorrections, compositeCaseScore } = libs.evalScoring;
     const { runPreAiDeterministicChecks } = libs.preAiRules;
 
     // Re-base the historical human final onto the policy under evaluation: the
-    // run's deterministic rules (built-ins + accepted + any candidate rules)
-    // are applied to the ground truth so an intentional policy change is not
-    // scored as a regression on menus approved under the old policy.
-    const resolveScoringTruth = (evalCase) => {
+    // config's deterministic rules are applied to the ground truth so an
+    // intentional policy change is not scored as a regression on menus approved
+    // under the old policy.
+    const makeResolveScoringTruth = (ruleSet) => (evalCase) => {
         if (!args.normalizeGroundTruth) return evalCase.ground_truth;
         return runPreAiDeterministicChecks(evalCase.ground_truth, {
             enabled: true,
             property: evalCase.context.property,
             templateType: evalCase.context.templateType,
             allergenLegend: evalCase.context.allergens,
-            acceptedCorrectionRules: rulesInfo.rules,
+            acceptedCorrectionRules: ruleSet,
         }).menuText;
     };
 
-    const basePrompt = fs.readFileSync(args.prompt, 'utf8');
-    const usageTotals = { apiCalls: 0, cacheHits: 0, promptTokens: 0, completionTokens: 0 };
-    const aiCaller = makeAiCaller(args, usageTotals);
-
-    let cases = dataset;
-    if (args.cases.length) {
-        const wanted = new Set(args.cases);
-        cases = cases.filter((c) => wanted.has(c.case_id));
-    }
-    cases = cases.slice(0, args.limit);
-
-    console.log(`Evaluating ${cases.length} cases | model=${args.ai ? args.model : 'no-ai'} | rules=${rulesInfo.description} | deterministic=${args.deterministic}`);
-
-    const caseReports = [];
-    const errors = [];
-    for (const [index, evalCase] of cases.entries()) {
-        process.stdout.write(`  [${index + 1}/${cases.length}] ${evalCase.label.slice(0, 60)} ... `);
-        try {
+    // Build a case evaluator bound to a specific prompt + rule set + AI caller,
+    // so the candidate and (for confirmation) the baseline config score the same way.
+    const makeEvaluator = (basePrompt, ruleSet, aiCaller) => {
+        const resolveScoringTruth = makeResolveScoringTruth(ruleSet);
+        return async (evalCase) => {
             const result = await runFullReviewPipeline(evalCase.raw_input, {
                 basePrompt,
                 menuType: evalCase.context.menuType,
                 templateType: evalCase.context.templateType,
                 property: evalCase.context.property,
                 allergens: evalCase.context.allergens,
-                acceptedCorrectionRules: rulesInfo.rules,
+                acceptedCorrectionRules: ruleSet,
                 precheckEnabled: args.deterministic,
             }, aiCaller);
 
@@ -558,7 +578,7 @@ async function runEval(args, dataset, rulesInfo, libs) {
             const corrections = scoreCorrections(evalCase.raw_input, candidate, scoringTruth);
             const composite = compositeCaseScore(candidateStyleSimilarity, corrections);
 
-            caseReports.push({
+            return {
                 case_id: evalCase.case_id,
                 source: evalCase.source,
                 label: evalCase.label,
@@ -593,15 +613,53 @@ async function runEval(args, dataset, rulesInfo, libs) {
                 criticalSuggestionCount: result.post.criticalSuggestions.length,
                 suggestionCount: result.finalSuggestions.length,
                 deterministicCorrections: result.preAiDeterministic.appliedCorrections.length,
-            });
-            console.log(`composite ${round(composite).toFixed(4)}`);
+            };
+        };
+    };
+
+    const candidateBasePrompt = fs.readFileSync(args.prompt, 'utf8');
+    const usageTotals = { apiCalls: 0, cacheHits: 0, promptTokens: 0, completionTokens: 0 };
+    const primaryAiCaller = makeAiCaller(args, usageTotals);
+    // Fresh-call caller (distinct cache key via an alternate seed) used to re-run
+    // BOTH configs back-to-back during confirmation, so OpenAI's temporal drift
+    // affects both equally and cancels out of the comparison.
+    const recheckAiCaller = makeAiCaller({ ...args, seed: args.seed + 7919 }, usageTotals);
+
+    const evaluateCandidate = makeEvaluator(candidateBasePrompt, rulesInfo.rules, primaryAiCaller);
+    const evaluateCandidateFresh = makeEvaluator(candidateBasePrompt, rulesInfo.rules, recheckAiCaller);
+    const evaluateBaselineFresh = baselineConfig
+        ? makeEvaluator(baselineConfig.prompt, baselineConfig.rulesInfo.rules, recheckAiCaller)
+        : null;
+
+    const cases = selectCases(args, dataset);
+    const caseById = new Map(cases.map((c) => [c.case_id, c]));
+    console.log(`Evaluating ${cases.length} cases | model=${args.ai ? args.model : 'no-ai'} | rules=${rulesInfo.description} | deterministic=${args.deterministic}`);
+
+    const caseReports = [];
+    const errors = [];
+    for (const [index, evalCase] of cases.entries()) {
+        process.stdout.write(`  [${index + 1}/${cases.length}] ${evalCase.label.slice(0, 60)} ... `);
+        try {
+            const report = await evaluateCandidate(evalCase);
+            caseReports.push(report);
+            console.log(`composite ${report.composite.toFixed(4)}`);
         } catch (error) {
             errors.push({ case_id: evalCase.case_id, label: evalCase.label, error: error.message });
             console.log(`ERROR: ${error.message.slice(0, 120)}`);
         }
     }
 
-    return { caseReports, errors, usageTotals };
+    const rerunCandidateCase = async (caseId) => {
+        const evalCase = caseById.get(caseId);
+        return evalCase ? evaluateCandidateFresh(evalCase) : null;
+    };
+    const rerunBaselineCase = async (caseId) => {
+        if (!evaluateBaselineFresh) return null;
+        const evalCase = caseById.get(caseId);
+        return evalCase ? evaluateBaselineFresh(evalCase) : null;
+    };
+
+    return { caseReports, errors, usageTotals, rerunCandidateCase, rerunBaselineCase };
 }
 
 function aggregate(caseReports) {
@@ -639,20 +697,25 @@ function aggregate(caseReports) {
     return totals;
 }
 
-function compareWithBaseline(baselineReport, caseReports) {
+function compareWithBaseline(baselineReport, caseReports, noiseEpsilon) {
     const baselineByCase = new Map((baselineReport.cases || []).map((c) => [c.case_id, c]));
     const comparisons = [];
     for (const current of caseReports) {
         const baseline = baselineByCase.get(current.case_id);
         if (!baseline) continue;
         const delta = round(current.composite - baseline.composite);
+        // Deltas within the noise band are "same" — below the run-to-run jitter
+        // of a nondeterministic model, so not a real improvement or regression.
+        let outcome = 'same';
+        if (delta > noiseEpsilon) outcome = 'improved';
+        else if (delta < -noiseEpsilon) outcome = 'regressed';
         comparisons.push({
             case_id: current.case_id,
             label: current.label,
             baselineComposite: baseline.composite,
             candidateComposite: current.composite,
             delta,
-            outcome: classifyDelta(delta),
+            outcome,
         });
     }
     const regressions = comparisons.filter((c) => c.outcome === 'regressed').sort((a, b) => a.delta - b.delta);
@@ -660,14 +723,72 @@ function compareWithBaseline(baselineReport, caseReports) {
     return {
         baselineGeneratedAt: baselineReport.generatedAt,
         baselineLabel: baselineReport.config?.label || '',
+        noiseEpsilon,
         comparedCases: comparisons.length,
         avgDelta: round(comparisons.reduce((acc, c) => acc + c.delta, 0) / Math.max(1, comparisons.length)),
-        regressed: regressions.length,
         improved: improvements.length,
         same: comparisons.length - regressions.length - improvements.length,
+        // Pre-confirmation counts. `regressed` is finalized by confirmRegressions
+        // (re-runs each flagged case with a fresh seed; keeps only reproducible
+        // regressions). Until then it equals the flagged count.
+        regressed: regressions.length,
+        flaggedRegressed: regressions.length,
+        confirmedRegressed: null,
+        noiseRegressed: null,
         regressions: regressions.slice(0, 20),
         improvements: improvements.slice(0, 20),
+        // Full list (unsliced) for the confirmation pass; trimmed before storage.
+        allRegressions: regressions,
     };
+}
+
+// Re-runs the BASELINE and CANDIDATE configs back-to-back (same time window) for
+// each flagged regression and keeps only those where the candidate is still
+// materially below the baseline on the fresh pair. Because OpenAI's temp-0 output
+// drifts over time, comparing the stored baseline (run earlier) to the candidate
+// (run later) conflates real config effects with that drift; a same-window pair
+// cancels it. Noise dips move back to "same". Mutates and returns the comparison.
+async function confirmRegressions(comparison, rerunBaselineCase, rerunCandidateCase, libs) {
+    const { classifyConfirmedRegression } = libs.evalScoring;
+    const flagged = comparison.allRegressions || [];
+    const confirmed = [];
+    const noise = [];
+    if (flagged.length) {
+        console.log(`\nConfirming ${flagged.length} flagged regression(s) with a back-to-back baseline+candidate re-run...`);
+    }
+    for (const reg of flagged) {
+        let baseFresh = null;
+        let candFresh = null;
+        try {
+            baseFresh = await rerunBaselineCase(reg.case_id);
+            candFresh = await rerunCandidateCase(reg.case_id);
+        } catch (error) {
+            console.warn(`  re-run failed for ${reg.case_id}: ${error.message}`);
+        }
+        if (!baseFresh || !candFresh) {
+            // Could not re-run the pair — keep it flagged (conservative).
+            confirmed.push({ ...reg, confirmReason: 'back-to-back re-run unavailable; kept as regression' });
+            continue;
+        }
+        const verdict = classifyConfirmedRegression(baseFresh.composite, candFresh.composite, comparison.noiseEpsilon);
+        const entry = {
+            ...reg,
+            baselineFreshComposite: baseFresh.composite,
+            candidateFreshComposite: candFresh.composite,
+            freshDelta: verdict.delta,
+            confirmReason: verdict.reason,
+        };
+        if (verdict.confirmed) confirmed.push(entry); else noise.push(entry);
+        console.log(`  ${reg.label.slice(0, 50)}: fresh baseline ${(baseFresh.composite * 100).toFixed(1)}% vs candidate ${(candFresh.composite * 100).toFixed(1)}% => ${verdict.confirmed ? 'CONFIRMED' : 'noise'}`);
+    }
+    comparison.confirmedRegressed = confirmed.length;
+    comparison.noiseRegressed = noise.length;
+    comparison.regressed = confirmed.length;          // headline = confirmed only
+    comparison.same += noise.length;                   // noise dips are effectively "same"
+    comparison.regressions = confirmed.slice(0, 20);
+    comparison.noiseRegressions = noise.slice(0, 20);
+    delete comparison.allRegressions;
+    return comparison;
 }
 
 function buildMarkdown(report) {
@@ -701,14 +822,26 @@ function buildMarkdown(report) {
             '## Baseline Comparison',
             `- Baseline: ${b.baselineLabel || b.baselineGeneratedAt}`,
             `- Compared cases: ${b.comparedCases}`,
+            `- Noise floor: ${(b.noiseEpsilon * 100).toFixed(1)} pp (smaller deltas count as "same")`,
             `- Avg composite delta: ${(b.avgDelta * 100).toFixed(4)} pp`,
             `- Improved ${b.improved}, same ${b.same}, regressed ${b.regressed}`,
             ''
         );
+        if (b.confirmedRegressed !== null && b.confirmedRegressed !== undefined) {
+            lines.push(`- Regressions: ${b.flaggedRegressed} flagged -> **${b.confirmedRegressed} confirmed** on fresh-seed re-run, ${b.noiseRegressed} were nondeterminism noise`, '');
+        }
         if (b.regressions.length) {
-            lines.push('### Regressions');
+            lines.push('### Confirmed Regressions (reproduced on re-run)');
             for (const r of b.regressions) {
-                lines.push(`- ${r.label}: ${(r.baselineComposite * 100).toFixed(3)}% -> ${(r.candidateComposite * 100).toFixed(3)}% (${(r.delta * 100).toFixed(4)} pp)`);
+                const recheck = (r.recheckComposite !== null && r.recheckComposite !== undefined) ? ` (re-run ${(r.recheckComposite * 100).toFixed(3)}%)` : '';
+                lines.push(`- ${r.label}: ${(r.baselineComposite * 100).toFixed(3)}% -> ${(r.candidateComposite * 100).toFixed(3)}%${recheck} (${(r.delta * 100).toFixed(4)} pp)`);
+            }
+            lines.push('');
+        }
+        if ((b.noiseRegressions || []).length) {
+            lines.push('### Discarded as noise (recovered on re-run)');
+            for (const r of b.noiseRegressions) {
+                lines.push(`- ${r.label}: dipped to ${(r.candidateComposite * 100).toFixed(3)}%, re-ran ${(r.recheckComposite * 100).toFixed(3)}% vs baseline ${(r.baselineComposite * 100).toFixed(3)}%`);
             }
             lines.push('');
         }
@@ -769,7 +902,21 @@ async function main() {
     };
     const rulesInfo = await resolveCorrectionRules(args.rules);
 
-    const { caseReports, errors, usageTotals } = await runEval(args, dataset, rulesInfo, libs);
+    // Baseline config for back-to-back regression confirmation (optional). Needs
+    // the baseline prompt; without it, flagged regressions can't be re-confirmed
+    // against a same-window baseline and are reported as-is.
+    let baselineConfig = null;
+    const willConfirm = args.baseline && args.confirmRegressions && args.ai && args.baselinePrompt;
+    if (willConfirm) {
+        baselineConfig = {
+            prompt: fs.readFileSync(args.baselinePrompt, 'utf8'),
+            rulesInfo: await resolveCorrectionRules(args.baselineRules),
+        };
+    } else if (args.baseline && args.confirmRegressions && args.ai && !args.baselinePrompt) {
+        console.warn('Note: --baseline-prompt not provided; regression confirmation (back-to-back re-run) is disabled, so flagged regressions may include temporal-drift noise.');
+    }
+
+    const { caseReports, errors, usageTotals, rerunBaselineCase, rerunCandidateCase } = await runEval(args, dataset, rulesInfo, libs, baselineConfig);
 
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     const outDir = path.join(defaultOutRoot, args.label ? `${timestamp}-${args.label}` : timestamp);
@@ -780,7 +927,12 @@ async function main() {
         const baselinePath = fs.statSync(args.baseline).isDirectory()
             ? path.join(args.baseline, 'report.json')
             : args.baseline;
-        baselineComparison = compareWithBaseline(JSON.parse(fs.readFileSync(baselinePath, 'utf8')), caseReports);
+        baselineComparison = compareWithBaseline(JSON.parse(fs.readFileSync(baselinePath, 'utf8')), caseReports, args.noiseEpsilon);
+        if (baselineConfig && baselineComparison.flaggedRegressed > 0) {
+            await confirmRegressions(baselineComparison, rerunBaselineCase, rerunCandidateCase, libs);
+        } else {
+            delete baselineComparison.allRegressions;
+        }
     }
 
     const report = {
@@ -818,7 +970,10 @@ async function main() {
     console.log(`Cases: ${report.summary.casesEvaluated}, exact ${report.summary.exactMatches}, avg composite ${(report.summary.avgComposite * 100).toFixed(3)}%`);
     console.log(`Corrections: P ${(report.summary.corrections.precision * 100).toFixed(1)}% R ${(report.summary.corrections.recall * 100).toFixed(1)}% F1 ${(report.summary.corrections.f1 * 100).toFixed(1)}%`);
     if (baselineComparison) {
-        console.log(`Baseline delta: ${(baselineComparison.avgDelta * 100).toFixed(4)} pp (improved ${baselineComparison.improved}, regressed ${baselineComparison.regressed})`);
+        const confirmNote = baselineComparison.confirmedRegressed !== null && baselineComparison.confirmedRegressed !== undefined
+            ? ` [${baselineComparison.flaggedRegressed} flagged -> ${baselineComparison.confirmedRegressed} confirmed, ${baselineComparison.noiseRegressed} noise]`
+            : '';
+        console.log(`Baseline delta: ${(baselineComparison.avgDelta * 100).toFixed(4)} pp (improved ${baselineComparison.improved}, regressed ${baselineComparison.regressed})${confirmNote}`);
         if (baselineComparison.regressed > 0) process.exitCode = 2;
     }
 }

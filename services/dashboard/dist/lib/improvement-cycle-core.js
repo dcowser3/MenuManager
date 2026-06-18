@@ -246,6 +246,8 @@ function buildProposalEvalSummary(baseline, candidate, candidateReport) {
         avgDelta: comparison?.avgDelta ?? 0,
         improved: comparison?.improved ?? 0,
         regressed: comparison?.regressed ?? 0,
+        flaggedRegressed: comparison?.flaggedRegressed ?? comparison?.regressed ?? 0,
+        noiseRegressed: comparison?.noiseRegressed ?? 0,
         same: comparison?.same ?? 0,
         regressions: (comparison?.regressions || []).slice(0, 20).map((entry) => ({
             case_id: entry.case_id,

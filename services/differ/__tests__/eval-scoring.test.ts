@@ -1,4 +1,4 @@
-import { compositeCaseScore, scoreCorrections } from '../lib/eval-scoring';
+import { classifyConfirmedRegression, compositeCaseScore, scoreCorrections } from '../lib/eval-scoring';
 
 const RAW = [
     'DINNER MENU',
@@ -86,5 +86,34 @@ describe('compositeCaseScore', () => {
         const score = scoreCorrections(RAW, CANDIDATE, TRUTH);
         const composite = compositeCaseScore(0.99, score);
         expect(composite).toBeCloseTo(0.6 * 0.99 + 0.4 * score.f1, 10);
+    });
+});
+
+describe('classifyConfirmedRegression', () => {
+    // Args are a back-to-back fresh pair: (baselineFresh, candidateFresh).
+    test('noise: fresh back-to-back pair is within the band (gap was temporal drift)', () => {
+        const r = classifyConfirmedRegression(0.80, 0.79);
+        expect(r.confirmed).toBe(false);
+        expect(r.reason).toContain('temporal drift');
+    });
+
+    test('confirmed: candidate still materially below baseline on the fresh pair', () => {
+        const r = classifyConfirmedRegression(0.80, 0.55);
+        expect(r.confirmed).toBe(true);
+        expect(r.reason).toContain('back-to-back');
+    });
+
+    test('exactly at the floor is not confirmed (must exceed it)', () => {
+        expect(classifyConfirmedRegression(0.80, 0.78).confirmed).toBe(false);
+        expect(classifyConfirmedRegression(0.80, 0.779).confirmed).toBe(true);
+    });
+
+    test('candidate above baseline on the fresh pair is never a regression', () => {
+        expect(classifyConfirmedRegression(0.80, 0.85).confirmed).toBe(false);
+    });
+
+    test('custom noise epsilon widens/narrows the band', () => {
+        expect(classifyConfirmedRegression(0.80, 0.74, 0.10).confirmed).toBe(false);
+        expect(classifyConfirmedRegression(0.80, 0.68, 0.10).confirmed).toBe(true);
     });
 });

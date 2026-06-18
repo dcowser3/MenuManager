@@ -293,7 +293,9 @@ export type ProposalEvalSummary = {
     comparedCases: number;
     avgDelta: number;
     improved: number;
-    regressed: number;
+    regressed: number;            // confirmed regressions (reproduced on re-run)
+    flaggedRegressed: number;     // raw count before confirmation
+    noiseRegressed: number;       // discarded as nondeterminism noise
     same: number;
     regressions: Array<{ case_id: string; label: string; delta: number }>;
     error?: string;
@@ -323,6 +325,8 @@ export function buildProposalEvalSummary(
         avgDelta: comparison?.avgDelta ?? 0,
         improved: comparison?.improved ?? 0,
         regressed: comparison?.regressed ?? 0,
+        flaggedRegressed: comparison?.flaggedRegressed ?? comparison?.regressed ?? 0,
+        noiseRegressed: comparison?.noiseRegressed ?? 0,
         same: comparison?.same ?? 0,
         regressions: (comparison?.regressions || []).slice(0, 20).map((entry: any) => ({
             case_id: entry.case_id,
