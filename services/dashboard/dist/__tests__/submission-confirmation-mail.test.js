@@ -30,15 +30,15 @@ describe('buildSubmissionConfirmationRecipients', () => {
     test('returns the submitter then each distinct valid approver', () => {
         const recipients = (0, submission_confirmation_mail_1.buildSubmissionConfirmationRecipients)(input());
         expect(recipients).toEqual([
-            { to: 'ada@example.com', role: 'submitter' },
-            { to: 'grace@example.com', role: 'approver' },
+            { email: 'ada@example.com', role: 'submitter' },
+            { email: 'grace@example.com', role: 'approver' },
         ]);
     });
     test('de-duplicates an approver that is also the submitter', () => {
         const recipients = (0, submission_confirmation_mail_1.buildSubmissionConfirmationRecipients)(input({
             approvals: [{ approved: true, name: 'Ada', position: 'Chef', email: 'ADA@example.com' }],
         }));
-        expect(recipients).toEqual([{ to: 'ada@example.com', role: 'submitter' }]);
+        expect(recipients).toEqual([{ email: 'ada@example.com', role: 'submitter' }]);
     });
     test('de-duplicates repeated approver emails (case-insensitively)', () => {
         const recipients = (0, submission_confirmation_mail_1.buildSubmissionConfirmationRecipients)(input({
@@ -48,8 +48,8 @@ describe('buildSubmissionConfirmationRecipients', () => {
             ],
         }));
         expect(recipients).toEqual([
-            { to: 'ada@example.com', role: 'submitter' },
-            { to: 'grace@example.com', role: 'approver' },
+            { email: 'ada@example.com', role: 'submitter' },
+            { email: 'grace@example.com', role: 'approver' },
         ]);
     });
     test('drops blank or invalid approver emails', () => {
@@ -59,39 +59,39 @@ describe('buildSubmissionConfirmationRecipients', () => {
                 { approved: true, name: 'Bad', position: 'GM', email: 'nope' },
             ],
         }));
-        expect(recipients).toEqual([{ to: 'ada@example.com', role: 'submitter' }]);
+        expect(recipients).toEqual([{ email: 'ada@example.com', role: 'submitter' }]);
     });
     test('skips the submitter when their email is invalid', () => {
         const recipients = (0, submission_confirmation_mail_1.buildSubmissionConfirmationRecipients)(input({ submitterEmail: 'bad' }));
-        expect(recipients).toEqual([{ to: 'grace@example.com', role: 'approver' }]);
+        expect(recipients).toEqual([{ email: 'grace@example.com', role: 'approver' }]);
     });
 });
 describe('buildSubmissionEmailSubject', () => {
-    test('differs by role', () => {
-        expect((0, submission_confirmation_mail_1.buildSubmissionEmailSubject)(input(), 'submitter')).toBe('Menu submitted for review: Dinner Menu');
-        expect((0, submission_confirmation_mail_1.buildSubmissionEmailSubject)(input(), 'approver')).toBe('Menu submitted for your approval: Dinner Menu');
+    test('uses one receipt subject for the grouped message', () => {
+        expect((0, submission_confirmation_mail_1.buildSubmissionEmailSubject)(input())).toBe('Menu submitted for review: Dinner Menu');
     });
 });
 describe('buildSubmissionReceiptHtml', () => {
-    test('submitter copy says the document is attached and lists approvers', () => {
-        const html = (0, submission_confirmation_mail_1.buildSubmissionReceiptHtml)(input(), 'submitter', false, 'https://dash.example.com');
-        expect(html).toContain('has been submitted for review');
-        expect(html).toContain('attached');
+    test('receipt copy explains the document is attached and lists approvers', () => {
+        const html = (0, submission_confirmation_mail_1.buildSubmissionReceiptHtml)(input(), false, 'https://dash.example.com');
+        expect(html).toContain('for visibility and recordkeeping');
+        expect(html).toContain('attached for your records');
         expect(html).toContain('Grace GM');
         expect(html).not.toContain('the submission page');
     });
-    test('approver copy names the submitter', () => {
-        const html = (0, submission_confirmation_mail_1.buildSubmissionReceiptHtml)(input(), 'approver', false, 'https://dash.example.com');
+    test('receipt copy names the submitter without asking for approval', () => {
+        const html = (0, submission_confirmation_mail_1.buildSubmissionReceiptHtml)(input(), false, 'https://dash.example.com');
         expect(html).toContain('Ada Chef');
-        expect(html).toContain('listed you as an approver');
+        expect(html).not.toContain('listed you as an approver');
+        expect(html).not.toContain('for your approval');
     });
     test('falls back to a dashboard link when the attachment was dropped', () => {
-        const html = (0, submission_confirmation_mail_1.buildSubmissionReceiptHtml)(input(), 'submitter', true, 'https://dash.example.com/');
+        const html = (0, submission_confirmation_mail_1.buildSubmissionReceiptHtml)(input(), true, 'https://dash.example.com/');
         expect(html).toContain('too large to attach');
         expect(html).toContain('https://dash.example.com/review/form-123');
     });
     test('escapes HTML in user-supplied values', () => {
-        const html = (0, submission_confirmation_mail_1.buildSubmissionReceiptHtml)(input({ projectName: '<script>x</script>' }), 'submitter', false, 'https://dash.example.com');
+        const html = (0, submission_confirmation_mail_1.buildSubmissionReceiptHtml)(input({ projectName: '<script>x</script>' }), false, 'https://dash.example.com');
         expect(html).not.toContain('<script>x</script>');
         expect(html).toContain('&lt;script&gt;');
     });

@@ -49,6 +49,7 @@ function buildGraphSendMailRequest(message) {
             subject: message.subject,
             body: { contentType: 'HTML', content: message.html },
             toRecipients: [{ emailAddress: { address: message.to } }],
+            ...(message.cc?.length ? { ccRecipients: message.cc.map((address) => ({ emailAddress: { address } })) } : {}),
             ...(attachments.length ? { attachments } : {}),
         },
         saveToSentItems: false,
@@ -150,6 +151,9 @@ async function sendViaGraph(config, message, fetchImpl) {
  * through to SMTP.
  */
 async function sendViaGraphInboxWrite(config, message, fetchImpl) {
+    if (message.cc?.length) {
+        throw new Error('Graph inbox write fallback does not support cc recipients');
+    }
     const token = await getGraphToken(config, fetchImpl);
     const buildBody = (msg) => {
         const payload = buildGraphSendMailRequest(msg).message;
@@ -205,6 +209,7 @@ async function sendAlertMail(message, deps) {
             await deps.smtpTransporter.sendMail({
                 from: `"${message.fromName}" <${deps.smtpFromAddress || message.to}>`,
                 to: message.to,
+                cc: message.cc,
                 subject: message.subject,
                 html: message.html,
                 attachments: (message.attachments || []).map((attachment) => ({

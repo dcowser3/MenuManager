@@ -1,6 +1,6 @@
 "use strict";
 // Pure helpers for the post-submission confirmation email (submitter + approvers
-// each receive a copy of the submitted menu document). Kept separate from
+// receive one grouped copy of the submitted menu document). Kept separate from
 // index.ts so the recipient/dedup and HTML logic are unit-testable without the
 // mail transport. index.ts owns reading the docx and calling sendAlertMail.
 Object.defineProperty(exports, "__esModule", { value: true });
@@ -30,7 +30,7 @@ function buildSubmissionConfirmationRecipients(input) {
     const seen = new Set();
     const submitterEmail = `${input.submitterEmail || ''}`.trim().toLowerCase();
     if (isLikelyEmailAddress(submitterEmail)) {
-        recipients.push({ to: submitterEmail, role: 'submitter' });
+        recipients.push({ email: submitterEmail, role: 'submitter' });
         seen.add(submitterEmail);
     }
     for (const approval of input.approvals || []) {
@@ -38,16 +38,14 @@ function buildSubmissionConfirmationRecipients(input) {
         if (!isLikelyEmailAddress(email) || seen.has(email))
             continue;
         seen.add(email);
-        recipients.push({ to: email, role: 'approver' });
+        recipients.push({ email, role: 'approver' });
     }
     return recipients;
 }
-function buildSubmissionEmailSubject(input, role) {
-    return role === 'approver'
-        ? `Menu submitted for your approval: ${input.projectName}`
-        : `Menu submitted for review: ${input.projectName}`;
+function buildSubmissionEmailSubject(input) {
+    return `Menu submitted for review: ${input.projectName}`;
 }
-function buildSubmissionReceiptHtml(input, role, attachmentDropped, dashboardUrl) {
+function buildSubmissionReceiptHtml(input, attachmentDropped, dashboardUrl) {
     const rows = [
         ['Project', input.projectName],
         ['Property', input.property],
@@ -62,9 +60,7 @@ function buildSubmissionReceiptHtml(input, role, attachmentDropped, dashboardUrl
         .map((a) => `<li>${escapeEmailHtml(a.name || a.email)}${a.position ? ` — ${escapeEmailHtml(a.position)}` : ''}${a.email ? ` (${escapeEmailHtml(a.email)})` : ''}</li>`)
         .join('');
     const docCopy = attachmentDropped ? 'available on the dashboard' : 'attached for your records';
-    const intro = role === 'approver'
-        ? `<p>${escapeEmailHtml(input.submitterName || 'A team member')} submitted the menu <strong>${escapeEmailHtml(input.projectName)}</strong> for <strong>${escapeEmailHtml(input.property)}</strong> and listed you as an approver. A copy of the submitted document is ${docCopy}.</p>`
-        : `<p>Your menu <strong>${escapeEmailHtml(input.projectName)}</strong> for <strong>${escapeEmailHtml(input.property)}</strong> has been submitted for review. A copy of the submitted document is ${attachmentDropped ? 'available on the dashboard' : 'attached'}.</p>`;
+    const intro = `<p>${escapeEmailHtml(input.submitterName || 'A team member')} submitted the menu <strong>${escapeEmailHtml(input.projectName)}</strong> for <strong>${escapeEmailHtml(input.property)}</strong>. This copy is for visibility and recordkeeping so the team can confirm the submitted document looks right. A copy of the submitted document is ${docCopy}.</p>`;
     const reviewUrl = `${(dashboardUrl || '').replace(/\/+$/, '')}/review/${encodeURIComponent(input.submissionId)}`;
     return `
         <div style="font-family:sans-serif;max-width:640px">

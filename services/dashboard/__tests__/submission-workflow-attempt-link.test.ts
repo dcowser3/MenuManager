@@ -58,6 +58,10 @@ function buildRequest(headers: Record<string, string> = {}) {
             digitalHeight: '1920',
             turnaroundDays: '5',
             menuContent: 'GUACAMOLE\nfresh avocado, lime 12',
+            approvals: [
+                { approved: true, name: 'Grace GM', position: 'General Manager', email: 'grace@example.com' },
+                { approved: true, name: 'Sam Ops', position: 'Operations', email: 'sam@example.com' },
+            ],
             skipAiReview: true,
         },
     };
@@ -109,5 +113,30 @@ describe('submitMenu form attempt linkage', () => {
         );
         expect(submissionPost![1].form_attempt_id).toBeNull();
         expect(deps.linkBasicAiCheckAuditsToSubmission).not.toHaveBeenCalled();
+    });
+
+    test('queues confirmation email data with the generated docx for submitter and approvers', async () => {
+        const sendSubmissionConfirmationEmails = jest.fn();
+        const deps = buildDeps({ sendSubmissionConfirmationEmails });
+        const handlers = createSubmissionWorkflowHandlers(deps as any);
+        const req = buildRequest();
+        const res = buildResponse();
+
+        await handlers.submitMenu(req, res);
+
+        expect(res.statusCode).toBe(200);
+        expect(sendSubmissionConfirmationEmails).toHaveBeenCalledTimes(1);
+        expect(sendSubmissionConfirmationEmails).toHaveBeenCalledWith(expect.objectContaining({
+            projectName: 'Spring Menu',
+            property: 'Maya - New York',
+            submitterName: 'Chef Test',
+            submitterEmail: 'chef@example.com',
+            docxPath: '/tmp/docs/test.docx',
+            filename: expect.stringMatching(/\.docx$/),
+            approvals: [
+                { approved: true, name: 'Grace GM', position: 'General Manager', email: 'grace@example.com' },
+                { approved: true, name: 'Sam Ops', position: 'Operations', email: 'sam@example.com' },
+            ],
+        }));
     });
 });

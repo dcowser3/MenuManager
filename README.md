@@ -27,14 +27,14 @@ Chef / manager submission
   -> Basic AI Check with deterministic pre/post guards, full-width suggestion rows above aligned review boxes, and fixed growl feedback
   -> Required approval block captures the approver's email
   -> Stored submission and generated original DOCX
-  -> Confirmation email (with the submitted DOCX) sent to the submitter and each approver
+  -> One confirmation email (with the submitted DOCX) sent to the submitter and approvers
   -> Human review in ClickUp or browser approval editor
   -> Approved DOCX, ClickUp/Marketing handoff, optional SharePoint upload
   -> Approved-menu download and approved-dish extraction
   -> Learning / improvement loop from human-reviewed corrections
 ```
 
-> **Rollout note:** the dashboard's `/form` link currently serves the **legacy** multi-section submission form while the new upload-first flow is piloted at `/form-new`. Both collect the approver email and send the confirmation emails. Flip `NEW_SUBMISSION_FORM_DEFAULT=true` to make `/form` serve the new flow (see [docs/environment.md](docs/environment.md)).
+> **Rollout note:** the dashboard's `/form` link currently serves the **legacy** multi-section submission form while the new upload-first flow is piloted at `/form-new`. Both collect the approver email and send the grouped confirmation email. Flip `NEW_SUBMISSION_FORM_DEFAULT=true` to make `/form` serve the new flow (see [docs/environment.md](docs/environment.md)).
 
 ## Services
 

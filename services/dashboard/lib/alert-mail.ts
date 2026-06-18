@@ -17,6 +17,7 @@ export interface AlertMailAttachment {
 export interface AlertMailMessage {
     fromName: string;
     to: string;
+    cc?: string[];
     subject: string;
     html: string;
     attachments?: AlertMailAttachment[];
@@ -81,6 +82,7 @@ export function buildGraphSendMailRequest(message: AlertMailMessage): Record<str
             subject: message.subject,
             body: { contentType: 'HTML', content: message.html },
             toRecipients: [{ emailAddress: { address: message.to } }],
+            ...(message.cc?.length ? { ccRecipients: message.cc.map((address) => ({ emailAddress: { address } })) } : {}),
             ...(attachments.length ? { attachments } : {}),
         },
         saveToSentItems: false,
@@ -204,6 +206,10 @@ async function sendViaGraphInboxWrite(
     message: AlertMailMessage,
     fetchImpl: typeof fetch
 ): Promise<SendAlertMailResult> {
+    if (message.cc?.length) {
+        throw new Error('Graph inbox write fallback does not support cc recipients');
+    }
+
     const token = await getGraphToken(config, fetchImpl);
 
     const buildBody = (msg: AlertMailMessage) => {
@@ -266,6 +272,7 @@ export async function sendAlertMail(message: AlertMailMessage, deps: SendAlertMa
             await deps.smtpTransporter.sendMail({
                 from: `"${message.fromName}" <${deps.smtpFromAddress || message.to}>`,
                 to: message.to,
+                cc: message.cc,
                 subject: message.subject,
                 html: message.html,
                 attachments: (message.attachments || []).map((attachment) => ({

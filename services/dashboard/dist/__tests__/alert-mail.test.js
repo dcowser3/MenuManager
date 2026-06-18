@@ -48,11 +48,12 @@ describe('alert mail transport', () => {
     });
     describe('buildGraphSendMailRequest', () => {
         test('builds an HTML message with base64 file attachments', () => {
-            const payload = (0, alert_mail_1.buildGraphSendMailRequest)(MESSAGE);
+            const payload = (0, alert_mail_1.buildGraphSendMailRequest)({ ...MESSAGE, cc: ['ops@example.com'] });
             expect(payload.saveToSentItems).toBe(false);
             expect(payload.message.subject).toBe('Test alert');
             expect(payload.message.body).toEqual({ contentType: 'HTML', content: '<p>hello</p>' });
             expect(payload.message.toRecipients).toEqual([{ emailAddress: { address: 'support@example.com' } }]);
+            expect(payload.message.ccRecipients).toEqual([{ emailAddress: { address: 'ops@example.com' } }]);
             expect(payload.message.attachments).toHaveLength(2);
             expect(payload.message.attachments[0]).toMatchObject({
                 '@odata.type': '#microsoft.graph.fileAttachment',
@@ -130,6 +131,23 @@ describe('alert mail transport', () => {
                 smtpTransporter: failingSmtp,
                 fetchImpl,
             })).rejects.toThrow(/graph: .*403.*Graph inbox write failed \(404\).*\| smtp: Connection timeout/);
+        });
+        test('uses SMTP for cc messages when Graph sendMail fails', async () => {
+            const fetchImpl = async (url) => url.includes('/oauth2/')
+                ? fakeResponse(200, { access_token: 'tok', expires_in: 3600 })
+                : fakeResponse(403, { error: { code: 'ErrorAccessDenied' } });
+            const sendMail = jest.fn().mockResolvedValue({});
+            const result = await (0, alert_mail_1.sendAlertMail)({ ...MESSAGE, cc: ['ops@example.com'] }, {
+                graphConfig: (0, alert_mail_1.buildGraphMailConfig)(GRAPH_ENV),
+                smtpTransporter: { sendMail },
+                smtpFromAddress: 'noreply@example.com',
+                fetchImpl,
+            });
+            expect(result.transport).toBe('smtp');
+            expect(sendMail).toHaveBeenCalledWith(expect.objectContaining({
+                to: 'support@example.com',
+                cc: ['ops@example.com'],
+            }));
         });
         test('includes Azure token error details without echoing the submitted secret', async () => {
             const calls = [];

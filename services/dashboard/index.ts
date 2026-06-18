@@ -401,10 +401,10 @@ const SUBMISSION_DOCX_CONTENT_TYPE =
     'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 
 /**
- * Email the submitter and each listed approver a copy of the submitted menu
- * document. Fire-and-forget — invoked after the submission record is created,
- * uses the same Graph/SMTP transport as admin alerts, and swallows all errors
- * so mail problems never affect the submission response.
+ * Email the submitter plus listed approvers one grouped copy of the submitted
+ * menu document. Fire-and-forget — invoked after the submission record is
+ * created, uses the same Graph/SMTP transport as admin alerts, and swallows all
+ * errors so mail problems never affect the submission response.
  */
 function sendSubmissionConfirmationEmails(input: SubmissionConfirmationInput): void {
     if (!canSendAlertMail(alertMailDeps)) {
@@ -433,23 +433,23 @@ function sendSubmissionConfirmationEmails(input: SubmissionConfirmationInput): v
             }]
             : [];
 
-        for (const recipient of recipients) {
-            try {
-                // sendAlertMail transparently strips an oversized attachment and
-                // appends a notice, so a single send covers both cases.
-                const result = await sendAlertMail({
-                    fromName: 'Menu Manager',
-                    to: recipient.to,
-                    subject: buildSubmissionEmailSubject(input, recipient.role),
-                    html: buildSubmissionReceiptHtml(input, recipient.role, attachments.length === 0, DASHBOARD_URL),
-                    attachments,
-                }, alertMailDeps);
-                if (result.attachmentsDropped) {
-                    console.warn(`Submission confirmation attachment dropped (oversize) for ${recipient.to} (${input.submissionId})`);
-                }
-            } catch (mailError: any) {
-                console.error(`Failed to send submission confirmation email to ${recipient.to} (${input.submissionId}):`, mailError.message);
+        const [primaryRecipient, ...ccRecipients] = recipients;
+        try {
+            // sendAlertMail transparently strips an oversized attachment and
+            // appends a notice, so a single send covers both cases.
+            const result = await sendAlertMail({
+                fromName: 'Menu Manager',
+                to: primaryRecipient.email,
+                cc: ccRecipients.map((recipient) => recipient.email),
+                subject: buildSubmissionEmailSubject(input),
+                html: buildSubmissionReceiptHtml(input, attachments.length === 0, DASHBOARD_URL),
+                attachments,
+            }, alertMailDeps);
+            if (result.attachmentsDropped) {
+                console.warn(`Submission confirmation attachment dropped (oversize) for ${input.submissionId}`);
             }
+        } catch (mailError: any) {
+            console.error(`Failed to send submission confirmation email (${input.submissionId}):`, mailError.message);
         }
     })();
 }
