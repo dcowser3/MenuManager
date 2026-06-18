@@ -59,6 +59,14 @@ const configuration = new openai_1.Configuration({
 });
 const openai = new openai_1.OpenAIApi(configuration);
 const AI_REVIEW_MODEL = process.env.AI_REVIEW_MODEL || 'gpt-4o-mini';
+// Menu review is a correction task, not a creative one: pin temperature so the
+// SAME menu produces the SAME review run-to-run. Default 0; overridable via env
+// for deliberate A/B testing. (OpenAI temp 0 still has minor backend drift, but
+// this removes the dominant source of inconsistent reviews — the API default
+// temperature of 1.)
+const AI_REVIEW_TEMPERATURE = Number.isFinite(Number(process.env.AI_REVIEW_TEMPERATURE))
+    ? Number(process.env.AI_REVIEW_TEMPERATURE)
+    : 0;
 app.use(express.json());
 app.use(internal_auth_1.requireInternalServiceAuth);
 function hasConfiguredOpenAIKey() {
@@ -194,6 +202,7 @@ app.post('/run-qa-check', async (req, res) => {
         console.log('Running QA check...');
         const qaResponse = await openai.createChatCompletion({
             model: AI_REVIEW_MODEL,
+            temperature: AI_REVIEW_TEMPERATURE,
             messages: [
                 { role: 'system', content: prompt },
                 { role: 'user', content: `Here is the menu text to review:\n\n---\n\n${text}` }
@@ -260,6 +269,7 @@ Configure OPENAI_API_KEY in .env for real AI reviews.
             const qaPrompt = await fs_1.promises.readFile(qaPromptPath, 'utf-8');
             const qaResponse = await openai.createChatCompletion({
                 model: AI_REVIEW_MODEL,
+                temperature: AI_REVIEW_TEMPERATURE,
                 messages: [
                     { role: 'system', content: qaPrompt },
                     { role: 'user', content: `Here is the menu text to review:\n\n---\n\n${text}` }
