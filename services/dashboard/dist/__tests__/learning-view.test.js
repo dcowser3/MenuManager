@@ -100,6 +100,7 @@ describe('learning dashboard view', () => {
         expect(html).toContain('"original_text":"radishes"');
         expect(html).toContain('"submission_ids":["sub-123"]');
         expect(html).toContain('rule-examples-row-rule-1');
+        expect(html).toContain('Project / Location');
     });
     test('renders the manual add-rule form with menu and property scope controls', () => {
         const html = renderLearningView({
@@ -169,6 +170,8 @@ describe('learning dashboard view', () => {
         expect(html).toContain('Beverage menus keep zero-proof section names.');
         expect(html).toContain('Beverage menus');
         expect(html).toContain('Accepted Correction Rule Audit Log (2)');
+        expect(html).toContain('Project / Menu');
+        expect(html).not.toContain('<th>Restaurant</th>');
         expect(html).not.toContain('Current Base Prompt');
         expect(html).not.toContain('SECRET PROMPT TEXT');
     });

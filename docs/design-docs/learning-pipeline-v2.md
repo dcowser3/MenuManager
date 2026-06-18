@@ -184,7 +184,7 @@ Reviewers can also add an accepted rule directly from `GET /learning` without op
 | Field | Current | New |
 |-------|---------|-----|
 | Explanation | Free text | Labeled **"Correction Explanation"** — reviewer context, not the final canonical rule |
-| Restaurant | Hidden, auto-filled | Visible, editable |
+| Project / menu | Hidden, auto-filled from submission metadata | Visible as project/menu context for the correction |
 | Location | Dropdown | Dropdown + **"Limit to specific property?"** checkbox |
 | Shared locations | Multi-select | Renamed to **"Other applicable locations"** |
 | Project name | Not captured | Added from submission metadata |

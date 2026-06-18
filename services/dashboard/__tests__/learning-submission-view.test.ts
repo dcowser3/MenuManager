@@ -48,6 +48,7 @@ describe('learning-submission view', () => {
     test('describes reviewer annotation as a correction explanation, not a rule', () => {
         const html = renderLearningSubmission();
 
+        expect(html).toContain('Project / Menu');
         expect(html).toContain('Explain this correction; the final rule is decided later');
         expect(html).toContain('Correction Explanation *');
         expect(html).toContain('Should this explanation be limited to specific properties?');
@@ -57,6 +58,7 @@ describe('learning-submission view', () => {
         expect(html).toContain('Explanation is required.');
         expect(html).not.toContain('Write the actionable rule this correction represents');
         expect(html).not.toContain('Does this rule apply to specific properties?');
+        expect(html).not.toContain('<th>Restaurant</th>');
     });
 
     test('escapes embedded correction JSON so script tags cannot break the page', () => {

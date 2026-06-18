@@ -144,7 +144,7 @@ The learning dashboard provides a review interface for understanding WHY correct
 - Line-by-line original vs corrected with token-level highlighting
 - Per-correction annotation form:
   - **Explanation** (required): why the correction matters
-  - **Restaurant name** (required)
+  - **Project / menu context** (saved in the legacy `restaurant_name` field)
   - **Property** (optional): tag rule to specific locations
   - **Shared properties** (optional): apply to multiple locations
 

@@ -144,12 +144,16 @@ const CONTEXT_LEAK_MARKERS = [
     '## Sample Before/After Documents',
 ];
 
-// Terms whose correct form depends on what the dish actually IS, not on
-// spelling — a blind find-replace would corrupt legitimate uses. These can
-// never be deterministic replacement rules; the AI must reason from dish
-// context in the prompt instead. tartare (raw chopped protein) vs tartar (a
-// sauce) is the canonical case. Match on whole words, case-insensitive.
-export const CONTEXT_DEPENDENT_TERMS = ['tartare', 'tartar'];
+// Terms whose correct form depends on what the dish actually IS (or how the
+// word is used in the line), not on spelling — a blind find-replace would
+// corrupt legitimate uses. These can never be deterministic replacement rules;
+// the AI must reason from context in the prompt instead.
+// - tartare (raw chopped protein) vs tartar (a sauce): the canonical homograph.
+// - berry/berries: a standalone fruit listing reads as plural ("berries"), but
+//   the same word is correct as a singular modifier ("berry compote", "berry
+//   coulis") — number-context-dependent, not an always-safe swap.
+// Match on whole words, case-insensitive.
+export const CONTEXT_DEPENDENT_TERMS = ['tartare', 'tartar', 'berry', 'berries'];
 
 export function involvesContextDependentTerm(...texts: string[]): string | null {
     for (const term of CONTEXT_DEPENDENT_TERMS) {

@@ -134,10 +134,12 @@
     <div class="header">
         <h1>Prompt Proposal Review</h1>
         <div class="links">
+            <button id="runCycleBtn" class="btn secondary" onclick="runCycleNow()">Run cycle now</button>
             <a href="/learning">Learning Dashboard</a>
             <a href="/">Dashboard</a>
         </div>
     </div>
+    <div id="runCycleStatus" class="status-msg" style="margin: 0 0 1rem;"></div>
 
     <div class="container">
         <% if (!proposal) { %>
@@ -527,5 +529,26 @@
         }
     </script>
     <% } %>
+    <script>
+        // Always available (even with no current proposal) so a reviewer can
+        // generate one on demand after saving corrections, instead of waiting
+        // for the overnight cron.
+        async function runCycleNow() {
+            const btn = document.getElementById('runCycleBtn');
+            const statusEl = document.getElementById('runCycleStatus');
+            if (btn) { btn.disabled = true; btn.textContent = 'Starting…'; }
+            if (statusEl) { statusEl.textContent = 'Starting the improvement cycle…'; statusEl.className = 'status-msg'; }
+            try {
+                const response = await fetch('/api/learning/run-improvement-cycle', { method: 'POST' });
+                const data = await response.json();
+                if (!response.ok) throw new Error(data.error || 'Failed to start the cycle.');
+                if (statusEl) { statusEl.textContent = data.message || 'Improvement cycle started.'; statusEl.className = 'status-msg ok'; }
+            } catch (error) {
+                if (statusEl) { statusEl.textContent = error.message || 'Failed to start the cycle.'; statusEl.className = 'status-msg err'; }
+            } finally {
+                if (btn) { btn.disabled = false; btn.textContent = 'Run cycle now'; }
+            }
+        }
+    </script>
 </body>
 </html>

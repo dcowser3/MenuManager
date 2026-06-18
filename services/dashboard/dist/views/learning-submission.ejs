@@ -136,7 +136,7 @@
                     <div class="meta-value"><%= learningDetail.timestamp ? new Date(learningDetail.timestamp).toLocaleString() : 'N/A' %></div>
                 </div>
                 <div class="meta-item">
-                    <div class="meta-label">Restaurant / Project</div>
+                    <div class="meta-label">Project / Menu</div>
                     <div class="meta-value"><%= submissionMeta.project_name || 'N/A' %></div>
                 </div>
                 <div class="meta-item">
@@ -168,6 +168,12 @@
                 if (value === 'food') return 'Food menus';
                 if (value === 'beverage') return 'Beverage menus';
                 return 'All menus';
+            };
+            const statusLabel = (value) => {
+                const v = `${value || ''}`.toLowerCase();
+                if (v === 'accepted') return 'Live';
+                if (v === 'rejected') return 'Rejected';
+                return 'Proposed (awaiting cycle)';
             };
         %>
         <% if (dishes.length === 0) { %>
@@ -301,10 +307,11 @@
                             <th>Corrected</th>
                             <th>Explanation</th>
                             <th>Menu Scope</th>
-                            <th>Restaurant</th>
+                            <th>Project / Menu</th>
                             <th>Location</th>
                             <th>Other Locations</th>
                             <th>Type</th>
+                            <th>Status</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -319,6 +326,7 @@
                                 <td><%= item.location || '' %><%= item.is_location_specific ? '' : ' (global)' %></td>
                                 <td><%= (item.other_applicable_locations || []).join(', ') %></td>
                                 <td><%= item.change_type || '' %></td>
+                                <td><%= statusLabel(item.status) %></td>
                             </tr>
                         <% }) %>
                     </tbody>

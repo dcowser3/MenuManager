@@ -290,9 +290,10 @@ async function main() {
     const core = requireDashboardLib('improvement-cycle-core');
     const manifestLib = requireDashboardLib('review-rules-manifest');
     const supabase = getSupabase();
-    const cycleId = new Date().toISOString().slice(0, 10);
+    const baseCycleId = new Date().toISOString().slice(0, 10);
+    let cycleId = baseCycleId;
 
-    console.log(`Improvement Cycle — ${cycleId}`);
+    console.log(`Improvement Cycle — ${baseCycleId}`);
     console.log('='.repeat(50));
 
     // Daily health check (runs even when the gate below skips the cycle).
@@ -302,11 +303,18 @@ async function main() {
     const { data: existing } = await supabase
         .from('prompt_proposals')
         .select('id, status')
-        .eq('cycle_id', cycleId)
+        .eq('cycle_id', baseCycleId)
         .maybeSingle();
     if (existing && !args.force) {
-        console.log(`Proposal already exists for ${cycleId} (status: ${existing.status}); exiting.`);
+        console.log(`Proposal already exists for ${baseCycleId} (status: ${existing.status}); exiting.`);
         return;
+    }
+    if (existing && args.force) {
+        // cycle_id is NOT NULL UNIQUE, so a forced manual re-run on a day that
+        // already has a proposal (e.g. the on-demand button after the nightly
+        // cron) needs a distinct id to avoid colliding on insert.
+        cycleId = `${baseCycleId}-manual-${Date.now()}`;
+        console.log(`Forced re-run; ${baseCycleId} already has a proposal — using cycle id ${cycleId}.`);
     }
 
     // Gate (the cheap daily path).

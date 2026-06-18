@@ -1,3 +1,5 @@
+import { involvesContextDependentTerm } from './improvement-cycle-core';
+
 export type PreAiCorrectionSource = 'built_in' | 'accepted_correction_rule';
 
 export type PreAiAppliedCorrection = {
@@ -485,6 +487,15 @@ function isSafeLearnedRule(rule: AcceptedCorrectionRule): boolean {
     const changeType = `${rule.change_type || ''}`.trim().toLowerCase();
     const original = `${rule.original_text || ''}`.trim();
     const corrected = `${rule.corrected_text || ''}`.trim();
+    // Context-dependent terms (tartare/tartar, berry/berries, …) can never be
+    // applied as blind replacements — the correct form depends on the dish/usage,
+    // so they belong in the AI prompt, not the deterministic pass. This mirrors
+    // the guard the improvement cycle already applies to LLM-proposed rules, and
+    // it neutralizes any such rule that reached the DB before that routing
+    // existed (e.g. a human-saved "berry" → "berries").
+    if (involvesContextDependentTerm(original, corrected)) {
+        return false;
+    }
     return `${rule.status || ''}`.toLowerCase() === 'accepted'
         && LEARNED_RULE_CHANGE_TYPES.has(changeType)
         && !!original

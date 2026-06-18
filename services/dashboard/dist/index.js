@@ -1639,6 +1639,57 @@ app.post('/api/learning/correction-rules', async (req, res) => {
         res.status(error?.response?.status || 500).json(error?.response?.data || { error: 'Failed to save correction rule' });
     }
 });
+// On-demand trigger for the improvement cycle. The daily cron is the primary
+// driver, but saved corrections are now proposals (born pending) that only go
+// live once the cycle routes them and a reviewer approves — so a reviewer needs
+// a way to generate that proposal immediately instead of waiting for the
+// overnight run. Spawns the same script the cron runs, detached, with --force so
+// it bypasses the daily gate (the script self-suffixes the cycle id when today
+// already has a proposal). The script's own lock file prevents overlap.
+app.post('/api/learning/run-improvement-cycle', async (_req, res) => {
+    try {
+        const repoRoot = getRepoRoot();
+        const scriptPath = path.join(repoRoot, 'scripts', 'improvement-cycle.js');
+        if (!fsSync.existsSync(scriptPath)) {
+            return res.status(500).json({ error: 'improvement-cycle.js was not found on this host.' });
+        }
+        // Respect the script's lock so the button can't stack runs on top of an
+        // in-flight cron run (lock is considered stale after 6h, matching acquireLock).
+        const lockPath = path.join(repoRoot, 'tmp', 'improvement-cycle', '.lock');
+        if (fsSync.existsSync(lockPath)) {
+            try {
+                const lock = JSON.parse(fsSync.readFileSync(lockPath, 'utf8'));
+                const ageMs = Date.now() - Date.parse(lock.acquiredAt || 0);
+                if (Number.isFinite(ageMs) && ageMs >= 0 && ageMs < 6 * 60 * 60 * 1000) {
+                    return res.status(409).json({ error: 'An improvement cycle is already running. Try again once it finishes.' });
+                }
+            }
+            catch {
+                // Unreadable lock — let the script's own staleness logic take over.
+            }
+        }
+        const logDir = path.join(repoRoot, 'logs');
+        await fs_1.promises.mkdir(logDir, { recursive: true }).catch(() => { });
+        const out = fsSync.openSync(path.join(logDir, 'improvement-cycle.log'), 'a');
+        const child = (0, child_process_1.spawn)(process.execPath, [scriptPath, '--force'], {
+            cwd: repoRoot,
+            detached: true,
+            stdio: ['ignore', out, out],
+            env: process.env,
+        });
+        child.on('error', (err) => console.error('On-demand improvement cycle failed to spawn:', err.message));
+        child.unref();
+        console.log(`On-demand improvement cycle started (pid ${child.pid ?? 'unknown'}).`);
+        res.json({
+            started: true,
+            message: 'Improvement cycle started. It runs the LLM and an eval pass, so give it a few minutes — the proposal will appear here and an email goes out when it is ready.',
+        });
+    }
+    catch (error) {
+        console.error('Failed to start on-demand improvement cycle:', error.message);
+        res.status(500).json({ error: error.message || 'Failed to start improvement cycle' });
+    }
+});
 function firstLearningQueryValue(value) {
     if (Array.isArray(value)) {
         return `${value[0] || ''}`;

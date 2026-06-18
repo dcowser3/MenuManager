@@ -86,7 +86,22 @@ describe('buildCorrectionRuleRecord', () => {
         expect(record.original_text).toBeNull();
         expect(record.corrected_text).toBeNull();
         expect(record.applies_to_menu_type).toBe('beverage');
-        expect(record.status).toBe('accepted');
+        // Saved corrections are proposals: born pending, never live on save.
+        expect(record.status).toBe('pending');
+    });
+
+    test('saves human corrections as pending proposals, not live accepted rules', () => {
+        const record = buildCorrectionRuleRecord({
+            ...basePayload,
+            is_location_specific: false,
+            location: GLOBAL_CORRECTION_RULE_LOCATION,
+        }, catalog);
+
+        // The improvement cycle is the single gate that promotes a correction to
+        // a live rule; saving one must NOT make it accepted (and therefore
+        // immediately applied by the deterministic pre-AI pass).
+        expect(record.source).toBe('human');
+        expect(record.status).toBe('pending');
     });
 
     test('requires optional exact replacement fields to be paired', () => {

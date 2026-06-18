@@ -80,7 +80,14 @@ function buildCorrectionRuleRecord(payload, catalog) {
         other_applicable_locations: isLocationSpecific ? otherLocations : [],
         reviewer_name: text(payload.reviewer_name) || null,
         source: payload.source || 'human',
-        status: payload.source === 'system' ? 'pending' : 'accepted',
+        // Saved corrections are PROPOSALS, not live rules. They stay 'pending'
+        // until the improvement cycle routes them by explanation (replacement
+        // rule vs prompt reasoning vs code change) and a reviewer approves the
+        // resulting proposal. This is the single gate: only cycle-approved rules
+        // (inserted directly as source 'system') reach the deterministic pre-AI
+        // pass, so a context-dependent fix can no longer go live as a blind
+        // find/replace the moment it is saved.
+        status: 'pending',
     };
     if (!record.submission_id || !record.correction_id || !record.rule) {
         throw new CorrectionRuleValidationError('rule is required');

@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.BUILT_IN_REPLACEMENTS = void 0;
 exports.runPreAiDeterministicChecks = runPreAiDeterministicChecks;
+const improvement_cycle_core_1 = require("./improvement-cycle-core");
 const COMMON_ALLERGEN_CODES = new Set([
     'A', 'C', 'CE', 'D', 'DF', 'E', 'ET', 'F', 'G', 'GF', 'L', 'M', 'MO',
     'MU', 'N', 'P', 'PN', 'S', 'SE', 'SF', 'SL', 'SS', 'SU', 'SY', 'T', 'TN',
@@ -370,6 +371,15 @@ function isSafeLearnedRule(rule) {
     const changeType = `${rule.change_type || ''}`.trim().toLowerCase();
     const original = `${rule.original_text || ''}`.trim();
     const corrected = `${rule.corrected_text || ''}`.trim();
+    // Context-dependent terms (tartare/tartar, berry/berries, …) can never be
+    // applied as blind replacements — the correct form depends on the dish/usage,
+    // so they belong in the AI prompt, not the deterministic pass. This mirrors
+    // the guard the improvement cycle already applies to LLM-proposed rules, and
+    // it neutralizes any such rule that reached the DB before that routing
+    // existed (e.g. a human-saved "berry" → "berries").
+    if ((0, improvement_cycle_core_1.involvesContextDependentTerm)(original, corrected)) {
+        return false;
+    }
     return `${rule.status || ''}`.toLowerCase() === 'accepted'
         && LEARNED_RULE_CHANGE_TYPES.has(changeType)
         && !!original

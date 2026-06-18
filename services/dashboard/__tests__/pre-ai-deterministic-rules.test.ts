@@ -183,6 +183,48 @@ describe('runPreAiDeterministicChecks', () => {
         }));
     });
 
+    it('never applies context-dependent learned rules as blind replacements', () => {
+        const rules: AcceptedCorrectionRule[] = [
+            {
+                id: 'rule-berry',
+                status: 'accepted',
+                source: 'human',
+                original_text: 'berry',
+                corrected_text: 'berries',
+                change_type: 'spelling',
+                rule: "Just 'berry' implies mixed berries and should be plural.",
+                is_location_specific: false,
+                location: 'All properties (global rule)',
+            },
+            {
+                id: 'rule-tartare',
+                status: 'accepted',
+                source: 'human',
+                original_text: 'poblano tartare',
+                corrected_text: 'poblano tartar',
+                change_type: 'terminology',
+                rule: 'This is the sauce, not the raw preparation.',
+                is_location_specific: false,
+                location: 'All properties (global rule)',
+            },
+        ];
+
+        // "berry compote" must stay singular; "tartare" must stay raw — a global
+        // find/replace would corrupt both, so neither rule is even considered.
+        const result = runPreAiDeterministicChecks(
+            'Berry compote 8\nBeef tartare crostini 18',
+            { acceptedCorrectionRules: rules }
+        );
+
+        expect(result.learnedRulesConsidered).toBe(0);
+        expect(result.learnedRulesApplied).toBe(0);
+        // The context-dependent terms are left exactly as submitted.
+        expect(result.menuText).toContain('Berry compote');
+        expect(result.menuText).not.toMatch(/berries/i);
+        expect(result.menuText).toContain('tartare');
+        expect(result.menuText).not.toMatch(/\btartar\b/i);
+    });
+
     it('does not duplicate append-style learned rules already satisfied by curated guards', () => {
         const rules: AcceptedCorrectionRule[] = [{
             id: 'rule-tres-leches',
