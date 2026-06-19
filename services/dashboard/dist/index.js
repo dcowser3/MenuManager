@@ -1473,10 +1473,20 @@ app.get('/learning', async (_req, res) => {
         const correctionRules = correctionRulesResult.data || [];
         const propertyOptions = propertiesResult.data?.properties || [];
         // v2: detected patterns from differ (read-only reference, not auto-injected)
+        const detectedPatternStatusLabel = (category) => {
+            if (category === 'active')
+                return 'Candidate';
+            if (category === 'weak')
+                return 'Below threshold';
+            if (category === 'conflicted')
+                return 'Conflicted';
+            return category;
+        };
         const decorate = (category, items) => (items || []).map((r) => ({
             ...r,
             key: `${r.source_norm}=>${r.target_norm}`,
             category,
+            status_label: detectedPatternStatusLabel(category),
         }));
         const detectedPatterns = [
             ...decorate('active', rulesData.active_rules || []),

@@ -1738,11 +1738,18 @@ app.get('/learning', async (_req, res) => {
         const propertyOptions: string[] = (propertiesResult as any).data?.properties || [];
 
         // v2: detected patterns from differ (read-only reference, not auto-injected)
+        const detectedPatternStatusLabel = (category: string) => {
+            if (category === 'active') return 'Candidate';
+            if (category === 'weak') return 'Below threshold';
+            if (category === 'conflicted') return 'Conflicted';
+            return category;
+        };
         const decorate = (category: string, items: any[]) =>
             (items || []).map((r: any) => ({
                 ...r,
                 key: `${r.source_norm}=>${r.target_norm}`,
                 category,
+                status_label: detectedPatternStatusLabel(category),
             }));
 
         const detectedPatterns = [

@@ -175,6 +175,25 @@ describe('learning dashboard view', () => {
         expect(html).not.toContain('Current Base Prompt');
         expect(html).not.toContain('SECRET PROMPT TEXT');
     });
+    test('labels threshold-met detected patterns as candidates instead of active rules', () => {
+        const html = renderLearningView({
+            detectedPatterns: [{
+                    source: 'tartare',
+                    target: 'tartar',
+                    kind: 'spelling',
+                    category: 'active',
+                    occurrences: 2,
+                    submission_count: 2,
+                    confidence: 0.64,
+                    last_seen_at: '2026-06-15T22:43:44.000Z',
+                }],
+        });
+        expect(html).toContain('tartare');
+        expect(html).toContain('tartar');
+        expect(html).toContain('Candidate');
+        expect(html).toContain('not</strong> applied by Pre-AI checks unless a reviewer accepts a safe exact rule above');
+        expect(html).not.toContain('>active</span>');
+    });
     test('keeps stale system proposals out of the actionable pending table', () => {
         const html = renderLearningView({
             pendingRules: [],

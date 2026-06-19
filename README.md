@@ -52,6 +52,8 @@ Menu Manager is an npm-workspace monorepo with Express microservices and shared 
 
 Shared workspace packages include `diff-core`, `internal-auth`, and `supabase-client`. DOCX redlining/extraction scripts live in `services/docx-redliner/`.
 
+The `/learning` dashboard separates auto-scanned detected patterns from active Pre-AI rules: detected patterns are candidate evidence for reviewer annotation, while only accepted safe rules in the Active Pre-AI section can change submitted menu text.
+
 ## Quick Start
 
 Prerequisites:

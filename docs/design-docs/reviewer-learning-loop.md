@@ -38,7 +38,7 @@ The differ skips learning for quick approvals, imports/backfills, AI-only change
 ## Learning Admin Dashboard
 
 - Route: `GET /learning` (dashboard service)
-- Displays learned rules with confidence, status, and activity
+- Displays auto-scanned detected patterns with confidence and evidence status. A threshold-met pattern is labeled as a candidate/reference signal on the dashboard, not as an active runtime replacement.
 - Displays pending `correction_rules` for accept/reject review and accepted rules that can feed deterministic pre-AI checks
 - Uses Supabase as the production correction-rule store, with a `tmp/db/correction_rules.json` fallback for local development or degraded Supabase/schema states so reviewer annotations do not fail at save time.
 - Shows compact active pre-AI rules first, including curated code guards promoted from accepted human explanations and accepted exact replacement rules.
@@ -90,6 +90,7 @@ The differ skips learning for quick approvals, imports/backfills, AI-only change
 - Replacement extraction uses line-diff alignment first (instead of raw same-line-index comparison) to reduce false mappings when line numbers shift.
 - Rules must meet minimum occurrences (`LEARNING_MIN_OCCURRENCES`, default `2`).
 - Low-dominance mappings are marked `conflicted` and are not proposed as accepted deterministic rules.
+- Context-dependent terms such as `tartare`/`tartar` stay out of blind deterministic replacements. A detected `tartare -> tartar` signal can be useful evidence for a sauce-specific correction, but it does not mean every raw tartare dish should be changed.
 - Dashboard fails open: if accepted correction rules cannot be loaded from the DB service, Basic AI Check still runs deterministic built-in checks and AI review without learned-rule replacements.
 - Deletion-only edits may be counted as document changes but may not generate replacement rules (`from -> to`) on their own.
 
