@@ -3,11 +3,15 @@ const path = require('path');
 const vm = require('vm');
 
 describe('dashboard form modification source chooser', () => {
-    test('defaults to modification mode without choosing a modification source', () => {
-        const template = fs.readFileSync(
-            path.join(__dirname, '..', 'views', 'form.ejs'),
+    function readView(viewName = 'form.ejs') {
+        return fs.readFileSync(
+            path.join(__dirname, '..', 'views', viewName),
             'utf8'
         );
+    }
+
+    test('defaults to modification mode without choosing a modification source', () => {
+        const template = readView();
 
         expect(template).toContain('id="submissionModeModification" value="modification" checked');
         expect(template).toContain('id="modificationSearchSection" class="modification-search show"');
@@ -16,10 +20,7 @@ describe('dashboard form modification source chooser', () => {
     });
 
     test('groups database and prior approved upload under edit-here flow', () => {
-        const template = fs.readFileSync(
-            path.join(__dirname, '..', 'views', 'form.ejs'),
-            'utf8'
-        );
+        const template = readView();
 
         expect(template).toContain("I'll make menu changes here");
         expect(template).toContain('Upload Prior Approved DOCX');
@@ -39,10 +40,7 @@ describe('dashboard form modification source chooser', () => {
     });
 
     test('lets brand-new submissions import menu content from DOCX using shared upload code', () => {
-        const template = fs.readFileSync(
-            path.join(__dirname, '..', 'views', 'form.ejs'),
-            'utf8'
-        );
+        const template = readView();
 
         expect(template).toContain('id="newMenuDocUploadSection"');
         expect(template).toContain('id="newMenuDocUpload" accept=".docx" onchange="uploadNewMenuDoc()"');
@@ -209,6 +207,60 @@ describe('dashboard form modification source chooser', () => {
         expect(template).toContain('Auto-Corrected');
         expect(template).toContain('Green highlights show inserted or modified text');
         expect(template).not.toContain("showAlert('Auto-corrections applied! Green highlights show the changes.', 'success');");
+    });
+
+    test('validates required fields again before final submit in both form views', () => {
+        ['form.ejs', 'form-legacy.ejs'].forEach((viewName) => {
+            const template = readView(viewName);
+            const submitStart = template.indexOf('async function submitMenu(skipAiReview = false) {');
+            const aiGuard = template.indexOf("if (!skipAiReview && !aiCheckHasRun)", submitStart);
+
+            expect(submitStart).toBeGreaterThan(-1);
+            expect(aiGuard).toBeGreaterThan(submitStart);
+            expect(template.slice(submitStart, aiGuard)).toContain('if (!validateStep1())');
+            expect(template.slice(submitStart, aiGuard)).toContain('return;');
+        });
+    });
+
+    test('recovers from server missing-field submit rejections in both form views', () => {
+        ['form.ejs', 'form-legacy.ejs'].forEach((viewName) => {
+            const template = readView(viewName);
+
+            expect(template).toContain('const submissionFieldErrorMap = {');
+            expect(template).toContain("'bleed marks': { fieldId: 'bleedMarks'");
+            expect(template).toContain('function revealEditableFieldsForSubmitCorrection()');
+            expect(template).toContain("if (step1) step1.classList.remove('hidden');");
+            expect(template).toContain("if (step2Fields) step2Fields.classList.add('hidden');");
+            expect(template).toContain('function recoverFromMissingSubmissionFields(missingFields)');
+            expect(template).toContain('const recoveredMissingFields = recoverFromMissingSubmissionFields(data.missingFields);');
+        });
+    });
+
+    test('shows inline errors for print conditional fields in both form views', () => {
+        ['form.ejs', 'form-legacy.ejs'].forEach((viewName) => {
+            const template = readView(viewName);
+
+            expect(template).toContain("setGenericFieldError('bleedMarks', !needsPrint || document.getElementById('bleedMarks').value ? '' : 'Please select bleed marks');");
+            expect(template).toContain("setGenericFieldError('printRegion', !needsPrint || printRegion ? '' : 'Please select the print region');");
+            expect(template).toContain("setGenericFieldError('fileSizeLimitMb', !needsPrint || fileSizeLimit !== 'yes' || document.getElementById('fileSizeLimitMb').value.trim() ? '' : 'Please provide the max file size in MB');");
+            expect(template).toContain("errorEl.dataset.generatedFieldError = 'true';");
+        });
+    });
+
+    test('keeps BOTH asset print metadata when copying project details in both form views', () => {
+        ['form.ejs', 'form-legacy.ejs'].forEach((viewName) => {
+            const template = readView(viewName);
+            const bothStart = template.indexOf("} else if (p.assetType === 'BOTH') {");
+            const bothEnd = template.indexOf('// Dispatch change event on templateType', bothStart);
+            const bothBlock = template.slice(bothStart, bothEnd);
+
+            expect(bothStart).toBeGreaterThan(-1);
+            expect(bothBlock).toContain("document.getElementById('widthPrint').value = p.printWidth || p.width || '';");
+            expect(bothBlock).toContain("document.getElementById('heightPrint').value = p.printHeight || p.height || '';");
+            expect(bothBlock).toContain("setSelectValue('bleedMarks', toYesNo(p.bleedMarks));");
+            expect(bothBlock).toContain("setSelectValue('printRegion', p.printRegion || 'US');");
+            expect(bothBlock).not.toContain("document.getElementById('bleedMarks').value = '';");
+        });
     });
 
     test('excludes imported deletions from uploaded-unapproved AI review text', () => {

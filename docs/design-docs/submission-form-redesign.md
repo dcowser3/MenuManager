@@ -43,6 +43,7 @@ This was a **re-sequencing + progressive-disclosure** change over the existing m
 - Action feedback from `showAlert()` renders as fixed top-right growl toasts with dismiss controls. Temporary success/info/warning toasts include a shrinking progress bar; persistent toasts remain visible until dismissed so action links and blocking guidance are not lost off-screen. The in-panel Auto-Corrected card is the only auto-correction completion message, avoiding a duplicate growl.
 - AI review highlights currently mark inserted visible tokens only. Tiny punctuation insertions may be technically highlighted but subtle, and whitespace-only layout corrections are not highlighted by the current token-range helper.
 - Internally the flow is always a preserve-redlines **modification** (`submissionMode='modification'`, `unapprovedMode=true`), so the redline/submit plumbing is unchanged. The submit reads the live `#reviewedContentArea`.
+- The browser re-runs Step 1 validation immediately before the final `/api/form/submit` POST in both form views. This keeps changed or auto-cleared conditional fields, such as print `bleedMarks` on `PRINT`/`BOTH` assets, from reaching the server as a late 400 after the chef has already completed AI review. If the server still returns `missingFields`, the client reopens the editable form, hides the read-only summary, highlights the exact fields, and scrolls/focuses the first missing input.
 
 ### Animation
 

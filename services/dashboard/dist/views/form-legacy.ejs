@@ -2988,8 +2988,15 @@
 
         function setGenericFieldError(fieldId, message) {
             const input = document.getElementById(fieldId);
-            const errorEl = document.getElementById(fieldId + 'Error');
             if (!input) return;
+            let errorEl = document.getElementById(fieldId + 'Error');
+            if (!errorEl && message && input.parentElement) {
+                errorEl = document.createElement('div');
+                errorEl.id = fieldId + 'Error';
+                errorEl.className = 'field-error hidden';
+                errorEl.dataset.generatedFieldError = 'true';
+                input.parentElement.appendChild(errorEl);
+            }
 
             if (message) {
                 input.classList.add('input-error');
@@ -3008,6 +3015,81 @@
 
         function clearGenericFieldError(fieldId) {
             setGenericFieldError(fieldId, '');
+        }
+
+        const submissionFieldErrorMap = {
+            'submitter name': { fieldId: 'submitterName', sectionId: 'submitterInfoCard', message: 'Please enter your name' },
+            'submitter email': { fieldId: 'submitterEmail', sectionId: 'submitterInfoCard', message: 'Please enter your email' },
+            'submitter job title': { fieldId: 'submitterJobTitle', sectionId: 'submitterInfoCard', message: 'Please enter your job title' },
+            'project name': { fieldId: 'projectName', sectionId: 'projectDetailsCard', message: 'Please enter a project name' },
+            property: { fieldId: 'property', sectionId: 'projectDetailsCard', message: 'Please select a property' },
+            orientation: { fieldId: 'orientation', sectionId: 'projectDetailsCard', message: 'Please select an orientation' },
+            'menu type': { fieldId: 'menuType', sectionId: 'projectDetailsCard', message: 'Please select a menu type' },
+            'service period': { fieldId: 'servicePeriod', sectionId: 'projectDetailsCard', message: 'Please select a service period' },
+            'template type': { fieldId: 'templateType', sectionId: 'projectDetailsCard', message: 'Please select a template type' },
+            'date needed': { fieldId: 'dateNeeded', sectionId: 'projectDetailsCard', message: 'Please select a date needed' },
+            'asset type': { fieldId: 'assetType', sectionId: 'projectDetailsCard', message: 'Please select an asset type' },
+            'menu content': { fieldId: 'menuEditor', sectionId: 'menuSplitBlock', message: 'Please add menu content' },
+            'digital width': { fieldId: 'widthDigital', sectionId: 'projectDetailsCard', message: 'Please enter the digital width' },
+            'digital height': { fieldId: 'heightDigital', sectionId: 'projectDetailsCard', message: 'Please enter the digital height' },
+            'print region': { fieldId: 'printRegion', sectionId: 'projectDetailsCard', message: 'Please select the print region' },
+            folded: { fieldId: 'folded', sectionId: 'projectDetailsCard', message: 'Please select whether the asset is folded' },
+            'crop marks': { fieldId: 'cropMarks', sectionId: 'projectDetailsCard', message: 'Please select crop marks' },
+            'bleed marks': { fieldId: 'bleedMarks', sectionId: 'projectDetailsCard', message: 'Please select bleed marks' },
+            'file size limit': { fieldId: 'fileSizeLimit', sectionId: 'projectDetailsCard', message: 'Please select whether there is a file size limit' },
+            'print width': { fieldId: 'widthPrint', sectionId: 'projectDetailsCard', message: 'Please enter the print width' },
+            'print height': { fieldId: 'heightPrint', sectionId: 'projectDetailsCard', message: 'Please enter the print height' },
+            'A-size selection': { fieldId: 'printSize', sectionId: 'projectDetailsCard', message: 'Please select an A-size' }
+        };
+
+        function revealEditableFieldsForSubmitCorrection() {
+            const step1 = document.getElementById('step1');
+            const step2Fields = document.getElementById('step2FormFields');
+            if (step1) step1.classList.remove('hidden');
+            if (step2Fields) step2Fields.classList.add('hidden');
+            toggleAssetFields();
+            if (typeof applyStageReveals === 'function') {
+                applyStageReveals();
+            }
+        }
+
+        function focusFirstMissingSubmissionField(missingFields) {
+            for (const label of missingFields) {
+                const config = submissionFieldErrorMap[label];
+                const target = config ? document.getElementById(config.fieldId) : null;
+                if (!target) continue;
+                const section = document.getElementById(config.sectionId) || target;
+                section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                if (typeof target.focus === 'function' && !target.readOnly && !target.disabled) {
+                    setTimeout(() => target.focus({ preventScroll: true }), 250);
+                }
+                return;
+            }
+        }
+
+        function recoverFromMissingSubmissionFields(missingFields) {
+            if (!Array.isArray(missingFields) || !missingFields.length) return false;
+            revealEditableFieldsForSubmitCorrection();
+
+            missingFields.forEach((label) => {
+                const config = submissionFieldErrorMap[label];
+                if (!config) return;
+                if (['submitterName', 'submitterEmail', 'submitterJobTitle'].includes(config.fieldId)) {
+                    setSubmitterFieldError(config.fieldId, config.message);
+                } else if (config.fieldId === 'property') {
+                    setPropertyFieldError(config.message);
+                } else {
+                    setGenericFieldError(config.fieldId, config.message);
+                }
+                if (config.sectionId === 'projectDetailsCard' || config.sectionId === 'submitterInfoCard') {
+                    setCardError(config.sectionId, true);
+                }
+            });
+            if (typeof refreshNeedsInputHighlights === 'function') {
+                refreshNeedsInputHighlights();
+            }
+            focusFirstMissingSubmissionField(missingFields);
+            return true;
         }
 
         function setCardError(cardId, hasError) {
@@ -3063,6 +3145,10 @@
             const turnaroundDays = document.getElementById('turnaroundDays').value.trim();
             const dateNeeded = document.getElementById('dateNeeded').value;
             const assetType = document.getElementById('assetType').value;
+            const needsPrint = assetType === 'PRINT' || assetType === 'BOTH';
+            const needsDigital = assetType === 'DIGITAL' || assetType === 'BOTH';
+            const printRegion = document.getElementById('printRegion').value;
+            const fileSizeLimit = document.getElementById('fileSizeLimit').value;
 
             setGenericFieldError('projectName', projectName ? '' : 'Please enter a project name');
             setPropertyFieldError(property ? '' : 'Please select a property');
@@ -3073,8 +3159,19 @@
             setTurnaroundFieldError(turnaroundDays ? '' : 'Please enter turnaround days');
             setGenericFieldError('dateNeeded', dateNeeded ? '' : 'Please select a date needed');
             setGenericFieldError('assetType', assetType ? '' : 'Please select an asset type');
+            setGenericFieldError('widthDigital', !needsDigital || document.getElementById('widthDigital').value.trim() ? '' : 'Please enter the digital width');
+            setGenericFieldError('heightDigital', !needsDigital || document.getElementById('heightDigital').value.trim() ? '' : 'Please enter the digital height');
+            setGenericFieldError('printRegion', !needsPrint || printRegion ? '' : 'Please select the print region');
+            setGenericFieldError('folded', !needsPrint || document.getElementById('folded').value ? '' : 'Please select whether the asset is folded');
+            setGenericFieldError('cropMarks', !needsPrint || document.getElementById('cropMarks').value ? '' : 'Please select crop marks');
+            setGenericFieldError('bleedMarks', !needsPrint || document.getElementById('bleedMarks').value ? '' : 'Please select bleed marks');
+            setGenericFieldError('fileSizeLimit', !needsPrint || fileSizeLimit ? '' : 'Please select whether there is a file size limit');
+            setGenericFieldError('widthPrint', !needsPrint || printRegion !== 'US' || document.getElementById('widthPrint').value.trim() ? '' : 'Please enter the print width');
+            setGenericFieldError('heightPrint', !needsPrint || printRegion !== 'US' || document.getElementById('heightPrint').value.trim() ? '' : 'Please enter the print height');
+            setGenericFieldError('printSize', !needsPrint || printRegion !== 'NON_US' || document.getElementById('printSize').value ? '' : 'Please select an A-size');
+            setGenericFieldError('fileSizeLimitMb', !needsPrint || fileSizeLimit !== 'yes' || document.getElementById('fileSizeLimitMb').value.trim() ? '' : 'Please provide the max file size in MB');
 
-            const hasProjectFieldErrors = !projectName || !property || !orientation || !menuType || !servicePeriod || !templateType || !turnaroundDays || !dateNeeded || !assetType;
+            const hasProjectFieldErrors = !!document.getElementById('projectDetailsCard')?.querySelector('.input-error');
             setCardError('projectDetailsCard', hasProjectFieldErrors);
             return hasProjectFieldErrors;
         }
@@ -4520,16 +4617,16 @@
             } else if (p.assetType === 'BOTH') {
                 document.getElementById('widthDigital').value = p.digitalWidth || '';
                 document.getElementById('heightDigital').value = p.digitalHeight || '';
-                document.getElementById('widthPrint').value = '';
-                document.getElementById('heightPrint').value = '';
-                document.getElementById('cropMarks').value = '';
-                document.getElementById('bleedMarks').value = '';
-                document.getElementById('fileSizeLimit').value = '';
-                document.getElementById('fileSizeLimitMb').value = '';
-                document.getElementById('fileDeliveryNotes').value = '';
-                document.getElementById('folded').value = '';
-                document.getElementById('printRegion').value = '';
-                document.getElementById('printSize').value = '';
+                document.getElementById('widthPrint').value = p.printWidth || p.width || '';
+                document.getElementById('heightPrint').value = p.printHeight || p.height || '';
+                setSelectValue('cropMarks', toYesNo(p.cropMarks));
+                setSelectValue('bleedMarks', toYesNo(p.bleedMarks));
+                setSelectValue('fileSizeLimit', toYesNo(p.fileSizeLimit));
+                document.getElementById('fileSizeLimitMb').value = p.fileSizeLimitMb || '';
+                document.getElementById('fileDeliveryNotes').value = p.fileDeliveryNotes || '';
+                setSelectValue('folded', toYesNo(p.folded));
+                setSelectValue('printRegion', p.printRegion || 'US');
+                setSelectValue('printSize', p.printSize || '');
                 togglePrintRegionFields();
                 toggleFileSizeLimit();
             }
@@ -6538,6 +6635,10 @@
         }
 
         async function submitMenu(skipAiReview = false) {
+            if (!validateStep1()) {
+                return;
+            }
+
             if (!skipAiReview && !aiCheckHasRun) {
                 showAlert('Run Basic AI Check before submitting.', 'error');
                 return;
@@ -6738,6 +6839,7 @@
                 }
 
                 if (!response.ok) {
+                    const recoveredMissingFields = recoverFromMissingSubmissionFields(data.missingFields);
                     await logFormAttempt('submit_failed', {
                         route: '/api/form/submit',
                         statusCode: response.status,
@@ -6758,6 +6860,9 @@
                             submittedWithPostSecondAiEdit: requiresAiRerun && !shouldBlockSubmitForStaleAiCheck()
                         }
                     });
+                    if (recoveredMissingFields) {
+                        showAlert(data.error || 'Please complete the highlighted required fields.', 'error');
+                    }
                     throw new Error(data.error || 'Failed to submit menu');
                 }
                 await logFormAttempt('submit_completed', {
