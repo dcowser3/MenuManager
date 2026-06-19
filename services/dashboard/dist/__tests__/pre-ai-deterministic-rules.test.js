@@ -189,6 +189,24 @@ describe('runPreAiDeterministicChecks', () => {
         expect(result.menuText).toContain('tartare');
         expect(result.menuText).not.toMatch(/\btartar\b/i);
     });
+    it('classifies tartare to tartar accepted rules as context guidance only', () => {
+        const rule = {
+            id: 'rule-tartare',
+            status: 'accepted',
+            source: 'human',
+            original_text: 'poblano tartare',
+            corrected_text: 'poblano tartar',
+            change_type: 'terminology',
+            rule: 'tartar sauce',
+            is_location_specific: false,
+            location: 'All properties (global rule)',
+        };
+        expect((0, pre_ai_deterministic_rules_1.getAcceptedCorrectionRulePreAiEligibility)(rule)).toEqual({
+            eligible: false,
+            reason: 'context_dependent',
+            contextTerm: 'tartare',
+        });
+    });
     it('does not duplicate append-style learned rules already satisfied by curated guards', () => {
         const rules = [{
                 id: 'rule-tres-leches',

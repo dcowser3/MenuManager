@@ -33,6 +33,7 @@ function renderLearningView(overrides: Record<string, unknown> = {}) {
             submissionsError: '',
         },
         basePrompt: '',
+        learningDashboardTimeZone: 'America/New_York',
         ...overrides,
     }, { filename: viewPath });
 }
@@ -46,6 +47,16 @@ describe('learning dashboard view', () => {
         expect(html).not.toContain('Cloud Deployment Note');
         expect(html).not.toContain('DOCUMENT_STORAGE_ROOT');
         expect(html).not.toContain('/app/tmp/documents');
+    });
+
+    test('formats learning scan timestamps in the configured dashboard timezone', () => {
+        const html = renderLearningView({
+            generatedAt: '2026-06-19T01:46:16.000Z',
+            learningDashboardTimeZone: 'America/New_York',
+        });
+
+        expect(html).toContain('6/18/2026, 9:46:16 PM EDT');
+        expect(html).not.toContain('6/19/2026, 1:46:16 AM');
     });
 
     test('shows menu names in the recent learned submissions column', () => {
@@ -142,6 +153,7 @@ describe('learning dashboard view', () => {
                 source: 'system',
                 location: 'All properties (global rule)',
                 is_location_specific: false,
+                implementation_detail: 'Pre-AI replaces the exact phrase "tomatoes" with "tomato" when menu and property scope match.',
             }],
             manualGuidanceRules: [{
                 rule: 'Beverage menus keep zero-proof section names.',
@@ -159,7 +171,9 @@ describe('learning dashboard view', () => {
                 source: 'system',
                 location: 'All properties (global rule)',
                 is_location_specific: false,
-                pre_ai_status: 'Active exact rule',
+                pre_ai_status: 'Active exact replacement',
+                implementation_status: 'Active exact replacement',
+                implementation_detail: 'Pre-AI replaces the exact phrase "tomatoes" with "tomato" when menu and property scope match.',
                 pre_ai_active: true,
             }, {
                 original_text: null,
@@ -170,13 +184,17 @@ describe('learning dashboard view', () => {
                 location: 'All properties (global rule)',
                 is_location_specific: false,
                 pre_ai_status: 'Manual guidance',
+                implementation_status: 'Manual guidance',
+                implementation_detail: 'No exact before/after replacement was supplied; this remains reviewer guidance and prompt-proposal material.',
                 pre_ai_active: false,
             }],
         });
 
         expect(html).toContain('Active Pre-AI Rules');
         expect(html).toContain('veggies -&gt; vegetables');
-        expect(html).toContain('Accepted Exact Rules Active In Pre-AI (1)');
+        expect(html).toContain('Accepted Exact Replacement Rules Active In Pre-AI (1)');
+        expect(html).toContain('Pre-AI replaces the exact phrase &#34;tomatoes&#34; with &#34;tomato&#34; when menu and property scope match.');
+        expect(html).toContain('What Code Does');
         expect(html).toContain('Accepted Manual Guidance (1)');
         expect(html).toContain('Beverage menus keep zero-proof section names.');
         expect(html).toContain('Beverage menus');
@@ -198,12 +216,18 @@ describe('learning dashboard view', () => {
                 submission_count: 2,
                 confidence: 0.64,
                 last_seen_at: '2026-06-15T22:43:44.000Z',
+                implementation_status: 'Context guidance only',
+                implementation_detail: 'No blind replacement is active because tartare depends on usage; handle through reviewer judgment or prompt guidance.',
             }],
         });
 
         expect(html).toContain('tartare');
         expect(html).toContain('tartar');
         expect(html).toContain('Candidate');
+        expect(html).toContain('Implementation');
+        expect(html).toContain('What Code Does');
+        expect(html).toContain('Context guidance only');
+        expect(html).toContain('No blind replacement is active because tartare depends on usage');
         expect(html).toContain('not</strong> applied by Pre-AI checks unless a reviewer accepts a safe exact rule above');
         expect(html).not.toContain('>active</span>');
     });

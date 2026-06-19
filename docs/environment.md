@@ -60,6 +60,7 @@ All variables are configured in `.env` at the project root. See `.env.example` f
 | `LEARNING_DATA_DIR` | Root directory for differ comparison history and learned-rule snapshots (default: `tmp/learning`) |
 | `LEARNING_MIN_OCCURRENCES` | Minimum repeated corrections needed before a learned rule is active (default: `2`) |
 | `LEARNING_MAX_OVERLAY_RULES` | Legacy v1 overlay cap. The v2 Basic AI Check path no longer injects this overlay into the prompt; accepted exact rules are loaded from `correction_rules` for deterministic pre-AI replacement. |
+| `LEARNING_DASHBOARD_TIME_ZONE` | IANA timezone used when the dashboard renders learning scan and rule timestamps (default: `America/New_York`). This keeps UTC snapshot times from appearing as future dates in Docker/container UTC. |
 | `GRAPH_CLIENT_ID` | Azure app client ID used for SharePoint/Microsoft Graph access |
 | `GRAPH_TENANT_ID` | Azure tenant ID used for SharePoint/Microsoft Graph access |
 | `GRAPH_CLIENT_SECRET` | Azure app client secret **Value** used for SharePoint/Microsoft Graph access. Azure also shows a Secret ID; do not use that here. If the token endpoint returns `AADSTS7000215` / `invalid_client`, rotate the secret and paste the new Value. |

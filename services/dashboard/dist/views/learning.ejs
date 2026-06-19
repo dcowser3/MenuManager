@@ -428,6 +428,26 @@
     </div>
 
     <div class="container">
+        <%
+            const dashboardTimeZone = learningDashboardTimeZone || 'America/New_York';
+            const formatDashboardTime = (value) => {
+                if (!value) return 'N/A';
+                try {
+                    return new Intl.DateTimeFormat('en-US', {
+                        timeZone: dashboardTimeZone,
+                        year: 'numeric',
+                        month: 'numeric',
+                        day: 'numeric',
+                        hour: 'numeric',
+                        minute: '2-digit',
+                        second: '2-digit',
+                        timeZoneName: 'short',
+                    }).format(new Date(value));
+                } catch {
+                    return new Date(value).toISOString();
+                }
+            };
+        %>
         <% if (differStatus && (!differStatus.rulesOk || !differStatus.trainingOk)) { %>
             <div class="panel warn">
                 <strong>Differ Connectivity Warning:</strong>
@@ -442,7 +462,7 @@
         <% } %>
 
         <div class="stats">
-            <div class="stat"><div class="label">Last Scan</div><div class="value"><%= generatedAt ? new Date(generatedAt).toLocaleString() : 'N/A' %></div></div>
+            <div class="stat"><div class="label">Last Scan</div><div class="value"><%= formatDashboardTime(generatedAt) %></div></div>
             <div class="stat"><div class="label">Submissions Analyzed</div><div class="value"><%= totalEntries %></div></div>
             <div class="stat"><div class="label">Detected Patterns</div><div class="value"><%= totalRules %></div></div>
             <div class="stat"><div class="label">Pending Review</div><div class="value"><%= pendingRules.length %></div></div>
@@ -567,7 +587,7 @@
             <% }) %>
         </div>
         <details class="compact-details">
-            <summary>Accepted Exact Rules Active In Pre-AI (<%= (activeExactRules || []).length %>)</summary>
+            <summary>Accepted Exact Replacement Rules Active In Pre-AI (<%= (activeExactRules || []).length %>)</summary>
             <div class="details-body">
                 <% if (!activeExactRules || activeExactRules.length === 0) { %>
                     <div class="empty">No accepted exact replacement rules are active beyond the curated code guards.</div>
@@ -578,6 +598,7 @@
                                 <th>Original</th>
                                 <th>Corrected</th>
                                 <th>Rule</th>
+                                <th>Implementation</th>
                                 <th>Source</th>
                                 <th>Scope</th>
                             </tr>
@@ -588,6 +609,7 @@
                                 <td><%= rule.original_text || '' %></td>
                                 <td><%= rule.corrected_text || '' %></td>
                                 <td><%= rule.rule || '' %></td>
+                                <td><%= rule.implementation_detail || '' %></td>
                                 <td><span class="badge <%= rule.source %>"><%= rule.source %></span></td>
                                 <td><%= rule.location || '' %><%= rule.is_location_specific ? '' : ' (global)' %></td>
                             </tr>
@@ -625,7 +647,7 @@
                                     <% } %>
                                 </td>
                                 <td><%= rule.reviewer_name || '' %></td>
-                                <td><%= rule.created_at ? new Date(rule.created_at).toLocaleString() : 'N/A' %></td>
+                                <td><%= formatDashboardTime(rule.created_at) %></td>
                             </tr>
                         <% }) %>
                         </tbody>
@@ -721,7 +743,7 @@
                                 <td><%= rule.corrected_text || '' %></td>
                                 <td><%= rule.rule || '' %></td>
                                 <td><%= menuScopeLabel(rule.applies_to_menu_type) %></td>
-                                <td><%= rule.created_at ? new Date(rule.created_at).toLocaleString() : 'N/A' %></td>
+                                <td><%= formatDashboardTime(rule.created_at) %></td>
                             </tr>
                         <% }) %>
                         </tbody>
@@ -752,7 +774,8 @@
                         <th>Original</th>
                         <th>Corrected</th>
                         <th>Rule</th>
-                        <th>Pre-AI Status</th>
+                        <th>Implementation</th>
+                        <th>What Code Does</th>
                         <th>Menu Scope</th>
                         <th>Type</th>
                         <th>Project / Menu</th>
@@ -767,7 +790,8 @@
                         <td><%= rule.original_text || '' %></td>
                         <td><%= rule.corrected_text || '' %></td>
                         <td><%= rule.rule || '' %></td>
-                        <td><span class="badge <%= rule.pre_ai_active ? 'accepted' : 'system' %>"><%= rule.pre_ai_status || '' %></span></td>
+                        <td><span class="badge <%= rule.pre_ai_active ? 'accepted' : 'system' %>"><%= rule.implementation_status || rule.pre_ai_status || '' %></span></td>
+                        <td><%= rule.implementation_detail || '' %></td>
                         <td><%= menuScopeLabel(rule.applies_to_menu_type) %></td>
                         <td><%= rule.change_type || '' %></td>
                         <td><%= rule.restaurant_name || '' %></td>
@@ -778,7 +802,7 @@
                             <% } %>
                         </td>
                         <td><span class="badge <%= rule.source %>"><%= rule.source %></span></td>
-                        <td><%= rule.created_at ? new Date(rule.created_at).toLocaleString() : 'N/A' %></td>
+                        <td><%= formatDashboardTime(rule.created_at) %></td>
                     </tr>
                 <% }) %>
                 </tbody>
@@ -801,6 +825,8 @@
                         <th>Pattern</th>
                         <th>Type</th>
                         <th>Evidence Status</th>
+                        <th>Implementation</th>
+                        <th>What Code Does</th>
                         <th>Signals</th>
                         <th>Last Seen</th>
                     </tr>
@@ -813,12 +839,14 @@
                         </td>
                         <td><%= pattern.kind %></td>
                         <td><span class="badge <%= pattern.category === 'active' ? 'candidate' : pattern.category %>"><%= pattern.status_label || (pattern.category === 'active' ? 'Candidate' : pattern.category === 'weak' ? 'Below threshold' : pattern.category === 'conflicted' ? 'Conflicted' : pattern.category) %></span></td>
+                        <td><span class="badge <%= pattern.implementation_status === 'Active exact replacement' || pattern.implementation_status === 'Active code guard' || pattern.implementation_status === 'Covered by built-in Pre-AI' ? 'accepted' : 'system' %>"><%= pattern.implementation_status || 'No implementation yet' %></span></td>
+                        <td><%= pattern.implementation_detail || '' %></td>
                         <td>
                             <div>Occurrences: <strong><%= pattern.occurrences %></strong></div>
                             <div>Submissions: <strong><%= pattern.submission_count %></strong></div>
                             <div>Confidence: <strong><%= Number(pattern.confidence || 0).toFixed(2) %></strong></div>
                         </td>
-                        <td><%= pattern.last_seen_at ? new Date(pattern.last_seen_at).toLocaleString() : 'N/A' %></td>
+                        <td><%= formatDashboardTime(pattern.last_seen_at) %></td>
                     </tr>
                 <% }) %>
                 </tbody>
@@ -853,7 +881,7 @@
                                 <div class="small submission-detail"><%= item.submission_display_detail %></div>
                             <% } %>
                         </td>
-                        <td><%= item.timestamp ? new Date(item.timestamp).toLocaleString() : 'N/A' %></td>
+                        <td><%= formatDashboardTime(item.timestamp) %></td>
                         <td><%= item.changes_detected ? 'YES' : 'NO' %></td>
                         <td><%= Number(item.change_percentage || 0).toFixed(2) %></td>
                         <td><%= item.replacement_count || item.learning_signals?.replacement_count || 0 %></td>

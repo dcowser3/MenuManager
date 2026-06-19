@@ -1,6 +1,7 @@
 import {
     runPreAiDeterministicChecks,
     AcceptedCorrectionRule,
+    getAcceptedCorrectionRulePreAiEligibility,
 } from '../lib/pre-ai-deterministic-rules';
 
 describe('runPreAiDeterministicChecks', () => {
@@ -223,6 +224,26 @@ describe('runPreAiDeterministicChecks', () => {
         expect(result.menuText).not.toMatch(/berries/i);
         expect(result.menuText).toContain('tartare');
         expect(result.menuText).not.toMatch(/\btartar\b/i);
+    });
+
+    it('classifies tartare to tartar accepted rules as context guidance only', () => {
+        const rule: AcceptedCorrectionRule = {
+            id: 'rule-tartare',
+            status: 'accepted',
+            source: 'human',
+            original_text: 'poblano tartare',
+            corrected_text: 'poblano tartar',
+            change_type: 'terminology',
+            rule: 'tartar sauce',
+            is_location_specific: false,
+            location: 'All properties (global rule)',
+        };
+
+        expect(getAcceptedCorrectionRulePreAiEligibility(rule)).toEqual({
+            eligible: false,
+            reason: 'context_dependent',
+            contextTerm: 'tartare',
+        });
     });
 
     it('does not duplicate append-style learned rules already satisfied by curated guards', () => {

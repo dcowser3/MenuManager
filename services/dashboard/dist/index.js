@@ -96,6 +96,7 @@ const ALERT_EMAIL = process.env.ALERT_EMAIL || '';
 const FORM_ATTEMPT_ALERT_EMAIL = process.env.FORM_ATTEMPT_ALERT_EMAIL || 'dcowser@richardsandoval.com';
 const PUBLIC_FORM_SUPPORT_EMAIL = process.env.PUBLIC_FORM_SUPPORT_EMAIL || 'dcowser@richardsandoval.com';
 const DASHBOARD_URL = process.env.DASHBOARD_URL || 'http://localhost:3005';
+const LEARNING_DASHBOARD_TIME_ZONE = process.env.LEARNING_DASHBOARD_TIME_ZONE || 'America/New_York';
 const JSON_BODY_LIMIT = process.env.DASHBOARD_JSON_BODY_LIMIT || process.env.JSON_BODY_LIMIT || '5mb';
 const ERROR_REPORT_JSON_BODY_LIMIT = process.env.ERROR_REPORT_JSON_BODY_LIMIT || '15mb';
 const ERROR_REPORT_BODY_SAFETY_BYTES = 512 * 1024;
@@ -1401,28 +1402,7 @@ function correctionRulePairKey(original, corrected) {
     return `${normalizeCorrectionRuleKeyPart(original)}=>${normalizeCorrectionRuleKeyPart(corrected)}`;
 }
 function isAcceptedRulePreAiEligible(rule) {
-    const changeType = `${rule.change_type || ''}`.trim().toLowerCase();
-    const original = `${rule.original_text || ''}`.trim();
-    const corrected = `${rule.corrected_text || ''}`.trim();
-    const allowedTypes = new Set([
-        '',
-        'diacritic',
-        'diacritics',
-        'spelling',
-        'typo',
-        'grammar',
-        'terminology',
-        'punctuation',
-    ]);
-    return `${rule.status || ''}`.toLowerCase() === 'accepted'
-        && allowedTypes.has(changeType)
-        && !!original
-        && !!corrected
-        && original !== corrected
-        && !original.includes('\n')
-        && !corrected.includes('\n')
-        && original.length <= 240
-        && corrected.length <= 240;
+    return (0, pre_ai_deterministic_rules_1.getAcceptedCorrectionRulePreAiEligibility)(rule).eligible;
 }
 function describeAcceptedRulePreAiStatus(rule) {
     const original = `${rule.original_text || ''}`.trim();
@@ -1430,7 +1410,11 @@ function describeAcceptedRulePreAiStatus(rule) {
     if (!original && !corrected) {
         return 'Manual guidance';
     }
-    if (!isAcceptedRulePreAiEligible(rule)) {
+    const eligibility = (0, pre_ai_deterministic_rules_1.getAcceptedCorrectionRulePreAiEligibility)(rule);
+    if (!eligibility.eligible) {
+        if (eligibility.reason === 'context_dependent') {
+            return 'Context guidance only';
+        }
         return 'Manual review only';
     }
     const ruleText = `${rule.rule || ''}`.toLowerCase();
@@ -1447,6 +1431,99 @@ function describeAcceptedRulePreAiStatus(rule) {
         return 'Active code guard';
     }
     return 'Active exact rule';
+}
+function describeAcceptedRuleImplementation(rule) {
+    const original = `${rule.original_text || ''}`.trim();
+    const corrected = `${rule.corrected_text || ''}`.trim();
+    const preAiStatus = describeAcceptedRulePreAiStatus(rule);
+    const eligibility = (0, pre_ai_deterministic_rules_1.getAcceptedCorrectionRulePreAiEligibility)(rule);
+    if (preAiStatus === 'Active exact rule') {
+        return {
+            status: 'Active exact replacement',
+            detail: `Pre-AI replaces the exact phrase "${original}" with "${corrected}" when menu and property scope match.`,
+        };
+    }
+    if (preAiStatus === 'Active code guard') {
+        const haystack = `${rule.rule || ''} ${original} ${corrected}`.toLowerCase();
+        let detail = 'Covered by a curated Pre-AI code guard; the accepted explanation is evidence, but code applies bounded logic instead of this row as a blind replacement.';
+        if (haystack.includes('tres leches')) {
+            detail = 'Pre-AI ensures Tres Leches rows include vegetarian code V while preserving existing allergen codes and price.';
+        }
+        else if (haystack.includes('veggies')) {
+            detail = 'Pre-AI changes veggies to vegetables in safe contexts while avoiding protected phrases like veggie burger.';
+        }
+        else if (haystack.includes('poached egg')) {
+            detail = 'Pre-AI adds or normalizes raw-marker asterisks for poached egg dishes when the line has dish context.';
+        }
+        else if (haystack.includes('sunny side')) {
+            detail = 'Pre-AI adds or normalizes raw-marker asterisks for sunny-side-up egg dishes when the line has dish context.';
+        }
+        return { status: preAiStatus, detail };
+    }
+    if (preAiStatus === 'Context guidance only') {
+        return {
+            status: preAiStatus,
+            detail: `Not automated as a blind replacement because ${eligibility.contextTerm || 'this term'} depends on usage; keep it as reviewer/prompt guidance.`,
+        };
+    }
+    if (preAiStatus === 'Manual guidance') {
+        return {
+            status: preAiStatus,
+            detail: 'No exact before/after replacement was supplied; this remains reviewer guidance and prompt-proposal material.',
+        };
+    }
+    const reasonText = eligibility.reason.replace(/_/g, ' ');
+    return {
+        status: preAiStatus,
+        detail: `Accepted explanation is not active in Pre-AI because it is ${reasonText}; use it for human review or prompt work.`,
+    };
+}
+function describeDetectedPatternImplementation(pattern, correctionRules) {
+    const source = `${pattern.source || ''}`.trim();
+    const target = `${pattern.target || ''}`.trim();
+    const pairKey = correctionRulePairKey(source, target);
+    const builtInReplacement = pre_ai_deterministic_rules_1.BUILT_IN_REPLACEMENTS.find((replacement) => correctionRulePairKey(replacement.from, replacement.to) === pairKey);
+    if (builtInReplacement) {
+        return {
+            status: 'Covered by built-in Pre-AI',
+            detail: `Pre-AI already replaces the exact phrase "${builtInReplacement.from}" with "${builtInReplacement.to}".`,
+        };
+    }
+    const matchingRules = correctionRules.filter((rule) => correctionRulePairKey(rule.original_text, rule.corrected_text) === pairKey);
+    const acceptedMatch = matchingRules.find((rule) => rule.status === 'accepted');
+    if (acceptedMatch) {
+        return describeAcceptedRuleImplementation(acceptedMatch);
+    }
+    const pendingMatch = matchingRules.find((rule) => rule.status === 'pending');
+    if (pendingMatch) {
+        return {
+            status: 'Pending review',
+            detail: 'A matching correction-rule proposal exists, but it is not active until a reviewer accepts it.',
+        };
+    }
+    const rejectedMatch = matchingRules.find((rule) => rule.status === 'rejected');
+    if (rejectedMatch) {
+        return {
+            status: 'Rejected',
+            detail: 'A matching correction-rule proposal was rejected; no Pre-AI adjustment is active for this pattern.',
+        };
+    }
+    const eligibility = (0, pre_ai_deterministic_rules_1.getAcceptedCorrectionRulePreAiEligibility)({
+        status: 'accepted',
+        original_text: source,
+        corrected_text: target,
+        change_type: pattern.kind,
+    });
+    if (eligibility.reason === 'context_dependent') {
+        return {
+            status: 'Context guidance only',
+            detail: `No blind replacement is active because ${eligibility.contextTerm || 'this term'} depends on usage; handle through reviewer judgment or prompt guidance.`,
+        };
+    }
+    return {
+        status: 'No implementation yet',
+        detail: 'Auto-scanned evidence only; no matching built-in Pre-AI rule or accepted correction-rule implementation was found.',
+    };
 }
 app.get('/learning', async (_req, res) => {
     try {
@@ -1488,7 +1565,7 @@ app.get('/learning', async (_req, res) => {
             category,
             status_label: detectedPatternStatusLabel(category),
         }));
-        const detectedPatterns = [
+        const rawDetectedPatterns = [
             ...decorate('active', rulesData.active_rules || []),
             ...decorate('weak', rulesData.weak_rules || []),
             ...decorate('conflicted', rulesData.conflicted_rules || []),
@@ -1519,13 +1596,26 @@ app.get('/learning', async (_req, res) => {
         const pendingRules = allPendingRules.filter((rule) => !ignoredSystemPendingRuleIds.has(rule.id));
         const acceptedRules = correctionRules
             .filter((r) => r.status === 'accepted')
-            .map((rule) => ({
-            ...rule,
-            pre_ai_status: describeAcceptedRulePreAiStatus(rule),
-            pre_ai_active: isAcceptedRulePreAiEligible(rule),
-        }));
-        const activeExactRules = acceptedRules.filter((rule) => rule.pre_ai_status === 'Active exact rule');
+            .map((rule) => {
+            const implementation = describeAcceptedRuleImplementation(rule);
+            return {
+                ...rule,
+                pre_ai_status: implementation.status,
+                pre_ai_active: isAcceptedRulePreAiEligible(rule),
+                implementation_status: implementation.status,
+                implementation_detail: implementation.detail,
+            };
+        });
+        const activeExactRules = acceptedRules.filter((rule) => rule.implementation_status === 'Active exact replacement');
         const manualGuidanceRules = acceptedRules.filter((rule) => rule.pre_ai_status === 'Manual guidance');
+        const detectedPatterns = rawDetectedPatterns.map((pattern) => {
+            const implementation = describeDetectedPatternImplementation(pattern, correctionRules);
+            return {
+                ...pattern,
+                implementation_status: implementation.status,
+                implementation_detail: implementation.detail,
+            };
+        });
         const curatedActiveRules = [
             {
                 label: 'veggies -> vegetables',
@@ -1581,6 +1671,7 @@ app.get('/learning', async (_req, res) => {
             learningSubmissions: decoratedLearningSubmissions,
             propertyOptions,
             differStatus,
+            learningDashboardTimeZone: LEARNING_DASHBOARD_TIME_ZONE,
         });
     }
     catch (error) {

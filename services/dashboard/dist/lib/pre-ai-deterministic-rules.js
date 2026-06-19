@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.BUILT_IN_REPLACEMENTS = void 0;
+exports.getAcceptedCorrectionRulePreAiEligibility = getAcceptedCorrectionRulePreAiEligibility;
 exports.runPreAiDeterministicChecks = runPreAiDeterministicChecks;
 const improvement_cycle_core_1 = require("./improvement-cycle-core");
 const COMMON_ALLERGEN_CODES = new Set([
@@ -367,28 +368,42 @@ function shouldAddRawAsterisk(line) {
 function addRawAsterisk(line) {
     return normalizeRawAsteriskPlacementForLine(`${line.trimEnd()} *`);
 }
-function isSafeLearnedRule(rule) {
+function getAcceptedCorrectionRulePreAiEligibility(rule) {
     const changeType = `${rule.change_type || ''}`.trim().toLowerCase();
     const original = `${rule.original_text || ''}`.trim();
     const corrected = `${rule.corrected_text || ''}`.trim();
+    if (`${rule.status || ''}`.toLowerCase() !== 'accepted') {
+        return { eligible: false, reason: 'not_accepted' };
+    }
     // Context-dependent terms (tartare/tartar, berry/berries, …) can never be
     // applied as blind replacements — the correct form depends on the dish/usage,
     // so they belong in the AI prompt, not the deterministic pass. This mirrors
     // the guard the improvement cycle already applies to LLM-proposed rules, and
     // it neutralizes any such rule that reached the DB before that routing
     // existed (e.g. a human-saved "berry" → "berries").
-    if ((0, improvement_cycle_core_1.involvesContextDependentTerm)(original, corrected)) {
-        return false;
+    const contextTerm = (0, improvement_cycle_core_1.involvesContextDependentTerm)(original, corrected);
+    if (contextTerm) {
+        return { eligible: false, reason: 'context_dependent', contextTerm };
     }
-    return `${rule.status || ''}`.toLowerCase() === 'accepted'
-        && LEARNED_RULE_CHANGE_TYPES.has(changeType)
-        && !!original
-        && !!corrected
-        && original !== corrected
-        && !original.includes('\n')
-        && !corrected.includes('\n')
-        && original.length <= 240
-        && corrected.length <= 240;
+    if (!LEARNED_RULE_CHANGE_TYPES.has(changeType)) {
+        return { eligible: false, reason: 'unsupported_change_type' };
+    }
+    if (!original || !corrected) {
+        return { eligible: false, reason: 'missing_exact_text' };
+    }
+    if (original === corrected) {
+        return { eligible: false, reason: 'same_text' };
+    }
+    if (original.includes('\n') || corrected.includes('\n')) {
+        return { eligible: false, reason: 'multiline_text' };
+    }
+    if (original.length > 240 || corrected.length > 240) {
+        return { eligible: false, reason: 'text_too_long' };
+    }
+    return { eligible: true, reason: 'eligible' };
+}
+function isSafeLearnedRule(rule) {
+    return getAcceptedCorrectionRulePreAiEligibility(rule).eligible;
 }
 function applyAcceptedCorrectionRules(lines, options) {
     const applicableRules = (options.acceptedCorrectionRules || [])
