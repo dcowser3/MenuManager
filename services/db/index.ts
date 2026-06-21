@@ -40,60 +40,10 @@ const APPROVED_SUBMISSION_STATUSES = ['approved', 'approved_override'];
 const REVIEW_QUEUE_STATUSES = ['pending_human_review', 'submitted_no_ai_review'];
 // Internal reviewer / direct-handoff submitter identity (configurable per business).
 const ISABELLA_EMAIL = getTenantConfig().emails.clickupHandoffSubmitter;
-const DEFAULT_PROPERTY_NAMES = [
-    '89Agave - Sedona',
-    'Agent\'s Only - Pasadena',
-    'Anchor & Brine - Marriott Tampa Water Street - Tampa',
-    'Aqimero - Ritz-Carlton - Philadelphia',
-    'Bayou & Bottle - Four Seasons - Houston',
-    'Beacon - Tampa',
-    'Casa Chi - InterContinental - Chicago',
-    'Cayao - Four Seasons Cabo Del Sol - Los Cabos',
-    'Ciclo - Four Seasons - Austin',
-    'Coraluz - Four Seasons Cabo Del Sol - Los Cabos',
-    'D\'Taco Joint - Newark',
-    'dLeña - Houston',
-    'dLeña - Washington, D.C.',
-    'Driftwood - Tampa',
-    'DRINK Bar (Fareground) - Austin',
-    'Ellis Bar (Fareground) - Austin',
-    'Fareground - Austin',
-    'Ironwood - Fairmont Scottsdale Princess - Scottsdale',
-    'La Hacienda - Fairmont Scottsdale Princess - Scottsdale',
-    'Live Oak - Four Seasons - Austin',
-    'Lona - Westin - Fort Lauderdale',
-    'Lona - Noelle - Nashville',
-    'Lona - Marriott Tampa Water Street - Tampa',
-    'Maya - Le Royal Meridien - Dubai',
-    'Maya - New York',
-    'Raya - Ritz-Carlton Laguna Niguel - Laguna Niguel',
-    'Sidecut - Four Seasons - Whistler',
-    'Sora - Four Seasons Cabo Del Sol - Los Cabos',
-    'Spa at JW - Tampa',
-    'Stoke & Rye - Westin Riverfront - Avon',
-    'Taco Pegaso - Austin',
-    'Tamayo - Denver',
-    'tán - New York',
-    'Toro - Belgrade',
-    'Toro - Dania Beach',
-    'Toro - Fairmont Millennium Park - Chicago',
-    'Toro - Hotel Clio - Denver',
-    'Toro - Six Senses Kocatas Mansions - Istanbul',
-    'Toro - Los Cabos',
-    'Toro - Marrakech',
-    'Toro - St. Regis Kanai - Riviera Maya',
-    'Toro - Fairmont Scottsdale Princess - Scottsdale',
-    'Toro - Viceroy - Snowmass',
-    'Toro Del Mar - Athens',
-    'Toro Toro - Grosvenor House - Dubai',
-    'Toro Toro - Worthington Renaissance - Fort Worth',
-    'Toro Toro - Four Seasons - Houston',
-    'Toro Toro - Malta',
-    'Toro Toro - InterContinental - Miami',
-    'Venga Venga - Snowmass',
-    'Zengo - Kempinski - Doha',
-    'Zengo - Le Royal Meridien - Dubai',
-];
+// The property list is the single source of truth in the config bundle
+// (config/properties.json), read by buildDefaultPropertyCatalog(). SharePoint
+// routing for the properties that have it is backfilled per-name from
+// DEFAULT_SHAREPOINT_PROPERTY_CONFIG below.
 
 type PropertyCatalogRecord = {
     name: string;
@@ -321,33 +271,25 @@ function deriveCityCountryFromProperty(name: string): string {
     return name.slice(idx + 3).trim();
 }
 
-function buildEmbeddedPropertyCatalog(): PropertyCatalogRecord[] {
-    return DEFAULT_PROPERTY_NAMES.map((name) => ({
-        name,
-        city_country: deriveCityCountryFromProperty(name),
-        is_active: true,
-        ...DEFAULT_SHAREPOINT_PROPERTY_CONFIG[name],
-    }));
-}
-
-// Seed catalog used when the database/local store has no properties yet.
-// Sourced from the config bundle (config/properties.json) so each business
-// ships its own locations; falls back to the embedded RSH list when the bundle
-// has no usable catalog. SharePoint routing is backfilled per-name by
-// normalizePropertyCatalogRecord from DEFAULT_SHAREPOINT_PROPERTY_CONFIG.
+// Seed catalog for a fresh database/local store. The property list is the single
+// source of truth in the config bundle (config/properties.json); SharePoint
+// routing is backfilled per-name by normalizePropertyCatalogRecord from
+// DEFAULT_SHAREPOINT_PROPERTY_CONFIG. Returns an empty catalog (not RSH data) if
+// the bundle has no usable list, so a fresh business never seeds as RSH.
 function buildDefaultPropertyCatalog(): PropertyCatalogRecord[] {
     try {
         const file = resolveTenantFile(getTenantConfig().propertiesSeedFile);
         if (fsSync.existsSync(file)) {
             const parsed = JSON.parse(fsSync.readFileSync(file, 'utf-8'));
-            if (Array.isArray(parsed) && parsed.length > 0) {
+            if (Array.isArray(parsed)) {
                 return parsed.map((record) => normalizePropertyCatalogRecord(record));
             }
         }
+        console.warn(`Property seed not found or invalid at ${file}; starting with an empty catalog.`);
     } catch (error: any) {
-        console.warn('Falling back to embedded property catalog:', error?.message || error);
+        console.warn('Could not read property seed; starting with an empty catalog:', error?.message || error);
     }
-    return buildEmbeddedPropertyCatalog();
+    return [];
 }
 
 function normalizeServiceFolders(input: any): string[] {

@@ -39,60 +39,8 @@ exports.normalizePropertyCatalogRecord = normalizePropertyCatalogRecord;
 exports.buildFallbackPropertyCatalog = buildFallbackPropertyCatalog;
 const fs = __importStar(require("fs"));
 const tenant_config_1 = require("@menumanager/tenant-config");
-const DEFAULT_PROPERTY_NAMES = [
-    '89Agave - Sedona',
-    'Agent\'s Only - Pasadena',
-    'Anchor & Brine - Marriott Tampa Water Street - Tampa',
-    'Aqimero - Ritz-Carlton - Philadelphia',
-    'Bayou & Bottle - Four Seasons - Houston',
-    'Beacon - Tampa',
-    'Casa Chi - InterContinental - Chicago',
-    'Cayao - Four Seasons Cabo Del Sol - Los Cabos',
-    'Ciclo - Four Seasons - Austin',
-    'Coraluz - Four Seasons Cabo Del Sol - Los Cabos',
-    'D\'Taco Joint - Newark',
-    'dLeña - Houston',
-    'dLeña - Washington, D.C.',
-    'Driftwood - Tampa',
-    'DRINK Bar (Fareground) - Austin',
-    'Ellis Bar (Fareground) - Austin',
-    'Fareground - Austin',
-    'Ironwood - Fairmont Scottsdale Princess - Scottsdale',
-    'La Hacienda - Fairmont Scottsdale Princess - Scottsdale',
-    'Live Oak - Four Seasons - Austin',
-    'Lona - Westin - Fort Lauderdale',
-    'Lona - Noelle - Nashville',
-    'Lona - Marriott Tampa Water Street - Tampa',
-    'Maya - Le Royal Meridien - Dubai',
-    'Maya - New York',
-    'Raya - Ritz-Carlton Laguna Niguel - Laguna Niguel',
-    'Sidecut - Four Seasons - Whistler',
-    'Sora - Four Seasons Cabo Del Sol - Los Cabos',
-    'Spa at JW - Tampa',
-    'Stoke & Rye - Westin Riverfront - Avon',
-    'Taco Pegaso - Austin',
-    'Tamayo - Denver',
-    'tán - New York',
-    'Toro - Belgrade',
-    'Toro - Dania Beach',
-    'Toro - Fairmont Millennium Park - Chicago',
-    'Toro - Hotel Clio - Denver',
-    'Toro - Six Senses Kocatas Mansions - Istanbul',
-    'Toro - Los Cabos',
-    'Toro - Marrakech',
-    'Toro - St. Regis Kanai - Riviera Maya',
-    'Toro - Fairmont Scottsdale Princess - Scottsdale',
-    'Toro - Viceroy - Snowmass',
-    'Toro Del Mar - Athens',
-    'Toro Toro - Grosvenor House - Dubai',
-    'Toro Toro - Worthington Renaissance - Fort Worth',
-    'Toro Toro - Four Seasons - Houston',
-    'Toro Toro - Malta',
-    'Toro Toro - InterContinental - Miami',
-    'Venga Venga - Snowmass',
-    'Zengo - Kempinski - Doha',
-    'Zengo - Le Royal Meridien - Dubai',
-];
+// The property list is the single source of truth in the config bundle
+// (config/properties.json), read by buildFallbackPropertyCatalog().
 function deriveCityCountryFromProperty(name) {
     const idx = name.lastIndexOf(' - ');
     if (idx < 0)
@@ -122,22 +70,22 @@ function normalizePropertyCatalogRecord(input) {
         sharepoint_last_synced_at: `${input?.sharepoint_last_synced_at || ''}`.trim() || undefined,
     };
 }
-// Fallback catalog for the form when the db service is unreachable. Sourced
-// from the config bundle (config/properties.json) so it stays in sync with the
-// db seed and is per-business; falls back to the embedded RSH list if the
-// bundle has no usable catalog.
+// Fallback catalog for the form when the db service is unreachable. The property
+// list lives only in the config bundle (config/properties.json) — the single
+// source shared with the db seed — so the dropdown stays per-business. Returns
+// an empty list if the bundle has no usable catalog.
 function buildFallbackPropertyCatalog() {
     try {
         const file = (0, tenant_config_1.resolveTenantFile)((0, tenant_config_1.getTenantConfig)().propertiesSeedFile);
         if (fs.existsSync(file)) {
             const parsed = JSON.parse(fs.readFileSync(file, 'utf-8'));
-            if (Array.isArray(parsed) && parsed.length > 0) {
+            if (Array.isArray(parsed)) {
                 return parsed.map((record) => normalizePropertyCatalogRecord(record));
             }
         }
     }
     catch {
-        /* fall back to embedded list */
+        /* fall through to empty list */
     }
-    return DEFAULT_PROPERTY_NAMES.map((name) => normalizePropertyCatalogRecord({ name }));
+    return [];
 }
