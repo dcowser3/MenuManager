@@ -31,7 +31,7 @@
  *   IMPROVE_NOTIFY_EMAIL         Proposal-ready email (default FORM_ATTEMPT_ALERT_EMAIL)
  *   IMPROVE_SKIP_EVAL=1          Skip the auto-eval step (eval_status: skipped)
  *   IMPROVE_EVAL_LIMIT           Cap eval cases per run (default: all)
- *   DASHBOARD_PUBLIC_URL         Base URL used in the notification email link
+ *   DASHBOARD_PUBLIC_URL         Base URL used in the notification email link (falls back to DASHBOARD_URL)
  */
 
 const fs = require('fs');
@@ -218,6 +218,7 @@ async function recordEmailAlert(supabase, severity, message, details) {
 async function sendProposalEmail(supabase, { cycleId, evalStatus, evalSummary, correctionCount, ruleCount, recommendationCount }) {
     const to = process.env.IMPROVE_NOTIFY_EMAIL || process.env.FORM_ATTEMPT_ALERT_EMAIL || 'dcowser@richardsandoval.com';
     try {
+        const core = requireDashboardLib('improvement-cycle-core');
         const alertMail = requireDashboardLib('alert-mail');
         const deps = buildCycleMailDeps(alertMail);
         if (!alertMail.canSendAlertMail(deps)) {
@@ -226,7 +227,7 @@ async function sendProposalEmail(supabase, { cycleId, evalStatus, evalSummary, c
             await recordEmailAlert(supabase, 'warning', msg, { cycleId, recipient: to, reason: 'no_transport' });
             return;
         }
-        const baseUrl = (process.env.DASHBOARD_PUBLIC_URL || 'http://localhost:3005').replace(/\/+$/, '');
+        const baseUrl = core.resolveDashboardPublicUrl(process.env);
         const verdict = evalStatus === 'passed'
             ? `Eval PASSED: avg delta ${(100 * (evalSummary?.avgDelta || 0)).toFixed(3)} pp, ${evalSummary?.improved || 0} improved, 0 regressed`
             : evalStatus === 'regressed'

@@ -347,6 +347,13 @@ export function evalStatusFromSummary(summary: ProposalEvalSummary | null): 'pas
     return summary.regressed > 0 ? 'regressed' : 'passed';
 }
 
+export function resolveDashboardPublicUrl(env: {
+    DASHBOARD_PUBLIC_URL?: string | null;
+    DASHBOARD_URL?: string | null;
+}): string {
+    return `${env.DASHBOARD_PUBLIC_URL || env.DASHBOARD_URL || 'http://localhost:3005'}`.replace(/\/+$/, '');
+}
+
 // Maps an accepted LLM-proposed rule into the payload shape consumed by
 // buildCorrectionRuleRecord / POST /correction-rules. Status is accepted (the
 // human approved it on the proposal page); source stays 'system' so provenance

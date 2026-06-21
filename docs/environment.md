@@ -76,7 +76,7 @@ All variables are configured in `.env` at the project root. See `.env.example` f
 | `IMPROVE_SKIP_EVAL` | Set `1` to skip the auto-eval step of the improvement cycle (proposal stored with `eval_status: skipped`) |
 | `IMPROVE_EVAL_LIMIT` | Cap the number of eval cases per improvement-cycle run (default: all) |
 | `REVIEW_EVAL_MODEL` | OpenAI model for the review eval harness (default: `AI_REVIEW_MODEL` or `gpt-4o-mini`) |
-| `DASHBOARD_PUBLIC_URL` | Base URL used in improvement-cycle notification email links (default: `http://localhost:3005`) |
+| `DASHBOARD_PUBLIC_URL` | Optional base URL override for improvement-cycle notification email links and proposal-related GitHub issue provenance. When unset, these links use `DASHBOARD_URL`, then fall back to `http://localhost:3005` for local development. |
 | `GITHUB_TOKEN` | GitHub personal access token with `issues:write` on `GITHUB_REPO`. When set, approving a proposal files each code recommendation as a GitHub issue; when unset, issue filing is skipped with a log line |
 | `GITHUB_REPO` | Repository for improvement-cycle issues (default: `dcowser3/MenuManager`) |
 

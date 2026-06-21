@@ -68,6 +68,7 @@ const error_report_1 = require("./lib/error-report");
 const alert_mail_1 = require("./lib/alert-mail");
 const property_catalog_1 = require("./lib/property-catalog");
 const learning_correction_rules_1 = require("./lib/learning-correction-rules");
+const learning_dashboard_rules_1 = require("./lib/learning-dashboard-rules");
 const learning_submissions_1 = require("./lib/learning-submissions");
 const embedded_set_menu_guard_1 = require("./lib/embedded-set-menu-guard");
 const pre_ai_deterministic_rules_1 = require("./lib/pre-ai-deterministic-rules");
@@ -1587,7 +1588,7 @@ app.get('/learning', async (_req, res) => {
         const recentSubmissions = await (0, learning_submissions_1.decorateLearningSubmissionsWithMenuNames)((trainingData.data || []).slice(-25).reverse(), fetchLearningSubmissionMetadata);
         const decoratedLearningSubmissions = await (0, learning_submissions_1.decorateLearningSubmissionsWithMenuNames)(learningSubmissions, fetchLearningSubmissionMetadata);
         // Split correction rules by status for the dashboard
-        const allPendingRules = correctionRules.filter((r) => r.status === 'pending');
+        const allPendingRules = (0, learning_dashboard_rules_1.listActionablePendingCorrectionRules)(correctionRules);
         const canValidateSystemProposalEvidence = !!rulesResult.ok;
         const ignoredSystemPendingRules = allPendingRules.filter((rule) => rule.source === 'system'
             && canValidateSystemProposalEvidence
@@ -1934,7 +1935,7 @@ async function createCodeRecommendationIssues(recommendations, proposal) {
     const results = [];
     for (const recommendation of recommendations) {
         try {
-            const issue = (0, improvement_cycle_core_1.buildCodeRecommendationIssue)(recommendation, proposal, process.env.DASHBOARD_PUBLIC_URL || '');
+            const issue = (0, improvement_cycle_core_1.buildCodeRecommendationIssue)(recommendation, proposal, (0, improvement_cycle_core_1.resolveDashboardPublicUrl)(process.env));
             const response = await fetch(`https://api.github.com/repos/${repo}/issues`, {
                 method: 'POST',
                 headers: {

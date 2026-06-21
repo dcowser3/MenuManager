@@ -217,6 +217,6 @@ Recommended if you want managed scaling or a multi-AZ setup.
 
 - If you don’t use Supabase, the DB service stores data locally under `/app/tmp/db`.
 - `DOCUMENT_STORAGE_ROOT` should point into `/app/tmp` or another persistent path.
-- The dashboard uses `DASHBOARD_URL` for email links; set this to your public domain.
+- The compose file passes `DASHBOARD_URL` from `.env` into the dashboard container, with a localhost default for local runs. Set `DASHBOARD_URL` to your public domain so email links, including improvement-cycle proposal emails when `DASHBOARD_PUBLIC_URL` is unset, do not point at localhost.
 - Docker builds run the workspace TypeScript compiles; ensure your repo is up to date before building.
 - Docker builds also create the `docx-redliner` Python virtualenv inside the images; builds need outbound access for pip to download dependencies.

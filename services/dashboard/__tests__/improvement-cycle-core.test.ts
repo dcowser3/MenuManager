@@ -5,6 +5,7 @@ import {
     evaluateSecretExpiry,
     mapProposedRuleToCorrectionRulePayload,
     pickEffectivePrompt,
+    resolveDashboardPublicUrl,
     shouldRunCycle,
     summarizeEvalReport,
     validateImprovementLlmOutput,
@@ -231,6 +232,25 @@ describe('evaluateSecretExpiry', () => {
     test('custom warn window', () => {
         expect(evaluateSecretExpiry('2026-08-01', now, 30).status).toBe('ok');
         expect(evaluateSecretExpiry('2026-08-01', now, 90).status).toBe('warning');
+    });
+});
+
+describe('resolveDashboardPublicUrl', () => {
+    test('prefers the explicit public URL and trims trailing slashes', () => {
+        expect(resolveDashboardPublicUrl({
+            DASHBOARD_PUBLIC_URL: 'https://menus.example.com///',
+            DASHBOARD_URL: 'https://fallback.example.com',
+        })).toBe('https://menus.example.com');
+    });
+
+    test('falls back to DASHBOARD_URL before localhost', () => {
+        expect(resolveDashboardPublicUrl({
+            DASHBOARD_URL: 'https://production.example.com/',
+        })).toBe('https://production.example.com');
+    });
+
+    test('uses localhost only when no public dashboard URL is configured', () => {
+        expect(resolveDashboardPublicUrl({})).toBe('http://localhost:3005');
     });
 });
 

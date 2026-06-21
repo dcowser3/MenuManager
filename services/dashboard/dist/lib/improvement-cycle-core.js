@@ -12,6 +12,7 @@ exports.validateImprovementLlmOutput = validateImprovementLlmOutput;
 exports.summarizeEvalReport = summarizeEvalReport;
 exports.buildProposalEvalSummary = buildProposalEvalSummary;
 exports.evalStatusFromSummary = evalStatusFromSummary;
+exports.resolveDashboardPublicUrl = resolveDashboardPublicUrl;
 exports.mapProposedRuleToCorrectionRulePayload = mapProposedRuleToCorrectionRulePayload;
 exports.buildCodeRecommendationIssue = buildCodeRecommendationIssue;
 // Azure client secrets expire and then fail silently, taking down ALL Graph
@@ -268,6 +269,9 @@ function evalStatusFromSummary(summary) {
     if (!summary.candidate)
         return 'failed';
     return summary.regressed > 0 ? 'regressed' : 'passed';
+}
+function resolveDashboardPublicUrl(env) {
+    return `${env.DASHBOARD_PUBLIC_URL || env.DASHBOARD_URL || 'http://localhost:3005'}`.replace(/\/+$/, '');
 }
 // Maps an accepted LLM-proposed rule into the payload shape consumed by
 // buildCorrectionRuleRecord / POST /correction-rules. Status is accepted (the

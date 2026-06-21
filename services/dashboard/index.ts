@@ -83,6 +83,7 @@ import {
     buildCorrectionRuleRecord,
     isCorrectionRuleValidationError,
 } from './lib/learning-correction-rules';
+import { listActionablePendingCorrectionRules } from './lib/learning-dashboard-rules';
 import { decorateLearningSubmissionsWithMenuNames } from './lib/learning-submissions';
 import {
     analyzeEmbeddedSetMenus,
@@ -119,6 +120,7 @@ import {
     evaluateSecretExpiry,
     mapProposedRuleToCorrectionRulePayload,
     pickEffectivePrompt,
+    resolveDashboardPublicUrl,
 } from './lib/improvement-cycle-core';
 
 export {
@@ -1875,7 +1877,7 @@ app.get('/learning', async (_req, res) => {
         );
 
         // Split correction rules by status for the dashboard
-        const allPendingRules = correctionRules.filter((r: any) => r.status === 'pending');
+        const allPendingRules = listActionablePendingCorrectionRules(correctionRules);
         const canValidateSystemProposalEvidence = !!(rulesResult as any).ok;
         const ignoredSystemPendingRules = allPendingRules.filter((rule: any) =>
             rule.source === 'system'
@@ -2254,7 +2256,7 @@ async function createCodeRecommendationIssues(
     const results: Array<{ title: string; ok: boolean; url?: string; error?: string }> = [];
     for (const recommendation of recommendations) {
         try {
-            const issue = buildCodeRecommendationIssue(recommendation, proposal, process.env.DASHBOARD_PUBLIC_URL || '');
+            const issue = buildCodeRecommendationIssue(recommendation, proposal, resolveDashboardPublicUrl(process.env));
             const response = await fetch(`https://api.github.com/repos/${repo}/issues`, {
                 method: 'POST',
                 headers: {

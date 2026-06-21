@@ -105,7 +105,8 @@ services:
       - AI_REVIEW_URL=http://ai-review:3002
       - DIFFER_SERVICE_URL=http://differ:3006
       - CLICKUP_SERVICE_URL=http://clickup-integration:3007
-      - DASHBOARD_URL=http://localhost:3005
+      - DASHBOARD_URL=${DASHBOARD_URL:-http://localhost:3005}
+      - DASHBOARD_PUBLIC_URL=${DASHBOARD_PUBLIC_URL:-}
     ports:
       - "3005:3005"
     depends_on:

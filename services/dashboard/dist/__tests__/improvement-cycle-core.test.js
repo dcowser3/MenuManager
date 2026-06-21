@@ -188,6 +188,22 @@ describe('evaluateSecretExpiry', () => {
         expect((0, improvement_cycle_core_1.evaluateSecretExpiry)('2026-08-01', now, 90).status).toBe('warning');
     });
 });
+describe('resolveDashboardPublicUrl', () => {
+    test('prefers the explicit public URL and trims trailing slashes', () => {
+        expect((0, improvement_cycle_core_1.resolveDashboardPublicUrl)({
+            DASHBOARD_PUBLIC_URL: 'https://menus.example.com///',
+            DASHBOARD_URL: 'https://fallback.example.com',
+        })).toBe('https://menus.example.com');
+    });
+    test('falls back to DASHBOARD_URL before localhost', () => {
+        expect((0, improvement_cycle_core_1.resolveDashboardPublicUrl)({
+            DASHBOARD_URL: 'https://production.example.com/',
+        })).toBe('https://production.example.com');
+    });
+    test('uses localhost only when no public dashboard URL is configured', () => {
+        expect((0, improvement_cycle_core_1.resolveDashboardPublicUrl)({})).toBe('http://localhost:3005');
+    });
+});
 describe('buildCodeRecommendationIssue', () => {
     test('builds a self-contained issue with checklist, manifest pointers, and label', () => {
         const issue = (0, improvement_cycle_core_1.buildCodeRecommendationIssue)({
