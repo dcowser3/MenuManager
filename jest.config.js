@@ -1,6 +1,9 @@
 module.exports = {
   preset: 'ts-jest',
   testEnvironment: 'node',
+  // Runs before any module loads in each test file: forces all mail transports
+  // off so the suite can never send real email. See jest.setup.js.
+  setupFiles: ['<rootDir>/jest.setup.js'],
   roots: ['<rootDir>/services'],
   testMatch: [
     '**/__tests__/**/*.(ts|tsx|js)',
