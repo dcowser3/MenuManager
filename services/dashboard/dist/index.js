@@ -52,6 +52,7 @@ const util_1 = require("util");
 // Supabase client for dish extraction and alerting (optional - gracefully handles if not configured)
 const supabase_client_1 = require("@menumanager/supabase-client");
 const nodemailer_1 = __importDefault(require("nodemailer"));
+const tenant_config_1 = require("@menumanager/tenant-config");
 const approval_baseline_1 = require("./lib/approval-baseline");
 const smtp_config_1 = require("./lib/smtp-config");
 const upload_security_1 = require("./lib/upload-security");
@@ -82,7 +83,10 @@ Object.defineProperty(exports, "sanitizePlainTextInput", { enumerable: true, get
 Object.defineProperty(exports, "sanitizeRichTextHtml", { enumerable: true, get: function () { return upload_security_2.sanitizeRichTextHtml; } });
 Object.defineProperty(exports, "sanitizeStoredFileName", { enumerable: true, get: function () { return upload_security_2.sanitizeStoredFileName; } });
 const execAsync = (0, util_1.promisify)(child_process_1.exec);
-const DEFAULT_ALLERGEN_KEY = 'G contains gluten | V vegetarian | D contains dairy | S contain shellfish | N contain nuts | VG vegan';
+// Business-specific config (branding, emails, allergen key, template markers).
+// Lives in the config bundle so the app is white-labelable without code edits.
+const tenantConfig = (0, tenant_config_1.getTenantConfig)();
+const DEFAULT_ALLERGEN_KEY = tenantConfig.allergenKey;
 // Which flow `/form` serves. Defaults to the proven legacy flow so the new
 // upload-first flow can be piloted at `/form-new` before switching everyone
 // over. Set NEW_SUBMISSION_FORM_DEFAULT=true (env) — or flip this default and
@@ -94,8 +98,8 @@ const AI_REVIEW_URL = process.env.AI_REVIEW_URL || 'http://localhost:3002';
 const DIFFER_SERVICE_URL = process.env.DIFFER_SERVICE_URL || 'http://localhost:3006';
 const CLICKUP_SERVICE_URL = process.env.CLICKUP_SERVICE_URL || 'http://localhost:3007';
 const ALERT_EMAIL = process.env.ALERT_EMAIL || '';
-const FORM_ATTEMPT_ALERT_EMAIL = process.env.FORM_ATTEMPT_ALERT_EMAIL || 'dcowser@richardsandoval.com';
-const PUBLIC_FORM_SUPPORT_EMAIL = process.env.PUBLIC_FORM_SUPPORT_EMAIL || 'dcowser@richardsandoval.com';
+const FORM_ATTEMPT_ALERT_EMAIL = process.env.FORM_ATTEMPT_ALERT_EMAIL || tenantConfig.emails.formAttemptAlert;
+const PUBLIC_FORM_SUPPORT_EMAIL = process.env.PUBLIC_FORM_SUPPORT_EMAIL || tenantConfig.emails.publicSupport;
 const DASHBOARD_URL = process.env.DASHBOARD_URL || 'http://localhost:3005';
 const LEARNING_DASHBOARD_TIME_ZONE = process.env.LEARNING_DASHBOARD_TIME_ZONE || 'America/New_York';
 const JSON_BODY_LIMIT = process.env.DASHBOARD_JSON_BODY_LIMIT || process.env.JSON_BODY_LIMIT || '5mb';
@@ -647,6 +651,8 @@ app.use((error, _req, res, next) => {
 });
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
+// Expose tenant branding/config to every EJS view (header, footer, theme, titles).
+app.locals.tenant = tenantConfig;
 async function extractBaselineFromDocx(filePath) {
     const docxRedlinerDir = getDocxRedlinerDir();
     const venvPython = path.join(docxRedlinerDir, 'venv', 'bin', 'python');
@@ -797,7 +803,7 @@ async function handleCleanDocxMenuUpload(req, res, options) {
  */
 app.get('/', (_req, res) => {
     res.render('welcome', {
-        title: 'Welcome - RSH Menu Manager'
+        title: `Welcome - ${tenantConfig.appName}`
     });
 });
 app.get('/dashboard', (_req, res) => {
@@ -814,7 +820,7 @@ app.get('/reviews', async (_req, res) => {
         const pendingResponse = await internalApi.get(`${DB_SERVICE_URL}/submissions/pending`, { timeout: 5000 });
         const reviews = Array.isArray(pendingResponse.data) ? pendingResponse.data : [];
         res.render('index', {
-            title: 'Pending Reviews - RSH Menu Manager',
+            title: `Pending Reviews - ${tenantConfig.appName}`,
             reviews,
         });
     }
@@ -830,7 +836,7 @@ app.get('/reviews', async (_req, res) => {
  */
 app.get('/submit/:token', (req, res) => {
     res.render('welcome', {
-        title: 'Welcome - RSH Menu Manager'
+        title: `Welcome - ${tenantConfig.appName}`
     });
 });
 /**
@@ -3604,8 +3610,8 @@ async function generateDocxFromForm(submissionId, formData, options) {
     // Select template based on templateType (food or beverage)
     const templateType = formData.templateType || 'food';
     const templatePath = templateType === 'beverage'
-        ? path.join(repoRoot, 'samples', 'RSH Design Brief Beverage Template.docx')
-        : path.join(repoRoot, 'samples', 'RSH_DESIGN BRIEF_FOOD_Menu_Template .docx');
+        ? path.join(repoRoot, 'samples', tenantConfig.template.beverage.fileName)
+        : path.join(repoRoot, 'samples', tenantConfig.template.food.fileName);
     console.log(`Using ${templateType} template: ${templatePath}`);
     const venvPython = path.join(docxRedlinerDir, 'venv', 'bin', 'python');
     // Create a temp JSON file with form data
@@ -4119,6 +4125,26 @@ function compareWords(docxLine, pdfLine) {
     }
     return { diffs, wordAlignments };
 }
+// On a fresh deployment the runtime prompt cache (sop-processor/qa_prompt.txt)
+// can be absent — initialize it from the config bundle seed
+// (config/rulebook/qa_prompt.txt) so reviews have a baseline before any
+// DB-approved prompt is synced. Existing installs (file present) are untouched.
+async function ensureRuntimePromptSeed() {
+    try {
+        const qaPromptPath = path.join(getRepoRoot(), 'sop-processor', 'qa_prompt.txt');
+        if (fsSync.existsSync(qaPromptPath))
+            return;
+        const seed = (0, tenant_config_1.readSeedRulebook)();
+        if (!seed)
+            return;
+        await fs_1.promises.mkdir(path.dirname(qaPromptPath), { recursive: true });
+        await fs_1.promises.writeFile(qaPromptPath, seed, 'utf-8');
+        console.log('Initialized runtime QA prompt from config bundle seed (config/rulebook/qa_prompt.txt).');
+    }
+    catch (error) {
+        console.warn('Runtime prompt seed init skipped:', error?.message || error);
+    }
+}
 // The runtime prompt file is baked into the Docker image, so a prompt approved
 // through the dashboard would be silently reverted by the next redeploy. On
 // startup, restore the latest approved proposal from the DB when it differs.
@@ -4148,7 +4174,7 @@ async function syncEffectivePromptFromDb() {
     }
 }
 if (require.main === module) {
-    void syncEffectivePromptFromDb();
+    void ensureRuntimePromptSeed().then(() => syncEffectivePromptFromDb());
     app.listen(port, () => {
         console.log(`📊 Dashboard service listening at http://localhost:${port}`);
         console.log(`   Access dashboard: http://localhost:${port}`);

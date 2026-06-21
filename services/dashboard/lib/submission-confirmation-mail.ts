@@ -27,9 +27,33 @@ export type ConfirmationRecipient = {
 };
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const RESERVED_EMAIL_DOMAINS = new Set([
+    'example.com',
+    'example.net',
+    'example.org',
+]);
+const RESERVED_EMAIL_TLDS = new Set([
+    'example',
+    'invalid',
+    'localhost',
+    'test',
+]);
 
 export function isLikelyEmailAddress(value: unknown): boolean {
     return EMAIL_PATTERN.test(`${value ?? ''}`.trim());
+}
+
+export function isReservedPlaceholderEmailAddress(value: unknown): boolean {
+    const email = `${value ?? ''}`.trim().toLowerCase();
+    if (!isLikelyEmailAddress(email)) return false;
+    const domain = email.split('@').pop() || '';
+    const labels = domain.split('.');
+    const topLevelDomain = labels[labels.length - 1] || '';
+    return RESERVED_EMAIL_DOMAINS.has(domain) || RESERVED_EMAIL_TLDS.has(topLevelDomain);
+}
+
+export function isDeliverableEmailAddress(value: unknown): boolean {
+    return isLikelyEmailAddress(value) && !isReservedPlaceholderEmailAddress(value);
 }
 
 function escapeEmailHtml(value: unknown): string {
@@ -43,22 +67,23 @@ function escapeEmailHtml(value: unknown): string {
 
 /**
  * Build the de-duplicated recipient list: the submitter first, then each
- * distinct, valid approver email that isn't the submitter. Invalid/blank
- * addresses are dropped so the caller never tries to mail them.
+ * distinct, deliverable-looking approver email that isn't the submitter.
+ * Invalid/blank/reserved placeholder addresses are dropped so the caller never
+ * tries to mail them.
  */
 export function buildSubmissionConfirmationRecipients(input: SubmissionConfirmationInput): ConfirmationRecipient[] {
     const recipients: ConfirmationRecipient[] = [];
     const seen = new Set<string>();
 
     const submitterEmail = `${input.submitterEmail || ''}`.trim().toLowerCase();
-    if (isLikelyEmailAddress(submitterEmail)) {
+    if (isDeliverableEmailAddress(submitterEmail)) {
         recipients.push({ email: submitterEmail, role: 'submitter' });
         seen.add(submitterEmail);
     }
 
     for (const approval of input.approvals || []) {
         const email = `${approval?.email || ''}`.trim().toLowerCase();
-        if (!isLikelyEmailAddress(email) || seen.has(email)) continue;
+        if (!isDeliverableEmailAddress(email) || seen.has(email)) continue;
         seen.add(email);
         recipients.push({ email, role: 'approver' });
     }

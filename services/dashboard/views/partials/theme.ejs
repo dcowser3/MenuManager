@@ -1,0 +1,27 @@
+<%# Tenant theme override. Included at the end of each view's <head> so these
+    :root values win the cascade over the page's built-in defaults. Edit colors
+    and fonts in config/tenant.json — never in the views. %>
+<% if (typeof tenant !== 'undefined' && tenant && tenant.branding) { %>
+<% if (tenant.branding.fonts && tenant.branding.fonts.googleFontsHref) { %>
+<link href="<%= tenant.branding.fonts.googleFontsHref %>" rel="stylesheet">
+<% } %>
+<style>
+    :root {
+        --color-primary: <%= tenant.branding.colors.primary %>;
+        --color-secondary: <%= tenant.branding.colors.secondary %>;
+        --color-accent: <%= tenant.branding.colors.accent %>;
+        --color-text: <%= tenant.branding.colors.text %>;
+        --color-text-light: <%= tenant.branding.colors.textLight %>;
+        --color-text-muted: <%= tenant.branding.colors.textMuted %>;
+        --color-background: <%= tenant.branding.colors.background %>;
+        --color-background-alt: <%= tenant.branding.colors.backgroundAlt %>;
+        --color-border: <%= tenant.branding.colors.border %>;
+        --color-border-light: <%= tenant.branding.colors.borderLight %>;
+        --color-success: <%= tenant.branding.colors.success %>;
+        --color-warning: <%= tenant.branding.colors.warning %>;
+        --color-error: <%= tenant.branding.colors.error %>;
+        --font-heading: <%- tenant.branding.fonts.heading %>;
+        --font-body: <%- tenant.branding.fonts.body %>;
+    }
+</style>
+<% } %>

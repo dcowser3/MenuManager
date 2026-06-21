@@ -1,3 +1,6 @@
+import * as fs from 'fs';
+import { getTenantConfig, resolveTenantFile } from '@menumanager/tenant-config';
+
 export type PropertyCatalogRecord = {
     name: string;
     city_country: string;
@@ -96,6 +99,21 @@ export function normalizePropertyCatalogRecord(input: any): PropertyCatalogRecor
     };
 }
 
+// Fallback catalog for the form when the db service is unreachable. Sourced
+// from the config bundle (config/properties.json) so it stays in sync with the
+// db seed and is per-business; falls back to the embedded RSH list if the
+// bundle has no usable catalog.
 export function buildFallbackPropertyCatalog(): PropertyCatalogRecord[] {
+    try {
+        const file = resolveTenantFile(getTenantConfig().propertiesSeedFile);
+        if (fs.existsSync(file)) {
+            const parsed = JSON.parse(fs.readFileSync(file, 'utf-8'));
+            if (Array.isArray(parsed) && parsed.length > 0) {
+                return parsed.map((record) => normalizePropertyCatalogRecord(record));
+            }
+        }
+    } catch {
+        /* fall back to embedded list */
+    }
     return DEFAULT_PROPERTY_NAMES.map((name) => normalizePropertyCatalogRecord({ name }));
 }

@@ -2,14 +2,17 @@ import fs from 'fs';
 import path from 'path';
 
 const ejs = require('ejs');
+const { getTenantConfig } = require('@menumanager/tenant-config');
 
 const viewPath = path.resolve(__dirname, '../views/index.ejs');
 
 function renderReviewDashboard(reviews: any[]) {
     const template = fs.readFileSync(viewPath, 'utf8');
+    const tenant = getTenantConfig();
     return ejs.render(template, {
-        title: 'Pending Reviews - RSH Menu Manager',
+        title: `Pending Reviews - ${tenant.appName}`,
         reviews,
+        tenant,
     }, { filename: viewPath });
 }
 

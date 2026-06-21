@@ -6,6 +6,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.validateTemplate = validateTemplate;
 const mammoth_1 = __importDefault(require("mammoth"));
 const fs_1 = require("fs");
+const tenant_config_1 = require("@menumanager/tenant-config");
 /**
  * Validates that a document follows the RSH DESIGN BRIEF templates
  * Supported templates:
@@ -28,38 +29,25 @@ async function validateTemplate(filePath) {
         textContent = result.value;
         console.log('Validating template structure...');
         // Detect template type (FOOD or BEVERAGE)
-        const isFoodTemplate = textContent.includes('FOOD MENU DESIGN BRIEF REQUEST FORM');
-        const isBeverageTemplate = textContent.includes('BEVERAGE MENU DESIGN BRIEF REQUEST FORM');
+        // Template markers/fields come from the tenant config bundle so the
+        // validation logic stays shared while the recognized template differs
+        // per business.
+        const template = (0, tenant_config_1.getTenantConfig)().template;
+        const isFoodTemplate = textContent.includes(template.food.detectMarker);
+        const isBeverageTemplate = textContent.includes(template.beverage.detectMarker);
         if (!isFoodTemplate && !isBeverageTemplate) {
-            errors.push('Document does not appear to be a valid RSH DESIGN BRIEF template (neither FOOD nor BEVERAGE)');
+            errors.push(`Document does not appear to be a valid ${template.label} template (neither FOOD nor BEVERAGE)`);
             errors.push('Please download and use the official template from the Menu Submission Guidelines');
         }
         else {
             const templateType = isFoodTemplate ? 'FOOD' : 'BEVERAGE';
             console.log(`  Detected template type: ${templateType}`);
-            // COMPREHENSIVE TEMPLATE VALIDATION
-            // These are the ACTUAL required sections from the official template
-            // 1. Header section
-            const headerElements = [
-                { text: 'DESIGN BRIEF REQUEST FORM', name: 'Design Brief Header' },
-                { text: 'PROJECT DESIGN DETAILS', name: 'Project Design Details Section' }
-            ];
-            // 2. Form fields that MUST be present
-            const requiredFormFields = [
-                { text: 'PROJECT NAME', name: 'Project Name Field' },
-                { text: 'PROPERTY', name: 'Property Field' },
-                { text: 'SIZE', name: 'Size Field' },
-                { text: 'ORIENTATION', name: 'Orientation Field' },
-                { text: 'DATE NEEDED', name: 'Date Needed Field' }
-            ];
-            // 3. SOP section (the instructions)
-            const sopElements = [
-                { text: 'MENU SUBMITTAL SOP', name: 'Menu Submittal SOP Section' },
-                { text: 'STEP 1: OBTAIN APPROVALS', name: 'Step 1 Section' },
-                { text: 'STEP 2: DESIGN DEVELOPMENT', name: 'Step 2 Section' }
-            ];
-            // 4. The critical boundary marker
-            const boundaryMarker = 'Please drop the menu content below on page 2';
+            // COMPREHENSIVE TEMPLATE VALIDATION — required sections/fields/markers
+            // are configured per business in config/tenant.json (template.*).
+            const headerElements = template.requiredHeaders.map((text) => ({ text, name: text }));
+            const requiredFormFields = template.requiredFields.map((text) => ({ text, name: text }));
+            const sopElements = template.sopSections.map((text) => ({ text, name: text }));
+            const boundaryMarker = template.boundaryMarker;
             // Check all header elements
             for (const element of headerElements) {
                 if (!textContent.includes(element.text)) {

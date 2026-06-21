@@ -1,0 +1,64 @@
+{
+  "name": "Richard Sandoval Hospitality",
+  "shortName": "RSH",
+  "tagline": "Menu Management System",
+  "appName": "RSH Menu Manager",
+  "branding": {
+    "colors": {
+      "primary": "#2c2c2c",
+      "secondary": "#8b7355",
+      "accent": "#6b5344",
+      "text": "#333333",
+      "textLight": "#666666",
+      "textMuted": "#999999",
+      "background": "#ffffff",
+      "backgroundAlt": "#fafaf8",
+      "border": "#e8e4de",
+      "borderLight": "#f0ece6",
+      "success": "#4a7c59",
+      "warning": "#b8860b",
+      "error": "#8b3a3a"
+    },
+    "fonts": {
+      "heading": "'Cormorant Garamond', Georgia, serif",
+      "body": "'Montserrat', -apple-system, BlinkMacSystemFont, sans-serif",
+      "googleFontsHref": "https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=Montserrat:wght@300;400;500;600&display=swap"
+    },
+    "logo": ""
+  },
+  "emails": {
+    "from": "no-reply@richardsandoval.com",
+    "alert": "dcowser@richardsandoval.com",
+    "formAttemptAlert": "dcowser@richardsandoval.com",
+    "publicSupport": "dcowser@richardsandoval.com",
+    "internalReviewer": "",
+    "clickupHandoffSubmitter": "isabella@richardsandoval.com",
+    "historyImport": "clickup-history@richardsandoval.com"
+  },
+  "allergenKey": "G contains gluten | V vegetarian | D contains dairy | S contain shellfish | N contain nuts | VG vegan",
+  "approvalRoles": [
+    { "key": "culinary", "label": "Culinary" },
+    { "key": "regional", "label": "Regional" }
+  ],
+  "template": {
+    "food": {
+      "detectMarker": "FOOD MENU DESIGN BRIEF REQUEST FORM",
+      "fileName": "RSH_DESIGN BRIEF_FOOD_Menu_Template .docx"
+    },
+    "beverage": {
+      "detectMarker": "BEVERAGE MENU DESIGN BRIEF REQUEST FORM",
+      "fileName": "RSH Design Brief Beverage Template.docx"
+    },
+    "requiredHeaders": ["DESIGN BRIEF REQUEST FORM", "PROJECT DESIGN DETAILS"],
+    "requiredFields": ["PROJECT NAME", "PROPERTY", "SIZE", "ORIENTATION", "DATE NEEDED"],
+    "sopSections": ["MENU SUBMITTAL SOP", "STEP 1: OBTAIN APPROVALS", "STEP 2: DESIGN DEVELOPMENT"],
+    "boundaryMarker": "Please drop the menu content below on page 2",
+    "label": "RSH DESIGN BRIEF"
+  },
+  "rulebook": {
+    "seedFile": "rulebook/qa_prompt.txt",
+    "guidelinesAnchor": "## RSH MENU GUIDELINES - COMPREHENSIVE RULES",
+    "allergensAnchor": "### 7. ALLERGENS"
+  },
+  "propertiesSeedFile": "properties.json"
+}

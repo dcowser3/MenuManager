@@ -27,7 +27,7 @@ Chef / manager submission
   -> Basic AI Check with deterministic pre/post guards, full-width suggestion rows above aligned review boxes, and fixed growl feedback
   -> Required approval block captures the approver's email
   -> Stored submission and generated original DOCX
-  -> One confirmation email (with the submitted DOCX) sent to the submitter and approvers
+  -> One confirmation email (with the submitted DOCX) sent to deliverable submitter and approver addresses
   -> Human review in ClickUp or browser approval editor
   -> Approved DOCX, ClickUp/Marketing handoff, optional SharePoint upload
   -> Approved-menu download and approved-dish extraction
@@ -50,7 +50,9 @@ Menu Manager is an npm-workspace monorepo with Express microservices and shared 
 | `differ` | 3006 | AI draft vs. human-approved comparison for training |
 | `clickup-integration` | 3007 | ClickUp task creation, webhook handling, approval handoff |
 
-Shared workspace packages include `diff-core`, `internal-auth`, and `supabase-client`. DOCX redlining/extraction scripts live in `services/docx-redliner/`.
+Shared workspace packages include `diff-core`, `internal-auth`, `supabase-client`, and `tenant-config`. DOCX redlining/extraction scripts live in `services/docx-redliner/`.
+
+The app is white-labelable: all business-specific values (branding, emails, allergen key, approval roles, menu-template markers, and seed rules/properties) live in one config bundle at `config/` and are loaded by `@menumanager/tenant-config`. To stand up the app for another business, copy `config.example/` to `config/` and edit it — no code changes. See [docs/onboarding-new-business.md](docs/onboarding-new-business.md).
 
 The `/learning` dashboard separates auto-scanned detected patterns from active Pre-AI rules: detected patterns are candidate evidence for reviewer annotation, while only accepted safe exact replacement rules in the Active Pre-AI section can change submitted menu text. Pending Rules shows only unconsumed corrections still awaiting direct review; corrections already consumed by an approved prompt proposal are represented by the generated accepted rules instead. Detected patterns and the accepted-rule audit log also show the implementation lane and what the code does next time, or why the note remains guidance only.
 

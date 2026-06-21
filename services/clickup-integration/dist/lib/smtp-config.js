@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.buildSmtpRuntimeConfig = buildSmtpRuntimeConfig;
+const tenant_config_1 = require("@menumanager/tenant-config");
 function readBoolean(value, fallback) {
     if (value === undefined || value === '')
         return fallback;
@@ -20,7 +21,7 @@ function buildSmtpRuntimeConfig(env = process.env) {
     const enabled = authMode === 'none'
         ? !!host
         : !!(host && user && pass);
-    const fromAddress = `${env.SMTP_FROM || env.GRAPH_MAILBOX_ADDRESS || env.SMTP_USER || 'no-reply@richardsandoval.com'}`.trim();
+    const fromAddress = `${env.SMTP_FROM || env.GRAPH_MAILBOX_ADDRESS || env.SMTP_USER || (0, tenant_config_1.getTenantConfig)().emails.from}`.trim();
     if (!enabled) {
         return {
             enabled,

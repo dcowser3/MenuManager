@@ -4,6 +4,7 @@
 
 import { RAW_NOTICE_TEXT } from './menu-footer';
 import { buildEmbeddedSetMenuPromptSection } from './embedded-set-menu-guard';
+import { getTenantConfig } from '@menumanager/tenant-config';
 
 export type QaPromptSectionId =
     | 'prix_fixe'
@@ -117,10 +118,13 @@ This is a PRIX FIXE (pre-fix) menu. Apply these special rules:
    - Individual items without their own pricing
    - Do NOT set severity to "critical" for missing individual dish prices on prix fixe menus
 `;
-        // Insert at the beginning of the rules section
+        // Insert at the beginning of the rules section. The anchor heading is
+        // configured per business (rulebook.guidelinesAnchor) and must appear
+        // verbatim in the active prompt for this injection to land.
+        const guidelinesAnchor = getTenantConfig().rulebook.guidelinesAnchor;
         qaPrompt = qaPrompt.replace(
-            '## RSH MENU GUIDELINES - COMPREHENSIVE RULES',
-            `## RSH MENU GUIDELINES - COMPREHENSIVE RULES\n${prixFixeSection}`
+            guidelinesAnchor,
+            `${guidelinesAnchor}\n${prixFixeSection}`
         );
         console.log('Injected prix fixe rules into prompt');
         sections.push('prix_fixe');
@@ -135,9 +139,11 @@ ${ctx.effectiveAllergens}
 
 Note: Use ONLY these allergen codes when checking allergen compliance. Do not use any other allergen codes not defined above.
 `;
-        // Insert after "### 7. ALLERGENS" when present; append for test/minimal prompts.
-        qaPrompt = qaPrompt.includes('### 7. ALLERGENS')
-            ? qaPrompt.replace('### 7. ALLERGENS', `### 7. ALLERGENS\n${allergenSection}`)
+        // Insert after the configured allergens anchor when present; append for
+        // test/minimal prompts.
+        const allergensAnchor = getTenantConfig().rulebook.allergensAnchor;
+        qaPrompt = qaPrompt.includes(allergensAnchor)
+            ? qaPrompt.replace(allergensAnchor, `${allergensAnchor}\n${allergenSection}`)
             : `${qaPrompt}\n${allergenSection}`;
         console.log('Injected custom allergens into prompt');
         sections.push('allergens');

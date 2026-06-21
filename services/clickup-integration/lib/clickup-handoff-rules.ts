@@ -1,4 +1,8 @@
-export const ISABELLA_SUBMITTER_EMAIL = 'isabella@richardsandoval.com';
+import { getTenantConfig } from '@menumanager/tenant-config';
+
+// Internal reviewer whose submissions hand off directly to marketing.
+// Configurable per business via config/tenant.json (emails.clickupHandoffSubmitter).
+export const ISABELLA_SUBMITTER_EMAIL = getTenantConfig().emails.clickupHandoffSubmitter.toLowerCase();
 export const ISABELLA_DIRECT_HANDOFF_STATUS = 'sent_to_marketing';
 
 export type ClickUpHandoffSubmissionLike = {

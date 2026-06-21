@@ -10,6 +10,7 @@
   "dependencies": {
     "@menumanager/internal-auth": "*",
     "@menumanager/supabase-client": "*",
+    "@menumanager/tenant-config": "*",
     "dotenv": "^17.2.2",
     "express": "^4.21.2"
   },

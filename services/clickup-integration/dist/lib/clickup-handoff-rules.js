@@ -4,7 +4,10 @@ exports.ISABELLA_DIRECT_HANDOFF_STATUS = exports.ISABELLA_SUBMITTER_EMAIL = void
 exports.normalizeClickUpLabel = normalizeClickUpLabel;
 exports.isIsabellaSubmission = isIsabellaSubmission;
 exports.isDirectIsabellaMarketingHandoff = isDirectIsabellaMarketingHandoff;
-exports.ISABELLA_SUBMITTER_EMAIL = 'isabella@richardsandoval.com';
+const tenant_config_1 = require("@menumanager/tenant-config");
+// Internal reviewer whose submissions hand off directly to marketing.
+// Configurable per business via config/tenant.json (emails.clickupHandoffSubmitter).
+exports.ISABELLA_SUBMITTER_EMAIL = (0, tenant_config_1.getTenantConfig)().emails.clickupHandoffSubmitter.toLowerCase();
 exports.ISABELLA_DIRECT_HANDOFF_STATUS = 'sent_to_marketing';
 function normalizeClickUpLabel(value) {
     return String(value || '').trim().toLowerCase();

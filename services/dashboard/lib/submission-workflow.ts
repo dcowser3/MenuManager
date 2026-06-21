@@ -1,4 +1,5 @@
 import * as path from 'path';
+import { getTenantConfig } from '@menumanager/tenant-config';
 import {
     ALLOWED_MENU_IMAGE_EXTENSIONS,
     MAX_LONG_TEXT_LENGTH,
@@ -103,7 +104,7 @@ function buildMissingRequiredSubmissionFieldsError(labels: string[]): string {
 }
 
 export function createSubmissionWorkflowHandlers(deps: SubmissionWorkflowDeps) {
-    const publicSupportEmail = deps.PUBLIC_FORM_SUPPORT_EMAIL || 'dcowser@richardsandoval.com';
+    const publicSupportEmail = deps.PUBLIC_FORM_SUPPORT_EMAIL || getTenantConfig().emails.publicSupport;
 
     const triggerAiReview = async (input: {
         submissionId: string;

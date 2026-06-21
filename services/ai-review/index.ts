@@ -6,6 +6,7 @@ import * as fsSync from 'fs';
 import * as path from 'path';
 import axios from 'axios';
 import { createInternalApiClient, requireInternalServiceAuth } from '@menumanager/internal-auth';
+import { getTenantConfig } from '@menumanager/tenant-config';
 
 // Load .env from project root (works whether running from src or dist)
 const envPath = path.resolve(__dirname, '../../../.env');
@@ -266,7 +267,7 @@ AI-GENERATED REVIEW (MOCK MODE)
 TIER 1 ANALYSIS - GENERAL QA
 ----------------------------
 ✅ All required sections present
-✅ Formatting consistent with RSH standards
+✅ Formatting consistent with ${getTenantConfig().shortName} standards
 ✅ Menu items clearly organized
 ⚠️  Recommendation: Add more sensory descriptions
 

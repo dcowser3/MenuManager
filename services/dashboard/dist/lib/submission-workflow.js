@@ -36,6 +36,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.getMissingRequiredSubmissionFieldLabels = getMissingRequiredSubmissionFieldLabels;
 exports.createSubmissionWorkflowHandlers = createSubmissionWorkflowHandlers;
 const path = __importStar(require("path"));
+const tenant_config_1 = require("@menumanager/tenant-config");
 const upload_security_1 = require("./upload-security");
 const request_normalization_1 = require("./request-normalization");
 const clickup_handoff_1 = require("./clickup-handoff");
@@ -87,7 +88,7 @@ function buildMissingRequiredSubmissionFieldsError(labels) {
     return `Please complete these required fields: ${labels.join(', ')}.`;
 }
 function createSubmissionWorkflowHandlers(deps) {
-    const publicSupportEmail = deps.PUBLIC_FORM_SUPPORT_EMAIL || 'dcowser@richardsandoval.com';
+    const publicSupportEmail = deps.PUBLIC_FORM_SUPPORT_EMAIL || (0, tenant_config_1.getTenantConfig)().emails.publicSupport;
     const triggerAiReview = async (input) => {
         try {
             if (input.skipAi) {

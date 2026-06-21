@@ -29,6 +29,7 @@ RUN apt-get update \
 COPY package.json package-lock.json tsconfig.json jest.config.js ./
 COPY services/internal-auth/package.json ./services/internal-auth/
 COPY services/supabase-client/package.json ./services/supabase-client/
+COPY services/tenant-config/package.json ./services/tenant-config/
 COPY services/diff-core/package.json ./services/diff-core/
 COPY services/parser/package.json ./services/parser/
 COPY services/ai-review/package.json ./services/ai-review/
@@ -43,9 +44,11 @@ RUN npm ci --include=dev
 # 2. Build the shared TS libraries so consumers can import @menumanager/*.
 COPY services/internal-auth ./services/internal-auth
 COPY services/supabase-client ./services/supabase-client
+COPY services/tenant-config ./services/tenant-config
 COPY services/diff-core ./services/diff-core
 RUN cd services/supabase-client && npx tsc \
-    && cd ../internal-auth && npx tsc
+    && cd ../internal-auth && npx tsc \
+    && cd ../tenant-config && npx tsc
 
 # 3. Provision the docx-redliner Python venv. This lives inside the image so
 # corruption can be reset with `docker compose build --no-cache <service>`.

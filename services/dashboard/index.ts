@@ -18,6 +18,7 @@ import {
     SystemAlert
 } from '@menumanager/supabase-client';
 import nodemailer from 'nodemailer';
+import { getTenantConfig, readSeedRulebook } from '@menumanager/tenant-config';
 import {
     loadApprovalBaselineFromSubmission,
     resolveApprovalSourceDocument,
@@ -130,7 +131,10 @@ export {
 } from './lib/upload-security';
 
 const execAsync = promisify(exec);
-const DEFAULT_ALLERGEN_KEY = 'G contains gluten | V vegetarian | D contains dairy | S contain shellfish | N contain nuts | VG vegan';
+// Business-specific config (branding, emails, allergen key, template markers).
+// Lives in the config bundle so the app is white-labelable without code edits.
+const tenantConfig = getTenantConfig();
+const DEFAULT_ALLERGEN_KEY = tenantConfig.allergenKey;
 // Which flow `/form` serves. Defaults to the proven legacy flow so the new
 // upload-first flow can be piloted at `/form-new` before switching everyone
 // over. Set NEW_SUBMISSION_FORM_DEFAULT=true (env) — or flip this default and
@@ -142,8 +146,8 @@ const AI_REVIEW_URL = process.env.AI_REVIEW_URL || 'http://localhost:3002';
 const DIFFER_SERVICE_URL = process.env.DIFFER_SERVICE_URL || 'http://localhost:3006';
 const CLICKUP_SERVICE_URL = process.env.CLICKUP_SERVICE_URL || 'http://localhost:3007';
 const ALERT_EMAIL = process.env.ALERT_EMAIL || '';
-const FORM_ATTEMPT_ALERT_EMAIL = process.env.FORM_ATTEMPT_ALERT_EMAIL || 'dcowser@richardsandoval.com';
-const PUBLIC_FORM_SUPPORT_EMAIL = process.env.PUBLIC_FORM_SUPPORT_EMAIL || 'dcowser@richardsandoval.com';
+const FORM_ATTEMPT_ALERT_EMAIL = process.env.FORM_ATTEMPT_ALERT_EMAIL || tenantConfig.emails.formAttemptAlert;
+const PUBLIC_FORM_SUPPORT_EMAIL = process.env.PUBLIC_FORM_SUPPORT_EMAIL || tenantConfig.emails.publicSupport;
 const DASHBOARD_URL = process.env.DASHBOARD_URL || 'http://localhost:3005';
 const LEARNING_DASHBOARD_TIME_ZONE = process.env.LEARNING_DASHBOARD_TIME_ZONE || 'America/New_York';
 const JSON_BODY_LIMIT = process.env.DASHBOARD_JSON_BODY_LIMIT || process.env.JSON_BODY_LIMIT || '5mb';
@@ -796,6 +800,8 @@ app.use((error: any, _req: express.Request, res: express.Response, next: express
 });
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
+// Expose tenant branding/config to every EJS view (header, footer, theme, titles).
+app.locals.tenant = tenantConfig;
 
 export async function extractBaselineFromDocx(filePath: string): Promise<{
     approvedMenuContent: string;
@@ -988,7 +994,7 @@ async function handleCleanDocxMenuUpload(
  */
 app.get('/', (_req, res) => {
     res.render('welcome', {
-        title: 'Welcome - RSH Menu Manager'
+        title: `Welcome - ${tenantConfig.appName}`
     });
 });
 
@@ -1009,7 +1015,7 @@ app.get('/reviews', async (_req, res) => {
         const reviews = Array.isArray(pendingResponse.data) ? pendingResponse.data : [];
 
         res.render('index', {
-            title: 'Pending Reviews - RSH Menu Manager',
+            title: `Pending Reviews - ${tenantConfig.appName}`,
             reviews,
         });
     } catch (error: any) {
@@ -1025,7 +1031,7 @@ app.get('/reviews', async (_req, res) => {
  */
 app.get('/submit/:token', (req, res) => {
     res.render('welcome', {
-        title: 'Welcome - RSH Menu Manager'
+        title: `Welcome - ${tenantConfig.appName}`
     });
 });
 
@@ -4074,8 +4080,8 @@ async function generateDocxFromForm(
     // Select template based on templateType (food or beverage)
     const templateType = formData.templateType || 'food';
     const templatePath = templateType === 'beverage'
-        ? path.join(repoRoot, 'samples', 'RSH Design Brief Beverage Template.docx')
-        : path.join(repoRoot, 'samples', 'RSH_DESIGN BRIEF_FOOD_Menu_Template .docx');
+        ? path.join(repoRoot, 'samples', tenantConfig.template.beverage.fileName)
+        : path.join(repoRoot, 'samples', tenantConfig.template.food.fileName);
 
     console.log(`Using ${templateType} template: ${templatePath}`);
 
@@ -4641,6 +4647,24 @@ function compareWords(docxLine: string, pdfLine: string): { diffs: Difference[];
     return { diffs, wordAlignments };
 }
 
+// On a fresh deployment the runtime prompt cache (sop-processor/qa_prompt.txt)
+// can be absent — initialize it from the config bundle seed
+// (config/rulebook/qa_prompt.txt) so reviews have a baseline before any
+// DB-approved prompt is synced. Existing installs (file present) are untouched.
+async function ensureRuntimePromptSeed(): Promise<void> {
+    try {
+        const qaPromptPath = path.join(getRepoRoot(), 'sop-processor', 'qa_prompt.txt');
+        if (fsSync.existsSync(qaPromptPath)) return;
+        const seed = readSeedRulebook();
+        if (!seed) return;
+        await fs.mkdir(path.dirname(qaPromptPath), { recursive: true });
+        await fs.writeFile(qaPromptPath, seed, 'utf-8');
+        console.log('Initialized runtime QA prompt from config bundle seed (config/rulebook/qa_prompt.txt).');
+    } catch (error: any) {
+        console.warn('Runtime prompt seed init skipped:', error?.message || error);
+    }
+}
+
 // The runtime prompt file is baked into the Docker image, so a prompt approved
 // through the dashboard would be silently reverted by the next redeploy. On
 // startup, restore the latest approved proposal from the DB when it differs.
@@ -4669,7 +4693,7 @@ async function syncEffectivePromptFromDb(): Promise<void> {
 }
 
 if (require.main === module) {
-    void syncEffectivePromptFromDb();
+    void ensureRuntimePromptSeed().then(() => syncEffectivePromptFromDb());
     app.listen(port, () => {
         console.log(`📊 Dashboard service listening at http://localhost:${port}`);
         console.log(`   Access dashboard: http://localhost:${port}`);

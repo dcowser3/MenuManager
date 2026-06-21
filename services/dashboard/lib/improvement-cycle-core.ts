@@ -2,6 +2,8 @@
 // gating, effective-prompt resolution, LLM-output validation, eval summarization,
 // and the mapping from LLM-proposed rules to correction_rules payloads.
 
+import { getTenantConfig } from '@menumanager/tenant-config';
+
 export type CycleGateInput = {
     unconsumedCorrectionCount: number;
     pendingProposalExists: boolean;
@@ -376,7 +378,7 @@ export function mapProposedRuleToCorrectionRulePayload(
         is_location_specific: rule.is_location_specific,
         location: rule.is_location_specific ? rule.location : null,
         other_applicable_locations: rule.is_location_specific ? rule.other_applicable_locations : [],
-        restaurant_name: rule.is_location_specific ? (rule.location || '') : 'All RSH restaurants',
+        restaurant_name: rule.is_location_specific ? (rule.location || '') : `All ${getTenantConfig().shortName} restaurants`,
         reviewer_name: reviewerName,
         source: 'system',
         status: 'accepted',
@@ -432,7 +434,7 @@ export function buildCodeRecommendationIssue(
     };
 }
 
-export const IMPROVEMENT_SYSTEM_PROMPT = `You are the review-process engineer for an AI menu editor at Richard Sandoval Hospitality (RSH).
+export const IMPROVEMENT_SYSTEM_PROMPT = `You are the review-process engineer for an AI menu editor at ${getTenantConfig().name} (${getTenantConfig().shortName}).
 
 The review process has TWO halves:
 1. A natural-language QA prompt (provided below) used by the review model.

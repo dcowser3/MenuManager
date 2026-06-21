@@ -15,6 +15,7 @@ exports.evalStatusFromSummary = evalStatusFromSummary;
 exports.resolveDashboardPublicUrl = resolveDashboardPublicUrl;
 exports.mapProposedRuleToCorrectionRulePayload = mapProposedRuleToCorrectionRulePayload;
 exports.buildCodeRecommendationIssue = buildCodeRecommendationIssue;
+const tenant_config_1 = require("@menumanager/tenant-config");
 // Azure client secrets expire and then fail silently, taking down ALL Graph
 // features at once (alert/proposal email + SharePoint). Track the expiry date
 // in GRAPH_CLIENT_SECRET_EXPIRES (YYYY-MM-DD, from Azure) so we can warn ahead
@@ -289,7 +290,7 @@ function mapProposedRuleToCorrectionRulePayload(rule, proposalId, index, reviewe
         is_location_specific: rule.is_location_specific,
         location: rule.is_location_specific ? rule.location : null,
         other_applicable_locations: rule.is_location_specific ? rule.other_applicable_locations : [],
-        restaurant_name: rule.is_location_specific ? (rule.location || '') : 'All RSH restaurants',
+        restaurant_name: rule.is_location_specific ? (rule.location || '') : `All ${(0, tenant_config_1.getTenantConfig)().shortName} restaurants`,
         reviewer_name: reviewerName,
         source: 'system',
         status: 'accepted',
@@ -325,7 +326,7 @@ function buildCodeRecommendationIssue(recommendation, proposal, dashboardUrl) {
         labels: ['improvement-cycle'],
     };
 }
-exports.IMPROVEMENT_SYSTEM_PROMPT = `You are the review-process engineer for an AI menu editor at Richard Sandoval Hospitality (RSH).
+exports.IMPROVEMENT_SYSTEM_PROMPT = `You are the review-process engineer for an AI menu editor at ${(0, tenant_config_1.getTenantConfig)().name} (${(0, tenant_config_1.getTenantConfig)().shortName}).
 
 The review process has TWO halves:
 1. A natural-language QA prompt (provided below) used by the review model.

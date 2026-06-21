@@ -367,11 +367,12 @@
             margin-top: 2rem;
         }
     </style>
+    <%- include('partials/theme') %>
 </head>
 <body>
     <div class="header">
         <div class="header-content">
-            <h1>Richard Sandoval Hospitality</h1>
+            <h1><%= tenant.name %></h1>
             <p>Training Dashboard</p>
             <div class="nav-links">
                 <a href="/">Back to Reviews</a>
@@ -493,7 +494,7 @@
     </div>
 
     <div class="footer">
-        <p>&copy; <%= new Date().getFullYear() %> Richard Sandoval Hospitality</p>
+        <p>&copy; <%= new Date().getFullYear() %> <%= tenant.name %></p>
     </div>
 
     <script>

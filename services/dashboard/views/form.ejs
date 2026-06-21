@@ -1979,11 +1979,12 @@
             display: none !important;
         }
     </style>
+    <%- include('partials/theme') %>
 </head>
 <body>
     <div class="header">
         <div class="container" style="padding-top: 0; padding-bottom: 0;">
-            <h1>Richard Sandoval Hospitality</h1>
+            <h1><%= tenant.name %></h1>
             <p>Submit New Menu</p>
         </div>
     </div>
@@ -2434,7 +2435,7 @@
                     <div class="allergens-section">
                         <label for="allergensInput">Allergen Key (Optional)</label>
                         <textarea id="allergensInput" class="allergens-input" placeholder="Paste your allergen key here, e.g.: G contains gluten | V vegetarian | D contains dairy | S contain shellfish | N contain nuts | VG vegan"></textarea>
-                        <p class="allergens-hint">If left blank, the default RSH allergen codes will be used for review.</p>
+                        <p class="allergens-hint">If left blank, the default <%= tenant.shortName %> allergen codes will be used for review.</p>
                         <label class="raw-toggle" for="containsRawUndercooked">
                             <input type="checkbox" id="containsRawUndercooked">
                             This menu contains raw or undercooked items (include foodborne notice)
@@ -2580,7 +2581,7 @@
                         <label for="allergensInputStep2">Allergen Key (Optional)</label>
                         <textarea id="allergensInputStep2" class="allergens-input" placeholder="Paste your allergen key here, e.g.: G contains gluten | V vegetarian | D contains dairy | S contain shellfish | N contain nuts | VG vegan"></textarea>
                         <div id="step2AllergenDetectedBadge" class="allergen-detected-badge hidden">Prefilled from uploaded baseline</div>
-                        <p class="allergens-hint">If left blank, the default RSH allergen codes will be used for review.</p>
+                        <p class="allergens-hint">If left blank, the default <%= tenant.shortName %> allergen codes will be used for review.</p>
                         <label class="raw-toggle" for="containsRawUndercookedStep2">
                             <input type="checkbox" id="containsRawUndercookedStep2">
                             This menu contains raw or undercooked items (include foodborne notice)

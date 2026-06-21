@@ -7,6 +7,7 @@ exports.QA_PROMPT_SECTIONS = void 0;
 exports.buildFinalPrompt = buildFinalPrompt;
 const menu_footer_1 = require("./menu-footer");
 const embedded_set_menu_guard_1 = require("./embedded-set-menu-guard");
+const tenant_config_1 = require("@menumanager/tenant-config");
 // Registry of every runtime prompt section. Consumed by the review-rules
 // manifest so prompt-layer rules are enumerable alongside code rules.
 exports.QA_PROMPT_SECTIONS = {
@@ -94,8 +95,11 @@ This is a PRIX FIXE (pre-fix) menu. Apply these special rules:
    - Individual items without their own pricing
    - Do NOT set severity to "critical" for missing individual dish prices on prix fixe menus
 `;
-        // Insert at the beginning of the rules section
-        qaPrompt = qaPrompt.replace('## RSH MENU GUIDELINES - COMPREHENSIVE RULES', `## RSH MENU GUIDELINES - COMPREHENSIVE RULES\n${prixFixeSection}`);
+        // Insert at the beginning of the rules section. The anchor heading is
+        // configured per business (rulebook.guidelinesAnchor) and must appear
+        // verbatim in the active prompt for this injection to land.
+        const guidelinesAnchor = (0, tenant_config_1.getTenantConfig)().rulebook.guidelinesAnchor;
+        qaPrompt = qaPrompt.replace(guidelinesAnchor, `${guidelinesAnchor}\n${prixFixeSection}`);
         console.log('Injected prix fixe rules into prompt');
         sections.push('prix_fixe');
     }
@@ -108,9 +112,11 @@ ${ctx.effectiveAllergens}
 
 Note: Use ONLY these allergen codes when checking allergen compliance. Do not use any other allergen codes not defined above.
 `;
-        // Insert after "### 7. ALLERGENS" when present; append for test/minimal prompts.
-        qaPrompt = qaPrompt.includes('### 7. ALLERGENS')
-            ? qaPrompt.replace('### 7. ALLERGENS', `### 7. ALLERGENS\n${allergenSection}`)
+        // Insert after the configured allergens anchor when present; append for
+        // test/minimal prompts.
+        const allergensAnchor = (0, tenant_config_1.getTenantConfig)().rulebook.allergensAnchor;
+        qaPrompt = qaPrompt.includes(allergensAnchor)
+            ? qaPrompt.replace(allergensAnchor, `${allergensAnchor}\n${allergenSection}`)
             : `${qaPrompt}\n${allergenSection}`;
         console.log('Injected custom allergens into prompt');
         sections.push('allergens');

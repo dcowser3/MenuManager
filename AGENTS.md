@@ -36,6 +36,7 @@ For any feature, bug fix, route, API, UI, or workflow change:
 | docx-redliner | — | DOCX redlining / track changes (Python scripts invoked as subprocess by differ + clickup-integration; not a network service) |
 | internal-auth | — | Shared internal-service auth middleware + axios client (library, no server) |
 | supabase-client | — | Shared Supabase database client (library, no server) |
+| tenant-config | — | Shared white-label config loader; reads the `config/` bundle via `getTenantConfig()` (library, no server) |
 
 ## Tech Stack
 
@@ -57,6 +58,7 @@ These apply to almost every change — keep them in mind without needing a deepe
 - **DOCX template structure:** First table = project details; content starts after boundary marker
 - **Severity vs confidence:** `severity` ("critical"/"normal") controls blocking; `confidence` is separate
 - **Prix fixe exemption:** Prix fixe menus skip missing-price critical errors
+- **White-label config:** All business-specific values (branding, emails, allergen key, approval roles, menu-template markers, seed rules/properties) come from the `config/` bundle via `@menumanager/tenant-config` (`getTenantConfig()` / `app.locals.tenant` in EJS). Never hardcode a business name, email, color, or template string — add a config field. See [docs/onboarding-new-business.md](docs/onboarding-new-business.md) and [docs/design-docs/white-label-config.md](docs/design-docs/white-label-config.md).
 - **Archive:** Old docs and legacy services in `archive/` — web form is the only active submission path
 
 ## Topic Pointers

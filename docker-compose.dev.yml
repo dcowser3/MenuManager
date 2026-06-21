@@ -13,7 +13,8 @@
 #     ts-node-dev to restart the process. Anonymous volumes on each
 #     `node_modules` path "punch through" the bind mount and re-expose the
 #     deps installed into the image at build time.
-#   - Shared libs (internal-auth, supabase-client) are NOT bind-mounted. They
+#   - Shared libs (internal-auth, supabase-client, tenant-config) are NOT
+#     bind-mounted. They
 #     are built into the image so consumers' `import '@menumanager/...'`
 #     resolves to a real `dist/index.js`. Edits to those libs require
 #     `./dev-up.sh --rebuild`.
@@ -55,6 +56,7 @@ services:
       - ./services/db:/app/services/db
       - /app/services/db/node_modules
       - ./tmp:/app/tmp
+      - ./config:/app/config:ro
       - ./.env:/app/.env:ro
 
   parser:
@@ -90,6 +92,7 @@ services:
       - /app/services/ai-review/node_modules
       - ./sop-processor:/app/sop-processor
       - ./tmp:/app/tmp
+      - ./config:/app/config:ro
       - ./.env:/app/.env:ro
     depends_on:
       - db
@@ -106,6 +109,7 @@ services:
       - ./services/notifier:/app/services/notifier
       - /app/services/notifier/node_modules
       - ./tmp:/app/tmp
+      - ./config:/app/config:ro
       - ./.env:/app/.env:ro
 
   differ:

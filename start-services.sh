@@ -25,7 +25,7 @@ else
     # Using `npm run build --workspaces` (plural) continues past failures and
     # sometimes hits spurious "lib.es2020.full.d.ts not found" / "tsc: command not found"
     # errors when state is mid-install. Per-workspace invocations are more reliable.
-    for svc in supabase-client ai-review clickup-integration db differ notifier parser dashboard; do
+    for svc in tenant-config supabase-client ai-review clickup-integration db differ notifier parser dashboard; do
         echo "  → building @menumanager/$svc"
         npm run build --workspace=@menumanager/$svc --silent
         if [ $? -ne 0 ]; then

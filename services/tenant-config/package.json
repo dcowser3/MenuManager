@@ -1,0 +1,15 @@
+{
+  "name": "@menumanager/tenant-config",
+  "version": "1.0.0",
+  "description": "Shared tenant/business configuration loader for Menu Manager (white-label config bundle)",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "typescript": "^5.3.3"
+  }
+}

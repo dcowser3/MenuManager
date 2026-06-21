@@ -6,12 +6,15 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const fs_1 = __importDefault(require("fs"));
 const path_1 = __importDefault(require("path"));
 const ejs = require('ejs');
+const { getTenantConfig } = require('@menumanager/tenant-config');
 const viewPath = path_1.default.resolve(__dirname, '../views/index.ejs');
 function renderReviewDashboard(reviews) {
     const template = fs_1.default.readFileSync(viewPath, 'utf8');
+    const tenant = getTenantConfig();
     return ejs.render(template, {
-        title: 'Pending Reviews - RSH Menu Manager',
+        title: `Pending Reviews - ${tenant.appName}`,
         reviews,
+        tenant,
     }, { filename: viewPath });
 }
 describe('review dashboard view', () => {

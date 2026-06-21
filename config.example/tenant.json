@@ -1,0 +1,64 @@
+{
+  "name": "Your Business Name",
+  "shortName": "YBN",
+  "tagline": "Menu Management System",
+  "appName": "YBN Menu Manager",
+  "branding": {
+    "colors": {
+      "primary": "#2c2c2c",
+      "secondary": "#8b7355",
+      "accent": "#6b5344",
+      "text": "#333333",
+      "textLight": "#666666",
+      "textMuted": "#999999",
+      "background": "#ffffff",
+      "backgroundAlt": "#fafaf8",
+      "border": "#e8e4de",
+      "borderLight": "#f0ece6",
+      "success": "#4a7c59",
+      "warning": "#b8860b",
+      "error": "#8b3a3a"
+    },
+    "fonts": {
+      "heading": "Georgia, serif",
+      "body": "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+      "googleFontsHref": ""
+    },
+    "logo": ""
+  },
+  "emails": {
+    "from": "no-reply@example.com",
+    "alert": "ops@example.com",
+    "formAttemptAlert": "ops@example.com",
+    "publicSupport": "support@example.com",
+    "internalReviewer": "",
+    "clickupHandoffSubmitter": "menus@example.com",
+    "historyImport": "clickup-history@example.com"
+  },
+  "allergenKey": "G contains gluten | V vegetarian | D contains dairy | S contains shellfish | N contains nuts | VG vegan",
+  "approvalRoles": [
+    { "key": "culinary", "label": "Culinary" },
+    { "key": "regional", "label": "Regional" }
+  ],
+  "template": {
+    "food": {
+      "detectMarker": "FOOD MENU DESIGN BRIEF REQUEST FORM",
+      "fileName": "Food Menu Template.docx"
+    },
+    "beverage": {
+      "detectMarker": "BEVERAGE MENU DESIGN BRIEF REQUEST FORM",
+      "fileName": "Beverage Menu Template.docx"
+    },
+    "requiredHeaders": ["DESIGN BRIEF REQUEST FORM", "PROJECT DESIGN DETAILS"],
+    "requiredFields": ["PROJECT NAME", "PROPERTY", "SIZE", "ORIENTATION", "DATE NEEDED"],
+    "sopSections": ["MENU SUBMITTAL SOP", "STEP 1: OBTAIN APPROVALS", "STEP 2: DESIGN DEVELOPMENT"],
+    "boundaryMarker": "Please drop the menu content below on page 2",
+    "label": "DESIGN BRIEF"
+  },
+  "rulebook": {
+    "seedFile": "rulebook/qa_prompt.txt",
+    "guidelinesAnchor": "## MENU GUIDELINES - COMPREHENSIVE RULES",
+    "allergensAnchor": "### 7. ALLERGENS"
+  },
+  "propertiesSeedFile": "properties.json"
+}

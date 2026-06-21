@@ -14,6 +14,7 @@ import {
 } from '@menumanager/supabase-client';
 import { sanitizeSubmissionUpdates } from './lib/submission-updates';
 import { buildInternalServiceHeaders, requireInternalServiceAuth } from '@menumanager/internal-auth';
+import { getTenantConfig, resolveTenantFile } from '@menumanager/tenant-config';
 
 dotenv.config({ path: path.join(__dirname, '..', '..', '..', '.env') });
 
@@ -37,7 +38,8 @@ const PROPERTIES_TABLE = 'properties';
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const APPROVED_SUBMISSION_STATUSES = ['approved', 'approved_override'];
 const REVIEW_QUEUE_STATUSES = ['pending_human_review', 'submitted_no_ai_review'];
-const ISABELLA_EMAIL = 'isabella@richardsandoval.com';
+// Internal reviewer / direct-handoff submitter identity (configurable per business).
+const ISABELLA_EMAIL = getTenantConfig().emails.clickupHandoffSubmitter;
 const DEFAULT_PROPERTY_NAMES = [
     '89Agave - Sedona',
     'Agent\'s Only - Pasadena',
@@ -319,13 +321,33 @@ function deriveCityCountryFromProperty(name: string): string {
     return name.slice(idx + 3).trim();
 }
 
-function buildDefaultPropertyCatalog(): PropertyCatalogRecord[] {
+function buildEmbeddedPropertyCatalog(): PropertyCatalogRecord[] {
     return DEFAULT_PROPERTY_NAMES.map((name) => ({
         name,
         city_country: deriveCityCountryFromProperty(name),
         is_active: true,
         ...DEFAULT_SHAREPOINT_PROPERTY_CONFIG[name],
     }));
+}
+
+// Seed catalog used when the database/local store has no properties yet.
+// Sourced from the config bundle (config/properties.json) so each business
+// ships its own locations; falls back to the embedded RSH list when the bundle
+// has no usable catalog. SharePoint routing is backfilled per-name by
+// normalizePropertyCatalogRecord from DEFAULT_SHAREPOINT_PROPERTY_CONFIG.
+function buildDefaultPropertyCatalog(): PropertyCatalogRecord[] {
+    try {
+        const file = resolveTenantFile(getTenantConfig().propertiesSeedFile);
+        if (fsSync.existsSync(file)) {
+            const parsed = JSON.parse(fsSync.readFileSync(file, 'utf-8'));
+            if (Array.isArray(parsed) && parsed.length > 0) {
+                return parsed.map((record) => normalizePropertyCatalogRecord(record));
+            }
+        }
+    } catch (error: any) {
+        console.warn('Falling back to embedded property catalog:', error?.message || error);
+    }
+    return buildEmbeddedPropertyCatalog();
 }
 
 function normalizeServiceFolders(input: any): string[] {

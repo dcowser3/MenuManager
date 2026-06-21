@@ -1,3 +1,5 @@
+import { getTenantConfig } from '@menumanager/tenant-config';
+
 type Env = Record<string, string | undefined>;
 
 export type SmtpAuthMode = 'login' | 'none';
@@ -28,7 +30,7 @@ export function buildSmtpRuntimeConfig(env: Env = process.env as Env): SmtpRunti
     const enabled = authMode === 'none'
         ? !!host
         : !!(host && user && pass);
-    const fromAddress = `${env.SMTP_FROM || env.GRAPH_MAILBOX_ADDRESS || env.SMTP_USER || 'no-reply@richardsandoval.com'}`.trim();
+    const fromAddress = `${env.SMTP_FROM || env.GRAPH_MAILBOX_ADDRESS || env.SMTP_USER || getTenantConfig().emails.from}`.trim();
 
     if (!enabled) {
         return {

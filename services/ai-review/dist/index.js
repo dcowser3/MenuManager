@@ -46,6 +46,7 @@ const fsSync = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const axios_1 = __importDefault(require("axios"));
 const internal_auth_1 = require("@menumanager/internal-auth");
+const tenant_config_1 = require("@menumanager/tenant-config");
 // Load .env from project root (works whether running from src or dist)
 const envPath = path.resolve(__dirname, '../../../.env');
 console.log(`Loading .env from: ${envPath}`);
@@ -243,7 +244,7 @@ AI-GENERATED REVIEW (MOCK MODE)
 TIER 1 ANALYSIS - GENERAL QA
 ----------------------------
 ✅ All required sections present
-✅ Formatting consistent with RSH standards
+✅ Formatting consistent with ${(0, tenant_config_1.getTenantConfig)().shortName} standards
 ✅ Menu items clearly organized
 ⚠️  Recommendation: Add more sensory descriptions
 
