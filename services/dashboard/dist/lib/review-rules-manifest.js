@@ -217,6 +217,16 @@ const FUNCTIONAL_ENTRIES = [
         implementation: { file: REVIEW_PIPELINE_FILE, exportName: 'enforcePrixFixeCriticalChecks' },
         source: 'code_metadata',
     },
+    {
+        id: 'reconcile/known-text-artifact-suggestions',
+        layer: 'reconciliation',
+        category: 'spelling',
+        title: 'Known text-artifact suggestions',
+        description: 'Adds non-critical, high-confidence suggestions for known malformed wine/geography terms that often come from DOCX redline cleanup or obvious submitter typos, without auto-correcting or blocking submission.',
+        examples: [{ before: 'Fleur de Mere, Rosé, ctes de provence, france GL 18/BTL 82', after: 'Possible Extraction Typo suggestion: Change "ctes de provence" to "côtes de provence".' }],
+        implementation: { file: REVIEW_PIPELINE_FILE, exportName: 'detectKnownTextArtifactSuggestions' },
+        source: 'code_metadata',
+    },
 ];
 function buildReviewRulesManifest(opts = {}) {
     const entries = [];

@@ -24,6 +24,7 @@ Related docs:
 - Basic AI Check runs as an async dashboard job. The browser starts a check, polls status, and keeps final submission blocked until the check completes or returns the manual-review fallback.
 - Deterministic pre-AI cleanup handles accepted spelling/diacritic replacements, allergen-code formatting, raw-item marker placement, learned accepted correction rules, and curated guards before the model call.
 - Post-AI guards reject unsafe model output that drops submitted lines, loses too many tokens, becomes much shorter than the input, or changes submitted prices.
+- Basic AI Check also raises non-critical, actionable suggestions for known DOCX/redline cleanup artifacts in menu text, such as malformed wine-region terms that should be reviewed before submission.
 - Missing-price and incomplete-dish-name blockers remain critical unless an exemption applies, such as included dishes inside supported set-menu sections.
 - Basic AI Check can fall back to manual review when the AI service is unavailable, preserving deterministic corrections that already ran.
 - Debug diagnostics are available with `?debugBasicCheck=1` outside production, or in production when `BASIC_AI_CHECK_DEBUG_ENABLED=true`.

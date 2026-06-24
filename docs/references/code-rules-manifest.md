@@ -296,3 +296,10 @@ Incomplete Dish Name critical suggestions are dropped when the matched line is a
 For prix fixe menus: synthesizes a critical PRICING STRUCTURE suggestion when no top-level price (incl. PP/per-person/pairing formats) appears in the first five lines, synthesizes critical COURSE NUMBERING when two or more course headings lack numbers, and removes AI course-numbering false positives when numbers are present. Prix fixe menus are exempt from per-dish missing-price criticals.
 
 - id: `reconcile/prix-fixe-enforcement` · category: prix_fixe · implementation: `services/dashboard/lib/review-pipeline.ts#enforcePrixFixeCriticalChecks`
+
+### Known text-artifact suggestions
+
+Adds non-critical, high-confidence suggestions for known malformed wine/geography terms that often come from DOCX redline cleanup or obvious submitter typos, without auto-correcting or blocking submission.
+- `Fleur de Mere, Rosé, ctes de provence, france GL 18/BTL 82` -> `Possible Extraction Typo suggestion: Change "ctes de provence" to "côtes de provence".`
+
+- id: `reconcile/known-text-artifact-suggestions` · category: spelling · implementation: `services/dashboard/lib/review-pipeline.ts#detectKnownTextArtifactSuggestions`

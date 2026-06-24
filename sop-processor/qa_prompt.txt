@@ -24,7 +24,7 @@ If the menu is perfect, return the original text unchanged.]
 === SUGGESTIONS ===
 [List remaining issues the chef should still review as JSON array. Each suggestion MUST have this exact structure:]
 
-**CRITICAL:** Any objective spelling, grammar, typo, or diacritics fix you are sure about MUST appear in CORRECTED MENU above. This JSON is for items the chef should still double-check; use `"confidence": "medium"` or `"low"` only (never mark spelling/grammar you already fixed in CORRECTED MENU as `"high"` here).
+**CRITICAL:** Any objective spelling, grammar, typo, or diacritics fix you are sure about MUST appear in CORRECTED MENU above. This JSON is for items the chef should still double-check; use "confidence": "medium" or "low" only (never mark spelling/grammar you already fixed in CORRECTED MENU as "high" here).
 
 [
   {
@@ -37,7 +37,6 @@ If the menu is perfect, return the original text unchanged.]
   }
 ]
 === END SUGGESTIONS ===
-```
 
 ---
 
@@ -82,10 +81,6 @@ Flag these as a suggestion with:
 - type: "Incomplete Dish Name"
 - severity: "critical"
 - Do NOT auto-correct — leave in SUGGESTIONS only
-
-- Do NOT flag standalone menu instructions such as "choose one", "choice of one",
-- "select two", or "pick your entree" as incomplete dish names or missing prices.
-- These are selection instructions, not dish entries. Preserve them in CORRECTED MENU.
 
 #### 1.4 Allergens
 - Format: Superscript, same line as dish/drink name
@@ -138,7 +133,7 @@ Deterministic pre-AI checks already apply approved exact spelling replacements a
 
 Continue to review for contextual spelling or terminology issues that cannot be safely handled by exact replacement rules:
 - "chili" vs. "chile" depends on whether the phrase is an English ingredient/cooking term or a named Spanish chile.
-- "tartar" vs. "tartare" depends on whether the item is a condiment or a raw protein preparation.
+- "tartar" vs. "tartare" depends on whether the item is a condiment or a raw protein preparation. Use "tartar" for sauces and "tartare" for raw protein dishes.
 - "mayo" vs. "aioli" is not an absolute replacement; flag only when the menu context clearly supports the change.
 - Word order and redundant-word issues should be suggestions unless the correction is objective and high confidence.
 

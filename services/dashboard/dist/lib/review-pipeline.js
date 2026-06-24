@@ -13,6 +13,7 @@ exports.isCriticalResolvedByCorrectedMenu = isCriticalResolvedByCorrectedMenu;
 exports.reconcileCriticalSuggestionsAgainstCorrectedMenu = reconcileCriticalSuggestionsAgainstCorrectedMenu;
 exports.reconcileCriticalSuggestionsAgainstCorrectedMenuWithDiagnostics = reconcileCriticalSuggestionsAgainstCorrectedMenuWithDiagnostics;
 exports.enforcePrixFixeCriticalChecks = enforcePrixFixeCriticalChecks;
+exports.detectKnownTextArtifactSuggestions = detectKnownTextArtifactSuggestions;
 exports.parseAIResponse = parseAIResponse;
 exports.normalizeRawAsteriskPlacement = normalizeRawAsteriskPlacement;
 exports.runPostAiPipeline = runPostAiPipeline;
@@ -251,6 +252,72 @@ function enforcePrixFixeCriticalChecks(menuContent, suggestions) {
     }
     return existing;
 }
+const KNOWN_TEXT_ARTIFACT_PATTERNS = [
+    {
+        pattern: /\bctes\s+de\s+provence\b/gi,
+        corrected: 'côtes de provence',
+    },
+    {
+        pattern: /\bprovance\b/gi,
+        corrected: 'provence',
+        context: /\b(?:provence|ros[eé]|france|wine|wines)\b/i,
+    },
+    {
+        pattern: /\bvallede\s+guadalupe\b/gi,
+        corrected: 'valle de guadalupe',
+    },
+];
+function hasExistingSuggestionForTextChange(suggestions, original, corrected) {
+    const originalNorm = normalizeForSuggestionMatch(original);
+    const correctedNorm = normalizeForSuggestionMatch(corrected);
+    if (!originalNorm || !correctedNorm)
+        return false;
+    return suggestions.some((suggestion) => {
+        const combined = normalizeForSuggestionMatch([
+            suggestion.type || '',
+            suggestion.menuItem || '',
+            suggestion.description || '',
+            suggestion.recommendation || '',
+        ].join(' '));
+        return combined.includes(originalNorm) && combined.includes(correctedNorm);
+    });
+}
+function detectKnownTextArtifactSuggestions(menuContent, suggestions = []) {
+    const existing = [...(suggestions || [])];
+    const additions = [];
+    const seenChanges = new Set();
+    const lines = (menuContent || '').split('\n');
+    for (const line of lines) {
+        const trimmedLine = line.trim();
+        if (!trimmedLine)
+            continue;
+        for (const artifact of KNOWN_TEXT_ARTIFACT_PATTERNS) {
+            if (artifact.context && !artifact.context.test(trimmedLine)) {
+                continue;
+            }
+            artifact.pattern.lastIndex = 0;
+            let match;
+            while ((match = artifact.pattern.exec(trimmedLine)) !== null) {
+                const original = match[0];
+                const corrected = artifact.corrected;
+                const changeKey = `${normalizeForSuggestionMatch(original)}->${normalizeForSuggestionMatch(corrected)}`;
+                if (seenChanges.has(changeKey) || hasExistingSuggestionForTextChange(existing.concat(additions), original, corrected)) {
+                    continue;
+                }
+                seenChanges.add(changeKey);
+                additions.push({
+                    type: 'Possible Extraction Typo',
+                    confidence: 'high',
+                    severity: 'normal',
+                    menuItem: trimmedLine,
+                    description: `The text "${original}" looks like a typo or DOCX redline cleanup artifact in this line.`,
+                    recommendation: `Change "${original}" to "${corrected}".`,
+                });
+            }
+        }
+    }
+    return existing.concat(additions);
+}
 function parseAIResponse(feedback, originalMenu) {
     // Extract corrected menu between markers
     const correctedMenuMatch = feedback.match(/=== CORRECTED MENU ===\s*\n([\s\S]*?)\n=== END CORRECTED MENU ===/);
@@ -386,6 +453,7 @@ function runPostAiPipeline(args) {
     if (args.menuType === 'prix_fixe') {
         finalSuggestions = enforcePrixFixeCriticalChecks(correctedMenuSanitized, finalSuggestions);
     }
+    finalSuggestions = detectKnownTextArtifactSuggestions(correctedMenuSanitized, finalSuggestions);
     const hasCriticalErrors = finalSuggestions.some(s => s.severity === 'critical');
     const criticalSuggestions = finalSuggestions.filter(s => s.severity === 'critical');
     return {

@@ -24,7 +24,7 @@ This README is intentionally short. Detailed feature notes, runbooks, and design
 ```text
 Chef / manager submission
   -> Upload-first dashboard form: upload menu DOCX (redlines preserved), project details auto-filled and revealed progressively
-  -> Basic AI Check with deterministic pre/post guards, full-width suggestion rows above aligned review boxes, and fixed growl feedback
+  -> Basic AI Check with deterministic pre/post guards, known DOCX cleanup artifact suggestions, full-width suggestion rows above aligned review boxes, and fixed growl feedback
   -> Required approval block captures the approver's email
   -> Stored submission and generated original DOCX
   -> One confirmation email (with the submitted DOCX) sent to deliverable submitter and approver addresses
@@ -64,6 +64,8 @@ Prerequisites:
 - npm bundled with Node 24
 - Docker Desktop
 - `.env` values for the integrations you want to exercise
+
+For Supabase-backed audit logs, set `SUPABASE_URL` plus either `SUPABASE_SERVICE_ROLE_KEY` (current Supabase dashboard label) or the legacy `SUPABASE_SERVICE_KEY`.
 
 Start the Docker dev stack:
 

@@ -15,7 +15,7 @@ All variables are configured in `.env` at the project root. See `.env.example` f
 | `INTERNAL_API_TOKEN` | Shared secret required on internal service-to-service requests between dashboard, db, parser, ai-review, differ, and clickup-integration |
 | `SUPABASE_URL` | Supabase project URL |
 | `SUPABASE_ANON_KEY` | Supabase anonymous key |
-| `SUPABASE_SERVICE_KEY` | Supabase service role key |
+| `SUPABASE_SERVICE_KEY` / `SUPABASE_SERVICE_ROLE_KEY` | Supabase service role key. `SUPABASE_SERVICE_ROLE_KEY` matches the modern Supabase dashboard label; `SUPABASE_SERVICE_KEY` is kept as a legacy alias. |
 
 ## Optional
 

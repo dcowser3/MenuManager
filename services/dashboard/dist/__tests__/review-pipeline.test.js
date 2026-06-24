@@ -90,6 +90,37 @@ describe('enforcePrixFixeCriticalChecks', () => {
         expect(result).toEqual([]);
     });
 });
+describe('detectKnownTextArtifactSuggestions', () => {
+    test('adds an actionable suggestion for Cotes de Provence extraction artifacts', () => {
+        const menu = 'Fleur de Mere, Rosé, ctes de provence, france GL 18/BTL 82';
+        const result = (0, review_pipeline_1.detectKnownTextArtifactSuggestions)(menu, []);
+        expect(result).toHaveLength(1);
+        expect(result[0]).toMatchObject({
+            type: 'Possible Extraction Typo',
+            confidence: 'high',
+            severity: 'normal',
+            menuItem: menu,
+            recommendation: 'Change "ctes de provence" to "côtes de provence".',
+        });
+    });
+    test('does not duplicate an existing AI suggestion for the same change', () => {
+        const menu = 'Fleur de Mere, Rosé, ctes de provence, france GL 18/BTL 82';
+        const result = (0, review_pipeline_1.detectKnownTextArtifactSuggestions)(menu, [{
+                type: 'Spelling',
+                confidence: 'high',
+                severity: 'normal',
+                menuItem: menu,
+                description: 'Known wine region typo.',
+                recommendation: 'Change "ctes de provence" to "côtes de provence".',
+            }]);
+        expect(result).toHaveLength(1);
+        expect(result[0].type).toBe('Spelling');
+    });
+    test('leaves normal Cotes de Provence wording alone', () => {
+        const menu = 'Fleur de Mere, Rosé, côtes de provence, france GL 18/BTL 82';
+        expect((0, review_pipeline_1.detectKnownTextArtifactSuggestions)(menu, [])).toEqual([]);
+    });
+});
 describe('reconcileCriticalSuggestionsAgainstCorrectedMenuWithDiagnostics', () => {
     test('drops criticals already resolved in the corrected menu and keeps the rest', () => {
         const corrected = 'GUACAMOLE\nfresh avocado, lime 12\nTACOS\nal pastor, pineapple';
@@ -222,5 +253,22 @@ describe('runPostAiPipeline (full guard chain)', () => {
         expect(result.hasCriticalErrors).toBe(false);
         expect(result.criticalSuggestions).toEqual([]);
         expect(result.reconciliation.droppedSuggestions[0].reason).toBe('critical_false_positive_selection_instruction');
+    });
+    test('adds known text artifact suggestions after AI output guards', () => {
+        const menu = 'Fleur de Mere, Rosé, ctes de provence, france GL 18/BTL 82';
+        const result = (0, review_pipeline_1.runPostAiPipeline)({
+            feedback: buildFeedback(menu, []),
+            preCheckedReviewBody: menu,
+            acceptedCorrectionRules: [],
+            embeddedSetMenuAnalysis: { sections: [], issues: [] },
+            precheckEnabled: false,
+        });
+        expect(result.hasCriticalErrors).toBe(false);
+        expect(result.finalSuggestions).toHaveLength(1);
+        expect(result.finalSuggestions[0]).toMatchObject({
+            type: 'Possible Extraction Typo',
+            severity: 'normal',
+            recommendation: 'Change "ctes de provence" to "côtes de provence".',
+        });
     });
 });

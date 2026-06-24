@@ -320,6 +320,88 @@ export function enforcePrixFixeCriticalChecks(
     return existing;
 }
 
+type KnownTextArtifactPattern = {
+    pattern: RegExp;
+    corrected: string;
+    context?: RegExp;
+};
+
+const KNOWN_TEXT_ARTIFACT_PATTERNS: KnownTextArtifactPattern[] = [
+    {
+        pattern: /\bctes\s+de\s+provence\b/gi,
+        corrected: 'côtes de provence',
+    },
+    {
+        pattern: /\bprovance\b/gi,
+        corrected: 'provence',
+        context: /\b(?:provence|ros[eé]|france|wine|wines)\b/i,
+    },
+    {
+        pattern: /\bvallede\s+guadalupe\b/gi,
+        corrected: 'valle de guadalupe',
+    },
+];
+
+function hasExistingSuggestionForTextChange(suggestions: ReviewSuggestion[], original: string, corrected: string): boolean {
+    const originalNorm = normalizeForSuggestionMatch(original);
+    const correctedNorm = normalizeForSuggestionMatch(corrected);
+    if (!originalNorm || !correctedNorm) return false;
+
+    return suggestions.some((suggestion) => {
+        const combined = normalizeForSuggestionMatch([
+            suggestion.type || '',
+            suggestion.menuItem || '',
+            suggestion.description || '',
+            suggestion.recommendation || '',
+        ].join(' '));
+        return combined.includes(originalNorm) && combined.includes(correctedNorm);
+    });
+}
+
+export function detectKnownTextArtifactSuggestions(
+    menuContent: string,
+    suggestions: ReviewSuggestion[] = []
+): ReviewSuggestion[] {
+    const existing = [...(suggestions || [])];
+    const additions: ReviewSuggestion[] = [];
+    const seenChanges = new Set<string>();
+    const lines = (menuContent || '').split('\n');
+
+    for (const line of lines) {
+        const trimmedLine = line.trim();
+        if (!trimmedLine) continue;
+
+        for (const artifact of KNOWN_TEXT_ARTIFACT_PATTERNS) {
+            if (artifact.context && !artifact.context.test(trimmedLine)) {
+                continue;
+            }
+
+            artifact.pattern.lastIndex = 0;
+            let match: RegExpExecArray | null;
+            while ((match = artifact.pattern.exec(trimmedLine)) !== null) {
+                const original = match[0];
+                const corrected = artifact.corrected;
+                const changeKey = `${normalizeForSuggestionMatch(original)}->${normalizeForSuggestionMatch(corrected)}`;
+                if (seenChanges.has(changeKey) || hasExistingSuggestionForTextChange(existing.concat(additions), original, corrected)) {
+                    continue;
+                }
+
+                seenChanges.add(changeKey);
+                additions.push({
+                    type: 'Possible Extraction Typo',
+                    confidence: 'high',
+                    severity: 'normal',
+                    menuItem: trimmedLine,
+                    description: `The text "${original}" looks like a typo or DOCX redline cleanup artifact in this line.`,
+                    recommendation: `Change "${original}" to "${corrected}".`,
+                });
+            }
+        }
+    }
+
+    return existing.concat(additions);
+}
+
 export function parseAIResponse(feedback: string, originalMenu: string): ParsedAiResponse {
     // Extract corrected menu between markers
     const correctedMenuMatch = feedback.match(/=== CORRECTED MENU ===\s*\n([\s\S]*?)\n=== END CORRECTED MENU ===/);
@@ -521,6 +603,7 @@ export function runPostAiPipeline(args: PostAiPipelineArgs): PostAiPipelineResul
     if (args.menuType === 'prix_fixe') {
         finalSuggestions = enforcePrixFixeCriticalChecks(correctedMenuSanitized, finalSuggestions);
     }
+    finalSuggestions = detectKnownTextArtifactSuggestions(correctedMenuSanitized, finalSuggestions);
 
     const hasCriticalErrors = finalSuggestions.some(s => s.severity === 'critical');
     const criticalSuggestions = finalSuggestions.filter(s => s.severity === 'critical');
