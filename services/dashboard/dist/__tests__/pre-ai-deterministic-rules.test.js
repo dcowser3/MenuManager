@@ -12,6 +12,24 @@ describe('runPreAiDeterministicChecks', () => {
             'Allergen Code',
         ]);
     });
+    it('adds the ají tone mark generally while protecting Hawaiian ahi tuna phrases', () => {
+        const result = (0, pre_ai_deterministic_rules_1.runPreAiDeterministicChecks)([
+            'Aji Amarillo Rice 18',
+            'Aji Panca Chicken D 24',
+            'aji tuna tostada 18',
+            'ají tuna tostada 18',
+            'ahí tuna tostada 18',
+            'Aji Lime Sauce 4',
+        ].join('\n'));
+        expect(result.menuText).toBe([
+            'Ají Amarillo Rice 18',
+            'Ají Panca Chicken D 24',
+            'ahi tuna tostada 18',
+            'ahi tuna tostada 18',
+            'ahi tuna tostada 18',
+            'Ají Lime Sauce 4',
+        ].join('\n'));
+    });
     it('normalizes existing raw marker placement and adds markers for strong raw terms', () => {
         const result = (0, pre_ai_deterministic_rules_1.runPreAiDeterministicChecks)([
             'Tuna Tartare F 24',
@@ -152,6 +170,40 @@ describe('runPreAiDeterministicChecks', () => {
             source: 'accepted_correction_rule',
             ruleId: 'rule-1',
         }));
+    });
+    it('applies learned spelling and diacritic rules without requiring the same accent marks', () => {
+        const rules = [
+            {
+                id: 'rule-creme-anglaise',
+                status: 'accepted',
+                source: 'system',
+                original_text: 'creme anglaise',
+                corrected_text: 'crème anglaise',
+                change_type: 'diacritic',
+                rule: 'crème anglaise is proper spelling',
+                is_location_specific: false,
+                location: 'All properties (global rule)',
+            },
+        ];
+        const result = (0, pre_ai_deterministic_rules_1.runPreAiDeterministicChecks)([
+            'creme anglaise 8',
+            'crême anglaise 8',
+            'crème anglaise 8',
+        ].join('\n'), { acceptedCorrectionRules: rules });
+        expect(result.menuText).toBe([
+            'crème anglaise 8',
+            'crème anglaise 8',
+            'crème anglaise 8',
+        ].join('\n'));
+        expect(result.learnedRulesConsidered).toBe(1);
+        expect(result.learnedRulesApplied).toBe(1);
+        expect(result.appliedCorrections).toEqual(expect.arrayContaining([
+            expect.objectContaining({ ruleId: 'rule-creme-anglaise', original: 'creme anglaise', corrected: 'crème anglaise' }),
+            expect.objectContaining({ ruleId: 'rule-creme-anglaise', original: 'crême anglaise', corrected: 'crème anglaise' }),
+        ]));
+        expect(result.appliedCorrections).not.toEqual(expect.arrayContaining([
+            expect.objectContaining({ original: 'crème anglaise' }),
+        ]));
     });
     it('never applies context-dependent learned rules as blind replacements', () => {
         const rules = [

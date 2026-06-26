@@ -102,14 +102,54 @@ describe('learning dashboard view', () => {
                     occurrences: 2,
                     confidence: 0.6,
                     submission_ids: ['sub-123'],
+                    created_at: '2026-06-26T14:30:00.000Z',
                 }],
         });
         expect(html).toContain('Examples');
+        expect(html).toContain('Created / From');
+        expect(html).toContain('Detected pattern scan');
+        expect(html).toContain('6/26/2026, 10:30:00 AM EDT');
         expect(html).toContain('ruleExamplesPayload');
         expect(html).toContain('"original_text":"radishes"');
         expect(html).toContain('"submission_ids":["sub-123"]');
         expect(html).toContain('rule-examples-row-rule-1');
         expect(html).toContain('Project / Location');
+    });
+    test('shows whether pending human rules came from general entry or a menu correction page', () => {
+        const html = renderLearningView({
+            pendingRules: [
+                {
+                    id: 'manual-rule',
+                    submission_id: 'manual-submission-123',
+                    original_text: 'ahi tuna',
+                    corrected_text: 'ahi tuna',
+                    rule: 'Ahi tuna is the correct spelling.',
+                    source: 'human',
+                    restaurant_name: '',
+                    location: 'All properties (global rule)',
+                    is_location_specific: false,
+                    created_at: '2026-06-26T15:00:00.000Z',
+                },
+                {
+                    id: 'menu-rule',
+                    submission_id: 'submission-123',
+                    original_text: 'ají tuna',
+                    corrected_text: 'ahi tuna',
+                    rule: 'Ahi tuna is the correct spelling.',
+                    source: 'human',
+                    project_name: 'Tamayo Lunch Menu',
+                    restaurant_name: 'Tamayo Lunch Menu',
+                    location: 'All properties (global rule)',
+                    is_location_specific: false,
+                    created_at: '2026-06-26T15:30:00.000Z',
+                },
+            ],
+        });
+        expect(html).toContain('General add-rule area');
+        expect(html).toContain('Menu correction page');
+        expect(html).toContain('Tamayo Lunch Menu');
+        expect(html).toContain('6/26/2026, 11:00:00 AM EDT');
+        expect(html).toContain('6/26/2026, 11:30:00 AM EDT');
     });
     test('renders the manual add-rule form with menu and property scope controls', () => {
         const html = renderLearningView({

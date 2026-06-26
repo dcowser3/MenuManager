@@ -10,10 +10,14 @@ not part of the committed copy.
 
 ## Layer 1 — Deterministic pre-AI checks (before the model runs)
 
-### Built-in exact replacements (52)
+### Built-in exact replacements (56)
 
 | From | To | Type |
 |------|----|------|
+| aji tuna | ahi tuna | Spelling |
+| ají tuna | ahi tuna | Spelling |
+| ahí tuna | ahi tuna | Spelling |
+| áhi tuna | ahi tuna | Spelling |
 | aji amarillo | ají amarillo | Diacritics |
 | aji panca | ají panca | Diacritics |
 | chile de arbol | chile de árbol | Diacritics |
@@ -95,9 +99,9 @@ Adds a missing raw marker to dishes containing strong raw/undercooked terms: tar
 
 - id: `pre-ai/raw-asterisk-insertion` · category: raw_markers · implementation: `services/dashboard/lib/pre-ai-deterministic-rules.ts#shouldAddRawAsterisk`
 
-### Accepted reviewer correction rules (exact replacements)
+### Accepted reviewer correction rules (bounded replacements)
 
-Accepted correction_rules rows with safe change types (spelling, diacritic, terminology, grammar, punctuation; both texts <= 240 chars) are applied as exact replacements when the rule scope matches the submitted property and template type. Broad content rules stay reviewer/prompt material. See the dynamic_correction_rule entries for the currently accepted set.
+Accepted correction_rules rows with safe change types (spelling, diacritic, terminology, grammar, punctuation; both texts <= 240 chars) are applied when the rule scope matches the submitted property and template type. Spelling/diacritic learned rules that include tone marks match accent-insensitively while preserving word boundaries; other learned replacements remain exact. Broad content rules stay reviewer/prompt material. See the dynamic_correction_rule entries for the currently accepted set.
 
 - id: `pre-ai/accepted-correction-rules` · category: learned_rules · implementation: `services/dashboard/lib/pre-ai-deterministic-rules.ts#applyAcceptedCorrectionRules`
 

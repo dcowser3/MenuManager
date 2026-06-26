@@ -10,6 +10,12 @@ const COMMON_ALLERGEN_CODES = new Set([
     'V', 'VG',
 ]);
 exports.BUILT_IN_REPLACEMENTS = [
+    // Hawaiian ahi tuna has no tone mark; protect this phrase before the
+    // general Spanish ají diacritic rule runs below.
+    { from: 'aji tuna', to: 'ahi tuna', type: 'Spelling' },
+    { from: 'ají tuna', to: 'ahi tuna', type: 'Spelling' },
+    { from: 'ahí tuna', to: 'ahi tuna', type: 'Spelling' },
+    { from: 'áhi tuna', to: 'ahi tuna', type: 'Spelling' },
     // Diacritics that are safe enough to apply before the AI review.
     { from: 'aji amarillo', to: 'ají amarillo', type: 'Diacritics' },
     { from: 'aji panca', to: 'ají panca', type: 'Diacritics' },
@@ -164,6 +170,77 @@ function replacementRegExp(from) {
     const endsWord = /[A-Za-z0-9À-ÖØ-öø-ÿ]$/.test(from);
     return new RegExp(`${startsWord ? '\\b' : ''}${escaped}${endsWord ? '\\b' : ''}`, 'gi');
 }
+function accentInsensitiveIndex(input) {
+    let normalized = '';
+    const map = [];
+    for (let index = 0; index < input.length;) {
+        const codePoint = input.codePointAt(index);
+        const char = String.fromCodePoint(codePoint || 0);
+        let end = index + char.length;
+        let cluster = char;
+        while (end < input.length) {
+            const nextCodePoint = input.codePointAt(end);
+            const nextChar = String.fromCodePoint(nextCodePoint || 0);
+            if (!/[\u0300-\u036f]/.test(nextChar))
+                break;
+            cluster += nextChar;
+            end += nextChar.length;
+        }
+        const stripped = stripDiacritics(cluster);
+        for (const outputChar of stripped) {
+            normalized += outputChar;
+            map.push({ start: index, end });
+        }
+        index = end;
+    }
+    return { normalized, map };
+}
+function applyAccentInsensitiveReplacementRule(line, lineIndex, rule, source, metadata = {}, settings = {}) {
+    const normalizedFrom = stripDiacritics(rule.from);
+    if (!normalizedFrom) {
+        return { line, corrections: [] };
+    }
+    const { normalized, map } = accentInsensitiveIndex(line);
+    const re = replacementRegExp(normalizedFrom);
+    const corrections = [];
+    let nextLine = '';
+    let lastOriginalIndex = 0;
+    let match;
+    while ((match = re.exec(normalized)) !== null) {
+        if (!match[0])
+            continue;
+        const startMap = map[match.index];
+        const endMap = map[match.index + match[0].length - 1];
+        if (!startMap || !endMap)
+            continue;
+        const original = line.slice(startMap.start, endMap.end);
+        const corrected = matchCase(original, rule.to);
+        nextLine += line.slice(lastOriginalIndex, startMap.start);
+        if (original === corrected
+            || (settings.skipIfAlreadyCorrected
+                && corrected.length > original.length
+                && line.slice(startMap.start, startMap.start + corrected.length).toLowerCase() === corrected.toLowerCase())) {
+            nextLine += original;
+        }
+        else {
+            nextLine += corrected;
+            corrections.push({
+                type: rule.type,
+                source,
+                original,
+                corrected,
+                lineIndex,
+                ...metadata,
+            });
+        }
+        lastOriginalIndex = endMap.end;
+    }
+    if (!corrections.length) {
+        return { line, corrections: [] };
+    }
+    nextLine += line.slice(lastOriginalIndex);
+    return { line: nextLine, corrections };
+}
 function applyReplacementRule(line, lineIndex, rule, source, metadata = {}, settings = {}) {
     const corrections = [];
     const re = replacementRegExp(rule.from);
@@ -188,6 +265,15 @@ function applyReplacementRule(line, lineIndex, rule, source, metadata = {}, sett
         return corrected;
     });
     return { line: nextLine, corrections };
+}
+function learnedRuleUsesAccentInsensitiveMatching(rule) {
+    const changeType = `${rule.change_type || ''}`.trim().toLowerCase();
+    if (!['diacritic', 'diacritics', 'spelling', 'typo'].includes(changeType)) {
+        return false;
+    }
+    const original = `${rule.original_text || ''}`;
+    const corrected = `${rule.corrected_text || ''}`;
+    return stripDiacritics(original) !== original || stripDiacritics(corrected) !== corrected;
 }
 function parseAllergenCodesFromLegend(legend) {
     const codes = new Set(COMMON_ALLERGEN_CODES);
@@ -420,12 +506,14 @@ function applyAcceptedCorrectionRules(lines, options) {
             type: 'Learned Rule',
         };
         for (let i = 0; i < nextLines.length; i++) {
-            const result = applyReplacementRule(nextLines[i], i, replacement, 'accepted_correction_rule', {
+            const metadata = {
                 ruleId: rule.id,
                 rule: rule.rule,
-            }, {
-                skipIfAlreadyCorrected: true,
-            });
+            };
+            const settings = { skipIfAlreadyCorrected: true };
+            const result = learnedRuleUsesAccentInsensitiveMatching(rule)
+                ? applyAccentInsensitiveReplacementRule(nextLines[i], i, replacement, 'accepted_correction_rule', metadata, settings)
+                : applyReplacementRule(nextLines[i], i, replacement, 'accepted_correction_rule', metadata, settings);
             if (result.corrections.length > 0) {
                 nextLines[i] = result.line;
                 appliedCorrections.push(...result.corrections);

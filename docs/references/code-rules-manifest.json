@@ -1,6 +1,98 @@
 {
   "entries": [
     {
+      "id": "pre-ai/replacement/aji-tuna",
+      "layer": "pre_ai_deterministic",
+      "category": "spelling",
+      "title": "aji tuna -> ahi tuna",
+      "description": "Built-in exact spelling replacement applied before the AI review (word-boundary, case-preserving).",
+      "examples": [
+        {
+          "before": "aji tuna",
+          "after": "ahi tuna"
+        }
+      ],
+      "implementation": {
+        "file": "services/dashboard/lib/pre-ai-deterministic-rules.ts",
+        "exportName": "BUILT_IN_REPLACEMENTS"
+      },
+      "data": {
+        "from": "aji tuna",
+        "to": "ahi tuna",
+        "type": "Spelling"
+      },
+      "source": "code_data"
+    },
+    {
+      "id": "pre-ai/replacement/ají-tuna",
+      "layer": "pre_ai_deterministic",
+      "category": "spelling",
+      "title": "ají tuna -> ahi tuna",
+      "description": "Built-in exact spelling replacement applied before the AI review (word-boundary, case-preserving).",
+      "examples": [
+        {
+          "before": "ají tuna",
+          "after": "ahi tuna"
+        }
+      ],
+      "implementation": {
+        "file": "services/dashboard/lib/pre-ai-deterministic-rules.ts",
+        "exportName": "BUILT_IN_REPLACEMENTS"
+      },
+      "data": {
+        "from": "ají tuna",
+        "to": "ahi tuna",
+        "type": "Spelling"
+      },
+      "source": "code_data"
+    },
+    {
+      "id": "pre-ai/replacement/ahí-tuna",
+      "layer": "pre_ai_deterministic",
+      "category": "spelling",
+      "title": "ahí tuna -> ahi tuna",
+      "description": "Built-in exact spelling replacement applied before the AI review (word-boundary, case-preserving).",
+      "examples": [
+        {
+          "before": "ahí tuna",
+          "after": "ahi tuna"
+        }
+      ],
+      "implementation": {
+        "file": "services/dashboard/lib/pre-ai-deterministic-rules.ts",
+        "exportName": "BUILT_IN_REPLACEMENTS"
+      },
+      "data": {
+        "from": "ahí tuna",
+        "to": "ahi tuna",
+        "type": "Spelling"
+      },
+      "source": "code_data"
+    },
+    {
+      "id": "pre-ai/replacement/áhi-tuna",
+      "layer": "pre_ai_deterministic",
+      "category": "spelling",
+      "title": "áhi tuna -> ahi tuna",
+      "description": "Built-in exact spelling replacement applied before the AI review (word-boundary, case-preserving).",
+      "examples": [
+        {
+          "before": "áhi tuna",
+          "after": "ahi tuna"
+        }
+      ],
+      "implementation": {
+        "file": "services/dashboard/lib/pre-ai-deterministic-rules.ts",
+        "exportName": "BUILT_IN_REPLACEMENTS"
+      },
+      "data": {
+        "from": "áhi tuna",
+        "to": "ahi tuna",
+        "type": "Spelling"
+      },
+      "source": "code_data"
+    },
+    {
       "id": "pre-ai/replacement/aji-amarillo",
       "layer": "pre_ai_deterministic",
       "category": "diacritics",
@@ -1272,8 +1364,8 @@
       "id": "pre-ai/accepted-correction-rules",
       "layer": "pre_ai_deterministic",
       "category": "learned_rules",
-      "title": "Accepted reviewer correction rules (exact replacements)",
-      "description": "Accepted correction_rules rows with safe change types (spelling, diacritic, terminology, grammar, punctuation; both texts <= 240 chars) are applied as exact replacements when the rule scope matches the submitted property and template type. Broad content rules stay reviewer/prompt material. See the dynamic_correction_rule entries for the currently accepted set.",
+      "title": "Accepted reviewer correction rules (bounded replacements)",
+      "description": "Accepted correction_rules rows with safe change types (spelling, diacritic, terminology, grammar, punctuation; both texts <= 240 chars) are applied when the rule scope matches the submitted property and template type. Spelling/diacritic learned rules that include tone marks match accent-insensitively while preserving word boundaries; other learned replacements remain exact. Broad content rules stay reviewer/prompt material. See the dynamic_correction_rule entries for the currently accepted set.",
       "implementation": {
         "file": "services/dashboard/lib/pre-ai-deterministic-rules.ts",
         "exportName": "applyAcceptedCorrectionRules"

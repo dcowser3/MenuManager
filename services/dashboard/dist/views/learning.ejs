@@ -490,6 +490,21 @@
                 if (value === 'beverage') return 'Beverage menus';
                 return 'All menus';
             };
+            const isManualSubmissionId = (value) => /^manual-submission-/.test(`${value || ''}`);
+            const createdFromLabel = (rule) => {
+                const submissionId = `${rule.submission_id || ''}`;
+                const menuName = rule.project_name || rule.restaurant_name || '';
+                if (submissionId.startsWith('proposal-')) {
+                    return { origin: 'Prompt proposal approval', menuName: '' };
+                }
+                if (rule.source === 'system') {
+                    return { origin: 'Detected pattern scan', menuName };
+                }
+                if (!submissionId || isManualSubmissionId(submissionId)) {
+                    return { origin: 'General add-rule area', menuName: '' };
+                }
+                return { origin: 'Menu correction page', menuName: menuName || submissionId };
+            };
         %>
 
         <!-- Manual Rule Capture -->
@@ -668,6 +683,7 @@
                         <th>Menu Scope</th>
                         <th>Source</th>
                         <th>Project / Location</th>
+                        <th>Created / From</th>
                         <th>Signals</th>
                         <th>Action</th>
                     </tr>
@@ -683,6 +699,14 @@
                         <td>
                             <div><%= rule.restaurant_name || '' %></div>
                             <div class="small"><%= rule.location || '' %><%= rule.is_location_specific ? '' : ' (global)' %></div>
+                        </td>
+                        <% const origin = createdFromLabel(rule); %>
+                        <td>
+                            <div><%= formatDashboardTime(rule.created_at) %></div>
+                            <div class="small"><%= origin.origin %></div>
+                            <% if (origin.menuName) { %>
+                                <div class="small"><%= origin.menuName %></div>
+                            <% } %>
                         </td>
                         <td>
                             <% if (rule.occurrences > 1) { %>
@@ -704,7 +728,7 @@
                     </tr>
                     <% if (rule.source === 'system') { %>
                         <tr class="examples-row" id="rule-examples-row-<%= rule.id %>" style="display:none;">
-                            <td colspan="8">
+                            <td colspan="9">
                                 <div class="examples-panel" id="rule-examples-<%= rule.id %>">
                                     <div class="small">Loading examples...</div>
                                 </div>
