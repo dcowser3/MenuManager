@@ -518,7 +518,7 @@ async function main() {
 
         // 9. Store the proposal.
         const dates = correctionRules.map((r) => Date.parse(r.created_at)).filter(Number.isFinite);
-        const proposalRow = {
+        let proposalRow = {
             cycle_id: cycleId,
             current_prompt: effective.prompt,
             proposed_prompt: validated.proposed_prompt,
@@ -528,6 +528,7 @@ async function main() {
             date_range_start: dates.length ? new Date(Math.min(...dates)).toISOString().slice(0, 10) : null,
             date_range_end: dates.length ? new Date(Math.max(...dates)).toISOString().slice(0, 10) : null,
             llm_analysis: validated.analysis,
+            llm_warnings: validated.warnings,
             llm_model: llmResult.model,
             status: 'pending',
             proposed_rules: validated.proposed_replacement_rules,
@@ -536,7 +537,13 @@ async function main() {
             eval_status: evalStatus,
             source: 'improvement_cycle',
         };
-        const { error: insertError } = await supabase.from('prompt_proposals').insert(proposalRow);
+        let { error: insertError } = await supabase.from('prompt_proposals').insert(proposalRow);
+        if (insertError && /llm_warnings/i.test(insertError.message || '')) {
+            console.warn(`prompt_proposals.llm_warnings is unavailable; storing proposal without validation notes. Apply supabase/migrations/20260626_add_prompt_proposal_llm_warnings.sql. (${insertError.message})`);
+            const { llm_warnings: _llmWarnings, ...fallbackProposalRow } = proposalRow;
+            proposalRow = fallbackProposalRow;
+            ({ error: insertError } = await supabase.from('prompt_proposals').insert(proposalRow));
+        }
         if (insertError) throw new Error(`Failed to store proposal: ${insertError.message}`);
 
         // 10. Mark corrections consumed.
@@ -551,6 +558,7 @@ async function main() {
 
         // 11. Artifacts + notification.
         await fsp.writeFile(path.join(artifactsDir, 'analysis.txt'), validated.analysis);
+        await fsp.writeFile(path.join(artifactsDir, 'warnings.json'), JSON.stringify(validated.warnings, null, 2));
         await fsp.writeFile(path.join(artifactsDir, 'code_recommendations.json'), JSON.stringify(validated.code_recommendations, null, 2));
         if (evalSummary) {
             await fsp.writeFile(path.join(artifactsDir, 'eval_summary.json'), JSON.stringify(evalSummary, null, 2));

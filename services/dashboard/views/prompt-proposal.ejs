@@ -102,6 +102,9 @@
             line-height: 1.6;
             white-space: pre-wrap;
         }
+        .notes-list { margin: 0; padding-left: 1.1rem; white-space: normal; }
+        .notes-list li { margin-bottom: .35rem; }
+        .notes-list li:last-child { margin-bottom: 0; }
         .btn {
             border: 1px solid var(--primary);
             background: var(--primary);
@@ -159,7 +162,7 @@
                         <div class="meta-value"><span class="badge <%= proposal.status %>"><%= proposal.status %></span></div>
                     </div>
                     <div class="meta-item">
-                        <div class="meta-label">Corrections Used</div>
+                        <div class="meta-label">Source Corrections</div>
                         <div class="meta-value"><%= proposal.correction_rule_count || 0 %></div>
                     </div>
                     <div class="meta-item">
@@ -200,6 +203,18 @@
             <% if (proposal.llm_analysis) { %>
                 <h3 class="section-title">LLM Analysis</h3>
                 <div class="analysis-box"><%= proposal.llm_analysis %></div>
+            <% } %>
+
+            <% const llmWarnings = Array.isArray(proposal.llm_warnings) ? proposal.llm_warnings : []; %>
+            <% if (llmWarnings.length) { %>
+                <h3 class="section-title">Validation Notes</h3>
+                <div class="analysis-box">
+                    <ul class="notes-list">
+                    <% llmWarnings.forEach((warning) => { %>
+                        <li><%= warning %></li>
+                    <% }) %>
+                    </ul>
+                </div>
             <% } %>
 
             <% const evalSummary = proposal.eval_summary || null; %>

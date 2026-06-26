@@ -26,6 +26,7 @@ const baseProposal = {
     llm_model: 'gpt-4o',
     created_at: '2026-06-12T09:15:00Z',
     llm_analysis: 'Added vegetables terminology rule.',
+    llm_warnings: [],
     prompt_diff: '- old line\n+ new line',
     current_prompt: 'CURRENT PROMPT',
     proposed_prompt: 'PROPOSED PROMPT',
@@ -73,6 +74,7 @@ describe('prompt-proposal view', () => {
     test('renders eval results, proposed rules with checkboxes, and code recommendations for a pending proposal', () => {
         const html = renderProposalView({ proposal: baseProposal });
 
+        expect(html).toContain('Source Corrections');
         expect(html).toContain('Eval Results');
         expect(html).toContain('84.00%');
         expect(html).toContain('5 / 22 / 0');
@@ -87,6 +89,21 @@ describe('prompt-proposal view', () => {
         expect(html).toContain('accepted_rule_indexes');
 
         expect(html).toContain('Improvement cycle');
+    });
+
+    test('renders LLM validation notes when output rules were dropped or guarded', () => {
+        const html = renderProposalView({
+            proposal: {
+                ...baseProposal,
+                llm_warnings: [
+                    'rule 4 dropped: "pepita" was mentioned in analysis but was not a valid replacement rule',
+                ],
+            },
+        });
+
+        expect(html).toContain('Validation Notes');
+        expect(html).toContain('rule 4 dropped');
+        expect(html).toContain('pepita');
     });
 
     test('renders the client-side diff scaffold (current/proposed textareas + diff containers)', () => {

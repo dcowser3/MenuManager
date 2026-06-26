@@ -2239,7 +2239,7 @@ const CRITICAL_SUPABASE_SCHEMA = {
     correction_rules: ['applies_to_menu_type', 'prompt_cycle_id', 'consumed_at', 'submission_ids'],
     submissions: ['form_attempt_id', 'approved_menu_content'],
     basic_ai_check_audits: ['menu_content_raw', 'submission_id'],
-    prompt_proposals: ['proposed_rules', 'eval_status', 'accepted_rules', 'source'],
+    prompt_proposals: ['proposed_rules', 'eval_status', 'accepted_rules', 'source', 'llm_warnings'],
 };
 async function verifyCriticalSupabaseSchema() {
     try {
