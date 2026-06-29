@@ -162,16 +162,19 @@
             margin-bottom: 0.35rem;
         }
 
-        .search-group input {
+        .search-group input,
+        .search-group select {
             width: 100%;
             padding: 0.8rem 0.9rem;
             border: 1px solid var(--color-border);
             background: var(--color-background);
             font-family: var(--font-body);
             font-size: 0.9rem;
+            color: var(--color-text);
         }
 
-        .search-group input:focus {
+        .search-group input:focus,
+        .search-group select:focus {
             outline: none;
             border-color: var(--color-secondary);
         }
@@ -334,7 +337,7 @@
         <div class="header-inner">
             <div>
                 <h1><%= tenant.name %></h1>
-                <p>Approved Menu Dashboard</p>
+                <p>Clean Approved Menu Lookup</p>
             </div>
             <div class="header-links">
                 <a href="/">Home</a>
@@ -351,29 +354,49 @@
 
         <div class="hero">
             <div>
-                <h2>Approved Menus</h2>
-                <p>Browse menus that have already been approved by Isabella and download the final Word document for operations, routing, or local handoff.</p>
+                <h2>Start From an Approved Menu</h2>
+                <p>Choose a restaurant and optional service period to find recent approved submissions, then download a clean Word document with redlines and highlights removed.</p>
             </div>
         </div>
 
         <div class="search-card">
             <form method="GET" action="/approved-menus" class="search-form">
                 <div class="search-group">
-                    <label for="q">Search approved menus</label>
-                    <input id="q" name="q" type="text" value="<%= searchQuery || '' %>" placeholder="Project name, property, file name, service period, submitter...">
+                    <label for="restaurant">Restaurant</label>
+                    <input id="restaurant" name="restaurant" type="text" value="<%= restaurantQuery || '' %>" placeholder="Restaurant or property name">
+                </div>
+                <div class="search-group">
+                    <label for="servicePeriod">Service period</label>
+                    <select id="servicePeriod" name="servicePeriod">
+                        <option value="" <%= !servicePeriodQuery ? 'selected' : '' %>>Any service period</option>
+                        <% ['Breakfast', 'Brunch', 'Lunch', 'Dinner', 'Happy Hour', 'All Day', 'Late Night'].forEach(function(period) { %>
+                            <option value="<%= period %>" <%= servicePeriodQuery && servicePeriodQuery.toLowerCase() === period.toLowerCase() ? 'selected' : '' %>><%= period %></option>
+                        <% }); %>
+                        <% if (servicePeriodQuery && !['breakfast', 'brunch', 'lunch', 'dinner', 'happy hour', 'all day', 'late night'].includes(servicePeriodQuery.toLowerCase())) { %>
+                            <option value="<%= servicePeriodQuery %>" selected><%= servicePeriodQuery %></option>
+                        <% } %>
+                    </select>
+                </div>
+                <div class="search-group">
+                    <label for="q">Optional keyword</label>
+                    <input id="q" name="q" type="text" value="<%= searchQuery || '' %>" placeholder="Menu name, file name, submitter...">
                 </div>
                 <button type="submit" class="btn">Search</button>
-                <% if (searchQuery) { %>
+                <% if (hasSearch) { %>
                     <a href="/approved-menus" class="btn btn-secondary">Clear</a>
                 <% } %>
             </form>
         </div>
 
         <div class="results-meta">
-            <%= approvedMenus.length %> approved <%= approvedMenus.length === 1 ? 'menu' : 'menus' %><% if (searchQuery) { %> matching "<%= searchQuery %>"<% } %>
+            <% if (hasSearch) { %>
+                <%= approvedMenus.length %> recent approved <%= approvedMenus.length === 1 ? 'submission' : 'submissions' %><% if (restaurantQuery) { %> for "<%= restaurantQuery %>"<% } %><% if (servicePeriodQuery) { %> during "<%= servicePeriodQuery %>"<% } %>
+            <% } else { %>
+                Search by restaurant to show recent approved submissions
+            <% } %>
         </div>
 
-        <% if (approvedMenus.length > 0) { %>
+        <% if (hasSearch && approvedMenus.length > 0) { %>
             <div class="menu-list">
                 <% approvedMenus.forEach(function(menu) { %>
                     <div class="menu-card">
@@ -389,15 +412,15 @@
                         </div>
                         <div class="menu-actions">
                             <span class="badge"><%= menu.status === 'approved_override' ? 'Approved Override' : 'Approved' %></span>
-                            <a href="/download/approved/<%= menu.id %>" class="btn">Download Word Doc</a>
+                            <a href="/download/approved-clean/<%= menu.id %>" class="btn">Download Clean Word Doc</a>
                         </div>
                     </div>
                 <% }); %>
             </div>
         <% } else { %>
             <div class="empty-state">
-                <h3>No approved menus found</h3>
-                <p><%= searchQuery ? 'Try a different search term or clear the filter.' : 'Approved menus will appear here after Isabella finalizes them.' %></p>
+                <h3><%= hasSearch ? 'No approved menus found' : 'Find the latest approved starting point' %></h3>
+                <p><%= hasSearch ? 'Try a different restaurant, service period, or keyword.' : 'Pick a restaurant first, then narrow by lunch, dinner, brunch, or another service period if needed.' %></p>
             </div>
         <% } %>
     </div>

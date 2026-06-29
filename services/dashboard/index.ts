@@ -657,18 +657,27 @@ function escapeHtml(value: string): string {
 }
 
 async function getPropertyCatalogFromDb(): Promise<PropertyCatalogRecord[]> {
+    const fallbackCatalog = buildFallbackPropertyCatalog();
+    const fallbackByName = new Map(fallbackCatalog.map((item) => [item.name.toLowerCase(), item]));
     try {
         const dbResponse = await internalApi.get(`${DB_SERVICE_URL}/properties`, { timeout: 3000 });
         const raw = Array.isArray(dbResponse?.data?.catalog) ? dbResponse.data.catalog : [];
         const catalog = raw
-            .map((item: any) => normalizePropertyCatalogRecord(item))
+            .map((item: any) => {
+                const normalized = normalizePropertyCatalogRecord(item);
+                const fallback = fallbackByName.get(normalized.name.toLowerCase());
+                if ((!normalized.menu_size_defaults || normalized.menu_size_defaults.length === 0) && fallback?.menu_size_defaults?.length) {
+                    return { ...normalized, menu_size_defaults: fallback.menu_size_defaults };
+                }
+                return normalized;
+            })
             .filter((item: PropertyCatalogRecord) => !!item.name);
         if (catalog.length) return catalog;
         console.warn('DB property catalog was empty; using dashboard fallback catalog');
     } catch (error: any) {
         console.warn('Failed to load DB property catalog; using dashboard fallback catalog:', error?.message || error);
     }
-    return buildFallbackPropertyCatalog();
+    return fallbackCatalog;
 }
 
 function resolveCityCountryFromCatalog(property: string, catalog: PropertyCatalogRecord[]): string {
@@ -930,6 +939,35 @@ export async function extractUnapprovedFromDocx(filePath: string): Promise<{
     };
 }
 
+async function createCleanApprovedDocx(sourcePath: string, submissionId: string): Promise<{ filePath: string; tempDir: string }> {
+    const docxRedlinerDir = getDocxRedlinerDir();
+    const venvPython = path.join(docxRedlinerDir, 'venv', 'bin', 'python');
+    const cleanScript = path.join(docxRedlinerDir, 'create_clean_approved_docx.py');
+    let pythonCmd = 'python3';
+
+    try {
+        await fs.access(venvPython);
+        pythonCmd = `"${venvPython}"`;
+    } catch {
+        // use system python
+    }
+
+    const tempDir = await fs.mkdtemp(path.join(getRepoRoot(), 'tmp', 'approved-clean-'));
+    const safeSubmissionId = `${submissionId || 'approved-menu'}`.replace(/[^a-zA-Z0-9._-]/g, '_');
+    const outputPath = path.join(tempDir, `${safeSubmissionId}-cleaned.docx`);
+    const command = `${pythonCmd} "${cleanScript}" "${sourcePath}" "${outputPath}"`;
+    await execAsync(command, { timeout: 120000, maxBuffer: 2 * 1024 * 1024 });
+
+    return { filePath: outputPath, tempDir };
+}
+
+function buildCleanApprovedDownloadName(fileName: string): string {
+    const sanitized = sanitizeStoredFileName(fileName || 'approved-menu.docx', 'approved-menu.docx');
+    const extension = path.extname(sanitized);
+    const baseName = extension ? sanitized.slice(0, -extension.length) : sanitized;
+    return `${baseName || 'approved-menu'} - cleaned${extension || '.docx'}`;
+}
+
 type CleanDocxUploadMode = 'baseline' | 'new_menu';
 
 async function handleCleanDocxMenuUpload(
@@ -1087,12 +1125,20 @@ app.get('/design-approval', (req, res) => {
 app.get('/approved-menus', async (req, res) => {
     try {
         const q = sanitizePlainTextInput(req.query.q, { maxLength: 120 }).trim();
-        const approvedMenus = await listApprovedMenus(getRepoRoot(), q, 150);
+        const restaurant = sanitizePlainTextInput(req.query.restaurant, { maxLength: 120 }).trim();
+        const servicePeriod = sanitizePlainTextInput(req.query.servicePeriod, { maxLength: 80 }).trim();
+        const hasSearch = !!(q || restaurant || servicePeriod);
+        const approvedMenus = hasSearch
+            ? await listApprovedMenus(getRepoRoot(), { query: q, restaurant, servicePeriod }, 150)
+            : [];
 
         res.render('approved-menus', {
             title: 'Approved Menus',
             approvedMenus,
+            hasSearch,
             searchQuery: q,
+            restaurantQuery: restaurant,
+            servicePeriodQuery: servicePeriod,
         });
     } catch (error: any) {
         console.error('Error loading approved menus:', error.response?.data || error.message);
@@ -1422,6 +1468,59 @@ app.get('/download/approved/:submissionId', async (req, res) => {
         res.download(absolutePath, downloadName);
     } catch (error) {
         console.error('Error downloading approved file:', error);
+        res.status(500).send('Error downloading file');
+    }
+});
+
+app.get('/download/approved-clean/:submissionId', async (req, res) => {
+    let cleanupDir = '';
+    try {
+        const { submissionId } = req.params;
+        const approvedMenu = await getApprovedMenuDownload(getRepoRoot(), submissionId);
+        if (!approvedMenu) {
+            return res.status(404).send('Approved file not found');
+        }
+        const candidatePaths = [approvedMenu.storagePath, approvedMenu.finalPath].filter(Boolean);
+        let absolutePath = '';
+
+        for (const candidatePath of candidatePaths) {
+            try {
+                const resolvedPath = resolveDashboardStoredPath(candidatePath, 'Approved submission', ALLOWED_DOCX_EXTENSIONS);
+                await fs.access(resolvedPath);
+                absolutePath = resolvedPath;
+                break;
+            } catch {
+                // Try the next candidate path.
+            }
+        }
+
+        if (!absolutePath) {
+            return res.status(404).send('Approved file not found');
+        }
+
+        const cleaned = await createCleanApprovedDocx(absolutePath, approvedMenu.id);
+        cleanupDir = cleaned.tempDir;
+        const downloadName = buildCleanApprovedDownloadName(
+            approvedMenu.approvedFileName || approvedMenu.filename || path.basename(absolutePath)
+        );
+
+        console.log(`Downloading cleaned approved file from: ${cleaned.filePath}`);
+        return res.download(cleaned.filePath, downloadName, (downloadError) => {
+            fs.rm(cleanupDir, { recursive: true, force: true }).catch((cleanupError) => {
+                console.warn('Failed to remove cleaned approved temp file:', cleanupError.message);
+            });
+            if (downloadError) {
+                console.error('Error sending cleaned approved file:', downloadError);
+                if (!res.headersSent) {
+                    res.status(500).send('Error downloading file');
+                }
+            }
+        });
+    } catch (error) {
+        if (cleanupDir) {
+            fs.rm(cleanupDir, { recursive: true, force: true }).catch(() => undefined);
+        }
+        console.error('Error downloading cleaned approved file:', error);
         res.status(500).send('Error downloading file');
     }
 });

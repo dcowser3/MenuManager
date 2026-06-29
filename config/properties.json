@@ -9,7 +9,21 @@
     "name": "Anchor & Brine - Marriott Tampa Water Street - Tampa"
   },
   {
-    "name": "Aqimero - Ritz-Carlton - Philadelphia"
+    "name": "Aqimero - Ritz-Carlton - Philadelphia",
+    "menu_size_defaults": [
+      { "menu_type": "Beverage", "width": "4.25", "height": "11", "folded": "no", "crop_marks": "no", "bleed_marks": "no" },
+      { "menu_type": "Boozy Tea", "width": "4.25", "height": "11", "folded": "no", "crop_marks": "no", "bleed_marks": "no" },
+      { "menu_type": "Breakfast", "width": "8.5", "height": "11", "folded": "no", "crop_marks": "no", "bleed_marks": "no" },
+      { "menu_type": "Brunch", "width": "8.5", "height": "11", "folded": "no", "crop_marks": "no", "bleed_marks": "no" },
+      { "menu_type": "Dessert", "width": "5", "height": "7", "folded": "no", "crop_marks": "no", "bleed_marks": "no" },
+      { "menu_type": "Dining Room Beverage", "width": "5.5", "height": "8.5", "folded": "no", "crop_marks": "no", "bleed_marks": "no" },
+      { "menu_type": "Dinner", "width": "8.5", "height": "14", "folded": "no", "crop_marks": "no", "bleed_marks": "no" },
+      { "menu_type": "Holidays", "width": "8.5", "height": "11", "folded": "no", "crop_marks": "no", "bleed_marks": "no" },
+      { "menu_type": "Late Night", "width": "4.25", "height": "11", "folded": "no", "crop_marks": "no", "bleed_marks": "no" },
+      { "menu_type": "Lunch", "width": "8.5", "height": "11", "folded": "no", "crop_marks": "no", "bleed_marks": "no" },
+      { "menu_type": "Sunday Dinner", "width": "8.5", "height": "11", "folded": "no", "crop_marks": "no", "bleed_marks": "no" },
+      { "menu_type": "Wine", "width": "4.25", "height": "11", "folded": "no", "crop_marks": "no", "bleed_marks": "no" }
+    ]
   },
   {
     "name": "Bayou & Bottle - Four Seasons - Houston"
@@ -72,7 +86,18 @@
     "name": "Maya - Le Royal Meridien - Dubai"
   },
   {
-    "name": "Maya - New York"
+    "name": "Maya - New York",
+    "menu_size_defaults": [
+      { "menu_type": "Brunch", "width": "14", "height": "8.5", "folded": "no", "crop_marks": "no", "bleed_marks": "no" },
+      { "menu_type": "Dessert", "width": "5.5", "height": "8.5", "folded": "no", "crop_marks": "no", "bleed_marks": "no" },
+      { "menu_type": "Dinner", "width": "14", "height": "8.5", "folded": "no", "crop_marks": "no", "bleed_marks": "no" },
+      { "menu_type": "Happy Hour", "width": "5.5", "height": "8.5", "folded": "no", "crop_marks": "no", "bleed_marks": "no" },
+      { "menu_type": "Holidays", "width": "5", "height": "7", "folded": "no", "crop_marks": "no", "bleed_marks": "no" },
+      { "menu_type": "Lunch", "width": "14", "height": "8.5", "folded": "yes", "crop_marks": "no", "bleed_marks": "no" },
+      { "menu_type": "Menu Board", "width": "20", "height": "28", "folded": "no", "crop_marks": "no", "bleed_marks": "no" },
+      { "menu_type": "Restaurant Week", "width": "5", "height": "7", "folded": "no", "crop_marks": "no", "bleed_marks": "no" },
+      { "menu_type": "Tequila", "width": "8.5", "height": "11", "folded": "no", "crop_marks": "no", "bleed_marks": "no" }
+    ]
   },
   {
     "name": "Raya - Ritz-Carlton Laguna Niguel - Laguna Niguel"
@@ -93,10 +118,34 @@
     "name": "Taco Pegaso - Austin"
   },
   {
-    "name": "Tamayo - Denver"
+    "name": "Tamayo - Denver",
+    "menu_size_defaults": [
+      { "menu_type": "Afternoon Brunch", "width": "5.5", "height": "8.5", "folded": "no", "crop_marks": "no", "bleed_marks": "no" },
+      { "menu_type": "Beverage", "width": "11", "height": "8.5", "folded": "yes", "crop_marks": "no", "bleed_marks": "no" },
+      { "menu_type": "Brunch", "width": "8.5", "height": "14", "folded": "no", "crop_marks": "no", "bleed_marks": "no" },
+      { "menu_type": "Dessert", "width": "5.5", "height": "8.5", "folded": "no", "crop_marks": "no", "bleed_marks": "no" },
+      { "menu_type": "Dinner", "width": "8.5", "height": "14", "folded": "no", "crop_marks": "no", "bleed_marks": "no" },
+      { "menu_type": "Happy Hour", "width": "5.5", "height": "8.5", "folded": "no", "crop_marks": "no", "bleed_marks": "no" },
+      { "menu_type": "Holidays", "width": "5.5", "height": "8.5", "folded": "no", "crop_marks": "no", "bleed_marks": "no" },
+      { "menu_type": "Kids", "width": "11", "height": "8.5", "folded": "no", "crop_marks": "no", "bleed_marks": "no" },
+      { "menu_type": "Lunch", "width": "8.5", "height": "14", "folded": "no", "crop_marks": "no", "bleed_marks": "no" },
+      { "menu_type": "Menu Box", "width": "20", "height": "32", "folded": "no", "crop_marks": "no", "bleed_marks": "no" }
+    ]
   },
   {
-    "name": "tán - New York"
+    "name": "tán - New York",
+    "menu_size_defaults": [
+      { "menu_type": "Beverage", "width": "11", "height": "8.5", "folded": "yes", "crop_marks": "no", "bleed_marks": "no" },
+      { "menu_type": "Brunch", "width": "8.5", "height": "14", "folded": "no", "crop_marks": "no", "bleed_marks": "no" },
+      { "menu_type": "Brunch Beverage", "width": "11", "height": "8.5", "folded": "yes", "crop_marks": "no", "bleed_marks": "no" },
+      { "menu_type": "Dessert", "width": "5", "height": "7", "folded": "no", "crop_marks": "no", "bleed_marks": "no" },
+      { "menu_type": "Dinner", "width": "8.5", "height": "14", "folded": "no", "crop_marks": "no", "bleed_marks": "no" },
+      { "menu_type": "Happy Hour", "width": "5", "height": "7", "folded": "no", "crop_marks": "no", "bleed_marks": "no" },
+      { "menu_type": "Holidays", "width": "5", "height": "7", "folded": "no", "crop_marks": "no", "bleed_marks": "no" },
+      { "menu_type": "Kids", "width": "11", "height": "8.5", "folded": "no", "crop_marks": "no", "bleed_marks": "no" },
+      { "menu_type": "Lunch", "width": "8.5", "height": "14", "folded": "no", "crop_marks": "no", "bleed_marks": "no" },
+      { "menu_type": "Menu Box", "width": "10", "height": "30", "folded": "no", "crop_marks": "no", "bleed_marks": "no" }
+    ]
   },
   {
     "name": "Toro - Belgrade"
@@ -147,7 +196,17 @@
     "name": "Toro Toro - InterContinental - Miami"
   },
   {
-    "name": "Venga Venga - Snowmass"
+    "name": "Venga Venga - Snowmass",
+    "menu_size_defaults": [
+      { "menu_type": "All Day", "width": "8.5", "height": "11", "folded": "no", "crop_marks": "no", "bleed_marks": "no" },
+      { "menu_type": "Beverage", "width": "4.25", "height": "14", "folded": "no", "crop_marks": "no", "bleed_marks": "no" },
+      { "menu_type": "Brunch", "width": "8.5", "height": "11", "folded": "no", "crop_marks": "no", "bleed_marks": "no" },
+      { "menu_type": "Dessert", "width": "4", "height": "6", "folded": "no", "crop_marks": "no", "bleed_marks": "no" },
+      { "menu_type": "Happy Hour", "width": "4.25", "height": "11", "folded": "no", "crop_marks": "no", "bleed_marks": "no" },
+      { "menu_type": "Holidays", "width": "8.5", "height": "11", "folded": "no", "crop_marks": "no", "bleed_marks": "no" },
+      { "menu_type": "Kids", "width": "14", "height": "8.5", "folded": "no", "crop_marks": "no", "bleed_marks": "no" },
+      { "menu_type": "Menu Box", "width": "41", "height": "29", "folded": "no", "crop_marks": "no", "bleed_marks": "no" }
+    ]
   },
   {
     "name": "Zengo - Kempinski - Doha"

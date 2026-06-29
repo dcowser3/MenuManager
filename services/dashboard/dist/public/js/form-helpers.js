@@ -187,6 +187,83 @@
         }).map((entry) => entry.name);
     }
 
+    function normalizeMenuSizeLookupKey(value) {
+        const normalized = normalizeSearchText(value);
+        if (!normalized) return '';
+        return normalized
+            .replace(/\bmenus?\b/g, ' ')
+            .replace(/\bevents?\b/g, ' ')
+            .replace(/\band\b/g, ' ')
+            .replace(/\bholiday\b/g, 'holidays')
+            .replace(/\s+/g, ' ')
+            .trim();
+    }
+
+    function normalizeMenuSizeBoolean(value) {
+        const normalized = String(value || '').trim().toLowerCase();
+        if (['y', 'yes', 'true', '1'].includes(normalized)) return 'yes';
+        if (['n', 'no', 'false', '0'].includes(normalized)) return 'no';
+        return '';
+    }
+
+    function compactMenuSizeDefault(row) {
+        if (!row || typeof row !== 'object') return null;
+        const menuType = String(row.menu_type || row.menuType || '').trim();
+        const width = String(row.width || '').trim();
+        const height = String(row.height || '').trim();
+        if (!menuType || !width || !height) return null;
+        return {
+            menuType,
+            width,
+            height,
+            folded: normalizeMenuSizeBoolean(row.folded),
+            cropMarks: normalizeMenuSizeBoolean(row.crop_marks || row.cropMarks),
+            bleedMarks: normalizeMenuSizeBoolean(row.bleed_marks || row.bleedMarks),
+        };
+    }
+
+    function findMenuSizeDefault(defaults, selectors) {
+        const rows = Array.isArray(defaults)
+            ? defaults.map(compactMenuSizeDefault).filter(Boolean)
+            : [];
+        if (!rows.length) return null;
+
+        const serviceLabel = String((selectors && (selectors.serviceLabel || selectors.servicePeriod)) || '').trim();
+        const templateValue = String((selectors && selectors.templateType) || '').trim();
+        const templateLabel = String((selectors && selectors.templateLabel) || '').trim();
+        const templateIsBeverage = /beverage/i.test(`${templateValue} ${templateLabel}`);
+        const templateIsFood = /food/i.test(`${templateValue} ${templateLabel}`) && !templateIsBeverage;
+
+        const candidates = [];
+        if (serviceLabel && templateIsBeverage) candidates.push(`${serviceLabel} beverage`);
+        if (serviceLabel) candidates.push(serviceLabel);
+        if (templateIsBeverage) candidates.push('beverage');
+        if (templateIsFood) candidates.push('food');
+
+        const keys = candidates
+            .map(normalizeMenuSizeLookupKey)
+            .filter(Boolean);
+        const seen = new Set();
+        const uniqueKeys = keys.filter((key) => {
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+        });
+
+        for (const key of uniqueKeys) {
+            const exact = rows.find((row) => normalizeMenuSizeLookupKey(row.menuType) === key);
+            if (exact) return exact;
+        }
+        for (const key of uniqueKeys) {
+            const contained = rows.find((row) => {
+                const rowKey = normalizeMenuSizeLookupKey(row.menuType);
+                return rowKey && (rowKey.includes(key) || key.includes(rowKey));
+            });
+            if (contained) return contained;
+        }
+        return null;
+    }
+
     function shouldBlockSubmitForStaleAiCheck(requiresAiRerun, completedCheckCount, unlockAfterCount) {
         if (!requiresAiRerun) return false;
         const completed = Number.parseInt(String(completedCheckCount || 0), 10) || 0;
@@ -330,6 +407,7 @@
         parseExtractedSize,
         searchTextIncludes,
         findSearchMatchRange,
+        findMenuSizeDefault,
         tokenizePropertyHint,
         findCatalogMatchesFromHints,
         shouldBlockSubmitForStaleAiCheck,

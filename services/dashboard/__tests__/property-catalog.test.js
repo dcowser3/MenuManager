@@ -61,4 +61,25 @@ describe('dashboard property catalog fallback', () => {
             sharepoint_service_folders: [],
         }));
     });
+
+    test('preserves normalized menu size defaults from the property seed', () => {
+        expect(normalizePropertyCatalogRecord({
+            name: 'Test - City',
+            menu_size_defaults: [
+                { menu_type: 'Beverage', width: 11, height: 8.5, folded: 'Y', crop_marks: 'N', bleed_marks: 'N' },
+                { menu_type: '', width: '8.5', height: '11', folded: 'N', crop_marks: 'N', bleed_marks: 'N' },
+            ],
+        })).toEqual(expect.objectContaining({
+            menu_size_defaults: [
+                {
+                    menu_type: 'Beverage',
+                    width: '11',
+                    height: '8.5',
+                    folded: 'yes',
+                    crop_marks: 'no',
+                    bleed_marks: 'no',
+                },
+            ],
+        }));
+    });
 });

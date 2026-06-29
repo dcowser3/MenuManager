@@ -2815,6 +2815,7 @@
             propertyField.addEventListener('change', () => {
                 clearPropertyError();
                 updateServicePeriodOptions(propertyField.value);
+                applyCurrentMenuSizeDefaults();
                 baselineFreshnessOverrideKey = '';
                 scheduleBaselineFreshnessCheck();
             });
@@ -2822,6 +2823,7 @@
             const servicePeriodField = document.getElementById('servicePeriod');
             if (servicePeriodField) {
                 servicePeriodField.addEventListener('change', () => {
+                    applyCurrentMenuSizeDefaults();
                     baselineFreshnessOverrideKey = '';
                     scheduleBaselineFreshnessCheck();
                 });
@@ -2843,6 +2845,7 @@
             if (templateTypeSelect) {
                 templateTypeSelect.addEventListener('change', updateApprovalHint);
                 templateTypeSelect.addEventListener('change', updateRunCheckButtonLabel);
+                templateTypeSelect.addEventListener('change', applyCurrentMenuSizeDefaults);
                 // Initialize on load
                 updateApprovalHint();
                 updateRunCheckButtonLabel();
@@ -4432,6 +4435,7 @@
         let propertyCatalogData = Array.isArray(initialPropertyOptions) ? initialPropertyOptions.slice() : [];
         let propertyCatalogMeta = [];
         let propertyCatalogLookup = {};
+        let suppressMenuSizeDefaults = false;
         let projectSuggestResults = [];
         let projectSuggestHighlightIndex = -1;
         let propertySuggestResults = [];
@@ -4453,6 +4457,7 @@
                         name: `${item?.name || ''}`.trim(),
                         hotel: `${item?.hotel || ''}`.trim(),
                         cityCountry: `${item?.city_country || ''}`.trim(),
+                        menuSizeDefaults: Array.isArray(item?.menu_size_defaults) ? item.menu_size_defaults : [],
                         sharepointServiceFolders: Array.isArray(item?.sharepoint_service_folders)
                             ? item.sharepoint_service_folders.map((folder) => `${folder || ''}`.trim()).filter(Boolean)
                             : []
@@ -4540,6 +4545,7 @@
             }
 
             updateServicePeriodOptions(document.getElementById('property')?.value || '', document.getElementById('servicePeriod')?.value || '');
+            applyCurrentMenuSizeDefaults();
         }
 
         async function loadRecentProjects() {
@@ -4633,7 +4639,47 @@
             }
 
             // Dispatch change event on templateType to update approval hints
+            suppressMenuSizeDefaults = true;
             document.getElementById('templateType').dispatchEvent(new Event('change'));
+            suppressMenuSizeDefaults = false;
+        }
+
+        function getSelectedOptionText(fieldId) {
+            const select = document.getElementById(fieldId);
+            if (!select || select.selectedIndex < 0) return '';
+            return select.options[select.selectedIndex]?.textContent || '';
+        }
+
+        function applyCurrentMenuSizeDefaults() {
+            if (suppressMenuSizeDefaults) return;
+            const propertyName = document.getElementById('property')?.value || '';
+            const propertyConfig = getPropertyCatalogEntry(propertyName);
+            if (!propertyConfig || !Array.isArray(propertyConfig.menuSizeDefaults) || !propertyConfig.menuSizeDefaults.length) return;
+
+            const match = window.formHelpers.findMenuSizeDefault(propertyConfig.menuSizeDefaults, {
+                servicePeriod: document.getElementById('servicePeriod')?.value || '',
+                serviceLabel: getSelectedOptionText('servicePeriod'),
+                templateType: document.getElementById('templateType')?.value || '',
+                templateLabel: getSelectedOptionText('templateType'),
+            });
+            if (!match) return;
+
+            setSelectValue('assetType', 'PRINT');
+            toggleAssetFields();
+            document.getElementById('widthPrint').value = match.width;
+            document.getElementById('heightPrint').value = match.height;
+            setSelectValue('folded', match.folded);
+            setSelectValue('cropMarks', match.cropMarks);
+            setSelectValue('bleedMarks', match.bleedMarks);
+            setSelectValue('printRegion', 'US');
+            document.getElementById('printSize').value = '';
+            const width = Number.parseFloat(match.width);
+            const height = Number.parseFloat(match.height);
+            if (Number.isFinite(width) && Number.isFinite(height)) {
+                setSelectValue('orientation', width > height ? 'Landscape' : 'Portrait');
+            }
+            togglePrintRegionFields();
+            syncProjectDetailsCardErrorState();
         }
 
         function onProjectNameInput(value) {
@@ -4756,6 +4802,7 @@
             document.getElementById('propertyDropdown').classList.remove('show');
             propertySuggestHighlightIndex = -1;
             updateServicePeriodOptions(selected);
+            applyCurrentMenuSizeDefaults();
             baselineFreshnessOverrideKey = '';
             scheduleBaselineFreshnessCheck();
         }

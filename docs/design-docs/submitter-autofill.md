@@ -37,6 +37,7 @@ Available on `/form` and learning rule workflows.
 - DOCX project-detail extraction supports newer templates that split property identity across `OUTLET NAME`, `HOTEL NAME`, and `CITY / COUNTRY`. The dashboard resolves those hints to a single canonical property when possible, and otherwise leaves the field blank without showing an extraction warning so the submitter can choose the property from the dropdown.
 - DOCX date extraction only fills Date Needed when the upload provides a valid date that satisfies turnaround rules. Invalid or too-soon dates keep the automatically calculated date without showing an extraction warning.
 - The dashboard carries a baked-in canonical fallback catalog for form rendering and `/api/properties`, so search and DOCX property matching still work if the DB property endpoint is temporarily unavailable or empty. DB metadata remains preferred when available. The fallback stays aligned with the DB default catalog for active selectable properties, including separate dLeña Houston and Washington, D.C. entries.
+- Property seed records may define `menu_size_defaults` rows. When the selected property plus service/template type matches one of those rows, both form versions set Asset Type to Print, fill print width/height, folded, crop marks, bleed marks, US print region, and derive orientation from the dimensions. Copying a previous submission keeps the copied dimensions instead of applying these defaults.
 
 ## Architecture
 

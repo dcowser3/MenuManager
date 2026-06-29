@@ -263,6 +263,40 @@ describe('dashboard form modification source chooser', () => {
         });
     });
 
+    test('applies property menu-size defaults in both form views', () => {
+        ['form.ejs', 'form-legacy.ejs'].forEach((viewName) => {
+            const template = readView(viewName);
+
+            expect(template).toContain('menuSizeDefaults: Array.isArray(item?.menu_size_defaults) ? item.menu_size_defaults : []');
+            expect(template).toContain('function applyCurrentMenuSizeDefaults()');
+            expect(template).toContain('window.formHelpers.findMenuSizeDefault(propertyConfig.menuSizeDefaults');
+            expect(template).toContain("setSelectValue('assetType', 'PRINT');");
+            expect(template).toContain("document.getElementById('widthPrint').value = match.width;");
+            expect(template).toContain("document.getElementById('heightPrint').value = match.height;");
+            expect(template).toContain("setSelectValue('folded', match.folded);");
+            expect(template).toContain("setSelectValue('cropMarks', match.cropMarks);");
+            expect(template).toContain("setSelectValue('bleedMarks', match.bleedMarks);");
+            expect(template).toContain("setSelectValue('printRegion', 'US');");
+            expect(template).toContain("setSelectValue('orientation', width > height ? 'Landscape' : 'Portrait');");
+            expect(template).toContain("templateTypeSelect.addEventListener('change', applyCurrentMenuSizeDefaults);");
+        });
+    });
+
+    test('does not let menu-size defaults overwrite copied project dimensions', () => {
+        ['form.ejs', 'form-legacy.ejs'].forEach((viewName) => {
+            const template = readView(viewName);
+            const prefillStart = template.indexOf('function applyProjectPrefill(p)');
+            const prefillEnd = template.indexOf('function getSelectedOptionText', prefillStart);
+            const prefillBlock = template.slice(prefillStart, prefillEnd);
+
+            expect(template).toContain('let suppressMenuSizeDefaults = false;');
+            expect(prefillBlock).toContain('suppressMenuSizeDefaults = true;');
+            expect(prefillBlock).toContain("document.getElementById('templateType').dispatchEvent(new Event('change'));");
+            expect(prefillBlock).toContain('suppressMenuSizeDefaults = false;');
+            expect(template).toContain('if (suppressMenuSizeDefaults) return;');
+        });
+    });
+
     test('excludes imported deletions from uploaded-unapproved AI review text', () => {
         const template = fs.readFileSync(
             path.join(__dirname, '..', 'views', 'form.ejs'),

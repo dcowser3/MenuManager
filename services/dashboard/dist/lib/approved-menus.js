@@ -59,6 +59,24 @@ function matchesApprovedSearch(row, query) {
         .toLowerCase();
     return haystack.includes(query);
 }
+function matchesRestaurant(row, restaurant) {
+    if (!restaurant)
+        return true;
+    const haystack = [
+        row.property,
+        row.project_name,
+        row.filename,
+    ]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase();
+    return haystack.includes(restaurant);
+}
+function matchesServicePeriod(row, servicePeriod) {
+    if (!servicePeriod)
+        return true;
+    return `${row.service_period || ''}`.trim().toLowerCase().includes(servicePeriod);
+}
 function buildApprovedMenuList(sourceRows, approvedAssetRows) {
     const approvedAssetBySubmission = new Map();
     for (const asset of approvedAssetRows) {
@@ -85,8 +103,13 @@ function buildApprovedMenuList(sourceRows, approvedAssetRows) {
         };
     });
 }
-async function listApprovedMenus(repoRoot, query = '', limit = 100) {
-    const normalizedQuery = `${query || ''}`.trim().toLowerCase();
+async function listApprovedMenus(repoRoot, filtersOrQuery = '', limit = 100) {
+    const filters = typeof filtersOrQuery === 'string'
+        ? { query: filtersOrQuery }
+        : filtersOrQuery || {};
+    const normalizedQuery = `${filters.query || ''}`.trim().toLowerCase();
+    const normalizedRestaurant = `${filters.restaurant || ''}`.trim().toLowerCase();
+    const normalizedServicePeriod = `${filters.servicePeriod || ''}`.trim().toLowerCase();
     const boundedLimit = Math.min(Math.max(limit, 1), 200);
     let sourceRows = [];
     let approvedAssetRows = [];
@@ -100,15 +123,30 @@ async function listApprovedMenus(repoRoot, query = '', limit = 100) {
             .order('reviewed_at', { ascending: false })
             .order('updated_at', { ascending: false })
             .limit(boundedLimit);
+        const prefilterTerms = [];
         if (normalizedQuery) {
             const like = `%${normalizedQuery}%`;
-            submissionsQuery = submissionsQuery.or(`project_name.ilike.${like},property.ilike.${like},filename.ilike.${like},submitter_name.ilike.${like},service_period.ilike.${like}`);
+            prefilterTerms.push(`project_name.ilike.${like}`, `property.ilike.${like}`, `filename.ilike.${like}`, `submitter_name.ilike.${like}`, `service_period.ilike.${like}`);
+        }
+        if (normalizedRestaurant) {
+            const like = `%${normalizedRestaurant}%`;
+            prefilterTerms.push(`property.ilike.${like}`, `project_name.ilike.${like}`, `filename.ilike.${like}`);
+        }
+        if (prefilterTerms.length > 0) {
+            submissionsQuery = submissionsQuery.or(prefilterTerms.join(','));
+        }
+        if (normalizedServicePeriod) {
+            submissionsQuery = submissionsQuery.ilike('service_period', `%${normalizedServicePeriod}%`);
         }
         const { data, error } = await submissionsQuery;
         if (error) {
             throw new Error(error.message);
         }
-        sourceRows = (data || []).filter((row) => !row.source || row.source === 'form');
+        sourceRows = (data || [])
+            .filter((row) => !row.source || row.source === 'form')
+            .filter((row) => matchesApprovedSearch(row, normalizedQuery))
+            .filter((row) => matchesRestaurant(row, normalizedRestaurant))
+            .filter((row) => matchesServicePeriod(row, normalizedServicePeriod));
         const submissionIds = sourceRows
             .map((row) => `${row.id || row.legacy_id || ''}`.trim())
             .filter(Boolean);
@@ -135,6 +173,8 @@ async function listApprovedMenus(repoRoot, query = '', limit = 100) {
             .filter((row) => !!row.final_path)
             .filter((row) => !row.source || row.source === 'form')
             .filter((row) => matchesApprovedSearch(row, normalizedQuery))
+            .filter((row) => matchesRestaurant(row, normalizedRestaurant))
+            .filter((row) => matchesServicePeriod(row, normalizedServicePeriod))
             .sort((a, b) => new Date(`${b.reviewed_at || b.updated_at || ''}`).getTime() - new Date(`${a.reviewed_at || a.updated_at || ''}`).getTime())
             .slice(0, boundedLimit);
         const assets = JSON.parse(await fs_1.promises.readFile(path.join(dbDir, 'assets.json'), 'utf-8'));

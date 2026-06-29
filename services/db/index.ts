@@ -50,12 +50,22 @@ type PropertyCatalogRecord = {
     city_country: string;
     hotel?: string;
     is_active: boolean;
+    menu_size_defaults?: MenuSizeDefaultRecord[];
     sharepoint_site_url?: string;
     sharepoint_library_name?: string;
     sharepoint_drive_id?: string;
     sharepoint_base_folder_path?: string;
     sharepoint_service_folders?: string[];
     sharepoint_last_synced_at?: string;
+};
+
+type MenuSizeDefaultRecord = {
+    menu_type: string;
+    width: string;
+    height: string;
+    folded: 'yes' | 'no' | '';
+    crop_marks: 'yes' | 'no' | '';
+    bleed_marks: 'yes' | 'no' | '';
 };
 
 type CorrectionRuleRecord = {
@@ -307,6 +317,27 @@ function normalizeServiceFolders(input: any): string[] {
         });
 }
 
+function normalizeMenuSizeBoolean(value: any): 'yes' | 'no' | '' {
+    const normalized = `${value || ''}`.trim().toLowerCase();
+    if (['y', 'yes', 'true', '1'].includes(normalized)) return 'yes';
+    if (['n', 'no', 'false', '0'].includes(normalized)) return 'no';
+    return '';
+}
+
+function normalizeMenuSizeDefaults(input: any): MenuSizeDefaultRecord[] {
+    if (!Array.isArray(input)) return [];
+    return input
+        .map((row) => ({
+            menu_type: `${row?.menu_type || row?.menuType || ''}`.trim(),
+            width: `${row?.width || ''}`.trim(),
+            height: `${row?.height || ''}`.trim(),
+            folded: normalizeMenuSizeBoolean(row?.folded),
+            crop_marks: normalizeMenuSizeBoolean(row?.crop_marks ?? row?.cropMarks),
+            bleed_marks: normalizeMenuSizeBoolean(row?.bleed_marks ?? row?.bleedMarks),
+        }))
+        .filter((row) => row.menu_type && row.width && row.height);
+}
+
 function normalizePropertyCatalogRecord(input: any): PropertyCatalogRecord {
     const name = `${input?.name || ''}`.trim();
     const defaults = DEFAULT_SHAREPOINT_PROPERTY_CONFIG[name] || {};
@@ -316,6 +347,7 @@ function normalizePropertyCatalogRecord(input: any): PropertyCatalogRecord {
         city_country: `${input?.city_country || deriveCityCountryFromProperty(name) || ''}`.trim(),
         hotel: input?.hotel || undefined,
         is_active: input?.is_active !== false,
+        menu_size_defaults: normalizeMenuSizeDefaults(input?.menu_size_defaults),
         sharepoint_site_url: `${input?.sharepoint_site_url || defaults.sharepoint_site_url || ''}`.trim() || undefined,
         sharepoint_library_name: `${input?.sharepoint_library_name || defaults.sharepoint_library_name || ''}`.trim() || undefined,
         sharepoint_drive_id: `${input?.sharepoint_drive_id || defaults.sharepoint_drive_id || ''}`.trim() || undefined,
@@ -598,6 +630,17 @@ async function readLocalPropertyCatalog(): Promise<PropertyCatalogRecord[]> {
 }
 
 async function getPropertyCatalog(): Promise<PropertyCatalogRecord[]> {
+    const seedCatalog = buildDefaultPropertyCatalog();
+    const seedByName = new Map(seedCatalog.map((item) => [item.name.toLowerCase(), item]));
+    const mergeSeedMenuSizeDefaults = (catalog: PropertyCatalogRecord[]): PropertyCatalogRecord[] => catalog
+        .map((item) => {
+            const seed = seedByName.get(item.name.toLowerCase());
+            if ((!item.menu_size_defaults || item.menu_size_defaults.length === 0) && seed?.menu_size_defaults?.length) {
+                return { ...item, menu_size_defaults: seed.menu_size_defaults };
+            }
+            return item;
+        });
+
     if (isSupabaseConfigured()) {
         try {
             const supabase = getSupabaseClient();
@@ -608,9 +651,9 @@ async function getPropertyCatalog(): Promise<PropertyCatalogRecord[]> {
                 .order('name', { ascending: true });
 
             if (!error && Array.isArray(data) && data.length > 0) {
-                return data
+                return mergeSeedMenuSizeDefaults(data
                     .map((item: any) => normalizePropertyCatalogRecord(item))
-                    .filter((item: PropertyCatalogRecord) => !!item.name);
+                    .filter((item: PropertyCatalogRecord) => !!item.name));
             }
         } catch (error: any) {
             console.warn('Falling back to local property catalog:', error?.message || error);
@@ -618,9 +661,9 @@ async function getPropertyCatalog(): Promise<PropertyCatalogRecord[]> {
     }
 
     const local = await readLocalPropertyCatalog();
-    return local
+    return mergeSeedMenuSizeDefaults(local
         .filter((item) => item.is_active !== false)
-        .sort((a, b) => a.name.localeCompare(b.name));
+        .sort((a, b) => a.name.localeCompare(b.name)));
 }
 
 function normalizeApprovedLookupValue(value: any): string {

@@ -283,6 +283,28 @@ function normalizeServiceFolders(input) {
         return true;
     });
 }
+function normalizeMenuSizeBoolean(value) {
+    const normalized = `${value || ''}`.trim().toLowerCase();
+    if (['y', 'yes', 'true', '1'].includes(normalized))
+        return 'yes';
+    if (['n', 'no', 'false', '0'].includes(normalized))
+        return 'no';
+    return '';
+}
+function normalizeMenuSizeDefaults(input) {
+    if (!Array.isArray(input))
+        return [];
+    return input
+        .map((row) => ({
+        menu_type: `${row?.menu_type || row?.menuType || ''}`.trim(),
+        width: `${row?.width || ''}`.trim(),
+        height: `${row?.height || ''}`.trim(),
+        folded: normalizeMenuSizeBoolean(row?.folded),
+        crop_marks: normalizeMenuSizeBoolean(row?.crop_marks ?? row?.cropMarks),
+        bleed_marks: normalizeMenuSizeBoolean(row?.bleed_marks ?? row?.bleedMarks),
+    }))
+        .filter((row) => row.menu_type && row.width && row.height);
+}
 function normalizePropertyCatalogRecord(input) {
     const name = `${input?.name || ''}`.trim();
     const defaults = DEFAULT_SHAREPOINT_PROPERTY_CONFIG[name] || {};
@@ -291,6 +313,7 @@ function normalizePropertyCatalogRecord(input) {
         city_country: `${input?.city_country || deriveCityCountryFromProperty(name) || ''}`.trim(),
         hotel: input?.hotel || undefined,
         is_active: input?.is_active !== false,
+        menu_size_defaults: normalizeMenuSizeDefaults(input?.menu_size_defaults),
         sharepoint_site_url: `${input?.sharepoint_site_url || defaults.sharepoint_site_url || ''}`.trim() || undefined,
         sharepoint_library_name: `${input?.sharepoint_library_name || defaults.sharepoint_library_name || ''}`.trim() || undefined,
         sharepoint_drive_id: `${input?.sharepoint_drive_id || defaults.sharepoint_drive_id || ''}`.trim() || undefined,
@@ -544,6 +567,16 @@ async function readLocalPropertyCatalog() {
     }
 }
 async function getPropertyCatalog() {
+    const seedCatalog = buildDefaultPropertyCatalog();
+    const seedByName = new Map(seedCatalog.map((item) => [item.name.toLowerCase(), item]));
+    const mergeSeedMenuSizeDefaults = (catalog) => catalog
+        .map((item) => {
+        const seed = seedByName.get(item.name.toLowerCase());
+        if ((!item.menu_size_defaults || item.menu_size_defaults.length === 0) && seed?.menu_size_defaults?.length) {
+            return { ...item, menu_size_defaults: seed.menu_size_defaults };
+        }
+        return item;
+    });
     if ((0, supabase_client_1.isSupabaseConfigured)()) {
         try {
             const supabase = (0, supabase_client_1.getSupabaseClient)();
@@ -553,9 +586,9 @@ async function getPropertyCatalog() {
                 .eq('is_active', true)
                 .order('name', { ascending: true });
             if (!error && Array.isArray(data) && data.length > 0) {
-                return data
+                return mergeSeedMenuSizeDefaults(data
                     .map((item) => normalizePropertyCatalogRecord(item))
-                    .filter((item) => !!item.name);
+                    .filter((item) => !!item.name));
             }
         }
         catch (error) {
@@ -563,9 +596,9 @@ async function getPropertyCatalog() {
         }
     }
     const local = await readLocalPropertyCatalog();
-    return local
+    return mergeSeedMenuSizeDefaults(local
         .filter((item) => item.is_active !== false)
-        .sort((a, b) => a.name.localeCompare(b.name));
+        .sort((a, b) => a.name.localeCompare(b.name)));
 }
 function normalizeApprovedLookupValue(value) {
     return `${value || ''}`

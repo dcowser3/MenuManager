@@ -27,6 +27,12 @@ export type ApprovedMenuDownloadRecord = {
     approvedFileName: string;
 };
 
+export type ApprovedMenuFilters = {
+    query?: string;
+    restaurant?: string;
+    servicePeriod?: string;
+};
+
 type ApprovedMenuSourceRow = {
     id?: string;
     legacy_id?: string;
@@ -71,6 +77,26 @@ function matchesApprovedSearch(row: ApprovedMenuSourceRow, query: string): boole
     return haystack.includes(query);
 }
 
+function matchesRestaurant(row: ApprovedMenuSourceRow, restaurant: string): boolean {
+    if (!restaurant) return true;
+
+    const haystack = [
+        row.property,
+        row.project_name,
+        row.filename,
+    ]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase();
+
+    return haystack.includes(restaurant);
+}
+
+function matchesServicePeriod(row: ApprovedMenuSourceRow, servicePeriod: string): boolean {
+    if (!servicePeriod) return true;
+    return `${row.service_period || ''}`.trim().toLowerCase().includes(servicePeriod);
+}
+
 function buildApprovedMenuList(
     sourceRows: ApprovedMenuSourceRow[],
     approvedAssetRows: ApprovedAssetRow[]
@@ -105,10 +131,15 @@ function buildApprovedMenuList(
 
 export async function listApprovedMenus(
     repoRoot: string,
-    query = '',
+    filtersOrQuery: ApprovedMenuFilters | string = '',
     limit = 100
 ): Promise<ApprovedMenuListItem[]> {
-    const normalizedQuery = `${query || ''}`.trim().toLowerCase();
+    const filters: ApprovedMenuFilters = typeof filtersOrQuery === 'string'
+        ? { query: filtersOrQuery }
+        : filtersOrQuery || {};
+    const normalizedQuery = `${filters.query || ''}`.trim().toLowerCase();
+    const normalizedRestaurant = `${filters.restaurant || ''}`.trim().toLowerCase();
+    const normalizedServicePeriod = `${filters.servicePeriod || ''}`.trim().toLowerCase();
     const boundedLimit = Math.min(Math.max(limit, 1), 200);
     let sourceRows: ApprovedMenuSourceRow[] = [];
     let approvedAssetRows: ApprovedAssetRow[] = [];
@@ -124,11 +155,31 @@ export async function listApprovedMenus(
             .order('updated_at', { ascending: false })
             .limit(boundedLimit);
 
+        const prefilterTerms: string[] = [];
         if (normalizedQuery) {
             const like = `%${normalizedQuery}%`;
-            submissionsQuery = submissionsQuery.or(
-                `project_name.ilike.${like},property.ilike.${like},filename.ilike.${like},submitter_name.ilike.${like},service_period.ilike.${like}`
+            prefilterTerms.push(
+                `project_name.ilike.${like}`,
+                `property.ilike.${like}`,
+                `filename.ilike.${like}`,
+                `submitter_name.ilike.${like}`,
+                `service_period.ilike.${like}`
             );
+        }
+        if (normalizedRestaurant) {
+            const like = `%${normalizedRestaurant}%`;
+            prefilterTerms.push(
+                `property.ilike.${like}`,
+                `project_name.ilike.${like}`,
+                `filename.ilike.${like}`
+            );
+        }
+        if (prefilterTerms.length > 0) {
+            submissionsQuery = submissionsQuery.or(prefilterTerms.join(','));
+        }
+
+        if (normalizedServicePeriod) {
+            submissionsQuery = submissionsQuery.ilike('service_period', `%${normalizedServicePeriod}%`);
         }
 
         const { data, error } = await submissionsQuery;
@@ -136,7 +187,11 @@ export async function listApprovedMenus(
             throw new Error(error.message);
         }
 
-        sourceRows = (data || []).filter((row: ApprovedMenuSourceRow) => !row.source || row.source === 'form');
+        sourceRows = (data || [])
+            .filter((row: ApprovedMenuSourceRow) => !row.source || row.source === 'form')
+            .filter((row: ApprovedMenuSourceRow) => matchesApprovedSearch(row, normalizedQuery))
+            .filter((row: ApprovedMenuSourceRow) => matchesRestaurant(row, normalizedRestaurant))
+            .filter((row: ApprovedMenuSourceRow) => matchesServicePeriod(row, normalizedServicePeriod));
 
         const submissionIds = sourceRows
             .map((row) => `${row.id || row.legacy_id || ''}`.trim())
@@ -164,6 +219,8 @@ export async function listApprovedMenus(
             .filter((row) => !!row.final_path)
             .filter((row) => !row.source || row.source === 'form')
             .filter((row) => matchesApprovedSearch(row, normalizedQuery))
+            .filter((row) => matchesRestaurant(row, normalizedRestaurant))
+            .filter((row) => matchesServicePeriod(row, normalizedServicePeriod))
             .sort((a, b) => new Date(`${b.reviewed_at || b.updated_at || ''}`).getTime() - new Date(`${a.reviewed_at || a.updated_at || ''}`).getTime())
             .slice(0, boundedLimit);
 

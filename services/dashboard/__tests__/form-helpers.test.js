@@ -5,6 +5,7 @@ const {
     extractSuggestionChangePair,
     findSearchMatchRange,
     findCatalogMatchesFromHints,
+    findMenuSizeDefault,
     isValidDateInputValue,
     normalizeSearchText,
     parseExtractedSize,
@@ -212,6 +213,55 @@ describe('property catalog hint matching', () => {
             'Maya - Le Royal Meridien - Dubai',
             'Maya - Le Meridien - Dubai',
         ]);
+    });
+});
+
+describe('menu size default matching', () => {
+    const tanDefaults = [
+        { menu_type: 'Beverage', width: '11', height: '8.5', folded: 'yes', crop_marks: 'no', bleed_marks: 'no' },
+        { menu_type: 'Brunch', width: '8.5', height: '14', folded: 'no', crop_marks: 'no', bleed_marks: 'no' },
+        { menu_type: 'Brunch Beverage', width: '11', height: '8.5', folded: 'yes', crop_marks: 'no', bleed_marks: 'no' },
+        { menu_type: 'Dinner', width: '8.5', height: '14', folded: 'no', crop_marks: 'no', bleed_marks: 'no' },
+    ];
+
+    test('uses the plain beverage row when only beverage is selected', () => {
+        expect(findMenuSizeDefault(tanDefaults, {
+            templateType: 'beverage',
+            templateLabel: 'Beverage Menu',
+        })).toEqual({
+            menuType: 'Beverage',
+            width: '11',
+            height: '8.5',
+            folded: 'yes',
+            cropMarks: 'no',
+            bleedMarks: 'no',
+        });
+    });
+
+    test('prefers the combined service and beverage row when both are selected', () => {
+        expect(findMenuSizeDefault(tanDefaults, {
+            servicePeriod: 'Brunch',
+            serviceLabel: 'Brunch',
+            templateType: 'beverage',
+            templateLabel: 'Beverage Menu',
+        })).toEqual(expect.objectContaining({
+            menuType: 'Brunch Beverage',
+            width: '11',
+            height: '8.5',
+        }));
+    });
+
+    test('matches holiday service folders to Holidays cheat-sheet rows', () => {
+        expect(findMenuSizeDefault([
+            { menu_type: 'Holidays', width: '5', height: '7', folded: 'no', crop_marks: 'no', bleed_marks: 'no' },
+        ], {
+            servicePeriod: 'Holidays & Events',
+            serviceLabel: 'Holidays & Events',
+        })).toEqual(expect.objectContaining({
+            menuType: 'Holidays',
+            width: '5',
+            height: '7',
+        }));
     });
 });
 

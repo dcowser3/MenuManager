@@ -52,6 +52,18 @@ describe('approved menu helpers', () => {
                         filename: 'Pending Menu.docx',
                         final_path: '/Users/deriancowser/Documents/MenuManager/tmp/documents/pending.docx',
                     },
+                    'form-202': {
+                        id: 'form-202',
+                        source: 'form',
+                        status: 'approved',
+                        project_name: 'Summer Lunch',
+                        property: 'Other Property',
+                        filename: 'Other_Lunch_6.1.26.docx',
+                        final_path: '/Users/deriancowser/Documents/MenuManager/tmp/documents/Other Property/Summer Lunch/form-202/approved/form-202-approved.docx',
+                        service_period: 'lunch',
+                        reviewed_at: '2026-06-01T10:00:00.000Z',
+                        submitter_name: 'Mina',
+                    },
                     'design-1': {
                         id: 'design-1',
                         source: 'design_approval',
@@ -100,6 +112,31 @@ describe('approved menu helpers', () => {
                 submitterName: 'Carlos',
             }),
         ]);
+    });
+
+    test('filters approved submissions by restaurant and optional service period', async () => {
+        const approvedMenus = await listApprovedMenus(repoRoot, {
+            restaurant: 'other property',
+            servicePeriod: 'lunch',
+        }, 150);
+
+        expect(approvedMenus).toEqual([
+            expect.objectContaining({
+                id: 'form-202',
+                projectName: 'Summer Lunch',
+                property: 'Other Property',
+                servicePeriod: 'lunch',
+            }),
+        ]);
+    });
+
+    test('does not return another restaurant when service period matches', async () => {
+        const approvedMenus = await listApprovedMenus(repoRoot, {
+            restaurant: 'test property',
+            servicePeriod: 'lunch',
+        }, 150);
+
+        expect(approvedMenus).toEqual([]);
     });
 
     test('returns approved download metadata for a form submission', async () => {

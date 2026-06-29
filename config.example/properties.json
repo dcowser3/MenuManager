@@ -2,6 +2,16 @@
   {
     "name": "Example Restaurant - City",
     "city_country": "City",
-    "is_active": true
+    "is_active": true,
+    "menu_size_defaults": [
+      {
+        "menu_type": "Dinner",
+        "width": "8.5",
+        "height": "11",
+        "folded": "no",
+        "crop_marks": "no",
+        "bleed_marks": "no"
+      }
+    ]
   }
 ]
