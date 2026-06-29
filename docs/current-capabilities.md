@@ -53,7 +53,7 @@ Related docs:
 
 ## Approved Menus And Dishes
 
-- Approved menus appear at `/approved-menus` as a chef-facing lookup: choose a restaurant, optionally narrow by service period, then download a clean editable Word DOCX for the next menu change.
+- Approved menus appear at `/approved-menus` as a chef-facing lookup: choose a restaurant, optionally narrow by service period, then download the cleaned editable Word DOCX or the original approved file.
 - Approved dishes appear at `/approved-dishes`, grouped by derived brand and canonical property/location.
 - Approved-dish extraction splits dish names, descriptions, prices, allergen codes, categories, source lines, and provenance where available.
 - Extraction uses deterministic quality flags first, then selectively asks `ai-review` for advisory classification of risky rows.
