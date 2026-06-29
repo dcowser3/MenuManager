@@ -179,6 +179,51 @@
             border-color: var(--color-secondary);
         }
 
+        .autocomplete-wrapper {
+            position: relative;
+        }
+
+        .autocomplete-dropdown {
+            display: none;
+            position: absolute;
+            top: 100%;
+            left: 0;
+            right: 0;
+            background: var(--color-background);
+            border: 1px solid var(--color-border);
+            border-top: none;
+            max-height: 260px;
+            overflow-y: auto;
+            z-index: 100;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+        }
+
+        .autocomplete-dropdown.show {
+            display: block;
+        }
+
+        .autocomplete-item {
+            padding: 0.7rem 0.9rem;
+            cursor: pointer;
+            font-size: 0.88rem;
+            color: var(--color-text);
+            border-bottom: 1px solid var(--color-border-light);
+        }
+
+        .autocomplete-item:last-child {
+            border-bottom: none;
+        }
+
+        .autocomplete-item:hover,
+        .autocomplete-item.highlighted {
+            background: var(--color-background-alt);
+        }
+
+        .autocomplete-item .ac-match {
+            font-weight: 600;
+            color: var(--color-secondary);
+        }
+
         .btn {
             display: inline-block;
             padding: 0.82rem 1.35rem;
@@ -360,10 +405,11 @@
         </div>
 
         <div class="search-card">
-            <form method="GET" action="/approved-menus" class="search-form">
-                <div class="search-group">
+            <form method="GET" action="/approved-menus" class="search-form" id="searchForm">
+                <div class="search-group autocomplete-wrapper">
                     <label for="restaurant">Restaurant</label>
-                    <input id="restaurant" name="restaurant" type="text" value="<%= restaurantQuery || '' %>" placeholder="Restaurant or property name">
+                    <input id="restaurant" name="restaurant" type="text" value="<%= restaurantQuery || '' %>" placeholder="Restaurant or property name" autocomplete="off" oninput="onRestaurantInput(this.value)" onkeydown="handleRestaurantKeydown(event)">
+                    <div class="autocomplete-dropdown" id="restaurantDropdown"></div>
                 </div>
                 <div class="search-group">
                     <label for="servicePeriod">Service period</label>
@@ -424,5 +470,202 @@
             </div>
         <% } %>
     </div>
+
+    <script>
+        const propertyCatalog = <%- JSON.stringify(propertyCatalog || []) %>;
+        let restaurantSuggestResults = [];
+        let restaurantSuggestHighlightIndex = -1;
+
+        function normalizeSearchText(text) {
+            return String(text || '')
+                .normalize('NFD')
+                .replace(/[\u0300-\u036f]/g, '')
+                .toLowerCase()
+                .replace(/[^a-z0-9]+/g, ' ')
+                .trim()
+                .replace(/\s+/g, ' ');
+        }
+
+        function searchTextIncludes(text, query) {
+            const normalizedQuery = normalizeSearchText(query).trim();
+            if (!normalizedQuery) return false;
+            if (normalizeSearchText(text).includes(normalizedQuery)) return true;
+            const compactQuery = normalizedQuery.replace(/\s+/g, '');
+            if (!compactQuery) return false;
+            return normalizeSearchText(text).replace(/\s+/g, '').includes(compactQuery);
+        }
+
+        function highlightMatch(text, query) {
+            const raw = String(text || '');
+            if (!query) return escapeHtml(raw);
+            const normalizedQuery = normalizeSearchText(query).trim();
+            if (!normalizedQuery) return escapeHtml(raw);
+            const range = findSearchMatchRange(raw, normalizedQuery);
+            if (!range) return escapeHtml(raw);
+            const before = raw.slice(0, range.start);
+            const match = raw.slice(range.start, range.end);
+            const after = raw.slice(range.end);
+            return `${escapeHtml(before)}<span class="ac-match">${escapeHtml(match)}</span>${escapeHtml(after)}`;
+        }
+
+        function escapeHtml(text) {
+            return String(text || '')
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;');
+        }
+
+        function buildSearchIndex(text, options) {
+            const raw = String(text || '');
+            const compact = !!(options && options.compact);
+            let normalizedText = '';
+            const indexMap = [];
+            let originalIndex = 0;
+            let pendingSeparatorStart = null;
+            let lastOutputWasSpace = true;
+
+            for (const char of Array.from(raw)) {
+                const start = originalIndex;
+                const end = start + char.length;
+                originalIndex = end;
+
+                const normalizedChar = char
+                    .normalize('NFD')
+                    .replace(/[\u0300-\u036f]/g, '')
+                    .toLowerCase();
+
+                for (const normalizedPart of Array.from(normalizedChar)) {
+                    if (/^[a-z0-9]$/.test(normalizedPart)) {
+                        if (!compact && pendingSeparatorStart !== null && !lastOutputWasSpace && normalizedText.length > 0) {
+                            normalizedText += ' ';
+                            indexMap.push({ start: pendingSeparatorStart, end: start });
+                        }
+                        normalizedText += normalizedPart;
+                        indexMap.push({ start, end });
+                        pendingSeparatorStart = null;
+                        lastOutputWasSpace = false;
+                    } else if (!lastOutputWasSpace && pendingSeparatorStart === null) {
+                        pendingSeparatorStart = start;
+                    }
+                }
+            }
+
+            return { normalizedText, indexMap };
+        }
+
+        function findSearchMatchRange(text, query) {
+            const raw = String(text || '');
+            const normalizedQuery = normalizeSearchText(query).trim();
+            if (!raw || !normalizedQuery) return null;
+
+            const { normalizedText, indexMap } = buildSearchIndex(raw);
+
+            let activeText = normalizedText;
+            let activeIndexMap = indexMap;
+            let activeQuery = normalizedQuery;
+            let normalizedStart = activeText.indexOf(activeQuery);
+            if (normalizedStart < 0) {
+                activeQuery = normalizedQuery.replace(/\s+/g, '');
+                if (!activeQuery) return null;
+                const compactIndex = buildSearchIndex(raw, { compact: true });
+                activeText = compactIndex.normalizedText;
+                activeIndexMap = compactIndex.indexMap;
+                normalizedStart = activeText.indexOf(activeQuery);
+            }
+            if (normalizedStart < 0) return null;
+
+            const normalizedEnd = normalizedStart + activeQuery.length - 1;
+            const start = activeIndexMap[normalizedStart]?.start;
+            const end = activeIndexMap[normalizedEnd]?.end;
+            if (start === undefined || end === undefined || end <= start) return null;
+            return { start, end };
+        }
+
+        function onRestaurantInput(value) {
+            const query = (value || '').trim();
+            const normalizedQuery = normalizeSearchText(query).trim();
+            const dropdown = document.getElementById('restaurantDropdown');
+            if (normalizedQuery.length < 2) {
+                dropdown.classList.remove('show');
+                restaurantSuggestResults = [];
+                restaurantSuggestHighlightIndex = -1;
+                return;
+            }
+
+            const seen = new Set();
+            restaurantSuggestResults = propertyCatalog
+                .filter((name) => searchTextIncludes(name || '', query))
+                .filter((name) => {
+                    const key = normalizeSearchText(name || '');
+                    if (seen.has(key)) return false;
+                    seen.add(key);
+                    return true;
+                })
+                .slice(0, 8);
+            restaurantSuggestHighlightIndex = -1;
+            showRestaurantDropdown(query);
+        }
+
+        function showRestaurantDropdown(query) {
+            const dropdown = document.getElementById('restaurantDropdown');
+            if (!restaurantSuggestResults.length) {
+                dropdown.classList.remove('show');
+                return;
+            }
+            dropdown.innerHTML = restaurantSuggestResults.map((propertyName, i) => `
+                <div class="autocomplete-item" data-index="${i}" onmousedown="selectRestaurantSuggestion(${i})">
+                    ${highlightMatch(propertyName || '', query)}
+                </div>
+            `).join('');
+            dropdown.classList.add('show');
+        }
+
+        function selectRestaurantSuggestion(index) {
+            const selected = restaurantSuggestResults[index] || '';
+            if (!selected) return;
+            document.getElementById('restaurant').value = selected;
+            document.getElementById('restaurantDropdown').classList.remove('show');
+            restaurantSuggestHighlightIndex = -1;
+        }
+
+        function handleRestaurantKeydown(e) {
+            const dropdown = document.getElementById('restaurantDropdown');
+            if (!dropdown.classList.contains('show') || restaurantSuggestResults.length === 0) return;
+            if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                restaurantSuggestHighlightIndex = Math.min(restaurantSuggestHighlightIndex + 1, restaurantSuggestResults.length - 1);
+                updateAutocompleteHighlight('#restaurantDropdown', restaurantSuggestHighlightIndex);
+            } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                restaurantSuggestHighlightIndex = Math.max(restaurantSuggestHighlightIndex - 1, 0);
+                updateAutocompleteHighlight('#restaurantDropdown', restaurantSuggestHighlightIndex);
+            } else if (e.key === 'Enter' && restaurantSuggestHighlightIndex >= 0) {
+                e.preventDefault();
+                selectRestaurantSuggestion(restaurantSuggestHighlightIndex);
+            } else if (e.key === 'Escape') {
+                dropdown.classList.remove('show');
+                restaurantSuggestHighlightIndex = -1;
+            }
+        }
+
+        function updateAutocompleteHighlight(selector, index) {
+            const items = document.querySelectorAll(`${selector} .autocomplete-item`);
+            items.forEach((item, i) => {
+                item.classList.toggle('highlighted', i === index);
+            });
+            if (items[index]) {
+                items[index].scrollIntoView({ block: 'nearest' });
+            }
+        }
+
+        document.addEventListener('click', function(e) {
+            const dropdown = document.getElementById('restaurantDropdown');
+            const input = document.getElementById('restaurant');
+            if (!dropdown.contains(e.target) && e.target !== input) {
+                dropdown.classList.remove('show');
+            }
+        });
+    </script>
 </body>
 </html>

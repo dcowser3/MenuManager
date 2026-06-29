@@ -1132,6 +1132,10 @@ app.get('/approved-menus', async (req, res) => {
             ? await listApprovedMenus(getRepoRoot(), { query: q, restaurant, servicePeriod }, 150)
             : [];
 
+        const propertyCatalog = buildFallbackPropertyCatalog()
+            .filter((record) => record.is_active !== false)
+            .map((record) => record.name);
+
         res.render('approved-menus', {
             title: 'Approved Menus',
             approvedMenus,
@@ -1139,6 +1143,7 @@ app.get('/approved-menus', async (req, res) => {
             searchQuery: q,
             restaurantQuery: restaurant,
             servicePeriodQuery: servicePeriod,
+            propertyCatalog,
         });
     } catch (error: any) {
         console.error('Error loading approved menus:', error.response?.data || error.message);

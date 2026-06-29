@@ -926,6 +926,9 @@ app.get('/approved-menus', async (req, res) => {
         const approvedMenus = hasSearch
             ? await (0, approved_menus_1.listApprovedMenus)(getRepoRoot(), { query: q, restaurant, servicePeriod }, 150)
             : [];
+        const propertyCatalog = (0, property_catalog_1.buildFallbackPropertyCatalog)()
+            .filter((record) => record.is_active !== false)
+            .map((record) => record.name);
         res.render('approved-menus', {
             title: 'Approved Menus',
             approvedMenus,
@@ -933,6 +936,7 @@ app.get('/approved-menus', async (req, res) => {
             searchQuery: q,
             restaurantQuery: restaurant,
             servicePeriodQuery: servicePeriod,
+            propertyCatalog,
         });
     }
     catch (error) {

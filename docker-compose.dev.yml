@@ -167,6 +167,7 @@ services:
       - ./sop-processor:/app/sop-processor
       - ./tmp:/app/tmp
       - ./samples:/app/samples:ro
+      - ./config:/app/config:ro
       - ./.env:/app/.env:ro
     depends_on:
       - db
