@@ -68,15 +68,15 @@ describe('dashboard route aliases', () => {
         expect(() => getRouteHandler('get', '/form-legacy')).not.toThrow();
     });
 
-    test('serves the legacy flow at /form by default, and the new flow at /form-new', async () => {
-        // NEW_SUBMISSION_FORM_DEFAULT is unset in tests → legacy is the default.
+    test('serves the new flow at /form by default, with the legacy flow still available', async () => {
+        // NEW_SUBMISSION_FORM_DEFAULT is unset in tests → new upload-first is the default.
         const renderOf = async (routePath) => {
             const handler = getRouteHandler('get', routePath);
             const res = { render: jest.fn() };
             await handler({}, res);
             return res.render.mock.calls[0][0];
         };
-        expect(await renderOf('/form')).toBe('form-legacy');
+        expect(await renderOf('/form')).toBe('form');
         expect(await renderOf('/form-new')).toBe('form');
         expect(await renderOf('/form-legacy')).toBe('form-legacy');
     });

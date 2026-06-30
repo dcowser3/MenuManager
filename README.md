@@ -34,7 +34,7 @@ Chef / manager submission
   -> Learning / improvement loop from human-reviewed corrections
 ```
 
-> **Rollout note:** the dashboard's `/form` link currently serves the **legacy** multi-section submission form while the new upload-first flow is piloted at `/form-new`. Both collect the approver email and send the grouped confirmation email. Flip `NEW_SUBMISSION_FORM_DEFAULT=true` to make `/form` serve the new flow (see [docs/environment.md](docs/environment.md)).
+> **Rollout note:** the dashboard's `/form` link serves the new upload-first submission form by default. The original multi-section form remains available at `/form-legacy`, and `/form-new` is kept as a stable alias for the new flow. Set `NEW_SUBMISSION_FORM_DEFAULT=false` only as a temporary rollback (see [docs/environment.md](docs/environment.md)).
 
 ## Services
 

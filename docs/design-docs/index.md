@@ -8,7 +8,7 @@ Catalog of design decisions and feature documentation for Menu Manager.
 | [ClickUp-Linked Approval Workflow Proposal](clickup-linked-approval-workflow-proposal.md) | Local Prototype | Browser-based approval flow linked from ClickUp that preserves the current DOCX and SharePoint handoff |
 | [Critical Error Blocking](critical-error-blocking.md) | Complete | Severity system that blocks submission on missing prices / incomplete dish names |
 | [Submitter Autofill](submitter-autofill.md) | Complete | Autocomplete from saved profiles + recent project loader |
-| [Design Approval](design-approval.md) | Built, entry point disabled | DOCX vs PDF comparison tool for design proof validation; welcome card now shows "Feature Coming Soon" |
+| [Design Approval](design-approval.md) | Built, direct-link only | DOCX vs PDF comparison tool for design proof validation; not shown on the public welcome dashboard |
 | [Design Comparison Rules](design-comparison-rules.md) | Complete | Configurable tolerance rules for design approval comparison |
 | [Approval Attestation](approval-attestation.md) | Complete | Required manager approval attestation before submission |
 | [Approved Dish Quality](approved-dish-quality.md) | Implemented | Provenance display, quality flags, idempotent extraction, and AI checks for questionable rows |

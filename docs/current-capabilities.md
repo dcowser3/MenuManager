@@ -96,5 +96,5 @@ Related docs:
 ## Disabled Or Direct-Link Surfaces
 
 - Learning/training dashboards are direct-link reviewer tools and are intentionally not linked from the public landing page.
-- The design approval tool still exists at `/design-approval`, but the welcome-page card is disabled and labeled "Feature Coming Soon".
+- The design approval tool still exists at `/design-approval`, but it is a direct-link tool and is not shown on the public welcome dashboard.
 - There is no active separate `submission-form`, `workflow-engine`, or `approved-dishes` service; those capabilities currently live in `dashboard`, `db`, `clickup-integration`, and shared libraries.

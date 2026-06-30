@@ -135,11 +135,9 @@ const execAsync = promisify(exec);
 // Lives in the config bundle so the app is white-labelable without code edits.
 const tenantConfig = getTenantConfig();
 const DEFAULT_ALLERGEN_KEY = tenantConfig.allergenKey;
-// Which flow `/form` serves. Defaults to the proven legacy flow so the new
-// upload-first flow can be piloted at `/form-new` before switching everyone
-// over. Set NEW_SUBMISSION_FORM_DEFAULT=true (env) — or flip this default and
-// redeploy — to make `/form` serve the new flow.
-const NEW_SUBMISSION_FORM_DEFAULT = ['1', 'true', 'yes', 'on']
+// Which flow `/form` serves. Defaults to the new upload-first flow; set
+// NEW_SUBMISSION_FORM_DEFAULT=false (env) only as a temporary rollback.
+const NEW_SUBMISSION_FORM_DEFAULT = !['0', 'false', 'no', 'off']
     .includes(`${process.env.NEW_SUBMISSION_FORM_DEFAULT || ''}`.trim().toLowerCase());
 const DB_SERVICE_URL = process.env.DB_SERVICE_URL || 'http://localhost:3004';
 const AI_REVIEW_URL = process.env.AI_REVIEW_URL || 'http://localhost:3002';
@@ -1092,18 +1090,15 @@ async function renderSubmissionForm(res: any, view: 'form' | 'form-legacy', titl
 /**
  * `/form` is the canonical submission URL the dashboard links to. It serves
  * whichever flow is the current default, controlled by `NEW_SUBMISSION_FORM_DEFAULT`
- * (see the constant near the top of this file). It defaults to the proven legacy
- * flow so the new upload-first flow can be piloted at `/form-new` in production
- * before everyone is switched over — flip the flag to make `/form` serve the new
- * flow, and all existing dashboard links/bookmarks follow automatically.
+ * (see the constant near the top of this file). The default is the new upload-first
+ * flow; `/form-legacy` remains available as a stable fallback URL.
  */
 app.get('/form', async (_req, res) => {
     const view = NEW_SUBMISSION_FORM_DEFAULT ? 'form' : 'form-legacy';
     await renderSubmissionForm(res, view, 'Submit New Menu');
 });
 
-// New upload-first flow — stable URL for piloting (hand this link to testers)
-// regardless of which flow `/form` currently serves.
+// New upload-first flow — stable URL for direct links regardless of rollback state.
 app.get('/form-new', async (_req, res) => {
     await renderSubmissionForm(res, 'form', 'Submit New Menu');
 });
@@ -4802,7 +4797,8 @@ if (require.main === module) {
         console.log(`📊 Dashboard service listening at http://localhost:${port}`);
         console.log(`   Access dashboard: http://localhost:${port}`);
         console.log(`   Form submission: http://localhost:${port}/form (${NEW_SUBMISSION_FORM_DEFAULT ? 'new upload-first flow' : 'legacy flow'})`);
-        console.log(`   New-flow pilot:  http://localhost:${port}/form-new`);
+        console.log(`   New-flow alias:  http://localhost:${port}/form-new`);
+        console.log(`   Legacy form:     http://localhost:${port}/form-legacy`);
         console.log(`   Design approval: http://localhost:${port}/design-approval`);
         console.log(`   Training dashboard: http://localhost:${port}/training`);
         // Surface alert-mail transport state so a misconfigured prod env (the

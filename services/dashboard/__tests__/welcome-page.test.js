@@ -2,14 +2,18 @@ const fs = require('fs');
 const path = require('path');
 
 describe('welcome page options', () => {
-    test('renders design approval as a disabled coming-soon card', () => {
+    test('renders the new submission card with a smaller legacy-form fallback', () => {
         const template = fs.readFileSync(
             path.join(__dirname, '..', 'views', 'welcome.ejs'),
             'utf8'
         );
 
-        expect(template).toContain('<div class="option-card disabled" aria-disabled="true">');
-        expect(template).toContain('Feature Coming Soon');
+        expect(template).toContain('<a href="/form" class="option-card">');
+        expect(template).toContain('New Menu Submission');
+        expect(template).toContain('<a href="/form-legacy" class="legacy-form-link">');
+        expect(template).toContain('Original Form');
+        expect(template).not.toContain('Feature Coming Soon');
+        expect(template).not.toContain('Design Approval');
         expect(template).not.toContain('<a href="/design-approval" class="option-card">');
     });
 

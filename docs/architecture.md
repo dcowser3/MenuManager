@@ -123,7 +123,7 @@ For browser approvals, `POST /approval/finalize` mirrors the same operational ha
 
 ```
 User visits /design-approval directly for internal testing
-  (the welcome-page card is currently disabled as "Feature Coming Soon")
+  (direct-link tool; not shown on the public welcome dashboard)
   │
   ▼
 Uploads DOCX template + PDF proof

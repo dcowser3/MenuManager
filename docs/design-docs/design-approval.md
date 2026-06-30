@@ -1,10 +1,10 @@
 # Design Approval
 
-**Status:** Built, entry point disabled (Updated May 2026)
+**Status:** Built, direct-link only (Updated Jun 2026)
 
 A comparison tool that validates printed PDF proofs against the approved DOCX source.
 
-The welcome-page card is currently grayed out and labeled "Feature Coming Soon" so users cannot click into the design approval flow from the main entry point. The route and comparison implementation remain in the codebase for future re-enablement or direct internal testing.
+The route and comparison implementation remain in the codebase for direct internal testing, but the tool is not shown on the public welcome dashboard.
 
 ## User Flow
 
