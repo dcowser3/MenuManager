@@ -4,6 +4,16 @@
 
 This file is the canonical agent-instruction document for the repo. Keep it small. Load topic-specific docs (see [Topic Pointers](#topic-pointers) below) only when the work actually touches that area.
 
+## Agent Bootstrap Files
+
+Other files exist only to point agents at this file (single source of truth):
+
+- `CLAUDE.md` — short redirect. Grok Build (this Cursor session), many Claude-based agents, and Cursor itself auto-load `CLAUDE.md` at the workspace root and inject it as always-applied rules.
+- `CODEX.md` — similar redirect, discovered by some Codex/Cursor agents.
+- `README.md` — human + agent starting point that links here for conventions.
+
+**Grok Build behavior:** It reads `CLAUDE.md` via the workspace rules mechanism, which tells it to read AGENTS.md first. Treat AGENTS.md + the Topic Pointers as the complete directive set.
+
 ## Required Post-Change Documentation
 
 For any code, config, schema, API, or workflow change:
@@ -46,8 +56,9 @@ Node.js 18+ / TypeScript • Express.js microservices • EJS templates • Supa
 
 These apply to almost every change — keep them in mind without needing a deeper read.
 
-- **Docker-first local verification:** Use `./dev-up.sh` / `docker-compose.dev.yml` for local service startup, route/API/browser verification, and service-dependent debugging by default. Native `npm start --workspace=...`, `node dist/index.js`, and `./start-services.sh` are fallback-only paths for deliberately non-Docker work.
+- **Docker-first local verification (AI agents: follow this strictly):** Use `./dev-up.sh` / `docker-compose.dev.yml` for local service startup, route/API/browser verification, and service-dependent debugging **by default**. Native `npm start --workspace=...`, `node dist/index.js`, and `./start-services.sh` are fallback-only paths for deliberately non-Docker work. AI agents must not start native services unless the user explicitly says "use native mode" or "test host startup".
 - **Docker reset:** If services, tests, or dependency state act strange, prefer `./dev-up.sh --down && ./dev-up.sh -d`; after dependency/shared-library/Python changes use `./dev-up.sh --rebuild`, `./dev-up.sh --reset-venv`, or `./dev-up.sh --nuke` as appropriate.
+- **Port conflicts (common with mixed native + Docker or long agent sessions):** Leftover processes from previous `start-services.sh`, `screen` sessions, or background jobs hold ports. Before `./dev-up.sh`, run: `for p in 3001 3002 3003 3004 3005 3006 3007; do lsof -ti:$p 2>/dev/null | xargs kill -9 2>/dev/null || true; done` (or just `./dev-up.sh --down` first). See the full clean-start guidance in [docs/local-dev-troubleshooting.md](docs/local-dev-troubleshooting.md).
 - **Build check:** `npx tsc --noEmit --project services/<name>/tsconfig.json`
 - **Every TS service declares `typescript` locally** in its own `devDependencies` — don't rely on hoisting; a partial install can leave the hoisted `tsc` shim broken.
 - **Python venv:** `services/docx-redliner/venv/bin/python` (try first, fallback to `python3`). In Docker mode the venv lives in the image — reset with `./dev-up.sh --reset-venv`.
@@ -68,7 +79,9 @@ Load these only when the task touches the area.
 ### Running locally / dev environment / startup failures
 → [docs/local-dev-troubleshooting.md](docs/local-dev-troubleshooting.md)
 
-Docker is the default local workflow: `./dev-up.sh` uses [docker-compose.dev.yml](docker-compose.dev.yml) + [docker/Dockerfile.dev](docker/Dockerfile.dev). Native mode (`./start-services.sh`) is documented there only as an intentional fallback. The doc covers Docker smoke checks, OOM kills, EADDRINUSE, broken tsc shim, corrupted Python venv, missing `INTERNAL_API_TOKEN` — all real failure modes you'll re-derive without it.
+**AI agents:** Always use the Docker workflow described in AGENTS.md (above) and the linked doc. See "Port conflicts" bullet for the common leftover-process case.
+
+Docker is the default local workflow: `./dev-up.sh` uses [docker-compose.dev.yml](docker-compose.dev.yml) + [docker/Dockerfile.dev](docker/Dockerfile.dev). Native mode (`./start-services.sh`) is documented there only as an intentional fallback. The doc covers Docker smoke checks, OOM kills, EADDRINUSE/port conflicts from native processes, broken tsc shim, corrupted Python venv, missing `INTERNAL_API_TOKEN` — all real failure modes you'll re-derive without it.
 
 ### Architecture / how services interact
 → [docs/architecture.md](docs/architecture.md) — service interactions, data flows, workflow diagrams.

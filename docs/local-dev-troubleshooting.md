@@ -4,14 +4,27 @@ Known failure modes when starting services locally and how to diagnose them. Eve
 
 ## Default: Docker
 
-Use Docker for local service startup, route/API/browser verification, and service-dependent debugging unless you are intentionally testing native startup. The dev stack uses Node 24 LTS and keeps Python venv and `node_modules` inside a reproducible image, which avoids the OOM / corrupted-venv / broken-tsc-shim failure modes that waste time in native mode.
+**Use Docker for local service startup, route/API/browser verification, and service-dependent debugging** unless you are *intentionally* testing native startup. This is the required path for AI agents (Grok Build, Claude, Codex, Cursor, etc.).
+
+The dev stack uses Node 24 LTS and keeps Python venv and `node_modules` inside a reproducible image, which avoids the OOM / corrupted-venv / broken-tsc-shim failure modes that waste time in native mode.
 
 | Mode | Entry point | When to use |
 |------|-------------|-------------|
-| **Docker (default)** | `./dev-up.sh` | Normal Codex/local workflow. Reset by rebuilding the image or nuking volumes. |
-| **Native (fallback)** | `./start-services.sh` | Only when deliberately testing host-machine startup or Docker Desktop is unavailable. You own dependency hygiene. |
+| **Docker (default)** | `./dev-up.sh` | Normal (and required) Codex/local workflow for AI agents. Reset by rebuilding the image or nuking volumes. |
+| **Native (fallback)** | `./start-services.sh` | Only when deliberately testing host-machine startup or Docker Desktop is unavailable. You own dependency hygiene. **AI agents: do not choose this path unless the user explicitly requests native testing.** |
 
 ### Docker workflow cheatsheet
+
+**AI agents (and anyone mixing native/Docker runs):** Leftover native processes are the #1 cause of "Ports are not available" / bind errors when starting Docker. Clean first:
+
+```bash
+# Free all MenuManager service ports (safe no-op if nothing is listening)
+for p in 3001 3002 3003 3004 3005 3006 3007; do
+  lsof -ti:$p 2>/dev/null | xargs kill -9 2>/dev/null || true
+done
+```
+
+Then:
 
 ```bash
 ./dev-up.sh                # build image (first run) + start all services, follow logs
