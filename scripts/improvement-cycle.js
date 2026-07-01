@@ -259,6 +259,54 @@ async function sendProposalEmail(supabase, { cycleId, evalStatus, evalSummary, c
     }
 }
 
+async function sendPendingProposalReminderEmail(supabase, { proposal, unconsumedCorrectionCount }) {
+    const to = process.env.IMPROVE_NOTIFY_EMAIL || process.env.FORM_ATTEMPT_ALERT_EMAIL || 'dcowser@richardsandoval.com';
+    const cycleId = proposal?.cycle_id || proposal?.id || 'unknown-cycle';
+    try {
+        const core = requireDashboardLib('improvement-cycle-core');
+        const alertMail = requireDashboardLib('alert-mail');
+        const deps = buildCycleMailDeps(alertMail);
+        if (!alertMail.canSendAlertMail(deps)) {
+            const msg = `Pending proposal ${cycleId} is still awaiting review but no mail transport is configured. Review it at /learning/prompt-proposal.`;
+            console.log(msg);
+            await recordEmailAlert(supabase, 'warning', msg, {
+                cycleId,
+                recipient: to,
+                reason: 'no_transport',
+                reminder: true,
+            });
+            return;
+        }
+
+        const baseUrl = core.resolveDashboardPublicUrl(process.env);
+        const message = core.buildPendingProposalReminderEmail({
+            proposal,
+            dashboardUrl: baseUrl,
+            unconsumedCorrectionCount,
+        });
+        await alertMail.sendAlertMail({
+            subject: message.subject,
+            to,
+            html: message.html,
+        }, deps);
+        console.log(`Pending proposal reminder sent to ${to} for ${cycleId}.`);
+    } catch (error) {
+        const looksLikeSecretExpiry = /AADSTS7000222|AADSTS700024|invalid_client|expired|invalid client secret/i.test(error.message || '');
+        const hint = looksLikeSecretExpiry
+            ? ' This looks like an expired/invalid Graph client secret — create a new one in Azure and update GRAPH_CLIENT_SECRET + GRAPH_CLIENT_SECRET_EXPIRES.'
+            : '';
+        const msg = `Pending proposal ${cycleId} reminder email failed to send to ${to}: ${error.message}.${hint} Review it at /learning/prompt-proposal.`;
+        console.warn(msg);
+        await recordEmailAlert(supabase, looksLikeSecretExpiry ? 'error' : 'warning', msg, {
+            cycleId,
+            recipient: to,
+            error: error.message,
+            likelySecretExpiry: looksLikeSecretExpiry,
+            reminder: true,
+        });
+    }
+}
+
 // Daily Graph client-secret expiry check. Runs before the gate so it fires
 // every day regardless of whether a proposal is generated. Secrets fail
 // silently on expiry and take down all Graph features (email + SharePoint).
@@ -322,15 +370,26 @@ async function main() {
     const [{ count: unconsumedCount }, { data: pendingProposals }] = await Promise.all([
         supabase.from('correction_rules').select('*', { count: 'exact', head: true })
             .is('prompt_cycle_id', null).in('status', ['accepted', 'pending']),
-        supabase.from('prompt_proposals').select('id').eq('status', 'pending').limit(1),
+        supabase.from('prompt_proposals')
+            .select('id, cycle_id, created_at, correction_rule_count, submission_count, eval_status, llm_model')
+            .eq('status', 'pending')
+            .order('created_at', { ascending: true })
+            .limit(1),
     ]);
+    const pendingProposal = (pendingProposals || [])[0] || null;
     const gate = core.shouldRunCycle({
         unconsumedCorrectionCount: unconsumedCount || 0,
-        pendingProposalExists: !!(pendingProposals || []).length,
+        pendingProposalExists: !!pendingProposal,
         minNewCorrections: Number.parseInt(process.env.IMPROVE_MIN_NEW_CORRECTIONS || '1', 10),
     });
     if (!gate.run && !args.force) {
         console.log(`Gate: skipping — ${gate.reason}.`);
+        if (pendingProposal) {
+            await sendPendingProposalReminderEmail(supabase, {
+                proposal: pendingProposal,
+                unconsumedCorrectionCount: unconsumedCount || 0,
+            });
+        }
         return;
     }
     console.log(`Gate: running — ${gate.reason}${args.force ? ' (forced)' : ''}.`);

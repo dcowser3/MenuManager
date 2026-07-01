@@ -92,6 +92,35 @@ describe('buildSubmissionConfirmationRecipients', () => {
         expect(recipients).toEqual([{ email: 'real@menumanager.dev', role: 'approver' }]);
     });
 });
+describe('buildSubmissionConfirmationCc', () => {
+    test('returns approver cc recipients plus configured always-cc addresses', () => {
+        const [primaryRecipient, ...ccRecipients] = (0, submission_confirmation_mail_1.buildSubmissionConfirmationRecipients)(input());
+        expect((0, submission_confirmation_mail_1.buildSubmissionConfirmationCc)(primaryRecipient, ccRecipients, ['isabella@richardsandoval.com'])).toEqual([
+            'grace@menumanager.dev',
+            'isabella@richardsandoval.com',
+        ]);
+    });
+    test('de-duplicates configured cc against the submitter and approvers', () => {
+        const recipients = (0, submission_confirmation_mail_1.buildSubmissionConfirmationRecipients)(input({
+            submitterEmail: 'isabella@richardsandoval.com',
+            approvals: [
+                { approved: true, name: 'Grace', position: 'GM', email: 'grace@menumanager.dev' },
+                { approved: true, name: 'Isa', position: 'Ops', email: 'ISABELLA@richardsandoval.com' },
+            ],
+        }));
+        const [primaryRecipient, ...ccRecipients] = recipients;
+        expect((0, submission_confirmation_mail_1.buildSubmissionConfirmationCc)(primaryRecipient, ccRecipients, [
+            'isabella@richardsandoval.com',
+            'GRACE@menumanager.dev',
+        ])).toEqual(['grace@menumanager.dev']);
+    });
+    test('drops invalid configured cc addresses', () => {
+        const [primaryRecipient, ...ccRecipients] = (0, submission_confirmation_mail_1.buildSubmissionConfirmationRecipients)(input());
+        expect((0, submission_confirmation_mail_1.buildSubmissionConfirmationCc)(primaryRecipient, ccRecipients, ['nope', 'ops@example.com'])).toEqual([
+            'grace@menumanager.dev',
+        ]);
+    });
+});
 describe('buildSubmissionEmailSubject', () => {
     test('uses one receipt subject for the grouped message', () => {
         expect((0, submission_confirmation_mail_1.buildSubmissionEmailSubject)(input())).toBe('Menu submitted for review: Dinner Menu');

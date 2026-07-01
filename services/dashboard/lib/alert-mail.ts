@@ -258,7 +258,7 @@ export async function sendAlertMail(message: AlertMailMessage, deps: SendAlertMa
         } catch (error: any) {
             graphError = error;
         }
-        if (!graphError?.message?.startsWith('Graph token request failed')) {
+        if (!graphError?.message?.startsWith('Graph token request failed') && !message.cc?.length) {
             try {
                 return await sendViaGraphInboxWrite(deps.graphConfig, message, fetchImpl);
             } catch (error: any) {

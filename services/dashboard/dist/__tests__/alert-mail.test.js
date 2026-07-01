@@ -133,9 +133,13 @@ describe('alert mail transport', () => {
             })).rejects.toThrow(/graph: .*403.*Graph inbox write failed \(404\).*\| smtp: Connection timeout/);
         });
         test('uses SMTP for cc messages when Graph sendMail fails', async () => {
-            const fetchImpl = async (url) => url.includes('/oauth2/')
-                ? fakeResponse(200, { access_token: 'tok', expires_in: 3600 })
-                : fakeResponse(403, { error: { code: 'ErrorAccessDenied' } });
+            const calls = [];
+            const fetchImpl = async (url) => {
+                calls.push(url);
+                return url.includes('/oauth2/')
+                    ? fakeResponse(200, { access_token: 'tok', expires_in: 3600 })
+                    : fakeResponse(403, { error: { code: 'ErrorAccessDenied' } });
+            };
             const sendMail = jest.fn().mockResolvedValue({});
             const result = await (0, alert_mail_1.sendAlertMail)({ ...MESSAGE, cc: ['ops@example.com'] }, {
                 graphConfig: (0, alert_mail_1.buildGraphMailConfig)(GRAPH_ENV),
@@ -148,6 +152,7 @@ describe('alert mail transport', () => {
                 to: 'support@example.com',
                 cc: ['ops@example.com'],
             }));
+            expect(calls.some((url) => url.includes('/mailFolders/inbox/messages'))).toBe(false);
         });
         test('includes Azure token error details without echoing the submitted secret', async () => {
             const calls = [];

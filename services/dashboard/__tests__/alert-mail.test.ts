@@ -152,10 +152,13 @@ describe('alert mail transport', () => {
         });
 
         test('uses SMTP for cc messages when Graph sendMail fails', async () => {
-            const fetchImpl: any = async (url: string) =>
-                url.includes('/oauth2/')
+            const calls: string[] = [];
+            const fetchImpl: any = async (url: string) => {
+                calls.push(url);
+                return url.includes('/oauth2/')
                     ? fakeResponse(200, { access_token: 'tok', expires_in: 3600 })
                     : fakeResponse(403, { error: { code: 'ErrorAccessDenied' } });
+            };
             const sendMail = jest.fn().mockResolvedValue({});
 
             const result = await sendAlertMail({ ...MESSAGE, cc: ['ops@example.com'] }, {
@@ -170,6 +173,7 @@ describe('alert mail transport', () => {
                 to: 'support@example.com',
                 cc: ['ops@example.com'],
             }));
+            expect(calls.some((url) => url.includes('/mailFolders/inbox/messages'))).toBe(false);
         });
 
         test('includes Azure token error details without echoing the submitted secret', async () => {

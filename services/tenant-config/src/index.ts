@@ -59,6 +59,8 @@ export interface TenantEmails {
     formAttemptAlert: string;
     /** Public support address shown to submitters. */
     publicSupport: string;
+    /** Extra CC recipients for post-submit confirmation emails. */
+    submissionConfirmationCc: string[];
     /** Internal reviewer address (usually env-driven; empty by default). */
     internalReviewer: string;
     /** Submitter identity used by the ClickUp handoff rules. */
@@ -160,6 +162,7 @@ export const DEFAULT_TENANT_CONFIG: TenantConfig = {
         alert: 'dcowser@richardsandoval.com',
         formAttemptAlert: 'dcowser@richardsandoval.com',
         publicSupport: 'dcowser@richardsandoval.com',
+        submissionConfirmationCc: ['isabella@richardsandoval.com'],
         internalReviewer: '',
         clickupHandoffSubmitter: 'isabella@richardsandoval.com',
         historyImport: 'clickup-history@richardsandoval.com',

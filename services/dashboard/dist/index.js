@@ -350,13 +350,14 @@ function sendSubmissionConfirmationEmails(input) {
                 }]
             : [];
         const [primaryRecipient, ...ccRecipients] = recipients;
+        const cc = (0, submission_confirmation_mail_1.buildSubmissionConfirmationCc)(primaryRecipient, ccRecipients, tenantConfig.emails.submissionConfirmationCc);
         try {
             // sendAlertMail transparently strips an oversized attachment and
             // appends a notice, so a single send covers both cases.
             const result = await (0, alert_mail_1.sendAlertMail)({
                 fromName: 'Menu Manager',
                 to: primaryRecipient.email,
-                cc: ccRecipients.map((recipient) => recipient.email),
+                cc,
                 subject: (0, submission_confirmation_mail_1.buildSubmissionEmailSubject)(input),
                 html: (0, submission_confirmation_mail_1.buildSubmissionReceiptHtml)(input, attachments.length === 0, DASHBOARD_URL),
                 attachments,

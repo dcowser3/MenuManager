@@ -27,7 +27,7 @@ Chef / manager submission
   -> Basic AI Check with deterministic pre/post guards, known DOCX cleanup artifact suggestions, full-width suggestion rows above aligned review boxes, and fixed growl feedback
   -> Required approval block captures the approver's email
   -> Stored submission and generated original DOCX
-  -> One confirmation email (with the submitted DOCX) sent to deliverable submitter and approver addresses
+  -> One confirmation email (with the submitted DOCX) sent to deliverable submitter and approver addresses, plus configured visibility CCs
   -> Human review in ClickUp or browser approval editor
   -> Approved DOCX, ClickUp/Marketing handoff, optional SharePoint upload
   -> Approved-menu lookup with cleaned and original approved Word DOCX downloads and approved-dish extraction
@@ -54,7 +54,7 @@ Shared workspace packages include `diff-core`, `internal-auth`, `supabase-client
 
 The app is white-labelable: all business-specific values (branding, emails, allergen key, approval roles, menu-template markers, and seed rules/properties) live in one config bundle at `config/` and are loaded by `@menumanager/tenant-config`. To stand up the app for another business, copy `config.example/` to `config/` and edit it — no code changes. See [docs/onboarding-new-business.md](docs/onboarding-new-business.md).
 
-The `/learning` dashboard separates auto-scanned detected patterns from active Pre-AI rules: detected patterns are candidate evidence for reviewer annotation, while only accepted safe exact replacement rules in the Active Pre-AI section can change submitted menu text. Pending Rules shows only unconsumed corrections still awaiting direct review; corrections already consumed by an approved prompt proposal are represented by the generated accepted rules instead. Detected patterns and the accepted-rule audit log also show the implementation lane and what the code does next time, or why the note remains guidance only.
+The `/learning` dashboard separates auto-scanned detected patterns from active Pre-AI rules: detected patterns are candidate evidence for reviewer annotation, while only accepted safe exact replacement rules in the Active Pre-AI section can change submitted menu text. Pending Rules shows only unconsumed corrections still awaiting direct review; corrections already consumed by an approved prompt proposal are represented by the generated accepted rules instead. The improvement loop emails when a proposal is ready and sends a reminder when a daily run is blocked by an older pending proposal. Detected patterns and the accepted-rule audit log also show the implementation lane and what the code does next time, or why the note remains guidance only.
 
 ## Quick Start
 

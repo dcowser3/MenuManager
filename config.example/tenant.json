@@ -31,6 +31,7 @@
     "alert": "ops@example.com",
     "formAttemptAlert": "ops@example.com",
     "publicSupport": "support@example.com",
+    "submissionConfirmationCc": [],
     "internalReviewer": "",
     "clickupHandoffSubmitter": "menus@example.com",
     "historyImport": "clickup-history@example.com"

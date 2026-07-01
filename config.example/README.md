@@ -27,7 +27,7 @@ swap test and for running multiple businesses' configs locally).
 - **name / shortName / tagline / appName** — header text and page titles. Roles render as `"<shortName> <role.label>"` (e.g. `RSH Culinary`).
 - **branding.colors** — CSS custom properties injected into every page's `:root`.
 - **branding.fonts** — `heading`/`body` become the `--font-*` CSS vars; `googleFontsHref` is the `<link>` that loads them (leave empty to use system fonts only).
-- **emails.\*** — default identities. Environment variables still take precedence over these (e.g. `SMTP_FROM`, `FORM_ATTEMPT_ALERT_EMAIL`, `PUBLIC_FORM_SUPPORT_EMAIL`).
+- **emails.\*** — default identities. Environment variables still take precedence over these (e.g. `SMTP_FROM`, `FORM_ATTEMPT_ALERT_EMAIL`, `PUBLIC_FORM_SUPPORT_EMAIL`). `submissionConfirmationCc` is a list of extra visibility recipients copied on every successful form-submission confirmation email.
 - **allergenKey** — default allergen legend used when a submission supplies none.
 - **approvalRoles** — the named sign-offs on the design-approval screen.
 - **template** — strings the parser uses to recognize and validate uploaded menu templates, plus the downloadable template file names. The validation *logic* is shared; only these strings change per business.

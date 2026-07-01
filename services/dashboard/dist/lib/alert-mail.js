@@ -195,7 +195,7 @@ async function sendAlertMail(message, deps) {
         catch (error) {
             graphError = error;
         }
-        if (!graphError?.message?.startsWith('Graph token request failed')) {
+        if (!graphError?.message?.startsWith('Graph token request failed') && !message.cc?.length) {
             try {
                 return await sendViaGraphInboxWrite(deps.graphConfig, message, fetchImpl);
             }

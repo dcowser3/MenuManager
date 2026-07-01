@@ -43,6 +43,7 @@ import { createInternalApiClient } from '@menumanager/internal-auth';
 import { createSubmissionWorkflowHandlers } from './lib/submission-workflow';
 import {
     SubmissionConfirmationInput,
+    buildSubmissionConfirmationCc,
     buildSubmissionConfirmationRecipients,
     buildSubmissionEmailSubject,
     buildSubmissionReceiptHtml,
@@ -441,13 +442,18 @@ function sendSubmissionConfirmationEmails(input: SubmissionConfirmationInput): v
             : [];
 
         const [primaryRecipient, ...ccRecipients] = recipients;
+        const cc = buildSubmissionConfirmationCc(
+            primaryRecipient,
+            ccRecipients,
+            tenantConfig.emails.submissionConfirmationCc,
+        );
         try {
             // sendAlertMail transparently strips an oversized attachment and
             // appends a notice, so a single send covers both cases.
             const result = await sendAlertMail({
                 fromName: 'Menu Manager',
                 to: primaryRecipient.email,
-                cc: ccRecipients.map((recipient) => recipient.email),
+                cc,
                 subject: buildSubmissionEmailSubject(input),
                 html: buildSubmissionReceiptHtml(input, attachments.length === 0, DASHBOARD_URL),
                 attachments,

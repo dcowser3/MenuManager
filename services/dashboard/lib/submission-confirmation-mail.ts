@@ -91,6 +91,36 @@ export function buildSubmissionConfirmationRecipients(input: SubmissionConfirmat
     return recipients;
 }
 
+export function buildSubmissionConfirmationCc(
+    primaryRecipient: ConfirmationRecipient | undefined,
+    ccRecipients: ConfirmationRecipient[],
+    alwaysCcEmails: unknown = [],
+): string[] {
+    const cc: string[] = [];
+    const seen = new Set<string>();
+
+    if (primaryRecipient?.email) {
+        seen.add(primaryRecipient.email.trim().toLowerCase());
+    }
+
+    const add = (value: unknown): void => {
+        const email = `${value ?? ''}`.trim().toLowerCase();
+        if (!isDeliverableEmailAddress(email) || seen.has(email)) return;
+        seen.add(email);
+        cc.push(email);
+    };
+
+    for (const recipient of ccRecipients || []) {
+        add(recipient?.email);
+    }
+    const configuredEmails = Array.isArray(alwaysCcEmails) ? alwaysCcEmails : [alwaysCcEmails];
+    for (const email of configuredEmails) {
+        add(email);
+    }
+
+    return cc;
+}
+
 export function buildSubmissionEmailSubject(input: SubmissionConfirmationInput): string {
     return `Menu submitted for review: ${input.projectName}`;
 }

@@ -79,6 +79,7 @@ exports.DEFAULT_TENANT_CONFIG = {
         alert: 'dcowser@richardsandoval.com',
         formAttemptAlert: 'dcowser@richardsandoval.com',
         publicSupport: 'dcowser@richardsandoval.com',
+        submissionConfirmationCc: ['isabella@richardsandoval.com'],
         internalReviewer: '',
         clickupHandoffSubmitter: 'isabella@richardsandoval.com',
         historyImport: 'clickup-history@richardsandoval.com',

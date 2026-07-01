@@ -11,6 +11,7 @@ This is the compact product-state reference for Menu Manager. Keep implementatio
 - Modification submissions support database baselines, uploaded approved baselines, and uploaded unapproved/redlined DOCX files.
 - Required fields are highlighted inline before submission, including submitter, project details, service period, and approval attestation.
 - Public upload endpoints enforce file-size limits, file-signature checks, and filename/rich-text sanitization while preserving Unicode menu names.
+- Submitter confirmation emails include the generated DOCX for deliverable submitter/approver addresses and any configured confirmation CC recipients.
 
 Related docs:
 
@@ -72,6 +73,7 @@ Related docs:
 - Reviewers can annotate learning examples and accepted correction rules on learning dashboards.
 - Accepted manual rules can be scoped globally, to food/beverage menus, or to a property.
 - The automated improvement loop can assemble new annotated corrections, propose prompt/rule changes, run evals, and wait for human approval before applying changes.
+- If the daily improvement loop is blocked by an older pending prompt proposal, it emails a reminder for that pending proposal instead of silently skipping the day.
 - Deterministic rule or prompt-section changes should be followed by `npm run rules:manifest`.
 
 Related docs:

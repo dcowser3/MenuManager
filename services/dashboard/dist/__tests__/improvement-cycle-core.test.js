@@ -204,6 +204,46 @@ describe('resolveDashboardPublicUrl', () => {
         expect((0, improvement_cycle_core_1.resolveDashboardPublicUrl)({})).toBe('http://localhost:3005');
     });
 });
+describe('buildPendingProposalReminderEmail', () => {
+    test('builds a reminder for the proposal blocking the next cycle', () => {
+        const message = (0, improvement_cycle_core_1.buildPendingProposalReminderEmail)({
+            proposal: {
+                id: 'prop-1',
+                cycle_id: '2026-06-26',
+                created_at: '2026-06-26T09:16:55Z',
+                correction_rule_count: 4,
+                submission_count: 1,
+                eval_status: 'passed',
+                llm_model: 'gpt-4o-2024-08-06',
+            },
+            dashboardUrl: 'https://menus.example.com/',
+            unconsumedCorrectionCount: 2,
+        });
+        expect(message.subject).toBe('Review-improvement proposal still pending (2026-06-26)');
+        expect(message.html).toContain('did not generate a new proposal');
+        expect(message.html).toContain('<strong>2026-06-26</strong>');
+        expect(message.html).toContain('Eval: passed');
+        expect(message.html).toContain('Source corrections in pending proposal: 4');
+        expect(message.html).toContain('Unconsumed correction rows currently waiting: 2');
+        expect(message.html).toContain('https://menus.example.com/learning/prompt-proposal');
+    });
+    test('escapes dynamic proposal fields before inserting them into HTML', () => {
+        const message = (0, improvement_cycle_core_1.buildPendingProposalReminderEmail)({
+            proposal: {
+                id: '<script>alert(1)</script>',
+                cycle_id: '<b>cycle</b>',
+                eval_status: '<passed>',
+                llm_model: '"model"',
+            },
+            dashboardUrl: 'https://menus.example.com/?x=<bad>',
+        });
+        expect(message.html).toContain('&lt;b&gt;cycle&lt;/b&gt;');
+        expect(message.html).toContain('&lt;passed&gt;');
+        expect(message.html).toContain('&quot;model&quot;');
+        expect(message.html).not.toContain('<b>cycle</b>');
+        expect(message.html).not.toContain('<passed>');
+    });
+});
 describe('buildCodeRecommendationIssue', () => {
     test('builds a self-contained issue with checklist, manifest pointers, and label', () => {
         const issue = (0, improvement_cycle_core_1.buildCodeRecommendationIssue)({

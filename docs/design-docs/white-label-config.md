@@ -50,7 +50,7 @@ done once.
 | Branding (header/footer/title/theme) | `dashboard/index.ts` (`app.locals.tenant`), `views/*.ejs` + `views/partials/theme.ejs` | `name`, `shortName`, `tagline`, `appName`, `branding.*` |
 | Approval roles | `views/design-approval.ejs` | `approvalRoles[]` |
 | Allergen key | `dashboard/index.ts` | `allergenKey` |
-| Emails (env still wins) | `dashboard/index.ts`, `submission-workflow.ts`, three `smtp-config.ts`, `db/index.ts`, `clickup-handoff-rules.ts` | `emails.*` |
+| Emails (env still wins) | `dashboard/index.ts`, `submission-workflow.ts`, three `smtp-config.ts`, `db/index.ts`, `clickup-handoff-rules.ts` | `emails.*`, including `emails.submissionConfirmationCc[]` for form-submission receipt visibility |
 | Template validation + download | `parser/src/validator.ts`, `dashboard/index.ts` | `template.*` |
 | Prompt injection anchors + debrand | `qa-prompt-builder.ts`, `improvement-cycle-core.ts`, `ai-review/index.ts` | `rulebook.guidelinesAnchor`, `rulebook.allergensAnchor` |
 | Rulebook seed | `config/rulebook/qa_prompt.txt`; startup `ensureRuntimePromptSeed()` in `dashboard/index.ts` | `rulebook.seedFile` |

@@ -356,6 +356,69 @@ export function resolveDashboardPublicUrl(env: {
     return `${env.DASHBOARD_PUBLIC_URL || env.DASHBOARD_URL || 'http://localhost:3005'}`.replace(/\/+$/, '');
 }
 
+function escapeHtml(value: unknown): string {
+    return `${value ?? ''}`
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+export type PendingPromptProposalReminderInput = {
+    proposal: {
+        id?: string | null;
+        cycle_id?: string | null;
+        created_at?: string | null;
+        correction_rule_count?: number | null;
+        submission_count?: number | null;
+        eval_status?: string | null;
+        llm_model?: string | null;
+    };
+    dashboardUrl: string;
+    unconsumedCorrectionCount?: number | null;
+};
+
+export function buildPendingProposalReminderEmail(input: PendingPromptProposalReminderInput): { subject: string; html: string } {
+    const proposal = input.proposal || {};
+    const cycleId = `${proposal.cycle_id || proposal.id || 'unknown-cycle'}`.trim();
+    const baseUrl = `${input.dashboardUrl || ''}`.replace(/\/+$/, '');
+    const generated = proposal.created_at
+        ? new Date(proposal.created_at).toLocaleString('en-US', { timeZone: 'UTC', timeZoneName: 'short' })
+        : 'unknown';
+    const evalStatus = `${proposal.eval_status || 'unknown'}`.trim();
+    const sourceCorrections = Number.isFinite(Number(proposal.correction_rule_count))
+        ? Number(proposal.correction_rule_count)
+        : null;
+    const submissions = Number.isFinite(Number(proposal.submission_count))
+        ? Number(proposal.submission_count)
+        : null;
+    const waitingCorrections = Number.isFinite(Number(input.unconsumedCorrectionCount))
+        ? Number(input.unconsumedCorrectionCount)
+        : null;
+
+    const details = [
+        `<li>Pending proposal cycle: <strong>${escapeHtml(cycleId)}</strong></li>`,
+        `<li>Generated: ${escapeHtml(generated)}</li>`,
+        `<li>Eval: ${escapeHtml(evalStatus)}</li>`,
+        sourceCorrections === null ? '' : `<li>Source corrections in pending proposal: ${sourceCorrections}</li>`,
+        submissions === null ? '' : `<li>Submissions in pending proposal: ${submissions}</li>`,
+        waitingCorrections === null ? '' : `<li>Unconsumed correction rows currently waiting: ${waitingCorrections}</li>`,
+        proposal.llm_model ? `<li>Model: ${escapeHtml(proposal.llm_model)}</li>` : '',
+    ].filter(Boolean);
+
+    return {
+        subject: `Review-improvement proposal still pending (${cycleId})`,
+        html: [
+            `<p>The daily review-improvement cycle did not generate a new proposal because a previous prompt proposal is still awaiting review.</p>`,
+            `<ul>`,
+            ...details,
+            `</ul>`,
+            `<p><a href="${escapeHtml(baseUrl)}/learning/prompt-proposal">Review the pending proposal</a></p>`,
+        ].join('\n'),
+    };
+}
+
 // Maps an accepted LLM-proposed rule into the payload shape consumed by
 // buildCorrectionRuleRecord / POST /correction-rules. Status is accepted (the
 // human approved it on the proposal page); source stays 'system' so provenance

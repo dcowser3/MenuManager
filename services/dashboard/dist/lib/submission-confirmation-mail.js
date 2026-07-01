@@ -8,6 +8,7 @@ exports.isLikelyEmailAddress = isLikelyEmailAddress;
 exports.isReservedPlaceholderEmailAddress = isReservedPlaceholderEmailAddress;
 exports.isDeliverableEmailAddress = isDeliverableEmailAddress;
 exports.buildSubmissionConfirmationRecipients = buildSubmissionConfirmationRecipients;
+exports.buildSubmissionConfirmationCc = buildSubmissionConfirmationCc;
 exports.buildSubmissionEmailSubject = buildSubmissionEmailSubject;
 exports.buildSubmissionReceiptHtml = buildSubmissionReceiptHtml;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -67,6 +68,28 @@ function buildSubmissionConfirmationRecipients(input) {
         recipients.push({ email, role: 'approver' });
     }
     return recipients;
+}
+function buildSubmissionConfirmationCc(primaryRecipient, ccRecipients, alwaysCcEmails = []) {
+    const cc = [];
+    const seen = new Set();
+    if (primaryRecipient?.email) {
+        seen.add(primaryRecipient.email.trim().toLowerCase());
+    }
+    const add = (value) => {
+        const email = `${value ?? ''}`.trim().toLowerCase();
+        if (!isDeliverableEmailAddress(email) || seen.has(email))
+            return;
+        seen.add(email);
+        cc.push(email);
+    };
+    for (const recipient of ccRecipients || []) {
+        add(recipient?.email);
+    }
+    const configuredEmails = Array.isArray(alwaysCcEmails) ? alwaysCcEmails : [alwaysCcEmails];
+    for (const email of configuredEmails) {
+        add(email);
+    }
+    return cc;
 }
 function buildSubmissionEmailSubject(input) {
     return `Menu submitted for review: ${input.projectName}`;

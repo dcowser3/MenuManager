@@ -56,6 +56,8 @@ npm run rules:manifest
 npm run backfill:audit-links -- --apply
 ```
 
+The daily improvement cycle sends a proposal-ready email when it creates a proposal. If it skips because an older proposal is still pending review, it sends a pending-proposal reminder email to the same recipient and leaves the queue unchanged.
+
 Regenerate the code rules manifest after changing deterministic rules, guards, prompt sections, or critical types.
 
 ## Approval Editor Regression Harness
