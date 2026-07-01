@@ -169,6 +169,17 @@ function asText(value: unknown, maxLength = 100000): string {
     return `${value ?? ''}`.trim().slice(0, maxLength);
 }
 
+function stripDiacriticsForComparison(value: string): string {
+    return `${value || ''}`.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+}
+
+function isDiacriticOnlyReplacement(originalText: string, correctedText: string): boolean {
+    if (!originalText || !correctedText || originalText === correctedText) {
+        return false;
+    }
+    return stripDiacriticsForComparison(originalText) === stripDiacriticsForComparison(correctedText);
+}
+
 function countMarkdownCodeFences(text: string): number {
     return (text.match(/^```/gm) || []).length;
 }
@@ -224,7 +235,7 @@ export function validateImprovementLlmOutput(
         const rule = (value && typeof value === 'object' ? value : {}) as Record<string, unknown>;
         const originalText = asText(rule.original_text, 240);
         const correctedText = asText(rule.corrected_text, 240);
-        const changeType = asText(rule.change_type, 50).toLowerCase();
+        let changeType = asText(rule.change_type, 50).toLowerCase();
         const explanation = asText(rule.rule, 2000);
         if (!originalText || !correctedText) {
             warnings.push(`rule ${index + 1} dropped: original_text and corrected_text are required`);
@@ -235,8 +246,13 @@ export function validateImprovementLlmOutput(
             continue;
         }
         if (!PROPOSED_RULE_CHANGE_TYPES.has(changeType)) {
-            warnings.push(`rule ${index + 1} dropped: change_type "${changeType}" is not deterministic-safe`);
-            continue;
+            if (isDiacriticOnlyReplacement(originalText, correctedText)) {
+                warnings.push(`rule ${index + 1}: change_type "${changeType || '(missing)'}" normalized to "diacritic" because the replacement only changes diacritics/case`);
+                changeType = 'diacritic';
+            } else {
+                warnings.push(`rule ${index + 1} dropped: change_type "${changeType}" is not deterministic-safe`);
+                continue;
+            }
         }
         const contextTerm = involvesContextDependentTerm(originalText, correctedText);
         if (contextTerm) {
@@ -514,7 +530,8 @@ Decide the right lane for each fix:
 
 CRITICAL — a text correction is "always-safe" (replacement-rule eligible) ONLY if the corrected form is right in EVERY context the word appears. If the correct form depends on what the dish actually is, it is NOT a replacement rule — it is a reasoning instruction for the prompt, and the prompt must teach the model to infer the right form from dish context.
 - Canonical example: "tartare" (a raw chopped-protein preparation, e.g. beef/tuna tartare) vs "tartar" (a sauce/condiment). A reviewer changing "poblano tartare" to "poblano tartar" because it is the sauce does NOT mean "tartare -> tartar" everywhere — that would corrupt legitimate raw tartare dishes. Add a prompt rule telling the model to decide between "tartare" and "tartar" based on whether the item is a raw protein dish or a sauce, NOT a replacement rule.
-- Apply the same test to any homograph/near-homophone whose meaning shifts the spelling. When unsure, prefer the prompt lane.
+- Apply the same test to any homograph/near-homophone whose meaning shifts the spelling. For semantic ambiguity, prefer the prompt lane.
+- Accent/diacritic-only corrections are different: if the original and corrected text are the same letters after stripping accents/diacritics and lowercasing (for example "espadin" -> "espadín" or "creme anglaise" -> "crème anglaise"), default to a deterministic "diacritic" replacement rule. Do NOT call an accent-only Spanish culinary/beverage term context-dependent unless you can name a realistic menu context where the unaccented form is intentionally correct (for example a brand styling); if you do, state that counterexample explicitly in the analysis.
 
 Prompt rewrite rules:
 - Keep the same structure, section numbering, and formatting conventions.

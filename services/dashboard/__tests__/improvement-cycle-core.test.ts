@@ -102,6 +102,29 @@ describe('validateImprovementLlmOutput', () => {
         expect(output.warnings.some((w) => /context-dependent/.test(w) && /tartar/.test(w))).toBe(true);
     });
 
+    test('normalizes accent-only replacements with unsafe labels into deterministic diacritic rules', () => {
+        const output = validateImprovementLlmOutput({
+            proposed_prompt: 'P'.repeat(600),
+            proposed_replacement_rules: [
+                {
+                    ...validRule,
+                    original_text: 'espadin',
+                    corrected_text: 'espadín',
+                    change_type: 'content',
+                    rule: 'Use the Spanish diacritic for the mezcal agave term.',
+                },
+            ],
+        });
+
+        expect(output.proposed_replacement_rules).toHaveLength(1);
+        expect(output.proposed_replacement_rules[0]).toMatchObject({
+            original_text: 'espadin',
+            corrected_text: 'espadín',
+            change_type: 'diacritic',
+        });
+        expect(output.warnings.some((w) => w.includes('normalized to "diacritic"'))).toBe(true);
+    });
+
     test('warns on a suspiciously short prompt and normalizes menu scope', () => {
         const output = validateImprovementLlmOutput({
             proposed_prompt: 'short prompt',
