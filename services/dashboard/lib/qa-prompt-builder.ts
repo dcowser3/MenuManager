@@ -71,10 +71,15 @@ export type QaPromptContext = {
     embeddedSetMenuAnalysis: { sections: any[]; issues: any[] };
 };
 
-export function buildFinalPrompt(basePrompt: string, ctx: QaPromptContext): {
+export function buildFinalPrompt(
+    basePrompt: string,
+    ctx: QaPromptContext,
+    opts: { omitSections?: QaPromptSectionId[] } = {}
+): {
     prompt: string;
     sections: QaPromptSectionId[];
 } {
+    const omit = new Set(opts.omitSections || []);
     const sections: QaPromptSectionId[] = [];
     let qaPrompt = basePrompt;
 
@@ -121,17 +126,19 @@ This is a PRIX FIXE (pre-fix) menu. Apply these special rules:
         // Insert at the beginning of the rules section. The anchor heading is
         // configured per business (rulebook.guidelinesAnchor) and must appear
         // verbatim in the active prompt for this injection to land.
-        const guidelinesAnchor = getTenantConfig().rulebook.guidelinesAnchor;
-        qaPrompt = qaPrompt.replace(
-            guidelinesAnchor,
-            `${guidelinesAnchor}\n${prixFixeSection}`
-        );
-        console.log('Injected prix fixe rules into prompt');
-        sections.push('prix_fixe');
+        if (!omit.has('prix_fixe')) {
+            const guidelinesAnchor = getTenantConfig().rulebook.guidelinesAnchor;
+            qaPrompt = qaPrompt.replace(
+                guidelinesAnchor,
+                `${guidelinesAnchor}\n${prixFixeSection}`
+            );
+            console.log('Injected prix fixe rules into prompt');
+            sections.push('prix_fixe');
+        }
     }
 
     // If custom or extracted allergens are provided, inject them into the prompt
-    if (ctx.effectiveAllergens && ctx.effectiveAllergens.trim()) {
+    if (ctx.effectiveAllergens && ctx.effectiveAllergens.trim() && !omit.has('allergens')) {
         const allergenSection = `
 **CUSTOM ALLERGEN KEY FOR THIS MENU:**
 Use the following allergen codes for reviewing this menu:
@@ -150,29 +157,39 @@ Note: Use ONLY these allergen codes when checking allergen compliance. Do not us
     }
 
     let finalPrompt = qaPrompt;
-    finalPrompt = `${finalPrompt}\n\nIMPORTANT CORRECTED MENU STRUCTURE RULES:\n- The CORRECTED MENU section must contain every submitted menu line in the same order.\n- Do not summarize, shorten, condense, omit, merge, reorder, or rewrite the menu structure.\n- Do not add section headings or line breaks that were not in the submitted menu.\n- Apply only high-confidence corrections inline and leave all other text unchanged.`;
-    finalPrompt = `${finalPrompt}\n- Never delete submitted dishes, beverages, options, headings, or standalone item lines. If a line seems wrong, duplicated, invalid, or not orderable, leave it in CORRECTED MENU and report the issue in SUGGESTIONS.`;
-    sections.push('corrected_menu_structure_rules');
-    if (ctx.precheckEnabled) {
+    if (!omit.has('corrected_menu_structure_rules')) {
+        finalPrompt = `${finalPrompt}\n\nIMPORTANT CORRECTED MENU STRUCTURE RULES:\n- The CORRECTED MENU section must contain every submitted menu line in the same order.\n- Do not summarize, shorten, condense, omit, merge, reorder, or rewrite the menu structure.\n- Do not add section headings or line breaks that were not in the submitted menu.\n- Apply only high-confidence corrections inline and leave all other text unchanged.`;
+        finalPrompt = `${finalPrompt}\n- Never delete submitted dishes, beverages, options, headings, or standalone item lines. If a line seems wrong, duplicated, invalid, or not orderable, leave it in CORRECTED MENU and report the issue in SUGGESTIONS.`;
+        sections.push('corrected_menu_structure_rules');
+    }
+    if (ctx.precheckEnabled && !omit.has('pre_ai_deterministic_checks')) {
         finalPrompt = `${finalPrompt}\n\nIMPORTANT PRE-AI DETERMINISTIC CHECKS:\n- Allowlisted spelling, diacritic, allergen-code formatting, raw-marker placement, and accepted correction-rule replacements have already been applied before this AI review.\n- Do not re-report those already-applied deterministic edits as remaining suggestions.\n- Focus on remaining semantic, contextual, uncertain, or reviewer-needed issues.`;
         sections.push('pre_ai_deterministic_checks');
     }
-    if (ctx.changedOnlyMode) {
+    if (ctx.changedOnlyMode && !omit.has('changed_only_scope')) {
         finalPrompt = `${finalPrompt}\n\nIMPORTANT SCOPE FOR THIS REVIEW:\nYou are reviewing ONLY changed excerpts from a menu revision.\nDo NOT flag unchanged baseline content.\nReturn issues only for the changed excerpts provided.\nThe CORRECTED MENU section MUST contain exactly the same lines you received, in the same order, with high-confidence corrections applied to each line. Do not add, remove, merge, split, or reorder lines.`;
         sections.push('changed_only_scope');
     }
-    finalPrompt = `${finalPrompt}\n\nIMPORTANT FOOTER RULES:\n- Do NOT review or suggest changes for the allergen legend/footer boilerplate.\n- Do NOT review or suggest changes for the standard foodborne illness warning/footer boilerplate.\n- The canonical foodborne illness warning is: ${RAW_NOTICE_TEXT}\n- Those footer lines are system-managed outside this review scope.`;
-    sections.push('footer_rules');
-    finalPrompt = `${finalPrompt}\n\nIMPORTANT ADD-ON PRICE RULES:\n- For add-on or enhancement rows with options separated by pipes or slashes, treat a number immediately after an option as that option's price.\n- Do NOT flag an add-on option as missing a price when the option appears on the same row with a numeric price, such as \"add chorizo 5 | mushrooms V 4\".`;
-    sections.push('add_on_price_rules');
+    if (!omit.has('footer_rules')) {
+        finalPrompt = `${finalPrompt}\n\nIMPORTANT FOOTER RULES:\n- Do NOT review or suggest changes for the allergen legend/footer boilerplate.\n- Do NOT review or suggest changes for the standard foodborne illness warning/footer boilerplate.\n- The canonical foodborne illness warning is: ${RAW_NOTICE_TEXT}\n- Those footer lines are system-managed outside this review scope.`;
+        sections.push('footer_rules');
+    }
+    if (!omit.has('add_on_price_rules')) {
+        finalPrompt = `${finalPrompt}\n\nIMPORTANT ADD-ON PRICE RULES:\n- For add-on or enhancement rows with options separated by pipes or slashes, treat a number immediately after an option as that option's price.\n- Do NOT flag an add-on option as missing a price when the option appears on the same row with a numeric price, such as \"add chorizo 5 | mushrooms V 4\".`;
+        sections.push('add_on_price_rules');
+    }
 
-    finalPrompt = `${finalPrompt}\n\nIMPORTANT STANDARD ITEM PRICE RULES:\n- A trailing whole number at the end of a standard menu item is a valid price even when there are no allergen codes before it.\n- Do NOT flag a line like \"Short Rib al Carbón, housemade tomatillo sauce, pickled red onion 54\" as Missing Price.`;
-    sections.push('standard_item_price_rules');
+    if (!omit.has('standard_item_price_rules')) {
+        finalPrompt = `${finalPrompt}\n\nIMPORTANT STANDARD ITEM PRICE RULES:\n- A trailing whole number at the end of a standard menu item is a valid price even when there are no allergen codes before it.\n- Do NOT flag a line like \"Short Rib al Carbón, housemade tomatillo sauce, pickled red onion 54\" as Missing Price.`;
+        sections.push('standard_item_price_rules');
+    }
 
-    finalPrompt = `${finalPrompt}\n\nIMPORTANT SELECTION INSTRUCTION RULES:\n- Standalone choice/instruction lines such as \"choose one\", \"choice of one\", \"select two\", or \"pick your entree\" are not dish entries.\n- Preserve those instruction lines in CORRECTED MENU, but do NOT flag them as Incomplete Dish Name or Missing Price.`;
-    sections.push('selection_instruction_rules');
+    if (!omit.has('selection_instruction_rules')) {
+        finalPrompt = `${finalPrompt}\n\nIMPORTANT SELECTION INSTRUCTION RULES:\n- Standalone choice/instruction lines such as \"choose one\", \"choice of one\", \"select two\", or \"pick your entree\" are not dish entries.\n- Preserve those instruction lines in CORRECTED MENU, but do NOT flag them as Incomplete Dish Name or Missing Price.`;
+        sections.push('selection_instruction_rules');
+    }
 
-    if (ctx.embeddedSetMenuAnalysis.sections.length > 0) {
+    if (ctx.embeddedSetMenuAnalysis.sections.length > 0 && !omit.has('embedded_set_menu_rules')) {
         finalPrompt = `${finalPrompt}\n\n${buildEmbeddedSetMenuPromptSection(ctx.embeddedSetMenuAnalysis as any)}`;
         sections.push('embedded_set_menu_rules');
     }

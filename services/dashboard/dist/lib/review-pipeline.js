@@ -502,7 +502,7 @@ async function runFullReviewPipeline(rawMenuContent, opts, aiCaller) {
         changedOnlyMode: false,
         precheckEnabled,
         embeddedSetMenuAnalysis,
-    });
+    }, { omitSections: opts.omitSections || [] });
     const feedback = await aiCaller(preCheckedReviewBody, promptInfo.prompt);
     const post = runPostAiPipeline({
         feedback,

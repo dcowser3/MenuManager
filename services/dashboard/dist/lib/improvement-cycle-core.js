@@ -3,12 +3,20 @@
 // gating, effective-prompt resolution, LLM-output validation, eval summarization,
 // and the mapping from LLM-proposed rules to correction_rules payloads.
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.IMPROVEMENT_SYSTEM_PROMPT = exports.CONTEXT_DEPENDENT_TERMS = exports.CURRENT_PROMPT_END_MARKER = exports.CURRENT_PROMPT_BEGIN_MARKER = exports.PROMPT_UNCHANGED_SENTINEL = exports.PROPOSED_RULE_CHANGE_TYPES = void 0;
-exports.evaluateSecretExpiry = evaluateSecretExpiry;
+exports.CONSOLIDATION_SYSTEM_PROMPT = exports.IMPROVEMENT_SYSTEM_PROMPT = exports.CONTEXT_DEPENDENT_TERMS = exports.CURRENT_PROMPT_END_MARKER = exports.CURRENT_PROMPT_BEGIN_MARKER = exports.PROMPT_UNCHANGED_SENTINEL = exports.PROPOSED_RULE_CHANGE_TYPES = void 0;
 exports.shouldRunCycle = shouldRunCycle;
+exports.assembleSupersedeCorrectionSet = assembleSupersedeCorrectionSet;
+exports.buildReplayUnavailableForCorrections = buildReplayUnavailableForCorrections;
+exports.supersededProposalReviewBlock = supersededProposalReviewBlock;
+exports.evaluateSecretExpiry = evaluateSecretExpiry;
 exports.pickEffectivePrompt = pickEffectivePrompt;
+exports.buildImprovementLlmPayload = buildImprovementLlmPayload;
 exports.involvesContextDependentTerm = involvesContextDependentTerm;
+exports.locateCorrectionSite = locateCorrectionSite;
+exports.buildCorrectionExcerptWindows = buildCorrectionExcerptWindows;
 exports.validateImprovementLlmOutput = validateImprovementLlmOutput;
+exports.decideReplayStatus = decideReplayStatus;
+exports.classifyTriggerFromComparisonEntry = classifyTriggerFromComparisonEntry;
 exports.summarizeEvalReport = summarizeEvalReport;
 exports.buildProposalEvalSummary = buildProposalEvalSummary;
 exports.evalStatusFromSummary = evalStatusFromSummary;
@@ -17,6 +25,80 @@ exports.buildPendingProposalReminderEmail = buildPendingProposalReminderEmail;
 exports.mapProposedRuleToCorrectionRulePayload = mapProposedRuleToCorrectionRulePayload;
 exports.buildCodeRecommendationIssue = buildCodeRecommendationIssue;
 const tenant_config_1 = require("@menumanager/tenant-config");
+function shouldRunCycle(input) {
+    const min = Math.max(1, input.minNewCorrections);
+    const pending = input.pendingProposal && input.pendingProposal.cycle_id
+        ? input.pendingProposal
+        : null;
+    if (input.force) {
+        if (pending) {
+            return {
+                run: true,
+                mode: 'supersede',
+                reason: 'forced re-run superseding pending proposal',
+                pendingProposal: pending,
+            };
+        }
+        return { run: true, mode: 'new', reason: 'forced re-run' };
+    }
+    if (pending) {
+        if (input.unconsumedCorrectionCount >= min) {
+            return {
+                run: true,
+                mode: 'supersede',
+                reason: `${input.unconsumedCorrectionCount} new correction(s); superseding pending proposal ${pending.cycle_id}`,
+                pendingProposal: pending,
+            };
+        }
+        return { run: false, reason: 'a pending proposal is already awaiting review' };
+    }
+    if (input.unconsumedCorrectionCount < min) {
+        return {
+            run: false,
+            reason: `only ${input.unconsumedCorrectionCount} unconsumed correction(s); need >= ${min}`,
+        };
+    }
+    return { run: true, mode: 'new', reason: `${input.unconsumedCorrectionCount} unconsumed correction(s) ready` };
+}
+/** Supersede mode: unconsumed + corrections stamped to the pending proposal's cycle (excludes proposal-* rows). */
+function assembleSupersedeCorrectionSet(unconsumed, carriedOver) {
+    const carried = (carriedOver || []).filter((r) => r && r.id && !`${r.submission_id || ''}`.startsWith('proposal-'));
+    const byId = new Map();
+    for (const r of carried)
+        byId.set(r.id, r);
+    for (const r of unconsumed || []) {
+        if (r && r.id)
+            byId.set(r.id, r);
+    }
+    const combined = [...byId.values()].sort((a, b) => Date.parse(a.created_at || '') - Date.parse(b.created_at || ''));
+    const carriedIds = new Set(carried.map((r) => r.id));
+    const newCount = combined.filter((r) => !carriedIds.has(r.id)).length;
+    return { combined, carriedCount: carried.length, newCount };
+}
+/** When replay cannot run (missing differ lib, etc.), tag every correction replay_unavailable. */
+function buildReplayUnavailableForCorrections(corrections, reason) {
+    const warning = `Pre-analysis replay unavailable (${reason}); corrections tagged replay_unavailable — review replay evidence carefully before approving a no-op.`;
+    const evidence = (corrections || []).map((r) => ({
+        correction_id: r.id,
+        submission_id: `${r.submission_id || ''}` || undefined,
+        original_text: `${r.original_text || ''}`,
+        corrected_text: `${r.corrected_text || ''}`,
+        status: 'replay_unavailable',
+    }));
+    return { evidence, warning };
+}
+/** Returns a 409 payload when review must be blocked because the proposal was superseded. */
+function supersededProposalReviewBlock(proposal) {
+    if (!proposal || `${proposal.status || ''}` !== 'superseded')
+        return null;
+    const pointer = proposal.superseded_by_cycle_id
+        ? ` Review the superseding proposal (cycle ${proposal.superseded_by_cycle_id}).`
+        : '';
+    return {
+        error: `This proposal was superseded and cannot be reviewed.${pointer}`,
+        superseded_by_cycle_id: proposal.superseded_by_cycle_id || null,
+    };
+}
 // Azure client secrets expire and then fail silently, taking down ALL Graph
 // features at once (alert/proposal email + SharePoint). Track the expiry date
 // in GRAPH_CLIENT_SECRET_EXPIRES (YYYY-MM-DD, from Azure) so we can warn ahead
@@ -50,18 +132,6 @@ function evaluateSecretExpiry(expiresIso, nowMs, warnDays = 30) {
         };
     }
     return { status: 'ok', daysLeft, message: `Graph client secret valid for ${daysLeft} more day(s) (expires ${raw}).` };
-}
-function shouldRunCycle(input) {
-    if (input.pendingProposalExists) {
-        return { run: false, reason: 'a pending proposal is already awaiting review' };
-    }
-    if (input.unconsumedCorrectionCount < Math.max(1, input.minNewCorrections)) {
-        return {
-            run: false,
-            reason: `only ${input.unconsumedCorrectionCount} unconsumed correction(s); need >= ${Math.max(1, input.minNewCorrections)}`,
-        };
-    }
-    return { run: true, reason: `${input.unconsumedCorrectionCount} unconsumed correction(s) ready` };
 }
 // The runtime prompt file is baked into the Docker image, so an approval made
 // through the dashboard is lost on the next redeploy. The DB record of the
@@ -103,6 +173,31 @@ const CONTEXT_LEAK_MARKERS = [
     '## New Reviewer Corrections',
     '## Sample Before/After Documents',
 ];
+/**
+ * Pure builder for the OpenAI chat payload used by the improvement/consolidation LLM call.
+ * Extracted so it is jest-testable (prevents hidden API contract bugs in script).
+ * - Non-reasoning: includes temperature + max_tokens.
+ * - o-series/reasoning: uses max_completion_tokens (no temperature); budget should cover reasoning tokens.
+ */
+function buildImprovementLlmPayload(model, systemPrompt, userPrompt, env = {}) {
+    const isReasoning = /o[0-9]|reasoning/i.test(model || '');
+    const payload = {
+        model,
+        messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userPrompt },
+        ],
+        response_format: { type: 'json_object' },
+    };
+    if (!isReasoning) {
+        payload.max_tokens = 16000;
+        payload.temperature = 0.2;
+    }
+    else {
+        payload.max_completion_tokens = Number(env.IMPROVE_MAX_COMPLETION_TOKENS || 32000);
+    }
+    return payload;
+}
 // Terms whose correct form depends on what the dish actually IS (or how the
 // word is used in the line), not on spelling — a blind find-replace would
 // corrupt legitimate uses. These can never be deterministic replacement rules;
@@ -133,8 +228,110 @@ function isDiacriticOnlyReplacement(originalText, correctedText) {
     }
     return stripDiacriticsForComparison(originalText) === stripDiacriticsForComparison(correctedText);
 }
+/**
+ * Locate the first occurrence of needle in text using tolerant matching:
+ * 1) case-insensitive substring
+ * 2) diacritic-stripped normalized
+ * Returns {start, end} char indices in original text, or null.
+ */
+function locateCorrectionSite(text, needle) {
+    const t = `${text || ''}`;
+    const n = `${needle || ''}`;
+    if (!t || !n)
+        return null;
+    // 1. case-insensitive direct
+    const lowerIdx = t.toLowerCase().indexOf(n.toLowerCase());
+    if (lowerIdx >= 0)
+        return { start: lowerIdx, end: lowerIdx + n.length };
+    // 2. diacritic-stripped
+    const tNorm = stripDiacriticsForComparison(t);
+    const nNorm = stripDiacriticsForComparison(n);
+    const normIdx = tNorm.indexOf(nNorm);
+    if (normIdx >= 0) {
+        // Map back approximately: find a window in original that normalizes to the match
+        // Simple approach: search near the norm position by scanning original windows
+        // For robustness we fall back to scanning original with normalized compare.
+        for (let i = 0; i <= t.length - n.length; i++) {
+            if (stripDiacriticsForComparison(t.slice(i, i + n.length)) === nNorm) {
+                return { start: i, end: i + n.length };
+            }
+        }
+    }
+    return null;
+}
+/** Trim a window to nearest line boundaries within a max radius. */
+function lineBoundedWindow(text, center, radius = 300) {
+    const t = `${text || ''}`;
+    if (!t)
+        return '';
+    const start = Math.max(0, center - radius);
+    const end = Math.min(t.length, center + radius);
+    let s = t.lastIndexOf('\n', start);
+    if (s < 0 || s < start - 80)
+        s = start;
+    else
+        s = s + 1;
+    let e = t.indexOf('\n', end);
+    if (e < 0 || e > end + 80)
+        e = end;
+    return t.slice(s, e).trim();
+}
+const HEAD_ORIENTATION_CHARS = 200;
+/**
+ * Build centered excerpt windows for corrections instead of head-slices (Fix 6 / B3).
+ * Returns labeled windows + a short head slice for orientation.
+ * Dedupes overlapping windows; respects per-submission and caller-enforced cycle budgets.
+ */
+function buildCorrectionExcerptWindows(aiText, finalText, corrections, opts = {}) {
+    const perSub = opts.perSubBudgetChars ?? 4000;
+    const out = [];
+    const usedRanges = []; // rough overlap guard on ai side
+    const ai = `${aiText || ''}`;
+    const fin = `${finalText || ''}`;
+    for (const c of corrections || []) {
+        const oid = c.id;
+        const o = c.original_text || '';
+        const ct = c.corrected_text || '';
+        let aiWin = '(correction site not found in AI draft)';
+        let finWin = '(correction site not found in final)';
+        const aiHit = o ? locateCorrectionSite(ai, o) : null;
+        if (aiHit) {
+            aiWin = lineBoundedWindow(ai, Math.floor((aiHit.start + aiHit.end) / 2), 300);
+        }
+        else if (ai) {
+            aiWin = ai.slice(0, HEAD_ORIENTATION_CHARS) + (ai.length > HEAD_ORIENTATION_CHARS ? ' …' : '');
+        }
+        const finHit = ct ? locateCorrectionSite(fin, ct) : null;
+        if (finHit) {
+            finWin = lineBoundedWindow(fin, Math.floor((finHit.start + finHit.end) / 2), 300);
+        }
+        else if (fin) {
+            finWin = fin.slice(0, HEAD_ORIENTATION_CHARS) + (fin.length > HEAD_ORIENTATION_CHARS ? ' …' : '');
+        }
+        // dedupe rough overlap on aiWin content length heuristic
+        const sig = (aiWin + '|' + finWin).slice(0, 120);
+        if (out.some((w) => (w.ai_window + '|' + w.final_window).slice(0, 120) === sig))
+            continue;
+        out.push({ correction_id: oid, submission_id: c.submission_id, ai_window: aiWin, final_window: finWin });
+        // enforce per-sub budget by char count of joined text
+        const currentChars = out.reduce((acc, w) => acc + w.ai_window.length + w.final_window.length, 0);
+        if (currentChars > perSub) {
+            // drop last if over
+            out.pop();
+            break;
+        }
+    }
+    return {
+        windows: out,
+        head_ai: ai.slice(0, HEAD_ORIENTATION_CHARS) + (ai.length > HEAD_ORIENTATION_CHARS ? ' …' : ''),
+        head_final: fin.slice(0, HEAD_ORIENTATION_CHARS) + (fin.length > HEAD_ORIENTATION_CHARS ? ' …' : ''),
+    };
+}
 function countMarkdownCodeFences(text) {
     return (text.match(/^```/gm) || []).length;
+}
+function looksLikeNoOpPromptAnalysis(analysis) {
+    return /already (?:covered|handled|addressed)|existing (?:rule|rules|prompt|guidance)|no (?:prompt )?change (?:is )?needed|should be handled by the prompt/i.test(analysis);
 }
 function validateImprovementLlmOutput(raw, opts = {}) {
     const warnings = [];
@@ -174,11 +371,16 @@ function validateImprovementLlmOutput(raw, opts = {}) {
             promptUnchanged = true;
         }
     }
-    if (!promptUnchanged && proposedPrompt.length < 500) {
+    const isConsolidation = !!opts.consolidation;
+    if (!promptUnchanged && !isConsolidation && proposedPrompt.length < 500) {
         warnings.push(`proposed_prompt is suspiciously short (${proposedPrompt.length} chars)`);
     }
-    if (!promptUnchanged && opts.currentPrompt && proposedPrompt.length > opts.currentPrompt.length * 1.6) {
+    if (!promptUnchanged && !isConsolidation && opts.currentPrompt && proposedPrompt.length > opts.currentPrompt.length * 1.6) {
         warnings.push(`proposed_prompt grew from ${opts.currentPrompt.length} to ${proposedPrompt.length} chars; review for bloat or echoed context`);
+    }
+    const analysis = asText(parsed.analysis, 20000);
+    if (promptUnchanged && looksLikeNoOpPromptAnalysis(analysis)) {
+        warnings.push('analysis appears to justify no prompt change by saying the behavior is already covered/handled; reviewer corrections are evidence the current guidance was not specific enough, so review this no-op carefully');
     }
     const rules = [];
     for (const [index, value] of (Array.isArray(parsed.proposed_replacement_rules) ? parsed.proposed_replacement_rules : []).entries()) {
@@ -240,14 +442,148 @@ function validateImprovementLlmOutput(raw, opts = {}) {
             target_file_hint: asText(recommendation.target_file_hint, 300) || null,
         });
     }
+    // B6 / Fix 9: recompute evidence counts for proposed rules from the actual source corrections.
+    // The LLM may echo "seen Nx across M" text, but we never trust its arithmetic.
+    const subByPair = new Map();
+    const occByPair = new Map();
+    for (const c of (opts.sourceCorrections || [])) {
+        const o = asText(c.original_text, 240);
+        const ct = asText(c.corrected_text, 240);
+        if (!o || !ct)
+            continue;
+        const k = `${o}→${ct}`;
+        occByPair.set(k, (occByPair.get(k) || 0) + 1);
+        if (c.submission_id) {
+            const set = subByPair.get(k) || new Set();
+            set.add(String(c.submission_id));
+            subByPair.set(k, set);
+        }
+    }
+    for (const r of rules) {
+        const k = `${r.original_text}→${r.corrected_text}`;
+        const subs = subByPair.get(k);
+        r.evidence_submission_count = subs ? subs.size : 1;
+        r.evidence_occurrence_count = occByPair.get(k) || 1;
+    }
+    // Consolidation mode (F1 / Fix 8): prompt-only rewrite for concision.
+    // Drop any emitted rules/recs with a warning; they do not apply.
+    // Warn on insufficient or suspiciously large reduction instead of the normal short/growth checks.
+    if (isConsolidation) {
+        if (rules.length > 0) {
+            warnings.push('consolidation proposal emitted replacement rules (dropped; consolidation is prompt-only)');
+            rules.length = 0;
+        }
+        if (recommendations.length > 0) {
+            warnings.push('consolidation proposal emitted code recommendations (dropped; consolidation is prompt-only)');
+            recommendations.length = 0;
+        }
+        if (!promptUnchanged && opts.currentPrompt) {
+            const currLen = opts.currentPrompt.length;
+            const propLen = proposedPrompt.length;
+            const red = currLen > 0 ? (currLen - propLen) / currLen : 0;
+            if (red < 0.05) {
+                warnings.push('consolidation produced <5% reduction (pointless run)');
+            }
+            if (red > 0.50) {
+                warnings.push('consolidation produced >50% reduction (suspicious; verify essential guidance was not dropped)');
+            }
+        }
+    }
+    // Fix 5 / B2: coverage_claims — must cite verbatim contiguous text from the *current* prompt.
+    // Invalid quotes are dropped with a hard warning. A valid citation alone does NOT count as
+    // a "cover" for still_missed corrections (replay evidence outranks citations).
+    const validatedCoverageClaims = [];
+    const currentPromptForClaims = opts.currentPrompt || '';
+    const norm = (s) => s.replace(/\s+/g, ' ').trim();
+    for (const value of Array.isArray(parsed.coverage_claims) ? parsed.coverage_claims : []) {
+        const claim = (value && typeof value === 'object' ? value : {});
+        const cid = asText(claim.correction_id, 200);
+        const quote = asText(claim.prompt_quote, 2000);
+        const expl = asText(claim.explanation, 2000);
+        if (!cid || !quote) {
+            warnings.push('coverage claim dropped: correction_id and prompt_quote are required');
+            continue;
+        }
+        if (currentPromptForClaims) {
+            if (!norm(currentPromptForClaims).includes(norm(quote))) {
+                warnings.push(`coverage claim for ${cid} cites text not present in the prompt`);
+                continue;
+            }
+        }
+        validatedCoverageClaims.push({ correction_id: cid, prompt_quote: quote, explanation: expl });
+    }
+    // Fix 2: unresolved_still_missed check. If prompt unchanged, any still_missed correction
+    // must be referenced by at least one proposed replacement rule (exact text match) or a
+    // code recommendation (loose text mention). Otherwise the proposal claims "nothing to do"
+    // while evidence shows the current pipeline still misses it.
+    let unresolvedStillMissed = false;
+    const stillMissed = (opts.replayEvidence || []).filter((e) => e.status === 'still_missed');
+    if (promptUnchanged && stillMissed.length) {
+        const referenced = stillMissed.filter((e) => {
+            const o = asText(e.original_text, 240);
+            const c = asText(e.corrected_text, 240);
+            const ruleHits = rules.some((r) => r.original_text === o && r.corrected_text === c);
+            if (ruleHits)
+                return true;
+            const hay = (recommendations.map((r) => `${r.title} ${r.description}`).join(' ') + ' ' + analysis).toLowerCase();
+            if (!o && !c)
+                return false;
+            return hay.includes(o.toLowerCase()) || hay.includes(c.toLowerCase());
+        });
+        if (referenced.length < stillMissed.length) {
+            unresolvedStillMissed = true;
+            warnings.push('unresolved_still_missed: prompt is unchanged and one or more still_missed corrections lack a covering replacement rule or code recommendation');
+        }
+    }
     return {
-        analysis: asText(parsed.analysis, 20000),
+        analysis,
         proposed_prompt: proposedPrompt,
         promptUnchanged,
         proposed_replacement_rules: rules,
         code_recommendations: recommendations,
         warnings,
+        unresolved_still_missed: unresolvedStillMissed || undefined,
+        coverage_claims: validatedCoverageClaims.length ? validatedCoverageClaims : undefined,
     };
+}
+/**
+ * Pure decision for replay tag of one correction.
+ * Follow-up 2: freeform (no original/corrected pair) -> not_verifiable so it never
+ * contributes to unresolved_still_missed.
+ */
+function decideReplayStatus(originalText, correctedText, replayOutput, signals) {
+    const o = `${originalText || ''}`.trim();
+    const c = `${correctedText || ''}`.trim();
+    if (!o && !c)
+        return 'not_verifiable';
+    if (!replayOutput)
+        return 'replay_unavailable';
+    const norm = (x) => `${x || ''}`.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+    const wantFrom = norm(o);
+    const wantTo = norm(c);
+    const hit = signals.some((sg) => {
+        const f = norm(sg.from_norm || sg.from || '');
+        const t = norm(sg.to_norm || sg.to || '');
+        return f === wantFrom && t === wantTo;
+    });
+    return hit ? 'now_correct' : 'still_missed';
+}
+/**
+ * Classify a trigger using a baselineComparison entry (B0 / Follow-up 1).
+ * Prefers confirmed_delta (fresh back-to-back from confirmation pass); falls back to freshDelta (old reports) then raw delta.
+ */
+function classifyTriggerFromComparisonEntry(entry, noiseEpsilon = 0.02) {
+    if (!entry)
+        return 'unchanged';
+    const d = entry.confirmed_delta != null ? entry.confirmed_delta
+        : (entry.freshDelta != null ? entry.freshDelta : entry.delta);
+    if (d == null)
+        return 'unchanged';
+    if (d > noiseEpsilon)
+        return 'improved';
+    if (d < -noiseEpsilon)
+        return 'regressed';
+    return 'unchanged';
 }
 function summarizeEvalReport(label, report, reportPath) {
     return {
@@ -278,14 +614,26 @@ function buildProposalEvalSummary(baseline, candidate, candidateReport) {
         })),
     };
 }
-function evalStatusFromSummary(summary) {
+function evalStatusFromSummary(summary, opts = {}) {
     if (!summary)
         return 'skipped';
     if (summary.error)
         return 'failed';
     if (!summary.candidate)
         return 'failed';
-    return summary.regressed > 0 ? 'regressed' : 'passed';
+    if (summary.regressed > 0)
+        return 'regressed';
+    if (opts.consolidation) {
+        // Consolidation proposals are not driven by corrections; success = no regressions introduced.
+        return 'passed';
+    }
+    const triggersImproved = summary.triggers_improved ?? 0;
+    if (triggersImproved > 0)
+        return 'passed';
+    // No confirmed regressions and no trigger improved: this proposal did not demonstrate
+    // forward progress on the cases that motivated it (Fix 1). Label no_effect rather than passed.
+    // (Dead opts.promptUnchanged removed per Follow-up 3; semantics focus on trigger evidence.)
+    return 'no_effect';
 }
 function resolveDashboardPublicUrl(env) {
     return `${env.DASHBOARD_PUBLIC_URL || env.DASHBOARD_URL || 'http://localhost:3005'}`.replace(/\/+$/, '');
@@ -412,6 +760,14 @@ Prompt rewrite rules:
 - Do NOT remove existing rules unless a correction explicitly contradicts them.
 - Do NOT duplicate rules the deterministic code layer already enforces (see manifest).
 - For location-specific rules, add them in a clearly labeled subsection.
+- Treat every new reviewer correction as evidence that the current first-pass process missed something. Corrections may be annotated with REPLAY EVIDENCE tags from a pre-analysis replay of the current pipeline on the same raw input:
+  - still_missed: the current pipeline reproduces the exact mistake on this input. Replay evidence outranks any coverage citation. A valid prompt_quote + still_missed is diagnosis ("present but ignored"); you MUST still propose a concrete change (restructuring/examples or code guard preferred over more abstract text). Claiming "already covered" for a still_missed correction is prohibited.
+  - now_correct: the current pipeline already produces the human's fix. You MAY leave this unaddressed, but your analysis must cite the replay evidence ("replay shows this is now produced") as the reason.
+  - replay_unavailable: no raw input was available for replay.
+  - not_verifiable: this correction is freeform guidance (no exact original/corrected text pair) and cannot be mechanically replay-verified; use judgment.
+- When a still_missed correction occurs in a context the prompt already "mentions," prefer adding concrete examples, decision tables, or counter-examples over appending another abstract sentence. If prompt text is fundamentally unreliable for the case, recommend a deterministic code guard instead of more prompt text, and say so.
+- Only leave the prompt unchanged when every source correction is fully handled by deterministic replacement rules, code recommendations, or a clearly invalid/out-of-scope reviewer correction — AND no correction is tagged still_missed. A still_missed correction is positive evidence the current process (prompt + code) does not yet produce the human fix; UNCHANGED is prohibited unless that evidence is addressed by a rule or code recommendation you also propose. In the analysis, explain the routing with reference to the replay tags.
+- If your analysis asserts that a correction is already covered by the current prompt, you MUST also emit a "coverage_claims" entry with a verbatim contiguous substring copied from the CURRENT PROMPT (exact characters, not paraphrased). Deterministic rule coverage should be cited via manifest ids in rules or code recs instead. A citation alone does not excuse a still_missed correction; if replay shows the pipeline still misses it, you must still propose a concrete change (restructuring, examples, or code guard).
 - The current prompt is provided between "=== BEGIN CURRENT PROMPT ===" and "=== END CURRENT PROMPT ===" markers. Your proposed_prompt must contain ONLY the rewritten prompt text itself — never the markers, the Code Rules Manifest, the corrections list, or any other context sections from this message.
 - Return the COMPLETE rewritten prompt, not a diff. If no prompt change is warranted, set "proposed_prompt" to exactly "UNCHANGED" instead of echoing the prompt back.
 
@@ -443,5 +799,39 @@ Respond with ONLY a JSON object in this exact shape:
       "manifest_rule_ids": ["related manifest entry ids"],
       "target_file_hint": "likely implementation file from the manifest"
     }
+  ],
+  "coverage_claims": [
+    {
+      "correction_id": "<id from the REPLAY EVIDENCE list>",
+      "prompt_quote": "exact contiguous text copied from the CURRENT PROMPT (after whitespace normalization we verify presence)",
+      "explanation": "why this section covers the correction (be specific)"
+    }
   ]
 }`;
+/**
+ * Dedicated system prompt for --consolidate (Fix 8 / F1).
+ * Task is prompt surgery for concision/structure only — not driven by new corrections.
+ * Same JSON output contract as the normal improvement prompt so the rest of the pipeline (validate, eval, storage) stays the same.
+ */
+exports.CONSOLIDATION_SYSTEM_PROMPT = `You are the review-process engineer for an AI menu editor at ${(0, tenant_config_1.getTenantConfig)().name} (${(0, tenant_config_1.getTenantConfig)().shortName}).
+
+Your job in this run is to **consolidate and tighten** the existing QA prompt without losing coverage or intent.
+
+Rules for this consolidation pass:
+- Merge redundant or overlapping rules into a single clearer statement.
+- Convert repeated abstract instructions into ONE rule + ONE short, concrete example.
+- Reorganize for scannability while keeping the original section numbering and formatting conventions where they aid readability.
+- Remove nothing unless you supply an equivalent (or stronger) formulation that preserves the original intent and edge cases.
+- Target at least 15% reduction in total characters while keeping deterministic behavior identical.
+- Do not invent new reviewer policy; only refactor what is already present.
+
+Output contract (identical shape to normal improvement proposals):
+- "analysis": short description of what you consolidated and the measured size change.
+- "proposed_prompt": the full consolidated prompt text ONLY (no markers, no manifest, no extra sections).
+- "proposed_replacement_rules": [] (emit empty; consolidation is prompt-only)
+- "code_recommendations": [] (emit empty)
+- "coverage_claims": [] (optional; only if you want to note a verbatim section you preserved)
+
+If the input is already minimal, a small honest reduction is acceptable. Never produce a longer prompt.
+
+Respond with ONLY a JSON object in the exact shape above.`;

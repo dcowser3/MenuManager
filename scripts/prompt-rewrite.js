@@ -29,11 +29,13 @@ function getRepoRoot() {
   return path.resolve(__dirname, '..');
 }
 
+const { requireSupabaseServiceKey } = require('./lib/supabase-key');
+
 function getSupabase() {
   const url = process.env.SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_ANON_KEY;
+  const key = requireSupabaseServiceKey(process.env);
   if (!url || !key) {
-    throw new Error('SUPABASE_URL and SUPABASE_SERVICE_KEY (or SUPABASE_ANON_KEY) are required');
+    throw new Error('SUPABASE_URL and a service key are required (SUPABASE_SERVICE_ROLE_KEY, legacy SUPABASE_SERVICE_KEY, or SUPABASE_ANON_KEY)');
   }
   return createClient(url, key);
 }

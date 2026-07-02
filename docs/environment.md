@@ -15,7 +15,8 @@ All variables are configured in `.env` at the project root. See `.env.example` f
 | `INTERNAL_API_TOKEN` | Shared secret required on internal service-to-service requests between dashboard, db, parser, ai-review, differ, and clickup-integration |
 | `SUPABASE_URL` | Supabase project URL |
 | `SUPABASE_ANON_KEY` | Supabase anonymous key |
-| `SUPABASE_SERVICE_KEY` / `SUPABASE_SERVICE_ROLE_KEY` | Supabase service role key. `SUPABASE_SERVICE_ROLE_KEY` matches the modern Supabase dashboard label; `SUPABASE_SERVICE_KEY` is kept as a legacy alias. |
+| `SUPABASE_SERVICE_ROLE_KEY` | **Canonical** Supabase service-role key (matches the modern Supabase dashboard label). Scripts and services resolve keys in this order: `SUPABASE_SERVICE_ROLE_KEY` → legacy `SUPABASE_SERVICE_KEY` → `SUPABASE_ANON_KEY`. |
+| `SUPABASE_SERVICE_KEY` | Legacy alias for the service-role key; still accepted if `SUPABASE_SERVICE_ROLE_KEY` is unset. |
 
 ## Optional
 
@@ -30,7 +31,7 @@ All variables are configured in `.env` at the project root. See `.env.example` f
 | `FORM_ATTEMPT_ALERT_EMAIL` | Email address that receives production public-form failure alerts such as `413` submit errors, plus user-initiated "Report this problem" emails with the page screenshot and client-state JSON attached (default: config bundle `emails.formAttemptAlert`) |
 | `PUBLIC_FORM_SUPPORT_EMAIL` | Email address shown to submitters in the form footer and blocking/red form errors as the manual fallback next to the "Report this problem" button (default: config bundle `emails.publicSupport`) |
 | `ERROR_REPORT_FORCE_EMAIL` | Set `true` to send "Report this problem" emails outside production (normally they only email in production; the report is always saved to `tmp/error-reports/` and logged to `form_attempt_logs`) |
-| `AI_REVIEW_MODEL` | OpenAI model used by AI review service (default: `gpt-4o-mini`) |
+| `AI_REVIEW_MODEL` | OpenAI model used by AI review service (default: `gpt-4o-mini`). Pin to a dated snapshot and set the same value for `REVIEW_EVAL_MODEL` (B5) to reduce eval drift. |
 | `AI_REVIEW_TEMPERATURE` | Sampling temperature for the menu QA review calls (`/run-qa-check` and the post-submit Tier-1 review). Default `0` — menu review is a correction task, not a creative one, so randomness is undesirable. Previously these calls sent no temperature (OpenAI default = 1), which made the same menu produce a different review each run. Note: temp 0 reduces but does not fully eliminate model nondeterminism (gpt-4o-mini still has backend drift); the deterministic pre-AI checks and structure/price guards are what actually make the final reviewed menu consistent. Override only for deliberate A/B testing. |
 | `APPROVED_DISH_AI_QUALITY_TIMEOUT_MS` | DB-service timeout in milliseconds when asking ai-review to classify questionable extracted dish rows (default: `20000`) |
 | `BASIC_AI_CHECK_TIMEOUT_MS` | Dashboard timeout in milliseconds for background public-form Basic AI Check calls to ai-review (default: `120000`; falls back to `AI_REVIEW_QA_TIMEOUT_MS` if set) |
@@ -72,11 +73,12 @@ All variables are configured in `.env` at the project root. See `.env.example` f
 | `ERROR_REPORT_AI_TRIAGE_DISABLED` | Set `true` to disable production AI triage proposal emails for problem reports |
 | `ERROR_REPORT_AI_TRIAGE_FORCE` | Set `true` to allow AI triage proposal emails outside production when `OPENAI_API_KEY` is configured |
 | `IMPROVE_MIN_NEW_CORRECTIONS` | Improvement-cycle gate: minimum unconsumed reviewer corrections before a proposal is generated (default: `1`) |
-| `IMPROVE_MODEL` | OpenAI model for the improvement-cycle analysis call (default: `PROMPT_REWRITE_MODEL` or `gpt-4o`) |
+| `IMPROVE_MODEL` | OpenAI model for the improvement-cycle analysis call. Default chain: `IMPROVE_MODEL || PROMPT_REWRITE_MODEL || o3` (reasoning-class). Reasoning models may ignore `temperature`; the call adapts and falls back to strict JSON parsing. |
+| `IMPROVE_MAX_COMPLETION_TOKENS` | Completion token budget passed as `max_completion_tokens` for reasoning-class models (o-series) in the improvement cycle. These models bill hidden reasoning tokens against the budget in addition to the visible JSON output (a full rewritten prompt can be ~22k chars). Default: 32000. If the response returns `finish_reason: 'length'`, the cycle now throws a clear error suggesting you raise this value. |
 | `IMPROVE_NOTIFY_EMAIL` | Recipient for "proposal ready" emails (default: `FORM_ATTEMPT_ALERT_EMAIL`) |
 | `IMPROVE_SKIP_EVAL` | Set `1` to skip the auto-eval step of the improvement cycle (proposal stored with `eval_status: skipped`) |
 | `IMPROVE_EVAL_LIMIT` | Cap the number of eval cases per improvement-cycle run (default: all) |
-| `REVIEW_EVAL_MODEL` | OpenAI model for the review eval harness (default: `AI_REVIEW_MODEL` or `gpt-4o-mini`) |
+| `REVIEW_EVAL_MODEL` | OpenAI model for the review eval harness (default: `AI_REVIEW_MODEL` or `gpt-4o-mini`). B5: pin both REVIEW_EVAL_MODEL and production AI_REVIEW_MODEL to the same dated snapshot (e.g. gpt-4o-mini-YYYY-MM-DD); the resolved value is emitted at top-level `model` in report.json. |
 | `DASHBOARD_PUBLIC_URL` | Optional base URL override for improvement-cycle notification email links and proposal-related GitHub issue provenance. When unset, these links use `DASHBOARD_URL`, then fall back to `http://localhost:3005` for local development. |
 | `GITHUB_TOKEN` | GitHub personal access token with `issues:write` on `GITHUB_REPO`. When set, approving a proposal files each code recommendation as a GitHub issue; when unset, issue filing is skipped with a log line |
 | `GITHUB_REPO` | Repository for improvement-cycle issues (default: `dcowser3/MenuManager`) |

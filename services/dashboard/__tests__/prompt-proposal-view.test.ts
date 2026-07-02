@@ -153,4 +153,83 @@ describe('prompt-proposal view', () => {
         expect(html).not.toContain('Proposed Deterministic Replacement Rules');
         expect(html).toContain('Prompt rewrite');
     });
+
+    test('renders no_effect eval status with distinct amber class on detail and in history', () => {
+        const html = renderProposalView({
+            proposal: {
+                ...baseProposal,
+                eval_status: 'no_effect',
+                eval_summary: { ...baseProposal.eval_summary, triggers_improved: 0, triggers_regressed: 0 },
+            },
+            history: [
+                { cycle_id: '2026-06-10', status: 'rejected', eval_status: 'no_effect', correction_rule_count: 0, submission_count: 2, created_at: '2026-06-10T10:00:00Z' },
+            ],
+        });
+        // Detail meta uses the amber chip
+        expect(html).toContain('class="badge no_effect"');
+        expect(html).toContain('no_effect');
+        // History table includes Eval column header and the amber badge for the row
+        expect(html).toContain('<th>Eval</th>');
+        expect(html).toMatch(/<td>.*class="badge no_effect".*no_effect.*<\/td>/s);
+    });
+
+    test('renders validated coverage claims section (Fix 5)', () => {
+        const html = renderProposalView({
+            proposal: {
+                ...baseProposal,
+                coverage_claims: [
+                    { correction_id: 'c42', prompt_quote: 'always use the full word vegetables', explanation: 'exact section' },
+                ],
+            },
+        });
+        expect(html).toContain('Coverage Claims (validated)');
+        expect(html).toContain('c42');
+        expect(html).toContain('always use the full word vegetables');
+        expect(html).toContain('replay evidence takes precedence');
+    });
+
+    test('renders thin-evidence amber badge and respects thin-unchecked default (B6)', () => {
+        const html = renderProposalView({
+            proposal: {
+                ...baseProposal,
+                status: 'pending',
+                proposed_rules: [
+                    { original_text: 'veggies', corrected_text: 'vegetables', change_type: 'terminology', rule: 'use full', applies_to_menu_type: 'all', is_location_specific: false, location: null, other_applicable_locations: [], evidence_submission_count: 1, evidence_occurrence_count: 1 },
+                    { original_text: 'radish', corrected_text: 'radishes', change_type: 'spelling', rule: 'plural', applies_to_menu_type: 'all', is_location_specific: false, location: null, other_applicable_locations: [], evidence_submission_count: 3 },
+                ],
+            },
+            thinRuleUncheckedDefault: true,
+        });
+        expect(html).toContain('single-submission evidence');
+        // First rule (thin) should not have checked when default-unchecked
+        expect(html).toMatch(/data-rule-index="0" (?!checked)/);
+        // Second (multi) still checked
+        expect(html).toMatch(/data-rule-index="1"[^>]*checked/);
+    });
+
+    test('renders supersede metadata: combined correction count and supersedes line', () => {
+        const html = renderProposalView({
+            proposal: {
+                ...baseProposal,
+                superseded_from_cycle_id: '2026-07-01',
+                supersede_carried_correction_count: 4,
+                supersede_new_correction_count: 2,
+                correction_rule_count: 6,
+            },
+        });
+        expect(html).toContain('Supersedes');
+        expect(html).toContain('2026-07-01');
+        expect(html).toContain('4 carried + 2 new');
+    });
+
+    test('history shows superseded status with pointer to replacing cycle', () => {
+        const html = renderProposalView({
+            history: [
+                { cycle_id: '2026-07-01', status: 'superseded', superseded_by_cycle_id: '2026-07-02', correction_rule_count: 4, submission_count: 1, created_at: '2026-07-01T10:00:00Z' },
+            ],
+        });
+        expect(html).toContain('class="badge superseded"');
+        expect(html).toContain('superseded');
+        expect(html).toContain('2026-07-02');
+    });
 });

@@ -36,8 +36,9 @@ function requireDashboardLib(relPath) {
 }
 
 async function fetchAcceptedRules() {
+    const { resolveSupabaseServiceKey } = require('./lib/supabase-key');
     const url = process.env.SUPABASE_URL;
-    const key = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_ANON_KEY;
+    const key = resolveSupabaseServiceKey(process.env);
     if (!url || !key) return [];
     try {
         const { createClient } = require('@supabase/supabase-js');

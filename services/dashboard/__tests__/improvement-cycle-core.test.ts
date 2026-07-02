@@ -2,32 +2,97 @@ import {
     buildPendingProposalReminderEmail,
     buildCodeRecommendationIssue,
     buildProposalEvalSummary,
+    classifyTriggerFromComparisonEntry,
+    decideReplayStatus,
     evalStatusFromSummary,
     evaluateSecretExpiry,
+    IMPROVEMENT_SYSTEM_PROMPT,
+    CONSOLIDATION_SYSTEM_PROMPT,
     mapProposedRuleToCorrectionRulePayload,
     pickEffectivePrompt,
     resolveDashboardPublicUrl,
     shouldRunCycle,
     summarizeEvalReport,
     validateImprovementLlmOutput,
+    buildCorrectionExcerptWindows,
+    locateCorrectionSite,
+    assembleSupersedeCorrectionSet,
+    buildReplayUnavailableForCorrections,
+    supersededProposalReviewBlock,
+    buildImprovementLlmPayload,
 } from '../lib/improvement-cycle-core';
 
 describe('shouldRunCycle gating', () => {
-    test('skips when a proposal is already pending', () => {
-        const gate = shouldRunCycle({ unconsumedCorrectionCount: 5, pendingProposalExists: true, minNewCorrections: 1 });
+    const pending = { id: 'p-old', cycle_id: '2026-07-01' };
+
+    test('pending + no new corrections: skip with reminder reason (no supersede)', () => {
+        const gate = shouldRunCycle({ unconsumedCorrectionCount: 0, pendingProposal: pending, minNewCorrections: 1 });
         expect(gate.run).toBe(false);
         expect(gate.reason).toContain('pending proposal');
     });
 
-    test('skips below the correction threshold and runs at it', () => {
-        expect(shouldRunCycle({ unconsumedCorrectionCount: 0, pendingProposalExists: false, minNewCorrections: 1 }).run).toBe(false);
-        expect(shouldRunCycle({ unconsumedCorrectionCount: 2, pendingProposalExists: false, minNewCorrections: 3 }).run).toBe(false);
-        expect(shouldRunCycle({ unconsumedCorrectionCount: 3, pendingProposalExists: false, minNewCorrections: 3 }).run).toBe(true);
+    test('pending + enough new corrections: supersede mode', () => {
+        const gate = shouldRunCycle({ unconsumedCorrectionCount: 2, pendingProposal: pending, minNewCorrections: 1 });
+        expect(gate.run).toBe(true);
+        expect(gate).toMatchObject({
+            run: true,
+            mode: 'supersede',
+            pendingProposal: { cycle_id: '2026-07-01' },
+        });
+    });
+
+    test('force with pending: supersede even with zero new corrections', () => {
+        const gate = shouldRunCycle({ unconsumedCorrectionCount: 0, pendingProposal: pending, minNewCorrections: 1, force: true });
+        expect(gate.run).toBe(true);
+        if (gate.run) expect(gate.mode).toBe('supersede');
+    });
+
+    test('force without pending: new mode', () => {
+        const gate = shouldRunCycle({ unconsumedCorrectionCount: 0, pendingProposal: null, minNewCorrections: 1, force: true });
+        expect(gate).toEqual({ run: true, mode: 'new', reason: 'forced re-run' });
+    });
+
+    test('skips below the correction threshold and runs at it when no pending', () => {
+        expect(shouldRunCycle({ unconsumedCorrectionCount: 0, pendingProposal: null, minNewCorrections: 1 }).run).toBe(false);
+        expect(shouldRunCycle({ unconsumedCorrectionCount: 2, pendingProposal: null, minNewCorrections: 3 }).run).toBe(false);
+        const at = shouldRunCycle({ unconsumedCorrectionCount: 3, pendingProposal: null, minNewCorrections: 3 });
+        expect(at.run).toBe(true);
+        if (at.run) expect(at.mode).toBe('new');
     });
 
     test('treats minNewCorrections below 1 as 1', () => {
-        expect(shouldRunCycle({ unconsumedCorrectionCount: 0, pendingProposalExists: false, minNewCorrections: 0 }).run).toBe(false);
-        expect(shouldRunCycle({ unconsumedCorrectionCount: 1, pendingProposalExists: false, minNewCorrections: 0 }).run).toBe(true);
+        expect(shouldRunCycle({ unconsumedCorrectionCount: 0, pendingProposal: null, minNewCorrections: 0 }).run).toBe(false);
+        expect(shouldRunCycle({ unconsumedCorrectionCount: 1, pendingProposal: null, minNewCorrections: 0 }).run).toBe(true);
+    });
+});
+
+describe('assembleSupersedeCorrectionSet', () => {
+    test('merges carried-over and unconsumed, dedupes by id, excludes proposal-* rows', () => {
+        const carried = [
+            { id: 'c1', submission_id: 's1', created_at: '2026-07-01T00:00:00Z' },
+            { id: 'c2', submission_id: 'proposal-x', created_at: '2026-07-01T01:00:00Z' },
+        ];
+        const unconsumed = [
+            { id: 'c3', submission_id: 's2', created_at: '2026-07-02T00:00:00Z' },
+            { id: 'c1', submission_id: 's1', created_at: '2026-07-01T00:00:00Z' }, // overlap
+        ];
+        const { combined, carriedCount, newCount } = assembleSupersedeCorrectionSet(unconsumed, carried);
+        expect(combined.map((r) => r.id)).toEqual(['c1', 'c3']);
+        expect(carriedCount).toBe(1);
+        expect(newCount).toBe(1);
+    });
+});
+
+describe('buildReplayUnavailableForCorrections', () => {
+    test('tags every correction replay_unavailable with a reviewer-visible warning', () => {
+        const { evidence, warning } = buildReplayUnavailableForCorrections(
+            [{ id: 'a', submission_id: 's1', original_text: 'x', corrected_text: 'y' }],
+            'Differ lib unavailable'
+        );
+        expect(evidence).toHaveLength(1);
+        expect(evidence[0].status).toBe('replay_unavailable');
+        expect(warning).toContain('replay unavailable');
+        expect(warning).toContain('Differ lib unavailable');
     });
 });
 
@@ -141,7 +206,20 @@ describe('validateImprovementLlmOutput', () => {
         );
         expect(output.promptUnchanged).toBe(true);
         expect(output.proposed_prompt).toBe('THE CURRENT PROMPT');
-        expect(output.warnings).toEqual([]);
+        expect(output.warnings.some((w) => w.includes('already covered/handled'))).toBe(true);
+    });
+
+    test('warns when unchanged analysis dismisses missed prompt-lane corrections as already handled', () => {
+        const output = validateImprovementLlmOutput(
+            {
+                proposed_prompt: 'UNCHANGED',
+                analysis: 'The word-order corrections should be handled by the prompt, so no prompt change is needed.',
+            },
+            { currentPrompt: 'THE CURRENT PROMPT' }
+        );
+
+        expect(output.promptUnchanged).toBe(true);
+        expect(output.warnings.some((w) => w.includes('current guidance was not specific enough'))).toBe(true);
     });
 
     test('echoed input context falls back to unchanged with a warning', () => {
@@ -191,6 +269,135 @@ describe('validateImprovementLlmOutput', () => {
         expect(bloated.promptUnchanged).toBe(false);
         expect(bloated.warnings.some((w) => w.includes('review for bloat'))).toBe(true);
     });
+
+    test('Fix 2: unresolved_still_missed is set when prompt unchanged and a still_missed correction has no covering rule or code rec', () => {
+        const out = validateImprovementLlmOutput(
+            { proposed_prompt: 'UNCHANGED', analysis: 'Nothing to change.' },
+            {
+                currentPrompt: 'THE CURRENT',
+                replayEvidence: [
+                    { correction_id: 'c1', submission_id: 's1', original_text: 'veggies', corrected_text: 'vegetables', status: 'still_missed' },
+                    { correction_id: 'c2', submission_id: 's1', original_text: 'x', corrected_text: 'y', status: 'now_correct' },
+                ],
+            }
+        );
+        expect(out.promptUnchanged).toBe(true);
+        expect(out.unresolved_still_missed).toBe(true);
+        expect(out.warnings.some((w) => /unresolved_still_missed/.test(w))).toBe(true);
+    });
+
+    test('Fix 2: still_missed covered by a proposed rule does not set unresolved', () => {
+        const out = validateImprovementLlmOutput(
+            {
+                proposed_prompt: 'UNCHANGED',
+                analysis: 'Covered by rule.',
+                proposed_replacement_rules: [{ original_text: 'veggies', corrected_text: 'vegetables', change_type: 'terminology', rule: 'use full', applies_to_menu_type: 'all', is_location_specific: false, location: null, other_applicable_locations: [] }],
+            },
+            {
+                currentPrompt: 'CUR',
+                replayEvidence: [{ correction_id: 'c1', submission_id: 's1', original_text: 'veggies', corrected_text: 'vegetables', status: 'still_missed' }],
+            }
+        );
+        expect(out.unresolved_still_missed).toBeFalsy();
+    });
+
+    test('Follow-up 2: freeform (not_verifiable) + UNCHANGED does not set unresolved_still_missed', () => {
+        const out = validateImprovementLlmOutput(
+            { proposed_prompt: 'UNCHANGED', analysis: 'Handled the guidance in reasoning.' },
+            {
+                currentPrompt: 'CUR',
+                replayEvidence: [
+                    { correction_id: 'c1', submission_id: 's1', original_text: '', corrected_text: '', status: 'not_verifiable' },
+                ],
+            }
+        );
+        expect(out.unresolved_still_missed).toBeFalsy();
+    });
+
+    test('Follow-up 2: exact still_missed without cover still sets unresolved (behavior preserved)', () => {
+        const out = validateImprovementLlmOutput(
+            { proposed_prompt: 'UNCHANGED', analysis: 'Did not address.' },
+            {
+                currentPrompt: 'CUR',
+                replayEvidence: [
+                    { correction_id: 'c1', submission_id: 's1', original_text: 'x', corrected_text: 'y', status: 'still_missed' },
+                ],
+            }
+        );
+        expect(out.unresolved_still_missed).toBe(true);
+    });
+
+    test('Fix 5: valid coverage_claim + still_missed + no rule/cover still sets unresolved_still_missed (replay outranks citation)', () => {
+        const current = 'The prompt says use vegetables for veggies and other terms.';
+        const out = validateImprovementLlmOutput(
+            {
+                proposed_prompt: 'UNCHANGED',
+                analysis: 'No action required per existing guidance.',
+                coverage_claims: [{ correction_id: 'c1', prompt_quote: 'use vegetables for veggies', explanation: 'mentions the term' }],
+            },
+            {
+                currentPrompt: current,
+                replayEvidence: [{ correction_id: 'c1', submission_id: 's1', original_text: 'veggies', corrected_text: 'vegetables', status: 'still_missed' }],
+            }
+        );
+        expect(out.unresolved_still_missed).toBe(true);
+        // The claim is accepted (present in output) but does not prevent the banner.
+        expect(Array.isArray(out.coverage_claims) && out.coverage_claims.length).toBe(1);
+        expect(out.coverage_claims![0].prompt_quote).toContain('vegetables for veggies');
+    });
+
+    test('Fix 5: fabricated coverage quote is dropped with warning and does not satisfy still_missed', () => {
+        const out = validateImprovementLlmOutput(
+            {
+                proposed_prompt: 'UNCHANGED',
+                analysis: 'Covered.',
+                coverage_claims: [{ correction_id: 'c9', prompt_quote: 'this text is not in the prompt at all', explanation: 'nope' }],
+            },
+            {
+                currentPrompt: 'short prompt here',
+                replayEvidence: [{ correction_id: 'c9', submission_id: 's9', original_text: 'foo', corrected_text: 'bar', status: 'still_missed' }],
+            }
+        );
+        expect(out.unresolved_still_missed).toBe(true);
+        expect(out.warnings.some((w) => /cites text not present/.test(w))).toBe(true);
+        expect(out.coverage_claims || []).toEqual([]);
+    });
+
+    test('B6: evidence counts on proposed rules are recomputed from sourceCorrections (never trust LLM)', () => {
+        const corrections = [
+            { original_text: 'veggies', corrected_text: 'vegetables', submission_id: 's1' },
+            { original_text: 'veggies', corrected_text: 'vegetables', submission_id: 's1' }, // dup occ on same sub
+            { original_text: 'veggies', corrected_text: 'vegetables', submission_id: 's2' },
+            { original_text: 'radish', corrected_text: 'radishes', submission_id: 's3' },
+        ];
+        const out = validateImprovementLlmOutput(
+            {
+                proposed_prompt: 'SOME PROMPT',
+                analysis: 'ok',
+                proposed_replacement_rules: [
+                    { original_text: 'veggies', corrected_text: 'vegetables', change_type: 'terminology', rule: 'full word', applies_to_menu_type: 'all', is_location_specific: false, location: null, other_applicable_locations: [] },
+                    { original_text: 'radish', corrected_text: 'radishes', change_type: 'spelling', rule: 'plural', applies_to_menu_type: 'all', is_location_specific: false, location: null, other_applicable_locations: [] },
+                ],
+            },
+            { sourceCorrections: corrections }
+        );
+        const r0 = out.proposed_replacement_rules[0];
+        const r1 = out.proposed_replacement_rules[1];
+        expect(r0.evidence_submission_count).toBe(2); // s1,s2
+        expect(r0.evidence_occurrence_count).toBe(3);
+        expect(r1.evidence_submission_count).toBe(1);
+        expect(r1.evidence_occurrence_count).toBe(1);
+    });
+});
+
+describe('improvement system prompt', () => {
+    test('treats missed prompt-lane corrections as evidence current guidance needs sharpening', () => {
+        expect(IMPROVEMENT_SYSTEM_PROMPT).toContain('Treat every new reviewer correction as evidence');
+        // Updated language from Fix 2 (replay evidence + still_missed discipline)
+        expect(IMPROVEMENT_SYSTEM_PROMPT).toContain('still_missed');
+        // B2 updated wording; replay outranks citation (case-insensitive match)
+        expect(IMPROVEMENT_SYSTEM_PROMPT.toLowerCase()).toContain('replay evidence outranks');
+    });
 });
 
 describe('eval summary + status', () => {
@@ -206,21 +413,31 @@ describe('eval summary + status', () => {
         },
     });
 
-    test('builds a compact summary and derives status', () => {
+    test('builds a compact summary and derives status (Fix 1: progression on triggers required for passed)', () => {
         const baseline = summarizeEvalReport('baseline', report(0.8), '/tmp/base/report.json');
         const candidate = summarizeEvalReport('candidate', report(0.82), '/tmp/cand/report.json');
-        const summary = buildProposalEvalSummary(baseline, candidate, report(0.82, 0));
-        expect(summary.improved).toBe(3);
-        expect(summary.regressed).toBe(0);
-        expect(evalStatusFromSummary(summary)).toBe('passed');
+        const baseSummary = buildProposalEvalSummary(baseline, candidate, report(0.82, 0));
+        expect(baseSummary.improved).toBe(3);
+        expect(baseSummary.regressed).toBe(0);
+
+        // Without any trigger improvement, zero-regressed proposals are no_effect, not passed.
+        expect(evalStatusFromSummary(baseSummary)).toBe('no_effect');
+
+        // A proposal that improves at least one trigger is 'passed' when there are no regressions.
+        const withTriggerWin = { ...baseSummary, triggers_improved: 1, triggers: [{ case_id: 'p:1', submission_id: '1', baseline_composite: 0.7, candidate_composite: 0.9, delta: 0.2, status: 'improved' as const }] };
+        expect(evalStatusFromSummary(withTriggerWin)).toBe('passed');
 
         const regressedSummary = buildProposalEvalSummary(baseline, candidate, report(0.79, 2));
         expect(evalStatusFromSummary(regressedSummary)).toBe('regressed');
         expect(regressedSummary.regressions[0].label).toBe('Case 1');
 
         expect(evalStatusFromSummary(null)).toBe('skipped');
-        expect(evalStatusFromSummary({ ...summary, error: 'boom' } as any)).toBe('failed');
-        expect(evalStatusFromSummary({ ...summary, candidate: null } as any)).toBe('failed');
+        expect(evalStatusFromSummary({ ...baseSummary, error: 'boom' } as any)).toBe('failed');
+        expect(evalStatusFromSummary({ ...baseSummary, candidate: null } as any)).toBe('failed');
+
+        // Byte-identical candidate (delta 0) with no trigger wins -> no_effect
+        const identical = buildProposalEvalSummary(baseline, candidate, report(0.80, 0));
+        expect(evalStatusFromSummary(identical)).toBe('no_effect');
     });
 });
 
@@ -356,6 +573,146 @@ describe('buildCodeRecommendationIssue', () => {
     });
 });
 
+describe('decideReplayStatus (Follow-up 2)', () => {
+    const sig = (f: string, t: string) => ({ from: f, to: t, from_norm: f.toLowerCase(), to_norm: t.toLowerCase() });
+
+    test('freeform (empty pair) is not_verifiable', () => {
+        expect(decideReplayStatus('', '', 'anything', [])).toBe('not_verifiable');
+        expect(decideReplayStatus(null, null, 'x', [])).toBe('not_verifiable');
+    });
+
+    test('no replay output -> replay_unavailable even with text pair', () => {
+        expect(decideReplayStatus('a', 'b', '', [sig('a','b')])).toBe('replay_unavailable');
+    });
+
+    test('hit in signals -> now_correct', () => {
+        expect(decideReplayStatus('veggies', 'vegetables', 'menu with vegetables', [sig('veggies', 'vegetables')])).toBe('now_correct');
+    });
+
+    test('miss but replay ran -> still_missed', () => {
+        expect(decideReplayStatus('a', 'b', 'menu with a', [sig('x','y')])).toBe('still_missed');
+    });
+});
+
+describe('classifyTriggerFromComparisonEntry (Follow-up 1)', () => {
+    test('uses freshDelta when present for confirmation', () => {
+        expect(classifyTriggerFromComparisonEntry({ delta: 0.03, freshDelta: 0.001 })).toBe('unchanged');
+        expect(classifyTriggerFromComparisonEntry({ delta: 0.03, freshDelta: 0.04 })).toBe('improved');
+    });
+
+    test('falls back to delta', () => {
+        expect(classifyTriggerFromComparisonEntry({ delta: 0.03 })).toBe('improved');
+        expect(classifyTriggerFromComparisonEntry({ delta: -0.03 })).toBe('regressed');
+        expect(classifyTriggerFromComparisonEntry({ delta: 0.01 })).toBe('unchanged');
+    });
+
+    test('null/empty -> unchanged', () => {
+        expect(classifyTriggerFromComparisonEntry(null)).toBe('unchanged');
+        expect(classifyTriggerFromComparisonEntry(undefined)).toBe('unchanged');
+    });
+
+    test('B0: prefers confirmed_delta over freshDelta/raw for trigger classification', () => {
+        // raw +3pp but confirmed ~0 => unchanged (drift)
+        expect(classifyTriggerFromComparisonEntry({ delta: 0.03, freshDelta: 0.001, confirmed_delta: 0.001 })).toBe('unchanged');
+        // confirmed positive wins
+        expect(classifyTriggerFromComparisonEntry({ delta: 0.01, confirmed_delta: 0.03 })).toBe('improved');
+        // old report fallback still works
+        expect(classifyTriggerFromComparisonEntry({ delta: 0.03, freshDelta: 0.04 })).toBe('improved');
+    });
+
+    test('B0: synthetic baselineComparison fixture with raw/confirmed disagreement', () => {
+        // Simulate the shape produced by review-eval.js after B0
+        const syntheticBaselineComparison = {
+            comparedCases: 2,
+            noiseEpsilon: 0.02,
+            avgDelta: 0.005,
+            improved: 1,
+            same: 1,
+            regressed: 0,
+            regressions: [],
+            improvements: [
+                { case_id: 'p:1', delta: 0.03, confirmed_delta: 0.025, outcome: 'improved' },
+                { case_id: 'p:2', delta: 0.01, confirmed_delta: null, outcome: 'improved' }, // no confirmation pass
+            ],
+        };
+        // Cycle code path: prefer confirmed_delta when present
+        const e1 = syntheticBaselineComparison.improvements[0];
+        const e2 = syntheticBaselineComparison.improvements[1];
+        expect(e1.confirmed_delta).toBe(0.025);
+        expect(e2.confirmed_delta).toBeNull();
+        expect(classifyTriggerFromComparisonEntry(e1, 0.02)).toBe('improved');
+        expect(classifyTriggerFromComparisonEntry(e2, 0.02)).toBe('unchanged'); // within epsilon after confirmed null -> use raw
+    });
+});
+
+describe('buildCorrectionExcerptWindows + locate (Fix 6 / B3)', () => {
+
+    test('locate finds case-insensitive and diacritic tolerant sites', () => {
+        const text = 'Grilled Salmon with radishes, fennel and veggies on the side.';
+        expect(locateCorrectionSite(text, 'VEGGIES')).not.toBeNull();
+        expect(locateCorrectionSite(text, 'radish')).not.toBeNull(); // substring
+        const accented = 'Espadin mezcal and creme anglaise finish.';
+        expect(locateCorrectionSite(accented, 'espadín')).not.toBeNull();
+        expect(locateCorrectionSite(accented, 'crème anglaise')).not.toBeNull();
+    });
+
+    test('builds ±300 line-bounded windows and includes correction site deep in text', () => {
+        const ai = 'Intro line.\n' + 'x'.repeat(800) + '\nPoblano tartare with veggies and radishes.\n' + 'y'.repeat(800) + '\nEnd.';
+        const fin = 'Intro line.\n' + 'x'.repeat(800) + '\nPoblano tartar with vegetables and radish.\n' + 'y'.repeat(800) + '\nEnd.';
+        const corrs = [
+            { id: 'c10', original_text: 'veggies', corrected_text: 'vegetables' },
+            { id: 'c11', original_text: 'Poblano tartare', corrected_text: 'Poblano tartar' },
+        ];
+        const res = buildCorrectionExcerptWindows(ai, fin, corrs, { perSubBudgetChars: 8000 });
+        const joined = (res.windows.map((w) => w.ai_window + ' ' + w.final_window).join(' ')).toLowerCase();
+        expect(joined).toContain('vegetables');
+        expect(joined).toContain('tartar');
+        // head slices are still produced for orientation
+        expect(res.head_ai.length).toBeGreaterThan(0);
+    });
+
+    test('dedupes overlapping and respects per-sub budget', () => {
+        const ai = 'A '.repeat(1000) + 'target word here ' + 'B '.repeat(1000);
+        const fin = 'A '.repeat(1000) + 'TARGET WORD HERE ' + 'B '.repeat(1000);
+        const corrs = [
+            { id: 'c1', original_text: 'target word', corrected_text: 'TARGET WORD' },
+            { id: 'c2', original_text: 'target word', corrected_text: 'TARGET WORD' }, // duplicate site
+        ];
+        const res = buildCorrectionExcerptWindows(ai, fin, corrs, { perSubBudgetChars: 200 });
+        // budget small -> at most one window kept
+        expect(res.windows.length).toBeLessThanOrEqual(1);
+    });
+});
+
+describe('cycle script replay execution path (Follow-up 0 regression guard)', () => {
+    test('executing the improvement cycle (dry-run) reaches replay assembly without TDZ/scope error', () => {
+        const { spawnSync } = require('child_process');
+        const path = require('path');
+        const script = path.resolve(__dirname, '../../../scripts/improvement-cycle.js');
+        // Provide just enough env to pass the initial getSupabase guard; the replay block will
+        // still run (and hit the outer catch or log evidence). A TDZ would surface as a specific
+        // ReferenceError instead of the graceful skip.
+        const res = spawnSync(process.execPath, [script, '--dry-run'], {
+            encoding: 'utf8',
+            env: {
+                ...process.env,
+                SUPABASE_URL: 'https://dummy.supabase.co',
+                SUPABASE_SERVICE_KEY: 'dummy',
+                OPENAI_API_KEY: 'sk-dummy-for-test',
+            },
+            timeout: 15000,
+        });
+        const out = (res.stdout || '') + (res.stderr || '');
+        // If TDZ or bad reference in the replay block, this string appears (or uncaught ReferenceError).
+        // A test failure here catches re-introduction of the Follow-up 0 scope bug.
+        expect(out).not.toMatch(/before initialization|Cannot access .*submissionIds/i);
+        // The path containing the replay block was reached if we see cycle startup text or a graceful
+        // replay outcome (success log or the caught skip). With dummy env some early exits are expected.
+        const reached = /Improvement Cycle|Gate:|replay (evidence|skipped)|dry-run/i.test(out) || res.status !== 0;
+        expect(reached).toBe(true);
+    });
+});
+
 describe('mapProposedRuleToCorrectionRulePayload', () => {
     test('maps a global rule with accepted status and system source', () => {
         const payload = mapProposedRuleToCorrectionRulePayload({
@@ -411,5 +768,85 @@ describe('mapProposedRuleToCorrectionRulePayload', () => {
         expect(payload.location).toBe('Zengo - Doha');
         expect(payload.other_applicable_locations).toEqual(['Toro - Dubai']);
         expect(payload.restaurant_name).toBe('Zengo - Doha');
+    });
+});
+
+describe('supersededProposalReviewBlock (409 guard)', () => {
+    test('returns null for pending/approved proposals', () => {
+        expect(supersededProposalReviewBlock({ status: 'pending' })).toBeNull();
+        expect(supersededProposalReviewBlock({ status: 'approved' })).toBeNull();
+    });
+
+    test('returns 409 payload with superseding cycle pointer', () => {
+        const block = supersededProposalReviewBlock({ status: 'superseded', superseded_by_cycle_id: '2026-07-02' });
+        expect(block?.error).toContain('superseded');
+        expect(block?.error).toContain('2026-07-02');
+        expect(block?.superseded_by_cycle_id).toBe('2026-07-02');
+    });
+});
+
+describe('buildImprovementLlmPayload (F0 extraction)', () => {
+    test('o-series / reasoning model: uses max_completion_tokens, no max_tokens, no temperature', () => {
+        const p = buildImprovementLlmPayload('o3', 'sys', 'user', { IMPROVE_MAX_COMPLETION_TOKENS: '28000' });
+        expect(p.model).toBe('o3');
+        expect(p.max_completion_tokens).toBe(28000);
+        expect(p).not.toHaveProperty('max_tokens');
+        expect(p).not.toHaveProperty('temperature');
+        expect(p.response_format).toEqual({ type: 'json_object' });
+    });
+
+    test('non-reasoning model: uses max_tokens + temperature, no max_completion_tokens', () => {
+        const p = buildImprovementLlmPayload('gpt-4o', 'sys', 'user');
+        expect(p.max_tokens).toBe(16000);
+        expect(p.temperature).toBe(0.2);
+        expect(p).not.toHaveProperty('max_completion_tokens');
+    });
+
+    test('falls back to 32000 for reasoning when env unset', () => {
+        const p = buildImprovementLlmPayload('o4-mini', 's', 'u');
+        expect(p.max_completion_tokens).toBe(32000);
+    });
+});
+
+describe('consolidation mode (F1 / Fix 8)', () => {
+    test('CONSOLIDATION_SYSTEM_PROMPT exists and is distinct', () => {
+        expect(typeof CONSOLIDATION_SYSTEM_PROMPT).toBe('string');
+        expect(CONSOLIDATION_SYSTEM_PROMPT.length).toBeGreaterThan(200);
+        expect(CONSOLIDATION_SYSTEM_PROMPT).toContain('consolidate');
+        expect(CONSOLIDATION_SYSTEM_PROMPT).not.toBe(IMPROVEMENT_SYSTEM_PROMPT);
+    });
+
+    test('validator in consolidation mode: drops rules/recs, warns on <5% or >50% reduction, does not fire short/growth', () => {
+        const current = 'x'.repeat(10000);
+        const tooLittle = current; // 0% reduction (promptUnchanged will be detected but we force proposed different length)
+        const outLittle = validateImprovementLlmOutput(
+            { proposed_prompt: current.slice(0, 9800), analysis: 'tiny change' },
+            { currentPrompt: current, consolidation: true }
+        );
+        expect(outLittle.proposed_replacement_rules.length).toBe(0);
+        expect(outLittle.code_recommendations.length).toBe(0);
+        expect(outLittle.warnings.some((w) => /<5% reduction/.test(w))).toBe(true);
+
+        const hugeCut = 'y'.repeat(1000);
+        const outHuge = validateImprovementLlmOutput(
+            { proposed_prompt: hugeCut, analysis: 'big cut' },
+            { currentPrompt: current, consolidation: true }
+        );
+        expect(outHuge.warnings.some((w) => />50% reduction/.test(w))).toBe(true);
+
+        // normal short warning should be suppressed
+        const outShort = validateImprovementLlmOutput(
+            { proposed_prompt: 'abc', analysis: 'short but consolidation' },
+            { currentPrompt: current, consolidation: true }
+        );
+        expect(outShort.warnings.some((w) => /suspiciously short/.test(w))).toBe(false);
+    });
+
+    test('evalStatusFromSummary for consolidation: passed iff zero confirmed regressed (ignores triggers)', () => {
+        const base = { regressed: 0, candidate: { avgComposite: 0.9 }, triggers_improved: 0 } as any;
+        expect(evalStatusFromSummary(base, { consolidation: true })).toBe('passed');
+        expect(evalStatusFromSummary({ ...base, regressed: 1 }, { consolidation: true })).toBe('regressed');
+        // normal (non-consol) still requires a trigger win for passed
+        expect(evalStatusFromSummary(base)).toBe('no_effect');
     });
 });

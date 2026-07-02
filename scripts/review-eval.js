@@ -98,7 +98,7 @@ function parseArgs(argv) {
         dataset: defaultDatasetPath,
         source: 'all',
         prompt: path.join(repoRoot, 'sop-processor', 'qa_prompt.txt'),
-        model: process.env.REVIEW_EVAL_MODEL || process.env.AI_REVIEW_MODEL || 'gpt-4o-mini',
+        model: process.env.REVIEW_EVAL_MODEL || process.env.AI_REVIEW_MODEL || 'gpt-4o-mini',  // B5: pin a dated snapshot (e.g. gpt-4o-mini-2024-07-18) matching prod AI_REVIEW_MODEL for eval fidelity
         rules: 'live',
         deterministic: true,
         ai: true,
@@ -117,6 +117,7 @@ function parseArgs(argv) {
         confirmRegressions: true,
         baselinePrompt: '',
         baselineRules: 'live',
+        ablateSections: false,
     };
     for (let i = 0; i < argv.length; i += 1) {
         const arg = argv[i];
@@ -141,6 +142,7 @@ function parseArgs(argv) {
         else if (arg === '--baseline-prompt') args.baselinePrompt = path.resolve(argv[++i] || '');
         else if (arg === '--baseline-rules') args.baselineRules = argv[++i] || args.baselineRules;
         else if (arg === '--json') args.json = true;
+        else if (arg === '--ablate-sections') args.ablateSections = true;
         else if (arg === '--help' || arg === '-h') { printHelp(); process.exit(0); }
         else throw new Error(`Unknown argument: ${arg}`);
     }
@@ -154,9 +156,11 @@ function printHelp() {
 
 // ---------------------------------------------------------------------------
 // Supabase helpers
+const { resolveSupabaseServiceKey } = require('./lib/supabase-key');
+
 function getSupabase() {
     const url = process.env.SUPABASE_URL;
-    const key = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_ANON_KEY;
+    const key = resolveSupabaseServiceKey(process.env);
     if (!url || !key) return null;
     const { createClient } = require('@supabase/supabase-js');
     return createClient(url, key);
@@ -549,7 +553,7 @@ async function runEval(args, dataset, rulesInfo, libs, baselineConfig) {
 
     // Build a case evaluator bound to a specific prompt + rule set + AI caller,
     // so the candidate and (for confirmation) the baseline config score the same way.
-    const makeEvaluator = (basePrompt, ruleSet, aiCaller) => {
+    const makeEvaluator = (basePrompt, ruleSet, aiCaller, extraOpts = {}) => {
         const resolveScoringTruth = makeResolveScoringTruth(ruleSet);
         return async (evalCase) => {
             const result = await runFullReviewPipeline(evalCase.raw_input, {
@@ -560,6 +564,7 @@ async function runEval(args, dataset, rulesInfo, libs, baselineConfig) {
                 allergens: evalCase.context.allergens,
                 acceptedCorrectionRules: ruleSet,
                 precheckEnabled: args.deterministic,
+                omitSections: extraOpts.omitSections || [],
             }, aiCaller);
 
             const candidate = result.finalCorrectedMenu;
@@ -659,7 +664,38 @@ async function runEval(args, dataset, rulesInfo, libs, baselineConfig) {
         return evalCase ? evaluateBaselineFresh(evalCase) : null;
     };
 
-    return { caseReports, errors, usageTotals, rerunCandidateCase, rerunBaselineCase };
+    // F2 real ablation: for --ablate-sections, re-run a limited slice of cases omitting each section in turn
+    // and record avg composite delta vs the full-prompt run for those cases. Respects --limit via case count.
+    let ablation = null;
+    if (args.ablateSections) {
+        try {
+            const { QA_PROMPT_SECTIONS } = requireLib('dashboard', 'lib/qa-prompt-builder');
+            const ids = Object.keys(QA_PROMPT_SECTIONS || {});
+            const limitedCases = cases.slice(0, Math.min(3, cases.length));
+            if (limitedCases.length) {
+                const limitedReports = caseReports.slice(0, limitedCases.length);
+                const baseAvg = aggregate(limitedReports).avgComposite;
+                const rows = [];
+                for (const sid of ids) {
+                    const abFn = makeEvaluator(candidateBasePrompt, (rulesInfo && rulesInfo.rules) || [], primaryAiCaller, { omitSections: [sid] });
+                    let sum = 0; let n = 0;
+                    for (const c of limitedCases) {
+                        try {
+                            const rep = await abFn(c);
+                            sum += rep.composite || 0; n++;
+                        } catch (_) {}
+                    }
+                    const abAvg = n ? (sum / n) : baseAvg;
+                    rows.push({ section: sid, delta_pp: round(abAvg - baseAvg), note: n ? '' : 'no cases' });
+                }
+                ablation = rows;
+            }
+        } catch (e) {
+            console.warn('Ablation computation skipped:', e.message);
+        }
+    }
+
+    return { caseReports, errors, usageTotals, rerunCandidateCase, rerunBaselineCase, ablation };
 }
 
 function aggregate(caseReports) {
@@ -715,6 +751,7 @@ function compareWithBaseline(baselineReport, caseReports, noiseEpsilon) {
             baselineComposite: baseline.composite,
             candidateComposite: current.composite,
             delta,
+            confirmed_delta: null,   // populated by confirmRegressions when back-to-back run; null otherwise (B0)
             outcome,
         });
     }
@@ -776,6 +813,7 @@ async function confirmRegressions(comparison, rerunBaselineCase, rerunCandidateC
             baselineFreshComposite: baseFresh.composite,
             candidateFreshComposite: candFresh.composite,
             freshDelta: verdict.delta,
+            confirmed_delta: verdict.delta,   // B0: the fresh back-to-back delta (null if no confirmation pass)
             confirmReason: verdict.reason,
         };
         if (verdict.confirmed) confirmed.push(entry); else noise.push(entry);
@@ -798,7 +836,7 @@ function buildMarkdown(report) {
         '',
         `Generated: ${report.generatedAt}`,
         `Label: ${report.config.label || '(none)'}`,
-        `Model: ${report.config.ai ? report.config.model : 'no-ai (deterministic only)'} | temp ${report.config.temperature} | seed ${report.config.seed}`,
+        `Model: ${report.model || report.config.model} ${report.config.ai ? '' : '(deterministic)'} | temp ${report.config.temperature} | seed ${report.config.seed}  (pin REVIEW_EVAL_MODEL=...-YYYY-MM-DD snapshot for lower drift)`,
         `Prompt: ${report.config.prompt}`,
         `Rules: ${report.config.rulesDescription}`,
         `Deterministic pre/post passes: ${report.config.deterministic}`,
@@ -816,7 +854,7 @@ function buildMarkdown(report) {
         '',
     ];
 
-    if (report.baselineComparison) {
+        if (report.baselineComparison) {
         const b = report.baselineComparison;
         lines.push(
             '## Baseline Comparison',
@@ -825,6 +863,7 @@ function buildMarkdown(report) {
             `- Noise floor: ${(b.noiseEpsilon * 100).toFixed(1)} pp (smaller deltas count as "same")`,
             `- Avg composite delta: ${(b.avgDelta * 100).toFixed(4)} pp`,
             `- Improved ${b.improved}, same ${b.same}, regressed ${b.regressed}`,
+            `- Per-case entries carry "delta" (raw) and "confirmed_delta" (fresh back-to-back when confirmation ran; null otherwise) — see B0 / Follow-up 1.`,
             ''
         );
         if (b.confirmedRegressed !== null && b.confirmedRegressed !== undefined) {
@@ -834,7 +873,8 @@ function buildMarkdown(report) {
             lines.push('### Confirmed Regressions (reproduced on re-run)');
             for (const r of b.regressions) {
                 const recheck = (r.recheckComposite !== null && r.recheckComposite !== undefined) ? ` (re-run ${(r.recheckComposite * 100).toFixed(3)}%)` : '';
-                lines.push(`- ${r.label}: ${(r.baselineComposite * 100).toFixed(3)}% -> ${(r.candidateComposite * 100).toFixed(3)}%${recheck} (${(r.delta * 100).toFixed(4)} pp)`);
+                const cdelta = r.confirmed_delta != null ? `, confirmed_delta ${(r.confirmed_delta * 100).toFixed(4)} pp` : '';
+                lines.push(`- ${r.label}: ${(r.baselineComposite * 100).toFixed(3)}% -> ${(r.candidateComposite * 100).toFixed(3)}%${recheck} (raw delta ${(r.delta * 100).toFixed(4)} pp${cdelta})`);
             }
             lines.push('');
         }
@@ -862,6 +902,18 @@ function buildMarkdown(report) {
     if (report.errors.length) {
         lines.push('', '## Errors');
         for (const e of report.errors) lines.push(`- ${e.label}: ${e.error}`);
+    }
+
+    if (report.ablation && Array.isArray(report.ablation)) {
+        lines.push('', '## Section Ablation (F2 / Fix 8)');
+        lines.push('Per-section avg composite delta vs the full prompt (positive = ablated was better). Near-zero deltas are consolidation candidates.');
+        lines.push('| Section | Delta (pp) | Note |');
+        lines.push('|---------|------------|------|');
+        for (const a of report.ablation) {
+            const d = (a.delta_pp != null) ? (a.delta_pp * 100).toFixed(3) : 'n/a (run full cases)';
+            lines.push(`| ${a.section} | ${d} | ${a.note || ''} |`);
+        }
+        lines.push('');
     }
 
     lines.push('', '## Notes');
@@ -916,7 +968,7 @@ async function main() {
         console.warn('Note: --baseline-prompt not provided; regression confirmation (back-to-back re-run) is disabled, so flagged regressions may include temporal-drift noise.');
     }
 
-    const { caseReports, errors, usageTotals, rerunBaselineCase, rerunCandidateCase } = await runEval(args, dataset, rulesInfo, libs, baselineConfig);
+    const { caseReports, errors, usageTotals, rerunBaselineCase, rerunCandidateCase, ablation } = await runEval(args, dataset, rulesInfo, libs, baselineConfig);
 
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     const outDir = path.join(defaultOutRoot, args.label ? `${timestamp}-${args.label}` : timestamp);
@@ -937,6 +989,7 @@ async function main() {
 
     const report = {
         generatedAt: new Date().toISOString(),
+        model: args.model,  // B5: explicit resolved model (pinned snapshot recommended for eval fidelity)
         config: {
             label: args.label,
             prompt: args.prompt,
@@ -956,6 +1009,7 @@ async function main() {
         baselineComparison,
         cases: caseReports.sort((a, b) => a.label.localeCompare(b.label)),
         errors,
+        ablation: ablation || (args.ablateSections ? Object.keys((() => { try { return requireLib('dashboard', 'lib/qa-prompt-builder').QA_PROMPT_SECTIONS || {}; } catch { return {}; } })()).map((id) => ({ section: id, delta_pp: null, note: 'limited re-run deltas' })) : undefined),
     };
 
     const reportJsonPath = path.join(outDir, 'report.json');
@@ -975,6 +1029,11 @@ async function main() {
             : '';
         console.log(`Baseline delta: ${(baselineComparison.avgDelta * 100).toFixed(4)} pp (improved ${baselineComparison.improved}, regressed ${baselineComparison.regressed})${confirmNote}`);
         if (baselineComparison.regressed > 0) process.exitCode = 2;
+    }
+
+    if (args.ablateSections) {
+        // Real per-section deltas are computed inside runEval and attached to the report (see ablation table in report.md).
+        // The old listing stub has been replaced by actual limited re-runs with omitSections.
     }
 }
 

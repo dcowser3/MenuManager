@@ -636,6 +636,8 @@ export type FullReviewPipelineOptions = {
     allergens?: string;
     acceptedCorrectionRules?: AcceptedCorrectionRule[];
     precheckEnabled?: boolean;
+    // F2: when --ablate-sections, omit specific prompt sections for delta measurement.
+    omitSections?: import('./qa-prompt-builder').QaPromptSectionId[];
 };
 
 export type FullReviewPipelineResult = {
@@ -684,7 +686,7 @@ export async function runFullReviewPipeline(
         changedOnlyMode: false,
         precheckEnabled,
         embeddedSetMenuAnalysis,
-    });
+    }, { omitSections: opts.omitSections || [] });
 
     const feedback = await aiCaller(preCheckedReviewBody, promptInfo.prompt);
 

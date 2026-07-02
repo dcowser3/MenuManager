@@ -2388,6 +2388,48 @@ app.put('/correction-rules/:id', async (req, res) => {
     }
 });
 
+// Un-consume corrections that were stamped by a prompt proposal cycle on rejection.
+// Never un-consumes the synthetic output rows (submission_id 'proposal-%') created on approval.
+app.post('/correction-rules/unconsume-for-cycle', async (req, res) => {
+    try {
+        const { cycle_id } = req.body || {};
+        if (!cycle_id) return res.status(400).json({ error: 'cycle_id is required' });
+        const updates = { prompt_cycle_id: null, consumed_at: null, updated_at: new Date().toISOString() };
+        if (isSupabaseConfigured()) {
+            try {
+                const supabase = getSupabaseClient();
+                const { data, error } = await supabase
+                    .from(CORRECTION_RULES_TABLE)
+                    .update(updates)
+                    .eq('prompt_cycle_id', cycle_id)
+                    .not('submission_id', 'like', 'proposal-%')
+                    .select('id');
+                if (error) throw new Error(error.message);
+                return res.json({ ok: true, reset: (data || []).length });
+            } catch (e: any) {
+                console.warn('Supabase unconsume failed, trying local fallback:', e.message);
+            }
+        }
+        // Local JSON fallback
+        const all = JSON.parse(await fs.readFile(CORRECTION_RULES_DB, 'utf8')) as any[];
+        let count = 0;
+        const now = updates.updated_at;
+        for (const r of all) {
+            if (r.prompt_cycle_id === cycle_id && !String(r.submission_id || '').startsWith('proposal-')) {
+                r.prompt_cycle_id = null;
+                r.consumed_at = null;
+                r.updated_at = now;
+                count += 1;
+            }
+        }
+        await fs.writeFile(CORRECTION_RULES_DB, JSON.stringify(all, null, 2));
+        res.json({ ok: true, reset: count });
+    } catch (error: any) {
+        console.error('Error unconsuming corrections for cycle:', error.message);
+        res.status(500).json({ error: 'Failed to unconsume corrections' });
+    }
+});
+
 // ============================================================================
 // Prompt Proposals (Learning Pipeline v2)
 // ============================================================================
@@ -2402,6 +2444,7 @@ app.get('/prompt-proposals/latest', async (_req, res) => {
         const { data, error } = await supabase
             .from(PROMPT_PROPOSALS_TABLE)
             .select('*')
+            .eq('status', 'pending')
             .order('created_at', { ascending: false })
             .limit(1)
             .maybeSingle();
@@ -2422,7 +2465,7 @@ app.get('/prompt-proposals', async (_req, res) => {
         const supabase = getSupabaseClient();
         const { data, error } = await supabase
             .from(PROMPT_PROPOSALS_TABLE)
-            .select('id, cycle_id, status, correction_rule_count, submission_count, date_range_start, date_range_end, llm_model, reviewer_name, reviewed_at, created_at')
+            .select('id, cycle_id, status, correction_rule_count, submission_count, date_range_start, date_range_end, llm_model, reviewer_name, reviewed_at, created_at, eval_status, superseded_by_cycle_id')
             .order('created_at', { ascending: false })
             .limit(20);
 
@@ -2498,7 +2541,7 @@ const CRITICAL_SUPABASE_SCHEMA: Record<string, string[]> = {
     correction_rules: ['applies_to_menu_type', 'prompt_cycle_id', 'consumed_at', 'submission_ids'],
     submissions: ['form_attempt_id', 'approved_menu_content'],
     basic_ai_check_audits: ['menu_content_raw', 'submission_id'],
-    prompt_proposals: ['proposed_rules', 'eval_status', 'accepted_rules', 'source', 'llm_warnings'],
+    prompt_proposals: ['proposed_rules', 'eval_status', 'accepted_rules', 'source', 'llm_warnings', 'replay_evidence', 'unresolved_still_missed', 'coverage_claims', 'prompt_length', 'superseded_by_cycle_id', 'superseded_from_cycle_id', 'supersede_carried_correction_count', 'supersede_new_correction_count'],
 };
 
 async function verifyCriticalSupabaseSchema(): Promise<void> {

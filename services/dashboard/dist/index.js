@@ -2005,10 +2005,12 @@ app.get('/learning/prompt-proposal', async (_req, res) => {
         ]);
         const proposal = proposalResult.data;
         const history = historyResult.data || [];
+        const thinUnchecked = !!process.env.IMPROVE_THIN_RULE_UNCHECKED;
         res.render('prompt-proposal', {
             title: 'Prompt Proposal Review',
             proposal,
             history,
+            thinRuleUncheckedDefault: thinUnchecked,
         });
     }
     catch (error) {
@@ -2074,6 +2076,13 @@ app.post('/api/learning/prompt-proposal/:id/review', async (req, res) => {
         catch (fetchError) {
             console.warn('Could not load proposal before review (proposed rules will be skipped):', fetchError.message);
         }
+        if (!proposalRecord) {
+            return res.status(404).json({ error: 'Proposal not found' });
+        }
+        const supersededBlock = (0, improvement_cycle_core_1.supersededProposalReviewBlock)(proposalRecord);
+        if (supersededBlock) {
+            return res.status(409).json(supersededBlock);
+        }
         const approved = status === 'approved' || status === 'approved_modified';
         const proposedRules = Array.isArray(proposalRecord?.proposed_rules) ? proposalRecord.proposed_rules : [];
         const selectedIndexes = Array.isArray(accepted_rule_indexes)
@@ -2089,6 +2098,16 @@ app.post('/api/learning/prompt-proposal/:id/review', async (req, res) => {
             reviewed_at: new Date().toISOString(),
             accepted_rules: acceptedRules.length ? acceptedRules : null,
         }, { timeout: 5000 });
+        // Fix 3: on rejection, un-consume the source corrections so they can seed a future cycle.
+        // Approval-inserted proposal-* rows are excluded by the endpoint.
+        if (status === 'rejected' && proposalRecord?.cycle_id) {
+            try {
+                await internalApi.post(`${DB_SERVICE_URL}/correction-rules/unconsume-for-cycle`, { cycle_id: proposalRecord.cycle_id }, { timeout: 5000 });
+            }
+            catch (unErr) {
+                console.warn('Failed to un-consume corrections on proposal rejection (non-fatal):', unErr.message);
+            }
+        }
         // If approved, write the new prompt to qa_prompt.txt
         if (approved) {
             const promptToWrite = final_prompt || response.data?.proposed_prompt;

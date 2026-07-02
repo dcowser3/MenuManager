@@ -138,4 +138,22 @@ describe('buildFinalPrompt (extracted from handleBasicCheck)', () => {
             expect(QA_PROMPT_SECTIONS[id]).toBeDefined();
         }
     });
+
+    test('omitSections removes the named section text and id from results (F2)', () => {
+        const full = buildFinalPrompt(BASE_PROMPT, {
+            precheckEnabled: true,
+            embeddedSetMenuAnalysis: EMPTY_SET_MENU,
+        });
+        const ablated = buildFinalPrompt(BASE_PROMPT, {
+            precheckEnabled: true,
+            embeddedSetMenuAnalysis: EMPTY_SET_MENU,
+        }, { omitSections: ['pre_ai_deterministic_checks', 'footer_rules'] });
+        expect(ablated.sections).not.toContain('pre_ai_deterministic_checks');
+        expect(ablated.sections).not.toContain('footer_rules');
+        expect(ablated.sections.length).toBeLessThan(full.sections.length);
+        expect(ablated.prompt).not.toContain('PRE-AI DETERMINISTIC CHECKS');
+        expect(ablated.prompt).not.toContain('FOOTER RULES');
+        // Other sections still present
+        expect(ablated.sections).toContain('corrected_menu_structure_rules');
+    });
 });

@@ -48,8 +48,10 @@
             background: #fff;
         }
         .badge.pending { color: var(--warn); border-color: rgba(184,134,11,.35); }
+        .badge.superseded { color: var(--muted); border-color: rgba(100,116,139,.35); text-decoration: line-through; }
         .badge.approved, .badge.approved_modified { color: var(--success); border-color: rgba(74,124,89,.35); }
         .badge.rejected { color: var(--danger); border-color: rgba(139,58,58,.35); }
+        .badge.no_effect { color: #b45309; border-color: rgba(180,83,9,.35); background: #fffbeb; } /* distinct amber for no_effect per Fix 4 / B1 */
         .meta-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: .75rem; margin-bottom: 1rem; }
         .meta-item { border: 1px solid var(--border); background: var(--bg-alt); padding: .5rem .6rem; }
         .meta-label { font-size: .6rem; text-transform: uppercase; letter-spacing: .1em; color: var(--muted); margin-bottom: .15rem; }
@@ -163,8 +165,21 @@
                     </div>
                     <div class="meta-item">
                         <div class="meta-label">Source Corrections</div>
-                        <div class="meta-value"><%= proposal.correction_rule_count || 0 %></div>
+                        <div class="meta-value">
+                            <% if (proposal.supersede_carried_correction_count != null && proposal.supersede_new_correction_count != null) { %>
+                                <%= proposal.correction_rule_count || 0 %>
+                                <span class="small" style="color:var(--muted);">(<%= proposal.supersede_carried_correction_count %> carried + <%= proposal.supersede_new_correction_count %> new)</span>
+                            <% } else { %>
+                                <%= proposal.correction_rule_count || 0 %>
+                            <% } %>
+                        </div>
                     </div>
+                    <% if (proposal.superseded_from_cycle_id) { %>
+                        <div class="meta-item">
+                            <div class="meta-label">Supersedes</div>
+                            <div class="meta-value">cycle <strong><%= proposal.superseded_from_cycle_id %></strong></div>
+                        </div>
+                    <% } %>
                     <div class="meta-item">
                         <div class="meta-label">Submissions</div>
                         <div class="meta-value"><%= proposal.submission_count || 0 %></div>
@@ -184,7 +199,12 @@
                     <% if (proposal.eval_status) { %>
                         <div class="meta-item">
                             <div class="meta-label">Eval</div>
-                            <div class="meta-value"><span class="badge <%= proposal.eval_status === 'passed' ? 'approved' : (proposal.eval_status === 'regressed' ? 'rejected' : 'pending') %>"><%= proposal.eval_status %></span></div>
+                            <%
+                                const evalBadgeClass = proposal.eval_status === 'passed' ? 'approved'
+                                    : (proposal.eval_status === 'regressed' ? 'rejected'
+                                    : (proposal.eval_status === 'no_effect' ? 'no_effect' : 'pending'));
+                            %>
+                            <div class="meta-value"><span class="badge <%= evalBadgeClass %>"><%= proposal.eval_status %></span></div>
                         </div>
                     <% } %>
                     <div class="meta-item">
@@ -205,6 +225,23 @@
                 <div class="analysis-box"><%= proposal.llm_analysis %></div>
             <% } %>
 
+            <% const covClaims = Array.isArray(proposal.coverage_claims) ? proposal.coverage_claims : []; %>
+            <% if (covClaims.length) { %>
+                <h3 class="section-title">Coverage Claims (validated)</h3>
+                <div class="analysis-box">
+                    <ul class="notes-list">
+                    <% covClaims.forEach((c) => { %>
+                        <li>
+                            <strong>correction <%= c.correction_id %></strong>:
+                            <span style="font-family: monospace; background:#fff; padding:1px 3px; border:1px solid var(--border);"><%= (c.prompt_quote || '').slice(0, 160) %><%= (c.prompt_quote || '').length > 160 ? '…' : '' %></span>
+                            <% if (c.explanation) { %><div class="small" style="margin-top:.2rem; color:var(--muted);"><%= c.explanation %></div><% } %>
+                        </li>
+                    <% }) %>
+                    </ul>
+                    <div class="small" style="margin-top:.3rem; color:#854d0e;">Note: a citation alone does not resolve a still_missed correction (replay evidence takes precedence).</div>
+                </div>
+            <% } %>
+
             <% const llmWarnings = Array.isArray(proposal.llm_warnings) ? proposal.llm_warnings : []; %>
             <% if (llmWarnings.length) { %>
                 <h3 class="section-title">Validation Notes</h3>
@@ -214,6 +251,13 @@
                         <li><%= warning %></li>
                     <% }) %>
                     </ul>
+                </div>
+            <% } %>
+
+            <% if (proposal.unresolved_still_missed) { %>
+                <div class="card" style="border-color: var(--danger); background:#fff5f5;">
+                    <strong style="color:var(--danger)">Unresolved still_missed corrections</strong>
+                    <div class="small" style="margin-top:.25rem">Pre-analysis replay showed that the current pipeline still reproduces one or more of the motivating mistakes, but this proposal left the prompt unchanged and did not provide a replacement rule or code recommendation that addresses them. A reviewer must either approve a covering change or explicitly note why the evidence can be deferred.</div>
                 </div>
             <% } %>
 
@@ -256,6 +300,25 @@
                                 <div class="meta-value"><%= evalSummary.candidate ? (evalSummary.candidate.correctionF1 * 100).toFixed(1) + '%' : 'n/a' %></div>
                             </div>
                         </div>
+                        <% const trigs = Array.isArray(evalSummary.triggers) ? evalSummary.triggers : []; %>
+                        <% if (trigs.length) { %>
+                            <div class="small" style="margin: .4rem 0 .2rem">Trigger cases (submissions whose corrections motivated this proposal — a "passed" verdict requires at least one improved):</div>
+                            <table>
+                                <thead><tr><th>Case / Submission</th><th>Baseline</th><th>Candidate</th><th>Delta</th><th>Status</th></tr></thead>
+                                <tbody>
+                                <% trigs.forEach((t) => { %>
+                                    <tr>
+                                        <td><code><%= t.case_id || t.submission_id %></code></td>
+                                        <td><%= t.baseline_composite != null ? (t.baseline_composite * 100).toFixed(2) + '%' : 'n/a' %></td>
+                                        <td><%= t.candidate_composite != null ? (t.candidate_composite * 100).toFixed(2) + '%' : 'n/a' %></td>
+                                        <td><%= t.delta != null ? (t.delta * 100).toFixed(3) + ' pp' : '' %></td>
+                                        <td><%= t.status %></td>
+                                    </tr>
+                                <% }) %>
+                                </tbody>
+                            </table>
+                            <div class="small" style="margin-top:.2rem">Triggers: improved <%= evalSummary.triggers_improved || 0 %>, unchanged <%= evalSummary.triggers_unchanged || 0 %>, regressed <%= evalSummary.triggers_regressed || 0 %>, unavailable <%= evalSummary.triggers_unavailable || 0 %></div>
+                        <% } %>
                         <% if ((evalSummary.regressions || []).length) { %>
                             <div class="small" style="margin-bottom:.4rem">Confirmed regressions (reproduced on a fresh-seed re-run, not nondeterminism noise):</div>
                             <table>
@@ -289,13 +352,21 @@
                         <% proposedRules.forEach((rule, index) => { %>
                             <tr>
                                 <% if (proposal.status === 'pending') { %>
-                                    <td><input type="checkbox" class="proposed-rule-checkbox" data-rule-index="<%= index %>" checked></td>
+                                    <%
+                                        const isThin = (rule.evidence_submission_count || 0) <= 1;
+                                        const shouldCheck = !(typeof thinRuleUncheckedDefault !== 'undefined' && thinRuleUncheckedDefault && isThin);
+                                    %>
+                                    <td><input type="checkbox" class="proposed-rule-checkbox" data-rule-index="<%= index %>" <%= shouldCheck ? 'checked' : '' %>></td>
                                 <% } %>
                                 <td><code><%= rule.original_text %></code></td>
                                 <td><code><%= rule.corrected_text %></code></td>
                                 <td><%= rule.change_type %></td>
                                 <td><%= rule.is_location_specific ? (rule.location || 'location-specific') : 'Global' %> · <%= rule.applies_to_menu_type || 'all' %></td>
-                                <td class="small"><%= rule.rule %></td>
+                                <td class="small"><%= rule.rule %>
+                                    <% if ((rule.evidence_submission_count || 0) <= 1) { %>
+                                        <span class="badge no_effect" title="Recomputed from corrections; consider whether this generalizes beyond the single menu." style="margin-left:.4rem;">single-submission evidence</span>
+                                    <% } %>
+                                </td>
                             </tr>
                         <% }) %>
                         </tbody>
@@ -347,7 +418,7 @@
                     <div class="review-form">
                         <label for="reviewerName">Reviewer Name</label>
                         <input id="reviewerName" placeholder="Your name">
-                        <label for="reviewerNotes">Notes (optional)</label>
+                        <label for="reviewerNotes">Notes (strongly encouraged for rejections; fed to the next cycle)</label>
                         <textarea id="reviewerNotes" placeholder="Any notes about this prompt change..."></textarea>
                     </div>
                     <div class="btn-group">
@@ -375,6 +446,7 @@
                     <tr>
                         <th>Cycle</th>
                         <th>Status</th>
+                        <th>Eval</th>
                         <th>Corrections</th>
                         <th>Submissions</th>
                         <th>Date Range</th>
@@ -387,7 +459,17 @@
                 <% history.forEach((p) => { %>
                     <tr>
                         <td><strong><%= p.cycle_id %></strong></td>
-                        <td><span class="badge <%= p.status %>"><%= p.status %></span></td>
+                        <td><span class="badge <%= p.status === 'superseded' ? 'superseded' : p.status %>"><%= p.status %></span><%
+                            if (p.status === 'superseded' && p.superseded_by_cycle_id) { %>
+                                <span class="small" style="color:var(--muted);"> → <%= p.superseded_by_cycle_id %></span><%
+                            }
+                        %></td>
+                        <td><%
+                            if (p.eval_status) {
+                                const ec = p.eval_status === 'passed' ? 'approved' : (p.eval_status === 'regressed' ? 'rejected' : (p.eval_status === 'no_effect' ? 'no_effect' : 'pending'));
+                                %><span class="badge <%= ec %>"><%= p.eval_status %></span><%
+                            } else { %>—<% }
+                        %></td>
                         <td><%= p.correction_rule_count || 0 %></td>
                         <td><%= p.submission_count || 0 %></td>
                         <td><%= p.date_range_start || '' %> - <%= p.date_range_end || '' %></td>
@@ -502,6 +584,10 @@
                 statusEl.textContent = 'Reviewer name is required.';
                 statusEl.className = 'status-msg err';
                 return;
+            }
+            if (status === 'rejected' && !reviewerNotes) {
+                const ok = confirm('Notes are fed to the next cycle — rejecting without notes wastes the signal. Continue without notes?');
+                if (!ok) return;
             }
 
             const body = {

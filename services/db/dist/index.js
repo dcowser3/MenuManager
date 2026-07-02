@@ -2165,6 +2165,51 @@ app.put('/correction-rules/:id', async (req, res) => {
         res.status(500).json({ error: 'Failed to update correction rule' });
     }
 });
+// Un-consume corrections that were stamped by a prompt proposal cycle on rejection.
+// Never un-consumes the synthetic output rows (submission_id 'proposal-%') created on approval.
+app.post('/correction-rules/unconsume-for-cycle', async (req, res) => {
+    try {
+        const { cycle_id } = req.body || {};
+        if (!cycle_id)
+            return res.status(400).json({ error: 'cycle_id is required' });
+        const updates = { prompt_cycle_id: null, consumed_at: null, updated_at: new Date().toISOString() };
+        if ((0, supabase_client_1.isSupabaseConfigured)()) {
+            try {
+                const supabase = (0, supabase_client_1.getSupabaseClient)();
+                const { data, error } = await supabase
+                    .from(CORRECTION_RULES_TABLE)
+                    .update(updates)
+                    .eq('prompt_cycle_id', cycle_id)
+                    .not('submission_id', 'like', 'proposal-%')
+                    .select('id');
+                if (error)
+                    throw new Error(error.message);
+                return res.json({ ok: true, reset: (data || []).length });
+            }
+            catch (e) {
+                console.warn('Supabase unconsume failed, trying local fallback:', e.message);
+            }
+        }
+        // Local JSON fallback
+        const all = JSON.parse(await fs_1.promises.readFile(CORRECTION_RULES_DB, 'utf8'));
+        let count = 0;
+        const now = updates.updated_at;
+        for (const r of all) {
+            if (r.prompt_cycle_id === cycle_id && !String(r.submission_id || '').startsWith('proposal-')) {
+                r.prompt_cycle_id = null;
+                r.consumed_at = null;
+                r.updated_at = now;
+                count += 1;
+            }
+        }
+        await fs_1.promises.writeFile(CORRECTION_RULES_DB, JSON.stringify(all, null, 2));
+        res.json({ ok: true, reset: count });
+    }
+    catch (error) {
+        console.error('Error unconsuming corrections for cycle:', error.message);
+        res.status(500).json({ error: 'Failed to unconsume corrections' });
+    }
+});
 // ============================================================================
 // Prompt Proposals (Learning Pipeline v2)
 // ============================================================================

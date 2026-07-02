@@ -162,6 +162,11 @@ services:
     volumes:
       - ./services/dashboard:/app/services/dashboard
       - /app/services/dashboard/node_modules
+      # improvement-cycle.js + review-eval.js run inside this container (Track A / cron parity)
+      - ./scripts:/app/scripts:ro
+      # requireDifferLib (replay evidence + eval scoring) needs differ source/dist in-container
+      - ./services/differ:/app/services/differ:ro
+      - /app/services/differ/node_modules
       - ./services/docx-redliner:/app/services/docx-redliner
       - /app/services/docx-redliner/venv
       - ./sop-processor:/app/sop-processor

@@ -73,7 +73,7 @@ Related docs:
 - Reviewers can annotate learning examples and accepted correction rules on learning dashboards.
 - Accepted manual rules can be scoped globally, to food/beverage menus, or to a property.
 - The automated improvement loop can assemble new annotated corrections, propose prompt/rule changes, run evals, and wait for human approval before applying changes.
-- If the daily improvement loop is blocked by an older pending prompt proposal, it emails a reminder for that pending proposal instead of silently skipping the day.
+- When the daily improvement loop finds a pending proposal with **no** new unconsumed corrections, it emails a reminder for that pending proposal instead of silently skipping the day. When new corrections arrive, it supersedes the pending proposal with a fresh one that combines all evidence.
 - Deterministic rule or prompt-section changes should be followed by `npm run rules:manifest`.
 
 Related docs:
