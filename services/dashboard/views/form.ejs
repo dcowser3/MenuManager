@@ -6771,7 +6771,10 @@
                         reviewMode: data.reviewMode || reviewMode,
                         changedLineCount: data.changedLineCount || 0,
                         hasChanges: !!data.hasChanges,
-                        aiCheckCompletedCount
+                        aiCheckCompletedCount,
+                        aiUnavailable: !!data.aiUnavailable,
+                        aiFailureReason: (data.aiFailure && data.aiFailure.reason) || null,
+                        gatewayFallbackStatus: data.gatewayFallbackStatus || 0
                     }
                 });
                 showStep2(data);
@@ -7292,7 +7295,10 @@
                         changedLineCount: data.changedLineCount || 0,
                         hasChanges: !!data.hasChanges,
                         rerun: true,
-                        aiCheckCompletedCount
+                        aiCheckCompletedCount,
+                        aiUnavailable: !!data.aiUnavailable,
+                        aiFailureReason: (data.aiFailure && data.aiFailure.reason) || null,
+                        gatewayFallbackStatus: data.gatewayFallbackStatus || 0
                     }
                 });
 
