@@ -40,6 +40,29 @@ describe('runPreAiDeterministicChecks', () => {
         ].join('\n'));
     });
 
+    it('adds the cheese modifier to Cotija without duplicating or changing hyphenated forms', () => {
+        const result = runPreAiDeterministicChecks([
+            'Esquites, sweet yellow corn, spicy aioli, cotija, bacon* D 17',
+            'Pork Belly, COTIJA CHEESE, pickled chili D,G 18',
+            'Taco, Cotija Cheese, salsa verde D 15',
+            'Corn, cotija-style crema D 12',
+        ].join('\n'));
+
+        expect(result.menuText).toBe([
+            'Esquites, sweet yellow corn, spicy aioli, cotija cheese, bacon* D 17',
+            'Pork Belly, COTIJA CHEESE, pickled chili D,G 18',
+            'Taco, Cotija Cheese, salsa verde D 15',
+            'Corn, cotija-style crema D 12',
+        ].join('\n'));
+        expect(result.appliedCorrections).toContainEqual(expect.objectContaining({
+            type: 'Terminology',
+            original: 'cotija',
+            corrected: 'cotija cheese',
+            rule: 'Cotija must include the cheese modifier.',
+        }));
+        expect(result.appliedCorrections).toHaveLength(1);
+    });
+
     it('normalizes existing raw marker placement and adds markers for strong raw terms', () => {
         const result = runPreAiDeterministicChecks([
             'Tuna Tartare F 24',

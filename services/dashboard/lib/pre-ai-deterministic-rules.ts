@@ -3,7 +3,7 @@ import { involvesContextDependentTerm } from './improvement-cycle-core';
 export type PreAiCorrectionSource = 'built_in' | 'accepted_correction_rule';
 
 export type PreAiAppliedCorrection = {
-    type: 'Spelling' | 'Diacritics' | 'Allergen Code' | 'Raw Item' | 'Learned Rule';
+    type: 'Spelling' | 'Diacritics' | 'Terminology' | 'Allergen Code' | 'Raw Item' | 'Learned Rule';
     source: PreAiCorrectionSource;
     original: string;
     corrected: string;
@@ -518,6 +518,32 @@ function ensureTresLechesVegetarianCodeOnLine(
     };
 }
 
+export function ensureCotijaCheeseModifierOnLine(
+    line: string,
+    lineIndex: number
+): { line: string; corrections: PreAiAppliedCorrection[] } {
+    const original = line || '';
+    // Cotija is an ingredient spelling that must be followed by "cheese" in
+    // menu descriptions. Do not alter already-correct text or hyphenated
+    // adjective forms such as "cotija-style".
+    const pattern = /\bcotija\b(?!\s+cheese\b)(?!-[A-Za-z])/gi;
+    const corrections: PreAiAppliedCorrection[] = [];
+    const corrected = original.replace(pattern, (match) => {
+        const replacement = matchCase(match, 'cotija cheese');
+        corrections.push({
+            type: 'Terminology',
+            source: 'built_in',
+            original: match,
+            corrected: replacement,
+            lineIndex,
+            rule: 'Cotija must include the cheese modifier.',
+        });
+        return replacement;
+    });
+
+    return { line: corrected, corrections };
+}
+
 function normalizeRawAsteriskPlacementForLine(line: string): string {
     const original = line || '';
     const originalTrimmed = original.trim();
@@ -723,6 +749,10 @@ export function runPreAiDeterministicChecks(
         const tresLechesResult = ensureTresLechesVegetarianCodeOnLine(nextLine, lineIndex, validAllergenCodes);
         nextLine = tresLechesResult.line;
         appliedCorrections.push(...tresLechesResult.corrections);
+
+        const cotijaResult = ensureCotijaCheeseModifierOnLine(nextLine, lineIndex);
+        nextLine = cotijaResult.line;
+        appliedCorrections.push(...cotijaResult.corrections);
 
         const allergenResult = normalizeAllergenClusterOnLine(nextLine, lineIndex, validAllergenCodes);
         nextLine = allergenResult.line;

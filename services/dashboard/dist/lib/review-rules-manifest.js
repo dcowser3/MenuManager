@@ -43,6 +43,16 @@ const FUNCTIONAL_ENTRIES = [
         source: 'code_metadata',
     },
     {
+        id: 'pre-ai/cotija-cheese-modifier',
+        layer: 'pre_ai_deterministic',
+        category: 'terminology',
+        title: 'Cotija requires cheese modifier',
+        description: 'Adds "cheese" after Cotija when it is used as an ingredient name, preserving capitalization. Already-correct "cotija cheese" and hyphenated adjective forms such as "cotija-style" are left unchanged.',
+        examples: [{ before: 'Esquites, corn, cotija, bacon D 17', after: 'Esquites, corn, cotija cheese, bacon D 17' }],
+        implementation: { file: PRE_AI_FILE, exportName: 'ensureCotijaCheeseModifierOnLine' },
+        source: 'code_metadata',
+    },
+    {
         id: 'pre-ai/raw-asterisk-placement',
         layer: 'pre_ai_deterministic',
         category: 'raw_markers',

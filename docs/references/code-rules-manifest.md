@@ -85,6 +85,13 @@ Tres Leches dessert lines must carry the V (vegetarian) allergen code; it is add
 
 - id: `pre-ai/tres-leches-vegetarian-code` · category: allergen_codes · implementation: `services/dashboard/lib/pre-ai-deterministic-rules.ts#ensureTresLechesVegetarianCodeOnLine`
 
+### Cotija requires cheese modifier
+
+Adds "cheese" after Cotija when it is used as an ingredient name, preserving capitalization. Already-correct "cotija cheese" and hyphenated adjective forms such as "cotija-style" are left unchanged.
+- `Esquites, corn, cotija, bacon D 17` -> `Esquites, corn, cotija cheese, bacon D 17`
+
+- id: `pre-ai/cotija-cheese-modifier` · category: terminology · implementation: `services/dashboard/lib/pre-ai-deterministic-rules.ts#ensureCotijaCheeseModifierOnLine`
+
 ### Raw-marker spacing normalization (pre-AI, conservative)
 
 When a dish line has exactly one raw marker, spacing drift is fixed: the marker attaches to the last dish/description word and is separated from allergen codes. Lines with zero or multiple markers are left for the post-AI pass.

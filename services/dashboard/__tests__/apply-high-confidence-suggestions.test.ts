@@ -121,6 +121,75 @@ describe('applyHighConfidenceSuggestionsToMenu', () => {
         expect(suggestions).toHaveLength(0);
     });
 
+    it('drops stale suggestions when the misspelled text is the menu item itself', () => {
+        // The model applied the fix in === CORRECTED MENU === but still listed
+        // the suggestion. Its menuItem carries the OLD spelling, which no longer
+        // matches any corrected line — the dedup must still find and drop it.
+        const menu = [
+            'SIDES',
+            'Parker House Rolls, whipped butter 12',
+            'Loaded Baked Potato, cheddar, chives 14',
+        ].join('\n');
+
+        const { menuText, suggestions } = applyHighConfidenceSuggestionsToMenu(menu, [
+            {
+                type: 'Spelling',
+                confidence: 'medium',
+                severity: 'normal',
+                menuItem: 'Paker House Rolls',
+                description: 'The dish name appears to misspell a well-known dish.',
+                recommendation: "Change 'Paker House Rolls' to 'Parker House Rolls'.",
+            },
+            {
+                type: 'Spelling',
+                confidence: 'medium',
+                severity: 'normal',
+                menuItem: 'Load Baked Potato',
+                description: 'The dish name appears to misspell a well-known dish.',
+                recommendation: "Change 'Load Baked Potato' to 'Loaded Baked Potato'.",
+            },
+        ]);
+
+        expect(menuText).toBe(menu);
+        expect(suggestions).toHaveLength(0);
+    });
+
+    it('drops already-applied suggestions even for non-auto-apply types', () => {
+        const menu = 'Prawns, grilled prawns, macha sauce C,D,E,G,M,PN,TN,S,SS 95';
+
+        const { menuText, suggestions } = applyHighConfidenceSuggestionsToMenu(menu, [
+            {
+                type: 'Allergen Code',
+                confidence: 'medium',
+                severity: 'normal',
+                menuItem: 'Prawns',
+                description: 'Allergen separator should be a comma.',
+                recommendation: "Change 'PN.TN' to 'PN,TN'.",
+            },
+        ]);
+
+        expect(menuText).toBe(menu);
+        expect(suggestions).toHaveLength(0);
+    });
+
+    it('keeps unapplied suggestions whose menu item is absent from the menu', () => {
+        const menu = 'Dinner Rolls, whipped butter 12';
+
+        const { menuText, suggestions } = applyHighConfidenceSuggestionsToMenu(menu, [
+            {
+                type: 'Spelling',
+                confidence: 'medium',
+                severity: 'normal',
+                menuItem: 'Paker House Rolls',
+                description: 'The dish name appears to misspell a well-known dish.',
+                recommendation: "Change 'Paker House Rolls' to 'Parker House Rolls'.",
+            },
+        ]);
+
+        expect(menuText).toBe(menu);
+        expect(suggestions).toHaveLength(1);
+    });
+
     it('auto-applies high-confidence raw item asterisks before allergens and price', () => {
         const menu = [
             'COLD STARTERS',

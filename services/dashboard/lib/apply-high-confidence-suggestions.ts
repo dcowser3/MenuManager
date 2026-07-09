@@ -102,6 +102,21 @@ function applyReplacementOnLine(line: string, from: string, to: string): string 
     return line.slice(0, idx) + to + line.slice(idx + from.length);
 }
 
+/**
+ * When the model already applied the fix in === CORRECTED MENU ===, the
+ * suggestion's menuItem still carries the OLD text (e.g. the misspelled dish
+ * name), which no longer appears in the corrected menu. Substituting from→to
+ * inside the menuItem lets us find the corrected line so the
+ * lineAlreadyHasReplacement dedup can drop the suggestion instead of leaking
+ * it to the client with a dead "Apply Change" button.
+ */
+function substituteInMenuItem(menuItem: string, from: string, to: string): string | null {
+    if (!menuItem || !from || !menuItem.includes(from)) {
+        return null;
+    }
+    return menuItem.split(from).join(to);
+}
+
 function pickLineIndexForMenuItem(
     lines: string[],
     menuItem: string,
@@ -119,6 +134,20 @@ function pickLineIndexForMenuItem(
         candidates.push(i);
     }
     if (candidates.length === 0) {
+        const appliedItem = substituteInMenuItem(menuItem || '', from, to);
+        const appliedNorm = appliedItem ? normalizeForMatch(appliedItem) : '';
+        if (appliedNorm) {
+            for (let i = 0; i < lines.length; i++) {
+                const trimmed = lines[i].trim();
+                if (!trimmed) continue;
+                if (
+                    normalizeForMatch(trimmed).includes(appliedNorm) &&
+                    lineAlreadyHasReplacement(lines[i], from, to)
+                ) {
+                    return i;
+                }
+            }
+        }
         return null;
     }
     const withToken = candidates.filter((i) => hasExactTokenOrPhrase(lines[i], from));
@@ -245,22 +274,20 @@ export function applyHighConfidenceSuggestionsToMenu(
         }
 
         const pair = extractChangePair(s.recommendation || '');
-        if (!shouldAutoApply(s, pair)) {
-            remaining.push(s);
-            continue;
-        }
-        if (!pair) {
-            remaining.push(s);
+        const lineIdx = pair
+            ? pickLineIndexForMenuItem(lines, s.menuItem || '', pair.from, pair.to)
+            : null;
+
+        // Regardless of type/confidence: if the change described by the pair is
+        // already present on the matched line (applied by the model, a guard, or
+        // a previous pass), the suggestion is dead weight — drop it rather than
+        // handing the client an "Apply Change" button that can never succeed.
+        if (pair && lineIdx !== null && lineAlreadyHasReplacement(lines[lineIdx], pair.from, pair.to)) {
             continue;
         }
 
-        const lineIdx = pickLineIndexForMenuItem(lines, s.menuItem || '', pair.from, pair.to);
-        if (lineIdx === null) {
+        if (!shouldAutoApply(s, pair) || !pair || lineIdx === null) {
             remaining.push(s);
-            continue;
-        }
-
-        if (lineAlreadyHasReplacement(lines[lineIdx], pair.from, pair.to)) {
             continue;
         }
 
