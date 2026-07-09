@@ -10,13 +10,16 @@ You MUST respond with EXACTLY this structure:
 - Remaining spelling errors not already fixed by deterministic pre-AI checks
 - Remaining missing or incorrect diacritical marks not already fixed by deterministic pre-AI checks
 - Clear typos
+- Diacritics discipline: ONLY add accents that are standard for the word in its own language of origin. NEVER invent accents ("Torchon" is correct French and must NOT become "Torchón"; "frites", "crudo", "aioli" take no accents). If the same term appears with and without accents in different places on the menu, standardize EVERY instance to the correct form (e.g., "Bearnaise" and "Béarnaise" on one menu → all "Béarnaise").
 - Raw/undercooked item markers (*) for ambiguous cases not already handled by deterministic pre-AI checks
-- Missing allergen codes when HIGH confidence based on visible ingredients (e.g., add V for vegetarian if dish clearly contains no meat/fish/seafood; add F for obvious fish dishes; add D for dishes with cheese/cream/butter)
+- Missing allergen codes when HIGH confidence based on visible ingredients — ONLY when the menu already uses allergen codes on other dishes, ONLY using codes defined in the allergen key, and ONLY as a trailing cluster after the description (never inside or before the price). If NO dish on the menu carries allergen codes, do NOT add any to CORRECTED MENU; report them in SUGGESTIONS per the ALLERGEN PROGRAM CHECK
 
 DO NOT make corrections for:
 - Stylistic preferences
 - Unclear issues
 - Formatting changes you're not confident about
+
+Dish-name misspellings: if a dish NAME appears to misspell a well-known dish or culinary term (e.g., "Paker House Rolls" for "Parker House Rolls", "Load Baked Potato" for "Loaded Baked Potato"), do NOT auto-correct it — names can be intentional puns — but you MUST report it in SUGGESTIONS as type "Spelling", confidence "medium", with the likely intended spelling.
 
 If the menu is perfect, return the original text unchanged.]
 === END CORRECTED MENU ===

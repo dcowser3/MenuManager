@@ -13,6 +13,7 @@ exports.isCriticalResolvedByCorrectedMenu = isCriticalResolvedByCorrectedMenu;
 exports.reconcileCriticalSuggestionsAgainstCorrectedMenu = reconcileCriticalSuggestionsAgainstCorrectedMenu;
 exports.reconcileCriticalSuggestionsAgainstCorrectedMenuWithDiagnostics = reconcileCriticalSuggestionsAgainstCorrectedMenuWithDiagnostics;
 exports.enforcePrixFixeCriticalChecks = enforcePrixFixeCriticalChecks;
+exports.enforceAllergenProgramCheck = enforceAllergenProgramCheck;
 exports.detectKnownTextArtifactSuggestions = detectKnownTextArtifactSuggestions;
 exports.parseAIResponse = parseAIResponse;
 exports.normalizeRawAsteriskPlacement = normalizeRawAsteriskPlacement;
@@ -252,6 +253,39 @@ function enforcePrixFixeCriticalChecks(menuContent, suggestions) {
     }
     return existing;
 }
+// Deterministic allergen-program check: if no dish line on the menu carries an
+// allergen-code cluster, inject one critical "Entire menu" suggestion. The AI
+// prompt asks for this too, but LLM compliance is stochastic — this guarantees
+// the flag fires on every review. Detection is conservative: a line "has codes"
+// when, after stripping a trailing price token, it ends in a cluster of 1-2
+// uppercase code tokens (comma-separated, no spaces), e.g. "... G,D 24".
+const TRAILING_PRICE_FOR_ALLERGEN_CHECK = /\s+\$?\d+(?:[.,]\d+)?(?:\s*(?:each|pp|per\s*person))?\s*$/i;
+const TRAILING_ALLERGEN_CLUSTER = /\s(?:[A-Z]{1,2}(?:,[A-Z]{1,2})+|VG|[A-Z])$/;
+function enforceAllergenProgramCheck(menuContent, suggestions) {
+    const existing = [...(suggestions || [])];
+    const hasAllergenSuggestion = existing.some((s) => `${s.type || ''}`.toLowerCase().includes('allergen'));
+    const lines = (menuContent || '').split('\n').map((l) => l.trim()).filter(Boolean);
+    const codedLines = lines.filter((line) => {
+        const withoutPrice = line.replace(TRAILING_PRICE_FOR_ALLERGEN_CHECK, '');
+        // Ignore section headings (all-caps lines) and the allergen legend itself
+        if (/^[A-Z\s&+•·-]+$/.test(withoutPrice))
+            return false;
+        if (/allergen|contains|gluten|vegetarian|vegan/i.test(withoutPrice) && /\|/.test(withoutPrice))
+            return false;
+        return TRAILING_ALLERGEN_CLUSTER.test(withoutPrice);
+    });
+    if (codedLines.length === 0 && !hasAllergenSuggestion) {
+        existing.push({
+            type: 'Allergen Code',
+            confidence: 'high',
+            severity: 'critical',
+            menuItem: 'Entire menu',
+            description: 'No dishes on this menu carry allergen codes — the menu has no allergen program.',
+            recommendation: 'Code each dish per the allergen key (e.g., D dairy, G gluten, N nuts, S shellfish) so allergen information is available at a glance.'
+        });
+    }
+    return existing;
+}
 const KNOWN_TEXT_ARTIFACT_PATTERNS = [
     {
         pattern: /\bctes\s+de\s+provence\b/gi,
@@ -453,6 +487,7 @@ function runPostAiPipeline(args) {
     if (args.menuType === 'prix_fixe') {
         finalSuggestions = enforcePrixFixeCriticalChecks(correctedMenuSanitized, finalSuggestions);
     }
+    finalSuggestions = enforceAllergenProgramCheck(correctedMenuSanitized, finalSuggestions);
     finalSuggestions = detectKnownTextArtifactSuggestions(correctedMenuSanitized, finalSuggestions);
     const hasCriticalErrors = finalSuggestions.some(s => s.severity === 'critical');
     const criticalSuggestions = finalSuggestions.filter(s => s.severity === 'critical');

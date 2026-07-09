@@ -60,6 +60,30 @@ The theme partial (`views/partials/theme.ejs`) is included near each view's
 `</head>` and re-declares the `:root` CSS variables from config, so it overrides
 each page's built-in defaults without rewriting every view.
 
+## QA rulebook: seed vs. runtime vs. DB (edit the right file)
+
+There are three layers to the QA prompt, and editing the wrong one silently does
+nothing (this has bitten us):
+
+1. **Seed (inert at runtime):** `config/rulebook/qa_prompt.txt` (`rulebook.seedFile`).
+   Only used by `ensureRuntimePromptSeed()` (`dashboard/index.ts`) to create the
+   runtime file **if it doesn't already exist**. Editing it on an existing
+   install has no effect on reviews.
+2. **Runtime file (what reviews actually read):** `sop-processor/qa_prompt.txt`.
+   Read fresh on every review by `dashboard/index.ts` and `ai-review/index.ts`
+   (no restart needed for edits). The dashboard's improvement cycle also writes
+   approved prompt changes back to this file.
+3. **DB override (wins on restart):** on dashboard startup,
+   `syncEffectivePromptFromDb()` restores the latest **approved prompt proposal
+   from the DB** over the runtime file when they differ. A hand edit to the
+   runtime file can therefore be reverted by the next restart — durable manual
+   changes should go through the prompt-proposal/approval flow (or be reconciled
+   with the latest approved proposal in the DB).
+
+Rule of thumb: hot-fix in `sop-processor/qa_prompt.txt`, then make it durable
+via the proposal flow; touch `config/rulebook/qa_prompt.txt` only when changing
+what a *fresh* install starts with.
+
 ## Verification
 
 - `npx jest` (full suite green; fixtures that render views directly now pass

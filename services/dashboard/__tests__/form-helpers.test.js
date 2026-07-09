@@ -6,6 +6,7 @@ const {
     findSearchMatchRange,
     findCatalogMatchesFromHints,
     findMenuSizeDefault,
+    isSuggestionAlreadyApplied,
     isValidDateInputValue,
     normalizeSearchText,
     parseExtractedSize,
@@ -348,5 +349,59 @@ describe('AI suggestion apply helpers', () => {
             reason: 'ambiguous_match',
         });
         expect(result.menuText).toBe(menu);
+    });
+});
+
+describe('isSuggestionAlreadyApplied', () => {
+    test('detects a change already applied by auto-correction', () => {
+        const correctedMenu = [
+            'Parker House Rolls, whipped butter 12',
+            'Loaded Baked Potato, cheddar, chives 14',
+        ].join('\n');
+
+        expect(isSuggestionAlreadyApplied(correctedMenu, {
+            menuItem: 'Paker House Rolls',
+            recommendation: "Change 'Paker House Rolls' to 'Parker House Rolls'.",
+        })).toBe(true);
+    });
+
+    test('is false when the change has not been applied yet', () => {
+        const menu = 'Paker House Rolls, whipped butter 12';
+
+        expect(isSuggestionAlreadyApplied(menu, {
+            menuItem: 'Paker House Rolls',
+            recommendation: "Change 'Paker House Rolls' to 'Parker House Rolls'.",
+        })).toBe(false);
+    });
+
+    test('is false when the replacement text is absent entirely', () => {
+        const menu = 'Dinner Rolls, whipped butter 12';
+
+        expect(isSuggestionAlreadyApplied(menu, {
+            menuItem: 'Paker House Rolls',
+            recommendation: "Change 'Paker House Rolls' to 'Parker House Rolls'.",
+        })).toBe(false);
+    });
+
+    test('handles replacements that contain the original text', () => {
+        const appliedMenu = 'Loaded Potato, cheddar, chives 14';
+
+        expect(isSuggestionAlreadyApplied(appliedMenu, {
+            menuItem: 'Potato',
+            recommendation: "Change 'Potato' to 'Loaded Potato'.",
+        })).toBe(true);
+
+        const unappliedMenu = 'Loaded Potato 14\nPotato Skins 9';
+        expect(isSuggestionAlreadyApplied(unappliedMenu, {
+            menuItem: 'Potato Skins',
+            recommendation: "Change 'Potato' to 'Loaded Potato'.",
+        })).toBe(false);
+    });
+
+    test('is false for suggestions without a direct change pair', () => {
+        expect(isSuggestionAlreadyApplied('Some menu text', {
+            menuItem: 'Some item',
+            recommendation: 'Consider adding allergen information.',
+        })).toBe(false);
     });
 });

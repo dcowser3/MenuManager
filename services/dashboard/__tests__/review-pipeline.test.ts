@@ -2,6 +2,7 @@ import {
     FORCED_CRITICAL_EXACT_TYPES,
     FORCED_CRITICAL_NORMALIZED_TYPES,
     detectKnownTextArtifactSuggestions,
+    enforceAllergenProgramCheck,
     enforcePrixFixeCriticalChecks,
     normalizeRawAsteriskPlacement,
     parseAIResponse,
@@ -326,5 +327,45 @@ describe('runPostAiPipeline (full guard chain)', () => {
             severity: 'normal',
             recommendation: 'Change "ctes de provence" to "côtes de provence".',
         });
+    });
+});
+
+describe('enforceAllergenProgramCheck', () => {
+    const uncodedMenu = [
+        'OAK STEAKHOUSE',
+        'STARTERS',
+        'Crab Cake, house tartar, slaw 23',
+        'Pork Belly, mushroom marsala ragout, fines herb oil 19',
+    ].join('\n');
+
+    const codedMenu = [
+        'ANTOJITOS',
+        'Guacamole, totopos, lime V,VG 14',
+        'Queso Fundido, chorizo, flour tortillas D,G 16',
+    ].join('\n');
+
+    it('injects one critical Entire-menu suggestion when no dish carries allergen codes', () => {
+        const result = enforceAllergenProgramCheck(uncodedMenu, []);
+        const allergen = result.filter((s) => (s.type || '').toLowerCase().includes('allergen'));
+        expect(allergen).toHaveLength(1);
+        expect(allergen[0].severity).toBe('critical');
+        expect(allergen[0].menuItem).toBe('Entire menu');
+    });
+
+    it('does not inject when dishes carry allergen code clusters', () => {
+        const result = enforceAllergenProgramCheck(codedMenu, []);
+        expect(result.filter((s) => (s.type || '').toLowerCase().includes('allergen'))).toHaveLength(0);
+    });
+
+    it('does not duplicate an existing AI allergen suggestion', () => {
+        const existing = [{ type: 'Allergen Code', severity: 'critical', menuItem: 'Entire menu' }];
+        const result = enforceAllergenProgramCheck(uncodedMenu, existing);
+        expect(result.filter((s) => (s.type || '').toLowerCase().includes('allergen'))).toHaveLength(1);
+    });
+
+    it('keeps unrelated suggestions intact', () => {
+        const existing = [{ type: 'Spelling', severity: 'normal', menuItem: 'Crab Cake' }];
+        const result = enforceAllergenProgramCheck(uncodedMenu, existing);
+        expect(result).toHaveLength(2);
     });
 });

@@ -3061,7 +3061,7 @@
                 .replace(/[“”„‟]/g, '"')
                 .replace(/[–—―]/g, '-')
                 .replace(/[…]/g, '...')
-                .replace(/[^ -ÿ]/g, '');
+                .replace(/[^\x00-\xFF]/g, '');
         }
 
         function getAttemptHeaders(extra) {
@@ -7284,6 +7284,12 @@
             const currentText = extractCleanTextFromReviewedArea(reviewedArea);
             const result = helper(currentText, suggestion);
             if (!result.applied) {
+                const alreadyAppliedHelper = window.formHelpers && window.formHelpers.isSuggestionAlreadyApplied;
+                if (typeof alreadyAppliedHelper === 'function' && alreadyAppliedHelper(currentText, suggestion)) {
+                    markSuggestionCardApplied(idx, 'Already Applied');
+                    showAlert('This change has already been applied to the menu text.', 'success');
+                    return;
+                }
                 const message = result.reason === 'ambiguous_match'
                     ? 'This suggestion matched more than one place. Please edit the menu text manually.'
                     : 'This suggestion no longer matches the current menu text.';
@@ -7315,16 +7321,19 @@
             renderPersistentPreview(diffBase, updatedText, quill.root.innerHTML || '');
             markAiCheckStale();
 
-            const card = document.querySelector(`.suggestion-item[data-suggestion-index="${idx}"]`);
-            if (card) {
-                card.classList.add('applied');
-                const button = card.querySelector('.suggestion-apply-btn');
-                if (button) {
-                    button.disabled = true;
-                    button.textContent = 'Applied';
-                }
-            }
+            markSuggestionCardApplied(idx, 'Applied');
             showAlert('Suggestion applied. Re-run AI Check when you are ready to refresh the remaining suggestions.', 'success');
+        }
+
+        function markSuggestionCardApplied(idx, buttonText) {
+            const card = document.querySelector(`.suggestion-item[data-suggestion-index="${idx}"]`);
+            if (!card) return;
+            card.classList.add('applied');
+            const button = card.querySelector('.suggestion-apply-btn');
+            if (button) {
+                button.disabled = true;
+                button.textContent = buttonText;
+            }
         }
 
         async function rerunAICheck(options = {}) {
@@ -7611,6 +7620,16 @@
             requiresAiRerun = false;
 
             const suggestionsDisplay = document.getElementById('suggestionsDisplay');
+
+            // Drop non-critical suggestions whose change was already applied by
+            // the automatic high-confidence corrections — showing them again
+            // produces "Apply Change" buttons that can never succeed.
+            const alreadyAppliedHelper = window.formHelpers && window.formHelpers.isSuggestionAlreadyApplied;
+            if (typeof alreadyAppliedHelper === 'function' && results.suggestions && results.suggestions.length > 0) {
+                results.suggestions = results.suggestions.filter((s) =>
+                    s.severity === 'critical' || !alreadyAppliedHelper(reviewedDisplayText, s)
+                );
+            }
 
             // Sort suggestions: critical first, then normal
             let sortedSuggestions = [];

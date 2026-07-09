@@ -328,6 +328,40 @@
         return count;
     }
 
+    function collectLiteralOccurrenceRanges(text, needle) {
+        const ranges = [];
+        if (!needle) return ranges;
+        const source = String(text || '');
+        let cursor = 0;
+        while (cursor <= source.length) {
+            const idx = source.indexOf(needle, cursor);
+            if (idx < 0) break;
+            ranges.push({ start: idx, end: idx + needle.length });
+            cursor = idx + Math.max(needle.length, 1);
+        }
+        return ranges;
+    }
+
+    function isSuggestionAlreadyApplied(menuText, suggestion) {
+        const source = String(menuText || '');
+        const pair = extractSuggestionChangePair(suggestion && suggestion.recommendation);
+        if (!pair) return false;
+        if (countLiteralOccurrences(source, pair.to) === 0) return false;
+
+        const fromRanges = collectLiteralOccurrenceRanges(source, pair.from);
+        if (fromRanges.length === 0) return true;
+
+        // `from` may still appear as a substring of the replacement
+        // (e.g. change 'Potato' to 'Loaded Potato'). Treat the suggestion as
+        // applied when every remaining `from` occurrence sits inside an
+        // occurrence of `to`.
+        if (!pair.to.includes(pair.from)) return false;
+        const toRanges = collectLiteralOccurrenceRanges(source, pair.to);
+        return fromRanges.every(({ start, end }) =>
+            toRanges.some((range) => start >= range.start && end <= range.end)
+        );
+    }
+
     function applySuggestionChangeToText(menuText, suggestion) {
         const sourceText = String(menuText || '');
         const pair = extractSuggestionChangePair(suggestion && suggestion.recommendation);
@@ -402,6 +436,7 @@
         applySuggestionChangeToText,
         clampExtractedDateNeeded,
         extractSuggestionChangePair,
+        isSuggestionAlreadyApplied,
         isValidDateInputValue,
         normalizeSearchText,
         parseExtractedSize,
