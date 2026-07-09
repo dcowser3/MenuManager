@@ -92,6 +92,11 @@ function buildCorrectionRuleRecord(payload, catalog) {
     if (!record.submission_id || !record.correction_id || !record.rule) {
         throw new CorrectionRuleValidationError('rule is required');
     }
+    // Human-saved rules must be attributed. System-generated rows (cycle
+    // approvals, detected-pattern scans) legitimately have no reviewer.
+    if (record.source !== 'system' && !record.reviewer_name) {
+        throw new CorrectionRuleValidationError('reviewer_name is required');
+    }
     return record;
 }
 function isCorrectionRuleValidationError(error) {

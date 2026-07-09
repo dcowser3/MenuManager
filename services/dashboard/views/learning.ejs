@@ -546,8 +546,8 @@
                     <input id="manual-rule-corrected" placeholder="Optional replacement">
                 </div>
                 <div class="form-field">
-                    <label for="manual-rule-reviewer">Reviewer Name</label>
-                    <input id="manual-rule-reviewer" placeholder="Optional">
+                    <label for="manual-rule-reviewer">Reviewer Name *</label>
+                    <input id="manual-rule-reviewer" placeholder="Your name" required>
                 </div>
             </div>
             <div class="check-row" style="margin-top:.75rem;">
@@ -1080,9 +1080,14 @@
             const otherLocations = sharedSelect
                 ? Array.from(sharedSelect.selectedOptions).map((option) => option.value)
                 : [];
+            const reviewerName = (document.getElementById('manual-rule-reviewer')?.value || '').trim();
 
             if (!rule) {
                 setManualRuleStatus('Rule is required.', 'err');
+                return;
+            }
+            if (!reviewerName) {
+                setManualRuleStatus('Reviewer name is required.', 'err');
                 return;
             }
             if ((originalText && !correctedText) || (!originalText && correctedText)) {
@@ -1110,7 +1115,7 @@
                         is_location_specific: isLocationSpecific,
                         location,
                         other_applicable_locations: otherLocations,
-                        reviewer_name: (document.getElementById('manual-rule-reviewer')?.value || '').trim(),
+                        reviewer_name: reviewerName,
                         source: 'human',
                     }),
                 });
