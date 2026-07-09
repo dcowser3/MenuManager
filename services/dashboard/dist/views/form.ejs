@@ -2976,8 +2976,22 @@
             return unescape(encodeURIComponent(text)).length;
         }
 
+        // HTTP header values must be ISO-8859-1 (Latin-1). Smart punctuation (curly
+        // apostrophes, em dashes, etc.) from menu names like "d'Leña" is outside that
+        // range and makes fetch() throw before the request is sent. These headers are
+        // diagnostic-only, so normalize common smart punctuation to ASCII and drop any
+        // remaining out-of-range code points.
+        function headerSafe(value) {
+            return String(value == null ? '' : value)
+                .replace(/[‘’‚‛]/g, "'")
+                .replace(/[“”„‟]/g, '"')
+                .replace(/[–—―]/g, '-')
+                .replace(/[…]/g, '...')
+                .replace(/[^ -ÿ]/g, '');
+        }
+
         function getAttemptHeaders(extra) {
-            return {
+            const headers = {
                 'x-menumanager-attempt-id': formAttemptId,
                 'x-menumanager-submit-mode': submissionMode || '',
                 'x-menumanager-revision-source': revisionSource || '',
@@ -2986,6 +3000,10 @@
                 'x-menumanager-property': document.getElementById('property')?.value?.trim() || '',
                 ...(extra || {})
             };
+            for (const key of Object.keys(headers)) {
+                headers[key] = headerSafe(headers[key]);
+            }
+            return headers;
         }
 
         function getAttemptMetadata(extra) {
