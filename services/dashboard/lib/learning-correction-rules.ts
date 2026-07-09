@@ -118,6 +118,12 @@ export function buildCorrectionRuleRecord(payload: any, catalog: Array<{ name?: 
         throw new CorrectionRuleValidationError('rule is required');
     }
 
+    // Human-saved rules must be attributed. System-generated rows (cycle
+    // approvals, detected-pattern scans) legitimately have no reviewer.
+    if (record.source !== 'system' && !record.reviewer_name) {
+        throw new CorrectionRuleValidationError('reviewer_name is required');
+    }
+
     return record;
 }
 

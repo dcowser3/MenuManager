@@ -15,6 +15,7 @@ const basePayload = {
     corrected_text: 'Jalapeño tartare',
     rule: 'Use the correct diacritic for jalapeño.',
     restaurant_name: 'Noche De Fiesta',
+    reviewer_name: 'Isabella',
 };
 
 describe('buildCorrectionRuleRecord', () => {
@@ -116,5 +117,34 @@ describe('buildCorrectionRuleRecord', () => {
             ...basePayload,
             applies_to_menu_type: 'dessert',
         }, catalog)).toThrow('applies_to_menu_type must be all, food, or beverage');
+    });
+
+    test('requires a reviewer name for human-saved rules', () => {
+        const { reviewer_name, ...withoutReviewer } = basePayload;
+        expect(() => buildCorrectionRuleRecord({
+            ...withoutReviewer,
+            is_location_specific: false,
+            location: GLOBAL_CORRECTION_RULE_LOCATION,
+        }, catalog)).toThrow('reviewer_name is required');
+
+        expect(() => buildCorrectionRuleRecord({
+            ...withoutReviewer,
+            reviewer_name: '   ',
+            is_location_specific: false,
+            location: GLOBAL_CORRECTION_RULE_LOCATION,
+        }, catalog)).toThrow('reviewer_name is required');
+    });
+
+    test('does not require a reviewer name for system-generated rules', () => {
+        const { reviewer_name, ...withoutReviewer } = basePayload;
+        const record = buildCorrectionRuleRecord({
+            ...withoutReviewer,
+            source: 'system',
+            is_location_specific: false,
+            location: GLOBAL_CORRECTION_RULE_LOCATION,
+        }, catalog);
+
+        expect(record.source).toBe('system');
+        expect(record.reviewer_name).toBeNull();
     });
 });

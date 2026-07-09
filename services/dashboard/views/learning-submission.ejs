@@ -239,8 +239,8 @@
                                         </select>
                                     </div>
                                     <div class="annotation-field">
-                                        <label for="reviewer-<%= idx %>">Reviewer Name</label>
-                                        <input id="reviewer-<%= idx %>" placeholder="Optional">
+                                        <label for="reviewer-<%= idx %>">Reviewer Name *</label>
+                                        <input id="reviewer-<%= idx %>" placeholder="Your name" required>
                                     </div>
                                 </div>
                             </div>
@@ -373,6 +373,11 @@
 
             if (!rule) {
                 statusEl.textContent = 'Explanation is required.';
+                statusEl.className = 'save-status err';
+                return;
+            }
+            if (!reviewerName) {
+                statusEl.textContent = 'Reviewer name is required.';
                 statusEl.className = 'save-status err';
                 return;
             }
