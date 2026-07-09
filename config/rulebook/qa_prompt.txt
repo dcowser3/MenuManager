@@ -10,13 +10,16 @@ You MUST respond with EXACTLY this structure:
 - Remaining spelling errors not already fixed by deterministic pre-AI checks
 - Remaining missing or incorrect diacritical marks not already fixed by deterministic pre-AI checks
 - Clear typos
+- Diacritics discipline: ONLY add accents that are standard for the word in its own language of origin. NEVER invent accents ("Torchon" is correct French and must NOT become "Torchón"; "frites", "crudo", "aioli" take no accents). If the same term appears with and without accents in different places on the menu, standardize EVERY instance to the correct form (e.g., "Bearnaise" and "Béarnaise" on one menu → all "Béarnaise").
 - Raw/undercooked item markers (*) for ambiguous cases not already handled by deterministic pre-AI checks
-- Missing allergen codes when HIGH confidence based on visible ingredients (e.g., add V for vegetarian if dish clearly contains no meat/fish/seafood; add F for obvious fish dishes; add D for dishes with cheese/cream/butter)
+- Missing allergen codes when HIGH confidence based on visible ingredients — ONLY when the menu already uses allergen codes on other dishes, ONLY using codes defined in the allergen key, and ONLY as a trailing cluster after the description (never inside or before the price). If NO dish on the menu carries allergen codes, do NOT add any to CORRECTED MENU; report them in SUGGESTIONS per section 1.4.1
 
 DO NOT make corrections for:
 - Stylistic preferences
 - Unclear issues
 - Formatting changes you're not confident about
+
+Dish-name misspellings: if a dish NAME appears to misspell a well-known dish or culinary term (e.g., "Paker House Rolls" for "Parker House Rolls", "Load Baked Potato" for "Loaded Baked Potato"), do NOT auto-correct it — names can be intentional puns — but you MUST report it in SUGGESTIONS as type "Spelling", confidence "medium", with the likely intended spelling.
 
 If the menu is perfect, return the original text unchanged.]
 === END CORRECTED MENU ===
@@ -25,6 +28,8 @@ If the menu is perfect, return the original text unchanged.]
 [List remaining issues the chef should still review as JSON array. Each suggestion MUST have this exact structure:]
 
 **CRITICAL:** Any objective spelling, grammar, typo, or diacritics fix you are sure about MUST appear in CORRECTED MENU above. This JSON is for items the chef should still double-check; use `"confidence": "medium"` or `"low"` only (never mark spelling/grammar you already fixed in CORRECTED MENU as `"high"` here).
+
+**ALLERGEN PROGRAM CHECK (MANDATORY — DO THIS FIRST):** Before writing the JSON, check whether ANY dish line on this menu carries allergen codes. If NO dish carries allergen codes, the FIRST element of the JSON array MUST be: type "Allergen Code", severity "critical", confidence "medium", menuItem "Entire menu", describing that no dishes on this menu carry allergen codes and recommending the menu be coded per the allergen key. Then ALSO include per-dish "Allergen Code" suggestions (severity "normal", confidence "medium") for dishes whose visible ingredients clearly indicate a major allergen (S shellfish e.g. shrimp/lobster/crab, D dairy e.g. cheese/cream/butter, G gluten e.g. noodles/pancakes/tempura/wonton, N nuts). Do NOT add these codes to CORRECTED MENU. Returning a suggestions array with no Allergen Code entries for a menu that has no allergen codes is an ERROR.
 
 [
   {
@@ -92,6 +97,11 @@ Flag these as a suggestion with:
 - Final allergen clusters should be comma-separated, no spaces, and alphabetical, but deterministic pre-AI checks already normalize recognized trailing clusters before this review.
 - Alphabetical order means standard A-to-Z order of the code tokens, NOT the order the codes appear in the allergen legend. For example, "D,G" is already correct; never recommend changing "D,G" to "G,D".
 - Case: Always capitalized
+
+#### 1.4.1 Menus With No Allergen Codes (CRITICAL)
+- If NO dish line anywhere on the menu carries allergen codes, the menu has no allergen program. Emit ONE suggestion with type "Allergen Code", severity "critical", confidence "medium", menuItem "Entire menu", describing that no dishes carry allergen codes and recommending coding per the allergen key.
+- In addition, for dishes whose visible ingredients clearly indicate a major allergen, emit per-dish "Allergen Code" suggestions (severity "normal", confidence "medium") with the specific code(s): S for shellfish (shrimp, lobster, crab), N for nuts, D for dairy (cheese, cream, butter, crema), G for gluten (noodles, pancakes, tempura, wonton).
+- Do NOT auto-add these codes to CORRECTED MENU when the menu has no allergen program at all — surface them as suggestions for the chef to confirm.
 
 ---
 

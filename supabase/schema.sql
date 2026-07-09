@@ -602,7 +602,27 @@ CREATE INDEX IF NOT EXISTS idx_system_alerts_unacknowledged ON system_alerts(ack
     WHERE acknowledged = false;
 
 -- ============================================================================
--- 10. FORM_ATTEMPT_LOGS
+-- 10. DRAFT_SESSIONS
+-- Shared approved-menu edit drafts, addressed only by unguessable token
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS draft_sessions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    token VARCHAR(120) UNIQUE NOT NULL,
+    base_submission_id VARCHAR(100) NOT NULL,
+    menu_content_html TEXT,
+    form_state JSONB DEFAULT '{}'::jsonb,
+    status VARCHAR(30) NOT NULL DEFAULT 'active',
+    submitted_submission_id VARCHAR(100),
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_draft_sessions_token ON draft_sessions(token);
+CREATE INDEX IF NOT EXISTS idx_draft_sessions_base_submission ON draft_sessions(base_submission_id);
+CREATE INDEX IF NOT EXISTS idx_draft_sessions_status_updated ON draft_sessions(status, updated_at DESC);
+
+-- ============================================================================
+-- 11. FORM_ATTEMPT_LOGS
 -- Lightweight telemetry for multi-step public form submissions
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS form_attempt_logs (
@@ -639,8 +659,14 @@ CREATE INDEX IF NOT EXISTS idx_form_attempt_logs_created ON form_attempt_logs(cr
 CREATE INDEX IF NOT EXISTS idx_form_attempt_logs_submitter ON form_attempt_logs(submitter_email);
 CREATE INDEX IF NOT EXISTS idx_form_attempt_logs_project ON form_attempt_logs(property, project_name);
 
+ALTER TABLE form_attempt_logs
+ADD COLUMN IF NOT EXISTS draft_session_id UUID;
+
+CREATE INDEX IF NOT EXISTS idx_form_attempt_logs_draft_session
+ON form_attempt_logs(draft_session_id);
+
 -- ============================================================================
--- 11. BASIC_AI_CHECK_AUDITS
+-- 12. BASIC_AI_CHECK_AUDITS
 -- Durable request/response audit trail for public-form Basic AI Check
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS basic_ai_check_audits (

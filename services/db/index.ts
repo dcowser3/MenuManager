@@ -1,4 +1,5 @@
 import express = require('express');
+import crypto = require('crypto');
 import { promises as fs } from 'fs';
 import * as fsSync from 'fs';
 import * as path from 'path';
@@ -31,10 +32,12 @@ const PROFILES_DB = path.join(DB_DIR, 'submitter_profiles.json');
 const ASSETS_DB = path.join(DB_DIR, 'assets.json');
 const PROPERTIES_DB = path.join(DB_DIR, 'properties.json');
 const CORRECTION_RULES_DB = path.join(DB_DIR, 'correction_rules.json');
+const DRAFT_SESSIONS_DB = path.join(DB_DIR, 'draft_sessions.json');
 const SUBMISSIONS_TABLE = 'submissions';
 const SUBMITTER_PROFILES_TABLE = 'submitter_profiles';
 const ASSETS_TABLE = 'assets';
 const PROPERTIES_TABLE = 'properties';
+const DRAFT_SESSIONS_TABLE = 'draft_sessions';
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const APPROVED_SUBMISSION_STATUSES = ['approved', 'approved_override'];
 const REVIEW_QUEUE_STATUSES = ['pending_human_review', 'submitted_no_ai_review'];
@@ -616,6 +619,130 @@ async function getSubmissionRecordById(id: string): Promise<any | null> {
     return match || null;
 }
 
+function getDraftExpiryDays(): number {
+    const configured = Number(getTenantConfig().draftSessions?.expiryDays);
+    return Number.isFinite(configured) && configured > 0 ? configured : 30;
+}
+
+function getDraftExpiryCutoff(): number {
+    return Date.now() - getDraftExpiryDays() * 24 * 60 * 60 * 1000;
+}
+
+function isDraftExpired(draft: any): boolean {
+    if (!draft || draft.status !== 'active') return false;
+    const updatedAt = Date.parse(`${draft.updated_at || draft.created_at || ''}`);
+    return Number.isFinite(updatedAt) && updatedAt < getDraftExpiryCutoff();
+}
+
+function normalizeDraftSession(row: any): any {
+    const formState = typeof row?.form_state === 'string'
+        ? (() => {
+            try {
+                return JSON.parse(row.form_state);
+            } catch {
+                return {};
+            }
+        })()
+        : (row?.form_state || {});
+
+    return {
+        id: `${row?.id || ''}`,
+        token: `${row?.token || ''}`,
+        base_submission_id: `${row?.base_submission_id || ''}`,
+        menu_content_html: `${row?.menu_content_html || ''}`,
+        form_state: formState && typeof formState === 'object' ? formState : {},
+        status: `${row?.status || 'active'}`,
+        created_at: `${row?.created_at || ''}`,
+        updated_at: `${row?.updated_at || ''}`,
+        submitted_submission_id: row?.submitted_submission_id || null,
+    };
+}
+
+async function readLocalDraftSessions(): Promise<Record<string, any>> {
+    try {
+        return JSON.parse(await fs.readFile(DRAFT_SESSIONS_DB, 'utf-8'));
+    } catch {
+        return {};
+    }
+}
+
+async function writeLocalDraftSessions(drafts: Record<string, any>): Promise<void> {
+    await fs.writeFile(DRAFT_SESSIONS_DB, JSON.stringify(drafts, null, 2));
+}
+
+async function loadDraftByToken(token: string): Promise<any | null> {
+    const normalizedToken = `${token || ''}`.trim();
+    if (!normalizedToken) return null;
+
+    if (isSupabaseConfigured()) {
+        const supabase = getSupabaseClient();
+        const { data, error } = await supabase
+            .from(DRAFT_SESSIONS_TABLE)
+            .select('*')
+            .eq('token', normalizedToken)
+            .maybeSingle();
+        if (error) {
+            throw new Error(`Failed to load draft session: ${error.message}`);
+        }
+        if (data) {
+            return normalizeDraftSession(data);
+        }
+    }
+
+    const drafts = await readLocalDraftSessions();
+    const local = Object.values(drafts).find((draft: any) => draft?.token === normalizedToken);
+    return local ? normalizeDraftSession(local) : null;
+}
+
+async function saveDraftSession(draft: any): Promise<any> {
+    const normalized = normalizeDraftSession(draft);
+
+    if (isSupabaseConfigured()) {
+        const supabase = getSupabaseClient();
+        const record = {
+            id: normalized.id,
+            token: normalized.token,
+            base_submission_id: normalized.base_submission_id,
+            menu_content_html: normalized.menu_content_html || null,
+            form_state: normalized.form_state || {},
+            status: normalized.status,
+            created_at: normalized.created_at,
+            updated_at: normalized.updated_at,
+            submitted_submission_id: normalized.submitted_submission_id || null,
+        };
+        const { error } = await supabase
+            .from(DRAFT_SESSIONS_TABLE)
+            .upsert(record, { onConflict: 'id' });
+        if (error) {
+            throw new Error(`Failed to save draft session: ${error.message}`);
+        }
+    }
+
+    const drafts = await readLocalDraftSessions();
+    drafts[normalized.id] = normalized;
+    await writeLocalDraftSessions(drafts);
+    return normalized;
+}
+
+async function expireDraftIfNeeded(draft: any): Promise<any> {
+    if (!isDraftExpired(draft)) return draft;
+    const expired = {
+        ...draft,
+        status: 'expired',
+        updated_at: new Date().toISOString(),
+    };
+    return saveDraftSession(expired);
+}
+
+function toDraftClientPayload(draft: any, baseline: any | null): any {
+    return {
+        ...normalizeDraftSession(draft),
+        token: draft.token ? `${draft.token}` : '',
+        baseline,
+        expiresInDays: getDraftExpiryDays(),
+    };
+}
+
 async function readLocalPropertyCatalog(): Promise<PropertyCatalogRecord[]> {
     try {
         const content = await fs.readFile(PROPERTIES_DB, 'utf-8');
@@ -1038,6 +1165,7 @@ async function initDb() {
         await fs.access(ASSETS_DB).catch(() => fs.writeFile(ASSETS_DB, '[]'));
         await fs.access(PROPERTIES_DB).catch(() => fs.writeFile(PROPERTIES_DB, JSON.stringify(buildDefaultPropertyCatalog(), null, 2)));
         await fs.access(CORRECTION_RULES_DB).catch(() => fs.writeFile(CORRECTION_RULES_DB, '[]'));
+        await fs.access(DRAFT_SESSIONS_DB).catch(() => fs.writeFile(DRAFT_SESSIONS_DB, '{}'));
     } catch (error) {
         console.error('Failed to initialize database:', error);
     }
@@ -1056,6 +1184,159 @@ app.use((error: any, _req: express.Request, res: express.Response, next: express
     return next(error);
 });
 app.use(requireInternalServiceAuth);
+
+app.post('/draft-sessions', async (req, res) => {
+    try {
+        const baseSubmissionId = `${req.body?.baseSubmissionId || req.body?.base_submission_id || ''}`.trim();
+        if (!baseSubmissionId) {
+            return res.status(400).json({ error: 'baseSubmissionId is required' });
+        }
+
+        const submission = await getSubmissionRecordById(baseSubmissionId);
+        if (!submission) {
+            return res.status(404).json({ error: 'Approved baseline not found' });
+        }
+
+        const status = `${submission.status || ''}`.trim().toLowerCase();
+        if (!APPROVED_SUBMISSION_STATUSES.includes(status) || !isApprovedBaselineSource(submission)) {
+            return res.status(400).json({ error: 'Drafts can only start from approved form submissions' });
+        }
+
+        const servicePeriod = getSubmissionServicePeriod(submission);
+        const latest = await findLatestApprovedByPropertyService(`${submission.property || ''}`, servicePeriod);
+        const baseline = mapApprovedSubmissionForClient(submission, latest || submission);
+        const now = new Date().toISOString();
+        const draft = await saveDraftSession({
+            id: crypto.randomUUID(),
+            token: crypto.randomBytes(32).toString('base64url'),
+            base_submission_id: baseline.id || baseSubmissionId,
+            menu_content_html: '',
+            form_state: {
+                previewCollapsed: true,
+                aiCheckHasRun: false,
+            },
+            status: 'active',
+            created_at: now,
+            updated_at: now,
+            submitted_submission_id: null,
+        });
+
+        res.status(201).json(toDraftClientPayload(draft, baseline));
+    } catch (error: any) {
+        console.error('Error creating draft session:', error.message);
+        res.status(500).json({ error: 'Failed to create draft session' });
+    }
+});
+
+app.get('/draft-sessions/:token', async (req, res) => {
+    try {
+        const draft = await loadDraftByToken(req.params.token);
+        if (!draft) {
+            return res.status(404).json({ error: 'Draft session not found' });
+        }
+
+        const currentDraft = await expireDraftIfNeeded(draft);
+        const baselineSubmission = await getSubmissionRecordById(currentDraft.base_submission_id);
+        const servicePeriod = getSubmissionServicePeriod(baselineSubmission);
+        const latest = baselineSubmission
+            ? await findLatestApprovedByPropertyService(`${baselineSubmission.property || ''}`, servicePeriod)
+            : null;
+        const baseline = baselineSubmission
+            ? mapApprovedSubmissionForClient(baselineSubmission, latest || baselineSubmission)
+            : null;
+
+        res.json(toDraftClientPayload(currentDraft, baseline));
+    } catch (error: any) {
+        console.error('Error loading draft session:', error.message);
+        res.status(500).json({ error: 'Failed to load draft session' });
+    }
+});
+
+app.put('/draft-sessions/:token', async (req, res) => {
+    try {
+        const draft = await loadDraftByToken(req.params.token);
+        if (!draft) {
+            return res.status(404).json({ error: 'Draft session not found' });
+        }
+
+        const currentDraft = await expireDraftIfNeeded(draft);
+        if (currentDraft.status === 'submitted') {
+            return res.status(409).json({
+                error: 'This draft has already been submitted.',
+                draft: currentDraft,
+            });
+        }
+        if (currentDraft.status === 'expired') {
+            return res.status(410).json({
+                error: 'This draft has expired. Start a fresh edit from the approved menu.',
+                draft: currentDraft,
+            });
+        }
+
+        const clientUpdatedAt = `${req.body?.updatedAt || req.body?.updated_at || ''}`.trim();
+        const serverUpdatedAt = `${currentDraft.updated_at || ''}`.trim();
+        if (clientUpdatedAt && serverUpdatedAt && Date.parse(serverUpdatedAt) > Date.parse(clientUpdatedAt)) {
+            return res.status(409).json({
+                error: 'This draft was updated by someone else — reload to get the latest edits.',
+                draft: currentDraft,
+            });
+        }
+
+        const updated = await saveDraftSession({
+            ...currentDraft,
+            menu_content_html: `${req.body?.menuContentHtml || req.body?.menu_content_html || currentDraft.menu_content_html || ''}`,
+            form_state: req.body?.formState && typeof req.body.formState === 'object'
+                ? req.body.formState
+                : (req.body?.form_state && typeof req.body.form_state === 'object' ? req.body.form_state : currentDraft.form_state),
+            updated_at: new Date().toISOString(),
+        });
+
+        res.json(toDraftClientPayload(updated, null));
+    } catch (error: any) {
+        console.error('Error saving draft session:', error.message);
+        res.status(500).json({ error: 'Failed to save draft session' });
+    }
+});
+
+app.post('/draft-sessions/:token/submit', async (req, res) => {
+    try {
+        const draft = await loadDraftByToken(req.params.token);
+        if (!draft) {
+            return res.status(404).json({ error: 'Draft session not found' });
+        }
+
+        const currentDraft = await expireDraftIfNeeded(draft);
+        if (currentDraft.status === 'submitted') {
+            return res.status(409).json({
+                error: 'This draft has already been submitted.',
+                draft: currentDraft,
+            });
+        }
+        if (currentDraft.status === 'expired') {
+            return res.status(410).json({
+                error: 'This draft has expired. Start a fresh edit from the approved menu.',
+                draft: currentDraft,
+            });
+        }
+
+        const submittedSubmissionId = `${req.body?.submittedSubmissionId || req.body?.submitted_submission_id || ''}`.trim();
+        if (!submittedSubmissionId) {
+            return res.status(400).json({ error: 'submittedSubmissionId is required' });
+        }
+
+        const updated = await saveDraftSession({
+            ...currentDraft,
+            status: 'submitted',
+            submitted_submission_id: submittedSubmissionId,
+            updated_at: new Date().toISOString(),
+        });
+
+        res.json(toDraftClientPayload(updated, null));
+    } catch (error: any) {
+        console.error('Error locking submitted draft session:', error.message);
+        res.status(500).json({ error: 'Failed to lock draft session' });
+    }
+});
 
 // Endpoint to create a new submission
 app.post('/submissions', async (req, res) => {
@@ -2540,6 +2821,8 @@ app.put('/prompt-proposals/:id', async (req, res) => {
 const CRITICAL_SUPABASE_SCHEMA: Record<string, string[]> = {
     correction_rules: ['applies_to_menu_type', 'prompt_cycle_id', 'consumed_at', 'submission_ids'],
     submissions: ['form_attempt_id', 'approved_menu_content'],
+    draft_sessions: ['token', 'base_submission_id', 'form_state', 'status', 'submitted_submission_id'],
+    form_attempt_logs: ['draft_session_id'],
     basic_ai_check_audits: ['menu_content_raw', 'submission_id'],
     prompt_proposals: ['proposed_rules', 'eval_status', 'accepted_rules', 'source', 'llm_warnings', 'replay_evidence', 'unresolved_still_missed', 'coverage_claims', 'prompt_length', 'superseded_by_cycle_id', 'superseded_from_cycle_id', 'supersede_carried_correction_count', 'supersede_new_correction_count'],
 };

@@ -821,6 +821,14 @@
             grid-template-columns: 1fr 1fr;
         }
 
+        .step2-container.preview-collapsed {
+            grid-template-columns: 1fr;
+        }
+
+        .step2-container.preview-collapsed .step2-right-panel {
+            display: none;
+        }
+
         .step2-left-panel,
         .step2-right-panel {
             background: var(--color-background);
@@ -1978,6 +1986,49 @@
         .ai-suggestions-section.hidden {
             display: none !important;
         }
+
+        .draft-banner {
+            border: 1px solid rgba(139, 115, 85, 0.25);
+            background: rgba(139, 115, 85, 0.08);
+            color: var(--color-secondary);
+            padding: 0.85rem 1rem;
+            margin-bottom: 1rem;
+            font-size: 0.86rem;
+        }
+
+        .draft-tools {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+            margin-top: 0.65rem;
+        }
+
+        .draft-tool-btn {
+            border: 1px solid var(--color-border);
+            background: var(--color-background);
+            color: var(--color-primary);
+            font-family: var(--font-body);
+            font-size: 0.68rem;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            padding: 0.45rem 0.65rem;
+            cursor: pointer;
+        }
+
+        .draft-tool-btn:hover {
+            border-color: var(--color-secondary);
+            color: var(--color-secondary);
+        }
+
+        .draft-save-status {
+            min-width: 6rem;
+            color: var(--color-text-muted);
+            font-size: 0.72rem;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+        }
     </style>
     <%- include('partials/theme') %>
 </head>
@@ -1995,6 +2046,15 @@
         </div>
 
         <div id="alertContainer" aria-live="polite" aria-atomic="false"></div>
+
+        <% if (draftLoadError) { %>
+            <div class="draft-banner"><%= draftLoadError %></div>
+        <% } else if (draftSession && draftSession.token) { %>
+            <div class="draft-banner" id="draftBanner">
+                Shared edit draft for <strong><%= draftSession.baseline && draftSession.baseline.projectName ? draftSession.baseline.projectName : 'approved menu' %></strong>.
+                Autosave is on; use Copy edit link in the editor to hand this draft to another chef.
+            </div>
+        <% } %>
 
         <!-- Upload-first landing: the only thing visible on page load -->
         <div id="uploadStage" class="card upload-stage">
@@ -2568,6 +2628,11 @@
                                 Re-run AI Check
                             </button>
                         </div>
+                        <div class="draft-tools hidden" id="draftTools">
+                            <button type="button" class="draft-tool-btn" id="previewToggleBtn" onclick="togglePersistentPreviewCollapsed()">Hide changes</button>
+                            <button type="button" class="draft-tool-btn" onclick="copyDraftEditLink()">Copy edit link</button>
+                            <span id="draftSaveStatus" class="draft-save-status"></span>
+                        </div>
                     </div>
                     <div id="editModeNotice" class="edit-mode-notice">
                         Editing mode active. Make your changes directly in the text below.
@@ -2708,6 +2773,15 @@
         let uploadedMenuImagePath = '';
         let uploadedMenuImageFileName = '';
         let importedNewMenuDocFileName = '';
+        const draftSession = <%- JSON.stringify(draftSession || null) %>;
+        const draftLoadError = <%- JSON.stringify(draftLoadError || '') %>;
+        let draftSessionToken = draftSession?.token || '';
+        let draftSessionId = draftSession?.id || '';
+        let draftLoadedUpdatedAt = draftSession?.updated_at || '';
+        let draftPreviewCollapsed = !!(draftSession?.form_state?.previewCollapsed);
+        let draftAutosaveTimer = null;
+        let draftAutosaveBlocked = false;
+        let draftApplying = false;
         let preservedManagedFooterText = '';
         let baselineFreshnessOverrideKey = '';
         let baselineFreshnessCheckTimer = null;
@@ -2987,7 +3061,7 @@
                 .replace(/[“”„‟]/g, '"')
                 .replace(/[–—―]/g, '-')
                 .replace(/[…]/g, '...')
-                .replace(/[^ -ÿ]/g, '');
+                .replace(/[^\x00-\xFF]/g, '');
         }
 
         function getAttemptHeaders(extra) {
@@ -3018,6 +3092,7 @@
                 submissionMode,
                 revisionSource: submissionMode === 'modification' ? revisionSource : '',
                 revisionBaselineFileName: submissionMode === 'modification' ? revisionBaselineFileName : '',
+                draftSessionId: draftSessionId || '',
                 baseMenuTextLength: (baseApprovedMenuContent || '').length,
                 ...(extra || {})
             };
@@ -3465,6 +3540,15 @@
             renderAllergenLegend();
             applyTurnaroundDefaults(true, true);
             toggleAssetFields();
+            applyDraftSession();
+
+            if (draftSessionToken) {
+                document.addEventListener('input', () => scheduleDraftAutosave());
+                document.addEventListener('change', () => scheduleDraftAutosave());
+                if (quill && typeof quill.on === 'function') {
+                    quill.on('text-change', () => scheduleDraftAutosave());
+                }
+            }
 
             // Submitter name keyboard nav + blur dismiss
             const submitterNameInput = document.getElementById('submitterName');
@@ -3744,7 +3828,7 @@
             }
         }
 
-        function applyProjectFieldValidationErrors() {
+        function applyProjectFieldValidationErrors(options = {}) {
             const projectName = document.getElementById('projectName').value.trim();
             const property = document.getElementById('property').value.trim();
             const orientation = document.getElementById('orientation').value;
@@ -3766,7 +3850,7 @@
             setGenericFieldError('servicePeriod', servicePeriod ? '' : 'Please select a service period');
             setGenericFieldError('templateType', templateType ? '' : 'Please select a template type');
             setTurnaroundFieldError(turnaroundDays ? '' : 'Please enter turnaround days');
-            setGenericFieldError('dateNeeded', dateNeeded ? '' : 'Please select a date needed');
+            setGenericFieldError('dateNeeded', options.skipDateNeeded ? '' : (dateNeeded ? '' : 'Please select a date needed'));
             setGenericFieldError('assetType', assetType ? '' : 'Please select an asset type');
             setGenericFieldError('widthDigital', !needsDigital || document.getElementById('widthDigital').value.trim() ? '' : 'Please enter the digital width');
             setGenericFieldError('heightDigital', !needsDigital || document.getElementById('heightDigital').value.trim() ? '' : 'Please enter the digital height');
@@ -6560,9 +6644,10 @@
             setTimeout(() => anchor.remove(), 1000);
         }
 
-        function validateStep1() {
+        function validateStep1(options = {}) {
             clearErrorAlerts();
             clearApprovalsCardError();
+            const allowDraftPrecheckConfirmLater = !!options.allowDraftPrecheckConfirmLater;
             const submitterName = document.getElementById('submitterName').value.trim();
             const submitterEmail = document.getElementById('submitterEmail').value.trim();
             const submitterJobTitle = document.getElementById('submitterJobTitle').value.trim();
@@ -6585,13 +6670,19 @@
             const digitalWidth = document.getElementById('widthDigital').value.trim();
             const digitalHeight = document.getElementById('heightDigital').value.trim();
 
-            setSubmitterFieldError('submitterName', submitterName ? '' : 'Please enter your name');
-            setSubmitterFieldError('submitterEmail', submitterEmail ? '' : 'Please enter your email');
-            setSubmitterFieldError('submitterJobTitle', submitterJobTitle ? '' : 'Please enter your job title');
-            const submitterMissing = !submitterName || !submitterEmail || !submitterJobTitle;
+            if (allowDraftPrecheckConfirmLater) {
+                setSubmitterFieldError('submitterName', '');
+                setSubmitterFieldError('submitterEmail', '');
+                setSubmitterFieldError('submitterJobTitle', '');
+            } else {
+                setSubmitterFieldError('submitterName', submitterName ? '' : 'Please enter your name');
+                setSubmitterFieldError('submitterEmail', submitterEmail ? '' : 'Please enter your email');
+                setSubmitterFieldError('submitterJobTitle', submitterJobTitle ? '' : 'Please enter your job title');
+            }
+            const submitterMissing = !allowDraftPrecheckConfirmLater && (!submitterName || !submitterEmail || !submitterJobTitle);
 
-            const projectFieldsMissing = applyProjectFieldValidationErrors();
-            const approvalValid = applyApprovalFieldValidationErrors();
+            const projectFieldsMissing = applyProjectFieldValidationErrors({ skipDateNeeded: allowDraftPrecheckConfirmLater });
+            const approvalValid = allowDraftPrecheckConfirmLater ? true : applyApprovalFieldValidationErrors();
 
             if (submitterMissing || projectFieldsMissing || !approvalValid || !menuContent) {
                 showAlert('Please fill in all required fields. Missing fields are highlighted below.', 'error');
@@ -6605,7 +6696,7 @@
                 return false;
             }
 
-            if (!submitterEmail.includes('@')) {
+            if (!allowDraftPrecheckConfirmLater && !submitterEmail.includes('@')) {
                 setSubmitterFieldError('submitterEmail', 'Please enter a valid email address');
                 showAlert('Please enter a valid email address', 'error');
                 window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -6633,7 +6724,7 @@
             setTurnaroundFieldError('');
             syncProjectDetailsCardErrorState();
 
-            if (dateNeeded < document.getElementById('dateNeeded').min) {
+            if (!allowDraftPrecheckConfirmLater && dateNeeded < document.getElementById('dateNeeded').min) {
                 showAlert(`Date needed cannot be earlier than ${document.getElementById('dateNeeded').min}`, 'error');
                 return false;
             }
@@ -6698,7 +6789,7 @@
             // Re-entrancy guard: a slow AI call must not be fired multiple times
             // by repeated clicks while it's in flight.
             if (basicCheckInProgress) return;
-            if (!validateStep1()) return;
+            if (!validateStep1({ allowDraftPrecheckConfirmLater: !!draftSessionToken })) return;
             if (submissionMode === 'modification' && !revisionBaseSubmissionId && !revisionBaselineDocPath) {
                 showAlert('Choose a modification source and load a baseline DOCX first.', 'error');
                 return;
@@ -6796,6 +6887,7 @@
                     }
                 });
                 showStep2(data);
+                scheduleDraftAutosave(0);
                 floatMenuToBottom(scrollAiReviewResultsIntoView);
                 applyStageReveals();
                 if (data.aiUnavailable) {
@@ -7192,6 +7284,12 @@
             const currentText = extractCleanTextFromReviewedArea(reviewedArea);
             const result = helper(currentText, suggestion);
             if (!result.applied) {
+                const alreadyAppliedHelper = window.formHelpers && window.formHelpers.isSuggestionAlreadyApplied;
+                if (typeof alreadyAppliedHelper === 'function' && alreadyAppliedHelper(currentText, suggestion)) {
+                    markSuggestionCardApplied(idx, 'Already Applied');
+                    showAlert('This change has already been applied to the menu text.', 'success');
+                    return;
+                }
                 const message = result.reason === 'ambiguous_match'
                     ? 'This suggestion matched more than one place. Please edit the menu text manually.'
                     : 'This suggestion no longer matches the current menu text.';
@@ -7223,16 +7321,19 @@
             renderPersistentPreview(diffBase, updatedText, quill.root.innerHTML || '');
             markAiCheckStale();
 
-            const card = document.querySelector(`.suggestion-item[data-suggestion-index="${idx}"]`);
-            if (card) {
-                card.classList.add('applied');
-                const button = card.querySelector('.suggestion-apply-btn');
-                if (button) {
-                    button.disabled = true;
-                    button.textContent = 'Applied';
-                }
-            }
+            markSuggestionCardApplied(idx, 'Applied');
             showAlert('Suggestion applied. Re-run AI Check when you are ready to refresh the remaining suggestions.', 'success');
+        }
+
+        function markSuggestionCardApplied(idx, buttonText) {
+            const card = document.querySelector(`.suggestion-item[data-suggestion-index="${idx}"]`);
+            if (!card) return;
+            card.classList.add('applied');
+            const button = card.querySelector('.suggestion-apply-btn');
+            if (button) {
+                button.disabled = true;
+                button.textContent = buttonText;
+            }
         }
 
         async function rerunAICheck(options = {}) {
@@ -7520,6 +7621,16 @@
 
             const suggestionsDisplay = document.getElementById('suggestionsDisplay');
 
+            // Drop non-critical suggestions whose change was already applied by
+            // the automatic high-confidence corrections — showing them again
+            // produces "Apply Change" buttons that can never succeed.
+            const alreadyAppliedHelper = window.formHelpers && window.formHelpers.isSuggestionAlreadyApplied;
+            if (typeof alreadyAppliedHelper === 'function' && results.suggestions && results.suggestions.length > 0) {
+                results.suggestions = results.suggestions.filter((s) =>
+                    s.severity === 'critical' || !alreadyAppliedHelper(reviewedDisplayText, s)
+                );
+            }
+
             // Sort suggestions: critical first, then normal
             let sortedSuggestions = [];
             if (results.suggestions && results.suggestions.length > 0) {
@@ -7750,7 +7861,8 @@
                 chefPersistentDiff: submissionMode === 'modification' ? persistentDiffSummary : null,
                 skipAiReview: !!skipAiReview,
                 menuImagePath: '',
-                menuImageFileName: ''
+                menuImageFileName: '',
+                draftSessionToken: draftSessionToken || ''
             };
 
             try {
@@ -7864,6 +7976,10 @@
                 if (data.clickup && data.clickup.warning) {
                     showAlert(data.clickup.warning, 'warning');
                 }
+                if (draftSessionToken) {
+                    draftAutosaveBlocked = true;
+                    draftSessionId = data.draftSessionId || draftSessionId;
+                }
                 prepareForNextSubmission();
 
             } catch (error) {
@@ -7966,6 +8082,231 @@
             const div = document.createElement('div');
             div.textContent = text;
             return div.innerHTML;
+        }
+
+        function getDraftChangeCount() {
+            return (Number(persistentDiffSummary?.insertions || 0) + Number(persistentDiffSummary?.deletions || 0));
+        }
+
+        function updatePreviewToggleLabel() {
+            const button = document.getElementById('previewToggleBtn');
+            if (!button) return;
+            button.textContent = draftPreviewCollapsed
+                ? `Show changes (${getDraftChangeCount()})`
+                : 'Hide changes';
+        }
+
+        function setPersistentPreviewCollapsed(collapsed) {
+            draftPreviewCollapsed = !!collapsed;
+            const step2Container = document.querySelector('.step2-container');
+            if (step2Container) {
+                step2Container.classList.toggle('preview-collapsed', draftPreviewCollapsed);
+            }
+            updatePreviewToggleLabel();
+            syncStep2EditorWorkboxAlignment();
+        }
+
+        function togglePersistentPreviewCollapsed() {
+            setPersistentPreviewCollapsed(!draftPreviewCollapsed);
+            scheduleDraftAutosave(250);
+        }
+
+        async function copyDraftEditLink() {
+            if (!draftSessionToken) return;
+            const url = `${window.location.origin}/form?draft=${encodeURIComponent(draftSessionToken)}`;
+            try {
+                await navigator.clipboard.writeText(url);
+                showAlert('Edit link copied.', 'success');
+            } catch (error) {
+                window.prompt('Copy edit link', url);
+            }
+        }
+
+        function setDraftSaveStatus(message) {
+            const status = document.getElementById('draftSaveStatus');
+            if (status) status.textContent = message || '';
+        }
+
+        function getDraftFormState() {
+            const valueFor = (id) => document.getElementById(id)?.value || '';
+            return {
+                previewCollapsed: draftPreviewCollapsed,
+                aiCheckHasRun,
+                aiCheckCompletedCount,
+                revisionSource,
+                fields: {
+                    projectName: valueFor('projectName'),
+                    property: valueFor('property'),
+                    orientation: valueFor('orientation'),
+                    menuType: valueFor('menuType'),
+                    servicePeriod: valueFor('servicePeriod'),
+                    templateType: valueFor('templateType'),
+                    turnaroundDays: valueFor('turnaroundDays'),
+                    dateNeeded: valueFor('dateNeeded'),
+                    assetType: valueFor('assetType'),
+                    widthPrint: valueFor('widthPrint'),
+                    heightPrint: valueFor('heightPrint'),
+                    widthDigital: valueFor('widthDigital'),
+                    heightDigital: valueFor('heightDigital'),
+                    cropMarks: valueFor('cropMarks'),
+                    bleedMarks: valueFor('bleedMarks'),
+                    fileSizeLimit: valueFor('fileSizeLimit'),
+                    fileSizeLimitMb: valueFor('fileSizeLimitMb'),
+                    fileDeliveryNotes: valueFor('fileDeliveryNotes'),
+                    folded: valueFor('folded'),
+                    printRegion: valueFor('printRegion'),
+                    printSize: valueFor('printSize'),
+                    allergens: getAllergenInputValue(),
+                    containsRawUndercooked: getContainsRawSelection(),
+                }
+            };
+        }
+
+        function getDraftMenuContentHtml() {
+            const step2Visible = !document.getElementById('step2')?.classList.contains('hidden');
+            if (step2Visible) {
+                return document.getElementById('reviewedContentArea')?.innerHTML || '';
+            }
+            return quill?.root?.innerHTML || '';
+        }
+
+        function scheduleDraftAutosave(delayMs = 1800) {
+            if (!draftSessionToken || draftAutosaveBlocked || draftApplying) return;
+            clearTimeout(draftAutosaveTimer);
+            draftAutosaveTimer = setTimeout(saveDraftNow, delayMs);
+            setDraftSaveStatus('Saving...');
+        }
+
+        async function saveDraftNow() {
+            if (!draftSessionToken || draftAutosaveBlocked || draftApplying) return;
+            try {
+                const response = await fetch(`/api/drafts/${encodeURIComponent(draftSessionToken)}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        updatedAt: draftLoadedUpdatedAt,
+                        menuContentHtml: getDraftMenuContentHtml(),
+                        formState: getDraftFormState(),
+                    }),
+                });
+                const data = await response.json().catch(() => ({}));
+                if (response.status === 409) {
+                    draftAutosaveBlocked = true;
+                    setDraftSaveStatus('Reload needed');
+                    showAlert(data.error || 'This draft was updated by someone else — reload to get the latest edits.', 'error', { persistent: true });
+                    return;
+                }
+                if (!response.ok) {
+                    throw new Error(data.error || 'Draft autosave failed');
+                }
+                draftLoadedUpdatedAt = data.updated_at || draftLoadedUpdatedAt;
+                setDraftSaveStatus('Saved');
+            } catch (error) {
+                console.warn('Draft autosave failed:', error);
+                setDraftSaveStatus('Save failed');
+            }
+        }
+
+        function applyDraftFormState(formState) {
+            const fields = formState?.fields || {};
+            const assign = (id, value) => {
+                if (value === undefined || value === null || value === '') return;
+                const el = document.getElementById(id);
+                if (el) el.value = value;
+            };
+
+            Object.entries({
+                projectName: 'projectName',
+                property: 'property',
+                orientation: 'orientation',
+                menuType: 'menuType',
+                servicePeriod: 'servicePeriod',
+                templateType: 'templateType',
+                turnaroundDays: 'turnaroundDays',
+                dateNeeded: 'dateNeeded',
+                assetType: 'assetType',
+                widthPrint: 'widthPrint',
+                heightPrint: 'heightPrint',
+                widthDigital: 'widthDigital',
+                heightDigital: 'heightDigital',
+                cropMarks: 'cropMarks',
+                bleedMarks: 'bleedMarks',
+                fileSizeLimit: 'fileSizeLimit',
+                fileSizeLimitMb: 'fileSizeLimitMb',
+                fileDeliveryNotes: 'fileDeliveryNotes',
+                folded: 'folded',
+                printRegion: 'printRegion',
+                printSize: 'printSize',
+            }).forEach(([key, id]) => assign(id, fields[key]));
+
+            if (fields.allergens !== undefined) setAllergenInputValue(fields.allergens || '');
+            if (fields.containsRawUndercooked !== undefined) setContainsRawSelection(!!fields.containsRawUndercooked);
+            toggleAssetFields();
+            togglePrintRegionFields();
+            toggleFileSizeLimit();
+        }
+
+        function setDraftReadonly(message) {
+            draftAutosaveBlocked = true;
+            ['reviewWithAiBtn', 'runCheckBtn', 'runCheckBtnBottom', 'submitBtn', 'editToggleBtn', 'rerunCheckBtn'].forEach((id) => {
+                const button = document.getElementById(id);
+                if (button) button.disabled = true;
+            });
+            const reviewedArea = document.getElementById('reviewedContentArea');
+            if (reviewedArea) {
+                reviewedArea.contentEditable = 'false';
+                reviewedArea.classList.remove('editable');
+            }
+            if (message) showAlert(message, 'warning', { persistent: true });
+        }
+
+        function applyDraftSession() {
+            if (draftLoadError) {
+                showAlert(draftLoadError, 'warning', { persistent: true });
+                return;
+            }
+            if (!draftSession || !draftSession.token || !draftSession.baseline) return;
+
+            draftApplying = true;
+            const tools = document.getElementById('draftTools');
+            if (tools) tools.classList.remove('hidden');
+            const uploadStage = document.getElementById('uploadStage');
+            if (uploadStage) uploadStage.classList.add('hidden');
+
+            applyApprovedBaseline(draftSession.baseline, { silent: true });
+            applyDraftFormState(draftSession.form_state || {});
+
+            if (draftSession.menu_content_html) {
+                displayReviewedContent(draftSession.menu_content_html);
+            } else {
+                // Brand-new draft: no saved edits yet (the DB seeds menu_content_html
+                // empty on create). Seed the editor from the approved baseline that
+                // applyApprovedBaseline() just loaded into the Quill composer so the
+                // chef starts from the current menu instead of a blank editor.
+                displayReviewedContent(quill.root.innerHTML);
+            }
+            const reviewedArea = document.getElementById('reviewedContentArea');
+            const currentText = extractCleanTextFromReviewedArea(reviewedArea);
+            renderPersistentPreview(baseApprovedMenuContent, currentText, reviewedArea.innerHTML || '');
+
+            // A shared draft opens straight into the editor (no upload step), so mark
+            // the menu as present and recompute progressive-disclosure so the Step 2
+            // editor and the downstream detail/approval/submitter stages reveal.
+            menuUploaded = true;
+            applyStageReveals();
+
+            setPersistentPreviewCollapsed(!!draftSession.form_state?.previewCollapsed);
+            draftApplying = false;
+            setDraftSaveStatus('Saved');
+
+            if (draftSession.status === 'submitted') {
+                const submittedId = draftSession.submitted_submission_id;
+                setDraftReadonly(submittedId
+                    ? `This shared draft has already been submitted as ${submittedId}.`
+                    : 'This shared draft has already been submitted.');
+            } else if (draftSession.status === 'expired') {
+                setDraftReadonly('This shared draft has expired. Start a fresh edit from the approved menu.');
+            }
         }
 
         function displayReviewedContent(htmlContent) {
@@ -8118,6 +8459,7 @@
                 deletions: rendered.deletions,
             };
             previewBody.innerHTML = rendered.html;
+            updatePreviewToggleLabel();
             syncStep2EditorWorkboxAlignment();
         }
 

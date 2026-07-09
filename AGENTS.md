@@ -70,6 +70,7 @@ These apply to almost every change — keep them in mind without needing a deepe
 - **Severity vs confidence:** `severity` ("critical"/"normal") controls blocking; `confidence` is separate
 - **Prix fixe exemption:** Prix fixe menus skip missing-price critical errors
 - **White-label config:** All business-specific values (branding, emails, allergen key, approval roles, menu-template markers, seed rules/properties) come from the `config/` bundle via `@menumanager/tenant-config` (`getTenantConfig()` / `app.locals.tenant` in EJS). Never hardcode a business name, email, color, or template string — add a config field. See [docs/onboarding-new-business.md](docs/onboarding-new-business.md) and [docs/design-docs/white-label-config.md](docs/design-docs/white-label-config.md).
+- **QA prompt edits:** The live rulebook is `sop-processor/qa_prompt.txt` (read per-review; DB-approved proposals can overwrite it on dashboard restart). `config/rulebook/qa_prompt.txt` is a fresh-install seed only — editing it changes nothing at runtime. See [docs/design-docs/white-label-config.md](docs/design-docs/white-label-config.md).
 - **Archive:** Old docs and legacy services in `archive/` — web form is the only active submission path
 
 ## Topic Pointers

@@ -103,6 +103,11 @@ export interface TenantRulebook {
     allergensAnchor: string;
 }
 
+export interface TenantDraftSessions {
+    /** Number of idle days before shared menu-edit drafts expire. */
+    expiryDays: number;
+}
+
 export interface TenantConfig {
     /** Full business name, e.g. "Richard Sandoval Hospitality". */
     name: string;
@@ -119,6 +124,8 @@ export interface TenantConfig {
     approvalRoles: TenantApprovalRole[];
     template: TenantTemplate;
     rulebook: TenantRulebook;
+    /** Shared draft-session settings for approved-menu click-to-edit. */
+    draftSessions: TenantDraftSessions;
     /** Property catalog seed file, relative to the config dir. */
     propertiesSeedFile: string;
 }
@@ -191,6 +198,9 @@ export const DEFAULT_TENANT_CONFIG: TenantConfig = {
         seedFile: 'rulebook/qa_prompt.txt',
         guidelinesAnchor: '## RSH MENU GUIDELINES - COMPREHENSIVE RULES',
         allergensAnchor: '### 7. ALLERGENS',
+    },
+    draftSessions: {
+        expiryDays: 30,
     },
     propertiesSeedFile: 'properties.json',
 };

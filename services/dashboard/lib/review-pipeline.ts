@@ -320,6 +320,46 @@ export function enforcePrixFixeCriticalChecks(
     return existing;
 }
 
+// Deterministic allergen-program check: if no dish line on the menu carries an
+// allergen-code cluster, inject one critical "Entire menu" suggestion. The AI
+// prompt asks for this too, but LLM compliance is stochastic — this guarantees
+// the flag fires on every review. Detection is conservative: a line "has codes"
+// when, after stripping a trailing price token, it ends in a cluster of 1-2
+// uppercase code tokens (comma-separated, no spaces), e.g. "... G,D 24".
+const TRAILING_PRICE_FOR_ALLERGEN_CHECK = /\s+\$?\d+(?:[.,]\d+)?(?:\s*(?:each|pp|per\s*person))?\s*$/i;
+const TRAILING_ALLERGEN_CLUSTER = /\s(?:[A-Z]{1,2}(?:,[A-Z]{1,2})+|VG|[A-Z])$/;
+
+export function enforceAllergenProgramCheck(
+    menuContent: string,
+    suggestions: ReviewSuggestion[]
+): ReviewSuggestion[] {
+    const existing = [...(suggestions || [])];
+    const hasAllergenSuggestion = existing.some((s) =>
+        `${s.type || ''}`.toLowerCase().includes('allergen'));
+
+    const lines = (menuContent || '').split('\n').map((l) => l.trim()).filter(Boolean);
+    const codedLines = lines.filter((line) => {
+        const withoutPrice = line.replace(TRAILING_PRICE_FOR_ALLERGEN_CHECK, '');
+        // Ignore section headings (all-caps lines) and the allergen legend itself
+        if (/^[A-Z\s&+•·-]+$/.test(withoutPrice)) return false;
+        if (/allergen|contains|gluten|vegetarian|vegan/i.test(withoutPrice) && /\|/.test(withoutPrice)) return false;
+        return TRAILING_ALLERGEN_CLUSTER.test(withoutPrice);
+    });
+
+    if (codedLines.length === 0 && !hasAllergenSuggestion) {
+        existing.push({
+            type: 'Allergen Code',
+            confidence: 'high',
+            severity: 'critical',
+            menuItem: 'Entire menu',
+            description: 'No dishes on this menu carry allergen codes — the menu has no allergen program.',
+            recommendation: 'Code each dish per the allergen key (e.g., D dairy, G gluten, N nuts, S shellfish) so allergen information is available at a glance.'
+        });
+    }
+
+    return existing;
+}
+
 type KnownTextArtifactPattern = {
     pattern: RegExp;
     corrected: string;
@@ -603,6 +643,7 @@ export function runPostAiPipeline(args: PostAiPipelineArgs): PostAiPipelineResul
     if (args.menuType === 'prix_fixe') {
         finalSuggestions = enforcePrixFixeCriticalChecks(correctedMenuSanitized, finalSuggestions);
     }
+    finalSuggestions = enforceAllergenProgramCheck(correctedMenuSanitized, finalSuggestions);
     finalSuggestions = detectKnownTextArtifactSuggestions(correctedMenuSanitized, finalSuggestions);
 
     const hasCriticalErrors = finalSuggestions.some(s => s.severity === 'critical');

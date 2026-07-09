@@ -134,6 +134,8 @@ describe('Dashboard Modification Workflow (local, mocked externals)', () => {
     const basicCheckStatusHandler = getRouteHandler('get', '/api/form/basic-check/status/:checkId');
     const attemptLogHandler = getRouteHandler('post', '/api/form/attempt-log');
     const submissionSearchHandler = getRouteHandler('get', '/api/submissions/search');
+    const createDraftHandler = getRouteHandler('post', '/api/drafts');
+    const saveDraftHandler = getRouteHandler('put', '/api/drafts/:token');
     const newMenuDocUploadHandler = getRouteHandler('post', '/api/form/menu-doc-upload');
     const baselineUploadPath = path.join(process.cwd(), 'tmp', 'uploads', 'legacy-approved.docx');
     const originalNodeEnv = process.env.NODE_ENV;
@@ -163,6 +165,17 @@ describe('Dashboard Modification Workflow (local, mocked externals)', () => {
             if (urlStr.includes('/submissions')) {
                 return { data: { id: payload.id || 'form-test-id' } };
             }
+            if (urlStr.includes('/draft-sessions')) {
+                return {
+                    data: {
+                        id: 'draft-123',
+                        token: 'share-token',
+                        status: 'active',
+                        updated_at: '2026-07-08T12:00:00.000Z',
+                        baseline: { id: payload.baseSubmissionId },
+                    },
+                };
+            }
             if (urlStr.includes('/submitter-profiles')) {
                 return { data: { ok: true } };
             }
@@ -187,7 +200,21 @@ describe('Dashboard Modification Workflow (local, mocked externals)', () => {
             return { data: {} };
         });
 
-        mockedAxios.put = jest.fn(async () => ({ data: { ok: true } }));
+        mockedAxios.put = jest.fn(async (url, payload) => {
+            const urlStr = String(url);
+            if (urlStr.includes('/draft-sessions/')) {
+                return {
+                    data: {
+                        id: 'draft-123',
+                        token: 'share-token',
+                        status: 'active',
+                        updated_at: '2026-07-08T12:01:00.000Z',
+                        form_state: payload.formState || {},
+                    },
+                };
+            }
+            return { data: { ok: true } };
+        });
         mockedAxios.get = jest.fn(async (url) => {
             const urlStr = String(url);
 
@@ -620,6 +647,40 @@ describe('Dashboard Modification Workflow (local, mocked externals)', () => {
 
         expect(response.status).toBe(503);
         expect(response.body.error).toBe('Failed to search approved submissions');
+    });
+
+    test('creates an approved-menu draft through the dashboard proxy', async () => {
+        const response = await invokeJsonHandler(
+            createDraftHandler,
+            { baseSubmissionId: 'form-approved' },
+            { headers: { accept: 'application/json' } }
+        );
+
+        expect(response.status).toBe(201);
+        expect(response.body.token).toBe('share-token');
+        expect(mockedAxios.post).toHaveBeenCalledWith(
+            expect.stringContaining('/draft-sessions'),
+            { baseSubmissionId: 'form-approved' }
+        );
+    });
+
+    test('saves an approved-menu draft through the dashboard proxy', async () => {
+        const response = await invokeJsonHandler(
+            saveDraftHandler,
+            {
+                updatedAt: '2026-07-08T12:00:00.000Z',
+                menuContentHtml: '<p>Updated</p>',
+                formState: { previewCollapsed: true },
+            },
+            { params: { token: 'share-token' } }
+        );
+
+        expect(response.status).toBe(200);
+        expect(response.body.updated_at).toBe('2026-07-08T12:01:00.000Z');
+        expect(mockedAxios.put).toHaveBeenCalledWith(
+            expect.stringContaining('/draft-sessions/share-token'),
+            expect.objectContaining({ menuContentHtml: '<p>Updated</p>' })
+        );
     });
 
     test('returns uploaded-baseline modification submit response before Tier 2 AI review completes', async () => {

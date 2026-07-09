@@ -121,8 +121,24 @@ describe('dashboard form modification source chooser', () => {
         expect(template).toContain('window.formHelpers.applySuggestionChangeToText');
         expect(template).toContain('function applySuggestionChange(idx)');
         expect(template).toContain('class="suggestion-apply-btn" onclick="applySuggestionChange(${idx})"');
-        expect(template).toContain("button.textContent = 'Applied';");
+        expect(template).toContain("markSuggestionCardApplied(idx, 'Applied');");
         expect(template).toContain('markAiCheckStale();');
+    });
+
+    test('hides and resolves suggestions already applied by auto-correction', () => {
+        const template = fs.readFileSync(
+            path.join(__dirname, '..', 'views', 'form.ejs'),
+            'utf8'
+        );
+
+        // Render-time filter: already-applied non-critical suggestions are dropped.
+        expect(template).toContain('window.formHelpers.isSuggestionAlreadyApplied');
+        expect(template).toContain("s.severity === 'critical' || !alreadyAppliedHelper(reviewedDisplayText, s)");
+
+        // Apply-time fallback: pressing Apply on an already-applied suggestion
+        // resolves the card instead of warning.
+        expect(template).toContain("markSuggestionCardApplied(idx, 'Already Applied');");
+        expect(template).toContain('This change has already been applied to the menu text.');
     });
 
     test('aligns the shared Step 2 editor with the persistent preview work box', () => {
