@@ -8278,10 +8278,22 @@
 
             if (draftSession.menu_content_html) {
                 displayReviewedContent(draftSession.menu_content_html);
-                const reviewedArea = document.getElementById('reviewedContentArea');
-                const currentText = extractCleanTextFromReviewedArea(reviewedArea);
-                renderPersistentPreview(baseApprovedMenuContent, currentText, reviewedArea.innerHTML || '');
+            } else {
+                // Brand-new draft: no saved edits yet (the DB seeds menu_content_html
+                // empty on create). Seed the editor from the approved baseline that
+                // applyApprovedBaseline() just loaded into the Quill composer so the
+                // chef starts from the current menu instead of a blank editor.
+                displayReviewedContent(quill.root.innerHTML);
             }
+            const reviewedArea = document.getElementById('reviewedContentArea');
+            const currentText = extractCleanTextFromReviewedArea(reviewedArea);
+            renderPersistentPreview(baseApprovedMenuContent, currentText, reviewedArea.innerHTML || '');
+
+            // A shared draft opens straight into the editor (no upload step), so mark
+            // the menu as present and recompute progressive-disclosure so the Step 2
+            // editor and the downstream detail/approval/submitter stages reveal.
+            menuUploaded = true;
+            applyStageReveals();
 
             setPersistentPreviewCollapsed(!!draftSession.form_state?.previewCollapsed);
             draftApplying = false;
