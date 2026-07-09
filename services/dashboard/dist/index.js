@@ -875,9 +875,46 @@ app.get('/submit/:token', (req, res) => {
 /**
  * Form Submission Page - New menu submission via form
  */
-async function renderSubmissionForm(res, view, title) {
+const DRAFT_TOKEN_LOOKUP_WINDOW_MS = 60 * 1000;
+const DRAFT_TOKEN_LOOKUP_MAX_PER_WINDOW = 30;
+const draftTokenLookupAttempts = new Map();
+function isDraftTokenLookupRateLimited(req) {
+    const key = `${req.ip || req.hostname || req.get?.('x-forwarded-for') || 'unknown'}`;
+    const now = Date.now();
+    const current = draftTokenLookupAttempts.get(key);
+    if (!current || current.resetAt <= now) {
+        draftTokenLookupAttempts.set(key, { count: 1, resetAt: now + DRAFT_TOKEN_LOOKUP_WINDOW_MS });
+        return false;
+    }
+    current.count += 1;
+    return current.count > DRAFT_TOKEN_LOOKUP_MAX_PER_WINDOW;
+}
+async function loadDraftSessionForForm(req) {
+    const token = (0, upload_security_1.sanitizePlainTextInput)(req.query?.draft, { maxLength: 160 }).trim();
+    if (!token) {
+        return { draftSession: null, draftLoadError: '' };
+    }
+    if (isDraftTokenLookupRateLimited(req)) {
+        return { draftSession: null, draftLoadError: 'Too many edit-link lookups. Please wait a minute and try again.' };
+    }
+    try {
+        const draftResponse = await internalApi.get(`${DB_SERVICE_URL}/draft-sessions/${encodeURIComponent(token)}`, {
+            timeout: 5000,
+        });
+        return { draftSession: draftResponse.data || null, draftLoadError: '' };
+    }
+    catch (error) {
+        const status = error?.response?.status;
+        if (status === 404) {
+            return { draftSession: null, draftLoadError: 'This edit link was not found. Start a fresh edit from Approved Menus.' };
+        }
+        return { draftSession: null, draftLoadError: error?.response?.data?.error || 'This edit link could not be loaded. Start a fresh edit from Approved Menus.' };
+    }
+}
+async function renderSubmissionForm(req, res, view, title) {
     const propertyCatalog = await getPropertyCatalogFromDb();
     const propertyOptions = propertyCatalog.map((item) => item.name);
+    const { draftSession, draftLoadError } = await loadDraftSessionForForm(req);
     res.render(view, {
         title,
         defaultAllergenKey: DEFAULT_ALLERGEN_KEY,
@@ -885,6 +922,8 @@ async function renderSubmissionForm(res, view, title) {
         propertyCatalog,
         supportEmail: PUBLIC_FORM_SUPPORT_EMAIL,
         errorReportMaxBodyBytes: ERROR_REPORT_CLIENT_MAX_BODY_BYTES,
+        draftSession,
+        draftLoadError,
     });
 }
 /**
@@ -893,17 +932,17 @@ async function renderSubmissionForm(res, view, title) {
  * (see the constant near the top of this file). The default is the new upload-first
  * flow; `/form-legacy` remains available as a stable fallback URL.
  */
-app.get('/form', async (_req, res) => {
+app.get('/form', async (req, res) => {
     const view = NEW_SUBMISSION_FORM_DEFAULT ? 'form' : 'form-legacy';
-    await renderSubmissionForm(res, view, 'Submit New Menu');
+    await renderSubmissionForm(req, res, view, 'Submit New Menu');
 });
 // New upload-first flow — stable URL for direct links regardless of rollback state.
-app.get('/form-new', async (_req, res) => {
-    await renderSubmissionForm(res, 'form', 'Submit New Menu');
+app.get('/form-new', async (req, res) => {
+    await renderSubmissionForm(req, res, 'form', 'Submit New Menu');
 });
 // Legacy multi-section flow — always available at a stable URL.
-app.get('/form-legacy', async (_req, res) => {
-    await renderSubmissionForm(res, 'form-legacy', 'Submit New Menu (Legacy)');
+app.get('/form-legacy', async (req, res) => {
+    await renderSubmissionForm(req, res, 'form-legacy', 'Submit New Menu (Legacy)');
 });
 /**
  * Design Approval Page - Compare DOCX against PDF
@@ -1305,6 +1344,16 @@ const submissionWorkflowHandlers = (0, submission_workflow_1.createSubmissionWor
     sendSubmissionConfirmationEmails,
     isClientInputError: upload_security_1.isClientInputError,
     linkBasicAiCheckAuditsToSubmission: basic_ai_check_audit_1.linkBasicAiCheckAuditsToSubmission,
+    getDraftSession: async (token) => {
+        const response = await internalApi.get(`${DB_SERVICE_URL}/draft-sessions/${encodeURIComponent(token)}`, { timeout: 5000 });
+        return response.data;
+    },
+    lockDraftSession: async (token, submittedSubmissionId) => {
+        const response = await internalApi.post(`${DB_SERVICE_URL}/draft-sessions/${encodeURIComponent(token)}/submit`, {
+            submittedSubmissionId,
+        }, { timeout: 5000 });
+        return response.data;
+    },
 });
 const approvalWorkflowHandlers = (0, approval_workflow_1.createApprovalWorkflowHandlers)({
     axios: internalApi,
@@ -2306,6 +2355,51 @@ app.get('/api/submissions/latest-approved', async (req, res) => {
     }
     catch (error) {
         res.status(error?.response?.status || 500).json(error?.response?.data || { error: 'Failed to fetch approved submission' });
+    }
+});
+app.post('/api/drafts', async (req, res) => {
+    try {
+        const baseSubmissionId = (0, upload_security_1.sanitizePlainTextInput)(req.body?.baseSubmissionId || req.body?.base_submission_id, { maxLength: 120 }).trim();
+        if (!baseSubmissionId) {
+            return res.status(400).json({ error: 'baseSubmissionId is required' });
+        }
+        const dbResponse = await internalApi.post(`${DB_SERVICE_URL}/draft-sessions`, {
+            baseSubmissionId,
+        });
+        const draft = dbResponse.data || {};
+        const draftToken = `${draft.token || ''}`.trim();
+        if (!draftToken) {
+            return res.status(500).json({ error: 'Draft session did not return a token' });
+        }
+        const wantsJson = `${req.get('accept') || ''}`.includes('application/json') || req.xhr;
+        if (wantsJson) {
+            return res.status(201).json(draft);
+        }
+        return res.redirect(303, `/form?draft=${encodeURIComponent(draftToken)}`);
+    }
+    catch (error) {
+        console.error('Failed to create draft session:', error?.response?.data || error.message);
+        const status = error?.response?.status || 500;
+        const payload = error?.response?.data || { error: 'Failed to create draft session' };
+        if (`${req.get('accept') || ''}`.includes('application/json') || req.xhr) {
+            return res.status(status).json(payload);
+        }
+        return res.status(status).render('error', {
+            message: payload.error || 'Failed to create draft session',
+        });
+    }
+});
+app.put('/api/drafts/:token', async (req, res) => {
+    try {
+        const token = (0, upload_security_1.sanitizePlainTextInput)(req.params.token, { maxLength: 160 }).trim();
+        if (!token) {
+            return res.status(400).json({ error: 'draft token is required' });
+        }
+        const dbResponse = await internalApi.put(`${DB_SERVICE_URL}/draft-sessions/${encodeURIComponent(token)}`, req.body || {});
+        res.json(dbResponse.data);
+    }
+    catch (error) {
+        res.status(error?.response?.status || 500).json(error?.response?.data || { error: 'Failed to save draft session' });
     }
 });
 /**

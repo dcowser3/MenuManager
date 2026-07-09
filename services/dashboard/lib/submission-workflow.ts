@@ -52,6 +52,8 @@ type SubmissionWorkflowDeps = {
     }) => void;
     isClientInputError: (error: any) => boolean;
     linkBasicAiCheckAuditsToSubmission?: (attemptId: string, submissionId: string) => Promise<void>;
+    getDraftSession?: (token: string) => Promise<any>;
+    lockDraftSession?: (token: string, submittedSubmissionId: string) => Promise<any>;
 };
 
 function getRequestHostname(req: any): string {
@@ -362,6 +364,22 @@ export function createSubmissionWorkflowHandlers(deps: SubmissionWorkflowDeps) {
                 (typeof req.get === 'function' ? req.get('x-menumanager-attempt-id') : '') || req.body?.attemptId,
                 { maxLength: 100 }
             ) || null;
+            const draftSessionToken = sanitizePlainTextInput(req.body?.draftSessionToken, { maxLength: 160 }).trim();
+            let draftSessionId: string | null = null;
+            if (draftSessionToken && deps.getDraftSession) {
+                const draft = await deps.getDraftSession(draftSessionToken);
+                draftSessionId = `${draft?.id || ''}`.trim() || null;
+                if (draft?.status === 'submitted') {
+                    const error: any = new Error('This shared draft has already been submitted. Reload the edit link to view the submitted state.');
+                    error.statusCode = 409;
+                    throw error;
+                }
+                if (draft?.status === 'expired') {
+                    const error: any = new Error('This shared draft has expired. Start a fresh edit from the approved menu.');
+                    error.statusCode = 410;
+                    throw error;
+                }
+            }
             const localTestingRequest = isLocalDashboardRequest(req);
             const docxPath = await deps.generateDocxFromForm(submissionId, {
                 projectName: safeProjectName,
@@ -708,9 +726,15 @@ export function createSubmissionWorkflowHandlers(deps: SubmissionWorkflowDeps) {
                 }
                 : undefined;
 
+            if (draftSessionToken && deps.lockDraftSession) {
+                const lockedDraft = await deps.lockDraftSession(draftSessionToken, submissionId);
+                draftSessionId = `${lockedDraft?.id || draftSessionId || ''}`.trim() || null;
+            }
+
             res.json({
                 success: true,
                 submissionId: submissionId,
+                draftSessionId,
                 message: 'Menu submitted successfully',
                 clickup: {
                     taskId: clickupTaskId,
@@ -721,7 +745,7 @@ export function createSubmissionWorkflowHandlers(deps: SubmissionWorkflowDeps) {
             });
         } catch (error: any) {
             console.error('Error submitting form:', error);
-            const statusCode = deps.isClientInputError(error) ? 400 : 500;
+            const statusCode = error?.statusCode || (deps.isClientInputError(error) ? 400 : 500);
             deps.sendAdminAlert({
                 alert_type: 'submission_failed',
                 severity: 'critical',

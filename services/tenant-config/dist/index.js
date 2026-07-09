@@ -109,6 +109,9 @@ exports.DEFAULT_TENANT_CONFIG = {
         guidelinesAnchor: '## RSH MENU GUIDELINES - COMPREHENSIVE RULES',
         allergensAnchor: '### 7. ALLERGENS',
     },
+    draftSessions: {
+        expiryDays: 30,
+    },
     propertiesSeedFile: 'properties.json',
 };
 function isPlainObject(value) {

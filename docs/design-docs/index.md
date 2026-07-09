@@ -24,3 +24,4 @@ Catalog of design decisions and feature documentation for Menu Manager.
 | [User Error Reports](user-error-reports.md) | Complete | One-click "Report this problem" button that emails support a full-page screenshot + client form-state JSON |
 | [White-label Tenant Config](white-label-config.md) | Implemented | One config bundle (`config/`) for all business-specific values (branding, emails, allergen key, approval roles, template markers, seed rules/properties) so the app rebrands per business with no code edits |
 | [Production Support Auto-Triage](production-support-auto-triage.md) | Design | Future auto-reply flow for obvious AI false-positive blockers reported from production |
+| [Approved Menu Click-to-Edit](approved-menu-click-to-edit.md) | Phase 1 implemented | Edit This Menu button on Approved Menus → prefilled in-browser modification editor, shareable draft sessions with staleness guard, collapsible redline preview, draft AI-check-before-confirm behavior |

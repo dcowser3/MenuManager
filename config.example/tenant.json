@@ -61,5 +61,8 @@
     "guidelinesAnchor": "## MENU GUIDELINES - COMPREHENSIVE RULES",
     "allergensAnchor": "### 7. ALLERGENS"
   },
+  "draftSessions": {
+    "expiryDays": 30
+  },
   "propertiesSeedFile": "properties.json"
 }

@@ -19,6 +19,7 @@ export type FormAttemptEvent = {
     submissionMode?: unknown;
     revisionSource?: unknown;
     revisionBaselineFileName?: unknown;
+    draftSessionId?: unknown;
     menuTextLength?: unknown;
     menuHtmlLength?: unknown;
     persistentDiffHtmlLength?: unknown;
@@ -91,6 +92,7 @@ export function normalizeFormAttemptEvent(event: FormAttemptEvent): Record<strin
         submission_mode: textOrNull(event.submissionMode, 50),
         revision_source: textOrNull(event.revisionSource, 100),
         revision_baseline_file_name: textOrNull(event.revisionBaselineFileName, 255),
+        draft_session_id: textOrNull(event.draftSessionId, 100),
         menu_text_length: numberOrNull(event.menuTextLength),
         menu_html_length: numberOrNull(event.menuHtmlLength),
         persistent_diff_html_length: numberOrNull(event.persistentDiffHtmlLength),

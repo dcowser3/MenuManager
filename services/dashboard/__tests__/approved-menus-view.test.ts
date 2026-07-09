@@ -35,11 +35,15 @@ const sampleMenu = {
 };
 
 describe('approved menus view', () => {
-    test('renders download links for both clean and original approved when results are present', () => {
+    test('renders edit and download actions when results are present', () => {
         const html = renderApprovedMenus({
             hasSearch: true,
             approvedMenus: [sampleMenu],
         });
+
+        expect(html).toContain('action="/api/drafts"');
+        expect(html).toContain('name="baseSubmissionId" value="form-abc123"');
+        expect(html).toContain('Edit This Menu');
 
         // Clean download (primary)
         expect(html).toContain('/download/approved-clean/form-abc123');

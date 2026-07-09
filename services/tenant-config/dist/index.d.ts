@@ -91,6 +91,10 @@ export interface TenantRulebook {
     /** Heading the prompt-builder injects the custom allergen key after. */
     allergensAnchor: string;
 }
+export interface TenantDraftSessions {
+    /** Number of idle days before shared menu-edit drafts expire. */
+    expiryDays: number;
+}
 export interface TenantConfig {
     /** Full business name, e.g. "Richard Sandoval Hospitality". */
     name: string;
@@ -107,6 +111,8 @@ export interface TenantConfig {
     approvalRoles: TenantApprovalRole[];
     template: TenantTemplate;
     rulebook: TenantRulebook;
+    /** Shared draft-session settings for approved-menu click-to-edit. */
+    draftSessions: TenantDraftSessions;
     /** Property catalog seed file, relative to the config dir. */
     propertiesSeedFile: string;
 }

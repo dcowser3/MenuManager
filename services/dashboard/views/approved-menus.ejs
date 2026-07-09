@@ -458,6 +458,10 @@
                         </div>
                         <div class="menu-actions">
                             <span class="badge"><%= menu.status === 'approved_override' ? 'Approved Override' : 'Approved' %></span>
+                            <form method="POST" action="/api/drafts" style="width: 100%; margin: 0;">
+                                <input type="hidden" name="baseSubmissionId" value="<%= menu.id %>">
+                                <button type="submit" class="btn" style="width: 100%;">Edit This Menu</button>
+                            </form>
                             <a href="/download/approved-clean/<%= menu.id %>" class="btn">Download Clean Word Doc</a>
                             <a href="/download/approved/<%= menu.id %>" class="btn btn-secondary">Download Original Approved</a>
                         </div>
