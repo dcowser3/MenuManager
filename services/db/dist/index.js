@@ -2597,16 +2597,13 @@ const CRITICAL_SUPABASE_SCHEMA = {
     basic_ai_check_audits: ['menu_content_raw', 'submission_id'],
     prompt_proposals: ['proposed_rules', 'eval_status', 'accepted_rules', 'source', 'llm_warnings', 'replay_evidence', 'unresolved_still_missed', 'coverage_claims', 'prompt_length', 'superseded_by_cycle_id', 'superseded_from_cycle_id', 'supersede_carried_correction_count', 'supersede_new_correction_count'],
 };
-// Columns that MUST be nullable. A stale NOT NULL constraint here silently routes
-// writes to the local JSON fallback exactly like a missing column would — but the
-// `select` probe above cannot detect it, because SELECT succeeds regardless of
-// nullability. This is the July 2026 incident: freeform correction rules (no
-// before/after text) have null original_text/corrected_text and bounced off a
-// NOT NULL constraint that migration 20260607 should have dropped, stranding weeks
-// of reviewer rules in the fallback where the improvement cycle never saw them.
-const NULLABLE_SUPABASE_COLUMNS = {
-    correction_rules: ['original_text', 'corrected_text'],
-};
+// Columns that MUST be nullable (shared NULLABLE_COLUMNS). A stale NOT NULL
+// constraint here silently routes writes to the local JSON fallback exactly like a
+// missing column would — but the `select` probe above cannot detect it, because
+// SELECT succeeds regardless of nullability. This is the July 2026 incident:
+// freeform correction rules (no before/after text) have null original_text/
+// corrected_text and bounced off a NOT NULL constraint that migration 20260607
+// should have dropped, stranding weeks of reviewer rules in the fallback.
 // PostgREST's OpenAPI (Swagger 2.0) spec lists every NOT-NULL-without-default
 // column of a table in that table's `required` array. Fetching it is fully
 // read-only, so we can detect a stale NOT NULL constraint without writing a probe
@@ -2654,7 +2651,7 @@ async function verifyCriticalSupabaseSchema() {
                 });
             }
         }
-        for (const [table, mustBeNullable] of Object.entries(NULLABLE_SUPABASE_COLUMNS)) {
+        for (const [table, mustBeNullable] of Object.entries(schema_drift_1.NULLABLE_COLUMNS)) {
             const required = await fetchRequiredColumns(table);
             if (!required)
                 continue; // spec unavailable — degrade to the runtime insert alert

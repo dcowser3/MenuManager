@@ -21,6 +21,7 @@ Catalog of design decisions and feature documentation for Menu Manager.
 | [Training Pipeline](training-pipeline.md) | Complete (v1) | End-to-end: data capture → rule aggregation → prompt injection → weekly optimization → cloud storage |
 | [Learning Pipeline v2](learning-pipeline-v2.md) | Design | Human-in-the-loop prompt evolution: no auto-injection, rich correction context, weekly LLM prompt rewrite |
 | [Automated Improvement Loop](automated-improvement-loop.md) | In progress | Daily gated cycle: new corrections → LLM proposal (prompt + rules) → eval against historical menus → human approval |
+| [Schema-Drift Gate](schema-drift-gate.md) | Implemented (warn) | Pre-deploy check comparing `supabase/schema.sql` against the live DB (PostgREST); flags unapplied migrations before they strand writes in the local fallback |
 | [User Error Reports](user-error-reports.md) | Complete | One-click "Report this problem" button that emails support a full-page screenshot + client form-state JSON |
 | [White-label Tenant Config](white-label-config.md) | Implemented | One config bundle (`config/`) for all business-specific values (branding, emails, allergen key, approval roles, template markers, seed rules/properties) so the app rebrands per business with no code edits |
 | [Production Support Auto-Triage](production-support-auto-triage.md) | Design | Future auto-reply flow for obvious AI false-positive blockers reported from production |

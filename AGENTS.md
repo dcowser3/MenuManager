@@ -108,6 +108,7 @@ Docker is the default local workflow: `./dev-up.sh` uses [docker-compose.dev.yml
 | Training pipeline (v1) | [docs/design-docs/training-pipeline.md](docs/design-docs/training-pipeline.md) |
 | Learning pipeline v2 (human-in-the-loop) | [docs/design-docs/learning-pipeline-v2.md](docs/design-docs/learning-pipeline-v2.md) |
 | Automated improvement loop (eval + daily proposal cycle) | [docs/design-docs/automated-improvement-loop.md](docs/design-docs/automated-improvement-loop.md) |
+| Schema-drift gate (pre-deploy repo↔live schema check) | [docs/design-docs/schema-drift-gate.md](docs/design-docs/schema-drift-gate.md) |
 | User error reports ("Report this problem") | [docs/design-docs/user-error-reports.md](docs/design-docs/user-error-reports.md) |
 
 ### SOP rules (the actual menu rules the AI checks against)

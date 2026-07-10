@@ -82,6 +82,8 @@ All variables are configured in `.env` at the project root. See `.env.example` f
 | `DASHBOARD_PUBLIC_URL` | Optional base URL override for improvement-cycle notification email links and proposal-related GitHub issue provenance. When unset, these links use `DASHBOARD_URL`, then fall back to `http://localhost:3005` for local development. |
 | `GITHUB_TOKEN` | GitHub personal access token with `issues:write` on `GITHUB_REPO`. When set, approving a proposal files each code recommendation as a GitHub issue; when unset, issue filing is skipped with a log line |
 | `GITHUB_REPO` | Repository for improvement-cycle issues (default: `dcowser3/MenuManager`) |
+| `SCHEMA_DRIFT_GATE` | Pre-deploy schema-drift gate mode (`scripts/check-schema-drift.js`): `warn` (default — report + `system_alerts` row, non-blocking) or `block` (fail the deploy on error-severity drift). Ships in `warn`; flip to `block` once the known pre-existing drift is triaged. See [docs/design-docs/schema-drift-gate.md](design-docs/schema-drift-gate.md). |
+| `SCHEMA_DRIFT_IGNORE_TABLES` | Comma-separated tables the schema-drift gate should skip (escape hatch). |
 
 ## ClickUp Integration
 

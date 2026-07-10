@@ -91,6 +91,18 @@ jobs:
           fi
 
           "${DOCKER[@]}" system prune -af
+
+          # Pre-deploy schema-drift gate. Build the new image, then run the gate in
+          # a one-off container BEFORE swapping the running stack — so that once it
+          # is set to block, a drift failure aborts here (set -e) with prod still
+          # serving the old version. It compares supabase/schema.sql against the live
+          # database and, on drift, writes a system_alert. Ships in warn mode
+          # (reports, exit 0); set SCHEMA_DRIFT_GATE=block in the host .env to enforce.
+          # See docs/design-docs/schema-drift-gate.md.
+          "${COMPOSE[@]}" build dashboard
+          echo "Running pre-deploy schema-drift gate..."
+          "${COMPOSE[@]}" run --rm --no-deps -T dashboard node /app/scripts/check-schema-drift.js
+
           "${COMPOSE[@]}" up -d --build --remove-orphans
           "${COMPOSE[@]}" ps
 
