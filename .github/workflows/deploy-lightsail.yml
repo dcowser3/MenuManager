@@ -103,7 +103,12 @@ jobs:
           echo "Running pre-deploy schema-drift gate..."
           "${COMPOSE[@]}" run --rm --no-deps -T dashboard node /app/scripts/check-schema-drift.js
 
-          "${COMPOSE[@]}" up -d --build --remove-orphans
+          # --force-recreate: `up --build` rebuilds images but Compose may leave a
+          # running container on its OLD image if it thinks nothing changed, so a
+          # deploy can report success while prod keeps serving the previous code
+          # (observed Jul 2026: a shipped improvement-cycle change never went live).
+          # Force a container swap onto the freshly built image every deploy.
+          "${COMPOSE[@]}" up -d --build --force-recreate --remove-orphans
           "${COMPOSE[@]}" ps
 
           if command -v curl >/dev/null 2>&1; then
