@@ -280,6 +280,42 @@ describe('prompt-proposal view', () => {
         expect(html).toContain('inferred from guidance');
     });
 
+    test('rules_only proposal (prompt unchanged) hides the side-by-side and shows a no-change note', () => {
+        const html = renderProposalView({
+            proposal: {
+                ...baseProposal,
+                disposition: 'rules_only',
+                current_prompt: 'IDENTICAL PROMPT TEXT',
+                proposed_prompt: 'IDENTICAL PROMPT TEXT',
+                final_prompt: null,
+            },
+        });
+        expect(html).toContain('No prompt change in this proposal');
+        expect(html).not.toContain('id="diffView"');
+        // the editable proposed textarea still exists so Approve With Edits works
+        expect(html).toContain('id="proposedPrompt"');
+        // but not the read-only current-prompt side-by-side panel
+        expect(html).not.toContain('id="currentPrompt"');
+    });
+
+    test('all-unavailable trigger cases collapse to a note instead of a wall of n/a rows', () => {
+        const html = renderProposalView({
+            proposal: {
+                ...baseProposal,
+                eval_summary: {
+                    ...baseProposal.eval_summary,
+                    triggers_unavailable: 2,
+                    triggers: [
+                        { case_id: 'production:manual-submission-1-x', baseline_composite: null, candidate_composite: null, delta: null, status: 'unavailable' },
+                        { case_id: 'production:manual-submission-2-y', baseline_composite: null, candidate_composite: null, delta: null, status: 'unavailable' },
+                    ],
+                },
+            },
+        });
+        expect(html).toContain('Trigger progression not measurable');
+        expect(html).not.toContain('production:manual-submission-1-x');
+    });
+
     test('history shows superseded status with pointer to replacing cycle', () => {
         const html = renderProposalView({
             history: [

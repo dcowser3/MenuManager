@@ -397,12 +397,17 @@
                             </div>
                         </div>
                         <% const trigs = Array.isArray(evalSummary.triggers) ? evalSummary.triggers : []; %>
-                        <% if (trigs.length) { %>
-                            <div class="small" style="margin: .4rem 0 .2rem">Trigger cases (submissions whose corrections motivated this proposal — a "passed" verdict requires at least one improved):</div>
+                        <% const trigScorable = trigs.filter((t) => t.status && t.status !== 'unavailable'); %>
+                        <% if (trigs.length && trigScorable.length === 0) { %>
+                            <div class="small" style="margin:.5rem 0; color:var(--muted);">
+                                Trigger progression not measurable — none of the <%= trigs.length %> motivating correction(s) had a replayable source menu to score against (freeform reviewer rules have no menu, so there is nothing to compare). The proposed rules are still safety-checked against historical menus below.
+                            </div>
+                        <% } else if (trigs.length) { %>
+                            <div class="small" style="margin: .4rem 0 .2rem">Trigger cases (submissions whose corrections motivated this proposal — a "passed" verdict requires at least one improved). Rows that couldn't be scored are hidden:</div>
                             <table>
                                 <thead><tr><th>Case / Submission</th><th>Baseline</th><th>Candidate</th><th>Delta</th><th>Status</th></tr></thead>
                                 <tbody>
-                                <% trigs.forEach((t) => { %>
+                                <% trigScorable.forEach((t) => { %>
                                     <tr>
                                         <td><code><%= t.case_id || t.submission_id %></code></td>
                                         <td><%= t.baseline_composite != null ? (t.baseline_composite * 100).toFixed(2) + '%' : 'n/a' %></td>
@@ -490,22 +495,38 @@
                 <% }) %>
             <% } %>
 
-            <h3 class="section-title">Prompt Changes</h3>
-            <div id="promptDiffSummary" class="diff-summary small">Computing changes…</div>
-            <div class="diff-view" id="diffView"></div>
+            <% const _currentFull = proposal.current_prompt || ''; %>
+            <% const _proposedFull = proposal.final_prompt || proposal.proposed_prompt || ''; %>
+            <% const promptChanged = _currentFull.trim() !== _proposedFull.trim(); %>
+            <% if (promptChanged) { %>
+                <h3 class="section-title">Prompt Changes</h3>
+                <div id="promptDiffSummary" class="diff-summary small">Computing changes…</div>
+                <div class="diff-view" id="diffView"></div>
 
-            <h3 class="section-title">Full Text (current vs proposed)</h3>
-            <div class="small" style="margin-bottom:.5rem">The proposed side is editable — changes here update the diff above live and are used for "Approve With Edits".</div>
-            <div class="prompt-grid">
-                <div class="prompt-block">
-                    <h3>Current Prompt</h3>
-                    <textarea class="prompt-text" id="currentPrompt" readonly><%= proposal.current_prompt || '' %></textarea>
+                <h3 class="section-title">Full Text (current vs proposed)</h3>
+                <div class="small" style="margin-bottom:.5rem">The proposed side is editable — changes here update the diff above live and are used for "Approve With Edits".</div>
+                <div class="prompt-grid">
+                    <div class="prompt-block">
+                        <h3>Current Prompt</h3>
+                        <textarea class="prompt-text" id="currentPrompt" readonly><%= _currentFull %></textarea>
+                    </div>
+                    <div class="prompt-block">
+                        <h3>Proposed Prompt</h3>
+                        <textarea class="prompt-text" id="proposedPrompt"><%= _proposedFull %></textarea>
+                    </div>
                 </div>
-                <div class="prompt-block">
-                    <h3>Proposed Prompt</h3>
-                    <textarea class="prompt-text" id="proposedPrompt"><%= proposal.final_prompt || proposal.proposed_prompt || '' %></textarea>
+            <% } else { %>
+                <h3 class="section-title">Prompt</h3>
+                <div class="small" style="margin-bottom:.5rem; color:var(--muted);">
+                    No prompt change in this proposal — the fixes are deterministic replacement rules (above). The QA prompt is unchanged, so there is nothing to diff.
                 </div>
-            </div>
+                <details>
+                    <summary class="small" style="cursor:pointer;">View / edit the full prompt (unchanged)</summary>
+                    <div class="prompt-block" style="margin-top:.5rem">
+                        <textarea class="prompt-text" id="proposedPrompt"><%= _proposedFull %></textarea>
+                    </div>
+                </details>
+            <% } %>
 
             <% if (proposal.status === 'pending') { %>
                 <div class="card">
