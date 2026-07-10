@@ -256,14 +256,15 @@ describe('prompt-proposal view', () => {
                 disposition: 'prompt_change',
                 correction_routing: [
                     { correction_id: 'a1', lane: 'prompt', target: 'section 4', note: 'sharpened', replay_status: 'still_missed', original_text: 'veggies', corrected_text: 'vegetables' },
-                    { correction_id: 'b2', lane: 'dismissed', target: '', note: 'invalid', replay_status: 'not_verifiable', original_text: null, corrected_text: null },
+                    { correction_id: 'b2', lane: 'dismissed', target: '', note: 'invalid', replay_status: 'not_verifiable', original_text: null, corrected_text: null, guidance: 'LAURENT-PERRIER must always be hyphenated' },
                 ],
             },
         });
         expect(html).toContain('What happened to each correction');
         expect(html).toContain('section 4');
-        expect(html).toContain('freeform · b2');
-        // still_missed routed dismissed is a conflict row
+        // freeform correction shows the human's guidance, not a bare UUID
+        expect(html).toContain('LAURENT-PERRIER must always be hyphenated');
+        expect(html).not.toContain('freeform · b2');
         expect(html).toContain('guidance only');
     });
 

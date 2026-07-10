@@ -265,6 +265,8 @@
                                 <td class="small">
                                     <% if (r.original_text || r.corrected_text) { %>
                                         <code><%= (r.original_text || '∅') %></code> → <code><%= (r.corrected_text || '∅') %></code>
+                                    <% } else if (r.guidance) { %>
+                                        <span><%= r.guidance.length > 160 ? r.guidance.slice(0, 160) + '…' : r.guidance %></span>
                                     <% } else { %>
                                         <span style="color:var(--muted);">freeform · <%= r.correction_id %></span>
                                     <% } %>

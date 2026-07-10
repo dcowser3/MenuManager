@@ -826,6 +826,34 @@ describe('C3 validateCorrectionRouting', () => {
         const out = (0, improvement_cycle_core_1.validateCorrectionRouting)([{ correction_id: 'a', lane: 'replacement_rule', target: 'X->Y', note: '' }, { correction_id: 'b', lane: 'prompt', target: 's', note: '' }], { sourceCorrections: sources, survivingRules: [{ original_text: 'X', corrected_text: 'Y' }] });
         expect(out.routing.find((r) => r.correction_id === 'a').lane).toBe('replacement_rule');
     });
+    test('a rule NARROWER than the correction line is not falsely flagged as dropped', () => {
+        const out = (0, improvement_cycle_core_1.validateCorrectionRouting)([{ correction_id: 'a', lane: 'replacement_rule', target: 'CAST IRON CHICKEN -> CAST-IRON CHICKEN', note: '' }], {
+            sourceCorrections: [{ id: 'a', original_text: 'CAST IRON CHICKEN D,G', corrected_text: 'CAST-IRON CHICKEN D,G' }],
+            // the model synthesized a narrower rule than the full correction line
+            survivingRules: [{ original_text: 'CAST IRON CHICKEN', corrected_text: 'CAST-IRON CHICKEN' }],
+        });
+        expect(out.routing.find((r) => r.correction_id === 'a').lane).toBe('replacement_rule');
+        expect(out.warnings.some((w) => /did not survive validation/.test(w))).toBe(false);
+    });
+    test('routing carries the human guidance text for freeform corrections', () => {
+        const out = (0, improvement_cycle_core_1.validateCorrectionRouting)([{ correction_id: 'g', lane: 'prompt', target: 'sec', note: 'ok' }], { sourceCorrections: [{ id: 'g', original_text: null, corrected_text: null, rule: 'LAURENT-PERRIER is a proper noun and must be hyphenated.' }] });
+        expect(out.routing[0].guidance).toMatch(/LAURENT-PERRIER is a proper noun/);
+    });
+    test('a still_missed correction covered by a narrower synthesized rule does NOT trip unresolved', () => {
+        const out = (0, improvement_cycle_core_1.validateImprovementLlmOutput)({
+            proposed_prompt: 'UNCHANGED',
+            proposed_replacement_rules: [
+                { original_text: 'sweetyellow', corrected_text: 'sweet yellow', change_type: 'spelling', rule: 'typo' },
+            ],
+            correction_routing: [{ correction_id: 's1', lane: 'replacement_rule', target: 'sweetyellow -> sweet yellow', note: '' }],
+        }, {
+            currentPrompt: 'cur',
+            replayEvidence: [{ correction_id: 's1', original_text: 'Esquites sweetyellow corn', corrected_text: 'Esquites sweet yellow corn', status: 'still_missed' }],
+            sourceCorrections: [{ id: 's1', original_text: 'Esquites sweetyellow corn', corrected_text: 'Esquites sweet yellow corn' }],
+        });
+        expect(out.unresolved_still_missed).toBeFalsy();
+        expect(out.correction_routing?.find((r) => r.correction_id === 's1').lane).toBe('replacement_rule');
+    });
     test('unknown lane normalizes to unrouted with a warning', () => {
         const out = (0, improvement_cycle_core_1.validateCorrectionRouting)([{ correction_id: 'a', lane: 'banish', target: '', note: '' }, { correction_id: 'b', lane: 'prompt', target: '', note: '' }], { sourceCorrections: sources });
         expect(out.routing.find((r) => r.correction_id === 'a').lane).toBe('unrouted');

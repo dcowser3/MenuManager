@@ -356,6 +356,29 @@ function countMarkdownCodeFences(text) {
 function looksLikeNoOpPromptAnalysis(analysis) {
     return /already (?:covered|handled|addressed)|existing (?:rule|rules|prompt|guidance)|no (?:prompt )?change (?:is )?needed|should be handled by the prompt/i.test(analysis);
 }
+function normLoose(value) {
+    return `${value ?? ''}`.toLowerCase().replace(/\s+/g, ' ').trim();
+}
+/**
+ * Does a replacement rule cover this correction? A rule legitimately fixes a *narrower* span
+ * than the raw correction line (e.g. rule "CAST IRON CHICKEN"->"CAST-IRON CHICKEN" for a
+ * correction whose text is the whole "CAST IRON CHICKEN D,G" line). So coverage is: the rule's
+ * original_text appears within the correction's original_text — NOT an exact pair match, which
+ * would false-flag every narrowed rule as "dropped/unresolved".
+ */
+function ruleCoversCorrection(rule, correctionOriginal, correctionCorrected) {
+    const ro = normLoose(rule.original_text);
+    if (!ro)
+        return false;
+    const co = normLoose(correctionOriginal);
+    const cc = normLoose(correctionCorrected);
+    // Exact-pair match (original behavior) OR the rule's from-text sits inside the correction text.
+    if (co && ro === co && normLoose(rule.corrected_text) === cc)
+        return true;
+    if (co && co.includes(ro))
+        return true;
+    return false;
+}
 /**
  * C3: validate the per-correction routing table the improvement LLM emits.
  * The reviewer must see an outcome for EVERY source correction, not only the ones
@@ -380,11 +403,10 @@ function validateCorrectionRouting(rawRouting, opts = {}) {
     }
     const sourceById = new Map();
     for (const c of sources)
-        sourceById.set(String(c.id), { original_text: c.original_text ?? undefined, corrected_text: c.corrected_text ?? undefined });
+        sourceById.set(String(c.id), { original_text: c.original_text ?? undefined, corrected_text: c.corrected_text ?? undefined, rule: c.rule ?? undefined });
     // Only cross-check replacement_rule lanes when the caller supplied the surviving rule set
     // (an empty array is a valid "no rules survived" assertion; undefined means "skip the check").
     const crossCheckRules = Array.isArray(opts.survivingRules);
-    const survivingPairs = new Set((opts.survivingRules || []).map((r) => `${asText(r.original_text, 240)}→${asText(r.corrected_text, 240)}`));
     // Parse model-provided routing entries, keyed by correction_id (first wins; dupes warn).
     const byId = new Map();
     for (const value of Array.isArray(rawRouting) ? rawRouting : []) {
@@ -412,6 +434,7 @@ function validateCorrectionRouting(rawRouting, opts = {}) {
             replay_status: replayById.get(cid),
             original_text: src ? (src.original_text ?? null) : undefined,
             corrected_text: src ? (src.corrected_text ?? null) : undefined,
+            guidance: src ? (src.rule ?? null) : undefined,
         });
     }
     // Completeness: every source correction must appear exactly once. Missing -> synthesize unrouted.
@@ -427,6 +450,7 @@ function validateCorrectionRouting(rawRouting, opts = {}) {
                 replay_status: replayById.get(cid),
                 original_text: c.original_text ?? null,
                 corrected_text: c.corrected_text ?? null,
+                guidance: c.rule ?? null,
             });
         }
     }
@@ -440,13 +464,18 @@ function validateCorrectionRouting(rawRouting, opts = {}) {
         if (entry.lane === 'already_correct' && replay && replay !== 'now_correct') {
             warnings.push(`correction ${entry.correction_id} routed "already_correct" but replay status is "${replay}" (not now_correct)`);
         }
-        if (entry.lane === 'replacement_rule') {
+        if (entry.lane === 'replacement_rule' && crossCheckRules) {
             const src = sourceById.get(entry.correction_id);
-            const pair = src ? `${asText(src.original_text, 240)}→${asText(src.corrected_text, 240)}` : '';
-            if (crossCheckRules && src && src.original_text && src.corrected_text && !survivingPairs.has(pair)) {
-                warnings.push(`correction ${entry.correction_id} routed to a replacement_rule that did not survive validation (likely dropped); recorded as unrouted`);
-                entry.lane = 'unrouted';
-                entry.note = entry.note ? `${entry.note} (rule dropped in validation)` : 'routed rule dropped in validation';
+            // Only cross-check corrections that carry an exact text pair; freeform corrections
+            // (no original/corrected of their own) can be routed to a synthesized rule whose text
+            // we can't line up, so we trust the model's routing there.
+            if (src && src.original_text && src.corrected_text) {
+                const covered = (opts.survivingRules || []).some((r) => ruleCoversCorrection(r, src.original_text, src.corrected_text));
+                if (!covered) {
+                    warnings.push(`correction ${entry.correction_id} routed to a replacement_rule that did not survive validation (likely dropped); recorded as unrouted`);
+                    entry.lane = 'unrouted';
+                    entry.note = entry.note ? `${entry.note} (rule dropped in validation)` : 'routed rule dropped in validation';
+                }
             }
         }
     }
@@ -668,7 +697,9 @@ function validateImprovementLlmOutput(raw, opts = {}) {
         const referenced = stillMissed.filter((e) => {
             const o = asText(e.original_text, 240);
             const c = asText(e.corrected_text, 240);
-            const ruleHits = rules.some((r) => r.original_text === o && r.corrected_text === c);
+            // A rule covers this correction if its (narrower) from-text sits inside the correction
+            // line — not only on an exact pair match, which would false-flag every narrowed rule.
+            const ruleHits = rules.some((r) => ruleCoversCorrection(r, o, c));
             if (ruleHits)
                 return true;
             const hay = (recommendations.map((r) => `${r.title} ${r.description}`).join(' ') + ' ' + analysis).toLowerCase();
