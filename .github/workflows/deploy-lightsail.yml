@@ -101,7 +101,13 @@ jobs:
           # See docs/design-docs/schema-drift-gate.md.
           "${COMPOSE[@]}" build dashboard
           echo "Running pre-deploy schema-drift gate..."
-          "${COMPOSE[@]}" run --rm --no-deps -T dashboard node /app/scripts/check-schema-drift.js
+          # </dev/null is load-bearing: this whole script is fed to `bash -se` over
+          # ssh stdin (the heredoc), and `docker compose run` forwards the parent's
+          # stdin into the container — which DRAINS the rest of the heredoc (the
+          # `up`, health check, and cron steps below). Without this redirect the
+          # gate silently eats the deploy: images rebuild but containers never swap,
+          # so every deploy since the gate landed (1a15310) shipped nothing live.
+          "${COMPOSE[@]}" run --rm --no-deps -T dashboard node /app/scripts/check-schema-drift.js </dev/null
 
           # --force-recreate: `up --build` rebuilds images but Compose may leave a
           # running container on its OLD image if it thinks nothing changed, so a
