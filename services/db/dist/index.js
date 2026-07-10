@@ -41,6 +41,7 @@ const path = __importStar(require("path"));
 const dotenv = require("dotenv");
 const supabase_client_1 = require("@menumanager/supabase-client");
 const submission_updates_1 = require("./lib/submission-updates");
+const schema_drift_1 = require("./lib/schema-drift");
 const internal_auth_1 = require("@menumanager/internal-auth");
 const tenant_config_1 = require("@menumanager/tenant-config");
 dotenv.config({ path: path.join(__dirname, '..', '..', '..', '.env') });
@@ -2298,6 +2299,23 @@ app.post('/correction-rules', async (req, res) => {
             }
             catch (error) {
                 console.error('Supabase correction rule insert failed, falling back local:', error.message);
+                // The rule is kept in the local JSON fallback, which the improvement
+                // cycle cannot see (it reads Supabase directly). This is silent data
+                // loss from the cycle's perspective, so raise a visible alert rather
+                // than only logging — a stale NOT NULL / missing column / RLS change
+                // otherwise strands reviewer rules for weeks (see the July 2026
+                // freeform-rule incident).
+                (0, supabase_client_1.logAlert)({
+                    alert_type: 'correction_rule_mirror_failed',
+                    severity: 'error',
+                    service: 'db',
+                    message: `Supabase correction rule insert failed for ${storageRecord.submission_id}/${storageRecord.correction_id}; kept only in the local JSON fallback, which the improvement cycle cannot see.`,
+                    details: {
+                        submission_id: storageRecord.submission_id,
+                        correction_id: storageRecord.correction_id,
+                        error: error.message,
+                    },
+                });
             }
         }
         const localRecord = await createLocalCorrectionRule(storageRecord);
@@ -2579,6 +2597,44 @@ const CRITICAL_SUPABASE_SCHEMA = {
     basic_ai_check_audits: ['menu_content_raw', 'submission_id'],
     prompt_proposals: ['proposed_rules', 'eval_status', 'accepted_rules', 'source', 'llm_warnings', 'replay_evidence', 'unresolved_still_missed', 'coverage_claims', 'prompt_length', 'superseded_by_cycle_id', 'superseded_from_cycle_id', 'supersede_carried_correction_count', 'supersede_new_correction_count'],
 };
+// Columns that MUST be nullable. A stale NOT NULL constraint here silently routes
+// writes to the local JSON fallback exactly like a missing column would — but the
+// `select` probe above cannot detect it, because SELECT succeeds regardless of
+// nullability. This is the July 2026 incident: freeform correction rules (no
+// before/after text) have null original_text/corrected_text and bounced off a
+// NOT NULL constraint that migration 20260607 should have dropped, stranding weeks
+// of reviewer rules in the fallback where the improvement cycle never saw them.
+const NULLABLE_SUPABASE_COLUMNS = {
+    correction_rules: ['original_text', 'corrected_text'],
+};
+// PostgREST's OpenAPI (Swagger 2.0) spec lists every NOT-NULL-without-default
+// column of a table in that table's `required` array. Fetching it is fully
+// read-only, so we can detect a stale NOT NULL constraint without writing a probe
+// row. Returns null (skip, no false alarm) if the spec is unavailable or shaped
+// unexpectedly.
+async function fetchRequiredColumns(table) {
+    const url = process.env.SUPABASE_URL;
+    const key = process.env.SUPABASE_SERVICE_ROLE_KEY
+        || process.env.SUPABASE_SERVICE_KEY
+        || process.env.SUPABASE_ANON_KEY;
+    if (!url || !key)
+        return null;
+    try {
+        const resp = await fetch(`${url.replace(/\/$/, '')}/rest/v1/`, {
+            headers: { apikey: key, Authorization: `Bearer ${key}` },
+        });
+        if (!resp.ok)
+            return null;
+        const spec = await resp.json();
+        const def = spec?.definitions?.[table] || spec?.components?.schemas?.[table];
+        if (!def || !Array.isArray(def.required))
+            return null;
+        return def.required.filter((c) => typeof c === 'string');
+    }
+    catch {
+        return null;
+    }
+}
 async function verifyCriticalSupabaseSchema() {
     try {
         if (!(0, supabase_client_1.isSupabaseConfigured)())
@@ -2595,6 +2651,23 @@ async function verifyCriticalSupabaseSchema() {
                     service: 'db',
                     message,
                     details: { table, expectedColumns: columns, error: error.message },
+                });
+            }
+        }
+        for (const [table, mustBeNullable] of Object.entries(NULLABLE_SUPABASE_COLUMNS)) {
+            const required = await fetchRequiredColumns(table);
+            if (!required)
+                continue; // spec unavailable — degrade to the runtime insert alert
+            const drifted = (0, schema_drift_1.detectNotNullDrift)(required, mustBeNullable);
+            if (drifted.length > 0) {
+                const message = `Supabase schema drift on ${table}: column(s) ${drifted.join(', ')} still carry a NOT NULL constraint that should have been dropped. Freeform correction rules (no before/after text) fail to insert and fall to local JSON, invisible to the improvement cycle. Apply supabase/migrations/20260710_drop_correction_rule_text_not_null.sql.`;
+                console.error(`SCHEMA DRIFT: ${message}`);
+                (0, supabase_client_1.logAlert)({
+                    alert_type: 'supabase_schema_drift',
+                    severity: 'error',
+                    service: 'db',
+                    message,
+                    details: { table, nonNullableColumns: drifted },
                 });
             }
         }
