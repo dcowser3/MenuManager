@@ -143,23 +143,49 @@ async function postImprovementCompletion(messages) {
     const isR = /o[0-9]|reasoning/i.test(model);
     const payload = { model, messages, response_format: { type: 'json_object' } };
     if (!isR) { payload.max_tokens = 16000; payload.temperature = 0.2; } else { payload.max_completion_tokens = Number(process.env.IMPROVE_MAX_COMPLETION_TOKENS || 32000); }
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
-        body: JSON.stringify(payload),
-    });
-    if (!response.ok) {
-        throw new Error(`OpenAI API error ${response.status}: ${(await response.text()).slice(0, 500)}`);
+
+    // Honor 429 rate-limit back-off instead of aborting the whole cycle. This matters
+    // especially with C1's guard-retry, which can fire a second large o3 call moments
+    // after the first — on a low per-minute token cap (o3 default TPM is 30k) the second
+    // call trips the limit. OpenAI tells us how long to wait ("try again in Xs"); we honor
+    // that (or Retry-After) and retry the same request. Capped so a stuck limit still fails.
+    const maxRateLimitRetries = Number(process.env.IMPROVE_RATE_LIMIT_RETRIES || 6);
+    for (let rlAttempt = 0; ; rlAttempt++) {
+        const response = await fetch('https://api.openai.com/v1/chat/completions', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+            body: JSON.stringify(payload),
+        });
+        if (response.status === 429 && rlAttempt < maxRateLimitRetries) {
+            const bodyText = await response.text();
+            let waitMs = 0;
+            const retryAfter = response.headers.get('retry-after');
+            if (retryAfter && Number.isFinite(Number(retryAfter))) {
+                waitMs = Number(retryAfter) * 1000;
+            }
+            if (!waitMs) {
+                const m = bodyText.match(/try again in ([\d.]+)\s*(ms|s)?/i);
+                if (m) waitMs = Math.ceil(parseFloat(m[1]) * (m[2] === 'ms' ? 1 : 1000));
+            }
+            // Pad by 1s to clear the window; floor 2s, cap 90s.
+            waitMs = Math.min(Math.max((waitMs || 15000) + 1000, 2000), 90000);
+            console.warn(`OpenAI 429 rate limit (attempt ${rlAttempt + 1}/${maxRateLimitRetries}); waiting ${Math.round(waitMs / 1000)}s then retrying. ${bodyText.slice(0, 160)}`);
+            await new Promise((r) => setTimeout(r, waitMs));
+            continue;
+        }
+        if (!response.ok) {
+            throw new Error(`OpenAI API error ${response.status}: ${(await response.text()).slice(0, 500)}`);
+        }
+        const data = await response.json();
+        if (data?.choices?.[0]?.finish_reason === 'length') {
+            throw new Error('LLM output truncated — raise IMPROVE_MAX_COMPLETION_TOKENS (reasoning models charge hidden tokens against the budget)');
+        }
+        return {
+            content: data.choices?.[0]?.message?.content || '',
+            model: data.model,
+            usage: data.usage,
+        };
     }
-    const data = await response.json();
-    if (data?.choices?.[0]?.finish_reason === 'length') {
-        throw new Error('LLM output truncated — raise IMPROVE_MAX_COMPLETION_TOKENS (reasoning models charge hidden tokens against the budget)');
-    }
-    return {
-        content: data.choices?.[0]?.message?.content || '',
-        model: data.model,
-        usage: data.usage,
-    };
 }
 
 function runEvalHarness(args) {
