@@ -135,6 +135,42 @@ describe('buildCorrectionRuleRecord', () => {
         }, catalog)).toThrow('reviewer_name is required');
     });
 
+    test('C4b: captures an example pair for a freeform rule (replay ground truth)', () => {
+        const record = buildCorrectionRuleRecord({
+            rule: 'We always accent jalapeño.',
+            is_location_specific: false,
+            reviewer_name: 'Isabella',
+            example_original: 'jalapeno',
+            example_corrected: 'jalapeño',
+        }, catalog);
+
+        expect(record.original_text).toBeNull();
+        expect(record.example_original).toBe('jalapeno');
+        expect(record.example_corrected).toBe('jalapeño');
+    });
+
+    test('C4b: an exact rule keeps its own before/after and leaves example columns null', () => {
+        const record = buildCorrectionRuleRecord({
+            ...basePayload,
+            is_location_specific: false,
+            location: GLOBAL_CORRECTION_RULE_LOCATION,
+            example_original: 'ignored',
+            example_corrected: 'ignored-too',
+        }, catalog);
+
+        expect(record.original_text).toBe('Jalapeno tartare');
+        expect(record.example_original).toBeNull();
+        expect(record.example_corrected).toBeNull();
+    });
+
+    test('C4b: example fields must be provided together', () => {
+        expect(() => buildCorrectionRuleRecord({
+            rule: 'Freeform.',
+            reviewer_name: 'Isabella',
+            example_original: 'only original',
+        }, catalog)).toThrow('example_original and example_corrected must be provided together');
+    });
+
     test('does not require a reviewer name for system-generated rules', () => {
         const { reviewer_name, ...withoutReviewer } = basePayload;
         const record = buildCorrectionRuleRecord({

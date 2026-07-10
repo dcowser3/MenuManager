@@ -94,6 +94,11 @@ type CorrectionRuleRecord = {
     submission_ids: string[] | null;
     prompt_cycle_id?: string | null;
     consumed_at?: string | null;
+    // C4b: verification ground truth for freeform rules.
+    example_original?: string | null;
+    example_corrected?: string | null;
+    // C4a: synthesized from freeform guidance by the improvement LLM.
+    inferred_from_guidance?: boolean;
     created_at?: string;
     updated_at?: string;
 };
@@ -1031,6 +1036,9 @@ function buildCorrectionRuleStorageRecord(record: any): CorrectionRuleRecord | n
         submission_ids: Array.isArray(record.submission_ids) ? record.submission_ids : null,
         prompt_cycle_id: record.prompt_cycle_id || null,
         consumed_at: record.consumed_at || null,
+        example_original: record.example_original || null,
+        example_corrected: record.example_corrected || null,
+        inferred_from_guidance: record.inferred_from_guidance === true,
     };
 }
 
@@ -2524,11 +2532,26 @@ app.post('/correction-rules', async (req, res) => {
         if (isSupabaseConfigured()) {
             try {
                 const supabase = getSupabaseClient();
-                const { data, error } = await supabase
+                let insertRecord: Record<string, unknown> = storageRecord as Record<string, unknown>;
+                let { data, error } = await supabase
                     .from(CORRECTION_RULES_TABLE)
-                    .insert(storageRecord)
+                    .insert(insertRecord)
                     .select()
                     .single();
+
+                // Degrade gracefully if the C4a/C4b columns are not yet migrated: strip them
+                // and retry so the rule still lands in Supabase (where the cycle can see it)
+                // rather than being stranded in the local JSON fallback.
+                if (error && /(example_original|example_corrected|inferred_from_guidance)/i.test(error.message || '')) {
+                    console.warn(`correction_rules example/inferred columns unavailable; storing without. Apply supabase/migrations/20260711_add_correction_rule_examples.sql. (${error.message})`);
+                    const { example_original: _eo, example_corrected: _ec, inferred_from_guidance: _ig, ...fallback } = insertRecord;
+                    insertRecord = fallback;
+                    ({ data, error } = await supabase
+                        .from(CORRECTION_RULES_TABLE)
+                        .insert(insertRecord)
+                        .select()
+                        .single());
+                }
 
                 if (error) {
                     throw new Error(error.message);
@@ -2837,12 +2860,12 @@ app.put('/prompt-proposals/:id', async (req, res) => {
 // missing column here means a migration was not applied — surface it loudly
 // instead of losing reviewer data. Update when a migration adds load-bearing columns.
 const CRITICAL_SUPABASE_SCHEMA: Record<string, string[]> = {
-    correction_rules: ['applies_to_menu_type', 'prompt_cycle_id', 'consumed_at', 'submission_ids'],
+    correction_rules: ['applies_to_menu_type', 'prompt_cycle_id', 'consumed_at', 'submission_ids', 'example_original', 'example_corrected', 'inferred_from_guidance'],
     submissions: ['form_attempt_id', 'approved_menu_content'],
     draft_sessions: ['token', 'base_submission_id', 'form_state', 'status', 'submitted_submission_id'],
     form_attempt_logs: ['draft_session_id'],
     basic_ai_check_audits: ['menu_content_raw', 'submission_id'],
-    prompt_proposals: ['proposed_rules', 'eval_status', 'accepted_rules', 'source', 'llm_warnings', 'replay_evidence', 'unresolved_still_missed', 'coverage_claims', 'prompt_length', 'superseded_by_cycle_id', 'superseded_from_cycle_id', 'supersede_carried_correction_count', 'supersede_new_correction_count'],
+    prompt_proposals: ['proposed_rules', 'eval_status', 'accepted_rules', 'source', 'llm_warnings', 'replay_evidence', 'unresolved_still_missed', 'coverage_claims', 'prompt_length', 'superseded_by_cycle_id', 'superseded_from_cycle_id', 'supersede_carried_correction_count', 'supersede_new_correction_count', 'disposition', 'correction_routing'],
 };
 
 // Columns that MUST be nullable (shared NULLABLE_COLUMNS). A stale NOT NULL

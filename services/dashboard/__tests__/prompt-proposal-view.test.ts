@@ -222,6 +222,63 @@ describe('prompt-proposal view', () => {
         expect(html).toContain('4 carried + 2 new');
     });
 
+    test('C2: renders the disposition headline in plain language', () => {
+        const html = renderProposalView({
+            proposal: { ...baseProposal, disposition: 'rules_and_prompt' },
+        });
+        expect(html).toContain('Disposition');
+        expect(html).toContain('replacement rule(s) + a prompt change');
+    });
+
+    test('C2: guard-discarded disposition collapses/labels the analysis as DISCARDED', () => {
+        const html = renderProposalView({
+            proposal: { ...baseProposal, disposition: 'no_change_guard_discarded' },
+        });
+        expect(html).toContain('DISCARDED');
+        expect(html).toContain('describes a DISCARDED rewrite');
+        // the analysis text lives inside a collapsible details block, not shown raw as a top-level box
+        expect(html).toContain('Show the discarded analysis');
+    });
+
+    test('C2: renders computed prompt length before -> after', () => {
+        const html = renderProposalView({
+            proposal: { ...baseProposal, current_prompt: 'x'.repeat(100), proposed_prompt: 'y'.repeat(120) },
+        });
+        expect(html).toContain('Prompt length (computed)');
+        expect(html).toContain('100');
+        expect(html).toContain('120');
+    });
+
+    test('C3: renders the per-correction routing table at the top', () => {
+        const html = renderProposalView({
+            proposal: {
+                ...baseProposal,
+                disposition: 'prompt_change',
+                correction_routing: [
+                    { correction_id: 'a1', lane: 'prompt', target: 'section 4', note: 'sharpened', replay_status: 'still_missed', original_text: 'veggies', corrected_text: 'vegetables' },
+                    { correction_id: 'b2', lane: 'dismissed', target: '', note: 'invalid', replay_status: 'not_verifiable', original_text: null, corrected_text: null },
+                ],
+            },
+        });
+        expect(html).toContain('What happened to each correction');
+        expect(html).toContain('section 4');
+        expect(html).toContain('freeform · b2');
+        // still_missed routed dismissed is a conflict row
+        expect(html).toContain('guidance only');
+    });
+
+    test('C4a: renders the inferred-from-guidance badge on synthesized rules', () => {
+        const html = renderProposalView({
+            proposal: {
+                ...baseProposal,
+                proposed_rules: [
+                    { original_text: 'jalapeno', corrected_text: 'jalapeño', change_type: 'diacritic', rule: 'accent', applies_to_menu_type: 'all', is_location_specific: false, location: null, other_applicable_locations: [], inferred_from_guidance: true, evidence_submission_count: 2 },
+                ],
+            },
+        });
+        expect(html).toContain('inferred from guidance');
+    });
+
     test('history shows superseded status with pointer to replacing cycle', () => {
         const html = renderProposalView({
             history: [

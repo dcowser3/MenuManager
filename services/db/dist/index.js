@@ -939,6 +939,9 @@ function buildCorrectionRuleStorageRecord(record) {
         submission_ids: Array.isArray(record.submission_ids) ? record.submission_ids : null,
         prompt_cycle_id: record.prompt_cycle_id || null,
         consumed_at: record.consumed_at || null,
+        example_original: record.example_original || null,
+        example_corrected: record.example_corrected || null,
+        inferred_from_guidance: record.inferred_from_guidance === true,
     };
 }
 async function readLocalCorrectionRules() {
@@ -2287,11 +2290,25 @@ app.post('/correction-rules', async (req, res) => {
         if ((0, supabase_client_1.isSupabaseConfigured)()) {
             try {
                 const supabase = (0, supabase_client_1.getSupabaseClient)();
-                const { data, error } = await supabase
+                let insertRecord = storageRecord;
+                let { data, error } = await supabase
                     .from(CORRECTION_RULES_TABLE)
-                    .insert(storageRecord)
+                    .insert(insertRecord)
                     .select()
                     .single();
+                // Degrade gracefully if the C4a/C4b columns are not yet migrated: strip them
+                // and retry so the rule still lands in Supabase (where the cycle can see it)
+                // rather than being stranded in the local JSON fallback.
+                if (error && /(example_original|example_corrected|inferred_from_guidance)/i.test(error.message || '')) {
+                    console.warn(`correction_rules example/inferred columns unavailable; storing without. Apply supabase/migrations/20260711_add_correction_rule_examples.sql. (${error.message})`);
+                    const { example_original: _eo, example_corrected: _ec, inferred_from_guidance: _ig, ...fallback } = insertRecord;
+                    insertRecord = fallback;
+                    ({ data, error } = await supabase
+                        .from(CORRECTION_RULES_TABLE)
+                        .insert(insertRecord)
+                        .select()
+                        .single());
+                }
                 if (error) {
                     throw new Error(error.message);
                 }
@@ -2590,12 +2607,12 @@ app.put('/prompt-proposals/:id', async (req, res) => {
 // missing column here means a migration was not applied — surface it loudly
 // instead of losing reviewer data. Update when a migration adds load-bearing columns.
 const CRITICAL_SUPABASE_SCHEMA = {
-    correction_rules: ['applies_to_menu_type', 'prompt_cycle_id', 'consumed_at', 'submission_ids'],
+    correction_rules: ['applies_to_menu_type', 'prompt_cycle_id', 'consumed_at', 'submission_ids', 'example_original', 'example_corrected', 'inferred_from_guidance'],
     submissions: ['form_attempt_id', 'approved_menu_content'],
     draft_sessions: ['token', 'base_submission_id', 'form_state', 'status', 'submitted_submission_id'],
     form_attempt_logs: ['draft_session_id'],
     basic_ai_check_audits: ['menu_content_raw', 'submission_id'],
-    prompt_proposals: ['proposed_rules', 'eval_status', 'accepted_rules', 'source', 'llm_warnings', 'replay_evidence', 'unresolved_still_missed', 'coverage_claims', 'prompt_length', 'superseded_by_cycle_id', 'superseded_from_cycle_id', 'supersede_carried_correction_count', 'supersede_new_correction_count'],
+    prompt_proposals: ['proposed_rules', 'eval_status', 'accepted_rules', 'source', 'llm_warnings', 'replay_evidence', 'unresolved_still_missed', 'coverage_claims', 'prompt_length', 'superseded_by_cycle_id', 'superseded_from_cycle_id', 'supersede_carried_correction_count', 'supersede_new_correction_count', 'disposition', 'correction_routing'],
 };
 // Columns that MUST be nullable (shared NULLABLE_COLUMNS). A stale NOT NULL
 // constraint here silently routes writes to the local JSON fallback exactly like a

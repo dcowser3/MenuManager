@@ -550,6 +550,17 @@
                     <input id="manual-rule-reviewer" placeholder="Your name" required>
                 </div>
             </div>
+            <div class="form-grid two" style="margin-top:.75rem;">
+                <div class="form-field">
+                    <label for="manual-rule-example-original">Example — text as it appeared</label>
+                    <input id="manual-rule-example-original" placeholder="Optional, for freeform rules">
+                </div>
+                <div class="form-field">
+                    <label for="manual-rule-example-corrected">Example — corrected text</label>
+                    <input id="manual-rule-example-corrected" placeholder="Optional, for freeform rules">
+                </div>
+            </div>
+            <div class="small" style="color:var(--muted); margin-top:.25rem;">An example lets the system verify this rule actually gets applied. Skip it if you filled in the exact Original/Corrected phrases above.</div>
             <div class="check-row" style="margin-top:.75rem;">
                 <input type="checkbox" id="manual-rule-location-specific">
                 <label for="manual-rule-location-specific">Location-specific rule?</label>
@@ -691,7 +702,13 @@
                 <tbody>
                 <% pendingRules.forEach((rule) => { %>
                     <tr id="rule-row-<%= rule.id %>">
-                        <td><strong><%= rule.original_text %></strong></td>
+                        <td>
+                            <strong><%= rule.original_text %></strong>
+                            <% const isVerifiable = !!((rule.original_text && rule.corrected_text) || (rule.example_original && rule.example_corrected)); %>
+                            <% if (!rule.original_text && !rule.corrected_text) { %>
+                                <div class="small"><span class="badge <%= isVerifiable ? 'accepted' : 'pending' %>" title="<%= isVerifiable ? 'Has an example the system can replay-verify.' : 'Freeform guidance with no example — cannot be replay-verified.' %>"><%= isVerifiable ? 'verifiable' : 'guidance only' %></span></div>
+                            <% } %>
+                        </td>
                         <td><strong><%= rule.corrected_text %></strong></td>
                         <td><%= rule.rule || '' %></td>
                         <td><%= menuScopeLabel(rule.applies_to_menu_type) %></td>
@@ -1081,6 +1098,8 @@
                 ? Array.from(sharedSelect.selectedOptions).map((option) => option.value)
                 : [];
             const reviewerName = (document.getElementById('manual-rule-reviewer')?.value || '').trim();
+            const exampleOriginal = (document.getElementById('manual-rule-example-original')?.value || '').trim();
+            const exampleCorrected = (document.getElementById('manual-rule-example-corrected')?.value || '').trim();
 
             if (!rule) {
                 setManualRuleStatus('Rule is required.', 'err');
@@ -1092,6 +1111,10 @@
             }
             if ((originalText && !correctedText) || (!originalText && correctedText)) {
                 setManualRuleStatus('Original and corrected phrases must be provided together.', 'err');
+                return;
+            }
+            if ((exampleOriginal && !exampleCorrected) || (!exampleOriginal && exampleCorrected)) {
+                setManualRuleStatus('Example fields must be provided together.', 'err');
                 return;
             }
             if (isLocationSpecific && !location) {
@@ -1117,6 +1140,8 @@
                         other_applicable_locations: otherLocations,
                         reviewer_name: reviewerName,
                         source: 'human',
+                        example_original: exampleOriginal || null,
+                        example_corrected: exampleCorrected || null,
                     }),
                 });
                 const result = await response.json().catch(() => ({}));

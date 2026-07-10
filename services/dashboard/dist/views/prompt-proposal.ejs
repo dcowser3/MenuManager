@@ -194,7 +194,7 @@
                     </div>
                     <div class="meta-item">
                         <div class="meta-label">Source</div>
-                        <div class="meta-value"><%= proposal.source === 'improvement_cycle' ? 'Improvement cycle' : 'Prompt rewrite' %></div>
+                        <div class="meta-value"><%= proposal.source === 'improvement_cycle' ? 'Improvement cycle' : (proposal.source === 'consolidation' ? 'Consolidation' : 'Prompt rewrite') %></div>
                     </div>
                     <% if (proposal.eval_status) { %>
                         <div class="meta-item">
@@ -220,9 +220,103 @@
                 </div>
             </div>
 
+            <%
+                // C2: plain-language headline for the code-computed disposition (what the
+                // proposal actually concluded). Kept in sync with describeDisposition() in core.
+                const dispo = proposal.disposition || null;
+                const ruleN = Array.isArray(proposal.proposed_rules) ? proposal.proposed_rules.length : 0;
+                const recN = Array.isArray(proposal.code_recommendations) ? proposal.code_recommendations.length : 0;
+                const dispoText = {
+                    prompt_change: `Prompt change proposed${recN ? ` + ${recN} code recommendation(s)` : ''}.`,
+                    rules_and_prompt: `${ruleN} replacement rule(s) + a prompt change.`,
+                    rules_only: `${ruleN} replacement rule(s), no prompt change.`,
+                    code_recs_only: `${recN} code recommendation(s), no prompt or rule change.`,
+                    no_change_model_declined: 'No change proposed — the model concluded nothing needed to change.',
+                    no_change_guard_discarded: "No change proposed — the model's rewrite was discarded by a formatting guard.",
+                }[dispo] || null;
+                const guardDiscarded = dispo === 'no_change_guard_discarded';
+            %>
+            <% if (dispoText) { %>
+                <div class="card" style="<%= guardDiscarded ? 'border-color:var(--danger); background:#fff5f5;' : 'border-color:var(--border);' %>">
+                    <div class="small" style="color:var(--muted); text-transform:uppercase; letter-spacing:.04em;">Disposition</div>
+                    <div style="font-size:1.05rem; font-weight:600; margin-top:.15rem;"><%= dispoText %></div>
+                </div>
+            <% } %>
+
+            <%
+                // C3: per-correction routing table — the conclusion, first thing the reviewer sees.
+                const routing = Array.isArray(proposal.correction_routing) ? proposal.correction_routing : [];
+            %>
+            <% if (routing.length) { %>
+                <h3 class="section-title">What happened to each correction</h3>
+                <div class="card">
+                    <table>
+                        <thead>
+                            <tr><th>Correction</th><th>Replay</th><th>Lane</th><th>Target</th><th>Note</th></tr>
+                        </thead>
+                        <tbody>
+                        <% routing.forEach((r) => { %>
+                            <%
+                                const laneClass = (r.lane === 'unrouted' || r.lane === 'dismissed') ? 'rejected'
+                                    : (r.lane === 'already_correct' ? 'no_effect' : 'approved');
+                                const stillMissedConflict = r.replay_status === 'still_missed' && (r.lane === 'dismissed' || r.lane === 'already_correct' || r.lane === 'unrouted');
+                            %>
+                            <tr<%= stillMissedConflict ? ' style="background:#fff5f5;"' : '' %>>
+                                <td class="small">
+                                    <% if (r.original_text || r.corrected_text) { %>
+                                        <code><%= (r.original_text || '∅') %></code> → <code><%= (r.corrected_text || '∅') %></code>
+                                    <% } else { %>
+                                        <span style="color:var(--muted);">freeform · <%= r.correction_id %></span>
+                                    <% } %>
+                                    <% const verifiable = r.replay_status === 'still_missed' || r.replay_status === 'now_correct'; %>
+                                    <% if (r.replay_status === 'not_verifiable') { %>
+                                        <span class="badge no_effect" style="margin-left:.3rem;" title="Freeform guidance with no example — cannot be replay-verified.">guidance only</span>
+                                    <% } else if (verifiable) { %>
+                                        <span class="badge approved" style="margin-left:.3rem;" title="Replay-verifiable against a concrete instance.">verifiable</span>
+                                    <% } %>
+                                </td>
+                                <td class="small"><%= r.replay_status || '—' %></td>
+                                <td><span class="badge <%= laneClass %>"><%= r.lane %></span></td>
+                                <td class="small"><%= r.target || '' %></td>
+                                <td class="small"><%= r.note || '' %></td>
+                            </tr>
+                        <% }) %>
+                        </tbody>
+                    </table>
+                    <div class="small" style="margin-top:.4rem; color:var(--muted);">One row per source correction. A still_missed correction routed dismissed/already_correct is highlighted — replay evidence outranks that routing.</div>
+                </div>
+            <% } %>
+
             <% if (proposal.llm_analysis) { %>
-                <h3 class="section-title">LLM Analysis</h3>
-                <div class="analysis-box"><%= proposal.llm_analysis %></div>
+                <% if (guardDiscarded) { %>
+                    <h3 class="section-title">LLM Analysis (describes a DISCARDED rewrite)</h3>
+                    <div class="card" style="border-color:var(--danger); background:#fff5f5;">
+                        <strong style="color:var(--danger)">This analysis describes a rewrite that was DISCARDED by a formatting guard and is NOT part of this proposal.</strong>
+                        <details style="margin-top:.5rem">
+                            <summary class="small" style="cursor:pointer;">Show the discarded analysis</summary>
+                            <div class="analysis-box" style="margin-top:.4rem"><%= proposal.llm_analysis %></div>
+                        </details>
+                    </div>
+                <% } else { %>
+                    <h3 class="section-title">LLM Analysis</h3>
+                    <div class="analysis-box"><%= proposal.llm_analysis %></div>
+                <% } %>
+            <% } %>
+
+            <%
+                // C2: computed prompt length before -> after (never model-claimed numbers).
+                const lenBefore = (proposal.current_prompt || '').length;
+                const lenAfter = (proposal.final_prompt || proposal.proposed_prompt || '').length;
+            %>
+            <% if (lenBefore || lenAfter) { %>
+                <div class="small" style="margin:-.3rem 0 .6rem; color:var(--muted);">
+                    Prompt length (computed): <strong><%= lenBefore.toLocaleString() %></strong> → <strong><%= lenAfter.toLocaleString() %></strong> chars
+                    <% if (lenBefore && lenAfter && lenAfter !== lenBefore) { %>
+                        (<%= lenAfter > lenBefore ? '+' : '' %><%= (lenAfter - lenBefore).toLocaleString() %>)
+                    <% } else if (lenBefore && lenAfter === lenBefore) { %>
+                        (unchanged)
+                    <% } %>
+                </div>
             <% } %>
 
             <% const covClaims = Array.isArray(proposal.coverage_claims) ? proposal.coverage_claims : []; %>
@@ -365,6 +459,9 @@
                                 <td class="small"><%= rule.rule %>
                                     <% if ((rule.evidence_submission_count || 0) <= 1) { %>
                                         <span class="badge no_effect" title="Recomputed from corrections; consider whether this generalizes beyond the single menu." style="margin-left:.4rem;">single-submission evidence</span>
+                                    <% } %>
+                                    <% if (rule.inferred_from_guidance) { %>
+                                        <span class="badge rejected" title="The model synthesized this exact swap from freeform guidance — verify the strings before trusting them." style="margin-left:.4rem;">inferred from guidance</span>
                                     <% } %>
                                 </td>
                             </tr>

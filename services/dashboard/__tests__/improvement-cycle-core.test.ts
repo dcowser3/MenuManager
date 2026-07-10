@@ -20,6 +20,15 @@ import {
     buildReplayUnavailableForCorrections,
     supersededProposalReviewBlock,
     buildImprovementLlmPayload,
+    computeDisposition,
+    describeDisposition,
+    shouldSkipCandidateEval,
+    isGuardDiscardReason,
+    validateCorrectionRouting,
+    buildGuardRetryMessage,
+    buildFencePreservationNote,
+    countFencedCodeDelimiters,
+    runImprovementProposalWithRetry,
 } from '../lib/improvement-cycle-core';
 
 describe('shouldRunCycle gating', () => {
@@ -848,5 +857,218 @@ describe('consolidation mode (F1 / Fix 8)', () => {
         expect(evalStatusFromSummary({ ...base, regressed: 1 }, { consolidation: true })).toBe('regressed');
         // normal (non-consol) still requires a trigger win for passed
         expect(evalStatusFromSummary(base)).toBe('no_effect');
+    });
+});
+
+// ── C1: retry-with-feedback when a prompt-shape guard discards the rewrite ──────────────
+describe('C1 guard-retry controller', () => {
+    const filler = 'Review each dish name for spelling, spacing, punctuation, and accent accuracy, and keep the section order intact. ';
+    const current = [
+        'You are a menu reviewer.',
+        filler.repeat(6),
+        '```json',
+        '{"format": "menu"}',
+        '```',
+        'End of prompt.',
+    ].join('\n');
+    // A >500-char rewrite that breaks fence structure (one lone ``` line).
+    const badRewrite = 'You are a menu reviewer. ' + filler.repeat(6) + '\n```json\nbroken';
+    // A valid rewrite that preserves both fences and differs from current.
+    const goodRewrite = current + '\nAlways verify diacritics on Spanish terms.';
+
+    function seqCaller(...contents: string[]) {
+        const state = { n: 0 };
+        const fn = async () => { const c = contents[state.n]; state.n++; return { content: c, model: 'test-model' }; };
+        return Object.assign(fn, { state });
+    }
+
+    test('countFencedCodeDelimiters + preservation note/message carry the count', () => {
+        expect(countFencedCodeDelimiters(current)).toBe(2);
+        expect(buildFencePreservationNote(2)).toMatch(/exactly 2 fenced/);
+        expect(buildGuardRetryMessage({ warning: 'x', fenceCount: 2 })).toMatch(/exactly 2 fenced/);
+        expect(isGuardDiscardReason('fence_guard')).toBe(true);
+        expect(isGuardDiscardReason('context_leak')).toBe(true);
+        expect(isGuardDiscardReason('sentinel')).toBe(false);
+        expect(isGuardDiscardReason('identical')).toBe(false);
+        expect(isGuardDiscardReason(undefined)).toBe(false);
+    });
+
+    test('broken fences then corrected rewrite -> prompt_change with attempt-1 warnings preserved', async () => {
+        const caller = seqCaller(
+            JSON.stringify({ proposed_prompt: badRewrite, analysis: 'first' }),
+            JSON.stringify({ proposed_prompt: goodRewrite, analysis: 'second' }),
+        );
+        const result = await runImprovementProposalWithRetry({
+            systemPrompt: 'sys', userPrompt: 'usr', currentPromptFenceCount: 2, maxRetries: 2,
+            validateOpts: { currentPrompt: current }, callLlm: caller,
+        });
+        expect(result.attempts.length).toBe(2);
+        expect(result.validated.promptUnchanged).toBe(false); // corrected rewrite accepted
+        expect(result.guardRetriesExhausted).toBe(false);
+        expect(result.discardedPrompts).toEqual([badRewrite]);
+        expect(result.validated.warnings.some((w) => /attempt 1\/3/.test(w) && /fence/.test(w))).toBe(true);
+    });
+
+    test('UNCHANGED sentinel -> no retry (deliberate no-change)', async () => {
+        const caller = seqCaller(JSON.stringify({ proposed_prompt: 'UNCHANGED', analysis: 'nothing' }));
+        const result = await runImprovementProposalWithRetry({
+            systemPrompt: 'sys', userPrompt: 'usr', currentPromptFenceCount: 2, maxRetries: 2,
+            validateOpts: { currentPrompt: current }, callLlm: caller,
+        });
+        expect(result.attempts.length).toBe(1);
+        expect(caller.state.n).toBe(1);
+        expect(result.validated.promptUnchanged).toBe(true);
+        expect(result.validated.promptUnchangedReason).toBe('sentinel');
+        expect(result.guardRetriesExhausted).toBe(false);
+    });
+
+    test('all attempts break fences -> retries exhausted, discarded prompts collected', async () => {
+        const caller = seqCaller(
+            JSON.stringify({ proposed_prompt: badRewrite, analysis: '1' }),
+            JSON.stringify({ proposed_prompt: badRewrite, analysis: '2' }),
+            JSON.stringify({ proposed_prompt: badRewrite, analysis: '3' }),
+        );
+        const result = await runImprovementProposalWithRetry({
+            systemPrompt: 'sys', userPrompt: 'usr', currentPromptFenceCount: 2, maxRetries: 2,
+            validateOpts: { currentPrompt: current }, callLlm: caller,
+        });
+        expect(result.attempts.length).toBe(3);
+        expect(result.guardRetriesExhausted).toBe(true);
+        expect(result.discardedPrompts.length).toBe(3);
+        expect(result.validated.promptUnchanged).toBe(true);
+        expect(result.validated.promptUnchangedReason).toBe('fence_guard');
+        expect(result.validated.warnings.some((w) => /attempt 3\/3/.test(w))).toBe(true);
+    });
+
+    test('validator sets promptUnchangedReason for each unchanged path', () => {
+        expect(validateImprovementLlmOutput({ proposed_prompt: 'UNCHANGED' }, { currentPrompt: current }).promptUnchangedReason).toBe('sentinel');
+        expect(validateImprovementLlmOutput({ proposed_prompt: current.trim() }, { currentPrompt: current }).promptUnchangedReason).toBe('identical');
+        expect(validateImprovementLlmOutput({ proposed_prompt: badRewrite }, { currentPrompt: current }).promptUnchangedReason).toBe('fence_guard');
+        const leak = `=== BEGIN CURRENT PROMPT ===\n${current}`;
+        expect(validateImprovementLlmOutput({ proposed_prompt: leak }, { currentPrompt: current }).promptUnchangedReason).toBe('context_leak');
+    });
+});
+
+// ── C2: honest, structured disposition ─────────────────────────────────────────────────
+describe('C2 disposition + eval-skip', () => {
+    test('computeDisposition matrix', () => {
+        expect(computeDisposition({ promptUnchanged: false, proposedRuleCount: 0, codeRecommendationCount: 0 })).toBe('prompt_change');
+        expect(computeDisposition({ promptUnchanged: false, proposedRuleCount: 2, codeRecommendationCount: 0 })).toBe('rules_and_prompt');
+        expect(computeDisposition({ promptUnchanged: true, promptUnchangedReason: 'sentinel', proposedRuleCount: 2, codeRecommendationCount: 0 })).toBe('rules_only');
+        expect(computeDisposition({ promptUnchanged: true, promptUnchangedReason: 'sentinel', proposedRuleCount: 0, codeRecommendationCount: 1 })).toBe('code_recs_only');
+        expect(computeDisposition({ promptUnchanged: true, promptUnchangedReason: 'sentinel', proposedRuleCount: 0, codeRecommendationCount: 0 })).toBe('no_change_model_declined');
+        // guard discard is the honest headline even when rules also survived
+        expect(computeDisposition({ promptUnchanged: true, promptUnchangedReason: 'fence_guard', guardRetriesExhausted: true, proposedRuleCount: 2, codeRecommendationCount: 0 })).toBe('no_change_guard_discarded');
+        // a guard reason that was NOT exhausted is not a guard discard
+        expect(computeDisposition({ promptUnchanged: true, promptUnchangedReason: 'fence_guard', guardRetriesExhausted: false, proposedRuleCount: 0, codeRecommendationCount: 0 })).toBe('no_change_model_declined');
+    });
+
+    test('describeDisposition guard headline mentions attempts', () => {
+        expect(describeDisposition('no_change_guard_discarded', { guardAttempts: 3 })).toMatch(/discarded by a formatting guard after 3 attempts/);
+        expect(describeDisposition('rules_and_prompt', { ruleCount: 2 })).toMatch(/2 replacement rules \+ a prompt change/);
+    });
+
+    test('shouldSkipCandidateEval only when unchanged AND no rules', () => {
+        expect(shouldSkipCandidateEval({ promptUnchanged: true, proposedRuleCount: 0 })).toBe(true);
+        expect(shouldSkipCandidateEval({ promptUnchanged: true, proposedRuleCount: 1 })).toBe(false);
+        expect(shouldSkipCandidateEval({ promptUnchanged: false, proposedRuleCount: 0 })).toBe(false);
+    });
+});
+
+// ── C3: per-correction routing table ───────────────────────────────────────────────────
+describe('C3 validateCorrectionRouting', () => {
+    const sources = [
+        { id: 'a', original_text: 'X', corrected_text: 'Y' },
+        { id: 'b', original_text: null, corrected_text: null },
+    ];
+
+    test('completeness: a missing source correction becomes a synthesized unrouted entry', () => {
+        const out = validateCorrectionRouting(
+            [{ correction_id: 'a', lane: 'prompt', target: 's1', note: 'ok' }],
+            { sourceCorrections: sources },
+        );
+        expect(out.routing.map((r) => r.correction_id).sort()).toEqual(['a', 'b']);
+        const b = out.routing.find((r) => r.correction_id === 'b')!;
+        expect(b.lane).toBe('unrouted');
+        expect(out.warnings.some((w) => /correction b was not routed/.test(w))).toBe(true);
+    });
+
+    test('still_missed cannot be dismissed/already_correct (trips unresolvedFromRouting)', () => {
+        const out = validateCorrectionRouting(
+            [{ correction_id: 'a', lane: 'dismissed', target: '', note: 'nah' }, { correction_id: 'b', lane: 'prompt', target: 's', note: '' }],
+            { sourceCorrections: sources, replayEvidence: [{ correction_id: 'a', status: 'still_missed' }] as any },
+        );
+        expect(out.unresolvedFromRouting).toBe(true);
+        expect(out.warnings.some((w) => /still_missed by replay but routed "dismissed"/.test(w))).toBe(true);
+    });
+
+    test('already_correct illegal unless replay is now_correct', () => {
+        const out = validateCorrectionRouting(
+            [{ correction_id: 'a', lane: 'already_correct', target: '', note: '' }, { correction_id: 'b', lane: 'prompt', target: 's', note: '' }],
+            { sourceCorrections: sources, replayEvidence: [{ correction_id: 'a', status: 'replay_unavailable' }] as any },
+        );
+        expect(out.warnings.some((w) => /routed "already_correct" but replay status is "replay_unavailable"/.test(w))).toBe(true);
+    });
+
+    test('replacement_rule pointing at a dropped rule downgrades to unrouted', () => {
+        const out = validateCorrectionRouting(
+            [{ correction_id: 'a', lane: 'replacement_rule', target: 'X->Y', note: '' }, { correction_id: 'b', lane: 'prompt', target: 's', note: '' }],
+            { sourceCorrections: sources, survivingRules: [] }, // rule dropped in validation
+        );
+        const a = out.routing.find((r) => r.correction_id === 'a')!;
+        expect(a.lane).toBe('unrouted');
+        expect(out.warnings.some((w) => /did not survive validation/.test(w))).toBe(true);
+    });
+
+    test('replacement_rule that matches a surviving rule is kept', () => {
+        const out = validateCorrectionRouting(
+            [{ correction_id: 'a', lane: 'replacement_rule', target: 'X->Y', note: '' }, { correction_id: 'b', lane: 'prompt', target: 's', note: '' }],
+            { sourceCorrections: sources, survivingRules: [{ original_text: 'X', corrected_text: 'Y' }] },
+        );
+        expect(out.routing.find((r) => r.correction_id === 'a')!.lane).toBe('replacement_rule');
+    });
+
+    test('unknown lane normalizes to unrouted with a warning', () => {
+        const out = validateCorrectionRouting(
+            [{ correction_id: 'a', lane: 'banish', target: '', note: '' }, { correction_id: 'b', lane: 'prompt', target: '', note: '' }],
+            { sourceCorrections: sources },
+        );
+        expect(out.routing.find((r) => r.correction_id === 'a')!.lane).toBe('unrouted');
+        expect(out.warnings.some((w) => /unknown lane "banish"/.test(w))).toBe(true);
+    });
+
+    test('validateImprovementLlmOutput surfaces correction_routing when source ids are present', () => {
+        const out = validateImprovementLlmOutput(
+            { proposed_prompt: 'UNCHANGED', analysis: 'x', correction_routing: [{ correction_id: 'a', lane: 'prompt', target: 's', note: '' }] },
+            { currentPrompt: 'cur', sourceCorrections: [{ id: 'a', original_text: 'X', corrected_text: 'Y' }] },
+        );
+        expect(out.correction_routing?.length).toBe(1);
+        expect(out.correction_routing?.[0].correction_id).toBe('a');
+    });
+});
+
+// ── C4a: freeform-guidance synthesis ───────────────────────────────────────────────────
+describe('C4a inferred_from_guidance', () => {
+    test('synthesized rule passes through with flag + verify warning', () => {
+        const out = validateImprovementLlmOutput({
+            proposed_prompt: 'UNCHANGED',
+            proposed_replacement_rules: [
+                { original_text: 'jalapeno', corrected_text: 'jalapeño', change_type: 'diacritic', rule: 'always accent', inferred_from_guidance: true },
+            ],
+        }, { currentPrompt: 'cur' });
+        expect(out.proposed_replacement_rules).toHaveLength(1);
+        expect(out.proposed_replacement_rules[0].inferred_from_guidance).toBe(true);
+        expect(out.warnings.some((w) => /synthesized from freeform guidance/.test(w))).toBe(true);
+    });
+
+    test('synthesized rule still fails the same safety checks (context-dependent term dropped)', () => {
+        const out = validateImprovementLlmOutput({
+            proposed_prompt: 'UNCHANGED',
+            proposed_replacement_rules: [
+                { original_text: 'poblano tartare', corrected_text: 'poblano tartar', change_type: 'terminology', rule: 'sauce', inferred_from_guidance: true },
+            ],
+        }, { currentPrompt: 'cur' });
+        expect(out.proposed_replacement_rules).toHaveLength(0);
+        expect(out.warnings.some((w) => /context-dependent/.test(w))).toBe(true);
     });
 });

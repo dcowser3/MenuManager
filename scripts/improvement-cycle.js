@@ -105,6 +105,15 @@ function releaseLock() {
     try { fs.unlinkSync(LOCK_PATH); } catch { /* best effort */ }
 }
 
+// Minimal HTML escaper for values interpolated into notification emails.
+function escapeHtmlLite(value) {
+    return `${value ?? ''}`
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+}
+
 function resolvePythonBin() {
     const venvPython = path.join(repoRoot, 'services', 'docx-redliner', 'venv', 'bin', 'python');
     return fs.existsSync(venvPython) ? venvPython : 'python3';
@@ -123,23 +132,17 @@ function extractCleanMenuText(pythonBin, docxPath) {
     }
 }
 
-async function callImprovementLlm(systemPrompt, userPrompt) {
+// Low-level completion for a full messages array (C1: the retry controller grows the
+// conversation across attempts, so the caller works from messages, not a fixed system+user pair).
+async function postImprovementCompletion(messages) {
     const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey || apiKey === 'your-openai-api-key-here') {
         throw new Error('OPENAI_API_KEY is required for the improvement cycle');
     }
     const model = process.env.IMPROVE_MODEL || process.env.PROMPT_REWRITE_MODEL || 'o3';
-    // Payload shaping lives in the tested core lib (script is thin caller).
-    let shaper = null;
-    try { shaper = requireDashboardLib('improvement-cycle-core').buildImprovementLlmPayload; } catch {}
-    const payload = shaper
-        ? shaper(model, systemPrompt, userPrompt, process.env)
-        : (() => {
-            const isR = /o[0-9]|reasoning/i.test(model);
-            const p = { model, messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }], response_format: { type: 'json_object' } };
-            if (!isR) { p.max_tokens = 16000; p.temperature = 0.2; } else { p.max_completion_tokens = Number(process.env.IMPROVE_MAX_COMPLETION_TOKENS || 32000); }
-            return p;
-          })();
+    const isR = /o[0-9]|reasoning/i.test(model);
+    const payload = { model, messages, response_format: { type: 'json_object' } };
+    if (!isR) { payload.max_tokens = 16000; payload.temperature = 0.2; } else { payload.max_completion_tokens = Number(process.env.IMPROVE_MAX_COMPLETION_TOKENS || 32000); }
     const response = await fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
@@ -440,7 +443,7 @@ async function recordEmailAlert(supabase, severity, message, details) {
     }
 }
 
-async function sendProposalEmail(supabase, { cycleId, evalStatus, evalSummary, correctionCount, ruleCount, recommendationCount, supersede }) {
+async function sendProposalEmail(supabase, { cycleId, evalStatus, evalSummary, correctionCount, ruleCount, recommendationCount, supersede, disposition, correctionRouting }) {
     const to = process.env.IMPROVE_NOTIFY_EMAIL || process.env.FORM_ATTEMPT_ALERT_EMAIL || 'dcowser@richardsandoval.com';
     try {
         const core = requireDashboardLib('improvement-cycle-core');
@@ -465,11 +468,27 @@ async function sendProposalEmail(supabase, { cycleId, evalStatus, evalSummary, c
         const supersedeLine = supersede && supersede.fromCycleId
             ? `<li>Supersedes cycle <strong>${supersede.fromCycleId}</strong> (${supersede.carriedCount} carried-over + ${supersede.newCount} new correction(s))</li>`
             : '';
+        // C2: lead with the plain-language disposition (what the proposal actually concluded).
+        const headline = disposition
+            ? core.describeDisposition(disposition, { ruleCount, recCount: recommendationCount })
+            : '';
+        // C3: compact per-correction routing table so the reviewer sees the conclusion in the email.
+        const routing = Array.isArray(correctionRouting) ? correctionRouting : [];
+        const routingTable = routing.length
+            ? [
+                `<p><strong>What happened to each correction:</strong></p>`,
+                `<table border="1" cellpadding="4" cellspacing="0" style="border-collapse:collapse;font-size:13px">`,
+                `<tr><th>correction</th><th>replay</th><th>lane</th><th>target</th></tr>`,
+                ...routing.map((r) => `<tr><td>${escapeHtmlLite(r.correction_id)}</td><td>${escapeHtmlLite(r.replay_status || '')}</td><td>${escapeHtmlLite(r.lane)}</td><td>${escapeHtmlLite(r.target || '')}</td></tr>`),
+                `</table>`,
+              ].join('\n')
+            : '';
         await alertMail.sendAlertMail({
             subject: `Review-improvement proposal ready (${cycleId}) — ${evalStatus}`,
             to,
             html: [
                 `<p>A new review-improvement proposal is ready for cycle <strong>${cycleId}</strong>.</p>`,
+                headline ? `<p style="font-size:15px"><strong>${escapeHtmlLite(headline)}</strong></p>` : '',
                 `<ul>`,
                 supersedeLine,
                 `<li>${correctionCount} reviewer correction(s) analyzed</li>`,
@@ -477,6 +496,7 @@ async function sendProposalEmail(supabase, { cycleId, evalStatus, evalSummary, c
                 `<li>${recommendationCount} code recommendation(s)</li>`,
                 `<li>${verdict}</li>`,
                 `</ul>`,
+                routingTable,
                 `<p><a href="${baseUrl}/learning/prompt-proposal">Review the proposal</a></p>`,
             ].join('\n'),
         }, deps);
@@ -746,8 +766,10 @@ async function main() {
                 const raw = row && row.raw_input;
                 for (const r of correctionRules) {
                     if (r.submission_id !== sid) continue;
-                    const o = r.original_text || '';
-                    const c = r.corrected_text || '';
+                    // C4b: a freeform rule with no exact pair becomes replay-verifiable when the human
+                    // supplied an example (example_original/example_corrected) — match on that instead.
+                    const o = r.original_text || r.example_original || '';
+                    const c = r.corrected_text || r.example_corrected || '';
                     if (!`${o}`.trim() && !`${c}`.trim()) {
                         replayEvidence.push({ correction_id: r.id, submission_id: sid, original_text: o, corrected_text: c, status: 'not_verifiable' });
                         continue;
@@ -943,10 +965,14 @@ async function main() {
                     else if (ev.status === 'not_verifiable') replayTag = `   REPLAY EVIDENCE: not_verifiable — freeform guidance, not mechanically checkable.`;
                     else replayTag = `   REPLAY EVIDENCE: ${ev.status} — replay unavailable for this submission.`;
                 }
+                const exampleLine = (!r.original_text && !r.corrected_text && (r.example_original || r.example_corrected))
+                    ? `   Human-supplied example (prefer these exact strings if you synthesize a rule): "${r.example_original || ''}" -> "${r.example_corrected || ''}"`
+                    : '';
                 return [
-                    `${i + 1}. Correction:`,
+                    `${i + 1}. Correction (correction_id: ${r.id}):`,
                     `   Original: "${r.original_text || '(freeform guidance)'}"`,
                     `   Corrected: "${r.corrected_text || '(freeform guidance)'}"`,
+                    exampleLine,
                     `   Reviewer explanation: "${r.rule}"`,
                     `   Type: ${r.change_type || 'unspecified'} | Menu scope: ${r.applies_to_menu_type || 'all'} | ${scope}`,
                     `   Restaurant: ${r.restaurant_name || 'N/A'} | Source: ${r.source}${r.source === 'system' ? ` (seen ${r.occurrences}x)` : ''} | Status: ${r.status}`,
@@ -979,6 +1005,11 @@ async function main() {
             console.log(`LLM context size: ~${(systemPromptToUse.length + userPrompt.length).toLocaleString()} chars`);
         }
 
+        // C1: inject the exact fence count to preserve (computed at assembly time) so the model
+        // is told, up front and on every retry, exactly how many fenced blocks must survive.
+        const currentPromptFenceCount = core.countFencedCodeDelimiters(effective.prompt);
+        userPrompt += core.buildFencePreservationNote(currentPromptFenceCount);
+
         if (args.dryRun) {
             const dryDir = path.join(repoRoot, 'tmp', 'improvement-cycle', `${cycleId}-dry-run`);
             await fsp.mkdir(dryDir, { recursive: true });
@@ -987,27 +1018,50 @@ async function main() {
             return;
         }
 
-        // 7. LLM analysis.
+        // 7. LLM analysis (C1: retry-with-feedback when a prompt-shape guard discards the rewrite).
         console.log('Calling improvement LLM...');
-        const llmResult = await callImprovementLlm(systemPromptToUse, userPrompt);
-        console.log(`Model: ${llmResult.model}, tokens: ${llmResult.usage?.total_tokens || 'n/a'}`);
-        let parsedOutput;
-        try {
-            parsedOutput = JSON.parse(llmResult.content);
-        } catch (error) {
-            throw new Error(`LLM returned non-JSON output: ${llmResult.content.slice(0, 300)}`);
-        }
-        const validated = core.validateImprovementLlmOutput(parsedOutput, {
-            currentPrompt: effective.prompt,
-            replayEvidence: args.consolidate ? [] : replayEvidence,
-            sourceCorrections: args.consolidate ? [] : correctionRules,
-            consolidation: !!args.consolidate,
+        const maxRetries = Number.isFinite(Number(process.env.IMPROVE_MAX_RETRIES))
+            ? Math.max(0, Number(process.env.IMPROVE_MAX_RETRIES))
+            : 2;
+        const proposalResult = await core.runImprovementProposalWithRetry({
+            systemPrompt: systemPromptToUse,
+            userPrompt,
+            currentPromptFenceCount,
+            maxRetries,
+            validateOpts: {
+                currentPrompt: effective.prompt,
+                replayEvidence: args.consolidate ? [] : replayEvidence,
+                sourceCorrections: args.consolidate ? [] : correctionRules,
+                consolidation: !!args.consolidate,
+            },
+            callLlm: postImprovementCompletion,
         });
+        const validated = proposalResult.validated;
+        const llmResult = { model: proposalResult.model, usage: proposalResult.usage };
+        if (proposalResult.attempts.length > 1) {
+            console.log(`LLM took ${proposalResult.attempts.length} attempt(s); guard discards: ${proposalResult.discardedPrompts.length}${proposalResult.guardRetriesExhausted ? ' (retries exhausted — rewrite discarded)' : ''}.`);
+        }
+        console.log(`Model: ${llmResult.model}, tokens: ${llmResult.usage?.total_tokens || 'n/a'}`);
         if (replayEnvironmentWarning) {
             validated.warnings.unshift(replayEnvironmentWarning);
         }
         for (const warning of validated.warnings) console.warn(`LLM output warning: ${warning}`);
-        console.log(`Proposed prompt: ${validated.promptUnchanged ? 'UNCHANGED (current prompt kept)' : `${validated.proposed_prompt.length} chars`}; rules: ${validated.proposed_replacement_rules.length}; code recommendations: ${validated.code_recommendations.length}; coverage claims: ${(validated.coverage_claims || []).length}`);
+        console.log(`Proposed prompt: ${validated.promptUnchanged ? `UNCHANGED (${validated.promptUnchangedReason || 'kept'})` : `${validated.proposed_prompt.length} chars`}; rules: ${validated.proposed_replacement_rules.length}; code recommendations: ${validated.code_recommendations.length}; coverage claims: ${(validated.coverage_claims || []).length}; routing rows: ${(validated.correction_routing || []).length}`);
+
+        // C2: keep discarded rewrites as forensics artifacts (never in the DB).
+        for (let i = 0; i < proposalResult.discardedPrompts.length; i++) {
+            await fsp.writeFile(path.join(artifactsDir, `discarded_prompt_attempt${i + 1}.txt`), proposalResult.discardedPrompts[i] || '');
+        }
+
+        // C2: honest, code-computed disposition — what this proposal actually concluded.
+        const disposition = core.computeDisposition({
+            promptUnchanged: validated.promptUnchanged,
+            promptUnchangedReason: validated.promptUnchangedReason,
+            guardRetriesExhausted: proposalResult.guardRetriesExhausted,
+            proposedRuleCount: validated.proposed_replacement_rules.length,
+            codeRecommendationCount: validated.code_recommendations.length,
+        });
+        console.log(`Disposition: ${disposition} — ${core.describeDisposition(disposition, { ruleCount: validated.proposed_replacement_rules.length, recCount: validated.code_recommendations.length, guardAttempts: proposalResult.attempts.length })}`);
 
         // 8. Auto-eval baseline vs candidate.
         // (artifactsDir created early for replay evidence; reuse the same path)
@@ -1023,7 +1077,23 @@ async function main() {
 
         let evalSummary = null;
         let evalStatus = 'skipped';
-        if (!args.skipEval) {
+        // C2: when the candidate is byte-identical to baseline AND has no replacement rules, a full
+        // eval run is pure waste (the candidate output cannot differ). Skip it and record no_effect.
+        const skipCandidateEval = !args.consolidate && core.shouldSkipCandidateEval({
+            promptUnchanged: validated.promptUnchanged,
+            proposedRuleCount: validated.proposed_replacement_rules.length,
+        });
+        if (args.skipEval) {
+            console.log('Eval skipped (--skip-eval / IMPROVE_SKIP_EVAL).');
+        } else if (skipCandidateEval) {
+            console.log(`Candidate identical to baseline with no replacement rules — ${core.IDENTICAL_CANDIDATE_EVAL_NOTE} (C2).`);
+            evalStatus = 'no_effect';
+            evalSummary = {
+                baseline: null, candidate: null, comparedCases: 0, avgDelta: 0,
+                improved: 0, regressed: 0, same: 0, regressions: [],
+                note: core.IDENTICAL_CANDIDATE_EVAL_NOTE,
+            };
+        } else {
             console.log('Running eval harness: baseline...');
             const limitArgs = process.env.IMPROVE_EVAL_LIMIT ? ['--limit', process.env.IMPROVE_EVAL_LIMIT] : [];
             const baselineRun = runEvalHarness([
@@ -1173,8 +1243,6 @@ async function main() {
                 }
             }
             console.log(`Eval status: ${evalStatus}${evalSummary?.error ? ` (${evalSummary.error.slice(0, 160)})` : ''}`);
-        } else {
-            console.log('Eval skipped (--skip-eval / IMPROVE_SKIP_EVAL).');
         }
 
         // 9. Store the proposal.
@@ -1201,6 +1269,8 @@ async function main() {
             unresolved_still_missed: !!validated.unresolved_still_missed,
             coverage_claims: validated.coverage_claims && validated.coverage_claims.length ? validated.coverage_claims : null,
             prompt_length: (validated.proposed_prompt || effective.prompt || '').length,
+            disposition,
+            correction_routing: validated.correction_routing && validated.correction_routing.length ? validated.correction_routing : null,
         };
         if (supersedeMeta) {
             proposalRow.superseded_from_cycle_id = supersedeMeta.fromCycleId;
@@ -1216,11 +1286,12 @@ async function main() {
             proposalRow = fallbackProposalRow;
             ({ error: insertError } = await supabase.from('prompt_proposals').insert(proposalRow));
         }
-        if (insertError && /(replay_evidence|unresolved_still_missed|coverage_claims|prompt_length|superseded_from_cycle_id|supersede_carried_correction_count|supersede_new_correction_count)/i.test(insertError.message || '')) {
+        if (insertError && /(replay_evidence|unresolved_still_missed|coverage_claims|prompt_length|superseded_from_cycle_id|supersede_carried_correction_count|supersede_new_correction_count|disposition|correction_routing)/i.test(insertError.message || '')) {
             console.warn('prompt_proposals extra column(s) missing; storing without. Apply recent migrations. (degrade gracefully)');
             const {
                 replay_evidence: _re, unresolved_still_missed: _um, coverage_claims: _cc, prompt_length: _pl,
                 superseded_from_cycle_id: _sfc, supersede_carried_correction_count: _scc, supersede_new_correction_count: _snc,
+                disposition: _disp, correction_routing: _croute,
                 ...fb
             } = proposalRow;
             proposalRow = fb;
@@ -1278,6 +1349,8 @@ async function main() {
             ruleCount: validated.proposed_replacement_rules.length,
             recommendationCount: validated.code_recommendations.length,
             supersede: supersedeMeta,
+            disposition,
+            correctionRouting: validated.correction_routing || [],
         });
 
         console.log(`\nDone. Proposal ${cycleId} stored (eval: ${evalStatus}). Review at /learning/prompt-proposal`);

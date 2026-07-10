@@ -56,6 +56,13 @@ function buildCorrectionRuleRecord(payload, catalog) {
     if ((originalText && !correctedText) || (!originalText && correctedText)) {
         throw new CorrectionRuleValidationError('original_text and corrected_text must be provided together');
     }
+    // C4b: an optional example pair lets a freeform rule be replay-verified. An exact rule already
+    // carries its own before/after, so its example columns stay null (the pair is the ground truth).
+    const exampleOriginal = optionalText(payload.example_original);
+    const exampleCorrected = optionalText(payload.example_corrected);
+    if ((exampleOriginal && !exampleCorrected) || (!exampleOriginal && exampleCorrected)) {
+        throw new CorrectionRuleValidationError('example_original and example_corrected must be provided together');
+    }
     if (isLocationSpecific) {
         if (!rawLocation || isGlobalLocationPlaceholder(rawLocation) || !propertyNames.has(locationKey(rawLocation))) {
             throw new CorrectionRuleValidationError('location must be one of the configured properties');
@@ -80,6 +87,8 @@ function buildCorrectionRuleRecord(payload, catalog) {
         other_applicable_locations: isLocationSpecific ? otherLocations : [],
         reviewer_name: text(payload.reviewer_name) || null,
         source: payload.source || 'human',
+        example_original: originalText ? null : exampleOriginal,
+        example_corrected: correctedText ? null : exampleCorrected,
         // Saved corrections are PROPOSALS, not live rules. They stay 'pending'
         // until the improvement cycle routes them by explanation (replacement
         // rule vs prompt reasoning vs code change) and a reviewer approves the

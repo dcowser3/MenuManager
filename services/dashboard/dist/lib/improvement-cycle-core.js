@@ -3,23 +3,32 @@
 // gating, effective-prompt resolution, LLM-output validation, eval summarization,
 // and the mapping from LLM-proposed rules to correction_rules payloads.
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.CONSOLIDATION_SYSTEM_PROMPT = exports.IMPROVEMENT_SYSTEM_PROMPT = exports.CONTEXT_DEPENDENT_TERMS = exports.CURRENT_PROMPT_END_MARKER = exports.CURRENT_PROMPT_BEGIN_MARKER = exports.PROMPT_UNCHANGED_SENTINEL = exports.PROPOSED_RULE_CHANGE_TYPES = void 0;
+exports.CONSOLIDATION_SYSTEM_PROMPT = exports.IMPROVEMENT_SYSTEM_PROMPT = exports.IDENTICAL_CANDIDATE_EVAL_NOTE = exports.CONTEXT_DEPENDENT_TERMS = exports.CURRENT_PROMPT_END_MARKER = exports.CURRENT_PROMPT_BEGIN_MARKER = exports.PROMPT_UNCHANGED_SENTINEL = exports.CORRECTION_ROUTING_LANES = exports.PROPOSED_RULE_CHANGE_TYPES = void 0;
 exports.shouldRunCycle = shouldRunCycle;
 exports.assembleSupersedeCorrectionSet = assembleSupersedeCorrectionSet;
 exports.buildReplayUnavailableForCorrections = buildReplayUnavailableForCorrections;
 exports.supersededProposalReviewBlock = supersededProposalReviewBlock;
 exports.evaluateSecretExpiry = evaluateSecretExpiry;
 exports.pickEffectivePrompt = pickEffectivePrompt;
+exports.isGuardDiscardReason = isGuardDiscardReason;
 exports.buildImprovementLlmPayload = buildImprovementLlmPayload;
 exports.involvesContextDependentTerm = involvesContextDependentTerm;
 exports.locateCorrectionSite = locateCorrectionSite;
 exports.buildCorrectionExcerptWindows = buildCorrectionExcerptWindows;
+exports.validateCorrectionRouting = validateCorrectionRouting;
 exports.validateImprovementLlmOutput = validateImprovementLlmOutput;
+exports.countFencedCodeDelimiters = countFencedCodeDelimiters;
+exports.buildFencePreservationNote = buildFencePreservationNote;
+exports.buildGuardRetryMessage = buildGuardRetryMessage;
+exports.runImprovementProposalWithRetry = runImprovementProposalWithRetry;
 exports.decideReplayStatus = decideReplayStatus;
 exports.classifyTriggerFromComparisonEntry = classifyTriggerFromComparisonEntry;
 exports.summarizeEvalReport = summarizeEvalReport;
 exports.buildProposalEvalSummary = buildProposalEvalSummary;
 exports.evalStatusFromSummary = evalStatusFromSummary;
+exports.computeDisposition = computeDisposition;
+exports.describeDisposition = describeDisposition;
+exports.shouldSkipCandidateEval = shouldSkipCandidateEval;
 exports.resolveDashboardPublicUrl = resolveDashboardPublicUrl;
 exports.buildPendingProposalReminderEmail = buildPendingProposalReminderEmail;
 exports.mapProposedRuleToCorrectionRulePayload = mapProposedRuleToCorrectionRulePayload;
@@ -157,6 +166,20 @@ exports.PROPOSED_RULE_CHANGE_TYPES = new Set([
     'punctuation',
     'capitalization',
 ]);
+exports.CORRECTION_ROUTING_LANES = new Set([
+    'replacement_rule',
+    'prompt',
+    'code_recommendation',
+    'already_correct',
+    'dismissed',
+    'unrouted',
+]);
+// C1: the two promptUnchangedReasons that mean "an automated guard discarded the model's
+// rewrite" — these are recoverable formatting mistakes and warrant a retry-with-feedback.
+// The sentinel/identical reasons are the model deliberately declining to change the prompt.
+function isGuardDiscardReason(reason) {
+    return reason === 'context_leak' || reason === 'fence_guard';
+}
 // Sentinel the LLM returns instead of echoing the full prompt when no prompt
 // change is warranted (echoing ~20k chars invites truncation/leak artifacts).
 exports.PROMPT_UNCHANGED_SENTINEL = 'UNCHANGED';
@@ -333,11 +356,122 @@ function countMarkdownCodeFences(text) {
 function looksLikeNoOpPromptAnalysis(analysis) {
     return /already (?:covered|handled|addressed)|existing (?:rule|rules|prompt|guidance)|no (?:prompt )?change (?:is )?needed|should be handled by the prompt/i.test(analysis);
 }
+/**
+ * C3: validate the per-correction routing table the improvement LLM emits.
+ * The reviewer must see an outcome for EVERY source correction, not only the ones
+ * the model chose to mention, so this:
+ *  - parses/normalizes lanes (unknown lane -> 'unrouted' + warning),
+ *  - enforces completeness (missing source ids -> synthesized 'unrouted' + warning),
+ *  - blocks still_missed corrections from being 'dismissed'/'already_correct' (feeds
+ *    unresolved_still_missed),
+ *  - allows 'already_correct' only when replay says now_correct,
+ *  - cross-checks 'replacement_rule' lanes against the rules that survived validation
+ *    (a routing pointing at a dropped rule downgrades to 'unrouted').
+ * Pure + exported so it is jest-testable independently of the LLM call.
+ */
+function validateCorrectionRouting(rawRouting, opts = {}) {
+    const warnings = [];
+    let unresolvedFromRouting = false;
+    const sources = (opts.sourceCorrections || []).filter((c) => c && c.id);
+    const replayById = new Map();
+    for (const e of opts.replayEvidence || []) {
+        if (e && e.correction_id)
+            replayById.set(String(e.correction_id), e.status);
+    }
+    const sourceById = new Map();
+    for (const c of sources)
+        sourceById.set(String(c.id), { original_text: c.original_text ?? undefined, corrected_text: c.corrected_text ?? undefined });
+    // Only cross-check replacement_rule lanes when the caller supplied the surviving rule set
+    // (an empty array is a valid "no rules survived" assertion; undefined means "skip the check").
+    const crossCheckRules = Array.isArray(opts.survivingRules);
+    const survivingPairs = new Set((opts.survivingRules || []).map((r) => `${asText(r.original_text, 240)}→${asText(r.corrected_text, 240)}`));
+    // Parse model-provided routing entries, keyed by correction_id (first wins; dupes warn).
+    const byId = new Map();
+    for (const value of Array.isArray(rawRouting) ? rawRouting : []) {
+        const entry = (value && typeof value === 'object' ? value : {});
+        const cid = asText(entry.correction_id, 200);
+        if (!cid) {
+            warnings.push('correction_routing entry dropped: correction_id is required');
+            continue;
+        }
+        let lane = asText(entry.lane, 40).toLowerCase();
+        if (!exports.CORRECTION_ROUTING_LANES.has(lane)) {
+            warnings.push(`correction_routing for ${cid}: unknown lane "${lane || '(missing)'}" -> unrouted`);
+            lane = 'unrouted';
+        }
+        if (byId.has(cid)) {
+            warnings.push(`correction_routing lists ${cid} more than once; keeping the first`);
+            continue;
+        }
+        const src = sourceById.get(cid);
+        byId.set(cid, {
+            correction_id: cid,
+            lane,
+            target: asText(entry.target, 300),
+            note: asText(entry.note, 500),
+            replay_status: replayById.get(cid),
+            original_text: src ? (src.original_text ?? null) : undefined,
+            corrected_text: src ? (src.corrected_text ?? null) : undefined,
+        });
+    }
+    // Completeness: every source correction must appear exactly once. Missing -> synthesize unrouted.
+    for (const c of sources) {
+        const cid = String(c.id);
+        if (!byId.has(cid)) {
+            warnings.push(`correction ${cid} was not routed by the model; recorded as unrouted`);
+            byId.set(cid, {
+                correction_id: cid,
+                lane: 'unrouted',
+                target: '',
+                note: 'not routed by the model',
+                replay_status: replayById.get(cid),
+                original_text: c.original_text ?? null,
+                corrected_text: c.corrected_text ?? null,
+            });
+        }
+    }
+    // Per-entry cross-checks.
+    for (const entry of byId.values()) {
+        const replay = replayById.get(entry.correction_id);
+        if (replay === 'still_missed' && (entry.lane === 'dismissed' || entry.lane === 'already_correct')) {
+            warnings.push(`correction ${entry.correction_id} is tagged still_missed by replay but routed "${entry.lane}"; replay evidence outranks this — it must result in a concrete change`);
+            unresolvedFromRouting = true;
+        }
+        if (entry.lane === 'already_correct' && replay && replay !== 'now_correct') {
+            warnings.push(`correction ${entry.correction_id} routed "already_correct" but replay status is "${replay}" (not now_correct)`);
+        }
+        if (entry.lane === 'replacement_rule') {
+            const src = sourceById.get(entry.correction_id);
+            const pair = src ? `${asText(src.original_text, 240)}→${asText(src.corrected_text, 240)}` : '';
+            if (crossCheckRules && src && src.original_text && src.corrected_text && !survivingPairs.has(pair)) {
+                warnings.push(`correction ${entry.correction_id} routed to a replacement_rule that did not survive validation (likely dropped); recorded as unrouted`);
+                entry.lane = 'unrouted';
+                entry.note = entry.note ? `${entry.note} (rule dropped in validation)` : 'routed rule dropped in validation';
+            }
+        }
+    }
+    // Order: source order first, then any extra ids the model routed.
+    const ordered = [];
+    const seen = new Set();
+    for (const c of sources) {
+        const e = byId.get(String(c.id));
+        if (e) {
+            ordered.push(e);
+            seen.add(e.correction_id);
+        }
+    }
+    for (const e of byId.values()) {
+        if (!seen.has(e.correction_id))
+            ordered.push(e);
+    }
+    return { routing: ordered, warnings, unresolvedFromRouting };
+}
 function validateImprovementLlmOutput(raw, opts = {}) {
     const warnings = [];
     const parsed = (raw && typeof raw === 'object' ? raw : {});
     let proposedPrompt = asText(parsed.proposed_prompt);
     let promptUnchanged = false;
+    let promptUnchangedReason;
     if (!proposedPrompt) {
         throw new Error('LLM output is missing proposed_prompt');
     }
@@ -347,6 +481,7 @@ function validateImprovementLlmOutput(raw, opts = {}) {
         }
         proposedPrompt = opts.currentPrompt;
         promptUnchanged = true;
+        promptUnchangedReason = 'sentinel';
     }
     else {
         const leakedMarker = CONTEXT_LEAK_MARKERS.find((marker) => proposedPrompt.includes(marker));
@@ -354,12 +489,14 @@ function validateImprovementLlmOutput(raw, opts = {}) {
             warnings.push(`proposed_prompt echoed input context (contains "${leakedMarker}"); treating the prompt as unchanged`);
             proposedPrompt = opts.currentPrompt;
             promptUnchanged = true;
+            promptUnchangedReason = 'context_leak';
         }
         else if (leakedMarker) {
             throw new Error(`proposed_prompt echoed input context (contains "${leakedMarker}")`);
         }
         else if (opts.currentPrompt && proposedPrompt === opts.currentPrompt.trim()) {
             promptUnchanged = true;
+            promptUnchangedReason = 'identical';
         }
     }
     if (!promptUnchanged && opts.currentPrompt) {
@@ -369,6 +506,7 @@ function validateImprovementLlmOutput(raw, opts = {}) {
             warnings.push(`proposed_prompt changed Markdown code fence structure (${currentFenceCount} -> ${proposedFenceCount}); treating the prompt as unchanged`);
             proposedPrompt = opts.currentPrompt;
             promptUnchanged = true;
+            promptUnchangedReason = 'fence_guard';
         }
     }
     const isConsolidation = !!opts.consolidation;
@@ -413,6 +551,13 @@ function validateImprovementLlmOutput(raw, opts = {}) {
             continue;
         }
         const menuType = asText(rule.applies_to_menu_type, 20).toLowerCase();
+        // C4a: the model may synthesize a deterministic rule from freeform guidance (no exact
+        // pair supplied by the human). Such rules pass the same safety validation as any rule,
+        // but the exact strings are the model's inference — flag them so the reviewer verifies.
+        const inferredFromGuidance = !!rule.inferred_from_guidance;
+        if (inferredFromGuidance) {
+            warnings.push(`rule ${index + 1} synthesized from freeform guidance — verify the exact strings ("${originalText}" -> "${correctedText}") before trusting them`);
+        }
         rules.push({
             original_text: originalText,
             corrected_text: correctedText,
@@ -424,6 +569,7 @@ function validateImprovementLlmOutput(raw, opts = {}) {
             other_applicable_locations: Array.isArray(rule.other_applicable_locations)
                 ? rule.other_applicable_locations.map((item) => asText(item, 255)).filter(Boolean)
                 : [],
+            ...(inferredFromGuidance ? { inferred_from_guidance: true } : {}),
         });
     }
     const recommendations = [];
@@ -535,16 +681,118 @@ function validateImprovementLlmOutput(raw, opts = {}) {
             warnings.push('unresolved_still_missed: prompt is unchanged and one or more still_missed corrections lack a covering replacement rule or code recommendation');
         }
     }
+    // C3: per-correction routing table. Enforced only when we have identifiable source
+    // corrections (skipped for consolidation, which has none). Completeness + cross-checks
+    // give the reviewer an outcome for every input; a still_missed routed dismissed also
+    // trips unresolved_still_missed.
+    let correctionRouting;
+    if (!isConsolidation && (opts.sourceCorrections || []).some((c) => c && c.id)) {
+        const routed = validateCorrectionRouting(parsed.correction_routing, {
+            sourceCorrections: opts.sourceCorrections,
+            replayEvidence: opts.replayEvidence,
+            survivingRules: rules,
+        });
+        for (const w of routed.warnings)
+            warnings.push(w);
+        if (routed.unresolvedFromRouting)
+            unresolvedStillMissed = true;
+        correctionRouting = routed.routing.length ? routed.routing : undefined;
+    }
     return {
         analysis,
         proposed_prompt: proposedPrompt,
         promptUnchanged,
+        promptUnchangedReason,
         proposed_replacement_rules: rules,
         code_recommendations: recommendations,
         warnings,
         unresolved_still_missed: unresolvedStillMissed || undefined,
         coverage_claims: validatedCoverageClaims.length ? validatedCoverageClaims : undefined,
+        correction_routing: correctionRouting,
     };
+}
+// ── C1: retry-with-feedback when a prompt-shape guard discards the rewrite ──────────────
+// A single recoverable formatting mistake by the model (fence structure, echoed context)
+// used to kill the whole cycle. Instead, re-call with a corrective addendum up to
+// IMPROVE_MAX_RETRIES times. The controller is pure over an injected `callLlm` so it is
+// jest-testable with canned responses.
+/** Count of fenced code-block delimiter lines (lines starting with ```). Exported for
+ *  context-assembly-time injection (buildFencePreservationNote / the retry message). */
+function countFencedCodeDelimiters(text) {
+    return countMarkdownCodeFences(text);
+}
+/** Dynamic note appended to the user prompt stating the exact fence count to preserve. */
+function buildFencePreservationNote(fenceCount) {
+    return `\n\nIMPORTANT — code fences: the current prompt contains exactly ${fenceCount} fenced code-block delimiter line(s) (lines starting with \`\`\`). Your proposed_prompt MUST contain the same ${fenceCount} delimiter line(s), byte-identical and in the same order, including the response-format block. Adding, removing, or reformatting any fenced block will cause an automated guard to discard your entire rewrite.`;
+}
+/** The corrective message appended to the conversation after a guard discards a rewrite. */
+function buildGuardRetryMessage(params) {
+    return [
+        `Your previous proposed_prompt was rejected by an automated guard: ${params.warning}.`,
+        `The current prompt contains exactly ${params.fenceCount} fenced code-block delimiter line(s) (lines beginning with \`\`\`) — every one must appear in your rewrite verbatim and unmodified, including the response-format block. Do not add, remove, or reformat any fenced block, and do not echo the input markers or context sections.`,
+        `Return the corrected COMPLETE prompt now as the same JSON object shape. If you genuinely intend no change, return "proposed_prompt": "UNCHANGED".`,
+    ].join(' ');
+}
+async function runImprovementProposalWithRetry(params) {
+    const maxRetries = Number.isFinite(Number(params.maxRetries)) ? Math.max(0, Number(params.maxRetries)) : 2;
+    const totalAttempts = maxRetries + 1;
+    const parseJson = params.parseJson || ((raw) => JSON.parse(raw));
+    const messages = [
+        { role: 'system', content: params.systemPrompt },
+        { role: 'user', content: params.userPrompt },
+    ];
+    const attempts = [];
+    const discardedPrompts = [];
+    const attemptWarnings = [];
+    let lastModel;
+    let lastUsage;
+    for (let attempt = 1; attempt <= totalAttempts; attempt++) {
+        const res = await params.callLlm(messages);
+        lastModel = res.model;
+        lastUsage = res.usage;
+        let parsed;
+        try {
+            parsed = parseJson(res.content || '');
+        }
+        catch {
+            const msg = `LLM returned non-JSON output: ${String(res.content || '').slice(0, 300)}`;
+            if (attempt < totalAttempts) {
+                attemptWarnings.push([msg]);
+                messages.push({ role: 'assistant', content: res.content || '' });
+                messages.push({ role: 'user', content: 'Your previous response was not valid JSON. Return ONLY the JSON object in the required shape, with no prose or surrounding code fences.' });
+                continue;
+            }
+            throw new Error(msg);
+        }
+        const validated = validateImprovementLlmOutput(parsed, params.validateOpts || {});
+        const rawProposed = asText(parsed?.proposed_prompt);
+        const guardDiscarded = isGuardDiscardReason(validated.promptUnchangedReason);
+        attempts.push({ attempt, validated, guardDiscarded, discardedPrompt: guardDiscarded ? rawProposed : null, model: res.model, usage: res.usage });
+        attemptWarnings.push(validated.warnings.slice());
+        if (guardDiscarded)
+            discardedPrompts.push(rawProposed);
+        if (guardDiscarded && attempt < totalAttempts) {
+            const guardWarning = validated.warnings.find((w) => /code fence|echoed input context/i.test(w))
+                || validated.warnings[validated.warnings.length - 1]
+                || 'a formatting guard rejected the rewrite';
+            messages.push({ role: 'assistant', content: res.content || '' });
+            messages.push({ role: 'user', content: buildGuardRetryMessage({ warning: guardWarning, fenceCount: params.currentPromptFenceCount }) });
+            continue;
+        }
+        // Terminal: success, deliberate no-change, or retries exhausted while still guard-discarded.
+        if (attemptWarnings.length > 1) {
+            const merged = [];
+            for (let i = 0; i < attemptWarnings.length; i++) {
+                for (const w of attemptWarnings[i])
+                    merged.push(`attempt ${i + 1}/${totalAttempts}: ${w}`);
+            }
+            validated.warnings = merged;
+        }
+        return { validated, model: lastModel, usage: lastUsage, attempts, guardRetriesExhausted: guardDiscarded, discardedPrompts };
+    }
+    // Unreachable (the loop always returns), but keep the type checker happy.
+    const last = attempts[attempts.length - 1];
+    return { validated: last.validated, model: lastModel, usage: lastUsage, attempts, guardRetriesExhausted: !!last?.guardDiscarded, discardedPrompts };
 }
 /**
  * Pure decision for replay tag of one correction.
@@ -635,6 +883,53 @@ function evalStatusFromSummary(summary, opts = {}) {
     // (Dead opts.promptUnchanged removed per Follow-up 3; semantics focus on trigger evidence.)
     return 'no_effect';
 }
+function computeDisposition(input) {
+    const hasRules = input.proposedRuleCount > 0;
+    const hasRecs = input.codeRecommendationCount > 0;
+    if (!input.promptUnchanged) {
+        return hasRules ? 'rules_and_prompt' : 'prompt_change';
+    }
+    // Prompt unchanged. A guard discard (C1 exhausted) is the honest headline even if rules exist.
+    if (isGuardDiscardReason(input.promptUnchangedReason) && input.guardRetriesExhausted) {
+        return 'no_change_guard_discarded';
+    }
+    if (hasRules)
+        return 'rules_only';
+    if (hasRecs)
+        return 'code_recs_only';
+    return 'no_change_model_declined';
+}
+// Plain-language headline for each disposition (proposal page + email lead line).
+function describeDisposition(disposition, ctx = {}) {
+    const rules = ctx.ruleCount ?? 0;
+    const recs = ctx.recCount ?? 0;
+    const rulePhrase = `${rules} replacement rule${rules === 1 ? '' : 's'}`;
+    const recPhrase = `${recs} code recommendation${recs === 1 ? '' : 's'}`;
+    switch (disposition) {
+        case 'prompt_change':
+            return `Prompt change proposed${recs ? ` + ${recPhrase}` : ''}.`;
+        case 'rules_and_prompt':
+            return `${rulePhrase} + a prompt change.`;
+        case 'rules_only':
+            return `${rulePhrase}, no prompt change.`;
+        case 'code_recs_only':
+            return `${recPhrase}, no prompt or rule change.`;
+        case 'no_change_model_declined':
+            return 'No change proposed — the model concluded nothing needed to change.';
+        case 'no_change_guard_discarded':
+            return `No change proposed — the model's rewrite was discarded by a formatting guard${ctx.guardAttempts ? ` after ${ctx.guardAttempts} attempt${ctx.guardAttempts === 1 ? '' : 's'}` : ''}.`;
+        default:
+            return `${disposition}`;
+    }
+}
+// C2: skip the candidate eval entirely when the candidate is byte-identical to baseline AND
+// there are no candidate replacement rules — a full 204-case run would be pure waste. Verdict
+// becomes no_effect with an explanatory note. (A rules-only proposal still needs the eval:
+// the rules change the candidate output even with an unchanged prompt.)
+function shouldSkipCandidateEval(input) {
+    return !!input.promptUnchanged && (input.proposedRuleCount || 0) === 0;
+}
+exports.IDENTICAL_CANDIDATE_EVAL_NOTE = 'eval skipped: candidate identical to baseline';
 function resolveDashboardPublicUrl(env) {
     return `${env.DASHBOARD_PUBLIC_URL || env.DASHBOARD_URL || 'http://localhost:3005'}`.replace(/\/+$/, '');
 }
@@ -770,11 +1065,24 @@ Prompt rewrite rules:
 - If your analysis asserts that a correction is already covered by the current prompt, you MUST also emit a "coverage_claims" entry with a verbatim contiguous substring copied from the CURRENT PROMPT (exact characters, not paraphrased). Deterministic rule coverage should be cited via manifest ids in rules or code recs instead. A citation alone does not excuse a still_missed correction; if replay shows the pipeline still misses it, you must still propose a concrete change (restructuring, examples, or code guard).
 - The current prompt is provided between "=== BEGIN CURRENT PROMPT ===" and "=== END CURRENT PROMPT ===" markers. Your proposed_prompt must contain ONLY the rewritten prompt text itself — never the markers, the Code Rules Manifest, the corrections list, or any other context sections from this message.
 - Return the COMPLETE rewritten prompt, not a diff. If no prompt change is warranted, set "proposed_prompt" to exactly "UNCHANGED" instead of echoing the prompt back.
+- Code fences are load-bearing: the current prompt contains a fixed number of fenced code blocks (lines starting with three backticks), including the response-format block. Preserve every one of them byte-identical and in the same order. Do NOT add, remove, reindent, or reformat any fenced block. An automated guard counts the fences and DISCARDS your entire rewrite if the count or structure changes — a discarded rewrite means your work is thrown away, so treat fence preservation as mandatory.
+
+Freeform guidance corrections:
+- Some corrections are freeform guidance with no exact original/corrected text pair (they are tagged "not_verifiable" in REPLAY EVIDENCE). You MUST still route them (see correction_routing below).
+- When such guidance implies an exact, always-safe replacement (it survives the always-safe test above), SYNTHESIZE the deterministic replacement rule yourself: state the inferred original_text and corrected_text explicitly and set "inferred_from_guidance": true on that rule. Example: guidance "we always accent jalapeño" implies a "jalapeno" -> "jalapeño" diacritic rule. Apply the same safety tests as any rule (reject context-dependent terms; only spelling/diacritic/terminology/grammar/punctuation/capitalization change types).
+- If the correction includes a "Human-supplied example", PREFER the human's exact example strings (casing, plurals, word boundaries) over your own inference when you synthesize the rule — the example is the verified ground truth.
+- When the guidance is contextual or judgment-based (not an always-safe swap), route it to the prompt lane as usual.
 
 Handling contradictions (policy changes):
 - When a new correction or manual reviewer rule contradicts older corrections, existing accepted rules, or current prompt text, the NEWEST human intent wins. Update or remove the conflicting older guidance rather than keeping both.
 - Call the conflict out explicitly in your analysis: name the old rule/behavior, the new rule, and which menus the change will affect going forward.
 - The eval replays HISTORICAL menus, so an intentional policy change can show up as "regressions" on old menus that were approved under the old policy. When you expect this, say so in your analysis ("regressions on menus containing X are the intended policy change, not errors") so the reviewer can read the eval verdict correctly.
+
+Per-correction routing (REQUIRED):
+- You MUST emit a "correction_routing" entry for EVERY source correction, using its correction_id from the REPLAY EVIDENCE list. This is how the reviewer sees what happened to each input; a correction you silently drop looks like it vanished.
+- lane is one of: "replacement_rule" (handled by a deterministic rule you propose), "prompt" (handled by your prompt change), "code_recommendation" (needs a code guard you recommend), "already_correct" (the pipeline already produces the fix — ONLY legal when replay says now_correct), "dismissed" (invalid/out-of-scope correction, with a reason).
+- A correction tagged still_missed by replay may NOT be routed "dismissed" or "already_correct" — replay proves the pipeline still gets it wrong, so it must be routed to a concrete change.
+- "target" names the specific rule, prompt section, or recommendation; "note" is a one-line reason.
 
 Respond with ONLY a JSON object in this exact shape:
 {
@@ -789,7 +1097,16 @@ Respond with ONLY a JSON object in this exact shape:
       "applies_to_menu_type": "all|food|beverage",
       "is_location_specific": false,
       "location": null,
-      "other_applicable_locations": []
+      "other_applicable_locations": [],
+      "inferred_from_guidance": false
+    }
+  ],
+  "correction_routing": [
+    {
+      "correction_id": "<id from the REPLAY EVIDENCE list>",
+      "lane": "replacement_rule|prompt|code_recommendation|already_correct|dismissed",
+      "target": "rule original->corrected, prompt section name, or recommendation title",
+      "note": "one-line reason"
     }
   ],
   "code_recommendations": [
@@ -824,6 +1141,7 @@ Rules for this consolidation pass:
 - Remove nothing unless you supply an equivalent (or stronger) formulation that preserves the original intent and edge cases.
 - Target at least 15% reduction in total characters while keeping deterministic behavior identical.
 - Do not invent new reviewer policy; only refactor what is already present.
+- Code fences are load-bearing: the current prompt contains a fixed number of fenced code blocks (lines starting with three backticks), including the response-format block. Preserve every one of them byte-identical and in the same order — do NOT add, remove, reindent, or reformat any fenced block. An automated guard counts the fences and DISCARDS your entire rewrite if the count or structure changes, which has repeatedly killed consolidation runs. Merge PROSE around the fences; never touch the fenced content itself.
 
 Output contract (identical shape to normal improvement proposals):
 - "analysis": short description of what you consolidated and the measured size change.
