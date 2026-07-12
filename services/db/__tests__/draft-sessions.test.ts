@@ -78,6 +78,7 @@ describe('draft sessions', () => {
             orientation: 'Portrait',
             final_path: '/tmp/approved.docx',
             approved_menu_content: 'TACOS\nGuacamole - $12',
+            menu_content_html: '<p><strong>TACOS</strong></p><p><strong>Guacamole</strong> - $12</p>',
             reviewed_at: '2026-06-01T12:00:00.000Z',
         },
     };
@@ -116,6 +117,9 @@ describe('draft sessions', () => {
         expect(response.body.status).toBe('active');
         expect(response.body.baseline.projectName).toBe('Spring Dinner');
         expect(response.body.baseline.approvedMenuContent).toContain('Guacamole');
+        expect(response.body.baseline.approvedMenuContentHtml).toBe(
+            '<p><strong>TACOS</strong></p><p><strong>Guacamole</strong> - $12</p>'
+        );
         expect(response.body.form_state.previewCollapsed).toBe(true);
     });
 

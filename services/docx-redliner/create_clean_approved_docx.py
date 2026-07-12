@@ -70,7 +70,18 @@ def run_has_strike(run_element):
     rpr = run_element.find(w_tag("rPr"))
     if rpr is None:
         return False
-    return any(local_name(child.tag) in {"strike", "dstrike"} for child in rpr)
+
+    # Word writes explicit false values such as <w:strike w:val="0" /> on
+    # otherwise ordinary runs.  Presence alone is not a visible strike, so
+    # treating it as one would delete legitimate menu content when making the
+    # clean copy.
+    for child in rpr:
+        if local_name(child.tag) not in {"strike", "dstrike"}:
+            continue
+        value = child.get(w_tag("val"))
+        if value is None or value.strip().lower() not in {"0", "false", "off"}:
+            return True
+    return False
 
 
 def accept_revisions(root):

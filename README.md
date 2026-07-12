@@ -30,7 +30,7 @@ Chef / manager submission
   -> One confirmation email (with the submitted DOCX) sent to deliverable submitter and approver addresses, plus configured visibility CCs
   -> Human review in ClickUp or browser approval editor
   -> Approved DOCX, ClickUp/Marketing handoff, optional SharePoint upload
-  -> Approved-menu lookup with cleaned/original approved Word DOCX downloads, Edit This Menu draft links, and approved-dish extraction
+  -> Approved-menu lookup with cleaned/original approved Word DOCX downloads, Edit This Menu draft links that preserve saved inline formatting, and approved-dish extraction
   -> Learning / improvement loop from human-reviewed corrections
 ```
 

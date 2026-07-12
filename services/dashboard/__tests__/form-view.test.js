@@ -39,6 +39,14 @@ describe('dashboard form modification source chooser', () => {
         expect(template).not.toContain('id="modSourceDatabase" value="database" checked');
     });
 
+    test('keeps saved inline formatting when loading an approved baseline into the editor', () => {
+        const template = readView();
+
+        expect(template).toContain("baseApprovedMenuContentHtml = stripManagedFooterHtml(selected.approvedMenuContentHtml || '');");
+        expect(template).toContain('quill.clipboard.dangerouslyPasteHTML(baseApprovedMenuContentHtml);');
+        expect(template).toContain('displayReviewedContent(baseApprovedMenuContentHtml || quill.root.innerHTML);');
+    });
+
     test('lets brand-new submissions import menu content from DOCX using shared upload code', () => {
         const template = readView();
 

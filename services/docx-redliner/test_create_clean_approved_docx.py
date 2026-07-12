@@ -73,6 +73,31 @@ def test_process_xml_part_removes_struck_runs_and_clears_highlights():
     assert not root.xpath("//w:strike", namespaces=NS)
 
 
+def test_process_xml_part_preserves_runs_with_explicitly_disabled_strike():
+    root = _process_document_xml(
+        f"""<?xml version="1.0" encoding="UTF-8"?>
+        <w:document xmlns:w="{W_NS}">
+          <w:body>
+            <w:p>
+              <w:r>
+                <w:rPr><w:strike w:val="0"/><w:highlight w:val="yellow"/></w:rPr>
+                <w:t>keep this menu text</w:t>
+              </w:r>
+              <w:r>
+                <w:rPr><w:strike/></w:rPr>
+                <w:t>remove this redline</w:t>
+              </w:r>
+            </w:p>
+          </w:body>
+        </w:document>
+        """
+    )
+
+    assert _paragraph_text(root) == "keep this menu text"
+    assert not root.xpath("//w:highlight", namespaces=NS)
+    assert not root.xpath("//w:strike", namespaces=NS)
+
+
 def test_create_clean_script_processes_docx_zip_package():
     from create_clean_approved_docx import create_clean_docx
 

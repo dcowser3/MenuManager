@@ -49,7 +49,7 @@ Identical to the current DB-baseline modification flow: left editor, right persi
 
 ### Prefill
 
-The baseline is a full submission record, so prefill is copy-from-DB, not extraction — stronger than the upload flow (no parser, no timeouts, no blank fields). Copy verbatim from the baseline submission: project name, property, service period, menu type, asset type, orientation, print size/region, crop/bleed marks, folded, allergen key, file delivery notes, raw/undercooked flag.
+The baseline is a full submission record, so prefill is copy-from-DB, not extraction — stronger than the upload flow (no parser, no timeouts, no blank fields). Copy verbatim from the baseline submission: project name, property, service period, menu type, asset type, orientation, print size/region, crop/bleed marks, folded, allergen key, file delivery notes, raw/undercooked flag. The draft also carries the saved menu HTML when available, so intentional inline formatting such as bold dish names is preserved in the editor; plain text remains the fallback for older records without saved HTML.
 
 Deliberately **not** carried over:
 

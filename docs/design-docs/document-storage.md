@@ -19,7 +19,7 @@ Subfolders:
 - `baseline/` — uploaded approved baseline DOCX in revision fallback flow
 - `approved/` — corrected/approved DOCX downloaded from ClickUp webhook
 
-Approved form submissions are exposed in the dashboard’s `/approved-menus` page so chefs can search by restaurant, optionally filter by service period, and download either the cleaned editable DOCX (redlines and highlights removed) or the original approved file. The original approved DOCX remains the source artifact and is served from `/download/approved/:submissionId`; `/download/approved-clean/:submissionId` creates a temporary accepted copy with redlines and highlights removed at download time.
+Approved form submissions are exposed in the dashboard’s `/approved-menus` page so chefs can search by restaurant, optionally filter by service period, and download either the cleaned editable DOCX (redlines and highlights removed) or the original approved file. The original approved DOCX remains the source artifact and is served from `/download/approved/:submissionId`; `/download/approved-clean/:submissionId` creates a temporary accepted copy with redlines and highlights removed at download time. The cleaner preserves normal text when a DOCX includes an explicitly disabled strike setting (`w:strike w:val="0"`), while still removing text that is visibly struck through.
 
 The dashboard download route now also normalizes stored container-style paths such as `/app/tmp/...` back into the repo-local `tmp/` tree when possible, and returns a clean `404` when the approved file metadata exists but the local artifact is no longer present on disk.
 

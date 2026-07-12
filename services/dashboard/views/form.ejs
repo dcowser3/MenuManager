@@ -4386,7 +4386,7 @@
             revisionBaselineFileName = '';
             const normalizedBaseline = stripBaselineFooter(selected.approvedMenuContent || '', selected.allergens || '');
             baseApprovedMenuContent = normalizedBaseline.menu || '';
-            baseApprovedMenuContentHtml = '';
+            baseApprovedMenuContentHtml = stripManagedFooterHtml(selected.approvedMenuContentHtml || '');
             preservedManagedFooterText = normalizedBaseline.footerText || '';
             persistentDiffSummary = { insertions: 0, deletions: 0 };
             baselineFreshnessOverrideKey = '';
@@ -4397,7 +4397,11 @@
 
             applyProjectPrefill(selected);
 
-            quill.setText(baseApprovedMenuContent || '');
+            if (baseApprovedMenuContentHtml && quill?.clipboard) {
+                quill.clipboard.dangerouslyPasteHTML(baseApprovedMenuContentHtml);
+            } else {
+                quill.setText(baseApprovedMenuContent || '');
+            }
             renderPersistentPreview(baseApprovedMenuContent, baseApprovedMenuContent);
 
             const selectedNote = document.getElementById('revisionSelectedNote');
@@ -8281,9 +8285,9 @@
             } else {
                 // Brand-new draft: no saved edits yet (the DB seeds menu_content_html
                 // empty on create). Seed the editor from the approved baseline that
-                // applyApprovedBaseline() just loaded into the Quill composer so the
-                // chef starts from the current menu instead of a blank editor.
-                displayReviewedContent(quill.root.innerHTML);
+                // applyApprovedBaseline() just loaded. Prefer its saved rich HTML so
+                // chefs keep intentional inline formatting from the approved menu.
+                displayReviewedContent(baseApprovedMenuContentHtml || quill.root.innerHTML);
             }
             const reviewedArea = document.getElementById('reviewedContentArea');
             const currentText = extractCleanTextFromReviewedArea(reviewedArea);

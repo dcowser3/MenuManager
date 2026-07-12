@@ -824,6 +824,10 @@ function mapApprovedSubmissionForClient(submission, latestForPropertyService) {
         updatedAt: submission.updated_at || submission.created_at,
         reviewedAt: submission.reviewed_at || submission.approved_text_extracted_at || submission.updated_at || submission.created_at || '',
         approvedMenuContent: submission.approved_menu_content || submission.menu_content || '',
+        // Click-to-edit needs the submitted rich HTML as well as plain text. The
+        // text remains the canonical diff/AI baseline; HTML carries intentional
+        // inline formatting such as bold dish names into the browser editor.
+        approvedMenuContentHtml: submission.menu_content_html || submission.raw_payload?.menuContentHtml || '',
         allergens: submission.allergens || '',
         status: submission.status,
         isLatestForPropertyService: latestForPropertyService ? latestPublicId === publicId : null,
