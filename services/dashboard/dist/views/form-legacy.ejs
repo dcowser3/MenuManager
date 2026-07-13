@@ -6063,8 +6063,10 @@
 
         function applyHeadingFormatting(originalText, displayText) {
             if (!quill) return;
+            const editorText = getLiveEditorTextForFormatting(displayText, 'Heading formatting');
             const originalLines = (originalText || '').split('\n');
             const displayLines = (displayText || '').split('\n');
+            const editorLineRanges = buildDisplayLineRanges(editorText);
             const headingLineIndexes = [];
 
             if (originalLines.length === displayLines.length) {
@@ -6082,21 +6084,18 @@
             }
 
             const headingSet = new Set(headingLineIndexes);
-            let charOffset = 0;
-            for (let i = 0; i < displayLines.length; i++) {
-                const line = displayLines[i] || '';
-                if (headingSet.has(i) && line.trim()) {
-                    quill.formatText(charOffset, line.length, { bold: true });
+            editorLineRanges.forEach((line) => {
+                if (headingSet.has(line.index) && line.text.trim()) {
+                    quill.formatText(line.start, line.text.length, { bold: true });
                 }
-                charOffset += line.length + 1;
-            }
+            });
         }
 
         function applyDishNameFormattingAnchors(displayText, anchors) {
             if (!quill || !redlinePreview || !redlinePreview.resolveDishNameFormattingRanges) return;
-            const sourceText = displayText || '';
-            const ranges = redlinePreview.resolveDishNameFormattingRanges(sourceText, anchors || []);
-            const lineRanges = buildDisplayLineRanges(sourceText);
+            const editorText = getLiveEditorTextForFormatting(displayText, 'Dish-name formatting');
+            const ranges = redlinePreview.resolveDishNameFormattingRanges(editorText, anchors || []);
+            const lineRanges = buildDisplayLineRanges(editorText);
             const anchoredLineIndexes = new Set();
 
             ranges.forEach((range) => {
@@ -6133,6 +6132,18 @@
                 if (!Number.isInteger(range.start) || !Number.isInteger(range.end) || range.end <= range.start) return;
                 quill.formatText(range.start, range.end - range.start, { bold: true });
             });
+        }
+
+        function getLiveEditorTextForFormatting(displayText, formatterName) {
+            const editorText = String(quill.getText() || '').replace(/\n$/, '');
+            const normalizedDisplayText = String(displayText || '').replace(/\n$/, '');
+            if (normalizedDisplayText !== editorText) {
+                console.warn(`${formatterName} display text differs from live editor text; using editor offsets`, {
+                    displayTextLength: normalizedDisplayText.length,
+                    editorTextLength: editorText.length,
+                });
+            }
+            return editorText;
         }
 
         function buildDisplayLineRanges(text) {

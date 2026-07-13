@@ -8,6 +8,7 @@ Usage:
 """
 
 import json
+import re
 import sys
 from html import escape
 from docx import Document
@@ -85,6 +86,20 @@ def all_runs_in_paragraph(paragraph):
     return [Run(r, paragraph) for r in paragraph._p.iter(qn("w:r"))]
 
 
+def collapse_inline_whitespace(text):
+    """Collapse Word's preserved in-line space debris without changing lines."""
+    return re.sub(r"[ \t\u00a0]+", " ", text or "")
+
+
+def normalize_clean_run_text(text, state):
+    """Normalize a kept run while also collapsing spaces at run boundaries."""
+    normalized = collapse_inline_whitespace(text)
+    if state["ends_with_space"] and normalized.startswith(" "):
+        normalized = normalized.lstrip(" ")
+    state["ends_with_space"] = normalized.endswith(" ")
+    return normalized
+
+
 # ── Boundary detection ────────────────────────────────────────────────────────
 
 def find_boundary_index(paragraphs):
@@ -112,7 +127,7 @@ def paragraph_clean_text(paragraph):
     """
     runs = all_runs_in_paragraph(paragraph)
     if not runs:
-        return paragraph.text
+        return collapse_inline_whitespace(paragraph.text)
 
     cleaned_parts = []
     for run in runs:
@@ -125,7 +140,7 @@ def paragraph_clean_text(paragraph):
             continue
         cleaned_parts.append(text)
 
-    return "".join(cleaned_parts)
+    return collapse_inline_whitespace("".join(cleaned_parts))
 
 
 def paragraph_clean_html(paragraph):
@@ -134,13 +149,14 @@ def paragraph_clean_html(paragraph):
     bold, italic, underline. Tracked/manual deletions are removed.
     """
     fragments = []
+    whitespace_state = {"ends_with_space": False}
     for run in all_runs_in_paragraph(paragraph):
         if run_is_in_deleted_change(run):
             continue
         if run_is_struck_through(run):
             continue
 
-        text = run.text or ""
+        text = normalize_clean_run_text(run.text or "", whitespace_state)
         if not text:
             continue
 

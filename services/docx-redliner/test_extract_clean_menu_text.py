@@ -275,6 +275,25 @@ class TestAllRunsInParagraph:
 # ── Tests: Full extraction pipeline ─────────────────────────────────────────
 
 class TestFullExtraction:
+    def test_clean_extraction_collapses_multispace_runs_in_text_and_html(self):
+        """Tracked-change acceptance can leave spaces split across formatted runs."""
+        doc = Document()
+        doc.add_paragraph("MENU")
+        para = doc.add_paragraph()
+        first = para.add_run("Tulum")
+        first.bold = True
+        para.add_run("  ")
+        second = para.add_run("Breeze")
+        second.bold = True
+        para.add_run("   21")
+
+        result = _save_and_extract(doc, mode="clean")
+
+        assert result["cleaned_menu_content"] == "Tulum Breeze 21"
+        assert result["cleaned_menu_html"] == "<p><strong>Tulum</strong> <strong>Breeze</strong> 21</p>"
+        assert "  " not in result["cleaned_menu_content"]
+        assert "  " not in result["cleaned_menu_html"]
+
     def test_clean_extraction_strips_strikethrough(self):
         """End-to-end: a DOCX with strikethrough + replacement should extract cleanly."""
         doc = Document()

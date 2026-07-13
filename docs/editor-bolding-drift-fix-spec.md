@@ -21,6 +21,12 @@ Whenever the Quill document's text differs from the offset-source string, every 
 
 ## Fix
 
+## Implementation status (2026-07-13)
+
+- Section 1 is complete operationally.
+- Section 2 is implemented in both `form.ejs` and `form-legacy.ejs`: heading and dish-name `formatText` offsets are now resolved from the live Quill text, with a warning when the caller's display text differs.
+- Section 3 is implemented as a separate extraction-only change: clean menu text and HTML now collapse in-line multi-space runs consistently.
+
 ### 1. Operational, do first (no code) — restore stored HTML for the broken window
 
 Approvals finalized before the fixed code went live have `approved_menu_content_html = NULL` and fall back to unstyled text. The approved DOCX files are now all under the host bind mount, so the existing backfill resolves them **when run on the server**:

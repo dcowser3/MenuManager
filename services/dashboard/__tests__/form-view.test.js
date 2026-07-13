@@ -357,11 +357,75 @@ describe('dashboard form modification source chooser', () => {
         );
 
         expect(template).toContain('function applyDishNameFormattingAnchors(displayText, anchors)');
-        expect(template).toContain('redlinePreview.resolveDishNameFormattingRanges(sourceText, anchors || [])');
+        expect(template).toContain("const editorText = getLiveEditorTextForFormatting(displayText, 'Dish-name formatting');");
+        expect(template).toContain('redlinePreview.resolveDishNameFormattingRanges(editorText, anchors || [])');
+        expect(template).toContain("const editorText = getLiveEditorTextForFormatting(displayText, 'Heading formatting');");
+        expect(template).toContain('const editorLineRanges = buildDisplayLineRanges(editorText);');
+        expect(template).toContain('function getLiveEditorTextForFormatting(displayText, formatterName)');
+        expect(template).toContain('displayTextLength: normalizedDisplayText.length');
+        expect(template).toContain('editorTextLength: editorText.length');
         expect(template).toContain('function shouldClearProjectedDishContinuationBold(line)');
         expect(template).toContain('quill.formatText(line.start, line.text.length, { bold: false });');
         expect(template).toContain('quill.formatText(range.start, range.end - range.start, { bold: true });');
         expect(template).toContain('revisedHtml: revisedHtml ? stripAiReviewTransientFormatting(revisedHtml) : \'\',');
+    });
+
+    test('computes heading and dish-name bold ranges from the live Quill text', () => {
+        const template = readView();
+        const start = template.indexOf('function isHeadingLike(line)');
+        const end = template.indexOf('function tokenizeDiffText(text)', start);
+        expect(start).toBeGreaterThan(-1);
+        expect(end).toBeGreaterThan(start);
+
+        const helperCode = template.slice(start, end);
+        const editorText = [
+            'BOTTOMLESS ENHANCEMENTS',
+            'blood orange, passion fruit',
+            'Tulum Breeze 21',
+            'tomato, tajín, guava',
+        ].join('\n');
+        const displayText = editorText.replace('orange, passion', 'orange,   passion');
+        const formatCalls = [];
+        const warnings = [];
+        const resolverInputs = [];
+        const sandbox = {
+            quill: {
+                getText: () => `${editorText}\n`,
+                formatText: (startOffset, length, format) => formatCalls.push({ startOffset, length, format }),
+            },
+            redlinePreview: {
+                resolveDishNameFormattingRanges: (text) => {
+                    resolverInputs.push(text);
+                    const startOffset = text.indexOf('Tulum Breeze');
+                    return [{ start: startOffset, end: startOffset + 'Tulum Breeze'.length }];
+                },
+            },
+            console: { warn: (...args) => warnings.push(args) },
+            result: null,
+        };
+
+        vm.runInNewContext(`
+            ${helperCode}
+            applyHeadingFormatting(${JSON.stringify(editorText)}, ${JSON.stringify(displayText)});
+            applyDishNameFormattingAnchors(${JSON.stringify(displayText)}, []);
+            result = { formatCalls, warnings, resolverInputs };
+        `, { ...sandbox, formatCalls, warnings, resolverInputs });
+
+        const boldCalls = formatCalls.filter((call) => call.format.bold === true);
+        const headingCall = boldCalls.find((call) => call.startOffset === 0);
+        const dishStart = editorText.indexOf('Tulum Breeze');
+        const dishCall = boldCalls.find((call) => call.startOffset === dishStart);
+        const tomatoStart = editorText.indexOf('tomato, tajín, guava');
+
+        expect(headingCall).toEqual({ startOffset: 0, length: 'BOTTOMLESS ENHANCEMENTS'.length, format: { bold: true } });
+        expect(dishCall).toEqual({ startOffset: dishStart, length: 'Tulum Breeze'.length, format: { bold: true } });
+        expect(boldCalls.some((call) => call.startOffset < tomatoStart && call.startOffset + call.length > tomatoStart)).toBe(false);
+        expect(resolverInputs).toEqual([editorText]);
+        expect(warnings).toHaveLength(2);
+        expect(warnings[0][1]).toEqual(expect.objectContaining({
+            displayTextLength: displayText.length,
+            editorTextLength: editorText.length,
+        }));
     });
 
     test('uses a full-screen decision dialog for existing approved menu conflicts', () => {
