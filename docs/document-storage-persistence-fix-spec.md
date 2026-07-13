@@ -1,24 +1,31 @@
 # Fix Spec: Approved DOCX files don't survive production redeploys
 
-Production incident, 7/13/26: `/download/approved-clean/145fe319-…` (Tán – Brunch Bebidas, approved 4:53 PM that day) returns "Approved file not found." The file existed at approval time — the finalization HTML extraction ran against it successfully — and disappeared after the same-day redeploy. Read `AGENTS.md` first for conventions and required verification.
+Production incident, 7/13/26: `/download/approved-clean/145fe319-…` (Tán – Brunch Bebidas, approved 4:53 PM that day) returned "Approved file not found," followed by a full instance outage during the redeploy. Read `AGENTS.md` first for conventions and required verification.
 
-## Root cause
+> **Infrastructure reality (supersedes the Azure docs):** production is a single AWS **Lightsail** Ubuntu instance (us-east-1, static IP 3.231.96.95, ~2GB RAM) running all services via `docker-compose.yml` from `~/MenuManager`. `docs/azure-production-status-*.md` describes a planned/abandoned setup — do not follow it for storage or deploy work.
 
-Approved DOCX files (and originals, AI drafts, baselines) are written to local disk under `DOCUMENT_STORAGE_ROOT`, which defaults to `tmp/documents` **inside the repo/app directory** (`services/dashboard/index.ts` ~line 495, `services/clickup-integration/index.ts` ~line 189). On Azure App Service, the deployed app directory is replaced on every deploy, so every production deploy silently deletes all documents written since the storage was last provisioned. Supabase rows survive and keep pointing at dead paths (`final_path`, `assets.storage_path`).
+## Root cause (confirmed on the instance, 7/13/26)
 
-Two aggravating factors:
+Documents live under `DOCUMENT_STORAGE_ROOT` (default `tmp/documents` in the app dir; in containers `/app/tmp/documents`). Where `/app/tmp` actually points has drifted across deployment styles on the same host:
 
-1. **Cross-app filesystems.** Production runs services as separate web apps on one App Service plan (see [azure-production-status-and-pricing-2026-02-25.md](azure-production-status-and-pricing-2026-02-25.md)). Services exchange *file paths* over internal APIs (e.g., differ `/compare` receives `ai_draft_path`/`final_path`; clickup-integration reads the approved DOCX the dashboard generated in browser approval). Separate web apps have separate filesystems — path handoff only works if all file-touching services mount the **same** storage. Any current behavior that appears to work across apps is accidental.
-2. **No fallback.** The download routes (`/download/approved-clean/:submissionId` ~line 1569 and `/download/approved/:submissionId`, `services/dashboard/index.ts`; path candidates resolved in `getApprovedMenuDownload`, `services/dashboard/lib/approved-menus.ts` ~line 261) try only local paths, even though a SharePoint copy (`sharepoint_approved_docx` asset) and, as of the click-to-edit HTML fix, clean text + HTML in Supabase often exist.
+- The compose project mounts the named volume `menumanager_menumanager_tmp` → holds **all historical documents** (verified: aqimero, bayou-bottle, casa-chi, t-n-new-york, tamayo, etc.).
+- A parallel dev-style deployment (`mm-*` containers from a shared `menumanager/dev:latest` image) ran with **different/no volume mounts** — documents written during its windows went to the container writable layer or orphaned volumes, and were destroyed when those containers were removed (this is how the 7/13 approvals' DOCX files were lost; ~12 orphaned anonymous volumes and a stale bare `menumanager_tmp` volume corroborate the drift).
+- Named volumes are also one `docker compose down -v` / `--nuke` away from deletion.
+
+Aggravating factor: the download routes (`/download/approved-clean/:submissionId` ~line 1569 and `/download/approved/:submissionId`, `services/dashboard/index.ts`; candidates resolved in `getApprovedMenuDownload`, `services/dashboard/lib/approved-menus.ts` ~line 261) try only local paths — no fallback to the SharePoint copy (`sharepoint_approved_docx` asset) or to the clean text/HTML now stored in Supabase.
+
+Secondary incident cause, fix alongside: a full parallel `docker compose build` of 7 Node images on a 2GB burstable instance with no swap wedged the machine (CPU burst exhaustion + memory pressure; required stop/start to recover). Swap has since been added manually (`/swapfile`, 2G, in fstab) — keep it.
 
 ## Fix — three parts, in priority order
 
-### 1. Persistent shared document storage (config + deploy, small code surface)
+### 1. One durable storage location: host bind mount (config, tiny code surface)
 
-- Provision an **Azure Files share** and mount it at the same path (e.g., `/mnt/menumanager-documents`) on **every** web app that touches documents: dashboard, clickup-integration, differ, parser (audit each service for `DOCUMENT_STORAGE_ROOT` / `getRepoRoot()`-relative file writes before assuming this list is complete). Set `DOCUMENT_STORAGE_ROOT=/mnt/menumanager-documents` on each app. `/home` alone is NOT sufficient: it persists across deploys but is per-app, which breaks the cross-app path handoff.
-- Code: verify every document read/write actually flows through the storage-root helper rather than hardcoded `tmp/documents` (grep for `tmp/documents`, `tmp/uploads` in non-temp contexts). Temp/scratch dirs (`tmp/uploads`, redliner temp) can stay app-local — only artifacts whose *paths are persisted to the DB or passed between services* must live under the shared root.
-- Add a startup log line in each service stating the resolved document storage root, so a misconfigured app is visible in one log check.
-- Docs: update [environment.md](environment.md) (line ~172 section) and [design-docs/document-storage.md](design-docs/document-storage.md) with the App Service guidance; add a post-deploy smoke step to [operations-playbook.md](operations-playbook.md): approve (or use a seeded approved record) → redeploy → download must still work.
+- In `docker-compose.yml`, replace `menumanager_tmp:/app/tmp` with a host bind mount `./tmp:/app/tmp` on **every** service (and consider the same for logs). Documents then live at `~/MenuManager/tmp/documents` on the host: visible with plain `ls`, shared by all containers, immune to `down -v`, volume pruning, container recreation, and image rebuilds.
+- One-time migration (performed/verified during the incident): stop the stack, `cp -a /var/lib/docker/volumes/menumanager_menumanager_tmp/_data/. ~/MenuManager/tmp/`, `chown -R ubuntu:ubuntu`, switch the mount, start. After a soak period, remove the stale `menumanager_tmp` bare volume and the orphaned anonymous volumes (`docker volume prune` once nothing references them).
+- **Retire the dual deployment styles.** The `mm-*` / `menumanager/dev:latest` pattern must not run in production again — it is how files silently landed outside the real volume. Production = `docker compose` from `~/MenuManager`, full stop. Remove the orphaned `mm-notifier` container once compose runs the notifier service.
+- Deploy procedure hardening (document in [operations-playbook.md](operations-playbook.md)): builds on this instance must be sequential (`docker compose build <svc> && docker compose up -d <svc>`, one at a time) — a full parallel build has taken the site down. Never use `down -v` in any deploy script. Keep swap enabled.
+- Add a startup log line in each service stating the resolved document storage root, so a mount regression is visible in one log check.
+- Docs: update [environment.md](environment.md) (~line 172 section) and [design-docs/document-storage.md](design-docs/document-storage.md) with the Lightsail/bind-mount guidance and a note deprecating the Azure doc's storage instructions.
 
 ### 2. Download fallback chain (dashboard)
 
@@ -36,7 +43,7 @@ For both approved-download routes, when no local candidate path resolves, fall b
 
 - Unit: fallback-chain ordering in the download handlers (local hit short-circuits; SharePoint tried next; regenerate only for the clean route; original route returns the specific unrecoverable message); storage-root helper honored everywhere the audit touched.
 - Integration/live (Docker): set `DOCUMENT_STORAGE_ROOT` to a bind-mounted dir, approve a seeded submission, delete the local file, hit `/download/approved-clean/:id` → regenerated (or SharePoint-served if configured) DOCX downloads; `/download/approved/:id` → specific message.
-- Production verification after the Azure Files mount: approve a menu → trigger a redeploy → both downloads still work; startup logs on every app show the shared root.
+- Production verification after the bind-mount switch: historical downloads work; approve a menu → `docker compose down && up -d` (no `-v`) → both downloads still work and the file is visible at `~/MenuManager/tmp/documents/...` on the host; startup logs on every service show the same storage root.
 
 ## Out of scope
 

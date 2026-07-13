@@ -13,7 +13,7 @@ services:
     ports:
       - "3004:3004"
     volumes:
-      - menumanager_tmp:/app/tmp
+      - ./tmp:/app/tmp
       - menumanager_logs:/app/logs
 
   ai-review:
@@ -31,7 +31,7 @@ services:
     depends_on:
       - db
     volumes:
-      - menumanager_tmp:/app/tmp
+      - ./tmp:/app/tmp
       - menumanager_logs:/app/logs
 
   parser:
@@ -51,7 +51,7 @@ services:
       - db
       - ai-review
     volumes:
-      - menumanager_tmp:/app/tmp
+      - ./tmp:/app/tmp
       - menumanager_logs:/app/logs
 
   differ:
@@ -69,7 +69,7 @@ services:
     depends_on:
       - db
     volumes:
-      - menumanager_tmp:/app/tmp
+      - ./tmp:/app/tmp
       - menumanager_logs:/app/logs
 
   clickup-integration:
@@ -89,7 +89,7 @@ services:
       - db
       - differ
     volumes:
-      - menumanager_tmp:/app/tmp
+      - ./tmp:/app/tmp
       - menumanager_logs:/app/logs
 
   dashboard:
@@ -115,9 +115,8 @@ services:
       - differ
       - clickup-integration
     volumes:
-      - menumanager_tmp:/app/tmp
+      - ./tmp:/app/tmp
       - menumanager_logs:/app/logs
 
 volumes:
-  menumanager_tmp:
   menumanager_logs:
