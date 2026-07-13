@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title><%= title %> — <%= tenant.name %></title>
+    <style>
+        body { font-family: Arial, sans-serif; color: #333; max-width: 1180px; margin: 0 auto; padding: 2rem; }
+        header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #ddd; padding-bottom: 1rem; }
+        a, button { color: #6b5344; } .btn { display: inline-block; padding: .55rem .8rem; border: 1px solid #6b5344; background: white; text-decoration: none; cursor: pointer; }
+        table { width: 100%; border-collapse: collapse; margin: 1.25rem 0 2rem; } th, td { text-align: left; padding: .7rem; border-bottom: 1px solid #ddd; vertical-align: top; }
+        .muted { color: #666; } form { display: inline; } @media (max-width: 700px) { body { padding: 1rem; } table { font-size: .85rem; } }
+    </style>
+    <%- include('partials/theme') %>
+</head>
+<body>
+    <header><div><h1><%= tenant.name %></h1><p>Menu drafts</p></div><nav><a href="/approved-menus">Approved Menus</a> · <a href="/form">New Submission</a></nav></header>
+    <main>
+        <h2>Active drafts</h2>
+        <% if (activeDrafts.length) { %>
+        <table><thead><tr><th>Restaurant</th><th>Service period</th><th>Menu</th><th>Baseline approved</th><th>Last saved</th><th>Edited by</th><th>Actions</th></tr></thead><tbody>
+        <% activeDrafts.forEach(function(draft) { const baseline = draft.baseline || {}; %>
+            <tr><td><%= baseline.property || 'Unknown' %></td><td><%= baseline.servicePeriod || '—' %></td><td><%= baseline.projectName || 'Approved menu' %></td><td><%= baseline.reviewedAt ? new Date(baseline.reviewedAt).toLocaleDateString() : '—' %></td><td><%= draft.updated_at ? new Date(draft.updated_at).toLocaleString() : '—' %></td><td><%= draft.last_edited_by || '—' %></td><td><a class="btn" href="/form?draft=<%= encodeURIComponent(draft.token) %>">Resume</a> <form method="POST" action="/api/drafts/<%= encodeURIComponent(draft.token) %>/discard" onsubmit="return confirm('Discard this draft?');"><button class="btn" type="submit">Discard</button></form></td></tr>
+        <% }); %>
+        </tbody></table>
+        <% } else { %><p class="muted">There are no active menu drafts.</p><% } %>
+
+        <h2>Recently closed</h2>
+        <% if (recentDrafts.length) { %>
+        <table><thead><tr><th>Restaurant</th><th>Menu</th><th>Status</th><th>Last saved</th><th>Edited by</th></tr></thead><tbody>
+        <% recentDrafts.forEach(function(draft) { const baseline = draft.baseline || {}; %>
+            <tr><td><%= baseline.property || 'Unknown' %></td><td><%= baseline.projectName || 'Approved menu' %></td><td><%= draft.status %></td><td><%= draft.updated_at ? new Date(draft.updated_at).toLocaleString() : '—' %></td><td><%= draft.last_edited_by || '—' %></td></tr>
+        <% }); %>
+        </tbody></table>
+        <% } else { %><p class="muted">No submitted or discarded drafts in the last seven days.</p><% } %>
+    </main>
+</body>
+</html>

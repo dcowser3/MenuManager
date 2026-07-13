@@ -595,8 +595,10 @@ CREATE TABLE IF NOT EXISTS draft_sessions (
     base_submission_id VARCHAR(100) NOT NULL,
     menu_content_html TEXT,
     form_state JSONB DEFAULT '{}'::jsonb,
+    -- Valid states: active, submitted, expired, discarded.
     status VARCHAR(30) NOT NULL DEFAULT 'active',
     submitted_submission_id VARCHAR(100),
+    last_edited_by VARCHAR(160),
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -604,6 +606,8 @@ CREATE TABLE IF NOT EXISTS draft_sessions (
 CREATE INDEX IF NOT EXISTS idx_draft_sessions_token ON draft_sessions(token);
 CREATE INDEX IF NOT EXISTS idx_draft_sessions_base_submission ON draft_sessions(base_submission_id);
 CREATE INDEX IF NOT EXISTS idx_draft_sessions_status_updated ON draft_sessions(status, updated_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_draft_sessions_one_active_per_base ON draft_sessions(base_submission_id) WHERE status = 'active';
+CREATE INDEX IF NOT EXISTS idx_submissions_revision_base ON submissions(revision_base_submission_id);
 
 -- ============================================================================
 -- 11. FORM_ATTEMPT_LOGS

@@ -33,6 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.enrichApprovedMenuList = enrichApprovedMenuList;
 exports.listApprovedMenus = listApprovedMenus;
 exports.getApprovedMenuDownload = getApprovedMenuDownload;
 const fs_1 = require("fs");
@@ -100,6 +101,24 @@ function buildApprovedMenuList(sourceRows, approvedAssetRows) {
             servicePeriod: `${row.service_period || ''}`.trim(),
             submitterName: `${row.submitter_name || ''}`.trim(),
             status: `${row.status || ''}`.trim(),
+            activeDraft: null,
+            supersededBy: null,
+        };
+    });
+}
+/** Attach DB-service batch lookup results without changing how menus are fetched. */
+function enrichApprovedMenuList(menus, drafts = [], lineage = {}) {
+    const draftByBase = new Map((drafts || []).map((draft) => [`${draft.base_submission_id || draft.baseline?.id || ''}`, draft]));
+    return menus.map((menu) => {
+        const draft = draftByBase.get(menu.id);
+        return {
+            ...menu,
+            activeDraft: draft ? {
+                token: `${draft.token || ''}`,
+                lastSavedAt: `${draft.updated_at || ''}`,
+                lastEditedBy: `${draft.last_edited_by || ''}`,
+            } : null,
+            supersededBy: lineage[menu.id]?.supersededBy || null,
         };
     });
 }

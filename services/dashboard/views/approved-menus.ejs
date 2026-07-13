@@ -387,6 +387,7 @@
             <div class="header-links">
                 <a href="/">Home</a>
                 <a href="/form">New Submission</a>
+                <a href="/drafts">Drafts</a>
                 <a href="/design-approval">Design Approval</a>
             </div>
         </div>
@@ -445,7 +446,7 @@
         <% if (hasSearch && approvedMenus.length > 0) { %>
             <div class="menu-list">
                 <% approvedMenus.forEach(function(menu) { %>
-                    <div class="menu-card">
+                    <div class="menu-card" id="approved-menu-<%= menu.id %>">
                         <div class="menu-main">
                             <h3><%= menu.projectName || menu.filename || 'Approved Menu' %></h3>
                             <div class="menu-property"><%= menu.property || 'Unknown Property' %></div>
@@ -458,10 +459,28 @@
                         </div>
                         <div class="menu-actions">
                             <span class="badge"><%= menu.status === 'approved_override' ? 'Approved Override' : 'Approved' %></span>
-                            <form method="POST" action="/api/drafts" style="width: 100%; margin: 0;">
-                                <input type="hidden" name="baseSubmissionId" value="<%= menu.id %>">
-                                <button type="submit" class="btn" style="width: 100%;">Edit This Menu</button>
-                            </form>
+                            <% if (menu.activeDraft) { %>
+                                <span class="badge">In progress — last saved <%= menu.activeDraft.lastSavedAt ? new Date(menu.activeDraft.lastSavedAt).toLocaleString() : 'recently' %><%= menu.activeDraft.lastEditedBy ? ` by ${menu.activeDraft.lastEditedBy}` : '' %></span>
+                                <a href="/form?draft=<%= encodeURIComponent(menu.activeDraft.token) %>" class="btn">Resume Editing</a>
+                                <form method="POST" action="/api/drafts" style="width: 100%; margin: 0;" onsubmit="return confirm('Discard the draft last saved <%= menu.activeDraft.lastSavedAt ? new Date(menu.activeDraft.lastSavedAt).toLocaleString() : 'recently' %> and start over?');">
+                                    <input type="hidden" name="baseSubmissionId" value="<%= menu.id %>">
+                                    <input type="hidden" name="replaceToken" value="<%= menu.activeDraft.token %>">
+                                    <button type="submit" class="btn btn-secondary" style="width: 100%;">Discard and start over</button>
+                                </form>
+                            <% } else if (menu.supersededBy) { %>
+                                <span class="badge">A newer version was approved <%= menu.supersededBy.approvedAt ? new Date(menu.supersededBy.approvedAt).toLocaleDateString() : 'recently' %></span>
+                                <button type="button" class="btn btn-secondary" style="width: 100%; opacity: .55; cursor: not-allowed;" disabled>Edit This Menu</button>
+                                <a href="/approved-menus?submissionId=<%= encodeURIComponent(menu.supersededBy.id) %>#approved-menu-<%= menu.supersededBy.id %>" class="btn">Edit Latest Version</a>
+                            <% } else { %>
+                                <form method="POST" action="/api/drafts" style="width: 100%; margin: 0;">
+                                    <input type="hidden" name="baseSubmissionId" value="<%= menu.id %>">
+                                    <button type="submit" class="btn" style="width: 100%;">Edit This Menu</button>
+                                </form>
+                            <% } %>
+                            <% if (menu.supersededBy && menu.activeDraft) { %>
+                                <span class="badge">A newer version was approved <%= menu.supersededBy.approvedAt ? new Date(menu.supersededBy.approvedAt).toLocaleDateString() : 'recently' %></span>
+                                <a href="/approved-menus?submissionId=<%= encodeURIComponent(menu.supersededBy.id) %>#approved-menu-<%= menu.supersededBy.id %>" class="btn btn-secondary">Edit Latest Version</a>
+                            <% } %>
                             <a href="/download/approved-clean/<%= menu.id %>" class="btn">Download Clean Word Doc</a>
                             <a href="/download/approved/<%= menu.id %>" class="btn btn-secondary">Download Original Approved</a>
                         </div>

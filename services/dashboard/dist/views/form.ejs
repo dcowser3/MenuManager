@@ -2179,6 +2179,7 @@
                         </div>
                     </div>
                     <div id="revisionSelectedNote" class="revision-selected"></div>
+                    <div id="lineageSuggestion" class="revision-selected" style="display: none;"></div>
                 </div>
                 <div class="recent-project-loader" id="recentProjectLoader" style="display: none;">
                     <label for="recentProjectSelect">Load from Recent</label>
@@ -2750,6 +2751,8 @@
         let revisionSearchDebounce = null;
         let revisionSearchResults = [];
         let revisionBaseSubmissionId = null;
+        let uploadedBaselineLineageSuggestion = null;
+        let uploadedBaselineLineageConfirmed = false;
         let selectedRevisionBaseline = null;
         let revisionSource = 'database';
         let revisionBaselineDocPath = '';
@@ -4176,6 +4179,8 @@
                 }
                 previewSection.classList.remove('show');
                 revisionBaseSubmissionId = null;
+                uploadedBaselineLineageSuggestion = null;
+                uploadedBaselineLineageConfirmed = false;
                 selectedRevisionBaseline = null;
                 revisionSource = 'database';
                 revisionBaselineDocPath = '';
@@ -4198,6 +4203,7 @@
                 const selectedNote = document.getElementById('revisionSelectedNote');
                 selectedNote.classList.remove('show');
                 selectedNote.textContent = '';
+                document.getElementById('lineageSuggestion').style.display = 'none';
                 document.getElementById('submissionSearchResults').innerHTML = '';
                 renderPersistentPreview('', '');
                 displayReviewedContent('');
@@ -4763,6 +4769,8 @@
             try {
                 revisionSource = 'uploaded_baseline';
                 revisionBaseSubmissionId = null;
+                uploadedBaselineLineageSuggestion = data.lineageSuggestion || null;
+                uploadedBaselineLineageConfirmed = false;
                 revisionBaselineDocPath = data.baselineDocPath || '';
                 revisionBaselineFileName = data.baselineFileName || file.name;
                 const normalizedBaseline = stripBaselineFooter(data.approvedMenuContent || '', data.extractedAllergenKey || '');
@@ -4787,6 +4795,7 @@
                 const selectedNote = document.getElementById('revisionSelectedNote');
                 selectedNote.textContent = `Loaded uploaded baseline: ${revisionBaselineFileName}`;
                 selectedNote.classList.add('show');
+                renderUploadedBaselineLineageSuggestion();
 
                 enterRevisionTrackingMode();
                 await logFormAttempt('baseline_upload_completed', {
@@ -4803,6 +4812,28 @@
                 console.error(error);
                 showAlert('Failed to process baseline DOCX: ' + error.message, 'error');
             }
+        }
+
+        function renderUploadedBaselineLineageSuggestion() {
+            const container = document.getElementById('lineageSuggestion');
+            const suggestion = uploadedBaselineLineageSuggestion;
+            container.innerHTML = '';
+            if (!suggestion?.id) {
+                container.style.display = 'none';
+                return;
+            }
+            const line = document.createElement('span');
+            const approved = suggestion.approvedAt ? new Date(suggestion.approvedAt).toLocaleDateString() : 'an unknown date';
+            line.textContent = `This looks like an update to ${suggestion.projectName || 'an approved menu'}, approved ${approved}. `;
+            const yes = document.createElement('button');
+            yes.type = 'button'; yes.className = 'btn btn-secondary'; yes.textContent = 'Yes, this replaces it';
+            const no = document.createElement('button');
+            no.type = 'button'; no.className = 'btn btn-secondary'; no.style.marginLeft = '0.5rem'; no.textContent = 'No, this is a separate menu';
+            const state = document.createElement('span'); state.style.marginLeft = '0.5rem';
+            yes.onclick = () => { revisionBaseSubmissionId = suggestion.id; uploadedBaselineLineageConfirmed = true; state.textContent = 'Will link this revision.'; };
+            no.onclick = () => { revisionBaseSubmissionId = null; uploadedBaselineLineageConfirmed = false; state.textContent = 'Will not link this revision.'; };
+            container.append(line, yes, no, state);
+            container.style.display = '';
         }
 
         async function uploadUnapprovedDoc() {
@@ -7859,6 +7890,7 @@
                 unapprovedMode: submissionMode === 'modification' ? unapprovedMode : false,
                 revisionSource: submissionMode === 'modification' ? revisionSource : null,
                 revisionBaseSubmissionId: revisionBaseSubmissionId,
+                lineageConfirmed: submissionMode === 'modification' && revisionSource === 'uploaded_baseline' ? uploadedBaselineLineageConfirmed : false,
                 revisionBaselineDocPath: submissionMode === 'modification' ? revisionBaselineDocPath : '',
                 revisionBaselineFileName: submissionMode === 'modification' ? revisionBaselineFileName : '',
                 baseApprovedMenuContent: submissionMode === 'modification' ? baseApprovedMenuContent : '',
@@ -8191,6 +8223,7 @@
                         updatedAt: draftLoadedUpdatedAt,
                         menuContentHtml: getDraftMenuContentHtml(),
                         formState: getDraftFormState(),
+                        lastEditedBy: document.getElementById('submitterName')?.value || '',
                     }),
                 });
                 const data = await response.json().catch(() => ({}));

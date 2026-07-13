@@ -245,6 +245,23 @@ function createSubmissionWorkflowHandlers(deps) {
             if (safeSubmissionMode === 'modification' && !safeRevisionBaseSubmissionId && !safeRevisionBaselineDocPath) {
                 return res.status(400).json({ error: 'Modification flow requires a prior approved submission or uploaded approved baseline document' });
             }
+            if (safeSubmissionMode === 'modification' && safeRevisionSource === 'uploaded_baseline' && safeRevisionBaseSubmissionId) {
+                const lineageConfirmed = req.body?.lineageConfirmed === true || req.body?.lineageConfirmed === 'true';
+                if (!lineageConfirmed) {
+                    return res.status(400).json({ error: 'Uploaded-baseline lineage must be explicitly confirmed' });
+                }
+                try {
+                    const baselineResponse = await deps.axios.get(`${deps.DB_SERVICE_URL}/submissions/${encodeURIComponent(safeRevisionBaseSubmissionId)}`);
+                    const baseline = baselineResponse.data || {};
+                    const approved = ['approved', 'approved_override'].includes(`${baseline.status || ''}`.toLowerCase());
+                    if (!approved || `${baseline.property || ''}`.trim().toLowerCase() !== normalizedProperty.toLowerCase()) {
+                        return res.status(400).json({ error: 'Confirmed baseline must be an approved submission for the same property' });
+                    }
+                }
+                catch (error) {
+                    return res.status(400).json({ error: 'Confirmed baseline could not be validated' });
+                }
+            }
             const printSizeForDocx = wantsPrint
                 ? (printRegion === 'NON_US' ? (printSize || 'N/A') : `${printWidth || width || ''} x ${printHeight || height || ''} inches`)
                 : '';

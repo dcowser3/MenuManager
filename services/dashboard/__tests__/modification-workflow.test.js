@@ -135,6 +135,8 @@ describe('Dashboard Modification Workflow (local, mocked externals)', () => {
     const attemptLogHandler = getRouteHandler('post', '/api/form/attempt-log');
     const submissionSearchHandler = getRouteHandler('get', '/api/submissions/search');
     const createDraftHandler = getRouteHandler('post', '/api/drafts');
+    const listDraftHandler = getRouteHandler('get', '/api/drafts');
+    const discardDraftHandler = getRouteHandler('post', '/api/drafts/:token/discard');
     const saveDraftHandler = getRouteHandler('put', '/api/drafts/:token');
     const newMenuDocUploadHandler = getRouteHandler('post', '/api/form/menu-doc-upload');
     const baselineUploadPath = path.join(process.cwd(), 'tmp', 'uploads', 'legacy-approved.docx');
@@ -161,6 +163,10 @@ describe('Dashboard Modification Workflow (local, mocked externals)', () => {
 
         mockedAxios.post = jest.fn(async (url, payload) => {
             const urlStr = String(url);
+
+            if (urlStr.includes('/draft-sessions/') && urlStr.endsWith('/discard')) {
+                return { data: { id: 'draft-123', token: 'share-token', status: 'discarded' } };
+            }
 
             if (urlStr.includes('/submissions')) {
                 return { data: { id: payload.id || 'form-test-id' } };
@@ -681,6 +687,16 @@ describe('Dashboard Modification Workflow (local, mocked externals)', () => {
             expect.stringContaining('/draft-sessions/share-token'),
             expect.objectContaining({ menuContentHtml: '<p>Updated</p>' })
         );
+    });
+
+    test('lists and discards drafts through dashboard proxy routes', async () => {
+        const listed = await invokeJsonHandler(listDraftHandler, {}, { query: { status: 'active' } });
+        expect(listed.status).toBe(200);
+        expect(mockedAxios.get).toHaveBeenCalledWith(expect.stringContaining('/draft-sessions'), expect.objectContaining({ params: { status: 'active' } }));
+
+        const discarded = await invokeJsonHandler(discardDraftHandler, {}, { params: { token: 'share-token' }, headers: { accept: 'application/json' } });
+        expect(discarded.status).toBe(200);
+        expect(mockedAxios.post).toHaveBeenCalledWith(expect.stringContaining('/draft-sessions/share-token/discard'));
     });
 
     test('returns uploaded-baseline modification submit response before Tier 2 AI review completes', async () => {

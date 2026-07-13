@@ -51,7 +51,7 @@ import {
 import { createApprovalWorkflowHandlers } from './lib/approval-workflow';
 import { createDesignApprovalWorkflowHandlers } from './lib/design-approval-workflow';
 import { getApprovedDishBrowseData, listApprovedDishBrands } from './lib/approved-dishes';
-import { getApprovedMenuDownload, listApprovedMenus } from './lib/approved-menus';
+import { enrichApprovedMenuList, getApprovedMenuDownload, listApprovedMenus } from './lib/approved-menus';
 import {
     buildClickUpTaskPayloadFromStoredSubmission,
     describeServiceError,
@@ -1005,6 +1005,22 @@ async function handleCleanDocxMenuUpload(
         };
 
         if (options.mode === 'baseline') {
+            let lineageSuggestion = null;
+            const extractedProperty = `${extracted.extractedProject?.property || ''}`.trim();
+            if (extractedProperty && extracted.approvedMenuContent) {
+                try {
+                    const matchResponse = await internalApi.post(`${DB_SERVICE_URL}/submissions/baseline-match`, {
+                        extractedText: extracted.approvedMenuContent,
+                        property: extractedProperty,
+                        servicePeriod: '',
+                    });
+                    lineageSuggestion = matchResponse.data?.match || null;
+                } catch (matchError: any) {
+                    // Upload extraction remains usable if the optional suggestion
+                    // lookup is unavailable; never infer a lineage link locally.
+                    console.warn('Could not find uploaded baseline lineage suggestion:', matchError?.message || matchError);
+                }
+            }
             return res.json({
                 ...sharedPayload,
                 baselineDocPath: req.file.path,
@@ -1012,6 +1028,7 @@ async function handleCleanDocxMenuUpload(
                 approvedMenuContent: extracted.approvedMenuContent,
                 approvedMenuContentRaw: extracted.approvedMenuContentRaw,
                 approvedMenuContentHtml: extracted.approvedMenuContentHtml,
+                lineageSuggestion,
             });
         }
 
@@ -1171,10 +1188,20 @@ app.get('/approved-menus', async (req, res) => {
         const q = sanitizePlainTextInput(req.query.q, { maxLength: 120 }).trim();
         const restaurant = sanitizePlainTextInput(req.query.restaurant, { maxLength: 120 }).trim();
         const servicePeriod = sanitizePlainTextInput(req.query.servicePeriod, { maxLength: 80 }).trim();
-        const hasSearch = !!(q || restaurant || servicePeriod);
-        const approvedMenus = hasSearch
+        const submissionId = sanitizePlainTextInput(req.query.submissionId, { maxLength: 120 }).trim();
+        const hasSearch = !!(q || restaurant || servicePeriod || submissionId);
+        let approvedMenus = hasSearch
             ? await listApprovedMenus(getRepoRoot(), { query: q, restaurant, servicePeriod }, 150)
             : [];
+        if (submissionId) approvedMenus = approvedMenus.filter((menu) => menu.id === submissionId);
+        if (approvedMenus.length) {
+            const ids = approvedMenus.map((menu) => menu.id).filter(Boolean).join(',');
+            const [draftResponse, lineageResponse] = await Promise.all([
+                internalApi.get(`${DB_SERVICE_URL}/draft-sessions`, { params: { status: 'active', baseSubmissionIds: ids } }),
+                internalApi.get(`${DB_SERVICE_URL}/submissions/lineage-children`, { params: { ids } }),
+            ]);
+            approvedMenus = enrichApprovedMenuList(approvedMenus, draftResponse.data, lineageResponse.data);
+        }
 
         const propertyCatalog = buildFallbackPropertyCatalog()
             .filter((record) => record.is_active !== false)
@@ -1187,6 +1214,7 @@ app.get('/approved-menus', async (req, res) => {
             searchQuery: q,
             restaurantQuery: restaurant,
             servicePeriodQuery: servicePeriod,
+            submissionId,
             propertyCatalog,
         });
     } catch (error: any) {
@@ -1194,6 +1222,23 @@ app.get('/approved-menus', async (req, res) => {
         res.status(500).render('error', {
             message: 'Failed to load approved menus',
         });
+    }
+});
+
+app.get('/drafts', async (_req, res) => {
+    try {
+        const [activeResponse, recentResponse] = await Promise.all([
+            internalApi.get(`${DB_SERVICE_URL}/draft-sessions`, { params: { status: 'active' } }),
+            internalApi.get(`${DB_SERVICE_URL}/draft-sessions`, { params: { status: 'submitted,discarded', sinceDays: 7 } }),
+        ]);
+        res.render('drafts', {
+            title: 'Menu Drafts',
+            activeDrafts: Array.isArray(activeResponse.data) ? activeResponse.data : [],
+            recentDrafts: Array.isArray(recentResponse.data) ? recentResponse.data : [],
+        });
+    } catch (error: any) {
+        console.error('Error loading drafts:', error.response?.data || error.message);
+        res.status(500).render('error', { message: 'Failed to load drafts' });
     }
 });
 
@@ -2712,9 +2757,10 @@ app.post('/api/drafts', async (req, res) => {
             return res.status(400).json({ error: 'baseSubmissionId is required' });
         }
 
-        const dbResponse = await internalApi.post(`${DB_SERVICE_URL}/draft-sessions`, {
-            baseSubmissionId,
-        });
+        const replaceToken = sanitizePlainTextInput(req.body?.replaceToken || req.body?.replace_token, { maxLength: 160 }).trim();
+        const draftRequest: Record<string, string> = { baseSubmissionId };
+        if (replaceToken) draftRequest.replaceToken = replaceToken;
+        const dbResponse = await internalApi.post(`${DB_SERVICE_URL}/draft-sessions`, draftRequest);
         const draft = dbResponse.data || {};
         const draftToken = `${draft.token || ''}`.trim();
         if (!draftToken) {
@@ -2723,7 +2769,7 @@ app.post('/api/drafts', async (req, res) => {
 
         const wantsJson = `${req.get('accept') || ''}`.includes('application/json') || req.xhr;
         if (wantsJson) {
-            return res.status(201).json(draft);
+            return res.status(dbResponse.status === 200 ? 200 : 201).json(draft);
         }
         return res.redirect(303, `/form?draft=${encodeURIComponent(draftToken)}`);
     } catch (error: any) {
@@ -2736,6 +2782,28 @@ app.post('/api/drafts', async (req, res) => {
         return res.status(status).render('error', {
             message: payload.error || 'Failed to create draft session',
         });
+    }
+});
+
+app.get('/api/drafts', async (req, res) => {
+    try {
+        const dbResponse = await internalApi.get(`${DB_SERVICE_URL}/draft-sessions`, { params: req.query || {} });
+        return res.json(dbResponse.data);
+    } catch (error: any) {
+        return res.status(error?.response?.status || 500).json(error?.response?.data || { error: 'Failed to list drafts' });
+    }
+});
+
+app.post('/api/drafts/:token/discard', async (req, res) => {
+    try {
+        const token = sanitizePlainTextInput(req.params.token, { maxLength: 160 }).trim();
+        if (!token) return res.status(400).json({ error: 'draft token is required' });
+        const dbResponse = await internalApi.post(`${DB_SERVICE_URL}/draft-sessions/${encodeURIComponent(token)}/discard`);
+        const wantsJson = `${req.get('accept') || ''}`.includes('application/json') || req.xhr;
+        if (wantsJson) return res.json(dbResponse.data);
+        return res.redirect(303, '/drafts');
+    } catch (error: any) {
+        return res.status(error?.response?.status || 500).json(error?.response?.data || { error: 'Failed to discard draft' });
     }
 });
 

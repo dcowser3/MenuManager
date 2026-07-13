@@ -16,6 +16,8 @@ export type ApprovedMenuListItem = {
     servicePeriod: string;
     submitterName: string;
     status: string;
+    activeDraft: { token: string; lastSavedAt: string; lastEditedBy: string } | null;
+    supersededBy: { id: string; projectName: string; approvedAt: string } | null;
 };
 
 export type ApprovedMenuDownloadRecord = {
@@ -125,6 +127,29 @@ function buildApprovedMenuList(
             servicePeriod: `${row.service_period || ''}`.trim(),
             submitterName: `${row.submitter_name || ''}`.trim(),
             status: `${row.status || ''}`.trim(),
+            activeDraft: null,
+            supersededBy: null,
+        };
+    });
+}
+
+/** Attach DB-service batch lookup results without changing how menus are fetched. */
+export function enrichApprovedMenuList(
+    menus: ApprovedMenuListItem[],
+    drafts: any[] = [],
+    lineage: Record<string, any> = {}
+): ApprovedMenuListItem[] {
+    const draftByBase = new Map((drafts || []).map((draft) => [`${draft.base_submission_id || draft.baseline?.id || ''}`, draft]));
+    return menus.map((menu) => {
+        const draft = draftByBase.get(menu.id);
+        return {
+            ...menu,
+            activeDraft: draft ? {
+                token: `${draft.token || ''}`,
+                lastSavedAt: `${draft.updated_at || ''}`,
+                lastEditedBy: `${draft.last_edited_by || ''}`,
+            } : null,
+            supersededBy: lineage[menu.id]?.supersededBy || null,
         };
     });
 }

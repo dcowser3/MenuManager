@@ -54,6 +54,17 @@ describe('approved menus view', () => {
         const html = renderApprovedMenus({ hasSearch: false, approvedMenus: [] });
         expect(html).toContain('Find the latest approved starting point');
     });
+    test('renders resume and superseded states while preserving downloads', () => {
+        const html = renderApprovedMenus({
+            hasSearch: true,
+            approvedMenus: [{ ...sampleMenu, activeDraft: { token: 'draft-token', lastSavedAt: '2026-07-12T00:00:00Z', lastEditedBy: 'Chef Mina' }, supersededBy: { id: 'form-tip', projectName: 'Spring Dinner v2', approvedAt: '2026-07-11T00:00:00Z' } }],
+        });
+        expect(html).toContain('Resume Editing');
+        expect(html).toContain('Discard and start over');
+        expect(html).toContain('A newer version was approved');
+        expect(html).toContain('/download/approved-clean/form-abc123');
+        expect(html).toContain('/download/approved/form-abc123');
+    });
     test('renders no results message when search yields nothing', () => {
         const html = renderApprovedMenus({ hasSearch: true, approvedMenus: [] });
         expect(html).toContain('No approved menus found');

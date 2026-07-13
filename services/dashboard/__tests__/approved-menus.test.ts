@@ -18,6 +18,7 @@ jest.mock('fs', () => {
 import { promises as fs } from 'fs';
 import {
     getApprovedMenuDownload,
+    enrichApprovedMenuList,
     listApprovedMenus,
 } from '../lib/approved-menus';
 
@@ -155,5 +156,16 @@ describe('approved menu helpers', () => {
     test('ignores non-form or non-approved submissions for download', async () => {
         await expect(getApprovedMenuDownload(repoRoot, 'form-201')).resolves.toBeNull();
         await expect(getApprovedMenuDownload(repoRoot, 'design-1')).resolves.toBeNull();
+    });
+
+    test('enriches cards from batch draft and lineage responses', () => {
+        const menus: any[] = [{ id: 'form-200', projectName: 'Spring Dinner' }];
+        const enriched = enrichApprovedMenuList(menus as any, [{
+            base_submission_id: 'form-200', token: 'draft-token', updated_at: '2026-07-13T12:00:00Z', last_edited_by: 'Chef Mina',
+        }], {
+            'form-200': { supersededBy: { id: 'form-201', projectName: 'Spring Dinner v2', approvedAt: '2026-07-12T00:00:00Z' } },
+        });
+        expect(enriched[0].activeDraft).toEqual({ token: 'draft-token', lastSavedAt: '2026-07-13T12:00:00Z', lastEditedBy: 'Chef Mina' });
+        expect(enriched[0].supersededBy).toEqual(expect.objectContaining({ id: 'form-201' }));
     });
 });

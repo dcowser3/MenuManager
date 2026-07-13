@@ -38,9 +38,9 @@ function getRouteHandler(method: string, routePath: string) {
     return layer.route.stack[layer.route.stack.length - 1].handle;
 }
 
-function invokeJsonHandler(handler: any, { body = {}, params = {} } = {}) {
+function invokeJsonHandler(handler: any, { body = {}, params = {}, query = {} } = {}) {
     return new Promise<{ status: number; body: any }>((resolve, reject) => {
-        const req: any = { body, params };
+        const req: any = { body, params, query };
         const res: any = {
             statusCode: 200,
             status(code: number) {
@@ -62,6 +62,10 @@ describe('draft sessions', () => {
     const getHandler = getRouteHandler('get', '/draft-sessions/:token');
     const saveHandler = getRouteHandler('put', '/draft-sessions/:token');
     const submitHandler = getRouteHandler('post', '/draft-sessions/:token/submit');
+    const discardHandler = getRouteHandler('post', '/draft-sessions/:token/discard');
+    const listHandler = getRouteHandler('get', '/draft-sessions');
+    const childrenHandler = getRouteHandler('get', '/submissions/lineage-children');
+    const baselineMatchHandler = getRouteHandler('post', '/submissions/baseline-match');
     let drafts: Record<string, any>;
 
     const submissions = {
@@ -85,6 +89,9 @@ describe('draft sessions', () => {
 
     beforeEach(() => {
         drafts = {};
+        delete (submissions as any)['form-approved-child'];
+        delete (submissions as any)['form-approved-child-newer'];
+        delete (submissions as any)['unrelated-approved'];
         (isSupabaseConfigured as jest.Mock).mockReturnValue(false);
         (fs.promises.writeFile as jest.Mock).mockClear();
         (fs.promises.readFile as jest.Mock).mockImplementation(async (target: string) => {
@@ -195,5 +202,97 @@ describe('draft sessions', () => {
         expect(response.status).toBe(200);
         expect(response.body.status).toBe('expired');
         expect(drafts['draft-old'].status).toBe('expired');
+    });
+
+    test('returns the existing active draft instead of creating a second one', async () => {
+        const first = await invokeJsonHandler(createHandler, { body: { baseSubmissionId: 'form-approved' } });
+        const second = await invokeJsonHandler(createHandler, { body: { baseSubmissionId: 'form-approved' } });
+        expect(first.status).toBe(201);
+        expect(second.status).toBe(200);
+        expect(second.body.resumed).toBe(true);
+        expect(second.body.token).toBe(first.body.token);
+        expect(Object.values(drafts).filter((draft: any) => draft.status === 'active')).toHaveLength(1);
+    });
+
+    test('expires an idle active draft and creates a new one', async () => {
+        drafts['old-draft'] = {
+            id: 'old-draft', token: 'old-token', base_submission_id: 'form-approved', menu_content_html: '', form_state: {},
+            status: 'active', created_at: '2020-01-01T00:00:00.000Z', updated_at: '2020-01-01T00:00:00.000Z',
+        };
+        const response = await invokeJsonHandler(createHandler, { body: { baseSubmissionId: 'form-approved' } });
+        expect(response.status).toBe(201);
+        expect(response.body.token).not.toBe('old-token');
+        expect(drafts['old-draft'].status).toBe('expired');
+    });
+
+    test('discard is idempotent and replace discards before creating a fresh active draft', async () => {
+        const first = await invokeJsonHandler(createHandler, { body: { baseSubmissionId: 'form-approved' } });
+        const replacement = await invokeJsonHandler(createHandler, {
+            body: { baseSubmissionId: 'form-approved', replaceToken: first.body.token },
+        });
+        expect(replacement.status).toBe(201);
+        expect(replacement.body.token).not.toBe(first.body.token);
+        expect(Object.values(drafts).filter((draft: any) => draft.status === 'active')).toHaveLength(1);
+        expect(Object.values(drafts).find((draft: any) => draft.token === first.body.token)).toEqual(expect.objectContaining({ status: 'discarded' }));
+
+        const discarded = await invokeJsonHandler(discardHandler, { params: { token: first.body.token } });
+        expect(discarded.status).toBe(200);
+        expect(discarded.body.status).toBe('discarded');
+    });
+
+    test('rejects an invalid replacement token and applies discard rules', async () => {
+        await invokeJsonHandler(createHandler, { body: { baseSubmissionId: 'form-approved' } });
+        const mismatch = await invokeJsonHandler(createHandler, { body: { baseSubmissionId: 'form-approved', replaceToken: 'wrong' } });
+        expect(mismatch.status).toBe(400);
+        const unknown = await invokeJsonHandler(discardHandler, { params: { token: 'none' } });
+        expect(unknown.status).toBe(404);
+
+        drafts['submitted-draft'] = { id: 'submitted-draft', token: 'submitted-token', base_submission_id: 'form-approved', form_state: {}, status: 'submitted', created_at: '2026-07-01T00:00:00.000Z', updated_at: '2026-07-01T00:00:00.000Z' };
+        const submitted = await invokeJsonHandler(discardHandler, { params: { token: 'submitted-token' } });
+        expect(submitted.status).toBe(409);
+    });
+
+    test('lists active drafts by baseline batch and retains last editor', async () => {
+        const created = await invokeJsonHandler(createHandler, { body: { baseSubmissionId: 'form-approved' } });
+        await invokeJsonHandler(saveHandler, { params: { token: created.body.token }, body: {
+            updatedAt: created.body.updated_at, menuContentHtml: '<p>Edited</p>', formState: {}, lastEditedBy: 'Chef Mina',
+        } });
+        const listed = await invokeJsonHandler(listHandler, { query: { status: 'active', baseSubmissionIds: 'form-approved' } });
+        expect(listed.status).toBe(200);
+        expect(listed.body).toHaveLength(1);
+        expect(listed.body[0]).toEqual(expect.objectContaining({ last_edited_by: 'Chef Mina', token: created.body.token }));
+        expect(listed.body[0].baseline).toEqual(expect.objectContaining({ property: 'Test Property', projectName: 'Spring Dinner' }));
+    });
+
+    test('gates only an approved lineage child and reports the latest child as the tip', async () => {
+        (submissions as any)['form-approved-child'] = {
+            ...submissions['form-approved'], id: 'form-approved-child', status: 'approved',
+            revision_base_submission_id: 'form-approved', reviewed_at: '2026-07-10T00:00:00.000Z', project_name: 'Spring Dinner v2',
+        };
+        const children = await invokeJsonHandler(childrenHandler, { query: { ids: 'form-approved' } });
+        expect(children.body['form-approved'].supersededBy).toEqual(expect.objectContaining({ id: 'form-approved-child' }));
+        const blocked = await invokeJsonHandler(createHandler, { body: { baseSubmissionId: 'form-approved' } });
+        expect(blocked.status).toBe(409);
+        expect(blocked.body.supersededBy.id).toBe('form-approved-child');
+    });
+
+    test('does not gate an unrelated same-service menu with unknown lineage', async () => {
+        (submissions as any)['unrelated-approved'] = {
+            ...submissions['form-approved'], id: 'unrelated-approved', project_name: 'Holidays & Events',
+            reviewed_at: '2026-07-12T00:00:00.000Z', revision_base_submission_id: null,
+        };
+        const response = await invokeJsonHandler(createHandler, { body: { baseSubmissionId: 'form-approved' } });
+        expect(response.status).toBe(201);
+    });
+
+    test('matches only an approved baseline from the same property', async () => {
+        const match = await invokeJsonHandler(baselineMatchHandler, { body: {
+            extractedText: 'TACOS\nGuacamole - $12', property: 'Test Property', servicePeriod: 'Dinner',
+        } });
+        expect(match.body.match).toEqual(expect.objectContaining({ id: 'form-approved' }));
+        const none = await invokeJsonHandler(baselineMatchHandler, { body: {
+            extractedText: 'Entirely different menu', property: 'Test Property', servicePeriod: 'Dinner',
+        } });
+        expect(none.body.match).toBeNull();
     });
 });

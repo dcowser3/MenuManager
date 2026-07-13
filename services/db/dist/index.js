@@ -33,6 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.findApprovedChildren = findApprovedChildren;
 const express = require("express");
 const crypto = require("crypto");
 const fs_1 = require("fs");
@@ -590,7 +591,28 @@ function normalizeDraftSession(row) {
         created_at: `${row?.created_at || ''}`,
         updated_at: `${row?.updated_at || ''}`,
         submitted_submission_id: row?.submitted_submission_id || null,
+        last_edited_by: `${row?.last_edited_by || ''}`,
     };
+}
+// JSON storage has no database constraints. Serialize create/replace work per
+// baseline so its behavior matches Supabase's partial unique index.
+const activeDraftMutations = new Map();
+async function withActiveDraftMutation(baseSubmissionId, work) {
+    const key = `${baseSubmissionId || ''}`.trim();
+    const previous = activeDraftMutations.get(key) || Promise.resolve();
+    let release;
+    const current = new Promise((resolve) => { release = resolve; });
+    const queued = previous.then(() => current);
+    activeDraftMutations.set(key, queued);
+    await previous;
+    try {
+        return await work();
+    }
+    finally {
+        release();
+        if (activeDraftMutations.get(key) === queued)
+            activeDraftMutations.delete(key);
+    }
 }
 async function readLocalDraftSessions() {
     try {
@@ -639,6 +661,7 @@ async function saveDraftSession(draft) {
             created_at: normalized.created_at,
             updated_at: normalized.updated_at,
             submitted_submission_id: normalized.submitted_submission_id || null,
+            last_edited_by: normalized.last_edited_by || null,
         };
         const { error } = await supabase
             .from(DRAFT_SESSIONS_TABLE)
@@ -651,6 +674,63 @@ async function saveDraftSession(draft) {
     drafts[normalized.id] = normalized;
     await writeLocalDraftSessions(drafts);
     return normalized;
+}
+async function findActiveDraftForBase(baseSubmissionId) {
+    const normalizedBaseId = `${baseSubmissionId || ''}`.trim();
+    if (!normalizedBaseId)
+        return null;
+    if ((0, supabase_client_1.isSupabaseConfigured)()) {
+        const { data, error } = await (0, supabase_client_1.getSupabaseClient)()
+            .from(DRAFT_SESSIONS_TABLE)
+            .select('*')
+            .eq('base_submission_id', normalizedBaseId)
+            .eq('status', 'active')
+            .order('updated_at', { ascending: false })
+            .limit(1);
+        if (error)
+            throw new Error(`Failed to find active draft: ${error.message}`);
+        if (data?.[0])
+            return normalizeDraftSession(data[0]);
+    }
+    const drafts = await readLocalDraftSessions();
+    const active = Object.values(drafts)
+        .map(normalizeDraftSession)
+        .filter((draft) => draft.base_submission_id === normalizedBaseId && draft.status === 'active')
+        .sort((a, b) => Date.parse(b.updated_at || '') - Date.parse(a.updated_at || ''))[0];
+    return active || null;
+}
+async function listDraftSessions(options = {}) {
+    const statuses = (options.statuses || []).map((status) => status.trim()).filter(Boolean);
+    const baseIds = (options.baseSubmissionIds || []).map((id) => id.trim()).filter(Boolean);
+    let rows = [];
+    if ((0, supabase_client_1.isSupabaseConfigured)()) {
+        let query = (0, supabase_client_1.getSupabaseClient)().from(DRAFT_SESSIONS_TABLE).select('*').order('updated_at', { ascending: false });
+        if (statuses.length)
+            query = query.in('status', statuses);
+        if (baseIds.length)
+            query = query.in('base_submission_id', baseIds);
+        if (options.since)
+            query = query.gte('updated_at', new Date(options.since).toISOString());
+        const { data, error } = await query;
+        if (error)
+            throw new Error(`Failed to list draft sessions: ${error.message}`);
+        rows = data || [];
+    }
+    else {
+        rows = Object.values(await readLocalDraftSessions());
+    }
+    const result = [];
+    for (const row of rows) {
+        const draft = await expireDraftIfNeeded(normalizeDraftSession(row));
+        if (statuses.length && !statuses.includes(draft.status))
+            continue;
+        if (baseIds.length && !baseIds.includes(draft.base_submission_id))
+            continue;
+        if (options.since && Date.parse(draft.updated_at || '') < options.since)
+            continue;
+        result.push(draft);
+    }
+    return result.sort((a, b) => Date.parse(b.updated_at || '') - Date.parse(a.updated_at || ''));
 }
 async function expireDraftIfNeeded(draft) {
     if (!isDraftExpired(draft))
@@ -873,6 +953,109 @@ async function findLatestApprovedByPropertyService(property, servicePeriod) {
         .filter(isApprovedBaselineSource)
         .filter((submission) => normalizeApprovedLookupValue(submission.property) === propertyKey)
         .filter((submission) => normalizeApprovedLookupValue(getSubmissionServicePeriod(submission)) === serviceKey)
+        .sort((a, b) => getApprovedTimestamp(b) - getApprovedTimestamp(a))[0] || null;
+}
+async function getSubmissionRecordsByIds(ids) {
+    const normalizedIds = [...new Set(ids.map((id) => `${id || ''}`.trim()).filter(Boolean))];
+    if (!normalizedIds.length)
+        return [];
+    if ((0, supabase_client_1.isSupabaseConfigured)()) {
+        const uuidIds = normalizedIds.filter((id) => UUID_REGEX.test(id));
+        const legacyIds = normalizedIds.filter((id) => !UUID_REGEX.test(id));
+        const rows = [];
+        if (uuidIds.length) {
+            const { data, error } = await (0, supabase_client_1.getSupabaseClient)().from(SUBMISSIONS_TABLE).select('*').in('id', uuidIds);
+            if (error)
+                throw new Error(`Failed to fetch baselines: ${error.message}`);
+            rows.push(...(data || []));
+        }
+        if (legacyIds.length) {
+            const { data, error } = await (0, supabase_client_1.getSupabaseClient)().from(SUBMISSIONS_TABLE).select('*').in('legacy_id', legacyIds);
+            if (error)
+                throw new Error(`Failed to fetch baselines: ${error.message}`);
+            rows.push(...(data || []));
+        }
+        return rows;
+    }
+    const submissions = JSON.parse(await fs_1.promises.readFile(SUBMISSIONS_DB, 'utf-8'));
+    return Object.values(submissions).filter((row) => normalizedIds.includes(getPublicSubmissionId(row)));
+}
+async function findApprovedChildren(submissionIds) {
+    const ids = [...new Set(submissionIds.map((id) => `${id || ''}`.trim()).filter(Boolean))];
+    const childrenByParent = Object.fromEntries(ids.map((id) => [id, []]));
+    if (!ids.length)
+        return childrenByParent;
+    let candidates = [];
+    if ((0, supabase_client_1.isSupabaseConfigured)()) {
+        const { data, error } = await (0, supabase_client_1.getSupabaseClient)()
+            .from(SUBMISSIONS_TABLE)
+            .select('*')
+            .in('revision_base_submission_id', ids)
+            .in('status', APPROVED_SUBMISSION_STATUSES);
+        if (error)
+            throw new Error(`Failed to find approved children: ${error.message}`);
+        candidates = data || [];
+    }
+    else {
+        candidates = Object.values(JSON.parse(await fs_1.promises.readFile(SUBMISSIONS_DB, 'utf-8')));
+    }
+    for (const candidate of candidates) {
+        const parentId = `${candidate?.revision_base_submission_id || ''}`.trim();
+        if (!childrenByParent[parentId])
+            continue;
+        if (!APPROVED_SUBMISSION_STATUSES.includes(`${candidate?.status || ''}`.trim().toLowerCase()))
+            continue;
+        childrenByParent[parentId].push(candidate);
+    }
+    for (const children of Object.values(childrenByParent)) {
+        children.sort((a, b) => getApprovedTimestamp(b) - getApprovedTimestamp(a));
+    }
+    return childrenByParent;
+}
+function toSupersededBy(child) {
+    return {
+        id: getPublicSubmissionId(child),
+        projectName: child?.project_name || '',
+        approvedAt: child?.reviewed_at || child?.updated_at || child?.created_at || '',
+    };
+}
+function normalizeBaselineMatchLines(value) {
+    return `${value || ''}`
+        .split(/\r?\n/)
+        .map((line) => line.trim().toLowerCase().replace(/\s+/g, ' '))
+        .filter(Boolean);
+}
+function isNearExactBaselineMatch(candidate, extractedText) {
+    const candidateLines = new Set(normalizeBaselineMatchLines(candidate));
+    const extractedLines = new Set(normalizeBaselineMatchLines(extractedText));
+    if (!candidateLines.size || !extractedLines.size)
+        return false;
+    const intersection = [...candidateLines].filter((line) => extractedLines.has(line)).length;
+    return intersection / candidateLines.size >= 0.95 && intersection / extractedLines.size >= 0.95;
+}
+async function findBaselineMatch(extractedText, property, servicePeriod) {
+    const propertyKey = normalizeApprovedLookupValue(property);
+    const serviceKey = normalizeApprovedLookupValue(servicePeriod);
+    if (!propertyKey || !normalizeBaselineMatchLines(extractedText).length)
+        return null;
+    let rows = [];
+    if ((0, supabase_client_1.isSupabaseConfigured)()) {
+        let query = (0, supabase_client_1.getSupabaseClient)().from(SUBMISSIONS_TABLE).select('*').in('status', APPROVED_SUBMISSION_STATUSES).ilike('property', property);
+        if (serviceKey)
+            query = query.ilike('service_period', servicePeriod || '');
+        const { data, error } = await query;
+        if (error)
+            throw new Error(`Failed to match approved baseline: ${error.message}`);
+        rows = data || [];
+    }
+    else {
+        rows = Object.values(JSON.parse(await fs_1.promises.readFile(SUBMISSIONS_DB, 'utf-8')));
+    }
+    return rows
+        .filter((row) => APPROVED_SUBMISSION_STATUSES.includes(`${row.status || ''}`.trim().toLowerCase()))
+        .filter((row) => normalizeApprovedLookupValue(row.property) === propertyKey)
+        .filter((row) => !serviceKey || normalizeApprovedLookupValue(getSubmissionServicePeriod(row)) === serviceKey)
+        .filter((row) => isNearExactBaselineMatch(row.approved_menu_content, extractedText))
         .sort((a, b) => getApprovedTimestamp(b) - getApprovedTimestamp(a))[0] || null;
 }
 async function findLatestApprovedByProjectProperty(projectName, property) {
@@ -1100,26 +1283,101 @@ app.post('/draft-sessions', async (req, res) => {
         const servicePeriod = getSubmissionServicePeriod(submission);
         const latest = await findLatestApprovedByPropertyService(`${submission.property || ''}`, servicePeriod);
         const baseline = mapApprovedSubmissionForClient(submission, latest || submission);
-        const now = new Date().toISOString();
-        const draft = await saveDraftSession({
-            id: crypto.randomUUID(),
-            token: crypto.randomBytes(32).toString('base64url'),
-            base_submission_id: baseline.id || baseSubmissionId,
-            menu_content_html: '',
-            form_state: {
-                previewCollapsed: true,
-                aiCheckHasRun: false,
-            },
-            status: 'active',
-            created_at: now,
-            updated_at: now,
-            submitted_submission_id: null,
+        const baseId = baseline.id || baseSubmissionId;
+        const approvedChildren = await findApprovedChildren([baseId]);
+        const children = approvedChildren[baseId] || [];
+        if (children.length) {
+            return res.status(409).json({
+                error: 'This menu has been superseded by an approved revision.',
+                supersededBy: toSupersededBy(children[0]),
+            });
+        }
+        const replaceToken = `${req.body?.replaceToken || req.body?.replace_token || ''}`.trim();
+        const result = await withActiveDraftMutation(baseId, async () => {
+            const existing = await findActiveDraftForBase(baseId);
+            const current = existing ? await expireDraftIfNeeded(existing) : null;
+            if (current?.status === 'active') {
+                if (!replaceToken)
+                    return { draft: current, resumed: true };
+                if (current.token !== replaceToken) {
+                    const error = new Error('replaceToken does not match the active draft for this menu');
+                    error.statusCode = 400;
+                    throw error;
+                }
+                await saveDraftSession({ ...current, status: 'discarded', updated_at: new Date().toISOString() });
+            }
+            else if (replaceToken) {
+                const error = new Error('replaceToken does not match the active draft for this menu');
+                error.statusCode = 400;
+                throw error;
+            }
+            const now = new Date().toISOString();
+            let draft;
+            try {
+                draft = await saveDraftSession({
+                    id: crypto.randomUUID(), token: crypto.randomBytes(32).toString('base64url'),
+                    base_submission_id: baseId, menu_content_html: '',
+                    form_state: { previewCollapsed: true, aiCheckHasRun: false }, status: 'active',
+                    created_at: now, updated_at: now, submitted_submission_id: null, last_edited_by: '',
+                });
+            }
+            catch (error) {
+                // A second service process may win the partial-index race. Treat
+                // PostgreSQL's unique violation as a resume, never as a 500.
+                if ((0, supabase_client_1.isSupabaseConfigured)() && (error?.message || '').match(/unique|duplicate|23505/i)) {
+                    const racedDraft = await findActiveDraftForBase(baseId);
+                    if (racedDraft)
+                        return { draft: racedDraft, resumed: true };
+                }
+                throw error;
+            }
+            return { draft, resumed: false };
         });
-        res.status(201).json(toDraftClientPayload(draft, baseline));
+        return res.status(result.resumed ? 200 : 201).json({
+            ...toDraftClientPayload(result.draft, baseline), resumed: result.resumed,
+        });
     }
     catch (error) {
         console.error('Error creating draft session:', error.message);
-        res.status(500).json({ error: 'Failed to create draft session' });
+        res.status(error.statusCode || 500).json({ error: error.statusCode ? error.message : 'Failed to create draft session' });
+    }
+});
+// Named list route must precede /draft-sessions/:token.
+app.get('/draft-sessions', async (req, res) => {
+    try {
+        const statuses = `${req.query.status || ''}`.split(',').map((value) => value.trim()).filter(Boolean);
+        const baseSubmissionIds = `${req.query.baseSubmissionIds || req.query.base_submission_ids || ''}`.split(',').map((value) => value.trim()).filter(Boolean);
+        const sinceDays = Number(req.query.sinceDays || 0);
+        const since = Number.isFinite(sinceDays) && sinceDays > 0 ? Date.now() - sinceDays * 86400000 : undefined;
+        const drafts = await listDraftSessions({ statuses, baseSubmissionIds, since });
+        const baselines = await getSubmissionRecordsByIds(drafts.map((draft) => draft.base_submission_id));
+        const baselineById = new Map(baselines.map((baseline) => [getPublicSubmissionId(baseline), baseline]));
+        return res.json(drafts.map((draft) => {
+            const baseline = baselineById.get(draft.base_submission_id);
+            return toDraftClientPayload(draft, baseline ? mapApprovedSubmissionForClient(baseline) : null);
+        }));
+    }
+    catch (error) {
+        console.error('Error listing draft sessions:', error.message);
+        return res.status(500).json({ error: 'Failed to list draft sessions' });
+    }
+});
+app.post('/draft-sessions/:token/discard', async (req, res) => {
+    try {
+        const draft = await loadDraftByToken(req.params.token);
+        if (!draft)
+            return res.status(404).json({ error: 'Draft session not found' });
+        const current = await expireDraftIfNeeded(draft);
+        if (current.status === 'submitted')
+            return res.status(409).json({ error: 'Submitted drafts cannot be discarded.', draft: current });
+        if (current.status === 'discarded' || current.status === 'expired')
+            return res.json(toDraftClientPayload(current, null));
+        const discarded = await withActiveDraftMutation(current.base_submission_id, async () => saveDraftSession({ ...current, status: 'discarded', updated_at: new Date().toISOString() }));
+        return res.json(toDraftClientPayload(discarded, null));
+    }
+    catch (error) {
+        console.error('Error discarding draft session:', error.message);
+        return res.status(500).json({ error: 'Failed to discard draft session' });
     }
 });
 app.get('/draft-sessions/:token', async (req, res) => {
@@ -1178,6 +1436,7 @@ app.put('/draft-sessions/:token', async (req, res) => {
                 ? req.body.formState
                 : (req.body?.form_state && typeof req.body.form_state === 'object' ? req.body.form_state : currentDraft.form_state),
             updated_at: new Date().toISOString(),
+            last_edited_by: `${req.body?.lastEditedBy || req.body?.last_edited_by || currentDraft.last_edited_by || ''}`.trim().slice(0, 160),
         });
         res.json(toDraftClientPayload(updated, null));
     }
@@ -1220,6 +1479,43 @@ app.post('/draft-sessions/:token/submit', async (req, res) => {
     catch (error) {
         console.error('Error locking submitted draft session:', error.message);
         res.status(500).json({ error: 'Failed to lock draft session' });
+    }
+});
+// Named submission routes must remain before /submissions/:id.
+app.get('/submissions/lineage-children', async (req, res) => {
+    try {
+        const ids = `${req.query.ids || req.query.submissionIds || ''}`.split(',').map((id) => id.trim()).filter(Boolean);
+        const childrenByParent = await findApprovedChildren(ids);
+        const payload = {};
+        for (const [parentId, children] of Object.entries(childrenByParent)) {
+            payload[parentId] = {
+                supersededBy: children.length ? toSupersededBy(children[0]) : null,
+                approvedChildren: children.map(toSupersededBy),
+            };
+        }
+        return res.json(payload);
+    }
+    catch (error) {
+        console.error('Error finding lineage children:', error.message);
+        return res.status(500).json({ error: 'Failed to find lineage children' });
+    }
+});
+app.post('/submissions/baseline-match', async (req, res) => {
+    try {
+        const extractedText = `${req.body?.extractedText || req.body?.extracted_text || ''}`;
+        const property = `${req.body?.property || ''}`.trim();
+        const servicePeriod = `${req.body?.servicePeriod || req.body?.service_period || ''}`.trim();
+        if (!extractedText.trim() || !property)
+            return res.status(400).json({ error: 'extractedText and property are required' });
+        const match = await findBaselineMatch(extractedText, property, servicePeriod);
+        return res.json({ match: match ? {
+                id: getPublicSubmissionId(match), projectName: match.project_name || '',
+                servicePeriod: getSubmissionServicePeriod(match), approvedAt: match.reviewed_at || match.updated_at || match.created_at || '',
+            } : null });
+    }
+    catch (error) {
+        console.error('Error matching uploaded baseline:', error.message);
+        return res.status(500).json({ error: 'Failed to match uploaded baseline' });
     }
 });
 // Endpoint to create a new submission
@@ -2613,7 +2909,7 @@ app.put('/prompt-proposals/:id', async (req, res) => {
 const CRITICAL_SUPABASE_SCHEMA = {
     correction_rules: ['applies_to_menu_type', 'prompt_cycle_id', 'consumed_at', 'submission_ids', 'example_original', 'example_corrected', 'inferred_from_guidance'],
     submissions: ['form_attempt_id', 'approved_menu_content'],
-    draft_sessions: ['token', 'base_submission_id', 'form_state', 'status', 'submitted_submission_id'],
+    draft_sessions: ['token', 'base_submission_id', 'form_state', 'status', 'submitted_submission_id', 'last_edited_by'],
     form_attempt_logs: ['draft_session_id'],
     basic_ai_check_audits: ['menu_content_raw', 'submission_id'],
     prompt_proposals: ['proposed_rules', 'eval_status', 'accepted_rules', 'source', 'llm_warnings', 'replay_evidence', 'unresolved_still_missed', 'coverage_claims', 'prompt_length', 'superseded_by_cycle_id', 'superseded_from_cycle_id', 'supersede_carried_correction_count', 'supersede_new_correction_count', 'disposition', 'correction_routing'],

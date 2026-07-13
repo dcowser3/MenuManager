@@ -4,6 +4,12 @@ Menu Manager is an AI-powered menu submission review and approval system. Chefs 
 
 This README is intentionally short. Detailed feature notes, runbooks, and design decisions live in `docs/` so agents and humans can load only the context they need.
 
+## Approved-menu revisions
+
+Starting an edit from an approved menu now resumes the existing active draft for that exact approved submission, rather than creating a competing draft. The Approved Menus page shows in-progress drafts with Resume and Discard-and-start-over actions, while `/drafts` provides a shared list of active and recently closed drafts.
+
+After a revision is approved, only a known `revision_base_submission_id` lineage relationship supersedes its parent; unrelated menus in the same property and service period remain editable. When a prior approved DOCX is uploaded as a baseline, the form may suggest a matching approved menu, but it records a lineage link only if the user explicitly confirms it.
+
 ## Start Here
 
 | Need | Read |

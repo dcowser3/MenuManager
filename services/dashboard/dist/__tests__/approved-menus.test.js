@@ -138,4 +138,14 @@ describe('approved menu helpers', () => {
         await expect((0, approved_menus_1.getApprovedMenuDownload)(repoRoot, 'form-201')).resolves.toBeNull();
         await expect((0, approved_menus_1.getApprovedMenuDownload)(repoRoot, 'design-1')).resolves.toBeNull();
     });
+    test('enriches cards from batch draft and lineage responses', () => {
+        const menus = [{ id: 'form-200', projectName: 'Spring Dinner' }];
+        const enriched = (0, approved_menus_1.enrichApprovedMenuList)(menus, [{
+                base_submission_id: 'form-200', token: 'draft-token', updated_at: '2026-07-13T12:00:00Z', last_edited_by: 'Chef Mina',
+            }], {
+            'form-200': { supersededBy: { id: 'form-201', projectName: 'Spring Dinner v2', approvedAt: '2026-07-12T00:00:00Z' } },
+        });
+        expect(enriched[0].activeDraft).toEqual({ token: 'draft-token', lastSavedAt: '2026-07-13T12:00:00Z', lastEditedBy: 'Chef Mina' });
+        expect(enriched[0].supersededBy).toEqual(expect.objectContaining({ id: 'form-201' }));
+    });
 });
