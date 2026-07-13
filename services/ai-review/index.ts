@@ -31,6 +31,7 @@ const AI_REVIEW_MODEL = process.env.AI_REVIEW_MODEL || 'gpt-4o-mini';
 const AI_REVIEW_TEMPERATURE = Number.isFinite(Number(process.env.AI_REVIEW_TEMPERATURE))
     ? Number(process.env.AI_REVIEW_TEMPERATURE)
     : 0;
+const DOCUMENT_STORAGE_ROOT = process.env.DOCUMENT_STORAGE_ROOT || path.join(__dirname, '..', '..', '..', 'tmp', 'documents');
 
 app.use(express.json());
 app.use(requireInternalServiceAuth);
@@ -335,7 +336,7 @@ Configure OPENAI_API_KEY in .env for real AI reviews.
 });
 
 async function saveAiDraft(submissionId: string, content: string, originalText: string = '', originalPath: string = '', hasOpenAIKey: boolean = false): Promise<string> {
-    let DRAFTS_DIR = path.join(__dirname, '..', '..', '..', 'tmp', 'ai-drafts');
+    let DRAFTS_DIR = path.join(DOCUMENT_STORAGE_ROOT, 'ai-drafts');
     if (originalPath) {
         DRAFTS_DIR = path.dirname(originalPath);
     }
@@ -395,5 +396,6 @@ function parseAICorrectedText(aiText: string): string {
 if (require.main === module) {
     app.listen(port, () => {
         console.log(`ai-review service listening at http://localhost:${port}`);
+        console.log(`Document storage root: ${DOCUMENT_STORAGE_ROOT}`);
     });
 }

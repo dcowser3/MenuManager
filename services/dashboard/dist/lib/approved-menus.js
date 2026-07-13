@@ -42,6 +42,22 @@ const supabase_client_1 = require("@menumanager/supabase-client");
 const SUBMISSIONS_TABLE = 'submissions';
 const ASSETS_TABLE = 'assets';
 const APPROVED_STATUSES = new Set(['approved', 'approved_override']);
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+function asObject(value) {
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+        return value;
+    }
+    if (typeof value === 'string') {
+        try {
+            const parsed = JSON.parse(value);
+            return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+        }
+        catch {
+            return {};
+        }
+    }
+    return {};
+}
 function getLocalDbDir(repoRoot) {
     return path.join(repoRoot, 'tmp', 'db');
 }
@@ -210,12 +226,14 @@ async function getApprovedMenuDownload(repoRoot, submissionId) {
     }
     let submission = null;
     let approvedAsset = null;
+    let sharePointAsset = null;
     if ((0, supabase_client_1.isSupabaseConfigured)()) {
         const supabase = (0, supabase_client_1.getSupabaseClient)();
+        const submissionIdColumn = UUID_PATTERN.test(normalizedSubmissionId) ? 'id' : 'legacy_id';
         const { data, error } = await supabase
             .from(SUBMISSIONS_TABLE)
             .select('*')
-            .eq('id', normalizedSubmissionId)
+            .eq(submissionIdColumn, normalizedSubmissionId)
             .maybeSingle();
         if (error) {
             throw new Error(error.message);
@@ -226,14 +244,16 @@ async function getApprovedMenuDownload(repoRoot, submissionId) {
                 .from(ASSETS_TABLE)
                 .select('*')
                 .eq('submission_id', normalizedSubmissionId)
-                .eq('asset_type', 'approved_docx')
+                .in('asset_type', ['approved_docx', 'sharepoint_approved_docx'])
                 .order('created_at', { ascending: false })
                 .limit(1);
             if (assetError) {
                 console.warn('Failed to fetch approved download asset:', assetError.message);
             }
             else {
-                approvedAsset = Array.isArray(assetData) ? assetData[0] || null : null;
+                const assets = Array.isArray(assetData) ? assetData : [];
+                approvedAsset = assets.find((asset) => asset.asset_type === 'approved_docx') || null;
+                sharePointAsset = assets.find((asset) => asset.asset_type === 'sharepoint_approved_docx') || null;
             }
         }
     }
@@ -247,6 +267,10 @@ async function getApprovedMenuDownload(repoRoot, submissionId) {
                 .filter((asset) => `${asset.submission_id || ''}`.trim() === normalizedSubmissionId)
                 .filter((asset) => asset.asset_type === 'approved_docx')
                 .sort((a, b) => new Date(`${b.created_at || ''}`).getTime() - new Date(`${a.created_at || ''}`).getTime())[0] || null;
+            sharePointAsset = assets
+                .filter((asset) => `${asset.submission_id || ''}`.trim() === normalizedSubmissionId)
+                .filter((asset) => asset.asset_type === 'sharepoint_approved_docx')
+                .sort((a, b) => new Date(`${b.created_at || ''}`).getTime() - new Date(`${a.created_at || ''}`).getTime())[0] || null;
         }
     }
     if (!submission) {
@@ -256,12 +280,28 @@ async function getApprovedMenuDownload(repoRoot, submissionId) {
     if (!APPROVED_STATUSES.has(status) || !submission.final_path || (submission.source && submission.source !== 'form')) {
         return null;
     }
+    const rawPayload = asObject(submission.raw_payload);
+    const sharePointMeta = asObject(sharePointAsset?.meta);
     return {
         id: normalizedSubmissionId,
         filename: `${submission.filename || ''}`.trim(),
         finalPath: `${submission.final_path || ''}`.trim(),
         storagePath: `${approvedAsset?.storage_path || ''}`.trim(),
+        sharePointStoragePath: `${sharePointAsset?.storage_path || ''}`.trim(),
+        sharePointDriveId: `${sharePointMeta.drive_id || ''}`.trim(),
         status,
         approvedFileName: `${submission.filename || approvedAsset?.file_name || 'approved-menu.docx'}`.trim(),
+        projectName: `${submission.project_name || ''}`.trim(),
+        property: `${submission.property || ''}`.trim(),
+        servicePeriod: `${submission.service_period || rawPayload.servicePeriod || ''}`.trim(),
+        templateType: `${submission.template_type || rawPayload.templateType || 'food'}`.trim(),
+        dateNeeded: `${submission.date_needed || rawPayload.dateNeeded || ''}`.trim(),
+        menuType: `${submission.menu_type || rawPayload.menuType || 'standard'}`.trim(),
+        orientation: `${submission.orientation || rawPayload.orientation || ''}`.trim(),
+        size: `${submission.size || rawPayload.size || ''}`.trim(),
+        allergens: `${submission.allergens || rawPayload.allergens || ''}`.trim(),
+        approvedMenuContent: `${submission.approved_menu_content || ''}`.trim(),
+        approvedMenuContentHtml: `${submission.approved_menu_content_html || ''}`.trim(),
+        rawPayload,
     };
 }

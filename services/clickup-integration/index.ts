@@ -379,7 +379,7 @@ app.use(express.json({
         req.rawBody = buf.toString('utf8');
     }
 }));
-app.use(['/create-task', '/approval/finalize', '/webhook/backfill-pending', '/webhook/register'], requireInternalServiceAuth);
+app.use(['/create-task', '/approval/finalize', '/webhook/backfill-pending', '/webhook/register', '/sharepoint/file'], requireInternalServiceAuth);
 
 function safeTimingEqual(a: string, b: string): boolean {
     try {
@@ -1030,6 +1030,21 @@ async function graphRequest<T = any>(config: {
         },
     });
     return response.data as T;
+}
+
+function asObject(value: unknown): Record<string, any> {
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+        return value as Record<string, any>;
+    }
+    if (typeof value === 'string') {
+        try {
+            const parsed = JSON.parse(value);
+            return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+        } catch {
+            return {};
+        }
+    }
+    return {};
 }
 
 function isDocxFileName(name: string | undefined): boolean {
@@ -2156,9 +2171,52 @@ app.get('/health', (_req, res) => {
     });
 });
 
+/**
+ * Internal proxy for the approved SharePoint artifact. Dashboard intentionally
+ * never receives Graph credentials; it only gets the DOCX bytes needed for a
+ * resilient customer download.
+ */
+app.get('/sharepoint/file', async (req, res) => {
+    const submissionId = `${req.query?.submissionId || ''}`.trim();
+    if (!submissionId) {
+        return res.status(400).json({ error: 'submissionId is required' });
+    }
+
+    try {
+        const assetResponse = await internalApi.get(
+            `${DB_SERVICE_URL}/assets/by-submission/${encodeURIComponent(submissionId)}`
+        );
+        const sharePointAsset = (Array.isArray(assetResponse.data) ? assetResponse.data : [])
+            .filter((asset: any) => asset?.asset_type === 'sharepoint_approved_docx')
+            .sort((a: any, b: any) => Date.parse(b?.created_at || '') - Date.parse(a?.created_at || ''))[0];
+        const meta = asObject(sharePointAsset?.meta);
+        const driveId = `${meta.drive_id || ''}`.trim();
+        const storagePath = `${sharePointAsset?.storage_path || ''}`.trim();
+
+        if (!driveId || !storagePath) {
+            return res.status(404).json({ error: 'SharePoint approved file not found' });
+        }
+
+        const contents = await graphRequest<Buffer>({
+            method: 'GET',
+            path: `/drives/${encodeURIComponent(driveId)}/root:/${encodeGraphPath(storagePath)}:/content`,
+            responseType: 'arraybuffer',
+        });
+        res.type('application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+        return res.send(contents);
+    } catch (error: any) {
+        if (error?.response?.status === 404) {
+            return res.status(404).json({ error: 'SharePoint approved file not found' });
+        }
+        console.error(`Failed to fetch SharePoint approved DOCX for ${submissionId}:`, error?.response?.data || error?.message || error);
+        return res.status(502).json({ error: 'Unable to fetch SharePoint approved file' });
+    }
+});
+
 if (require.main === module) {
     app.listen(port, () => {
         console.log(`clickup-integration service listening at http://localhost:${port}`);
+        console.log(`Document storage root: ${getDocumentStorageRoot()}`);
         if (!CLICKUP_API_TOKEN) {
             console.log('ClickUp API token not configured - task creation will be skipped');
         }

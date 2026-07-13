@@ -5,6 +5,7 @@ import { getSupabaseClient, isSupabaseConfigured } from '@menumanager/supabase-c
 const SUBMISSIONS_TABLE = 'submissions';
 const ASSETS_TABLE = 'assets';
 const APPROVED_STATUSES = new Set(['approved', 'approved_override']);
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export type ApprovedMenuListItem = {
     id: string;
@@ -25,8 +26,22 @@ export type ApprovedMenuDownloadRecord = {
     filename: string;
     finalPath: string;
     storagePath: string;
+    sharePointStoragePath: string;
+    sharePointDriveId: string;
     status: string;
     approvedFileName: string;
+    projectName: string;
+    property: string;
+    servicePeriod: string;
+    templateType: string;
+    dateNeeded: string;
+    menuType: string;
+    orientation: string;
+    size: string;
+    allergens: string;
+    approvedMenuContent: string;
+    approvedMenuContentHtml: string;
+    rawPayload: Record<string, any>;
 };
 
 export type ApprovedMenuFilters = {
@@ -48,6 +63,15 @@ type ApprovedMenuSourceRow = {
     submitter_name?: string;
     status?: string;
     source?: string;
+    template_type?: string;
+    date_needed?: string;
+    menu_type?: string;
+    orientation?: string;
+    size?: string;
+    allergens?: string;
+    approved_menu_content?: string;
+    approved_menu_content_html?: string;
+    raw_payload?: Record<string, any> | string | null;
 };
 
 type ApprovedAssetRow = {
@@ -56,7 +80,23 @@ type ApprovedAssetRow = {
     file_name?: string;
     storage_path?: string;
     created_at?: string;
+    meta?: Record<string, any> | null;
 };
+
+function asObject(value: unknown): Record<string, any> {
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+        return value as Record<string, any>;
+    }
+    if (typeof value === 'string') {
+        try {
+            const parsed = JSON.parse(value);
+            return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+        } catch {
+            return {};
+        }
+    }
+    return {};
+}
 
 function getLocalDbDir(repoRoot: string): string {
     return path.join(repoRoot, 'tmp', 'db');
@@ -269,13 +309,15 @@ export async function getApprovedMenuDownload(
 
     let submission: ApprovedMenuSourceRow | null = null;
     let approvedAsset: ApprovedAssetRow | null = null;
+    let sharePointAsset: ApprovedAssetRow | null = null;
 
     if (isSupabaseConfigured()) {
         const supabase = getSupabaseClient();
+        const submissionIdColumn = UUID_PATTERN.test(normalizedSubmissionId) ? 'id' : 'legacy_id';
         const { data, error } = await supabase
             .from(SUBMISSIONS_TABLE)
             .select('*')
-            .eq('id', normalizedSubmissionId)
+            .eq(submissionIdColumn, normalizedSubmissionId)
             .maybeSingle();
 
         if (error) {
@@ -288,14 +330,16 @@ export async function getApprovedMenuDownload(
                 .from(ASSETS_TABLE)
                 .select('*')
                 .eq('submission_id', normalizedSubmissionId)
-                .eq('asset_type', 'approved_docx')
+                .in('asset_type', ['approved_docx', 'sharepoint_approved_docx'])
                 .order('created_at', { ascending: false })
                 .limit(1);
 
             if (assetError) {
                 console.warn('Failed to fetch approved download asset:', assetError.message);
             } else {
-                approvedAsset = Array.isArray(assetData) ? assetData[0] || null : null;
+                const assets = Array.isArray(assetData) ? assetData : [];
+                approvedAsset = assets.find((asset: ApprovedAssetRow) => asset.asset_type === 'approved_docx') || null;
+                sharePointAsset = assets.find((asset: ApprovedAssetRow) => asset.asset_type === 'sharepoint_approved_docx') || null;
             }
         }
     } else {
@@ -309,6 +353,10 @@ export async function getApprovedMenuDownload(
                 .filter((asset) => `${asset.submission_id || ''}`.trim() === normalizedSubmissionId)
                 .filter((asset) => asset.asset_type === 'approved_docx')
                 .sort((a, b) => new Date(`${b.created_at || ''}`).getTime() - new Date(`${a.created_at || ''}`).getTime())[0] || null;
+            sharePointAsset = (assets as ApprovedAssetRow[])
+                .filter((asset) => `${asset.submission_id || ''}`.trim() === normalizedSubmissionId)
+                .filter((asset) => asset.asset_type === 'sharepoint_approved_docx')
+                .sort((a, b) => new Date(`${b.created_at || ''}`).getTime() - new Date(`${a.created_at || ''}`).getTime())[0] || null;
         }
     }
 
@@ -321,12 +369,28 @@ export async function getApprovedMenuDownload(
         return null;
     }
 
+    const rawPayload = asObject(submission.raw_payload);
+    const sharePointMeta = asObject(sharePointAsset?.meta);
     return {
         id: normalizedSubmissionId,
         filename: `${submission.filename || ''}`.trim(),
         finalPath: `${submission.final_path || ''}`.trim(),
         storagePath: `${approvedAsset?.storage_path || ''}`.trim(),
+        sharePointStoragePath: `${sharePointAsset?.storage_path || ''}`.trim(),
+        sharePointDriveId: `${sharePointMeta.drive_id || ''}`.trim(),
         status,
         approvedFileName: `${submission.filename || approvedAsset?.file_name || 'approved-menu.docx'}`.trim(),
+        projectName: `${submission.project_name || ''}`.trim(),
+        property: `${submission.property || ''}`.trim(),
+        servicePeriod: `${submission.service_period || rawPayload.servicePeriod || ''}`.trim(),
+        templateType: `${submission.template_type || rawPayload.templateType || 'food'}`.trim(),
+        dateNeeded: `${submission.date_needed || rawPayload.dateNeeded || ''}`.trim(),
+        menuType: `${submission.menu_type || rawPayload.menuType || 'standard'}`.trim(),
+        orientation: `${submission.orientation || rawPayload.orientation || ''}`.trim(),
+        size: `${submission.size || rawPayload.size || ''}`.trim(),
+        allergens: `${submission.allergens || rawPayload.allergens || ''}`.trim(),
+        approvedMenuContent: `${submission.approved_menu_content || ''}`.trim(),
+        approvedMenuContentHtml: `${submission.approved_menu_content_html || ''}`.trim(),
+        rawPayload,
     };
 }

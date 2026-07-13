@@ -130,8 +130,22 @@ describe('approved menu helpers', () => {
             filename: 'Aqimero_Dinner_5.8.26.docx',
             finalPath: '/Users/deriancowser/Documents/MenuManager/tmp/documents/Test Property/Spring Dinner/form-200/approved/form-200-approved.docx',
             storagePath: '/Users/deriancowser/Documents/MenuManager/tmp/documents/Test Property/Spring Dinner/form-200/approved/form-200-approved.docx',
+            sharePointStoragePath: '',
+            sharePointDriveId: '',
             status: 'approved',
             approvedFileName: 'Aqimero_Dinner_5.8.26.docx',
+            projectName: 'Spring Dinner',
+            property: 'Test Property',
+            servicePeriod: 'dinner',
+            templateType: 'food',
+            dateNeeded: '',
+            menuType: 'standard',
+            orientation: '',
+            size: '',
+            allergens: '',
+            approvedMenuContent: '',
+            approvedMenuContentHtml: '',
+            rawPayload: {},
         });
     });
     test('ignores non-form or non-approved submissions for download', async () => {

@@ -54,7 +54,7 @@ All variables are configured in `.env` at the project root. See `.env.example` f
 | `CLICKUP_TASK_CREATE_TIMEOUT_MS` | Dashboard timeout in milliseconds for the form submit to ClickUp task creation handoff (default: `60000`) |
 | `CLICKUP_APPROVAL_FINALIZE_TIMEOUT_MS` | Dashboard timeout in milliseconds for browser approval editor finalization through ClickUp integration (default: `CLICKUP_TASK_CREATE_TIMEOUT_MS`, normally `60000`) |
 | `INTERNAL_API_TIMEOUT_MS` | Default timeout in milliseconds for internal service-to-service HTTP calls (default: `5000`; individual long-running calls may override it) |
-| `DOCUMENT_STORAGE_ROOT` | Root directory for persisted menu DOCX assets (default: `tmp/documents`) |
+| `DOCUMENT_STORAGE_ROOT` | Shared root directory for persisted menu DOCX assets (default: `tmp/documents`; Azure multi-app deployments must use one shared Azure Files mount) |
 | `JSON_BODY_LIMIT` | Shared Express JSON/urlencoded body limit for services that need larger rich-text payloads (default where used: `5mb`) |
 | `DASHBOARD_JSON_BODY_LIMIT` | Dashboard-specific override for chef form JSON/urlencoded bodies (default: `JSON_BODY_LIMIT` or `5mb`) |
 | `ERROR_REPORT_JSON_BODY_LIMIT` | Dashboard-specific JSON body limit for `/api/form/error-report`, which carries screenshot data plus client state (default: `15mb`; fronting proxy body limits must be at least this high) |
@@ -160,7 +160,7 @@ Notes:
 Internal HTTP routes now require the shared `INTERNAL_API_TOKEN` header on service-to-service calls.
 
 - Protected services: `db`, `parser`, `ai-review`, and `differ`
-- Protected ClickUp integration routes: `/create-task`, `/approval/finalize`, `/webhook/backfill-pending`, and `/webhook/register`
+- Protected ClickUp integration routes: `/create-task`, `/approval/finalize`, `/webhook/backfill-pending`, `/webhook/register`, and `/sharepoint/file`
 - Public exceptions remain for the dashboard itself, ClickUp's inbound webhook route, and `GET /health`
 
 Set the same `INTERNAL_API_TOKEN` value for every service process in the environment. If it is missing, internal requests fail closed with `503` or `401` responses instead of falling back to network trust.
@@ -179,7 +179,13 @@ Subfolders currently used:
 - `baseline/` — chef-uploaded approved baseline DOCX (revision flow fallback)
 - `approved/` — Isabella-approved corrected DOCX pulled from ClickUp webhook
 
-If `DOCUMENT_STORAGE_ROOT` is not set, the default is `tmp/documents` under the repo root.
+If `DOCUMENT_STORAGE_ROOT` is not set, the default is `tmp/documents` under the repo root. This is suitable only for local development and single-host setups with a shared volume.
+
+### Azure App Service shared storage (required for production)
+
+Azure App Service replaces the deployed application directory during a redeploy. It also gives separately deployed web apps separate `/home` filesystems. Therefore `/home` and repo-local `tmp/documents` are not safe when dashboard, ClickUp integration, AI review, parser, and differ exchange persisted file paths.
+
+Provision one Azure Files share, mount it at the same absolute path on every document-touching app (for example `/mnt/menumanager-documents`), and set `DOCUMENT_STORAGE_ROOT=/mnt/menumanager-documents` on each app. Check each startup log for its resolved `Document storage root` value before accepting traffic.
 
 ## Learning Data Layout
 

@@ -62,6 +62,7 @@ const RULE_OVERRIDES_FILE = path.join(DIFFERENCES_DIR, 'rule_overrides.json');
 const LOCATION_RULES_FILE = path.join(DIFFERENCES_DIR, 'location_specific_rules.json');
 const MIN_OCCURRENCES = Number(process.env.LEARNING_MIN_OCCURRENCES || 2);
 const MAX_RULES_IN_OVERLAY = Number(process.env.LEARNING_MAX_OVERLAY_RULES || 25);
+const DOCUMENT_STORAGE_ROOT = process.env.DOCUMENT_STORAGE_ROOT || path.join(getRepoRoot(), 'tmp', 'documents');
 function getRepoRoot() {
     const candidates = [
         path.resolve(__dirname, '..', '..'),
@@ -1070,6 +1071,7 @@ function clamp(value, min, max) {
 if (require.main === module) {
     app.listen(port, async () => {
         console.log(`🔬 Differ service listening at http://localhost:${port}`);
+        console.log(`   Document storage root: ${DOCUMENT_STORAGE_ROOT}`);
         console.log(`   Learning data directory: ${DIFFERENCES_DIR}`);
         await initDiffer();
     });

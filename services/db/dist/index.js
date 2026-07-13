@@ -2391,6 +2391,7 @@ app.put('/submissions/:id', async (req, res) => {
         const { id } = req.params;
         const { allowedFields, rejectedFields, errors } = (0, submission_updates_1.sanitizeSubmissionUpdates)(req.body || {}, {
             repoRoot: getRepoRoot(),
+            documentStorageRoot: process.env.DOCUMENT_STORAGE_ROOT,
         });
         if (rejectedFields.length > 0 || errors.length > 0) {
             return res.status(400).json({

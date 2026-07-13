@@ -66,12 +66,13 @@ type SanitizeSubmissionUpdatesResult = {
 
 export function sanitizeSubmissionUpdates(
     updates: Record<string, any>,
-    options: { repoRoot: string }
+    options: { repoRoot: string; documentStorageRoot?: string }
 ): SanitizeSubmissionUpdatesResult {
     const allowedFields: Record<string, any> = {};
     const rejectedFields: string[] = [];
     const errors: string[] = [];
     const repoTmpRoot = path.join(options.repoRoot, 'tmp');
+    const documentStorageRoot = path.resolve(options.documentStorageRoot || process.env.DOCUMENT_STORAGE_ROOT || path.join(repoTmpRoot, 'documents'));
 
     for (const [key, value] of Object.entries(updates || {})) {
         if (!EDITABLE_SUBMISSION_FIELDS.has(key)) {
@@ -96,8 +97,8 @@ export function sanitizeSubmissionUpdates(
                 continue;
             }
             const resolvedPath = path.resolve(rawPath);
-            if (!isInsideDirectory(resolvedPath, repoTmpRoot)) {
-                errors.push(`${key} must stay inside the repository tmp/ directory`);
+            if (!isInsideDirectory(resolvedPath, repoTmpRoot) && !isInsideDirectory(resolvedPath, documentStorageRoot)) {
+                errors.push(`${key} must stay inside the repository tmp/ directory or DOCUMENT_STORAGE_ROOT`);
                 continue;
             }
             allowedFields[key] = resolvedPath;

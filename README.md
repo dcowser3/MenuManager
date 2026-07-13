@@ -12,6 +12,8 @@ Approved-menu edits load the reviewer-approved text and formatting, not the orig
 
 After a revision is approved, only a known `revision_base_submission_id` lineage relationship supersedes its parent; unrelated menus in the same property and service period remain editable. When a prior approved DOCX is uploaded as a baseline, the form may suggest a matching approved menu, but it records a lineage link only if the user explicitly confirms it.
 
+Approved DOCX files require a shared persistent `DOCUMENT_STORAGE_ROOT` in multi-app production deployments. The clean-download route can recover from SharePoint or stored approved content when the local artifact is missing; the original-approved route is served only from the reviewer file or its SharePoint copy. See [document storage](docs/design-docs/document-storage.md) and the [operations playbook](docs/operations-playbook.md).
+
 ## Start Here
 
 | Need | Read |

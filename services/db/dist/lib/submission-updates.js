@@ -65,6 +65,7 @@ function sanitizeSubmissionUpdates(updates, options) {
     const rejectedFields = [];
     const errors = [];
     const repoTmpRoot = path_1.default.join(options.repoRoot, 'tmp');
+    const documentStorageRoot = path_1.default.resolve(options.documentStorageRoot || process.env.DOCUMENT_STORAGE_ROOT || path_1.default.join(repoTmpRoot, 'documents'));
     for (const [key, value] of Object.entries(updates || {})) {
         if (!EDITABLE_SUBMISSION_FIELDS.has(key)) {
             rejectedFields.push(key);
@@ -86,8 +87,8 @@ function sanitizeSubmissionUpdates(updates, options) {
                 continue;
             }
             const resolvedPath = path_1.default.resolve(rawPath);
-            if (!isInsideDirectory(resolvedPath, repoTmpRoot)) {
-                errors.push(`${key} must stay inside the repository tmp/ directory`);
+            if (!isInsideDirectory(resolvedPath, repoTmpRoot) && !isInsideDirectory(resolvedPath, documentStorageRoot)) {
+                errors.push(`${key} must stay inside the repository tmp/ directory or DOCUMENT_STORAGE_ROOT`);
                 continue;
             }
             allowedFields[key] = resolvedPath;

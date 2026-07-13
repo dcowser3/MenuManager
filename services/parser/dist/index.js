@@ -55,9 +55,10 @@ const port = 3001;
 const DB_SERVICE_URL = process.env.DB_SERVICE_URL || 'http://localhost:3004';
 const AI_REVIEW_URL = process.env.AI_REVIEW_URL || 'http://localhost:3002';
 const internalApi = (0, internal_auth_1.createInternalApiClient)(axios_1.default);
-// Use absolute path for uploads to avoid path resolution issues
-// __dirname in compiled code is services/parser/dist, so we need ../../../tmp/uploads to get to workspace root
-const uploadsDir = path.resolve(__dirname, '../../../tmp/uploads');
+// Parser-uploaded originals are persisted in the shared document root because
+// original_path is stored in the database and later read by other services.
+const documentStorageRoot = process.env.DOCUMENT_STORAGE_ROOT || path.resolve(__dirname, '../../../tmp/documents');
+const uploadsDir = path.join(documentStorageRoot, 'incoming');
 const upload = (0, multer_1.default)({ dest: uploadsDir });
 const execAsync = (0, util_1.promisify)(child_process_1.exec);
 app.use(internal_auth_1.requireInternalServiceAuth);
@@ -179,6 +180,7 @@ app.post('/parser', upload.single('file'), async (req, res) => {
 if (require.main === module) {
     app.listen(port, () => {
         console.log(`parser service listening at http://localhost:${port}`);
+        console.log(`Document storage root: ${documentStorageRoot}`);
     });
 }
 /**

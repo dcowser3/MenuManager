@@ -30,6 +30,24 @@ curl -i -H "x-menumanager-internal-token: $TOKEN" http://localhost:3006/stats
 
 Internal service routes intentionally return `401` without `x-menumanager-internal-token`; that does not block normal dashboard testing.
 
+## Approved DOCX persistence smoke check
+
+Before an Azure production deployment, mount one Azure Files share at the same path on dashboard, clickup-integration, ai-review, parser, and differ, and set `DOCUMENT_STORAGE_ROOT` to that path on each app. Confirm every startup log prints the same resolved document-storage root.
+
+After deployment, approve a test menu (or use a seeded approved record), redeploy the apps, then verify both routes still return DOCX files:
+
+```bash
+curl -f -OJ "https://<dashboard-host>/download/approved/<submissionId>"
+curl -f -OJ "https://<dashboard-host>/download/approved-clean/<submissionId>"
+```
+
+Audit existing approved records from a production host with the Azure Files mount. The command is read-only by default; `--restore` re-materializes only existing SharePoint copies and updates their local asset path.
+
+```bash
+npm run audit:approved-documents
+npm run audit:approved-documents -- --restore
+```
+
 ## Form And AI Review Checks
 
 Run a live async Basic AI Check smoke test against `DASHBOARD_URL`:

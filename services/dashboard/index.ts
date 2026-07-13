@@ -51,7 +51,8 @@ import {
 import { createApprovalWorkflowHandlers } from './lib/approval-workflow';
 import { createDesignApprovalWorkflowHandlers } from './lib/design-approval-workflow';
 import { getApprovedDishBrowseData, listApprovedDishBrands } from './lib/approved-dishes';
-import { enrichApprovedMenuList, getApprovedMenuDownload, listApprovedMenus } from './lib/approved-menus';
+import { ApprovedMenuDownloadRecord, enrichApprovedMenuList, getApprovedMenuDownload, listApprovedMenus } from './lib/approved-menus';
+import { resolveApprovedDownload } from './lib/approved-download';
 import {
     buildClickUpTaskPayloadFromStoredSubmission,
     describeServiceError,
@@ -521,6 +522,10 @@ function getStoredPathCandidates(candidatePath: string): string[] {
         candidates.add(path.join(getRepoRoot(), 'tmp', trimmed.slice('/app/tmp/'.length)));
     }
 
+    if (trimmed.startsWith('/app/tmp/documents/')) {
+        candidates.add(path.join(getDocumentStorageRoot(), trimmed.slice('/app/tmp/documents/'.length)));
+    }
+
     return Array.from(candidates);
 }
 
@@ -541,6 +546,91 @@ function resolveDashboardStoredPath(candidatePath: string, label: string, allowe
     }
 
     throw lastError || new Error(`${label} path is unavailable`);
+}
+
+async function findLocalApprovedDocx(approvedMenu: ApprovedMenuDownloadRecord): Promise<string | null> {
+    for (const candidatePath of [approvedMenu.storagePath, approvedMenu.finalPath].filter(Boolean)) {
+        try {
+            const resolvedPath = resolveDashboardStoredPath(candidatePath, 'Approved submission', ALLOWED_DOCX_EXTENSIONS);
+            await fs.access(resolvedPath);
+            return resolvedPath;
+        } catch {
+            // Continue through legacy path candidates and then the fallback chain.
+        }
+    }
+    return null;
+}
+
+async function fetchSharePointApprovedDocx(submissionId: string): Promise<Buffer | null> {
+    try {
+        const response = await internalApi.get(
+            `${CLICKUP_SERVICE_URL}/sharepoint/file?submissionId=${encodeURIComponent(submissionId)}`,
+            { responseType: 'arraybuffer', timeout: 30000 }
+        );
+        return Buffer.from(response.data);
+    } catch (error: any) {
+        if (error?.response?.status === 404) {
+            return null;
+        }
+        throw error;
+    }
+}
+
+async function materializeSharePointApprovedDocx(approvedMenu: ApprovedMenuDownloadRecord, contents: Buffer): Promise<string> {
+    const approvedDir = path.join(
+        getSubmissionDocumentDir(approvedMenu.projectName, approvedMenu.property, approvedMenu.id),
+        'approved'
+    );
+    const approvedPath = path.join(approvedDir, `${approvedMenu.id}-approved.docx`);
+    await fs.mkdir(approvedDir, { recursive: true });
+    await fs.writeFile(approvedPath, contents);
+    await internalApi.put(`${DB_SERVICE_URL}/submissions/${encodeURIComponent(approvedMenu.id)}`, {
+        final_path: approvedPath,
+    });
+    return approvedPath;
+}
+
+async function regenerateCleanApprovedDocx(approvedMenu: ApprovedMenuDownloadRecord): Promise<string | null> {
+    const menuContent = approvedMenu.approvedMenuContent;
+    const menuContentHtml = approvedMenu.approvedMenuContentHtml;
+    if (!menuContent && !menuContentHtml) {
+        return null;
+    }
+
+    const approvedDir = path.join(
+        getSubmissionDocumentDir(approvedMenu.projectName, approvedMenu.property, approvedMenu.id),
+        'approved'
+    );
+    const outputPath = path.join(approvedDir, `${approvedMenu.id}-regenerated-clean.docx`);
+    const rawPayload = approvedMenu.rawPayload || {};
+    await generateDocxFromForm(approvedMenu.id, {
+        projectName: approvedMenu.projectName,
+        property: approvedMenu.property,
+        size: approvedMenu.size || rawPayload.size || '',
+        orientation: approvedMenu.orientation || rawPayload.orientation || '',
+        menuType: approvedMenu.menuType || rawPayload.menuType || 'standard',
+        templateType: approvedMenu.templateType || rawPayload.templateType || 'food',
+        dateNeeded: approvedMenu.dateNeeded || rawPayload.dateNeeded || '',
+        menuContent: menuContent,
+        menuContentHtml: menuContentHtml || textToParagraphHtml(menuContent),
+        allergens: approvedMenu.allergens || rawPayload.allergens || DEFAULT_ALLERGEN_KEY,
+    }, { outputPath });
+    return outputPath;
+}
+
+async function resolveApprovedDocxDownload(
+    approvedMenu: ApprovedMenuDownloadRecord,
+    allowRegeneration: boolean
+) {
+    return resolveApprovedDownload({
+        hasSharePointCopy: !!approvedMenu.sharePointStoragePath,
+        allowRegeneration,
+    }, {
+        findLocal: () => findLocalApprovedDocx(approvedMenu),
+        fetchSharePoint: () => fetchSharePointApprovedDocx(approvedMenu.id),
+        materializeSharePoint: (contents) => materializeSharePointApprovedDocx(approvedMenu, contents),
+        regenerateClean: () => regenerateCleanApprovedDocx(approvedMenu),
+    });
 }
 
 type ExtractedProjectDetails = {
@@ -1528,23 +1618,11 @@ app.get('/download/approved/:submissionId', async (req, res) => {
         if (!approvedMenu) {
             return res.status(404).send('Approved file not found');
         }
-        const candidatePaths = [approvedMenu.storagePath, approvedMenu.finalPath].filter(Boolean);
-        let absolutePath = '';
-
-        for (const candidatePath of candidatePaths) {
-            try {
-                const resolvedPath = resolveDashboardStoredPath(candidatePath, 'Approved submission', ALLOWED_DOCX_EXTENSIONS);
-                await fs.access(resolvedPath);
-                absolutePath = resolvedPath;
-                break;
-            } catch {
-                // Try the next candidate path.
-            }
+        const resolved = await resolveApprovedDocxDownload(approvedMenu, false);
+        if (!resolved.filePath) {
+            return res.status(404).send('Original file no longer available; a SharePoint copy was not found');
         }
-
-        if (!absolutePath) {
-            return res.status(404).send('Approved file not found');
-        }
+        const absolutePath = resolved.filePath;
 
         const downloadName = sanitizeStoredFileName(
             approvedMenu.approvedFileName || approvedMenu.filename || path.basename(absolutePath),
@@ -1567,23 +1645,11 @@ app.get('/download/approved-clean/:submissionId', async (req, res) => {
         if (!approvedMenu) {
             return res.status(404).send('Approved file not found');
         }
-        const candidatePaths = [approvedMenu.storagePath, approvedMenu.finalPath].filter(Boolean);
-        let absolutePath = '';
-
-        for (const candidatePath of candidatePaths) {
-            try {
-                const resolvedPath = resolveDashboardStoredPath(candidatePath, 'Approved submission', ALLOWED_DOCX_EXTENSIONS);
-                await fs.access(resolvedPath);
-                absolutePath = resolvedPath;
-                break;
-            } catch {
-                // Try the next candidate path.
-            }
-        }
-
-        if (!absolutePath) {
+        const resolved = await resolveApprovedDocxDownload(approvedMenu, true);
+        if (!resolved.filePath) {
             return res.status(404).send('Approved file not found');
         }
+        const absolutePath = resolved.filePath;
 
         const cleaned = await createCleanApprovedDocx(absolutePath, approvedMenu.id);
         cleanupDir = cleaned.tempDir;
@@ -4988,6 +5054,7 @@ if (require.main === module) {
         console.log(`   Legacy form:     http://localhost:${port}/form-legacy`);
         console.log(`   Design approval: http://localhost:${port}/design-approval`);
         console.log(`   Training dashboard: http://localhost:${port}/training`);
+        console.log(`   Document storage root: ${getDocumentStorageRoot()}`);
         // Surface alert-mail transport state so a misconfigured prod env (the
         // reason cron/proposal emails silently don't send) is visible in logs.
         const graphReady = graphMailConfig.enabled;

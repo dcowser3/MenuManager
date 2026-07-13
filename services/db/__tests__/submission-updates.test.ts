@@ -322,7 +322,7 @@ describe('submission update hardening', () => {
         });
 
         expect(response.status).toBe(400);
-        expect(response.body.details).toContain('final_path must stay inside the repository tmp/ directory');
+        expect(response.body.details).toContain('final_path must stay inside the repository tmp/ directory or DOCUMENT_STORAGE_ROOT');
         expect(fs.promises.writeFile).not.toHaveBeenCalled();
     });
 
@@ -369,6 +369,19 @@ describe('submission update hardening', () => {
         expect(result.rejectedFields).not.toContain('raw_payload');
         expect(result.allowedFields.raw_payload).toEqual({ clickup_handoff: { status: 'failed' } });
         expect(result.allowedFields.clickup_task_id).toBe('cu_123');
+    });
+
+    test('allows persisted document paths inside DOCUMENT_STORAGE_ROOT', () => {
+        const result = sanitizeSubmissionUpdates(
+            { final_path: '/mnt/menumanager-documents/tan/brunch/sub-123/approved/sub-123-approved.docx' },
+            {
+                repoRoot: '/Users/deriancowser/Documents/MenuManager',
+                documentStorageRoot: '/mnt/menumanager-documents',
+            }
+        );
+
+        expect(result.errors).toEqual([]);
+        expect(result.allowedFields.final_path).toBe('/mnt/menumanager-documents/tan/brunch/sub-123/approved/sub-123-approved.docx');
     });
 
     test('allows direct Isabella handoffs to leave the review queue', () => {
