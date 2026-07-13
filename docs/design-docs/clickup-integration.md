@@ -54,8 +54,8 @@ When a chef submits a menu, a ClickUp task is automatically created with the gen
 - Skips submissions already marked as Isabella direct handoffs (`status: sent_to_marketing` plus Isabella submitter email), so a later review-complete webhook does not download an attachment, re-run finalization, move the task, or change assignees
 - Downloads the latest attachment from the ClickUp task
 - If no usable ClickUp attachment exists at approval time, falls back to the locally stored submitted DOCX so "perfect as submitted" menus can still be finalized
-- Extracts canonical approved menu text from the corrected DOCX
-- Updates submission to `status: 'approved'` with `final_path`, `approved_menu_content_raw`, and `approved_menu_content`
+- Extracts canonical approved menu text and clean post-approval HTML from the corrected DOCX
+- Updates submission to `status: 'approved'` with `final_path`, `approved_menu_content_raw`, `approved_menu_content`, and `approved_menu_content_html`; submitted HTML remains unchanged for training provenance
 - After approved DOCX processing completes, moves the ClickUp task to `CLICKUP_POST_APPROVAL_STATUS` (default: `To Do`) only when it is not already there
 - Routes the ClickUp task to Marketing assignees after approval processing by adding resolved Marketing users and removing `CLICKUP_ASSIGNEE_ID` when that reviewer is not part of the Marketing group
 - Calls `POST /approved-dishes/extract` on the DB service, waits for the result, and alerts if approved-dish extraction fails

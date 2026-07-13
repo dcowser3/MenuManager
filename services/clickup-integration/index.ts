@@ -1305,20 +1305,13 @@ async function uploadApprovedDocToSharePoint(input: {
     };
 }
 
-async function extractApprovedMenuContent(docxPath: string): Promise<{ raw: string; cleaned: string }> {
-    const scriptPath = path.resolve(__dirname, '..', '..', 'docx-redliner', 'extract_clean_menu_text.py');
-    const venvPython = path.resolve(__dirname, '..', '..', 'docx-redliner', 'venv', 'bin', 'python');
-
-    let command = `"${venvPython}" "${scriptPath}" "${docxPath}"`;
-    if (!fs.existsSync(venvPython)) {
-        command = `python3 "${scriptPath}" "${docxPath}"`;
-    }
-
-    const { stdout } = await execAsync(command, { timeout: 30000 });
-    const parsed = JSON.parse(stdout || '{}');
+async function extractApprovedMenuContent(docxPath: string): Promise<{ raw: string; cleaned: string; cleanedHtml: string }> {
+    const parsed = await require(path.join(getRepoRoot(), 'services', 'docx-redliner', 'clean-menu-extraction'))
+        .extractCleanMenuFromDocx(docxPath, { acceptChanges: true });
     return {
         raw: parsed.menu_content || '',
         cleaned: parsed.cleaned_menu_content || parsed.menu_content || '',
+        cleanedHtml: parsed.cleaned_menu_html || '',
     };
 }
 
@@ -1365,6 +1358,7 @@ async function finalizeApprovedSubmission(input: {
     const warnings: string[] = [];
     let extractedRaw = '';
     let extractedClean = '';
+    let extractedCleanHtml = '';
     let clickupMarketingAssigneesUpdated = false;
     let marketingAssigneeCount = 0;
 
@@ -1372,6 +1366,7 @@ async function finalizeApprovedSubmission(input: {
         const extracted = await extractApprovedMenuContent(input.approvedPath);
         extractedRaw = extracted.raw;
         extractedClean = extracted.cleaned;
+        extractedCleanHtml = extracted.cleanedHtml;
     } catch (extractError: any) {
         console.warn(`Failed to extract approved text from approved DOCX: ${extractError.message}`);
     }
@@ -1382,6 +1377,7 @@ async function finalizeApprovedSubmission(input: {
             approvedPath: input.approvedPath,
             extractedRaw,
             extractedClean,
+            extractedCleanHtml,
         })
     );
     console.log(`Updated submission ${submission.id} to approved`);

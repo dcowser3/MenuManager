@@ -49,7 +49,7 @@ jest.mock('fs', () => {
 jest.mock('child_process', () => ({
     exec: jest.fn((cmd, opts, cb) => {
         if (typeof opts === 'function') cb = opts;
-        cb(null, JSON.stringify({ menu_content: 'RAW MENU', cleaned_menu_content: 'Clean Menu' }), '');
+        cb(null, JSON.stringify({ menu_content: 'RAW MENU', cleaned_menu_content: 'Clean Menu', cleaned_menu_html: '<p><strong>Clean</strong> Menu</p>' }), '');
     }),
 }));
 
@@ -457,6 +457,14 @@ describe('browser approval finalize route', () => {
         );
         expect(statusCall).toBeTruthy();
         expect(statusCall[1]).toEqual({ status: 'to do' });
+
+        const approvedUpdateCall = axios.put.mock.calls.find((call) =>
+            String(call[0]).includes('/submissions/sub_approval_1') && call[1]?.status === 'approved'
+        );
+        expect(approvedUpdateCall[1]).toEqual(expect.objectContaining({
+            approved_menu_content: 'Clean Menu',
+            approved_menu_content_html: '<p><strong>Clean</strong> Menu</p>',
+        }));
     });
 
     test('triggers differ compare for uploaded-baseline modifications finalized from the approval editor', async () => {

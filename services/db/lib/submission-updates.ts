@@ -14,6 +14,7 @@ const EDITABLE_SUBMISSION_FIELDS = new Set([
     'reviewed_at',
     'approved_menu_content_raw',
     'approved_menu_content',
+    'approved_menu_content_html',
     'approved_text_extracted_at',
     'mismatch_override',
     'mismatch_override_reason',

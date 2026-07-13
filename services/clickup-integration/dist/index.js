@@ -956,17 +956,12 @@ async function uploadApprovedDocToSharePoint(input) {
     };
 }
 async function extractApprovedMenuContent(docxPath) {
-    const scriptPath = path_1.default.resolve(__dirname, '..', '..', 'docx-redliner', 'extract_clean_menu_text.py');
-    const venvPython = path_1.default.resolve(__dirname, '..', '..', 'docx-redliner', 'venv', 'bin', 'python');
-    let command = `"${venvPython}" "${scriptPath}" "${docxPath}"`;
-    if (!fs_1.default.existsSync(venvPython)) {
-        command = `python3 "${scriptPath}" "${docxPath}"`;
-    }
-    const { stdout } = await execAsync(command, { timeout: 30000 });
-    const parsed = JSON.parse(stdout || '{}');
+    const parsed = await require(path_1.default.join(getRepoRoot(), 'services', 'docx-redliner', 'clean-menu-extraction'))
+        .extractCleanMenuFromDocx(docxPath, { acceptChanges: true });
     return {
         raw: parsed.menu_content || '',
         cleaned: parsed.cleaned_menu_content || parsed.menu_content || '',
+        cleanedHtml: parsed.cleaned_menu_html || '',
     };
 }
 async function extractApprovedDishesForSubmission(input) {
@@ -988,12 +983,14 @@ async function finalizeApprovedSubmission(input) {
     const warnings = [];
     let extractedRaw = '';
     let extractedClean = '';
+    let extractedCleanHtml = '';
     let clickupMarketingAssigneesUpdated = false;
     let marketingAssigneeCount = 0;
     try {
         const extracted = await extractApprovedMenuContent(input.approvedPath);
         extractedRaw = extracted.raw;
         extractedClean = extracted.cleaned;
+        extractedCleanHtml = extracted.cleanedHtml;
     }
     catch (extractError) {
         console.warn(`Failed to extract approved text from approved DOCX: ${extractError.message}`);
@@ -1002,6 +999,7 @@ async function finalizeApprovedSubmission(input) {
         approvedPath: input.approvedPath,
         extractedRaw,
         extractedClean,
+        extractedCleanHtml,
     }));
     console.log(`Updated submission ${submission.id} to approved`);
     internalApi.post(`${DB_SERVICE_URL}/assets`, (0, approval_finalization_1.buildApprovedDocxAssetRecord)({

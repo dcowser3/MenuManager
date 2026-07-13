@@ -65,6 +65,7 @@ CREATE TABLE submissions (
     -- Canonical approved text captured from Isabella upload
     approved_menu_content_raw TEXT,
     approved_menu_content TEXT,
+    approved_menu_content_html TEXT,                -- Clean, post-approval HTML for click-to-edit
     approved_text_extracted_at TIMESTAMPTZ,
 
     -- Full payload mirror for future-proofing and audits

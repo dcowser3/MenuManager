@@ -21,7 +21,7 @@ jest.mock('fs', () => {
 });
 
 import fs from 'fs';
-import app from '../index';
+import app, { mapApprovedSubmissionForClient } from '../index';
 import { isSupabaseConfigured } from '@menumanager/supabase-client';
 
 function getRouteHandler(method: string, routePath: string) {
@@ -294,5 +294,27 @@ describe('draft sessions', () => {
             extractedText: 'Entirely different menu', property: 'Test Property', servicePeriod: 'Dinner',
         } });
         expect(none.body.match).toBeNull();
+    });
+
+    test('uses post-approval HTML and never returns stale submitted HTML', () => {
+        const base = submissions['form-approved'];
+        expect(mapApprovedSubmissionForClient({
+            ...base,
+            approved_menu_content_html: '<p><strong>Corrected</strong> Menu</p>',
+            approved_menu_content: 'Corrected Menu',
+            menu_content_html: '<p>Pre-review Menu</p>',
+        }).approvedMenuContentHtml).toBe('<p><strong>Corrected</strong> Menu</p>');
+
+        expect(mapApprovedSubmissionForClient({
+            ...base,
+            approved_menu_content: "tito's\nrosé",
+            menu_content_html: '<p>titos</p><p>rose</p>',
+        }).approvedMenuContentHtml).toBe('');
+
+        expect(mapApprovedSubmissionForClient({
+            ...base,
+            approved_menu_content: 'Matching Menu',
+            menu_content_html: '<p><strong>Matching</strong> Menu</p>',
+        }).approvedMenuContentHtml).toBe('<p><strong>Matching</strong> Menu</p>');
     });
 });

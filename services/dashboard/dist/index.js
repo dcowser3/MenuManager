@@ -664,7 +664,6 @@ app.locals.tenant = tenantConfig;
 async function extractBaselineFromDocx(filePath) {
     const docxRedlinerDir = getDocxRedlinerDir();
     const venvPython = path.join(docxRedlinerDir, 'venv', 'bin', 'python');
-    const extractCleanScript = path.join(docxRedlinerDir, 'extract_clean_menu_text.py');
     const extractDetailsScript = path.join(docxRedlinerDir, 'extract_project_details.py');
     let pythonCmd = 'python3';
     try {
@@ -674,10 +673,9 @@ async function extractBaselineFromDocx(filePath) {
     catch {
         // use system python
     }
-    const cleanCommand = `${pythonCmd} "${extractCleanScript}" "${filePath}"`;
     const detailsCommand = `${pythonCmd} "${extractDetailsScript}" "${filePath}"`;
-    const [{ stdout: cleanStdout }, detailsResult] = await Promise.all([
-        execAsync(cleanCommand, { timeout: 120000, maxBuffer: 10 * 1024 * 1024 }),
+    const [cleanData, detailsResult] = await Promise.all([
+        require(path.join(docxRedlinerDir, 'clean-menu-extraction')).extractCleanMenuFromDocx(filePath),
         execAsync(detailsCommand, { timeout: 8000, maxBuffer: 2 * 1024 * 1024 })
             .then(({ stdout }) => ({ stdout }))
             .catch((error) => {
@@ -685,11 +683,7 @@ async function extractBaselineFromDocx(filePath) {
             return { stdout: '{}' };
         }),
     ]);
-    const cleanData = JSON.parse((cleanStdout || '{}').trim() || '{}');
     const detailsData = JSON.parse((detailsResult.stdout || '{}').trim() || '{}');
-    if (cleanData.error) {
-        throw new Error(cleanData.error);
-    }
     const projectDetails = detailsData.project_details || {};
     const rawCleanedText = cleanData.cleaned_menu_content || cleanData.menu_content || '';
     const rawCleanedHtml = cleanData.cleaned_menu_html || '';

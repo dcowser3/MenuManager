@@ -8,6 +8,8 @@ This README is intentionally short. Detailed feature notes, runbooks, and design
 
 Starting an edit from an approved menu now resumes the existing active draft for that exact approved submission, rather than creating a competing draft. The Approved Menus page shows in-progress drafts with Resume and Discard-and-start-over actions, while `/drafts` provides a shared list of active and recently closed drafts.
 
+Approved-menu edits load the reviewer-approved text and formatting, not the original submitted HTML. This prevents reviewer corrections from appearing as pending edits or being accidentally reverted in the next revision.
+
 After a revision is approved, only a known `revision_base_submission_id` lineage relationship supersedes its parent; unrelated menus in the same property and service period remain editable. When a prior approved DOCX is uploaded as a baseline, the form may suggest a matching approved menu, but it records a lineage link only if the user explicitly confirms it.
 
 ## Start Here

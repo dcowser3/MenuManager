@@ -10,11 +10,13 @@ const path_1 = __importDefault(require("path"));
 function buildApprovedSubmissionUpdate(input) {
     const extractedClean = (input.extractedClean || '').trim();
     const extractedRaw = (input.extractedRaw || '').trim();
+    const extractedCleanHtml = (input.extractedCleanHtml || '').trim();
     return {
         status: 'approved',
         final_path: input.approvedPath,
         approved_menu_content_raw: extractedRaw || undefined,
         approved_menu_content: extractedClean || undefined,
+        approved_menu_content_html: extractedCleanHtml || undefined,
         approved_text_extracted_at: extractedClean ? (input.now || new Date()).toISOString() : undefined,
     };
 }

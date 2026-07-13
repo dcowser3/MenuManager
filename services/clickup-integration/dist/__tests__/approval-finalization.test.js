@@ -8,12 +8,14 @@ describe('clickup approval finalization builders', () => {
             approvedPath: '/tmp/documents/form-1/approved/form-1-approved.docx',
             extractedRaw: 'RAW MENU',
             extractedClean: 'Clean Menu',
+            extractedCleanHtml: '<p><strong>Clean</strong> Menu</p>',
             now,
         })).toEqual({
             status: 'approved',
             final_path: '/tmp/documents/form-1/approved/form-1-approved.docx',
             approved_menu_content_raw: 'RAW MENU',
             approved_menu_content: 'Clean Menu',
+            approved_menu_content_html: '<p><strong>Clean</strong> Menu</p>',
             approved_text_extracted_at: '2026-05-05T14:00:00.000Z',
         });
     });
@@ -27,6 +29,7 @@ describe('clickup approval finalization builders', () => {
             final_path: '/tmp/documents/form-1/approved/form-1-approved.docx',
             approved_menu_content_raw: undefined,
             approved_menu_content: undefined,
+            approved_menu_content_html: undefined,
             approved_text_extracted_at: undefined,
         });
     });

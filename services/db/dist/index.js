@@ -33,6 +33,8 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.htmlTextMatchesApproved = htmlTextMatchesApproved;
+exports.mapApprovedSubmissionForClient = mapApprovedSubmissionForClient;
 exports.findApprovedChildren = findApprovedChildren;
 const express = require("express");
 const crypto = require("crypto");
@@ -405,6 +407,7 @@ const SUPABASE_SUBMISSION_COLUMNS = new Set([
     'form_attempt_id',
     'approved_menu_content_raw',
     'approved_menu_content',
+    'approved_menu_content_html',
     'approved_text_extracted_at',
     'filename',
     'original_path',
@@ -869,6 +872,26 @@ function isApprovedBaselineSource(submission) {
     const source = `${submission?.source || ''}`.trim();
     return !source || source === 'form' || source === 'clickup_history_import';
 }
+function normalizeComparableMenuText(value) {
+    return `${value || ''}`
+        .replace(/<br\s*\/?>/gi, '\n')
+        .replace(/<\/p\s*>/gi, '\n')
+        .replace(/<[^>]*>/g, ' ')
+        .replace(/&nbsp;/gi, ' ')
+        .replace(/&amp;/gi, '&')
+        .replace(/&lt;/gi, '<')
+        .replace(/&gt;/gi, '>')
+        .replace(/&#39;|&apos;/gi, "'")
+        .replace(/&quot;/gi, '"')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .toLocaleLowerCase();
+}
+function htmlTextMatchesApproved(html, approvedText) {
+    const normalizedHtml = normalizeComparableMenuText(html);
+    const normalizedApproved = normalizeComparableMenuText(approvedText);
+    return !!normalizedHtml && !!normalizedApproved && normalizedHtml === normalizedApproved;
+}
 function mapApprovedSubmissionForClient(submission, latestForPropertyService) {
     const publicId = getPublicSubmissionId(submission);
     const latestPublicId = latestForPropertyService ? getPublicSubmissionId(latestForPropertyService) : '';
@@ -904,10 +927,11 @@ function mapApprovedSubmissionForClient(submission, latestForPropertyService) {
         updatedAt: submission.updated_at || submission.created_at,
         reviewedAt: submission.reviewed_at || submission.approved_text_extracted_at || submission.updated_at || submission.created_at || '',
         approvedMenuContent: submission.approved_menu_content || submission.menu_content || '',
-        // Click-to-edit needs the submitted rich HTML as well as plain text. The
-        // text remains the canonical diff/AI baseline; HTML carries intentional
-        // inline formatting such as bold dish names into the browser editor.
-        approvedMenuContentHtml: submission.menu_content_html || submission.raw_payload?.menuContentHtml || '',
+        // Never open an approved baseline with pre-review HTML. Historical rows
+        // may only have submitted HTML; retain it solely when its text agrees
+        // with canonical approved text, otherwise the form safely uses plain text.
+        approvedMenuContentHtml: submission.approved_menu_content_html
+            || (htmlTextMatchesApproved(submission.menu_content_html || submission.raw_payload?.menuContentHtml || '', submission.approved_menu_content || submission.menu_content || '') ? (submission.menu_content_html || submission.raw_payload?.menuContentHtml || '') : ''),
         allergens: submission.allergens || '',
         status: submission.status,
         isLatestForPropertyService: latestForPropertyService ? latestPublicId === publicId : null,
@@ -2908,7 +2932,7 @@ app.put('/prompt-proposals/:id', async (req, res) => {
 // instead of losing reviewer data. Update when a migration adds load-bearing columns.
 const CRITICAL_SUPABASE_SCHEMA = {
     correction_rules: ['applies_to_menu_type', 'prompt_cycle_id', 'consumed_at', 'submission_ids', 'example_original', 'example_corrected', 'inferred_from_guidance'],
-    submissions: ['form_attempt_id', 'approved_menu_content'],
+    submissions: ['form_attempt_id', 'approved_menu_content', 'approved_menu_content_html'],
     draft_sessions: ['token', 'base_submission_id', 'form_state', 'status', 'submitted_submission_id', 'last_edited_by'],
     form_attempt_logs: ['draft_session_id'],
     basic_ai_check_audits: ['menu_content_raw', 'submission_id'],

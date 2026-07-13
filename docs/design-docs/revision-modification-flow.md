@@ -95,6 +95,7 @@ Approved-text fields set by ClickUp webhook:
 
 - `approved_menu_content_raw`
 - `approved_menu_content`
+- `approved_menu_content_html` (clean post-approval HTML used by click-to-edit)
 - `approved_text_extracted_at`
 
 ## File Storage Metadata (Teams-ready)
