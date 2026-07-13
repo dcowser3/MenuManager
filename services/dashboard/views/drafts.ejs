@@ -1,37 +1,368 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title><%= title %> — <%= tenant.name %></title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=Montserrat:wght@300;400;500;600&display=swap" rel="stylesheet">
     <style>
-        body { font-family: Arial, sans-serif; color: #333; max-width: 1180px; margin: 0 auto; padding: 2rem; }
-        header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #ddd; padding-bottom: 1rem; }
-        a, button { color: #6b5344; } .btn { display: inline-block; padding: .55rem .8rem; border: 1px solid #6b5344; background: white; text-decoration: none; cursor: pointer; }
-        table { width: 100%; border-collapse: collapse; margin: 1.25rem 0 2rem; } th, td { text-align: left; padding: .7rem; border-bottom: 1px solid #ddd; vertical-align: top; }
-        .muted { color: #666; } form { display: inline; } @media (max-width: 700px) { body { padding: 1rem; } table { font-size: .85rem; } }
+        :root {
+            --color-primary: #2c2c2c;
+            --color-secondary: #8b7355;
+            --color-accent: #6b5344;
+            --color-text: #333333;
+            --color-text-light: #666666;
+            --color-text-muted: #999999;
+            --color-background: #ffffff;
+            --color-background-alt: #fafaf8;
+            --color-border: #e8e4de;
+            --color-border-light: #f0ece6;
+            --color-success: #4a7c59;
+            --font-heading: 'Cormorant Garamond', Georgia, serif;
+            --font-body: 'Montserrat', -apple-system, BlinkMacSystemFont, sans-serif;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: var(--font-body);
+            background: var(--color-background);
+            color: var(--color-text);
+            line-height: 1.7;
+            font-weight: 400;
+            font-size: 15px;
+            letter-spacing: 0.02em;
+        }
+
+        .header {
+            background: var(--color-background);
+            color: var(--color-primary);
+            padding: 1.75rem 4vw;
+            border-bottom: 1px solid var(--color-border);
+        }
+
+        .header-inner {
+            max-width: 1280px;
+            margin: 0 auto;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 1.5rem;
+        }
+
+        .header h1 {
+            font-family: var(--font-heading);
+            font-size: 1.85rem;
+            font-weight: 500;
+            letter-spacing: 0.05em;
+            color: var(--color-primary);
+        }
+
+        .header p {
+            color: var(--color-text-light);
+            margin-top: 0.2rem;
+            font-size: 0.72rem;
+            text-transform: uppercase;
+            letter-spacing: 0.15em;
+            font-weight: 400;
+        }
+
+        .header-links {
+            display: flex;
+            gap: 1.25rem;
+            flex-wrap: wrap;
+            justify-content: flex-end;
+        }
+
+        .header-links a {
+            color: var(--color-text);
+            text-decoration: none;
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            letter-spacing: 0.15em;
+            font-weight: 500;
+            border-bottom: 1px solid transparent;
+            padding-bottom: 0.15rem;
+        }
+
+        .header-links a:hover {
+            color: var(--color-secondary);
+            border-bottom-color: var(--color-secondary);
+        }
+
+        .container {
+            max-width: 1280px;
+            margin: 0 auto;
+            padding: 2rem 4vw 3rem;
+        }
+
+        .nav {
+            margin-bottom: 1rem;
+        }
+
+        .nav a {
+            color: var(--color-secondary);
+            text-decoration: none;
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            font-weight: 500;
+        }
+
+        .hero {
+            margin-bottom: 1.5rem;
+        }
+
+        .hero h2 {
+            font-family: var(--font-heading);
+            font-size: 2rem;
+            font-weight: 500;
+            letter-spacing: 0.03em;
+            color: var(--color-primary);
+        }
+
+        .hero p {
+            color: var(--color-text-light);
+            max-width: 700px;
+            margin-top: 0.4rem;
+            font-size: 0.92rem;
+        }
+
+        .section-title {
+            font-family: var(--font-heading);
+            font-size: 1.5rem;
+            font-weight: 500;
+            letter-spacing: 0.03em;
+            color: var(--color-primary);
+            margin: 2.25rem 0 1rem;
+        }
+
+        .table-wrap {
+            border: 1px solid var(--color-border);
+            overflow-x: auto;
+            margin-bottom: 1rem;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.85rem;
+        }
+
+        thead th {
+            text-align: left;
+            padding: 0.85rem 1rem;
+            background: var(--color-background-alt);
+            border-bottom: 1px solid var(--color-border);
+            color: var(--color-text-muted);
+            font-size: 0.62rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.15em;
+            white-space: nowrap;
+        }
+
+        tbody td {
+            text-align: left;
+            padding: 0.85rem 1rem;
+            border-bottom: 1px solid var(--color-border-light);
+            vertical-align: middle;
+            color: var(--color-text);
+        }
+
+        tbody tr:last-child td {
+            border-bottom: none;
+        }
+
+        tbody tr:hover {
+            background: var(--color-background-alt);
+        }
+
+        td .menu-name {
+            font-weight: 500;
+            color: var(--color-primary);
+        }
+
+        .status-pill {
+            display: inline-block;
+            padding: 0.25rem 0.7rem;
+            border: 1px solid var(--color-border);
+            background: var(--color-background-alt);
+            color: var(--color-text-light);
+            font-size: 0.6rem;
+            text-transform: uppercase;
+            letter-spacing: 0.14em;
+            font-weight: 600;
+        }
+
+        .actions {
+            display: flex;
+            gap: 0.5rem;
+            align-items: center;
+            white-space: nowrap;
+        }
+
+        .actions form {
+            margin: 0;
+            display: inline;
+        }
+
+        .btn {
+            display: inline-block;
+            padding: 0.55rem 1rem;
+            text-decoration: none;
+            font-weight: 500;
+            transition: all 0.2s ease;
+            border: 1px solid var(--color-primary);
+            cursor: pointer;
+            font-size: 0.62rem;
+            text-transform: uppercase;
+            letter-spacing: 0.14em;
+            font-family: var(--font-body);
+            background: var(--color-primary);
+            color: var(--color-background);
+        }
+
+        .btn:hover {
+            background: transparent;
+            color: var(--color-primary);
+        }
+
+        .btn-secondary {
+            background: transparent;
+            color: var(--color-primary);
+        }
+
+        .btn-secondary:hover {
+            background: var(--color-primary);
+            color: var(--color-background);
+        }
+
+        .empty-state {
+            border: 1px solid var(--color-border);
+            padding: 2.5rem 1.5rem;
+            text-align: center;
+            background: var(--color-background-alt);
+            margin-bottom: 1rem;
+        }
+
+        .empty-state p {
+            color: var(--color-text-light);
+            font-size: 0.9rem;
+        }
+
+        @media (max-width: 700px) {
+            .header-inner {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+            .header-links {
+                justify-content: flex-start;
+            }
+        }
     </style>
     <%- include('partials/theme') %>
 </head>
 <body>
-    <header><div><h1><%= tenant.name %></h1><p>Menu drafts</p></div><nav><a href="/approved-menus">Approved Menus</a> · <a href="/form">New Submission</a></nav></header>
-    <main>
-        <h2>Active drafts</h2>
-        <% if (activeDrafts.length) { %>
-        <table><thead><tr><th>Restaurant</th><th>Service period</th><th>Menu</th><th>Baseline approved</th><th>Last saved</th><th>Edited by</th><th>Actions</th></tr></thead><tbody>
-        <% activeDrafts.forEach(function(draft) { const baseline = draft.baseline || {}; %>
-            <tr><td><%= baseline.property || 'Unknown' %></td><td><%= baseline.servicePeriod || '—' %></td><td><%= baseline.projectName || 'Approved menu' %></td><td><%= baseline.reviewedAt ? new Date(baseline.reviewedAt).toLocaleDateString() : '—' %></td><td><%= draft.updated_at ? new Date(draft.updated_at).toLocaleString() : '—' %></td><td><%= draft.last_edited_by || '—' %></td><td><a class="btn" href="/form?draft=<%= encodeURIComponent(draft.token) %>">Resume</a> <form method="POST" action="/api/drafts/<%= encodeURIComponent(draft.token) %>/discard" onsubmit="return confirm('Discard this draft?');"><button class="btn" type="submit">Discard</button></form></td></tr>
-        <% }); %>
-        </tbody></table>
-        <% } else { %><p class="muted">There are no active menu drafts.</p><% } %>
+    <div class="header">
+        <div class="header-inner">
+            <div>
+                <h1><%= tenant.name %></h1>
+                <p>Menu Drafts</p>
+            </div>
+            <div class="header-links">
+                <a href="/">Home</a>
+                <a href="/form">New Submission</a>
+                <a href="/approved-menus">Approved Menus</a>
+                <a href="/design-approval">Design Approval</a>
+            </div>
+        </div>
+    </div>
 
-        <h2>Recently closed</h2>
+    <div class="container">
+        <div class="nav">
+            <a href="/">Back to Welcome</a>
+        </div>
+
+        <div class="hero">
+            <div>
+                <h2>Menu Drafts</h2>
+                <p>Resume an in-progress edit or discard a draft you no longer need. Recently submitted or discarded drafts are listed for reference.</p>
+            </div>
+        </div>
+
+        <h3 class="section-title">Active drafts</h3>
+        <% if (activeDrafts.length) { %>
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Restaurant</th>
+                        <th>Service period</th>
+                        <th>Menu</th>
+                        <th>Baseline approved</th>
+                        <th>Last saved</th>
+                        <th>Edited by</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                <% activeDrafts.forEach(function(draft) { const baseline = draft.baseline || {}; %>
+                    <tr>
+                        <td><%= baseline.property || 'Unknown' %></td>
+                        <td><%= baseline.servicePeriod || '—' %></td>
+                        <td class="menu-name"><%= baseline.projectName || 'Approved menu' %></td>
+                        <td><%= baseline.reviewedAt ? new Date(baseline.reviewedAt).toLocaleDateString() : '—' %></td>
+                        <td><%= draft.updated_at ? new Date(draft.updated_at).toLocaleString() : '—' %></td>
+                        <td><%= draft.last_edited_by || '—' %></td>
+                        <td>
+                            <div class="actions">
+                                <a class="btn" href="/form?draft=<%= encodeURIComponent(draft.token) %>">Resume</a>
+                                <form method="POST" action="/api/drafts/<%= encodeURIComponent(draft.token) %>/discard" onsubmit="return confirm('Discard this draft?');">
+                                    <button class="btn btn-secondary" type="submit">Discard</button>
+                                </form>
+                            </div>
+                        </td>
+                    </tr>
+                <% }); %>
+                </tbody>
+            </table>
+        </div>
+        <% } else { %>
+        <div class="empty-state"><p>There are no active menu drafts.</p></div>
+        <% } %>
+
+        <h3 class="section-title">Recently closed</h3>
         <% if (recentDrafts.length) { %>
-        <table><thead><tr><th>Restaurant</th><th>Menu</th><th>Status</th><th>Last saved</th><th>Edited by</th></tr></thead><tbody>
-        <% recentDrafts.forEach(function(draft) { const baseline = draft.baseline || {}; %>
-            <tr><td><%= baseline.property || 'Unknown' %></td><td><%= baseline.projectName || 'Approved menu' %></td><td><%= draft.status %></td><td><%= draft.updated_at ? new Date(draft.updated_at).toLocaleString() : '—' %></td><td><%= draft.last_edited_by || '—' %></td></tr>
-        <% }); %>
-        </tbody></table>
-        <% } else { %><p class="muted">No submitted or discarded drafts in the last seven days.</p><% } %>
-    </main>
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Restaurant</th>
+                        <th>Menu</th>
+                        <th>Status</th>
+                        <th>Last saved</th>
+                        <th>Edited by</th>
+                    </tr>
+                </thead>
+                <tbody>
+                <% recentDrafts.forEach(function(draft) { const baseline = draft.baseline || {}; %>
+                    <tr>
+                        <td><%= baseline.property || 'Unknown' %></td>
+                        <td class="menu-name"><%= baseline.projectName || 'Approved menu' %></td>
+                        <td><span class="status-pill"><%= draft.status %></span></td>
+                        <td><%= draft.updated_at ? new Date(draft.updated_at).toLocaleString() : '—' %></td>
+                        <td><%= draft.last_edited_by || '—' %></td>
+                    </tr>
+                <% }); %>
+                </tbody>
+            </table>
+        </div>
+        <% } else { %>
+        <div class="empty-state"><p>No submitted or discarded drafts in the last seven days.</p></div>
+        <% } %>
+    </div>
 </body>
 </html>
