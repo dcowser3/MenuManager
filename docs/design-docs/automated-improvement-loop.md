@@ -3,7 +3,7 @@
 > Status: In progress (Phase A implemented, Jun 2026)
 > Builds on: [Learning Pipeline v2](learning-pipeline-v2.md), [Reviewer Learning Loop](reviewer-learning-loop.md)
 
-Automates the manual "collect ~10 reviewer corrections, ask an AI how to improve the review process" workflow into a daily, gated cycle: detect new annotated corrections → LLM proposes improvements with full knowledge of the current prompt and code rules → eval harness proves the proposal against historical menus (human-approved finals = ground truth) → human approves on the existing prompt-proposal page. Proposals are never auto-applied.
+Automates the manual "collect ~10 reviewer corrections, ask an AI how to improve the review process" workflow into a scheduled, gated cycle (every other day since Jul 2026): detect new annotated corrections → LLM proposes improvements with full knowledge of the current prompt and code rules → eval harness proves the proposal against historical menus (human-approved finals = ground truth) → human approves on the existing prompt-proposal page. Proposals are never auto-applied.
 
 ## Phases
 
@@ -14,7 +14,7 @@ Automates the manual "collect ~10 reviewer corrections, ask an AI how to improve
 | C2 | Eval harness (`npm run review:eval`) | Implemented |
 | B | Generated code-rules manifest (`npm run rules:manifest`) | Implemented |
 | D | Improvement cycle (`npm run improve:cycle`) + proposal page extension | Implemented |
-| E | Daily Lightsail cron + runbook | Implemented |
+| E | Scheduled Lightsail cron (every other day) + runbook | Implemented |
 
 ## Phase A — Training-triple data capture (Implemented)
 
@@ -125,10 +125,10 @@ Reviewers can add manual rules on the learning dashboard that *contradict* past 
 The deploy workflow ([.github/workflows/deploy-lightsail.yml](../../.github/workflows/deploy-lightsail.yml)) installs the cron idempotently on every deploy — no manual host setup:
 
 ```cron
-15 9 * * * /usr/bin/flock -n /tmp/menumanager-improve.lock <DEPLOY_PATH>/scripts/run-improvement-cycle-cron.sh >> /tmp/menumanager-improve-cron.log 2>&1
+15 9 */2 * * /usr/bin/flock -n /tmp/menumanager-improve.lock <DEPLOY_PATH>/scripts/run-improvement-cycle-cron.sh >> /tmp/menumanager-improve-cron.log 2>&1
 ```
 
-[scripts/run-improvement-cycle-cron.sh](../../scripts/run-improvement-cycle-cron.sh) detects `docker` vs `sudo docker` (same logic as the deploy) and runs `node /app/scripts/improvement-cycle.js` inside the dashboard container, where the compose `.env`, built `dist/`, and the persistent `menumanager_tmp`/`menumanager_logs` volumes live. 09:15 UTC = overnight US, so proposals are waiting at the start of the day.
+[scripts/run-improvement-cycle-cron.sh](../../scripts/run-improvement-cycle-cron.sh) detects `docker` vs `sudo docker` (same logic as the deploy) and runs `node /app/scripts/improvement-cycle.js` inside the dashboard container, where the compose `.env`, built `dist/`, and the persistent `menumanager_tmp`/`menumanager_logs` volumes live. 09:15 UTC = overnight US, so proposals are waiting at the start of the day. Since Jul 2026 the cadence is **every other day** (`*/2` on day-of-month; a daily proposal was more than reviewers consumed). Month boundaries can occasionally give back-to-back runs (31st → 1st) — harmless, the correction gate makes an empty run a no-op.
 
 Idempotency layers: host `flock` → script lock file (`tmp/improvement-cycle/.lock`, stale 6h) → one proposal per `cycle_id` (day) → pending-proposal gate.
 
@@ -139,9 +139,18 @@ Idempotency layers: host `flock` → script lock file (`tmp/improvement-cycle/.l
 - **Run manually:** `docker compose exec dashboard node /app/scripts/improvement-cycle.js` (add `--dry-run` to inspect the assembled context without an LLM call, `--force` to bypass the gate, `--skip-eval` to skip the eval step).
 - **Kill switch:** remove the crontab line (`crontab -e`) or set `IMPROVE_MIN_NEW_CORRECTIONS` very high in `.env` and restart.
 - **Notification email:** the cycle builds the same Graph + SMTP transports the dashboard uses (`buildCycleMailDeps`). On Lightsail, Graph (HTTPS) is the only working transport — outbound port 25 is blocked, so SMTP cannot deliver there. Graph requires `GRAPH_USER_EMAIL` (or `GRAPH_MAILBOX_ADDRESS` — a real sendable mailbox, e.g. `design@richardsandoval.com`, not a distribution list) plus `GRAPH_CLIENT_ID` / `GRAPH_TENANT_ID` / `GRAPH_CLIENT_SECRET` with `Mail.Send` (or `Mail.ReadWrite` for the inbox-write fallback) admin consent. The dashboard logs its transport state on startup (`docker compose logs dashboard | grep "Alert mail"`). When the cycle cannot send or the send fails, it records a visible `improvement_cycle_email_failed` row in `system_alerts` — so a missing email is never silent. Set `DASHBOARD_URL` to the production dashboard domain; use `DASHBOARD_PUBLIC_URL` only when proposal emails need a different public base. **The proposal is always available at `/learning/prompt-proposal` regardless of email.** If the dashboard's other alert emails (form-failure alerts) also aren't arriving, it's the same Graph-config root cause. If a daily run skips because an older proposal is still pending, it sends a reminder email for that pending proposal to the same recipient instead of creating a new proposal.
-- **Graph secret rotation (avoid silent expiry):** Azure client secrets expire and then fail silently, taking down all Graph features (email + SharePoint) at once. Set `GRAPH_CLIENT_SECRET_EXPIRES` (`YYYY-MM-DD`) to the secret's Azure expiry; the dashboard logs days-remaining on startup and the daily cycle raises a `graph_secret_warning` system alert from 30 days out and `graph_secret_expired` after. **To rotate:** Azure portal → App registrations → (the app, client id `347b024c-…`) → Certificates & secrets → New client secret → copy the *Value* immediately (not the Secret ID) → on the Lightsail host update `GRAPH_CLIENT_SECRET` and `GRAPH_CLIENT_SECRET_EXPIRES` in `.env` → `docker compose up -d --force-recreate dashboard` → confirm with the `Alert mail:` / `Graph secret:` startup log lines. `AADSTS7000215` / `invalid_client` means Azure rejected the configured secret value, so rotate and repaste the Value.
+- **Graph secret rotation (avoid silent expiry):** Azure client secrets expire and then fail silently, taking down all Graph features (email + SharePoint) at once. Set `GRAPH_CLIENT_SECRET_EXPIRES` (`YYYY-MM-DD`) to the secret's Azure expiry; the dashboard logs days-remaining on startup and each scheduled cycle run raises a `graph_secret_warning` system alert from 30 days out and `graph_secret_expired` after. **To rotate:** Azure portal → App registrations → (the app, client id `347b024c-…`) → Certificates & secrets → New client secret → copy the *Value* immediately (not the Secret ID) → on the Lightsail host update `GRAPH_CLIENT_SECRET` and `GRAPH_CLIENT_SECRET_EXPIRES` in `.env` → `docker compose up -d --force-recreate dashboard` → confirm with the `Alert mail:` / `Graph secret:` startup log lines. `AADSTS7000215` / `invalid_client` means Azure rejected the configured secret value, so rotate and repaste the Value.
 - **First production run checklist:** (1) apply the Supabase migrations (`20260610`, `20260611`, `20260612`, and `20260626` — see Phase A/D notes); (2) run once manually with `--dry-run`, then for real; (3) review and approve/reject the proposal at `/learning/prompt-proposal`; (4) confirm the next gated day logs a skip line and nothing else.
 - **Eval dataset in production:** the python venv is not in the production image, so curated DOCX pairs are skipped with warnings there — production cases (Supabase) still work. Build the full dataset locally with `npm run review:eval -- --build-dataset --source all --dataset-only`; it persists on the `menumanager_tmp` volume. Use `IMPROVE_EVAL_LIMIT` to cap eval cost initially.
+
+## July 2026 — TPM-cap failure, model move to gpt-5.1, alignment fixes
+
+On Jul 14 2026 the daily run silently died: the assembled context (~31k tokens, 8 corrections) exceeded the org's o3 rate tier of 30k tokens **per minute**, and a single request larger than the TPM cap can never succeed — but the 429 handler treated it as transient and burned all 6 retries (16s waits) before failing, leaving no proposal, no email, and no alert. Only the Lightsail cron log knew. Fixes shipped:
+
+- **Model:** `IMPROVE_MODEL=gpt-5.1` in production (500k TPM, stronger than o3). `isReasoningModel` (`improvement-cycle-core.ts`) now routes the gpt-5 family down the reasoning payload path (no `temperature`, `max_completion_tokens`) — previously the `/o[0-9]|reasoning/` check missed gpt-5 and would have sent `temperature: 0.2`, which gpt-5 reasoning models reject. An earlier stopgap on o4-mini worked but broke prompt code-fence discipline on its first run (guard caught it; proposal shipped rules-only), reinforcing that this call wants a strong model.
+- **Fail fast:** `isRequestTooLarge429` detects the "Request too large … (TPM)" body and the script aborts immediately instead of retrying.
+- **Never silent:** any cycle crash now inserts an `improvement_cycle_failed` row into `system_alerts` (`recordCycleFailureAlert` in the script) — previously only email-step failures were recorded.
+- **Cadence:** cron moved from daily to every other day (see Phase E).
 
 ## Operational note: Supabase schema drift (correction rules)
 

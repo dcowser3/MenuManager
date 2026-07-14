@@ -5285,6 +5285,16 @@
             document.getElementById('submitterName').value = profile.name;
             document.getElementById('submitterEmail').value = profile.email || '';
             document.getElementById('submitterJobTitle').value = profile.jobTitle || '';
+            // Programmatic .value assignment does not fire the inputs' oninput
+            // handlers, so stale validation state (input-error highlight, hidden
+            // AI-review button) would survive the autofill. Clear the submitter
+            // field errors directly and notify listeners on the non-search
+            // fields. (No synthetic input on submitterName — that would re-open
+            // this autocomplete dropdown.)
+            ['submitterName', 'submitterEmail', 'submitterJobTitle'].forEach(clearSubmitterFieldError);
+            ['submitterEmail', 'submitterJobTitle'].forEach(function (id) {
+                document.getElementById(id).dispatchEvent(new Event('input', { bubbles: true }));
+            });
             document.getElementById('submitterDropdown').classList.remove('show');
             submitterResults = [];
             submitterHighlightIndex = -1;

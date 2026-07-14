@@ -140,7 +140,8 @@ async function postImprovementCompletion(messages) {
         throw new Error('OPENAI_API_KEY is required for the improvement cycle');
     }
     const model = process.env.IMPROVE_MODEL || process.env.PROMPT_REWRITE_MODEL || 'o3';
-    const isR = /o[0-9]|reasoning/i.test(model);
+    const core = requireDashboardLib('improvement-cycle-core');
+    const isR = core.isReasoningModel(model);
     const payload = { model, messages, response_format: { type: 'json_object' } };
     if (!isR) { payload.max_tokens = 16000; payload.temperature = 0.2; } else { payload.max_completion_tokens = Number(process.env.IMPROVE_MAX_COMPLETION_TOKENS || 32000); }
 
@@ -158,6 +159,15 @@ async function postImprovementCompletion(messages) {
         });
         if (response.status === 429 && rlAttempt < maxRateLimitRetries) {
             const bodyText = await response.text();
+            // Fail fast when the single request is bigger than the org's TPM cap:
+            // no amount of waiting makes the same request fit (observed Jul 2026:
+            // 31k-token request vs o3's 30k TPM cap burned all 6 retries for nothing).
+            if (core.isRequestTooLarge429(bodyText)) {
+                throw new Error(
+                    `OpenAI 429 (request too large): a single ${model} request exceeds the org's tokens-per-minute cap — retrying cannot help. `
+                    + `Reduce context or set IMPROVE_MODEL to a model with a higher TPM limit. ${bodyText.slice(0, 300)}`
+                );
+            }
             let waitMs = 0;
             const retryAfter = response.headers.get('retry-after');
             if (retryAfter && Number.isFinite(Number(retryAfter))) {
@@ -1385,8 +1395,29 @@ async function main() {
     }
 }
 
-main().catch((error) => {
+// Any cycle failure must leave a visible trace: the email-failure path already
+// records improvement_cycle_email_failed, but a crash BEFORE the email step
+// (LLM call failure, eval crash, insert error) previously died with only a log
+// line in the cron log — invisible unless someone ssh'd in (observed Jul 14
+// 2026: request-too-large 429 silently killed the daily proposal).
+async function recordCycleFailureAlert(error) {
+    try {
+        const supabase = getSupabase();
+        await supabase.from('system_alerts').insert({
+            alert_type: 'improvement_cycle_failed',
+            severity: 'error',
+            service: 'improvement-cycle',
+            message: `Improvement cycle failed: ${`${error.message || error}`.slice(0, 500)}`,
+            details: { error: `${error.stack || error.message || error}`.slice(0, 1500) },
+        });
+    } catch (alertError) {
+        console.warn(`Could not record cycle-failure alert: ${alertError.message}`);
+    }
+}
+
+main().catch(async (error) => {
     console.error(`Improvement cycle failed: ${error.message}`);
+    await recordCycleFailureAlert(error);
     releaseLock();
     process.exit(1);
 });

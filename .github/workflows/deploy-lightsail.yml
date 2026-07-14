@@ -133,10 +133,13 @@ jobs:
             done
           fi
 
-          # Install/refresh the daily improvement-cycle cron (idempotent).
-          # 09:15 UTC = overnight US, so proposals are ready at start of day.
+          # Install/refresh the improvement-cycle cron (idempotent).
+          # Every other day (odd days of month) at 09:15 UTC = overnight US, so
+          # proposals are ready at start of day. Note */2 on day-of-month means
+          # month boundaries can occasionally give back-to-back runs (31st -> 1st);
+          # harmless — the correction gate makes an empty run a no-op.
           chmod +x "$DEPLOY_PATH/scripts/run-improvement-cycle-cron.sh"
-          CRON_LINE="15 9 * * * /usr/bin/flock -n /tmp/menumanager-improve.lock $DEPLOY_PATH/scripts/run-improvement-cycle-cron.sh >> /tmp/menumanager-improve-cron.log 2>&1"
+          CRON_LINE="15 9 */2 * * /usr/bin/flock -n /tmp/menumanager-improve.lock $DEPLOY_PATH/scripts/run-improvement-cycle-cron.sh >> /tmp/menumanager-improve-cron.log 2>&1"
           ( crontab -l 2>/dev/null | grep -v 'run-improvement-cycle-cron.sh' || true; echo "$CRON_LINE" ) | crontab -
           echo "Improvement-cycle cron installed"
           REMOTE
