@@ -5285,6 +5285,16 @@
             document.getElementById('submitterName').value = profile.name;
             document.getElementById('submitterEmail').value = profile.email || '';
             document.getElementById('submitterJobTitle').value = profile.jobTitle || '';
+            // Programmatic .value assignment does not fire the inputs' oninput
+            // handlers, so stale validation state (input-error highlight, hidden
+            // AI-review button) would survive the autofill. Clear the submitter
+            // field errors directly and notify listeners on the non-search
+            // fields. (No synthetic input on submitterName — that would re-open
+            // this autocomplete dropdown.)
+            ['submitterName', 'submitterEmail', 'submitterJobTitle'].forEach(clearSubmitterFieldError);
+            ['submitterEmail', 'submitterJobTitle'].forEach(function (id) {
+                document.getElementById(id).dispatchEvent(new Event('input', { bubbles: true }));
+            });
             document.getElementById('submitterDropdown').classList.remove('show');
             submitterResults = [];
             submitterHighlightIndex = -1;
@@ -8205,6 +8215,18 @@
                     printSize: valueFor('printSize'),
                     allergens: getAllergenInputValue(),
                     containsRawUndercooked: getContainsRawSelection(),
+                    submitterName: valueFor('submitterName'),
+                    submitterEmail: valueFor('submitterEmail'),
+                    submitterJobTitle: valueFor('submitterJobTitle'),
+                    approval1: valueFor('approval1'),
+                    approver1Name: valueFor('approver1Name'),
+                    approver1Position: valueFor('approver1Position'),
+                    approver1Email: valueFor('approver1Email'),
+                    additionalApproverVisible: !document.getElementById('additionalApprovalGroup')?.classList.contains('hidden'),
+                    approval2: valueFor('approval2'),
+                    approver2Name: valueFor('approver2Name'),
+                    approver2Position: valueFor('approver2Position'),
+                    approver2Email: valueFor('approver2Email'),
                 }
             };
         }
@@ -8285,7 +8307,25 @@
                 folded: 'folded',
                 printRegion: 'printRegion',
                 printSize: 'printSize',
+                submitterName: 'submitterName',
+                submitterEmail: 'submitterEmail',
+                submitterJobTitle: 'submitterJobTitle',
+                approval1: 'approval1',
+                approver1Name: 'approver1Name',
+                approver1Position: 'approver1Position',
+                approver1Email: 'approver1Email',
+                approval2: 'approval2',
+                approver2Name: 'approver2Name',
+                approver2Position: 'approver2Position',
+                approver2Email: 'approver2Email',
             }).forEach(([key, id]) => assign(id, fields[key]));
+
+            const additionalGroup = document.getElementById('additionalApprovalGroup');
+            const wantsAdditionalApprover = !!fields.additionalApproverVisible
+                || !!(fields.approval2 || fields.approver2Name || fields.approver2Position || fields.approver2Email);
+            if (additionalGroup && wantsAdditionalApprover && additionalGroup.classList.contains('hidden')) {
+                toggleAdditionalApproval();
+            }
 
             if (fields.allergens !== undefined) setAllergenInputValue(fields.allergens || '');
             if (fields.containsRawUndercooked !== undefined) setContainsRawSelection(!!fields.containsRawUndercooked);
@@ -8347,6 +8387,17 @@
             draftApplying = false;
             setDraftSaveStatus('Saved');
 
+            // Make resuming explicit: without this, clicking "Edit This Menu" can
+            // silently drop the user into someone's existing draft.
+            const resumedPriorSave = draftSession.status === 'active'
+                && draftSession.updated_at && draftSession.created_at
+                && draftSession.updated_at !== draftSession.created_at;
+            if (resumedPriorSave) {
+                const savedAt = new Date(draftSession.updated_at).toLocaleString();
+                const savedBy = `${draftSession.last_edited_by || ''}`.trim();
+                showAlert(`You are resuming an in-progress draft last saved ${savedAt}${savedBy ? ` by ${savedBy}` : ''}. Your edits continue from that saved version.`, 'info', { persistent: true });
+            }
+
             if (draftSession.status === 'submitted') {
                 const submittedId = draftSession.submitted_submission_id;
                 setDraftReadonly(submittedId
@@ -8354,6 +8405,23 @@
                     : 'This shared draft has already been submitted.');
             } else if (draftSession.status === 'expired') {
                 setDraftReadonly('This shared draft has expired. Start a fresh edit from the approved menu.');
+            }
+
+            // Surface staleness at open instead of waiting for the continue-step
+            // dialog. Banner only — the dialog's "Load Newer Menu" action would
+            // overwrite this draft's saved edits under the old baseline id.
+            if (draftSession.status === 'active') {
+                (async () => {
+                    try {
+                        const issue = await getBaselineFreshnessIssue();
+                        if (issue && (issue.type === 'stale' || issue.type === 'mismatch')) {
+                            const latestLabel = formatBaselineLabel(issue.latest);
+                            showAlert(`A newer approved ${issue.servicePeriod} menu exists for ${issue.property} (${latestLabel}). This draft is editing an older version of the menu.`, 'warning', { persistent: true });
+                        }
+                    } catch (error) {
+                        console.error('Draft baseline staleness check failed:', error);
+                    }
+                })();
             }
         }
 

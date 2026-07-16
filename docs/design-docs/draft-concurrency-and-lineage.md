@@ -55,7 +55,14 @@ Security note: `Resume Editing` on a public page hands the draft to anyone who c
 
 ### Who's editing (best-effort identity)
 
-Drafts have no identity until submit. For the badge and dashboard to say more than "someone," autosaves include an optional `last_edited_by` hint taken from the client-side submitter-autofill profile when present. Display-only, never access control, never trusted for anything else.
+Drafts have no identity until submit. For the badge and dashboard to say more than "someone," autosaves include an optional `last_edited_by` hint taken from the submitter-name field when present. Display-only, never access control, never trusted for anything else.
+
+**July 2026 fixes** (observed in production use; see [menu-entity-and-identity.md](menu-entity-and-identity.md) for the longer-term direction):
+
+- Draft `form_state` now persists the Submitter Information and Required Approval sections (`submitterName/Email/JobTitle`, both approver groups, additional-approver visibility). Previously these were silently dropped on resume, which also meant `last_edited_by` only populated if the user happened to retype their name in that session.
+- The drafts/lineage batch lookups on `/approved-menus` now join on **both** public ids. Drafts store `base_submission_id` via `getPublicSubmissionId` (legacy_id preferred) while the card list keys rows uuid-first; rows with both ids never matched, so the In-progress/Resume card state never rendered and `Edit This Menu` silently resumed an existing draft.
+- Opening a previously saved draft shows an explicit "You are resuming an in-progress draft last saved …" banner (all entry paths, including shared links).
+- Opening an active draft whose baseline is not the latest for its property + service period shows a persistent warning banner at open. The pre-existing confirm dialog still fires at continue/submit; the banner deliberately does not offer "Load Newer Menu" because that would overwrite the draft's saved edits under the old baseline id.
 
 ### In-progress dashboard
 
