@@ -34,11 +34,13 @@ const ASSETS_DB = path.join(DB_DIR, 'assets.json');
 const PROPERTIES_DB = path.join(DB_DIR, 'properties.json');
 const CORRECTION_RULES_DB = path.join(DB_DIR, 'correction_rules.json');
 const DRAFT_SESSIONS_DB = path.join(DB_DIR, 'draft_sessions.json');
+const MENUS_DB = path.join(DB_DIR, 'menus.json');
 const SUBMISSIONS_TABLE = 'submissions';
 const SUBMITTER_PROFILES_TABLE = 'submitter_profiles';
 const ASSETS_TABLE = 'assets';
 const PROPERTIES_TABLE = 'properties';
 const DRAFT_SESSIONS_TABLE = 'draft_sessions';
+const MENUS_TABLE = 'menus';
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const APPROVED_SUBMISSION_STATUSES = ['approved', 'approved_override'];
 const REVIEW_QUEUE_STATUSES = ['pending_human_review', 'submitted_no_ai_review'];
@@ -819,6 +821,126 @@ function toDraftClientPayload(draft: any, baseline: any | null): any {
     };
 }
 
+// ---------------------------------------------------------------------------
+// Menus (Phase 1 — menu-as-an-entity). Supabase-primary with JSON mirror, same
+// convention as draft sessions. No DB constraints on the JSON fallback — the
+// single-menu-per-group and pointer invariants are enforced in code.
+// ---------------------------------------------------------------------------
+const VALID_MENU_STATUSES = ['active', 'retired'];
+
+function normalizeMenu(row: any): any {
+    const status = `${row?.status || 'active'}`.trim().toLowerCase();
+    return {
+        id: `${row?.id || ''}`,
+        property: `${row?.property || ''}`,
+        service_period: `${row?.service_period || ''}`,
+        name: `${row?.name || ''}`,
+        current_submission_id: row?.current_submission_id ? `${row.current_submission_id}` : null,
+        status: VALID_MENU_STATUSES.includes(status) ? status : 'active',
+        created_at: `${row?.created_at || ''}`,
+        updated_at: `${row?.updated_at || ''}`,
+    };
+}
+
+async function readLocalMenus(): Promise<Record<string, any>> {
+    try {
+        return JSON.parse(await fs.readFile(MENUS_DB, 'utf-8'));
+    } catch {
+        return {};
+    }
+}
+
+async function writeLocalMenus(menus: Record<string, any>): Promise<void> {
+    await fs.writeFile(MENUS_DB, JSON.stringify(menus, null, 2));
+}
+
+async function getMenuById(id: string): Promise<any | null> {
+    const normalizedId = `${id || ''}`.trim();
+    if (!normalizedId) return null;
+    if (isSupabaseConfigured()) {
+        const { data, error } = await getSupabaseClient()
+            .from(MENUS_TABLE)
+            .select('*')
+            .eq('id', normalizedId)
+            .maybeSingle();
+        if (error) throw new Error(`Failed to load menu: ${error.message}`);
+        if (data) return normalizeMenu(data);
+    }
+    const menus = await readLocalMenus();
+    return menus[normalizedId] ? normalizeMenu(menus[normalizedId]) : null;
+}
+
+async function getMenusByIds(ids: string[]): Promise<any[]> {
+    const normalizedIds = [...new Set((ids || []).map((id) => `${id || ''}`.trim()).filter(Boolean))];
+    if (!normalizedIds.length) return [];
+    if (isSupabaseConfigured()) {
+        const { data, error } = await getSupabaseClient()
+            .from(MENUS_TABLE)
+            .select('*')
+            .in('id', normalizedIds);
+        if (error) throw new Error(`Failed to batch-load menus: ${error.message}`);
+        return (data || []).map(normalizeMenu);
+    }
+    const menus = await readLocalMenus();
+    return normalizedIds.map((id) => menus[id]).filter(Boolean).map(normalizeMenu);
+}
+
+async function findMenus(filters: { property?: string; servicePeriod?: string; status?: string } = {}): Promise<any[]> {
+    const propertyKey = filters.property ? normalizeApprovedLookupValue(filters.property) : '';
+    const serviceKey = filters.servicePeriod ? normalizeApprovedLookupValue(filters.servicePeriod) : '';
+    const statusKey = filters.status ? `${filters.status}`.trim().toLowerCase() : '';
+    let rows: any[] = [];
+    if (isSupabaseConfigured()) {
+        let query: any = getSupabaseClient().from(MENUS_TABLE).select('*').order('updated_at', { ascending: false });
+        if (filters.property) query = query.ilike('property', filters.property);
+        if (statusKey) query = query.eq('status', statusKey);
+        const { data, error } = await query;
+        if (error) throw new Error(`Failed to find menus: ${error.message}`);
+        rows = data || [];
+    } else {
+        rows = Object.values(await readLocalMenus());
+    }
+    return rows
+        .map(normalizeMenu)
+        .filter((menu) => !propertyKey || normalizeApprovedLookupValue(menu.property) === propertyKey)
+        .filter((menu) => !serviceKey || normalizeApprovedLookupValue(menu.service_period) === serviceKey)
+        .filter((menu) => !statusKey || menu.status === statusKey)
+        .sort((a, b) => Date.parse(b.updated_at || '') - Date.parse(a.updated_at || ''));
+}
+
+async function saveMenu(menu: any): Promise<any> {
+    const now = new Date().toISOString();
+    const normalized = normalizeMenu({
+        ...menu,
+        id: menu?.id || crypto.randomUUID(),
+        created_at: menu?.created_at || now,
+        updated_at: menu?.updated_at || now,
+    });
+    if (!normalized.property || !normalized.service_period || !normalized.name) {
+        const error: any = new Error('Menu requires property, service_period, and name');
+        error.statusCode = 400;
+        throw error;
+    }
+    if (isSupabaseConfigured()) {
+        const record = {
+            id: normalized.id,
+            property: normalized.property,
+            service_period: normalized.service_period,
+            name: normalized.name,
+            current_submission_id: normalized.current_submission_id,
+            status: normalized.status,
+            created_at: normalized.created_at,
+            updated_at: normalized.updated_at,
+        };
+        const { error } = await getSupabaseClient().from(MENUS_TABLE).upsert(record, { onConflict: 'id' });
+        if (error) throw new Error(`Failed to save menu: ${error.message}`);
+    }
+    const menus = await readLocalMenus();
+    menus[normalized.id] = normalized;
+    await writeLocalMenus(menus);
+    return normalized;
+}
+
 async function readLocalPropertyCatalog(): Promise<PropertyCatalogRecord[]> {
     try {
         const content = await fs.readFile(PROPERTIES_DB, 'utf-8');
@@ -1013,6 +1135,7 @@ export function mapApprovedSubmissionForClient(submission: any, latestForPropert
             ) ? (submission.menu_content_html || submission.raw_payload?.menuContentHtml || '') : ''),
         allergens: submission.allergens || '',
         status: submission.status,
+        menuId: submission.menu_id || null,
         isLatestForPropertyService: latestForPropertyService ? latestPublicId === publicId : null,
         latestForPropertyService: latestForPropertyService ? {
             id: latestPublicId,
@@ -1371,6 +1494,7 @@ async function initDb() {
         await fs.access(PROPERTIES_DB).catch(() => fs.writeFile(PROPERTIES_DB, JSON.stringify(buildDefaultPropertyCatalog(), null, 2)));
         await fs.access(CORRECTION_RULES_DB).catch(() => fs.writeFile(CORRECTION_RULES_DB, '[]'));
         await fs.access(DRAFT_SESSIONS_DB).catch(() => fs.writeFile(DRAFT_SESSIONS_DB, '{}'));
+        await fs.access(MENUS_DB).catch(() => fs.writeFile(MENUS_DB, '{}')); // keyed by id
     } catch (error) {
         console.error('Failed to initialize database:', error);
     }
@@ -1610,6 +1734,51 @@ app.post('/draft-sessions/:token/submit', async (req, res) => {
     } catch (error: any) {
         console.error('Error locking submitted draft session:', error.message);
         res.status(500).json({ error: 'Failed to lock draft session' });
+    }
+});
+
+// ---------------------------------------------------------------------------
+// Menu entity routes (Phase 1). Named list route must precede /menus/:id.
+// ---------------------------------------------------------------------------
+app.get('/menus', async (req, res) => {
+    try {
+        const menus = await findMenus({
+            property: `${req.query.property || ''}`.trim() || undefined,
+            servicePeriod: `${req.query.servicePeriod || req.query.service_period || ''}`.trim() || undefined,
+            status: `${req.query.status || ''}`.trim() || undefined,
+        });
+        res.json({ menus });
+    } catch (error: any) {
+        console.error('Error listing menus:', error.message);
+        res.status(500).json({ error: 'Failed to list menus' });
+    }
+});
+
+app.post('/menus', async (req, res) => {
+    try {
+        const menu = await saveMenu({
+            id: req.body?.id,
+            property: `${req.body?.property || ''}`.trim(),
+            service_period: `${req.body?.servicePeriod || req.body?.service_period || ''}`.trim(),
+            name: `${req.body?.name || ''}`.trim(),
+            current_submission_id: req.body?.currentSubmissionId || req.body?.current_submission_id || null,
+            status: req.body?.status,
+        });
+        res.status(201).json({ menu });
+    } catch (error: any) {
+        console.error('Error saving menu:', error.message);
+        res.status(error.statusCode || 500).json({ error: error.statusCode ? error.message : 'Failed to save menu' });
+    }
+});
+
+app.get('/menus/:id', async (req, res) => {
+    try {
+        const menu = await getMenuById(req.params.id);
+        if (!menu) return res.status(404).json({ error: 'Menu not found' });
+        res.json({ menu });
+    } catch (error: any) {
+        console.error('Error loading menu:', error.message);
+        res.status(500).json({ error: 'Failed to load menu' });
     }
 });
 
@@ -3164,8 +3333,9 @@ app.put('/prompt-proposals/:id', async (req, res) => {
 // instead of losing reviewer data. Update when a migration adds load-bearing columns.
 const CRITICAL_SUPABASE_SCHEMA: Record<string, string[]> = {
     correction_rules: ['applies_to_menu_type', 'prompt_cycle_id', 'consumed_at', 'submission_ids', 'example_original', 'example_corrected', 'inferred_from_guidance'],
-    submissions: ['form_attempt_id', 'approved_menu_content', 'approved_menu_content_html'],
-    draft_sessions: ['token', 'base_submission_id', 'form_state', 'status', 'submitted_submission_id', 'last_edited_by'],
+    submissions: ['form_attempt_id', 'approved_menu_content', 'approved_menu_content_html', 'menu_id'],
+    menus: ['property', 'service_period', 'name', 'current_submission_id', 'status'],
+    draft_sessions: ['token', 'base_submission_id', 'form_state', 'status', 'submitted_submission_id', 'last_edited_by', 'menu_id'],
     form_attempt_logs: ['draft_session_id'],
     basic_ai_check_audits: ['menu_content_raw', 'submission_id'],
     prompt_proposals: ['proposed_rules', 'eval_status', 'accepted_rules', 'source', 'llm_warnings', 'replay_evidence', 'unresolved_still_missed', 'coverage_claims', 'prompt_length', 'superseded_by_cycle_id', 'superseded_from_cycle_id', 'supersede_carried_correction_count', 'supersede_new_correction_count', 'disposition', 'correction_routing'],

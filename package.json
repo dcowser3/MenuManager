@@ -24,7 +24,8 @@
     "backfill:audit-links": "node scripts/backfill-audit-submission-links.js",
     "audit:approved-documents": "node scripts/audit-approved-documents.js",
     "sharepoint:sync-property": "node scripts/sync-sharepoint-property.js",
-    "reconcile:correction-rules": "node scripts/reconcile-correction-rules.js"
+    "reconcile:correction-rules": "node scripts/reconcile-correction-rules.js",
+    "backfill:menus": "node scripts/backfill-menus.js"
   },
   "keywords": [],
   "author": "",

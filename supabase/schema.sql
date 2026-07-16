@@ -57,6 +57,7 @@ CREATE TABLE submissions (
     submission_mode VARCHAR(50) DEFAULT 'new',      -- 'new' or 'modification'
     revision_source VARCHAR(100),                   -- 'database' or 'uploaded_baseline'
     revision_base_submission_id VARCHAR(100),
+    menu_id UUID,                                   -- Menu entity this submission is a version of (Phase 1)
     revision_baseline_doc_path TEXT,
     revision_baseline_file_name VARCHAR(255),
     base_approved_menu_content TEXT,
@@ -103,6 +104,27 @@ CREATE INDEX idx_submissions_status ON submissions(status);
 CREATE INDEX idx_submissions_created_at ON submissions(created_at DESC);
 CREATE INDEX idx_submissions_clickup_task_id ON submissions(clickup_task_id);
 CREATE INDEX IF NOT EXISTS idx_submissions_form_attempt ON submissions(form_attempt_id);
+CREATE INDEX IF NOT EXISTS idx_submissions_menu ON submissions(menu_id);
+
+-- ============================================================================
+-- 1a. MENUS (Phase 1 — menu-as-an-entity)
+-- A menu evolves over time; each approved submission is a version of one menu.
+-- current_submission_id points at the live version. No FK on current_submission_id
+-- / submissions.menu_id in v1 (historical rows + JSON fallback); validated in code.
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS menus (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    property VARCHAR(200) NOT NULL,
+    service_period VARCHAR(120) NOT NULL,
+    name VARCHAR(200) NOT NULL,            -- e.g. "Lunch", "Brunch Bebidas"
+    current_submission_id UUID,
+    status VARCHAR(24) NOT NULL DEFAULT 'active',  -- active | retired
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_menus_property_service ON menus(property, service_period);
+CREATE INDEX IF NOT EXISTS idx_menus_status ON menus(status);
 
 -- ============================================================================
 -- 1b. SUBMITTER PROFILES (autocomplete cache)
@@ -600,11 +622,13 @@ CREATE TABLE IF NOT EXISTS draft_sessions (
     status VARCHAR(30) NOT NULL DEFAULT 'active',
     submitted_submission_id VARCHAR(100),
     last_edited_by VARCHAR(160),
+    menu_id UUID,                                   -- Menu entity this draft edits (populated Phase 3)
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_draft_sessions_token ON draft_sessions(token);
+CREATE INDEX IF NOT EXISTS idx_draft_sessions_menu ON draft_sessions(menu_id);
 CREATE INDEX IF NOT EXISTS idx_draft_sessions_base_submission ON draft_sessions(base_submission_id);
 CREATE INDEX IF NOT EXISTS idx_draft_sessions_status_updated ON draft_sessions(status, updated_at DESC);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_draft_sessions_one_active_per_base ON draft_sessions(base_submission_id) WHERE status = 'active';
