@@ -4,7 +4,9 @@
 
 Design (July 2026). Follow-up to [draft-concurrency-and-lineage.md](draft-concurrency-and-lineage.md), motivated by production use of the July 2026 build. Near-term fixes shipped alongside this doc (form_state persistence, id-join fix, resume banner, staleness-at-open banner) treat the symptoms; this doc proposes fixing the causes.
 
-**Phase 1 built (2026-07-16, ships dark):** `menus` table + `submissions.menu_id` + `draft_sessions.menu_id` (migration `20260716_menu_entity.sql`); db CRUD/batch helpers + `GET/POST /menus` routes; grouping backfill `scripts/backfill-menus.js` (`npm run backfill:menus`, dry-run default) with pure algorithm in `services/db/lib/menu-backfill.ts`. No read path consumes the new tables yet. Production `--apply` is gated on a human reviewing `tmp/menu-backfill-review.csv` first. Phases 2–5 pending — see the [implementation spec](../menu-entity-and-identity-implementation-spec.md).
+**Phase 1 built (2026-07-16, ships dark):** `menus` table + `submissions.menu_id` + `draft_sessions.menu_id` (migration `20260716_menu_entity.sql`); db CRUD/batch helpers + `GET/POST /menus` routes; grouping backfill `scripts/backfill-menus.js` (`npm run backfill:menus`, dry-run default) with pure algorithm in `services/db/lib/menu-backfill.ts`. No read path consumes the new tables yet. Production `--apply` is gated on a human reviewing `tmp/menu-backfill-review.csv` first.
+
+**Phase 2 built (2026-07-16, write path):** the pointer moves. All approval callers funnel through the db `PUT /submissions/:id` chokepoint, which (a) advances `menus.current_submission_id` when a linked submission is approved — never backward (latest `reviewed_at` wins), and (b) resolves a menu for still-unlinked submissions *at approval time* (silent create when no name collision; on collision it honors the reviewer's `menu_decision`, else defaults to a separate menu and warns — the ClickUp-webhook path lands here). Guided paths inherit `menu_id` from their baseline at `POST /submissions`. The reviewer "new version vs separate menu?" prompt fires only on collision, on the primary review approval (`GET /menus/resolve` → 409 → confirm). The read path is still unchanged — Approved Menus/drafts/freshness still use the old lineage inference until Phase 3. Phases 3–5 pending — see the [implementation spec](../menu-entity-and-identity-implementation-spec.md).
 
 Implementation handoff: [../menu-entity-and-identity-implementation-spec.md](../menu-entity-and-identity-implementation-spec.md) (build order, file pointers, acceptance criteria).
 
@@ -79,7 +81,7 @@ Stage 3 (deferred) — **real sign-in.** Magic-link auth for chefs and reviewers
 ## Rollout
 
 1. **Schema + backfill (no behavior change):** `menus` table, `submissions.menu_id`, backfill script + human review sheet. Ship dark. ✅ Built 2026-07-16.
-2. **Write path:** set `menu_id` on approval for all four paths; move `current_submission_id` pointer on approval; reviewer "new version or separate menu?" prompt.
+2. **Write path:** set `menu_id` on approval for all four paths; move `current_submission_id` pointer on approval; reviewer "new version or separate menu?" prompt. ✅ Built 2026-07-16.
 3. **Read path:** menu-centric Approved Menus page; draft invariant re-keyed to `menu_id`; retire heuristic gating.
 4. **Identity Stage 1** (can ship independently, any time): localStorage profile prefill + `last_edited_by` stamping.
 5. **Identity Stage 2:** approver dispute link ("If you did NOT approve this menu…") in the existing approver email.

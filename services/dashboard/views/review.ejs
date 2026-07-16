@@ -546,8 +546,10 @@
             document.getElementById('loading').classList.toggle('show', show);
         }
 
-        async function quickApprove() {
-            if (!confirm('Are you sure the AI draft is perfect and ready to send to the chef?')) {
+        // menuDecision (Phase 2): undefined until the reviewer answers a name
+        // collision — then a menu id ("new version of X") or 'separate'.
+        async function quickApprove(menuDecision) {
+            if (!menuDecision && !confirm('Are you sure the AI draft is perfect and ready to send to the chef?')) {
                 return;
             }
 
@@ -556,8 +558,19 @@
             try {
                 const response = await fetch('/approve/' + submissionId, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' }
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(menuDecision ? { menuDecision: menuDecision } : {})
                 });
+
+                if (response.status === 409) {
+                    const info = await response.json();
+                    if (info && info.needsMenuDecision) {
+                        showLoading(false);
+                        const decision = promptMenuDecision(info);
+                        if (decision) quickApprove(decision);
+                        return;
+                    }
+                }
 
                 const data = await response.json();
 
@@ -574,6 +587,22 @@
                 showAlert('Failed to approve submission', 'error');
                 showLoading(false);
             }
+        }
+
+        // Ask whether this approval is a new version of an existing menu or a
+        // separate menu. Returns a menu id, 'separate', or null (cancelled).
+        function promptMenuDecision(info) {
+            var candidate = (info.candidates && info.candidates[0]) || null;
+            var approvedNote = '';
+            if (candidate && candidate.current_submission_id) {
+                approvedNote = ' (current version: ' + candidate.current_submission_id + ')';
+            }
+            var name = info.menuName || 'this menu';
+            var msg = 'A menu named "' + name + '" already exists for this property and service period' + approvedNote + '.\n\n'
+                + 'OK = save this as a NEW VERSION of that menu.\n'
+                + 'Cancel = create a SEPARATE menu with the same name.';
+            if (!candidate) return 'separate';
+            return confirm(msg) ? candidate.id : 'separate';
         }
 
         async function retryClickUpTask() {

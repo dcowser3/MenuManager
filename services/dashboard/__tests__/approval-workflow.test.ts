@@ -116,6 +116,64 @@ describe('approval workflow learning provenance', () => {
         expect(comparePayload.final_path).toContain('/tmp/finals/sub-1-final.docx');
     });
 
+    test('brand-new approval that collides prompts the reviewer (409), no db write', async () => {
+        const deps = createDeps();
+        deps.axios.get.mockImplementation(async (url: string) => {
+            if (url.endsWith('/submissions/sub-1')) {
+                return { data: { id: 'sub-1', ai_draft_path: '/tmp/documents/sub-1/sub-1-draft.docx', property: 'Tán', service_period: 'Lunch', project_name: 'Lunch' } };
+            }
+            if (url.endsWith('/menus/resolve')) {
+                return { data: { collision: true, candidates: [{ id: 'menu-9', name: 'Lunch', current_submission_id: 'old' }] } };
+            }
+            return { data: {} };
+        });
+        const handlers = createApprovalWorkflowHandlers(deps as any);
+        const res = createJsonResponse();
+
+        await handlers.quickApprove({ params: { submissionId: 'sub-1' }, body: {} }, res);
+
+        expect(res.statusCode).toBe(409);
+        expect(res.body).toMatchObject({ needsMenuDecision: true, menuName: 'Lunch' });
+        expect(deps.axios.put).not.toHaveBeenCalled(); // nothing approved until reviewer answers
+    });
+
+    test('brand-new approval with a reviewer decision forwards menu_decision to the db', async () => {
+        const deps = createDeps();
+        deps.axios.get.mockImplementation(async (url: string) => {
+            if (url.endsWith('/submissions/sub-1')) {
+                return { data: { id: 'sub-1', ai_draft_path: '/tmp/documents/sub-1/sub-1-draft.docx', property: 'Tán', service_period: 'Lunch', project_name: 'Lunch' } };
+            }
+            return { data: { collision: true, candidates: [] } };
+        });
+        const handlers = createApprovalWorkflowHandlers(deps as any);
+        const res = createJsonResponse();
+
+        await handlers.quickApprove({ params: { submissionId: 'sub-1' }, body: { menuDecision: 'menu-9' } }, res);
+
+        expect(res.statusCode).toBe(200);
+        expect(deps.axios.put).toHaveBeenCalledWith(
+            'http://localhost:3004/submissions/sub-1',
+            expect.objectContaining({ menu_decision: 'menu-9' })
+        );
+    });
+
+    test('no collision approves without a menu prompt', async () => {
+        const deps = createDeps();
+        deps.axios.get.mockImplementation(async (url: string) => {
+            if (url.endsWith('/submissions/sub-1')) {
+                return { data: { id: 'sub-1', ai_draft_path: '/tmp/documents/sub-1/sub-1-draft.docx', property: 'Tán', service_period: 'Lunch', project_name: 'Lunch' } };
+            }
+            return { data: { collision: false, candidates: [] } };
+        });
+        const handlers = createApprovalWorkflowHandlers(deps as any);
+        const res = createJsonResponse();
+
+        await handlers.quickApprove({ params: { submissionId: 'sub-1' }, body: {} }, res);
+
+        expect(res.statusCode).toBe(200);
+        expect(deps.axios.put).toHaveBeenCalled();
+    });
+
     test('browser approval finalization uses the long ClickUp timeout', async () => {
         const deps = createDeps();
         deps.axios.get.mockResolvedValue({

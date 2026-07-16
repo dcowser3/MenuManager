@@ -20,7 +20,10 @@ const EDITABLE_SUBMISSION_FIELDS = new Set([
     'mismatch_override_reason',
     'mismatch_override_at',
     'raw_payload',
+    'menu_id',
 ]);
+
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 const ALLOWED_SUBMISSION_STATUSES = new Set([
     'processing',
@@ -154,6 +157,20 @@ export function sanitizeSubmissionUpdates(
                 continue;
             }
             allowedFields[key] = normalizedTaskId;
+            continue;
+        }
+
+        if (key === 'menu_id') {
+            if (value === null) {
+                allowedFields.menu_id = null;
+                continue;
+            }
+            const normalizedMenuId = `${value || ''}`.trim();
+            if (!UUID_PATTERN.test(normalizedMenuId)) {
+                errors.push('menu_id must be a UUID or null');
+                continue;
+            }
+            allowedFields.menu_id = normalizedMenuId;
             continue;
         }
 

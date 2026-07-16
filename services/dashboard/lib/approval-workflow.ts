@@ -38,18 +38,47 @@ type ApprovalWorkflowDeps = {
 };
 
 export function createApprovalWorkflowHandlers(deps: ApprovalWorkflowDeps) {
+    // Menu-as-entity (Phase 2): a brand-new submission (no menu link, no lineage)
+    // resolves its menu at approval. If it collides by name with an active menu
+    // and the reviewer hasn't answered "new version vs separate menu?", surface a
+    // prompt instead of silently picking. Returns a prompt payload, or null to
+    // proceed (menuDecision, if any, is forwarded to the db which does the work).
+    const checkMenuCollision = async (submission: any, menuDecision?: string): Promise<{ needsMenuDecision: true; menuName: string; candidates: any[] } | null> => {
+        if (submission?.menu_id || menuDecision) return null; // already linked or reviewer already decided
+        const property = `${submission?.property || ''}`.trim();
+        const servicePeriod = `${submission?.service_period || submission?.raw_payload?.servicePeriod || ''}`.trim();
+        const name = `${submission?.project_name || ''}`.trim();
+        if (!property || !servicePeriod || !name) return null; // db will warn + skip menu creation
+        try {
+            const resolve = await deps.axios.get(`${deps.DB_SERVICE_URL}/menus/resolve`, {
+                params: { property, servicePeriod, name },
+            });
+            if (resolve.data?.collision) {
+                return { needsMenuDecision: true, menuName: name, candidates: resolve.data.candidates || [] };
+            }
+        } catch (error: any) {
+            // Resolution is advisory; on failure let the db apply its safe default.
+            console.error('Menu collision check failed (continuing with db default):', error.message);
+        }
+        return null;
+    };
+
     const persistApprovedSubmission = async (input: {
         submissionId: string;
         submission: any;
         finalPath: string;
         changesMade: boolean;
+        menuDecision?: string;
     }) => {
         await deps.axios.put(
             `${deps.DB_SERVICE_URL}/submissions/${input.submissionId}`,
-            buildApprovedSubmissionUpdate({
-                finalPath: input.finalPath,
-                changesMade: input.changesMade,
-            })
+            {
+                ...buildApprovedSubmissionUpdate({
+                    finalPath: input.finalPath,
+                    changesMade: input.changesMade,
+                }),
+                ...(input.menuDecision ? { menu_decision: input.menuDecision } : {}),
+            }
         );
 
         if (input.changesMade) {
@@ -88,6 +117,12 @@ export function createApprovalWorkflowHandlers(deps: ApprovalWorkflowDeps) {
                 return res.status(404).json({ error: 'Submission not found' });
             }
 
+            const menuDecision = `${req.body?.menuDecision || ''}`.trim() || undefined;
+            const collision = await checkMenuCollision(submission, menuDecision);
+            if (collision) {
+                return res.status(409).json(collision);
+            }
+
             const finalPath = submission.ai_draft_path.replace('-draft.', '-final.');
             await deps.fs.copyFile(submission.ai_draft_path, finalPath);
 
@@ -96,6 +131,7 @@ export function createApprovalWorkflowHandlers(deps: ApprovalWorkflowDeps) {
                 submission,
                 finalPath,
                 changesMade: false,
+                menuDecision,
             });
 
             res.json({

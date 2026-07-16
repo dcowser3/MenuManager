@@ -453,6 +453,7 @@ const SUPABASE_SUBMISSION_COLUMNS = new Set([
     'submission_mode',
     'revision_source',
     'revision_base_submission_id',
+    'menu_id',
     'revision_baseline_doc_path',
     'revision_baseline_file_name',
     'base_approved_menu_content',
@@ -939,6 +940,97 @@ async function saveMenu(menu: any): Promise<any> {
     menus[normalized.id] = normalized;
     await writeLocalMenus(menus);
     return normalized;
+}
+
+// Phase 2 chokepoint: when a submission enters an approved status and is linked
+// to a menu, advance that menu's current_submission_id — but never backward. A
+// late-arriving approval of an older version (lower approved timestamp than the
+// current pointer) must not move the pointer (latest reviewed_at wins, same rule
+// as today's lineage tip). Derived bookkeeping: failures are logged, never fatal
+// to the approval itself.
+// Phase 2 brand-new resolution: a submission being approved with no menu link
+// gets a menu resolved now (never at submit — rejected submissions must not
+// create menus). No name collision → create silently. Collision (active menu,
+// same property + service + name) → honor the reviewer's `menuDecision` if one
+// was passed; otherwise default to a SEPARATE menu and warn (the ClickUp-webhook
+// path and any non-prompting caller land here — never a silent merge). Returns
+// the menu id to link, or null when the submission lacks the fields to form a
+// menu. Creates the menu row but leaves the pointer to reconcileMenuPointer.
+async function resolveBrandNewMenuId(submission: any, menuDecision?: string): Promise<{ menuId: string | null; collisionDefaulted: boolean }> {
+    const property = `${submission?.property || ''}`.trim();
+    const servicePeriod = getSubmissionServicePeriod(submission);
+    const name = `${submission?.project_name || ''}`.trim();
+    if (!property || !servicePeriod || !name) {
+        console.warn(`resolveBrandNewMenuId: submission ${getPublicSubmissionId(submission)} missing property/service/name — no menu created`);
+        return { menuId: null, collisionDefaulted: false };
+    }
+
+    const nameKey = normalizeApprovedLookupValue(name);
+    const candidates = (await findMenus({ property, servicePeriod, status: 'active' }))
+        .filter((menu) => normalizeApprovedLookupValue(menu.name) === nameKey);
+
+    const decision = `${menuDecision || ''}`.trim();
+    if (candidates.length > 0 && decision && decision.toLowerCase() !== 'separate') {
+        // Reviewer chose "new version of <existing>": link to that menu.
+        const chosen = candidates.find((menu) => menu.id === decision);
+        if (chosen) return { menuId: chosen.id, collisionDefaulted: false };
+        console.warn(`resolveBrandNewMenuId: menuDecision ${decision} not among candidates — creating separate menu`);
+    }
+
+    const collisionDefaulted = candidates.length > 0 && (!decision || decision.toLowerCase() === 'separate');
+    if (candidates.length > 0 && !decision) {
+        console.warn(`resolveBrandNewMenuId: name collision on "${name}" (${property} / ${servicePeriod}) with no reviewer decision — defaulting to a separate menu`);
+    }
+    const created = await saveMenu({ property, service_period: servicePeriod, name, current_submission_id: null, status: 'active' });
+    return { menuId: created.id, collisionDefaulted };
+}
+
+// When an update approves a still-unlinked submission, resolve its menu and add
+// menu_id to the write so the link and the pointer move land together. Never
+// fatal to the approval — logs and leaves the submission unlinked on failure.
+async function injectResolvedMenuIdIfApproving(existingRecord: any, allowedFields: Record<string, any>, menuDecision?: string): Promise<void> {
+    const mergedStatus = `${allowedFields.status ?? existingRecord?.status ?? ''}`.trim().toLowerCase();
+    if (!APPROVED_SUBMISSION_STATUSES.includes(mergedStatus)) return;
+    if (existingRecord?.menu_id || allowedFields.menu_id) return; // already linked or being linked
+    try {
+        const { menuId } = await resolveBrandNewMenuId({ ...existingRecord, ...allowedFields }, menuDecision);
+        if (menuId) allowedFields.menu_id = menuId;
+    } catch (error: any) {
+        console.error('Brand-new menu resolution failed (approval kept, left unlinked):', error.message);
+    }
+}
+
+// Only reconcile when the write could affect the pointer: a status entering an
+// approved state, or a menu link being (re)assigned on the submission.
+function shouldReconcileMenuPointer(allowedFields: Record<string, any>): boolean {
+    const status = `${allowedFields?.status || ''}`.trim().toLowerCase();
+    return APPROVED_SUBMISSION_STATUSES.includes(status) || Object.prototype.hasOwnProperty.call(allowedFields || {}, 'menu_id');
+}
+
+async function reconcileMenuPointerOnApproval(submission: any): Promise<void> {
+    const status = `${submission?.status || ''}`.trim().toLowerCase();
+    if (!APPROVED_SUBMISSION_STATUSES.includes(status)) return;
+    const menuId = `${submission?.menu_id || ''}`.trim();
+    if (!menuId) return;
+
+    const menu = await getMenuById(menuId);
+    if (!menu) {
+        console.warn(`reconcileMenuPointerOnApproval: submission links to unknown menu ${menuId}`);
+        return;
+    }
+
+    const submissionPublicId = getPublicSubmissionId(submission);
+    if (!submissionPublicId) return;
+
+    if (menu.current_submission_id) {
+        if (menu.current_submission_id === submissionPublicId) return; // already the tip
+        const currentPointer = await getSubmissionRecordById(menu.current_submission_id);
+        if (currentPointer && getApprovedTimestamp(submission) < getApprovedTimestamp(currentPointer)) {
+            return; // older version approved late — don't move the pointer backward
+        }
+    }
+
+    await saveMenu({ ...menu, current_submission_id: submissionPublicId, updated_at: new Date().toISOString() });
 }
 
 async function readLocalPropertyCatalog(): Promise<PropertyCatalogRecord[]> {
@@ -1771,6 +1863,28 @@ app.post('/menus', async (req, res) => {
     }
 });
 
+// Resolve whether a brand-new submission collides with existing active menus
+// (same property + service period + normalized name). Named route before
+// /menus/:id. Used by the reviewer approval flow to decide silent-create vs
+// "new version or separate menu?" prompt.
+app.get('/menus/resolve', async (req, res) => {
+    try {
+        const property = `${req.query.property || ''}`.trim();
+        const servicePeriod = `${req.query.servicePeriod || req.query.service_period || ''}`.trim();
+        const name = `${req.query.name || ''}`.trim();
+        if (!property || !servicePeriod || !name) {
+            return res.status(400).json({ error: 'property, servicePeriod, and name are required' });
+        }
+        const nameKey = normalizeApprovedLookupValue(name);
+        const candidates = (await findMenus({ property, servicePeriod, status: 'active' }))
+            .filter((menu) => normalizeApprovedLookupValue(menu.name) === nameKey);
+        res.json({ collision: candidates.length > 0, candidates });
+    } catch (error: any) {
+        console.error('Error resolving menu:', error.message);
+        res.status(500).json({ error: 'Failed to resolve menu' });
+    }
+});
+
 app.get('/menus/:id', async (req, res) => {
     try {
         const menu = await getMenuById(req.params.id);
@@ -1830,6 +1944,21 @@ app.post('/submissions', async (req, res) => {
             created_at: req.body.created_at || new Date().toISOString(),
             updated_at: new Date().toISOString(),
         };
+
+        // Phase 2 menu resolution — guided paths inherit their menu from the
+        // baseline they revise (draft submit, DB-baseline mod, doc-upload confirm
+        // all carry revision_base_submission_id here). Brand-new submissions get
+        // their menu resolved at approval time, not now (rejected submissions
+        // must never create menus).
+        if (!newSubmission.menu_id && newSubmission.revision_base_submission_id) {
+            try {
+                const baseline = await getSubmissionRecordById(`${newSubmission.revision_base_submission_id}`);
+                if (baseline?.menu_id) newSubmission.menu_id = baseline.menu_id;
+            } catch (baselineError: any) {
+                console.warn(`Could not inherit menu_id from baseline for ${newId}:`, baselineError.message);
+            }
+        }
+
         submissions[newId] = newSubmission;
         await fs.writeFile(SUBMISSIONS_DB, JSON.stringify(submissions, null, 2));
 
@@ -2752,7 +2881,12 @@ app.post('/approved-dishes/backfill-approved', async (req, res) => {
 app.put('/submissions/:id', async (req, res) => {
     try {
         const { id } = req.params;
-        const { allowedFields, rejectedFields, errors } = sanitizeSubmissionUpdates(req.body || {}, {
+        // menu_decision is an approval-time control input (reviewer's "new version
+        // vs separate menu?" answer), not a submission column — pull it out before
+        // sanitizing so it isn't rejected as an unknown field.
+        const { menu_decision, menuDecision: menuDecisionCamel, ...updateBody } = req.body || {};
+        const menuDecision = menu_decision ?? menuDecisionCamel;
+        const { allowedFields, rejectedFields, errors } = sanitizeSubmissionUpdates(updateBody, {
             repoRoot: getRepoRoot(),
             documentStorageRoot: process.env.DOCUMENT_STORAGE_ROOT,
         });
@@ -2787,6 +2921,8 @@ app.put('/submissions/:id', async (req, res) => {
             if (isSupabaseConfigured()) {
                 // Allow UUID/legacy-id updates even when local JSON entry is missing.
                 try {
+                    const currentRemote = await getSubmissionRecordById(id);
+                    await injectResolvedMenuIdIfApproving(currentRemote, allowedFields, menuDecision);
                     await mirrorSubmissionUpdateToSupabase(id, allowedFields);
                     const supabase = getSupabaseClient();
                     const idColumn = UUID_REGEX.test(id) ? 'id' : 'legacy_id';
@@ -2795,6 +2931,13 @@ app.put('/submissions/:id', async (req, res) => {
                         .select('*')
                         .eq(idColumn, id)
                         .maybeSingle();
+                    if (data && shouldReconcileMenuPointer(allowedFields)) {
+                        try {
+                            await reconcileMenuPointerOnApproval(data);
+                        } catch (menuError: any) {
+                            console.error('Menu pointer reconcile failed (approval kept):', menuError.message);
+                        }
+                    }
                     return res.status(200).json(data || { id, ...allowedFields, updated_at: new Date().toISOString() });
                 } catch (supabaseError: any) {
                     console.error('Supabase-only submission update failed:', supabaseError.message);
@@ -2802,6 +2945,8 @@ app.put('/submissions/:id', async (req, res) => {
             }
             return res.status(404).send('Submission not found.');
         }
+
+        await injectResolvedMenuIdIfApproving(submissions[resolvedId], allowedFields, menuDecision);
 
         const updatedSubmission = { ...submissions[resolvedId], ...allowedFields, updated_at: new Date().toISOString() };
         submissions[resolvedId] = updatedSubmission;
@@ -2812,6 +2957,14 @@ app.put('/submissions/:id', async (req, res) => {
             await mirrorSubmissionUpdateToSupabase(id, allowedFields);
         } catch (supabaseError: any) {
             console.error('Supabase mirror update failed (kept local JSON write):', supabaseError.message);
+        }
+
+        if (shouldReconcileMenuPointer(allowedFields)) {
+            try {
+                await reconcileMenuPointerOnApproval(updatedSubmission);
+            } catch (menuError: any) {
+                console.error('Menu pointer reconcile failed (approval kept):', menuError.message);
+            }
         }
 
         res.status(200).json(updatedSubmission);

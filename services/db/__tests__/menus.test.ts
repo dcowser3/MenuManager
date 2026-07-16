@@ -201,3 +201,128 @@ describe('menu CRUD routes (JSON fallback)', () => {
         expect(res.status).toBe(404);
     });
 });
+
+// --------------------------------------------------------------------------
+// Write path: pointer moves + brand-new resolution + inheritance (JSON fallback)
+// --------------------------------------------------------------------------
+describe('menu write path (JSON fallback)', () => {
+    const putHandler = getRouteHandler('put', '/submissions/:id');
+    const postHandler = getRouteHandler('post', '/submissions');
+    let submissions: Record<string, any>;
+    let menus: Record<string, any>;
+
+    beforeEach(() => {
+        submissions = {};
+        menus = {};
+        (isSupabaseConfigured as jest.Mock).mockReturnValue(false);
+        (fs.promises.readFile as jest.Mock).mockImplementation(async (target: string) => {
+            const t = String(target);
+            if (t.endsWith('submissions.json')) return JSON.stringify(submissions);
+            if (t.endsWith('menus.json')) return JSON.stringify(menus);
+            return '{}';
+        });
+        (fs.promises.writeFile as jest.Mock).mockImplementation(async (target: string, payload: string) => {
+            const t = String(target);
+            if (t.endsWith('submissions.json')) submissions = JSON.parse(payload);
+            if (t.endsWith('menus.json')) menus = JSON.parse(payload);
+        });
+        (fs.promises.copyFile as jest.Mock) = jest.fn().mockResolvedValue(undefined);
+        jest.spyOn(console, 'error').mockImplementation(() => {});
+        jest.spyOn(console, 'warn').mockImplementation(() => {});
+    });
+
+    afterEach(() => jest.restoreAllMocks());
+
+    const seedMenu = (over: Partial<any> = {}) => {
+        const id = over.id || 'menu-1';
+        menus[id] = {
+            id, property: 'Tán', service_period: 'Lunch', name: 'Lunch',
+            current_submission_id: over.current_submission_id ?? 'old-sub',
+            status: 'active', created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z', ...over,
+        };
+        return id;
+    };
+
+    test('approving a linked submission moves the menu pointer', async () => {
+        const menuId = seedMenu({ current_submission_id: 'old-sub' });
+        submissions['old-sub'] = { id: 'old-sub', status: 'approved', menu_id: menuId, reviewed_at: '2026-01-01T00:00:00Z' };
+        submissions['new-sub'] = { id: 'new-sub', status: 'pending_human_review', menu_id: menuId, ai_draft_path: '/x' };
+
+        const res = await invokeJsonHandler(putHandler, {
+            params: { id: 'new-sub' },
+            body: { status: 'approved', reviewed_at: '2026-03-01T00:00:00Z' },
+        });
+        expect(res.status).toBe(200);
+        expect(menus[menuId].current_submission_id).toBe('new-sub');
+    });
+
+    test('late approval of an older version does not move the pointer backward', async () => {
+        const menuId = seedMenu({ current_submission_id: 'newer-sub' });
+        submissions['newer-sub'] = { id: 'newer-sub', status: 'approved', menu_id: menuId, reviewed_at: '2026-05-01T00:00:00Z' };
+        submissions['older-sub'] = { id: 'older-sub', status: 'pending_human_review', menu_id: menuId };
+
+        await invokeJsonHandler(putHandler, {
+            params: { id: 'older-sub' },
+            body: { status: 'approved', reviewed_at: '2026-02-01T00:00:00Z' },
+        });
+        expect(menus[menuId].current_submission_id).toBe('newer-sub'); // unchanged
+    });
+
+    test('a non-approved status update never touches the pointer', async () => {
+        const menuId = seedMenu({ current_submission_id: 'old-sub' });
+        submissions['s'] = { id: 's', status: 'pending_human_review', menu_id: menuId };
+        await invokeJsonHandler(putHandler, {
+            params: { id: 's' },
+            body: { status: 'needs_correction' },
+        });
+        expect(menus[menuId].current_submission_id).toBe('old-sub');
+    });
+
+    test('brand-new approval with no collision creates a menu silently and points at it', async () => {
+        submissions['bn'] = { id: 'bn', status: 'pending_human_review', property: 'Fresh Place', service_period: 'Dinner', project_name: 'Dinner' };
+        const res = await invokeJsonHandler(putHandler, {
+            params: { id: 'bn' },
+            body: { status: 'approved', reviewed_at: '2026-03-01T00:00:00Z' },
+        });
+        expect(res.status).toBe(200);
+        const created = Object.values(menus).find((m) => m.name === 'Dinner');
+        expect(created).toBeTruthy();
+        expect(created.current_submission_id).toBe('bn');
+        expect(submissions['bn'].menu_id).toBe(created.id);
+    });
+
+    test('brand-new collision with no reviewer decision defaults to a separate menu', async () => {
+        const existingId = seedMenu({ id: 'existing', current_submission_id: 'old-sub', property: 'Tán', service_period: 'Lunch', name: 'Lunch' });
+        submissions['bn'] = { id: 'bn', status: 'pending_human_review', property: 'Tán', service_period: 'Lunch', project_name: 'Lunch' };
+        await invokeJsonHandler(putHandler, {
+            params: { id: 'bn' },
+            body: { status: 'approved', reviewed_at: '2026-03-01T00:00:00Z' },
+        });
+        const menuIds = Object.keys(menus);
+        expect(menuIds.length).toBe(2); // a separate menu was created, not merged
+        expect(submissions['bn'].menu_id).not.toBe(existingId);
+    });
+
+    test('brand-new collision with menuDecision links to the chosen existing menu', async () => {
+        const existingId = seedMenu({ id: 'existing', current_submission_id: 'old-sub', property: 'Tán', service_period: 'Lunch', name: 'Lunch' });
+        submissions['old-sub'] = { id: 'old-sub', status: 'approved', menu_id: existingId, reviewed_at: '2026-01-01T00:00:00Z' };
+        submissions['bn'] = { id: 'bn', status: 'pending_human_review', property: 'Tán', service_period: 'Lunch', project_name: 'Lunch' };
+        await invokeJsonHandler(putHandler, {
+            params: { id: 'bn' },
+            body: { status: 'approved', reviewed_at: '2026-03-01T00:00:00Z', menu_decision: existingId },
+        });
+        expect(Object.keys(menus).length).toBe(1); // linked, no new menu
+        expect(submissions['bn'].menu_id).toBe(existingId);
+        expect(menus[existingId].current_submission_id).toBe('bn'); // pointer moved
+    });
+
+    test('POST /submissions inherits menu_id from the revised baseline', async () => {
+        const menuId = seedMenu({ current_submission_id: 'base' });
+        submissions['base'] = { id: 'base', status: 'approved', menu_id: menuId };
+        const res = await invokeJsonHandler(postHandler, {
+            body: { id: 'child', status: 'processing', revision_base_submission_id: 'base', property: 'Tán', project_name: 'Lunch' },
+        });
+        expect(res.status).toBe(201);
+        expect(submissions['child'].menu_id).toBe(menuId);
+    });
+});
