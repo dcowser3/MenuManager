@@ -598,6 +598,7 @@ function normalizeDraftSession(row) {
         updated_at: `${row?.updated_at || ''}`,
         submitted_submission_id: row?.submitted_submission_id || null,
         last_edited_by: `${row?.last_edited_by || ''}`,
+        menu_id: row?.menu_id || null,
     };
 }
 // JSON storage has no database constraints. Serialize create/replace work per
@@ -668,6 +669,7 @@ async function saveDraftSession(draft) {
             updated_at: normalized.updated_at,
             submitted_submission_id: normalized.submitted_submission_id || null,
             last_edited_by: normalized.last_edited_by || null,
+            menu_id: normalized.menu_id || null,
         };
         const { error } = await supabase
             .from(DRAFT_SESSIONS_TABLE)
@@ -702,6 +704,32 @@ async function findActiveDraftForBase(baseSubmissionId) {
     const active = Object.values(drafts)
         .map(normalizeDraftSession)
         .filter((draft) => draft.base_submission_id === normalizedBaseId && draft.status === 'active')
+        .sort((a, b) => Date.parse(b.updated_at || '') - Date.parse(a.updated_at || ''))[0];
+    return active || null;
+}
+// Phase 3: one active draft per MENU (re-keys findActiveDraftForBase). Falls
+// back to per-baseline lookup when the draft's menu isn't known yet.
+async function findActiveDraftForMenu(menuId) {
+    const normalizedMenuId = `${menuId || ''}`.trim();
+    if (!normalizedMenuId)
+        return null;
+    if ((0, supabase_client_1.isSupabaseConfigured)()) {
+        const { data, error } = await (0, supabase_client_1.getSupabaseClient)()
+            .from(DRAFT_SESSIONS_TABLE)
+            .select('*')
+            .eq('menu_id', normalizedMenuId)
+            .eq('status', 'active')
+            .order('updated_at', { ascending: false })
+            .limit(1);
+        if (error)
+            throw new Error(`Failed to find active draft for menu: ${error.message}`);
+        if (data?.[0])
+            return normalizeDraftSession(data[0]);
+    }
+    const drafts = await readLocalDraftSessions();
+    const active = Object.values(drafts)
+        .map(normalizeDraftSession)
+        .filter((draft) => draft.menu_id === normalizedMenuId && draft.status === 'active')
         .sort((a, b) => Date.parse(b.updated_at || '') - Date.parse(a.updated_at || ''))[0];
     return active || null;
 }
@@ -1525,17 +1553,37 @@ app.post('/draft-sessions', async (req, res) => {
         const latest = await findLatestApprovedByPropertyService(`${submission.property || ''}`, servicePeriod);
         const baseline = mapApprovedSubmissionForClient(submission, latest || submission);
         const baseId = baseline.id || baseSubmissionId;
-        const approvedChildren = await findApprovedChildren([baseId]);
-        const children = approvedChildren[baseId] || [];
-        if (children.length) {
-            return res.status(409).json({
-                error: 'This menu has been superseded by an approved revision.',
-                supersededBy: toSupersededBy(children[0]),
-            });
+        // Phase 3 gating: prefer the menu pointer. A draft must start from the
+        // menu's current version — not an outdated one. When the baseline has no
+        // menu yet (pre-backfill), fall back to the old lineage-children gate.
+        const menuId = `${submission.menu_id || ''}`.trim();
+        let draftKey = baseId;
+        if (menuId) {
+            const menu = await getMenuById(menuId);
+            const currentVersionId = `${menu?.current_submission_id || ''}`.trim();
+            if (currentVersionId && currentVersionId !== baseId) {
+                const currentRecord = await getSubmissionRecordById(currentVersionId);
+                return res.status(409).json({
+                    error: 'A newer version of this menu has been approved. Edit the current version instead.',
+                    currentVersion: currentRecord ? mapApprovedSubmissionForClient(currentRecord, currentRecord) : { id: currentVersionId },
+                });
+            }
+            draftKey = menuId;
         }
+        else {
+            const approvedChildren = await findApprovedChildren([baseId]);
+            const children = approvedChildren[baseId] || [];
+            if (children.length) {
+                return res.status(409).json({
+                    error: 'This menu has been superseded by an approved revision.',
+                    supersededBy: toSupersededBy(children[0]),
+                });
+            }
+        }
+        const findActiveDraft = () => (menuId ? findActiveDraftForMenu(menuId) : findActiveDraftForBase(baseId));
         const replaceToken = `${req.body?.replaceToken || req.body?.replace_token || ''}`.trim();
-        const result = await withActiveDraftMutation(baseId, async () => {
-            const existing = await findActiveDraftForBase(baseId);
+        const result = await withActiveDraftMutation(draftKey, async () => {
+            const existing = await findActiveDraft();
             const current = existing ? await expireDraftIfNeeded(existing) : null;
             if (current?.status === 'active') {
                 if (!replaceToken)
@@ -1557,7 +1605,7 @@ app.post('/draft-sessions', async (req, res) => {
             try {
                 draft = await saveDraftSession({
                     id: crypto.randomUUID(), token: crypto.randomBytes(32).toString('base64url'),
-                    base_submission_id: baseId, menu_content_html: '',
+                    base_submission_id: baseId, menu_id: menuId || null, menu_content_html: '',
                     form_state: { previewCollapsed: true, aiCheckHasRun: false }, status: 'active',
                     created_at: now, updated_at: now, submitted_submission_id: null, last_edited_by: '',
                 });
@@ -1566,7 +1614,7 @@ app.post('/draft-sessions', async (req, res) => {
                 // A second service process may win the partial-index race. Treat
                 // PostgreSQL's unique violation as a resume, never as a 500.
                 if ((0, supabase_client_1.isSupabaseConfigured)() && (error?.message || '').match(/unique|duplicate|23505/i)) {
-                    const racedDraft = await findActiveDraftForBase(baseId);
+                    const racedDraft = await findActiveDraft();
                     if (racedDraft)
                         return { draft: racedDraft, resumed: true };
                 }

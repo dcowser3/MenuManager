@@ -51,7 +51,7 @@ import {
 import { createApprovalWorkflowHandlers } from './lib/approval-workflow';
 import { createDesignApprovalWorkflowHandlers } from './lib/design-approval-workflow';
 import { getApprovedDishBrowseData, listApprovedDishBrands } from './lib/approved-dishes';
-import { ApprovedMenuDownloadRecord, enrichApprovedMenuList, getApprovedMenuDownload, listApprovedMenus } from './lib/approved-menus';
+import { ApprovedMenuDownloadRecord, getApprovedMenuDownload, listApprovedMenus, listMenuCards } from './lib/approved-menus';
 import { resolveApprovedDownload } from './lib/approved-download';
 import {
     buildClickUpTaskPayloadFromStoredSubmission,
@@ -1273,17 +1273,30 @@ app.get('/approved-menus', async (req, res) => {
         const servicePeriod = sanitizePlainTextInput(req.query.servicePeriod, { maxLength: 80 }).trim();
         const submissionId = sanitizePlainTextInput(req.query.submissionId, { maxLength: 120 }).trim();
         const hasSearch = !!(q || restaurant || servicePeriod || submissionId);
-        let approvedMenus = hasSearch
-            ? await listApprovedMenus(getRepoRoot(), { query: q, restaurant, servicePeriod }, 150)
-            : [];
-        if (submissionId) approvedMenus = approvedMenus.filter((menu) => menu.id === submissionId);
-        if (approvedMenus.length) {
-            const ids = approvedMenus.map((menu) => menu.id).filter(Boolean).join(',');
-            const [draftResponse, lineageResponse] = await Promise.all([
-                internalApi.get(`${DB_SERVICE_URL}/draft-sessions`, { params: { status: 'active', baseSubmissionIds: ids } }),
-                internalApi.get(`${DB_SERVICE_URL}/submissions/lineage-children`, { params: { ids } }),
+
+        // Menu-centric (Phase 3): one card per menu, with the current-version
+        // pointer replacing lineage-children inference. Active menus + active
+        // drafts come from the db; grouping/enrichment happens in listMenuCards.
+        let menuCards: Awaited<ReturnType<typeof listMenuCards>> = [];
+        if (hasSearch) {
+            // Tolerate a missing menus table / drafts lookup: without them the
+            // page still renders (each approved submission becomes a single-
+            // version card), so a not-yet-applied migration never blanks it.
+            const [menusResult, draftResult] = await Promise.allSettled([
+                internalApi.get(`${DB_SERVICE_URL}/menus`, { params: { status: 'active' } }),
+                internalApi.get(`${DB_SERVICE_URL}/draft-sessions`, { params: { status: 'active' } }),
             ]);
-            approvedMenus = enrichApprovedMenuList(approvedMenus, draftResponse.data, lineageResponse.data);
+            if (menusResult.status === 'rejected') {
+                console.warn('Approved menus: menu entity lookup failed, falling back to per-submission cards:', menusResult.reason?.message || menusResult.reason);
+            }
+            const menusData = menusResult.status === 'fulfilled' ? (menusResult.value.data?.menus || []) : [];
+            const draftsData = draftResult.status === 'fulfilled' && Array.isArray(draftResult.value.data) ? draftResult.value.data : [];
+            const menusById = new Map<string, any>(menusData.map((menu: any) => [`${menu.id}`, menu]));
+            menuCards = await listMenuCards(getRepoRoot(), { query: q, restaurant, servicePeriod }, 150, menusById, draftsData);
+            if (submissionId) {
+                menuCards = menuCards.filter((card) =>
+                    card.versions.some((version) => version.submissionId === submissionId || version.legacyId === submissionId));
+            }
         }
 
         const propertyCatalog = buildFallbackPropertyCatalog()
@@ -1292,7 +1305,7 @@ app.get('/approved-menus', async (req, res) => {
 
         res.render('approved-menus', {
             title: 'Approved Menus',
-            approvedMenus,
+            menuCards,
             hasSearch,
             searchQuery: q,
             restaurantQuery: restaurant,

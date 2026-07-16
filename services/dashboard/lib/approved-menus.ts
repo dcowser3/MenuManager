@@ -9,6 +9,10 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3
 
 export type ApprovedMenuListItem = {
     id: string;
+    /** Alternate public id (legacy_id) when the row has both; drafts/lineage may be keyed by either. */
+    legacyId: string;
+    /** Menu entity this version belongs to (Phase 3); empty until backfilled/linked. */
+    menuId: string;
     projectName: string;
     property: string;
     filename: string;
@@ -53,6 +57,7 @@ export type ApprovedMenuFilters = {
 type ApprovedMenuSourceRow = {
     id?: string;
     legacy_id?: string;
+    menu_id?: string;
     project_name?: string;
     property?: string;
     filename?: string;
@@ -155,10 +160,13 @@ function buildApprovedMenuList(
 
     return sourceRows.map((row) => {
         const id = `${row.id || row.legacy_id || ''}`.trim();
+        const legacyId = `${row.legacy_id || ''}`.trim();
         const approvedAsset = approvedAssetBySubmission.get(id);
         const submittedFileName = `${row.filename || ''}`.trim();
         return {
             id,
+            legacyId,
+            menuId: `${row.menu_id || ''}`.trim(),
             projectName: `${row.project_name || ''}`.trim(),
             property: `${row.property || ''}`.trim(),
             filename: submittedFileName,
@@ -181,7 +189,10 @@ export function enrichApprovedMenuList(
 ): ApprovedMenuListItem[] {
     const draftByBase = new Map((drafts || []).map((draft) => [`${draft.base_submission_id || draft.baseline?.id || ''}`, draft]));
     return menus.map((menu) => {
-        const draft = draftByBase.get(menu.id);
+        // Drafts store base_submission_id as the public id (legacy_id preferred),
+        // while this list keys rows uuid-first — match on either id.
+        const draft = draftByBase.get(menu.id) || (menu.legacyId ? draftByBase.get(menu.legacyId) : undefined);
+        const lineageEntry = lineage[menu.id] || (menu.legacyId ? lineage[menu.legacyId] : undefined);
         return {
             ...menu,
             activeDraft: draft ? {
@@ -189,9 +200,143 @@ export function enrichApprovedMenuList(
                 lastSavedAt: `${draft.updated_at || ''}`,
                 lastEditedBy: `${draft.last_edited_by || ''}`,
             } : null,
-            supersededBy: lineage[menu.id]?.supersededBy || null,
+            supersededBy: lineageEntry?.supersededBy || null,
         };
     });
+}
+
+// ---------------------------------------------------------------------------
+// Menu-centric view (Phase 3). One card per menu entity; approved submissions
+// are its versions. Degrades gracefully: submissions with no menu_id (pre-
+// backfill) each render as their own single-version card, so the page keeps
+// working before and after the backfill runs.
+// ---------------------------------------------------------------------------
+export type MenuVersion = {
+    submissionId: string;
+    legacyId: string;
+    approvedFileName: string;
+    reviewedAt: string;
+    status: string;
+    isCurrent: boolean;
+};
+
+export type MenuCardItem = {
+    /** Menu entity id, or `submission:<id>` for an un-backfilled single version. */
+    menuId: string;
+    hasMenuEntity: boolean;
+    name: string;
+    property: string;
+    servicePeriod: string;
+    submitterName: string;
+    current: MenuVersion;
+    versions: MenuVersion[]; // newest-first, includes the current version
+    versionCount: number;
+    activeDraft: { token: string; lastSavedAt: string; lastEditedBy: string } | null;
+};
+
+export type MenuEntityRecord = {
+    id: string;
+    property?: string;
+    service_period?: string;
+    name?: string;
+    current_submission_id?: string | null;
+    status?: string;
+};
+
+function toMenuVersion(item: ApprovedMenuListItem, isCurrent: boolean): MenuVersion {
+    return {
+        submissionId: item.id,
+        legacyId: item.legacyId,
+        approvedFileName: item.approvedFileName,
+        reviewedAt: item.reviewedAt,
+        status: item.status,
+        isCurrent,
+    };
+}
+
+export function groupApprovedIntoMenuCards(
+    items: ApprovedMenuListItem[],
+    menusById: Map<string, MenuEntityRecord> = new Map(),
+    activeDrafts: any[] = []
+): MenuCardItem[] {
+    const draftByMenu = new Map<string, any>();
+    const draftByBase = new Map<string, any>();
+    for (const draft of activeDrafts || []) {
+        if (draft?.menu_id) draftByMenu.set(`${draft.menu_id}`, draft);
+        const base = `${draft?.base_submission_id || draft?.baseline?.id || ''}`;
+        if (base) draftByBase.set(base, draft);
+    }
+
+    const groups = new Map<string, ApprovedMenuListItem[]>();
+    for (const item of items) {
+        const key = item.menuId || `submission:${item.id}`;
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key)!.push(item);
+    }
+
+    const cards: MenuCardItem[] = [];
+    for (const [key, groupItems] of groups) {
+        const hasMenuEntity = !key.startsWith('submission:');
+        const menu = hasMenuEntity ? menusById.get(key) : undefined;
+        const sorted = [...groupItems].sort((a, b) => Date.parse(b.reviewedAt || '') - Date.parse(a.reviewedAt || ''));
+        const currentId = `${menu?.current_submission_id || ''}`.trim();
+        const currentItem = (currentId && sorted.find((i) => i.id === currentId || i.legacyId === currentId)) || sorted[0];
+        const versions = sorted.map((item) => toMenuVersion(item, item.id === currentItem.id));
+        const draft = hasMenuEntity
+            ? (draftByMenu.get(key) || null)
+            : (draftByBase.get(currentItem.id) || (currentItem.legacyId ? draftByBase.get(currentItem.legacyId) : null) || null);
+        cards.push({
+            menuId: key,
+            hasMenuEntity,
+            name: `${menu?.name || currentItem.projectName || ''}`.trim(),
+            property: `${menu?.property || currentItem.property || ''}`.trim(),
+            servicePeriod: `${menu?.service_period || currentItem.servicePeriod || ''}`.trim(),
+            submitterName: currentItem.submitterName,
+            current: toMenuVersion(currentItem, true),
+            versions,
+            versionCount: versions.length,
+            activeDraft: draft ? {
+                token: `${draft.token || ''}`,
+                lastSavedAt: `${draft.updated_at || ''}`,
+                lastEditedBy: `${draft.last_edited_by || ''}`,
+            } : null,
+        });
+    }
+    cards.sort((a, b) => Date.parse(b.current.reviewedAt || '') - Date.parse(a.current.reviewedAt || ''));
+    return cards;
+}
+
+function menuCardMatches(card: MenuCardItem, query: string, restaurant: string, servicePeriod: string): boolean {
+    if (query) {
+        const hay = [card.name, card.property, card.servicePeriod, card.submitterName, card.current.approvedFileName]
+            .filter(Boolean).join(' ').toLowerCase();
+        if (!hay.includes(query)) return false;
+    }
+    if (restaurant && !`${card.property} ${card.name}`.toLowerCase().includes(restaurant)) return false;
+    if (servicePeriod && !card.servicePeriod.toLowerCase().includes(servicePeriod)) return false;
+    return true;
+}
+
+/**
+ * Menu-centric Approved Menus list. Fetches all approved versions, groups them
+ * into menu cards (enriched with the menu-entity pointer + active drafts), then
+ * filters the cards. `menusById`/`activeDrafts` are supplied by the route from
+ * the db service.
+ */
+export async function listMenuCards(
+    repoRoot: string,
+    filters: ApprovedMenuFilters = {},
+    limit = 150,
+    menusById: Map<string, MenuEntityRecord> = new Map(),
+    activeDrafts: any[] = []
+): Promise<MenuCardItem[]> {
+    const items = await listApprovedMenus(repoRoot, {}, 500);
+    const query = `${filters.query || ''}`.trim().toLowerCase();
+    const restaurant = `${filters.restaurant || ''}`.trim().toLowerCase();
+    const servicePeriod = `${filters.servicePeriod || ''}`.trim().toLowerCase();
+    const cards = groupApprovedIntoMenuCards(items, menusById, activeDrafts)
+        .filter((card) => menuCardMatches(card, query, restaurant, servicePeriod));
+    return cards.slice(0, Math.min(Math.max(limit, 1), 300));
 }
 
 export async function listApprovedMenus(
@@ -205,7 +350,7 @@ export async function listApprovedMenus(
     const normalizedQuery = `${filters.query || ''}`.trim().toLowerCase();
     const normalizedRestaurant = `${filters.restaurant || ''}`.trim().toLowerCase();
     const normalizedServicePeriod = `${filters.servicePeriod || ''}`.trim().toLowerCase();
-    const boundedLimit = Math.min(Math.max(limit, 1), 200);
+    const boundedLimit = Math.min(Math.max(limit, 1), 500);
     let sourceRows: ApprovedMenuSourceRow[] = [];
     let approvedAssetRows: ApprovedAssetRow[] = [];
 

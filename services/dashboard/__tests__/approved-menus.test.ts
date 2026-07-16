@@ -19,6 +19,7 @@ import { promises as fs } from 'fs';
 import {
     getApprovedMenuDownload,
     enrichApprovedMenuList,
+    groupApprovedIntoMenuCards,
     listApprovedMenus,
 } from '../lib/approved-menus';
 
@@ -172,6 +173,24 @@ describe('approved menu helpers', () => {
         await expect(getApprovedMenuDownload(repoRoot, 'design-1')).resolves.toBeNull();
     });
 
+    test('matches drafts and lineage keyed by legacy_id when the card id is the uuid', () => {
+        // Drafts store base_submission_id via getPublicSubmissionId (legacy_id
+        // preferred); the card list keys rows uuid-first. Both must join.
+        const menus: any[] = [{ id: 'uuid-300', legacyId: 'form-300', projectName: 'Tán Lunch' }];
+        const enriched = enrichApprovedMenuList(menus as any, [{
+            base_submission_id: 'form-300', token: 'draft-token-2', updated_at: '2026-07-15T12:00:00Z', last_edited_by: 'Derian Cowser',
+        }], {
+            'form-300': { supersededBy: { id: 'form-301', projectName: 'Tán Lunch v2', approvedAt: '2026-07-14T00:00:00Z' } },
+        });
+        expect(enriched[0].activeDraft).toEqual({ token: 'draft-token-2', lastSavedAt: '2026-07-15T12:00:00Z', lastEditedBy: 'Derian Cowser' });
+        expect(enriched[0].supersededBy).toEqual(expect.objectContaining({ id: 'form-301' }));
+    });
+
+    test('exposes legacyId on list items so the route can batch-look-up both ids', async () => {
+        const approvedMenus = await listApprovedMenus(repoRoot, 'spring', 150);
+        expect(approvedMenus[0]).toEqual(expect.objectContaining({ id: 'form-200', legacyId: '' }));
+    });
+
     test('enriches cards from batch draft and lineage responses', () => {
         const menus: any[] = [{ id: 'form-200', projectName: 'Spring Dinner' }];
         const enriched = enrichApprovedMenuList(menus as any, [{
@@ -181,5 +200,46 @@ describe('approved menu helpers', () => {
         });
         expect(enriched[0].activeDraft).toEqual({ token: 'draft-token', lastSavedAt: '2026-07-13T12:00:00Z', lastEditedBy: 'Chef Mina' });
         expect(enriched[0].supersededBy).toEqual(expect.objectContaining({ id: 'form-201' }));
+    });
+});
+
+describe('groupApprovedIntoMenuCards (menu-centric)', () => {
+    const item = (over: any = {}) => ({
+        id: over.id || 'x', legacyId: over.legacyId || '', menuId: over.menuId || '',
+        projectName: over.projectName || 'Dinner', property: over.property || 'Tán',
+        filename: '', approvedFileName: over.approvedFileName || 'f.docx',
+        reviewedAt: over.reviewedAt || '2026-01-01T00:00:00Z', servicePeriod: over.servicePeriod || 'Dinner',
+        submitterName: over.submitterName || 'Chef', status: over.status || 'approved',
+        activeDraft: null, supersededBy: null,
+    });
+
+    test('groups versions of one menu into a single card; current = menu pointer', () => {
+        const items = [
+            item({ id: 'v1', menuId: 'm1', reviewedAt: '2026-01-01T00:00:00Z' }),
+            item({ id: 'v2', menuId: 'm1', reviewedAt: '2026-03-01T00:00:00Z' }),
+        ];
+        const menus = new Map([['m1', { id: 'm1', name: 'Lunch', property: 'Tán', service_period: 'Lunch', current_submission_id: 'v1' }]]);
+        const cards = groupApprovedIntoMenuCards(items as any, menus as any, []);
+        expect(cards).toHaveLength(1);
+        expect(cards[0].name).toBe('Lunch');
+        expect(cards[0].versionCount).toBe(2);
+        expect(cards[0].current.submissionId).toBe('v1'); // pointer, not newest
+        expect(cards[0].versions.find((v) => v.submissionId === 'v1')!.isCurrent).toBe(true);
+    });
+
+    test('un-backfilled submissions each become their own single-version card', () => {
+        const items = [item({ id: 'a', menuId: '' }), item({ id: 'b', menuId: '' })];
+        const cards = groupApprovedIntoMenuCards(items as any, new Map(), []);
+        expect(cards).toHaveLength(2);
+        expect(cards.every((c) => !c.hasMenuEntity && c.versionCount === 1)).toBe(true);
+    });
+
+    test('active draft attaches to its menu card by menu_id', () => {
+        const items = [item({ id: 'v1', menuId: 'm1' })];
+        const menus = new Map([['m1', { id: 'm1', name: 'Lunch', current_submission_id: 'v1' }]]);
+        const cards = groupApprovedIntoMenuCards(items as any, menus as any, [
+            { menu_id: 'm1', token: 'tok', updated_at: '2026-07-01T00:00:00Z', last_edited_by: 'Mina' },
+        ]);
+        expect(cards[0].activeDraft).toEqual({ token: 'tok', lastSavedAt: '2026-07-01T00:00:00Z', lastEditedBy: 'Mina' });
     });
 });

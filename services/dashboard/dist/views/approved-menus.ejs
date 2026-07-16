@@ -273,9 +273,68 @@
             background: var(--color-background);
             padding: 1.25rem 1.35rem;
             display: flex;
+            flex-wrap: wrap;
             justify-content: space-between;
             gap: 1.5rem;
             align-items: center;
+        }
+
+        .version-history {
+            flex-basis: 100%;
+            border-top: 1px solid var(--color-border);
+            padding-top: 0.75rem;
+            margin-top: 0.25rem;
+        }
+
+        .version-history summary {
+            cursor: pointer;
+            font-size: 0.82rem;
+            color: var(--color-primary);
+            font-weight: 600;
+        }
+
+        .version-list {
+            list-style: none;
+            margin: 0.75rem 0 0;
+            padding: 0;
+        }
+
+        .version-row {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: space-between;
+            align-items: center;
+            gap: 0.75rem;
+            padding: 0.5rem 0;
+            border-bottom: 1px solid var(--color-border);
+        }
+
+        .version-current {
+            background: rgba(74, 124, 89, 0.05);
+        }
+
+        .version-when {
+            font-size: 0.85rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .version-actions {
+            display: flex;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+        }
+
+        .btn-small {
+            padding: 0.3rem 0.7rem;
+            font-size: 0.72rem;
+        }
+
+        .version-note {
+            margin: 0.6rem 0 0;
+            font-size: 0.75rem;
+            color: var(--color-text-light);
         }
 
         .menu-card:hover {
@@ -437,53 +496,66 @@
 
         <div class="results-meta">
             <% if (hasSearch) { %>
-                <%= approvedMenus.length %> recent approved <%= approvedMenus.length === 1 ? 'submission' : 'submissions' %><% if (restaurantQuery) { %> for "<%= restaurantQuery %>"<% } %><% if (servicePeriodQuery) { %> during "<%= servicePeriodQuery %>"<% } %>
+                <%= menuCards.length %> <%= menuCards.length === 1 ? 'menu' : 'menus' %><% if (restaurantQuery) { %> for "<%= restaurantQuery %>"<% } %><% if (servicePeriodQuery) { %> during "<%= servicePeriodQuery %>"<% } %>
             <% } else { %>
-                Search by restaurant to show recent approved submissions
+                Search by restaurant to show approved menus
             <% } %>
         </div>
 
-        <% if (hasSearch && approvedMenus.length > 0) { %>
+        <% if (hasSearch && menuCards.length > 0) { %>
             <div class="menu-list">
-                <% approvedMenus.forEach(function(menu) { %>
-                    <div class="menu-card" id="approved-menu-<%= menu.id %>">
+                <% menuCards.forEach(function(menu) { %>
+                    <div class="menu-card" id="approved-menu-<%= menu.current.submissionId %>">
                         <div class="menu-main">
-                            <h3><%= menu.projectName || menu.filename || 'Approved Menu' %></h3>
+                            <h3><%= menu.name || 'Approved Menu' %></h3>
                             <div class="menu-property"><%= menu.property || 'Unknown Property' %></div>
                             <div class="menu-meta">
-                                <span><strong>Approved file:</strong> <%= menu.approvedFileName || menu.filename || 'approved-menu.docx' %></span>
                                 <span><strong>Service period:</strong> <%= menu.servicePeriod || 'N/A' %></span>
-                                <span><strong>Approved:</strong> <%= menu.reviewedAt ? new Date(menu.reviewedAt).toLocaleDateString() : 'N/A' %></span>
-                                <span><strong>Submitter:</strong> <%= menu.submitterName || menu.submitterEmail || 'N/A' %></span>
+                                <span><strong>Current version approved:</strong> <%= menu.current.reviewedAt ? new Date(menu.current.reviewedAt).toLocaleDateString() : 'N/A' %></span>
+                                <span><strong>Approved file:</strong> <%= menu.current.approvedFileName || 'approved-menu.docx' %></span>
+                                <span><strong>Submitter:</strong> <%= menu.submitterName || 'N/A' %></span>
+                                <% if (menu.versionCount > 1) { %><span><strong>Versions:</strong> <%= menu.versionCount %></span><% } %>
                             </div>
                         </div>
                         <div class="menu-actions">
-                            <span class="badge"><%= menu.status === 'approved_override' ? 'Approved Override' : 'Approved' %></span>
+                            <span class="badge"><%= menu.current.status === 'approved_override' ? 'Approved Override' : 'Approved' %></span>
                             <% if (menu.activeDraft) { %>
                                 <span class="badge">In progress — last saved <%= menu.activeDraft.lastSavedAt ? new Date(menu.activeDraft.lastSavedAt).toLocaleString() : 'recently' %><%= menu.activeDraft.lastEditedBy ? ` by ${menu.activeDraft.lastEditedBy}` : '' %></span>
                                 <a href="/form?draft=<%= encodeURIComponent(menu.activeDraft.token) %>" class="btn">Resume Editing</a>
                                 <form method="POST" action="/api/drafts" style="width: 100%; margin: 0;" onsubmit="return confirm('Discard the draft last saved <%= menu.activeDraft.lastSavedAt ? new Date(menu.activeDraft.lastSavedAt).toLocaleString() : 'recently' %> and start over?');">
-                                    <input type="hidden" name="baseSubmissionId" value="<%= menu.id %>">
+                                    <input type="hidden" name="baseSubmissionId" value="<%= menu.current.submissionId %>">
                                     <input type="hidden" name="replaceToken" value="<%= menu.activeDraft.token %>">
                                     <button type="submit" class="btn btn-secondary" style="width: 100%;">Discard and start over</button>
                                 </form>
-                            <% } else if (menu.supersededBy) { %>
-                                <span class="badge">A newer version was approved <%= menu.supersededBy.approvedAt ? new Date(menu.supersededBy.approvedAt).toLocaleDateString() : 'recently' %></span>
-                                <button type="button" class="btn btn-secondary" style="width: 100%; opacity: .55; cursor: not-allowed;" disabled>Edit This Menu</button>
-                                <a href="/approved-menus?submissionId=<%= encodeURIComponent(menu.supersededBy.id) %>#approved-menu-<%= menu.supersededBy.id %>" class="btn">Edit Latest Version</a>
                             <% } else { %>
                                 <form method="POST" action="/api/drafts" style="width: 100%; margin: 0;">
-                                    <input type="hidden" name="baseSubmissionId" value="<%= menu.id %>">
+                                    <input type="hidden" name="baseSubmissionId" value="<%= menu.current.submissionId %>">
                                     <button type="submit" class="btn" style="width: 100%;">Edit This Menu</button>
                                 </form>
                             <% } %>
-                            <% if (menu.supersededBy && menu.activeDraft) { %>
-                                <span class="badge">A newer version was approved <%= menu.supersededBy.approvedAt ? new Date(menu.supersededBy.approvedAt).toLocaleDateString() : 'recently' %></span>
-                                <a href="/approved-menus?submissionId=<%= encodeURIComponent(menu.supersededBy.id) %>#approved-menu-<%= menu.supersededBy.id %>" class="btn btn-secondary">Edit Latest Version</a>
-                            <% } %>
-                            <a href="/download/approved-clean/<%= menu.id %>" class="btn">Download Clean Word Doc</a>
-                            <a href="/download/approved/<%= menu.id %>" class="btn btn-secondary">Download Original Approved</a>
+                            <a href="/download/approved-clean/<%= menu.current.submissionId %>" class="btn">Download Clean Word Doc</a>
+                            <a href="/download/approved/<%= menu.current.submissionId %>" class="btn btn-secondary">Download Original Approved</a>
                         </div>
+                        <% if (menu.versionCount > 1) { %>
+                            <details class="version-history">
+                                <summary>View version history (<%= menu.versionCount %> versions)</summary>
+                                <ul class="version-list">
+                                    <% menu.versions.forEach(function(version) { %>
+                                        <li id="approved-menu-<%= version.submissionId %>" class="version-row<%= version.isCurrent ? ' version-current' : '' %>">
+                                            <span class="version-when">
+                                                <%= version.reviewedAt ? new Date(version.reviewedAt).toLocaleDateString() : 'N/A' %>
+                                                <% if (version.isCurrent) { %><span class="badge">Current</span><% } %>
+                                            </span>
+                                            <span class="version-actions">
+                                                <a href="/download/approved-clean/<%= version.submissionId %>" class="btn btn-small">Download Clean</a>
+                                                <a href="/download/approved/<%= version.submissionId %>" class="btn btn-small btn-secondary">Download Original</a>
+                                            </span>
+                                        </li>
+                                    <% }); %>
+                                </ul>
+                                <p class="version-note">Older versions are view/download only — editing always starts from the current version.</p>
+                            </details>
+                        <% } %>
                     </div>
                 <% }); %>
             </div>

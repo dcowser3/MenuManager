@@ -631,7 +631,11 @@ CREATE INDEX IF NOT EXISTS idx_draft_sessions_token ON draft_sessions(token);
 CREATE INDEX IF NOT EXISTS idx_draft_sessions_menu ON draft_sessions(menu_id);
 CREATE INDEX IF NOT EXISTS idx_draft_sessions_base_submission ON draft_sessions(base_submission_id);
 CREATE INDEX IF NOT EXISTS idx_draft_sessions_status_updated ON draft_sessions(status, updated_at DESC);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_draft_sessions_one_active_per_base ON draft_sessions(base_submission_id) WHERE status = 'active';
+-- Single-active-draft invariant re-keyed to the menu entity (Phase 3): one
+-- active draft per menu. Drafts whose baseline was never backfilled keep the
+-- per-base guard below.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_draft_sessions_one_active_per_menu ON draft_sessions(menu_id) WHERE status = 'active' AND menu_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_draft_sessions_one_active_per_base_nullmenu ON draft_sessions(base_submission_id) WHERE status = 'active' AND menu_id IS NULL;
 CREATE INDEX IF NOT EXISTS idx_submissions_revision_base ON submissions(revision_base_submission_id);
 
 -- ============================================================================

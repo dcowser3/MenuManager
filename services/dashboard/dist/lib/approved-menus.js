@@ -34,6 +34,8 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.enrichApprovedMenuList = enrichApprovedMenuList;
+exports.groupApprovedIntoMenuCards = groupApprovedIntoMenuCards;
+exports.listMenuCards = listMenuCards;
 exports.listApprovedMenus = listApprovedMenus;
 exports.getApprovedMenuDownload = getApprovedMenuDownload;
 const fs_1 = require("fs");
@@ -105,10 +107,13 @@ function buildApprovedMenuList(sourceRows, approvedAssetRows) {
     }
     return sourceRows.map((row) => {
         const id = `${row.id || row.legacy_id || ''}`.trim();
+        const legacyId = `${row.legacy_id || ''}`.trim();
         const approvedAsset = approvedAssetBySubmission.get(id);
         const submittedFileName = `${row.filename || ''}`.trim();
         return {
             id,
+            legacyId,
+            menuId: `${row.menu_id || ''}`.trim(),
             projectName: `${row.project_name || ''}`.trim(),
             property: `${row.property || ''}`.trim(),
             filename: submittedFileName,
@@ -126,7 +131,10 @@ function buildApprovedMenuList(sourceRows, approvedAssetRows) {
 function enrichApprovedMenuList(menus, drafts = [], lineage = {}) {
     const draftByBase = new Map((drafts || []).map((draft) => [`${draft.base_submission_id || draft.baseline?.id || ''}`, draft]));
     return menus.map((menu) => {
-        const draft = draftByBase.get(menu.id);
+        // Drafts store base_submission_id as the public id (legacy_id preferred),
+        // while this list keys rows uuid-first — match on either id.
+        const draft = draftByBase.get(menu.id) || (menu.legacyId ? draftByBase.get(menu.legacyId) : undefined);
+        const lineageEntry = lineage[menu.id] || (menu.legacyId ? lineage[menu.legacyId] : undefined);
         return {
             ...menu,
             activeDraft: draft ? {
@@ -134,9 +142,95 @@ function enrichApprovedMenuList(menus, drafts = [], lineage = {}) {
                 lastSavedAt: `${draft.updated_at || ''}`,
                 lastEditedBy: `${draft.last_edited_by || ''}`,
             } : null,
-            supersededBy: lineage[menu.id]?.supersededBy || null,
+            supersededBy: lineageEntry?.supersededBy || null,
         };
     });
+}
+function toMenuVersion(item, isCurrent) {
+    return {
+        submissionId: item.id,
+        legacyId: item.legacyId,
+        approvedFileName: item.approvedFileName,
+        reviewedAt: item.reviewedAt,
+        status: item.status,
+        isCurrent,
+    };
+}
+function groupApprovedIntoMenuCards(items, menusById = new Map(), activeDrafts = []) {
+    const draftByMenu = new Map();
+    const draftByBase = new Map();
+    for (const draft of activeDrafts || []) {
+        if (draft?.menu_id)
+            draftByMenu.set(`${draft.menu_id}`, draft);
+        const base = `${draft?.base_submission_id || draft?.baseline?.id || ''}`;
+        if (base)
+            draftByBase.set(base, draft);
+    }
+    const groups = new Map();
+    for (const item of items) {
+        const key = item.menuId || `submission:${item.id}`;
+        if (!groups.has(key))
+            groups.set(key, []);
+        groups.get(key).push(item);
+    }
+    const cards = [];
+    for (const [key, groupItems] of groups) {
+        const hasMenuEntity = !key.startsWith('submission:');
+        const menu = hasMenuEntity ? menusById.get(key) : undefined;
+        const sorted = [...groupItems].sort((a, b) => Date.parse(b.reviewedAt || '') - Date.parse(a.reviewedAt || ''));
+        const currentId = `${menu?.current_submission_id || ''}`.trim();
+        const currentItem = (currentId && sorted.find((i) => i.id === currentId || i.legacyId === currentId)) || sorted[0];
+        const versions = sorted.map((item) => toMenuVersion(item, item.id === currentItem.id));
+        const draft = hasMenuEntity
+            ? (draftByMenu.get(key) || null)
+            : (draftByBase.get(currentItem.id) || (currentItem.legacyId ? draftByBase.get(currentItem.legacyId) : null) || null);
+        cards.push({
+            menuId: key,
+            hasMenuEntity,
+            name: `${menu?.name || currentItem.projectName || ''}`.trim(),
+            property: `${menu?.property || currentItem.property || ''}`.trim(),
+            servicePeriod: `${menu?.service_period || currentItem.servicePeriod || ''}`.trim(),
+            submitterName: currentItem.submitterName,
+            current: toMenuVersion(currentItem, true),
+            versions,
+            versionCount: versions.length,
+            activeDraft: draft ? {
+                token: `${draft.token || ''}`,
+                lastSavedAt: `${draft.updated_at || ''}`,
+                lastEditedBy: `${draft.last_edited_by || ''}`,
+            } : null,
+        });
+    }
+    cards.sort((a, b) => Date.parse(b.current.reviewedAt || '') - Date.parse(a.current.reviewedAt || ''));
+    return cards;
+}
+function menuCardMatches(card, query, restaurant, servicePeriod) {
+    if (query) {
+        const hay = [card.name, card.property, card.servicePeriod, card.submitterName, card.current.approvedFileName]
+            .filter(Boolean).join(' ').toLowerCase();
+        if (!hay.includes(query))
+            return false;
+    }
+    if (restaurant && !`${card.property} ${card.name}`.toLowerCase().includes(restaurant))
+        return false;
+    if (servicePeriod && !card.servicePeriod.toLowerCase().includes(servicePeriod))
+        return false;
+    return true;
+}
+/**
+ * Menu-centric Approved Menus list. Fetches all approved versions, groups them
+ * into menu cards (enriched with the menu-entity pointer + active drafts), then
+ * filters the cards. `menusById`/`activeDrafts` are supplied by the route from
+ * the db service.
+ */
+async function listMenuCards(repoRoot, filters = {}, limit = 150, menusById = new Map(), activeDrafts = []) {
+    const items = await listApprovedMenus(repoRoot, {}, 500);
+    const query = `${filters.query || ''}`.trim().toLowerCase();
+    const restaurant = `${filters.restaurant || ''}`.trim().toLowerCase();
+    const servicePeriod = `${filters.servicePeriod || ''}`.trim().toLowerCase();
+    const cards = groupApprovedIntoMenuCards(items, menusById, activeDrafts)
+        .filter((card) => menuCardMatches(card, query, restaurant, servicePeriod));
+    return cards.slice(0, Math.min(Math.max(limit, 1), 300));
 }
 async function listApprovedMenus(repoRoot, filtersOrQuery = '', limit = 100) {
     const filters = typeof filtersOrQuery === 'string'
@@ -145,7 +239,7 @@ async function listApprovedMenus(repoRoot, filtersOrQuery = '', limit = 100) {
     const normalizedQuery = `${filters.query || ''}`.trim().toLowerCase();
     const normalizedRestaurant = `${filters.restaurant || ''}`.trim().toLowerCase();
     const normalizedServicePeriod = `${filters.servicePeriod || ''}`.trim().toLowerCase();
-    const boundedLimit = Math.min(Math.max(limit, 1), 200);
+    const boundedLimit = Math.min(Math.max(limit, 1), 500);
     let sourceRows = [];
     let approvedAssetRows = [];
     if ((0, supabase_client_1.isSupabaseConfigured)()) {

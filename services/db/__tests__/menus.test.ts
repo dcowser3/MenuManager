@@ -316,6 +316,44 @@ describe('menu write path (JSON fallback)', () => {
         expect(menus[existingId].current_submission_id).toBe('bn'); // pointer moved
     });
 
+    test('draft from an outdated version is rejected 409 with the current version', async () => {
+        const menuId = seedMenu({ id: 'menu-1', current_submission_id: 'current-sub' });
+        submissions['current-sub'] = { id: 'current-sub', status: 'approved', source: 'form', property: 'Tán', service_period: 'Lunch', project_name: 'Lunch', menu_id: menuId, final_path: '/f', reviewed_at: '2026-03-01T00:00:00Z' };
+        submissions['old-sub'] = { id: 'old-sub', status: 'approved', source: 'form', property: 'Tán', service_period: 'Lunch', project_name: 'Lunch', menu_id: menuId, final_path: '/f', reviewed_at: '2026-01-01T00:00:00Z' };
+        const createDraft = getRouteHandler('post', '/draft-sessions');
+        const res = await invokeJsonHandler(createDraft, { body: { baseSubmissionId: 'old-sub' } });
+        expect(res.status).toBe(409);
+        expect(res.body.currentVersion?.id).toBe('current-sub');
+    });
+
+    test('draft from the current version succeeds and carries menu_id; second call resumes (one active per menu)', async () => {
+        const menuId = seedMenu({ id: 'menu-1', current_submission_id: 'current-sub' });
+        submissions['current-sub'] = { id: 'current-sub', status: 'approved', source: 'form', property: 'Tán', service_period: 'Lunch', project_name: 'Lunch', menu_id: menuId, final_path: '/f', reviewed_at: '2026-03-01T00:00:00Z' };
+        let drafts: Record<string, any> = {};
+        (fs.promises.readFile as jest.Mock).mockImplementation(async (target: string) => {
+            const t = String(target);
+            if (t.endsWith('submissions.json')) return JSON.stringify(submissions);
+            if (t.endsWith('menus.json')) return JSON.stringify(menus);
+            if (t.endsWith('draft_sessions.json')) return JSON.stringify(drafts);
+            if (t.endsWith('assets.json')) return '[]';
+            return '{}';
+        });
+        (fs.promises.writeFile as jest.Mock).mockImplementation(async (target: string, payload: string) => {
+            const t = String(target);
+            if (t.endsWith('submissions.json')) submissions = JSON.parse(payload);
+            if (t.endsWith('menus.json')) menus = JSON.parse(payload);
+            if (t.endsWith('draft_sessions.json')) drafts = JSON.parse(payload);
+        });
+        const createDraft = getRouteHandler('post', '/draft-sessions');
+        const first = await invokeJsonHandler(createDraft, { body: { baseSubmissionId: 'current-sub' } });
+        expect(first.status).toBe(201);
+        expect(first.body.menu_id).toBe(menuId);
+        const second = await invokeJsonHandler(createDraft, { body: { baseSubmissionId: 'current-sub' } });
+        expect(second.status).toBe(200); // resumed the same active draft, not a new one
+        expect(second.body.resumed).toBe(true);
+        expect(Object.keys(drafts)).toHaveLength(1);
+    });
+
     test('POST /submissions inherits menu_id from the revised baseline', async () => {
         const menuId = seedMenu({ current_submission_id: 'base' });
         submissions['base'] = { id: 'base', status: 'approved', menu_id: menuId };

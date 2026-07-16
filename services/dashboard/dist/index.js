@@ -1044,25 +1044,35 @@ app.get('/approved-menus', async (req, res) => {
         const servicePeriod = (0, upload_security_1.sanitizePlainTextInput)(req.query.servicePeriod, { maxLength: 80 }).trim();
         const submissionId = (0, upload_security_1.sanitizePlainTextInput)(req.query.submissionId, { maxLength: 120 }).trim();
         const hasSearch = !!(q || restaurant || servicePeriod || submissionId);
-        let approvedMenus = hasSearch
-            ? await (0, approved_menus_1.listApprovedMenus)(getRepoRoot(), { query: q, restaurant, servicePeriod }, 150)
-            : [];
-        if (submissionId)
-            approvedMenus = approvedMenus.filter((menu) => menu.id === submissionId);
-        if (approvedMenus.length) {
-            const ids = approvedMenus.map((menu) => menu.id).filter(Boolean).join(',');
-            const [draftResponse, lineageResponse] = await Promise.all([
-                internalApi.get(`${DB_SERVICE_URL}/draft-sessions`, { params: { status: 'active', baseSubmissionIds: ids } }),
-                internalApi.get(`${DB_SERVICE_URL}/submissions/lineage-children`, { params: { ids } }),
+        // Menu-centric (Phase 3): one card per menu, with the current-version
+        // pointer replacing lineage-children inference. Active menus + active
+        // drafts come from the db; grouping/enrichment happens in listMenuCards.
+        let menuCards = [];
+        if (hasSearch) {
+            // Tolerate a missing menus table / drafts lookup: without them the
+            // page still renders (each approved submission becomes a single-
+            // version card), so a not-yet-applied migration never blanks it.
+            const [menusResult, draftResult] = await Promise.allSettled([
+                internalApi.get(`${DB_SERVICE_URL}/menus`, { params: { status: 'active' } }),
+                internalApi.get(`${DB_SERVICE_URL}/draft-sessions`, { params: { status: 'active' } }),
             ]);
-            approvedMenus = (0, approved_menus_1.enrichApprovedMenuList)(approvedMenus, draftResponse.data, lineageResponse.data);
+            if (menusResult.status === 'rejected') {
+                console.warn('Approved menus: menu entity lookup failed, falling back to per-submission cards:', menusResult.reason?.message || menusResult.reason);
+            }
+            const menusData = menusResult.status === 'fulfilled' ? (menusResult.value.data?.menus || []) : [];
+            const draftsData = draftResult.status === 'fulfilled' && Array.isArray(draftResult.value.data) ? draftResult.value.data : [];
+            const menusById = new Map(menusData.map((menu) => [`${menu.id}`, menu]));
+            menuCards = await (0, approved_menus_1.listMenuCards)(getRepoRoot(), { query: q, restaurant, servicePeriod }, 150, menusById, draftsData);
+            if (submissionId) {
+                menuCards = menuCards.filter((card) => card.versions.some((version) => version.submissionId === submissionId || version.legacyId === submissionId));
+            }
         }
         const propertyCatalog = (0, property_catalog_1.buildFallbackPropertyCatalog)()
             .filter((record) => record.is_active !== false)
             .map((record) => record.name);
         res.render('approved-menus', {
             title: 'Approved Menus',
-            approvedMenus,
+            menuCards,
             hasSearch,
             searchQuery: q,
             restaurantQuery: restaurant,
