@@ -69,6 +69,11 @@ CREATE TABLE submissions (
     approved_menu_content_html TEXT,                -- Clean, post-approval HTML for click-to-edit
     approved_text_extracted_at TIMESTAMPTZ,
 
+    -- Approver dispute link (Identity Stage 2): per-submission negative-confirmation token
+    approver_dispute_token VARCHAR(64),
+    approver_disputed_at TIMESTAMPTZ,
+    approver_dispute_note VARCHAR(500),
+
     -- Full payload mirror for future-proofing and audits
     raw_payload JSONB,
 
@@ -105,6 +110,7 @@ CREATE INDEX idx_submissions_created_at ON submissions(created_at DESC);
 CREATE INDEX idx_submissions_clickup_task_id ON submissions(clickup_task_id);
 CREATE INDEX IF NOT EXISTS idx_submissions_form_attempt ON submissions(form_attempt_id);
 CREATE INDEX IF NOT EXISTS idx_submissions_menu ON submissions(menu_id);
+CREATE INDEX IF NOT EXISTS idx_submissions_approver_dispute_token ON submissions(approver_dispute_token);
 
 -- ============================================================================
 -- 1a. MENUS (Phase 1 — menu-as-an-entity)

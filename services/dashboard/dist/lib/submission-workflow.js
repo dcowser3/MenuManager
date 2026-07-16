@@ -407,7 +407,7 @@ function createSubmissionWorkflowHandlers(deps) {
                 chef_persistent_diff: chefPersistentDiff ? JSON.stringify(chefPersistentDiff) : null,
                 form_attempt_id: formAttemptId,
             };
-            await deps.axios.post(`${deps.DB_SERVICE_URL}/submissions`, submissionRecordPayload);
+            const createResponse = await deps.axios.post(`${deps.DB_SERVICE_URL}/submissions`, submissionRecordPayload);
             console.log(`✓ Submission created in database: ${submissionId}`);
             // Email the submitter and each approver a copy of the submitted document.
             // Fire-and-forget: a mail failure must never fail the submission itself.
@@ -421,6 +421,7 @@ function createSubmissionWorkflowHandlers(deps) {
                     approvals: normalizedApprovals,
                     docxPath,
                     filename: generatedMenuFilename,
+                    approverDisputeToken: `${createResponse?.data?.approver_dispute_token || ''}`,
                 });
             }
             if (formAttemptId && deps.linkBasicAiCheckAuditsToSubmission) {

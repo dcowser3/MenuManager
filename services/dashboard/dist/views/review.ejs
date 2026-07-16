@@ -412,6 +412,16 @@
 
         <div id="alert" class="alert"></div>
 
+        <% if (submission.approver_disputed_at) { %>
+            <div class="card" style="border: 2px solid #c53030; background: #fff5f5;">
+                <h2 style="color: #c53030; margin-bottom: 0.4rem;">⚠ Approver dispute</h2>
+                <p style="margin: 0;">An approver reported they did <strong>not</strong> approve this menu (<%= new Date(submission.approver_disputed_at).toLocaleString() %>). Verify the approval before proceeding.</p>
+                <% if (submission.approver_dispute_note) { %>
+                    <p style="margin: 0.5rem 0 0;"><strong>Note:</strong> <%= submission.approver_dispute_note %></p>
+                <% } %>
+            </div>
+        <% } %>
+
         <div class="card">
             <h2>Review Submission</h2>
 

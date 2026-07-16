@@ -10,6 +10,7 @@ exports.isDeliverableEmailAddress = isDeliverableEmailAddress;
 exports.buildSubmissionConfirmationRecipients = buildSubmissionConfirmationRecipients;
 exports.buildSubmissionConfirmationCc = buildSubmissionConfirmationCc;
 exports.buildSubmissionEmailSubject = buildSubmissionEmailSubject;
+exports.buildApproverDisputeUrl = buildApproverDisputeUrl;
 exports.buildSubmissionReceiptHtml = buildSubmissionReceiptHtml;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const RESERVED_EMAIL_DOMAINS = new Set([
@@ -94,7 +95,14 @@ function buildSubmissionConfirmationCc(primaryRecipient, ccRecipients, alwaysCcE
 function buildSubmissionEmailSubject(input) {
     return `Menu submitted for review: ${input.projectName}`;
 }
-function buildSubmissionReceiptHtml(input, attachmentDropped, dashboardUrl) {
+/** Approver dispute link URL, or '' when no token is available. */
+function buildApproverDisputeUrl(dashboardUrl, token) {
+    const trimmed = `${token || ''}`.trim();
+    if (!trimmed)
+        return '';
+    return `${(dashboardUrl || '').replace(/\/+$/, '')}/approval-dispute/${encodeURIComponent(trimmed)}`;
+}
+function buildSubmissionReceiptHtml(input, attachmentDropped, dashboardUrl, options = {}) {
     const rows = [
         ['Project', input.projectName],
         ['Property', input.property],
@@ -111,12 +119,18 @@ function buildSubmissionReceiptHtml(input, attachmentDropped, dashboardUrl) {
     const docCopy = attachmentDropped ? 'available on the dashboard' : 'attached for your records';
     const intro = `<p>${escapeEmailHtml(input.submitterName || 'A team member')} submitted the menu <strong>${escapeEmailHtml(input.projectName)}</strong> for <strong>${escapeEmailHtml(input.property)}</strong>. This copy is for visibility and recordkeeping so the team can confirm the submitted document looks right. A copy of the submitted document is ${docCopy}.</p>`;
     const reviewUrl = `${(dashboardUrl || '').replace(/\/+$/, '')}/review/${encodeURIComponent(input.submissionId)}`;
+    // Negative confirmation, approver copies only: silence means all is well.
+    const disputeUrl = options.includeDisputeLink ? buildApproverDisputeUrl(dashboardUrl, input.approverDisputeToken || '') : '';
+    const disputeLine = disputeUrl
+        ? `<p style="margin-top:12px;padding:10px 12px;background:#fff8e1;border:1px solid #ffe082">If you did <strong>not</strong> approve this menu, <a href="${disputeUrl}">let us know</a>.</p>`
+        : '';
     return `
         <div style="font-family:sans-serif;max-width:640px">
             <h2 style="margin-bottom:4px">Menu submission received</h2>
             ${intro}
             <table style="border-collapse:collapse;width:100%;margin:12px 0">${rows}</table>
             ${approverList ? `<p style="margin-bottom:4px"><strong>Approvers:</strong></p><ul>${approverList}</ul>` : ''}
+            ${disputeLine}
             ${attachmentDropped ? `<p style="color:#b71c1c">The document was too large to attach; download it from <a href="${reviewUrl}">the submission page</a>.</p>` : ''}
             <p style="color:#888;font-size:12px;margin-top:16px">This is an automated message from Menu Manager.</p>
         </div>

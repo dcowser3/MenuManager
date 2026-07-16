@@ -49,6 +49,7 @@ type SubmissionWorkflowDeps = {
         approvals: Array<{ approved: boolean; name: string; position: string; email: string }>;
         docxPath: string;
         filename: string;
+        approverDisputeToken?: string;
     }) => void;
     isClientInputError: (error: any) => boolean;
     linkBasicAiCheckAuditsToSubmission?: (attemptId: string, submissionId: string) => Promise<void>;
@@ -508,7 +509,7 @@ export function createSubmissionWorkflowHandlers(deps: SubmissionWorkflowDeps) {
                 form_attempt_id: formAttemptId,
             };
 
-            await deps.axios.post(`${deps.DB_SERVICE_URL}/submissions`, submissionRecordPayload);
+            const createResponse = await deps.axios.post(`${deps.DB_SERVICE_URL}/submissions`, submissionRecordPayload);
 
             console.log(`✓ Submission created in database: ${submissionId}`);
 
@@ -524,6 +525,7 @@ export function createSubmissionWorkflowHandlers(deps: SubmissionWorkflowDeps) {
                     approvals: normalizedApprovals,
                     docxPath,
                     filename: generatedMenuFilename,
+                    approverDisputeToken: `${createResponse?.data?.approver_dispute_token || ''}`,
                 });
             }
 

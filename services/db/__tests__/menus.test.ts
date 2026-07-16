@@ -363,4 +363,58 @@ describe('menu write path (JSON fallback)', () => {
         expect(res.status).toBe(201);
         expect(submissions['child'].menu_id).toBe(menuId);
     });
+
+    test('POST /submissions mints an approver dispute token', async () => {
+        const res = await invokeJsonHandler(postHandler, {
+            body: { id: 'sub-tok', status: 'processing', property: 'Tán', project_name: 'Lunch' },
+        });
+        expect(res.status).toBe(201);
+        expect(`${submissions['sub-tok'].approver_dispute_token || ''}`.length).toBeGreaterThan(10);
+    });
+});
+
+describe('approver dispute (JSON fallback)', () => {
+    const getDispute = getRouteHandler('get', '/submissions/dispute/:token');
+    const postDispute = getRouteHandler('post', '/submissions/dispute/:token');
+    let submissions: Record<string, any>;
+
+    beforeEach(() => {
+        submissions = {
+            'form-1': { id: 'form-1', status: 'approved', project_name: 'Lunch', property: 'Tán', service_period: 'Lunch', approver_dispute_token: 'tok-abc' },
+        };
+        (isSupabaseConfigured as jest.Mock).mockReturnValue(false);
+        (fs.promises.readFile as jest.Mock).mockImplementation(async (target: string) => {
+            if (String(target).endsWith('submissions.json')) return JSON.stringify(submissions);
+            return '{}';
+        });
+        (fs.promises.writeFile as jest.Mock).mockImplementation(async (target: string, payload: string) => {
+            if (String(target).endsWith('submissions.json')) submissions = JSON.parse(payload);
+        });
+        jest.spyOn(console, 'error').mockImplementation(() => {});
+    });
+
+    afterEach(() => jest.restoreAllMocks());
+
+    test('GET returns the submission summary for a valid token, 404 otherwise', async () => {
+        const ok = await invokeJsonHandler(getDispute, { params: { token: 'tok-abc' } });
+        expect(ok.status).toBe(200);
+        expect(ok.body).toMatchObject({ submissionId: 'form-1', projectName: 'Lunch', disputed: false });
+        const missing = await invokeJsonHandler(getDispute, { params: { token: 'nope' } });
+        expect(missing.status).toBe(404);
+    });
+
+    test('POST records the dispute and is idempotent', async () => {
+        const first = await invokeJsonHandler(postDispute, { params: { token: 'tok-abc' }, body: { note: 'I never saw this' } });
+        expect(first.status).toBe(200);
+        expect(first.body.disputed).toBe(true);
+        expect(submissions['form-1'].approver_disputed_at).toBeTruthy();
+        expect(submissions['form-1'].approver_dispute_note).toBe('I never saw this');
+
+        const firstAt = submissions['form-1'].approver_disputed_at;
+        const second = await invokeJsonHandler(postDispute, { params: { token: 'tok-abc' }, body: { note: 'changed' } });
+        expect(second.status).toBe(200);
+        expect(second.body.alreadyRecorded).toBe(true);
+        expect(submissions['form-1'].approver_disputed_at).toBe(firstAt); // unchanged
+        expect(submissions['form-1'].approver_dispute_note).toBe('I never saw this'); // not overwritten
+    });
 });

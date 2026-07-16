@@ -19,6 +19,7 @@ export type SubmissionConfirmationInput = {
     approvals: ConfirmationApproval[];
     docxPath: string;
     filename: string;
+    approverDisputeToken?: string;
 };
 
 export type ConfirmationRecipient = {
@@ -125,10 +126,18 @@ export function buildSubmissionEmailSubject(input: SubmissionConfirmationInput):
     return `Menu submitted for review: ${input.projectName}`;
 }
 
+/** Approver dispute link URL, or '' when no token is available. */
+export function buildApproverDisputeUrl(dashboardUrl: string, token: string): string {
+    const trimmed = `${token || ''}`.trim();
+    if (!trimmed) return '';
+    return `${(dashboardUrl || '').replace(/\/+$/, '')}/approval-dispute/${encodeURIComponent(trimmed)}`;
+}
+
 export function buildSubmissionReceiptHtml(
     input: SubmissionConfirmationInput,
     attachmentDropped: boolean,
     dashboardUrl: string,
+    options: { includeDisputeLink?: boolean } = {},
 ): string {
     const rows = [
         ['Project', input.projectName],
@@ -150,12 +159,19 @@ export function buildSubmissionReceiptHtml(
 
     const reviewUrl = `${(dashboardUrl || '').replace(/\/+$/, '')}/review/${encodeURIComponent(input.submissionId)}`;
 
+    // Negative confirmation, approver copies only: silence means all is well.
+    const disputeUrl = options.includeDisputeLink ? buildApproverDisputeUrl(dashboardUrl, input.approverDisputeToken || '') : '';
+    const disputeLine = disputeUrl
+        ? `<p style="margin-top:12px;padding:10px 12px;background:#fff8e1;border:1px solid #ffe082">If you did <strong>not</strong> approve this menu, <a href="${disputeUrl}">let us know</a>.</p>`
+        : '';
+
     return `
         <div style="font-family:sans-serif;max-width:640px">
             <h2 style="margin-bottom:4px">Menu submission received</h2>
             ${intro}
             <table style="border-collapse:collapse;width:100%;margin:12px 0">${rows}</table>
             ${approverList ? `<p style="margin-bottom:4px"><strong>Approvers:</strong></p><ul>${approverList}</ul>` : ''}
+            ${disputeLine}
             ${attachmentDropped ? `<p style="color:#b71c1c">The document was too large to attach; download it from <a href="${reviewUrl}">the submission page</a>.</p>` : ''}
             <p style="color:#888;font-size:12px;margin-top:16px">This is an automated message from Menu Manager.</p>
         </div>

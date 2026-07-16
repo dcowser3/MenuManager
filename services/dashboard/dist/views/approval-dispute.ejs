@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Approval check — <%= tenant.name %></title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f5f7fa; color: #2d3748;
+            display: flex; align-items: center; justify-content: center; min-height: 100vh; padding: 1rem;
+        }
+        .card { background: #fff; max-width: 560px; width: 100%; padding: 2rem; border-radius: 10px; box-shadow: 0 4px 24px rgba(0,0,0,0.08); }
+        .brand { font-size: 0.8rem; letter-spacing: 0.12em; text-transform: uppercase; color: #a0aec0; margin-bottom: 0.75rem; }
+        h1 { font-size: 1.4rem; margin-bottom: 0.75rem; }
+        p { color: #4a5568; line-height: 1.6; margin-bottom: 1rem; }
+        .meta { background: #f7fafc; border: 1px solid #edf2f7; border-radius: 8px; padding: 0.75rem 1rem; margin-bottom: 1.25rem; font-size: 0.92rem; }
+        label { display: block; font-weight: 600; margin-bottom: 0.35rem; font-size: 0.9rem; }
+        textarea { width: 100%; min-height: 90px; padding: 0.6rem; border: 1px solid #cbd5e0; border-radius: 6px; font: inherit; margin-bottom: 1rem; }
+        .btn { display: inline-block; padding: 0.75rem 1.5rem; background: #c53030; color: #fff; border: none; border-radius: 6px; font-weight: 600; font-size: 0.95rem; cursor: pointer; text-decoration: none; }
+        .btn:hover { background: #9b2c2c; }
+        .ok { color: #2f855a; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <div class="brand"><%= tenant.name %></div>
+        <% if (state === 'recorded') { %>
+            <h1 class="ok">Thanks — the team has been notified</h1>
+            <p>We recorded that you did not approve this menu. A reviewer will follow up. You can close this page.</p>
+            <div class="meta"><strong><%= projectName || 'Menu' %></strong><%= property ? ` — ${property}` : '' %></div>
+        <% } else { %>
+            <h1>Did you not approve this menu?</h1>
+            <p>You are listed as an approver for the menu below. If you <strong>did not</strong> approve it, let us know and a reviewer will follow up. If everything is fine, you can simply close this page — no action needed.</p>
+            <div class="meta"><strong><%= projectName || 'Menu' %></strong><%= property ? ` — ${property}` : '' %><%= servicePeriod ? ` (${servicePeriod})` : '' %></div>
+            <form method="POST" action="/approval-dispute/<%= encodeURIComponent(token) %>">
+                <label for="note">Anything to add? (optional)</label>
+                <textarea id="note" name="note" maxlength="500" placeholder="e.g. I never saw this menu, or the approval was recorded without me."></textarea>
+                <button type="submit" class="btn">I did NOT approve this menu</button>
+            </form>
+        <% } %>
+    </div>
+</body>
+</html>

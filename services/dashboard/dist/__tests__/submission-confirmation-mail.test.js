@@ -150,4 +150,20 @@ describe('buildSubmissionReceiptHtml', () => {
         expect(html).not.toContain('<script>x</script>');
         expect(html).toContain('&lt;script&gt;');
     });
+    test('approver dispute link appears only when includeDisputeLink is set (approver copy)', () => {
+        const withToken = input({ approverDisputeToken: 'tok-xyz' });
+        const submitterCopy = (0, submission_confirmation_mail_1.buildSubmissionReceiptHtml)(withToken, false, 'https://dash.example.com');
+        const approverCopy = (0, submission_confirmation_mail_1.buildSubmissionReceiptHtml)(withToken, false, 'https://dash.example.com', { includeDisputeLink: true });
+        expect(submitterCopy).not.toContain('did <strong>not</strong> approve');
+        expect(approverCopy).toContain('did <strong>not</strong> approve');
+        expect(approverCopy).toContain('/approval-dispute/tok-xyz');
+    });
+    test('no dispute link when there is no token even if requested', () => {
+        const html = (0, submission_confirmation_mail_1.buildSubmissionReceiptHtml)(input({ approverDisputeToken: '' }), false, 'https://dash.example.com', { includeDisputeLink: true });
+        expect(html).not.toContain('/approval-dispute/');
+    });
+    test('buildApproverDisputeUrl builds a link or empty string', () => {
+        expect((0, submission_confirmation_mail_1.buildApproverDisputeUrl)('https://dash.example.com/', 'abc')).toBe('https://dash.example.com/approval-dispute/abc');
+        expect((0, submission_confirmation_mail_1.buildApproverDisputeUrl)('https://dash.example.com', '')).toBe('');
+    });
 });

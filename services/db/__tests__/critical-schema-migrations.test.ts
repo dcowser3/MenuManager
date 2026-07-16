@@ -9,7 +9,7 @@ const REPO_ROOT = path.resolve(__dirname, '../../..');
 
 const CRITICAL_SUPABASE_SCHEMA: Record<string, string[]> = {
     correction_rules: ['applies_to_menu_type', 'prompt_cycle_id', 'consumed_at', 'submission_ids'],
-    submissions: ['form_attempt_id', 'approved_menu_content', 'approved_menu_content_html', 'menu_id'],
+    submissions: ['form_attempt_id', 'approved_menu_content', 'approved_menu_content_html', 'menu_id', 'approver_dispute_token', 'approver_disputed_at', 'approver_dispute_note'],
     menus: ['property', 'service_period', 'name', 'current_submission_id', 'status'],
     draft_sessions: ['menu_id'],
     basic_ai_check_audits: ['menu_content_raw', 'submission_id'],

@@ -350,25 +350,48 @@ function sendSubmissionConfirmationEmails(input) {
                     contentType: SUBMISSION_DOCX_CONTENT_TYPE,
                 }]
             : [];
-        const [primaryRecipient, ...ccRecipients] = recipients;
-        const cc = (0, submission_confirmation_mail_1.buildSubmissionConfirmationCc)(primaryRecipient, ccRecipients, tenantConfig.emails.submissionConfirmationCc);
-        try {
-            // sendAlertMail transparently strips an oversized attachment and
-            // appends a notice, so a single send covers both cases.
-            const result = await (0, alert_mail_1.sendAlertMail)({
-                fromName: 'Menu Manager',
-                to: primaryRecipient.email,
-                cc,
-                subject: (0, submission_confirmation_mail_1.buildSubmissionEmailSubject)(input),
-                html: (0, submission_confirmation_mail_1.buildSubmissionReceiptHtml)(input, attachments.length === 0, DASHBOARD_URL),
-                attachments,
-            }, alertMailDeps);
-            if (result.attachmentsDropped) {
-                console.warn(`Submission confirmation attachment dropped (oversize) for ${input.submissionId}`);
-            }
+        // Role-segregated sends so the approver copy — and only the approver
+        // copy — carries the dispute link ("If you did NOT approve this menu…").
+        // The submitter receipt stays clean. always-cc rides the primary send.
+        const submitterRecipients = recipients.filter((r) => r.role === 'submitter');
+        const approverRecipients = recipients.filter((r) => r.role === 'approver');
+        const sends = [];
+        if (submitterRecipients.length) {
+            sends.push({
+                to: submitterRecipients[0].email,
+                cc: (0, submission_confirmation_mail_1.buildSubmissionConfirmationCc)(submitterRecipients[0], [], tenantConfig.emails.submissionConfirmationCc),
+                includeDisputeLink: false,
+            });
         }
-        catch (mailError) {
-            console.error(`Failed to send submission confirmation email (${input.submissionId}):`, mailError.message);
+        if (approverRecipients.length) {
+            const [primaryApprover, ...ccApprovers] = approverRecipients;
+            sends.push({
+                to: primaryApprover.email,
+                // Only fold the always-cc address in here when there was no
+                // submitter send to carry it.
+                cc: (0, submission_confirmation_mail_1.buildSubmissionConfirmationCc)(primaryApprover, ccApprovers, submitterRecipients.length ? [] : tenantConfig.emails.submissionConfirmationCc),
+                includeDisputeLink: !!input.approverDisputeToken,
+            });
+        }
+        for (const send of sends) {
+            try {
+                // sendAlertMail transparently strips an oversized attachment and
+                // appends a notice, so a single send covers both cases.
+                const result = await (0, alert_mail_1.sendAlertMail)({
+                    fromName: 'Menu Manager',
+                    to: send.to,
+                    cc: send.cc,
+                    subject: (0, submission_confirmation_mail_1.buildSubmissionEmailSubject)(input),
+                    html: (0, submission_confirmation_mail_1.buildSubmissionReceiptHtml)(input, attachments.length === 0, DASHBOARD_URL, { includeDisputeLink: send.includeDisputeLink }),
+                    attachments,
+                }, alertMailDeps);
+                if (result.attachmentsDropped) {
+                    console.warn(`Submission confirmation attachment dropped (oversize) for ${input.submissionId}`);
+                }
+            }
+            catch (mailError) {
+                console.error(`Failed to send submission confirmation email (${input.submissionId}):`, mailError.message);
+            }
         }
     })();
 }
@@ -1162,6 +1185,78 @@ app.get('/approved-dishes/:brandSlug', async (req, res) => {
         res.status(500).render('error', {
             message: 'Failed to load approved dishes',
         });
+    }
+});
+/**
+ * Approver dispute link (Identity Stage 2) — public, no auth, rate-limited.
+ * "If you did NOT approve this menu…" Negative confirmation: a click records
+ * the dispute and notifies reviewers; it never unwinds anything automatically.
+ */
+app.get('/approval-dispute/:token', async (req, res) => {
+    if (isDraftTokenLookupRateLimited(req)) {
+        return res.status(429).render('error', { message: 'Too many attempts. Please wait a minute and try again.' });
+    }
+    const token = (0, upload_security_1.sanitizePlainTextInput)(req.params.token, { maxLength: 120 }).trim();
+    try {
+        const response = await internalApi.get(`${DB_SERVICE_URL}/submissions/dispute/${encodeURIComponent(token)}`);
+        const info = response.data || {};
+        return res.render('approval-dispute', {
+            token,
+            state: info.disputed ? 'recorded' : 'confirm',
+            projectName: info.projectName || '',
+            property: info.property || '',
+            servicePeriod: info.servicePeriod || '',
+        });
+    }
+    catch (error) {
+        if (error?.response?.status === 404) {
+            return res.status(404).render('error', { message: 'This approval link is not valid.' });
+        }
+        console.error('Error loading approval dispute:', error?.response?.data || error.message);
+        return res.status(500).render('error', { message: 'Could not load this approval link.' });
+    }
+});
+app.post('/approval-dispute/:token', async (req, res) => {
+    if (isDraftTokenLookupRateLimited(req)) {
+        return res.status(429).render('error', { message: 'Too many attempts. Please wait a minute and try again.' });
+    }
+    const token = (0, upload_security_1.sanitizePlainTextInput)(req.params.token, { maxLength: 120 }).trim();
+    const note = (0, upload_security_1.sanitizePlainTextInput)(req.body?.note, { multiline: true, maxLength: 500 }).trim();
+    try {
+        const response = await internalApi.post(`${DB_SERVICE_URL}/submissions/dispute/${encodeURIComponent(token)}`, { note });
+        const info = response.data || {};
+        // Notify reviewers — fire-and-forget, never block the confirm page.
+        (0, supabase_client_1.logAlert)({
+            alert_type: 'approver_dispute',
+            severity: 'warning',
+            service: 'dashboard',
+            submission_id: info.submissionId || undefined,
+            message: `An approver reported they did NOT approve submission ${info.submissionId || token}.`,
+            details: { submissionId: info.submissionId || null, note: note || null },
+        });
+        if (tenantConfig.emails.internalReviewer) {
+            const reviewUrl = `${DASHBOARD_URL.replace(/\/+$/, '')}/review/${encodeURIComponent(info.submissionId || '')}`;
+            Promise.resolve((0, alert_mail_1.sendAlertMail)({
+                fromName: 'Menu Manager',
+                to: tenantConfig.emails.internalReviewer,
+                subject: `Approver dispute: ${info.submissionId || token}`,
+                html: `<p>An approver reported they did <strong>not</strong> approve submission <strong>${info.submissionId || token}</strong>.</p>${note ? `<p>Note: ${note.replace(/</g, '&lt;')}</p>` : ''}<p><a href="${reviewUrl}">Open the submission</a></p>`,
+            }, alertMailDeps)).catch((mailError) => console.error('Dispute reviewer notification failed:', mailError?.message || mailError));
+        }
+        return res.render('approval-dispute', {
+            token,
+            state: 'recorded',
+            projectName: info.projectName || '',
+            property: info.property || '',
+            servicePeriod: info.servicePeriod || '',
+        });
+    }
+    catch (error) {
+        if (error?.response?.status === 404) {
+            return res.status(404).render('error', { message: 'This approval link is not valid.' });
+        }
+        console.error('Error recording approval dispute:', error?.response?.data || error.message);
+        return res.status(500).render('error', { message: 'Could not record your response. Please try again.' });
     }
 });
 /**

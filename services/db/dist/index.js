@@ -403,6 +403,9 @@ const SUPABASE_SUBMISSION_COLUMNS = new Set([
     'revision_source',
     'revision_base_submission_id',
     'menu_id',
+    'approver_dispute_token',
+    'approver_disputed_at',
+    'approver_dispute_note',
     'revision_baseline_doc_path',
     'revision_baseline_file_name',
     'base_approved_menu_content',
@@ -562,6 +565,24 @@ async function getSubmissionRecordById(id) {
     }
     const match = Object.values(submissions).find((submission) => (submission?.id === normalizedId || submission?.legacy_id === normalizedId));
     return match || null;
+}
+async function findSubmissionByDisputeToken(token) {
+    const normalized = `${token || ''}`.trim();
+    if (!normalized)
+        return null;
+    if ((0, supabase_client_1.isSupabaseConfigured)()) {
+        const { data, error } = await (0, supabase_client_1.getSupabaseClient)()
+            .from(SUBMISSIONS_TABLE)
+            .select('*')
+            .eq('approver_dispute_token', normalized)
+            .maybeSingle();
+        if (error)
+            throw new Error(`Failed to look up dispute token: ${error.message}`);
+        if (data)
+            return data;
+    }
+    const submissions = JSON.parse(await fs_1.promises.readFile(SUBMISSIONS_DB, 'utf-8'));
+    return Object.values(submissions).find((row) => `${row?.approver_dispute_token || ''}`.trim() === normalized) || null;
 }
 function getDraftExpiryDays() {
     const configured = Number((0, tenant_config_1.getTenantConfig)().draftSessions?.expiryDays);
@@ -1838,6 +1859,65 @@ app.get('/menus/:id', async (req, res) => {
         res.status(500).json({ error: 'Failed to load menu' });
     }
 });
+// Approver dispute token routes (Identity Stage 2). Named — before /submissions/:id.
+app.get('/submissions/dispute/:token', async (req, res) => {
+    try {
+        const submission = await findSubmissionByDisputeToken(req.params.token);
+        if (!submission)
+            return res.status(404).json({ error: 'Dispute link not found' });
+        return res.json({
+            submissionId: getPublicSubmissionId(submission),
+            projectName: submission.project_name || '',
+            property: submission.property || '',
+            servicePeriod: getSubmissionServicePeriod(submission),
+            disputed: !!submission.approver_disputed_at,
+            disputedAt: submission.approver_disputed_at || null,
+            disputeNote: submission.approver_dispute_note || '',
+        });
+    }
+    catch (error) {
+        console.error('Error loading dispute:', error.message);
+        return res.status(500).json({ error: 'Failed to load dispute' });
+    }
+});
+app.post('/submissions/dispute/:token', async (req, res) => {
+    try {
+        const submission = await findSubmissionByDisputeToken(req.params.token);
+        if (!submission)
+            return res.status(404).json({ error: 'Dispute link not found' });
+        const publicId = getPublicSubmissionId(submission);
+        const summary = {
+            submissionId: publicId,
+            projectName: submission.project_name || '',
+            property: submission.property || '',
+            servicePeriod: getSubmissionServicePeriod(submission),
+        };
+        // Idempotent: a re-visit after recording just echoes the stored state.
+        if (submission.approver_disputed_at) {
+            return res.json({ ...summary, disputed: true, disputedAt: submission.approver_disputed_at, alreadyRecorded: true });
+        }
+        const note = `${req.body?.note || ''}`.trim().slice(0, 500);
+        const disputedAt = new Date().toISOString();
+        const updates = { approver_disputed_at: disputedAt, approver_dispute_note: note || null };
+        const submissions = JSON.parse(await fs_1.promises.readFile(SUBMISSIONS_DB, 'utf-8'));
+        const localKey = Object.keys(submissions).find((key) => getPublicSubmissionId(submissions[key]) === publicId);
+        if (localKey) {
+            submissions[localKey] = { ...submissions[localKey], ...updates, updated_at: disputedAt };
+            await fs_1.promises.writeFile(SUBMISSIONS_DB, JSON.stringify(submissions, null, 2));
+        }
+        try {
+            await mirrorSubmissionUpdateToSupabase(publicId, updates);
+        }
+        catch (mirrorError) {
+            console.error('Dispute mirror failed (kept local write):', mirrorError.message);
+        }
+        return res.json({ ...summary, disputed: true, disputedAt });
+    }
+    catch (error) {
+        console.error('Error recording dispute:', error.message);
+        return res.status(500).json({ error: 'Failed to record dispute' });
+    }
+});
 // Named submission routes must remain before /submissions/:id.
 app.get('/submissions/lineage-children', async (req, res) => {
     try {
@@ -1884,6 +1964,9 @@ app.post('/submissions', async (req, res) => {
             ...req.body,
             id: newId,
             status: req.body.status || 'processing',
+            // Per-submission approver dispute token (Identity Stage 2), minted
+            // once at creation like draft tokens. Never regenerated.
+            approver_dispute_token: req.body.approver_dispute_token || crypto.randomBytes(32).toString('base64url').slice(0, 64),
             created_at: req.body.created_at || new Date().toISOString(),
             updated_at: new Date().toISOString(),
         };
@@ -3305,7 +3388,7 @@ app.put('/prompt-proposals/:id', async (req, res) => {
 // instead of losing reviewer data. Update when a migration adds load-bearing columns.
 const CRITICAL_SUPABASE_SCHEMA = {
     correction_rules: ['applies_to_menu_type', 'prompt_cycle_id', 'consumed_at', 'submission_ids', 'example_original', 'example_corrected', 'inferred_from_guidance'],
-    submissions: ['form_attempt_id', 'approved_menu_content', 'approved_menu_content_html', 'menu_id'],
+    submissions: ['form_attempt_id', 'approved_menu_content', 'approved_menu_content_html', 'menu_id', 'approver_dispute_token', 'approver_disputed_at', 'approver_dispute_note'],
     menus: ['property', 'service_period', 'name', 'current_submission_id', 'status'],
     draft_sessions: ['token', 'base_submission_id', 'form_state', 'status', 'submitted_submission_id', 'last_edited_by', 'menu_id'],
     form_attempt_logs: ['draft_session_id'],
