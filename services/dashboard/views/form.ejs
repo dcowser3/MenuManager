@@ -3544,6 +3544,9 @@
             applyTurnaroundDefaults(true, true);
             toggleAssetFields();
             applyDraftSession();
+            // After any draft restore — draft form_state wins; profile only
+            // backfills submitter fields left empty.
+            prefillSubmitterProfile();
 
             if (draftSessionToken) {
                 document.addEventListener('input', () => scheduleDraftAutosave());
@@ -5298,6 +5301,56 @@
             document.getElementById('submitterDropdown').classList.remove('show');
             submitterResults = [];
             submitterHighlightIndex = -1;
+            saveSubmitterProfile();
+        }
+
+        // ---- Remembered submitter profile (Phase 4, client-side only) ----
+        // localStorage convenience so the same person stops retyping their name/
+        // email/title every session, and drafts can stamp last_edited_by from the
+        // first keystroke. No accounts, no access control — display convenience.
+        const SUBMITTER_PROFILE_KEY = 'menumanager.submitterProfile.v1';
+
+        function readSubmitterProfile() {
+            try {
+                const raw = window.localStorage?.getItem(SUBMITTER_PROFILE_KEY);
+                const parsed = raw ? JSON.parse(raw) : null;
+                return parsed && typeof parsed === 'object' ? parsed : null;
+            } catch (error) {
+                return null;
+            }
+        }
+
+        function saveSubmitterProfile() {
+            try {
+                const name = (document.getElementById('submitterName')?.value || '').trim();
+                const email = (document.getElementById('submitterEmail')?.value || '').trim();
+                const jobTitle = (document.getElementById('submitterJobTitle')?.value || '').trim();
+                if (!name && !email && !jobTitle) return;
+                window.localStorage?.setItem(SUBMITTER_PROFILE_KEY, JSON.stringify({ name, email, jobTitle }));
+            } catch (error) {
+                /* storage may be unavailable (private mode, quota) — non-fatal */
+            }
+        }
+
+        function storedSubmitterName() {
+            return `${readSubmitterProfile()?.name || ''}`.trim();
+        }
+
+        // Fill only fields still empty after a draft restore — draft-saved
+        // Submitter Information (form_state) always takes precedence over the
+        // stored profile. Fields stay editable; edits re-save on the next submit.
+        function prefillSubmitterProfile() {
+            const profile = readSubmitterProfile();
+            if (!profile) return;
+            const fillIfEmpty = (id, value) => {
+                const el = document.getElementById(id);
+                if (el && !`${el.value || ''}`.trim() && `${value || ''}`.trim()) {
+                    el.value = value;
+                }
+            };
+            fillIfEmpty('submitterName', profile.name);
+            fillIfEmpty('submitterEmail', profile.email);
+            fillIfEmpty('submitterJobTitle', profile.jobTitle);
         }
 
         function handleSubmitterKeydown(e) {
@@ -8037,6 +8090,8 @@
                     draftAutosaveBlocked = true;
                     draftSessionId = data.draftSessionId || draftSessionId;
                 }
+                // Remember this submitter for next time (Phase 4).
+                saveSubmitterProfile();
                 prepareForNextSubmission();
 
             } catch (error) {
@@ -8256,7 +8311,7 @@
                         updatedAt: draftLoadedUpdatedAt,
                         menuContentHtml: getDraftMenuContentHtml(),
                         formState: getDraftFormState(),
-                        lastEditedBy: document.getElementById('submitterName')?.value || '',
+                        lastEditedBy: (document.getElementById('submitterName')?.value || '').trim() || storedSubmitterName(),
                     }),
                 });
                 const data = await response.json().catch(() => ({}));

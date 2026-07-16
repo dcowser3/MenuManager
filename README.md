@@ -8,6 +8,8 @@ This README is intentionally short. Detailed feature notes, runbooks, and design
 
 The Approved Menus page is **menu-centric**: it shows one card per menu (e.g. "Tán — Lunch"), not one per approved submission. Each card surfaces the current approved version with its downloads and an "Edit This Menu" action (which always starts from the current version), an in-progress badge with Resume / Discard-and-start-over when a draft is open, and a "View version history" expander listing prior versions with per-version downloads — older versions are view/download only and never editable. `/drafts` provides a shared list of active and recently closed drafts. A menu's current version is a stored pointer (`menus.current_submission_id`) that advances on approval, so "current vs outdated" is a fact, not an inference; starting a draft from an outdated version is rejected in favor of the current one, and there is at most one active draft per menu.
 
+The submission form and design-approval page remember your Submitter Information (name, email, job title) in the browser after a submit or an autocomplete pick, and prefill it next time. Draft-saved values always win — the remembered profile only fills fields left empty after a draft is restored. This is a local convenience, not an account or any access control.
+
 Approved-menu edits load the reviewer-approved text and formatting, not the original submitted HTML. This prevents reviewer corrections from appearing as pending edits or being accidentally reverted in the next revision.
 
 When Basic AI Check or a suggestion updates an editable menu, heading and dish-name formatting is mapped against the live editor text so collapsed whitespace cannot shift bold styling onto neighboring words or lines.

@@ -1094,6 +1094,8 @@
             document.getElementById('step2SubmitterName').value = document.getElementById('submitterName').value;
             document.getElementById('step2SubmitterEmail').value = document.getElementById('submitterEmail').value;
             document.getElementById('step2SubmitterJobTitle').value = document.getElementById('submitterJobTitle').value;
+            // Remember this submitter for next time (Phase 4).
+            saveSubmitterProfile();
 
             // Project details (extracted from DOCX)
             const details = data.projectDetails || {};
@@ -1526,6 +1528,48 @@
             document.getElementById('submitterDropdown').classList.remove('show');
             submitterResults = [];
             submitterHighlightIndex = -1;
+            saveSubmitterProfile();
+        }
+
+        // ---- Remembered submitter profile (Phase 4, client-side only) ----
+        // Shares the localStorage key with the submission form so a returning
+        // user's name/email/title carry across both pages. Convenience only.
+        const SUBMITTER_PROFILE_KEY = 'menumanager.submitterProfile.v1';
+
+        function readSubmitterProfile() {
+            try {
+                const raw = window.localStorage?.getItem(SUBMITTER_PROFILE_KEY);
+                const parsed = raw ? JSON.parse(raw) : null;
+                return parsed && typeof parsed === 'object' ? parsed : null;
+            } catch (error) {
+                return null;
+            }
+        }
+
+        function saveSubmitterProfile() {
+            try {
+                const name = (document.getElementById('submitterName')?.value || '').trim();
+                const email = (document.getElementById('submitterEmail')?.value || '').trim();
+                const jobTitle = (document.getElementById('submitterJobTitle')?.value || '').trim();
+                if (!name && !email && !jobTitle) return;
+                window.localStorage?.setItem(SUBMITTER_PROFILE_KEY, JSON.stringify({ name, email, jobTitle }));
+            } catch (error) {
+                /* storage may be unavailable — non-fatal */
+            }
+        }
+
+        function prefillSubmitterProfile() {
+            const profile = readSubmitterProfile();
+            if (!profile) return;
+            const fillIfEmpty = (id, value) => {
+                const el = document.getElementById(id);
+                if (el && !`${el.value || ''}`.trim() && `${value || ''}`.trim()) {
+                    el.value = value;
+                }
+            };
+            fillIfEmpty('submitterName', profile.name);
+            fillIfEmpty('submitterEmail', profile.email);
+            fillIfEmpty('submitterJobTitle', profile.jobTitle);
         }
 
         function handleSubmitterKeydown(e) {
@@ -1570,6 +1614,7 @@
             });
             onDocxSourceModeChange();
             updateCompareButtonState();
+            prefillSubmitterProfile();
         });
     </script>
 </body>
