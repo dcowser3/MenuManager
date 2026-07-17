@@ -276,7 +276,21 @@
             flex-wrap: wrap;
             justify-content: space-between;
             gap: 1.5rem;
-            align-items: center;
+            align-items: flex-start;   /* main + actions both start at the top */
+        }
+
+        /* Two downloads share one row to keep the actions column from running
+           long when a card has every state (approved + in-progress + stale). */
+        .menu-downloads {
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .menu-downloads .btn {
+            flex: 1;
+            width: auto;
+            padding-left: 0.5rem;
+            padding-right: 0.5rem;
         }
 
         .version-history {
@@ -342,7 +356,10 @@
         }
 
         .menu-main {
-            flex: 1 1 auto;
+            /* basis 320px (not auto): grows to fill, but its max-content meta
+               line never forces the 240px actions column to wrap on desktop.
+               The 860px media query still stacks them on mobile. */
+            flex: 1 1 320px;
             min-width: 0;
         }
 
@@ -554,8 +571,10 @@
                                     <button type="submit" class="btn" style="width: 100%;">Edit This Menu</button>
                                 </form>
                             <% } %>
-                            <a href="/download/approved-clean/<%= menu.current.submissionId %>" class="btn">Download Clean Word Doc</a>
-                            <a href="/download/approved/<%= menu.current.submissionId %>" class="btn btn-secondary">Download Original Approved</a>
+                            <div class="menu-downloads">
+                                <a href="/download/approved-clean/<%= menu.current.submissionId %>" class="btn btn-small" title="Download the cleaned Word doc (redlines/highlights removed)">Clean</a>
+                                <a href="/download/approved/<%= menu.current.submissionId %>" class="btn btn-small btn-secondary" title="Download the original approved file">Original</a>
+                            </div>
                         </div>
                         <% if (menu.versionCount > 1) { %>
                             <details class="version-history">
