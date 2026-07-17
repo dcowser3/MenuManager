@@ -83,11 +83,29 @@ describe('approved menus view (menu-centric)', () => {
     test('renders resume/discard for an in-progress menu, keyed to the current version', () => {
         const html = renderApprovedMenus({
             hasSearch: true,
-            menuCards: [sampleCard({ activeDraft: { token: 'draft-token', lastSavedAt: '2026-07-12T00:00:00Z', lastEditedBy: 'Chef Mina' } })],
+            menuCards: [sampleCard({ activeDraft: { token: 'draft-token', lastSavedAt: '2026-07-12T00:00:00Z', lastEditedBy: 'Chef Mina', staleBaseline: false } })],
         });
+        expect(html).toContain('In progress — last saved');
+        expect(html).toContain('by Chef Mina');
         expect(html).toContain('Resume Editing');
         expect(html).toContain('Discard and start over');
         expect(html).toContain('value="draft-token"');
+        expect(html).not.toContain('Draft started from an older version');
+    });
+
+    test('hints when an in-progress draft started from an older version', () => {
+        const html = renderApprovedMenus({
+            hasSearch: true,
+            menuCards: [sampleCard({ activeDraft: { token: 'draft-token', lastSavedAt: '2026-07-12T00:00:00Z', lastEditedBy: 'Derian Cowser', staleBaseline: true } })],
+        });
+        expect(html).toContain('Draft started from an older version');
+        expect(html).toContain('badge-warn');
+    });
+
+    test('action buttons get uniform full-width treatment in the actions column', () => {
+        const html = renderApprovedMenus({ hasSearch: true, menuCards: [sampleCard()] });
+        expect(html).toContain('.menu-actions .btn');
+        expect(html).toMatch(/\.menu-actions \.btn\s*\{[^}]*width:\s*100%/);
     });
 
     test('renders empty state when no search has been performed', () => {

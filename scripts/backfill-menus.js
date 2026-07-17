@@ -30,6 +30,7 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-
 const localDbDir = path.join(__dirname, '..', 'tmp', 'db');
 const SUBMISSIONS_JSON = path.join(localDbDir, 'submissions.json');
 const MENUS_JSON = path.join(localDbDir, 'menus.json');
+const DRAFT_SESSIONS_JSON = path.join(localDbDir, 'draft_sessions.json');
 const REVIEW_CSV = path.join(__dirname, '..', 'tmp', 'menu-backfill-review.csv');
 
 function idFor(row) { return `${row.legacy_id || row.id || ''}`.trim(); }
@@ -211,6 +212,53 @@ async function resetMenus() {
     return { remoteMenus, remoteUnlinked, localUnlinked };
 }
 
+// Re-link active drafts to their menu from the baseline's (now-populated)
+// menu_id. The Phase 3 rekey backfilled draft_sessions.menu_id while `menus`
+// was still empty, so pre-existing active drafts have menu_id = null and don't
+// show on menu cards. Idempotent; run standalone (--relink-drafts) and at the
+// end of every --apply / --apply-review so the ordering can't bite again.
+async function relinkDrafts() {
+    // public submission id (legacy_id || id) -> menu_id
+    const menuBySubmission = new Map();
+    if (isSupabaseConfigured()) {
+        const supabase = getSupabaseClient();
+        const { data, error } = await supabase.from('submissions').select('id,legacy_id,menu_id').not('menu_id', 'is', null);
+        if (error) throw new Error(`relink: load submissions failed: ${error.message}`);
+        for (const row of data || []) menuBySubmission.set(idFor(row), `${row.menu_id}`);
+    }
+    const localSubs = await readJson(SUBMISSIONS_JSON, {});
+    for (const row of Object.values(localSubs)) {
+        if (row.menu_id) menuBySubmission.set(idFor(row), `${row.menu_id}`);
+    }
+
+    let remoteUpdated = 0;
+    if (isSupabaseConfigured()) {
+        const supabase = getSupabaseClient();
+        const { data, error } = await supabase
+            .from('draft_sessions').select('id,base_submission_id,menu_id,status').eq('status', 'active');
+        if (error) throw new Error(`relink: load drafts failed: ${error.message}`);
+        for (const draft of data || []) {
+            const menuId = menuBySubmission.get(`${draft.base_submission_id || ''}`.trim());
+            if (menuId && `${draft.menu_id || ''}` !== menuId) {
+                const { error: updErr } = await supabase.from('draft_sessions').update({ menu_id: menuId }).eq('id', draft.id);
+                if (updErr) throw new Error(`relink: update draft ${draft.id} failed: ${updErr.message}`);
+                remoteUpdated++;
+            }
+        }
+    }
+
+    const localDrafts = await readJson(DRAFT_SESSIONS_JSON, {});
+    let localUpdated = 0;
+    for (const key of Object.keys(localDrafts)) {
+        const draft = localDrafts[key];
+        if (`${draft.status || ''}` !== 'active') continue;
+        const menuId = menuBySubmission.get(`${draft.base_submission_id || ''}`.trim());
+        if (menuId && `${draft.menu_id || ''}` !== menuId) { draft.menu_id = menuId; localUpdated++; }
+    }
+    await fsp.writeFile(DRAFT_SESSIONS_JSON, JSON.stringify(localDrafts, null, 2));
+    return { remoteUpdated, localUpdated };
+}
+
 async function applyReview(csvPath) {
     const text = await fsp.readFile(csvPath, 'utf8');
     const [headerLine, ...rows] = text.split(/\r?\n/).filter((l) => l.trim().length);
@@ -325,11 +373,18 @@ async function applyReview(csvPath) {
         return;
     }
 
+    if (args.includes('--relink-drafts')) {
+        const result = await relinkDrafts();
+        console.log(`Re-linked active drafts to their menu: Supabase=${result.remoteUpdated}, local=${result.localUpdated}.`);
+        return;
+    }
+
     if (reviewFlagIdx >= 0) {
         const csvPath = args[reviewFlagIdx + 1];
         if (!csvPath) throw new Error('--apply-review requires a CSV path');
         const result = await applyReview(csvPath);
-        console.log(`Applied review decisions: linked=${result.linked}, new single-version menus=${result.created}.`);
+        const relink = await relinkDrafts();
+        console.log(`Applied review decisions: linked=${result.linked}, new single-version menus=${result.created}. Re-linked drafts: Supabase=${relink.remoteUpdated}, local=${relink.localUpdated}.`);
         return;
     }
 
@@ -347,5 +402,6 @@ async function applyReview(csvPath) {
         return;
     }
     const result = await applyMenus(plan.menus, rows);
-    console.log(`Applied: JSON menus=${result.localMenuRows}, JSON links=${result.localLinks}; Supabase menus=${result.remoteMenuRows}, Supabase links=${result.remoteLinks}; reused existing menus=${result.reused}.`);
+    const relink = await relinkDrafts();
+    console.log(`Applied: JSON menus=${result.localMenuRows}, JSON links=${result.localLinks}; Supabase menus=${result.remoteMenuRows}, Supabase links=${result.remoteLinks}; reused existing menus=${result.reused}. Re-linked drafts: Supabase=${relink.remoteUpdated}, local=${relink.localUpdated}.`);
 })().catch((error) => { console.error(error); process.exitCode = 1; });

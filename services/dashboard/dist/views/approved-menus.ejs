@@ -378,9 +378,18 @@
         .menu-actions {
             display: flex;
             flex-direction: column;
-            align-items: flex-end;
+            align-items: stretch;   /* uniform full-width column: badge on top, actions, downloads last */
             gap: 0.6rem;
             min-width: 240px;
+            flex: 0 0 240px;
+        }
+
+        .menu-actions form { margin: 0; width: 100%; }
+
+        .menu-actions .btn {
+            width: 100%;
+            text-align: center;
+            box-sizing: border-box;
         }
 
         .badge {
@@ -393,6 +402,15 @@
             text-transform: uppercase;
             letter-spacing: 0.16em;
             font-weight: 600;
+        }
+
+        /* In the actions column badges are full-width labels above the buttons. */
+        .menu-actions .badge { display: block; text-align: center; }
+
+        .badge-warn {
+            border-color: rgba(180, 120, 20, 0.4);
+            background: rgba(255, 193, 7, 0.14);
+            color: #8a5a12;
         }
 
         .empty-state {
@@ -521,6 +539,9 @@
                             <span class="badge"><%= menu.current.status === 'approved_override' ? 'Approved Override' : 'Approved' %></span>
                             <% if (menu.activeDraft) { %>
                                 <span class="badge">In progress — last saved <%= menu.activeDraft.lastSavedAt ? new Date(menu.activeDraft.lastSavedAt).toLocaleString() : 'recently' %><%= menu.activeDraft.lastEditedBy ? ` by ${menu.activeDraft.lastEditedBy}` : '' %></span>
+                                <% if (menu.activeDraft.staleBaseline) { %>
+                                    <span class="badge badge-warn">Draft started from an older version</span>
+                                <% } %>
                                 <a href="/form?draft=<%= encodeURIComponent(menu.activeDraft.token) %>" class="btn">Resume Editing</a>
                                 <form method="POST" action="/api/drafts" style="width: 100%; margin: 0;" onsubmit="return confirm('Discard the draft last saved <%= menu.activeDraft.lastSavedAt ? new Date(menu.activeDraft.lastSavedAt).toLocaleString() : 'recently' %> and start over?');">
                                     <input type="hidden" name="baseSubmissionId" value="<%= menu.current.submissionId %>">

@@ -231,7 +231,7 @@ export type MenuCardItem = {
     current: MenuVersion;
     versions: MenuVersion[]; // newest-first, includes the current version
     versionCount: number;
-    activeDraft: { token: string; lastSavedAt: string; lastEditedBy: string } | null;
+    activeDraft: { token: string; lastSavedAt: string; lastEditedBy: string; staleBaseline: boolean } | null;
 };
 
 export type MenuEntityRecord = {
@@ -285,6 +285,10 @@ export function groupApprovedIntoMenuCards(
         const draft = hasMenuEntity
             ? (draftByMenu.get(key) || null)
             : (draftByBase.get(currentItem.id) || (currentItem.legacyId ? draftByBase.get(currentItem.legacyId) : null) || null);
+        // A draft is stale when it was started from a version that is no longer
+        // the menu's current one — nobody should resume it thinking it's current.
+        const draftBase = `${draft?.base_submission_id || draft?.baseline?.id || ''}`.trim();
+        const staleBaseline = !!draftBase && draftBase !== currentItem.id && draftBase !== currentItem.legacyId;
         cards.push({
             menuId: key,
             hasMenuEntity,
@@ -299,6 +303,7 @@ export function groupApprovedIntoMenuCards(
                 token: `${draft.token || ''}`,
                 lastSavedAt: `${draft.updated_at || ''}`,
                 lastEditedBy: `${draft.last_edited_by || ''}`,
+                staleBaseline,
             } : null,
         });
     }

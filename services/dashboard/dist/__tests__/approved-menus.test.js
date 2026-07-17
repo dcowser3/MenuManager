@@ -211,8 +211,21 @@ describe('groupApprovedIntoMenuCards (menu-centric)', () => {
         const items = [item({ id: 'v1', menuId: 'm1' })];
         const menus = new Map([['m1', { id: 'm1', name: 'Lunch', current_submission_id: 'v1' }]]);
         const cards = (0, approved_menus_1.groupApprovedIntoMenuCards)(items, menus, [
-            { menu_id: 'm1', token: 'tok', updated_at: '2026-07-01T00:00:00Z', last_edited_by: 'Mina' },
+            { menu_id: 'm1', base_submission_id: 'v1', token: 'tok', updated_at: '2026-07-01T00:00:00Z', last_edited_by: 'Mina' },
         ]);
-        expect(cards[0].activeDraft).toEqual({ token: 'tok', lastSavedAt: '2026-07-01T00:00:00Z', lastEditedBy: 'Mina' });
+        expect(cards[0].activeDraft).toEqual({ token: 'tok', lastSavedAt: '2026-07-01T00:00:00Z', lastEditedBy: 'Mina', staleBaseline: false });
+    });
+    test('flags a draft as stale when its baseline is not the menu current version', () => {
+        const items = [
+            item({ id: 'v1', menuId: 'm1', reviewedAt: '2026-06-09T00:00:00Z' }),
+            item({ id: 'v2', menuId: 'm1', reviewedAt: '2026-07-02T00:00:00Z' }),
+        ];
+        const menus = new Map([['m1', { id: 'm1', name: 'Lunch', current_submission_id: 'v2' }]]);
+        // Draft started from v1 (older), but current is v2 → stale.
+        const cards = (0, approved_menus_1.groupApprovedIntoMenuCards)(items, menus, [
+            { menu_id: 'm1', base_submission_id: 'v1', token: 'tok', updated_at: '2026-07-05T00:00:00Z', last_edited_by: 'Derian Cowser' },
+        ]);
+        expect(cards[0].current.submissionId).toBe('v2');
+        expect(cards[0].activeDraft?.staleBaseline).toBe(true);
     });
 });
