@@ -138,6 +138,30 @@ describe('planMenuBackfill grouping', () => {
         expect(plan.menus[0].currentSubmissionId).toBe('solo');
         expect(plan.ambiguous).toHaveLength(0);
     });
+
+    test('clickup_history_import rows key on their non-UUID legacy public id (regression: uuid column)', () => {
+        // legacy_id is the public id (legacy-first); clickup imports use a
+        // non-UUID string. The pointer must be that string — not the uuid —
+        // which is why menus.current_submission_id had to become VARCHAR.
+        const rows = [
+            base({
+                id: '11111111-1111-1111-1111-111111111111',
+                legacy_id: 'clickup-86b4q079a',
+                source: 'clickup_history_import',
+                property: 'Toro Toro - Dubai',
+                service_period: 'dinner',
+                project_name: 'Set Menu',
+                reviewed_at: '2026-02-01T00:00:00Z',
+                approved_menu_content: 'legacy content',
+            }),
+        ];
+        const plan = planMenuBackfill(rows);
+        expect(plan.menus).toHaveLength(1);
+        expect(plan.menus[0].currentSubmissionId).toBe('clickup-86b4q079a');
+        expect(plan.menus[0].memberIds).toEqual(['clickup-86b4q079a']);
+        // Sanity: it is not a UUID (would fail the old column type).
+        expect(/^[0-9a-f-]{36}$/i.test(plan.menus[0].currentSubmissionId)).toBe(false);
+    });
 });
 
 // --------------------------------------------------------------------------

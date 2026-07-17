@@ -123,7 +123,7 @@ CREATE TABLE IF NOT EXISTS menus (
     property VARCHAR(200) NOT NULL,
     service_period VARCHAR(120) NOT NULL,
     name VARCHAR(200) NOT NULL,            -- e.g. "Lunch", "Brunch Bebidas"
-    current_submission_id UUID,
+    current_submission_id VARCHAR(100),    -- PUBLIC submission id (legacy_id || id), not a UUID
     status VARCHAR(24) NOT NULL DEFAULT 'active',  -- active | retired
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()

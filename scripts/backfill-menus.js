@@ -26,6 +26,7 @@ const { isSupabaseConfigured, getSupabaseClient } = require('../services/supabas
 const { planMenuBackfill } = require('../services/db/dist/lib/menu-backfill');
 
 const APPROVED = new Set(['approved', 'approved_override']);
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const localDbDir = path.join(__dirname, '..', 'tmp', 'db');
 const SUBMISSIONS_JSON = path.join(localDbDir, 'submissions.json');
 const MENUS_JSON = path.join(localDbDir, 'menus.json');
@@ -81,17 +82,79 @@ async function writeReviewCsv(plan) {
     await fsp.writeFile(REVIEW_CSV, `${lines.join('\n')}\n`);
 }
 
-async function applyMenus(plannedMenus) {
-    // Assign a stable UUID per menu, shared across both stores.
-    const menus = plannedMenus.map((m) => ({ id: crypto.randomUUID(), ...m }));
+// A member's public id may be a UUID (id) or a legacy string (legacy_id, e.g.
+// clickup_history_import). Filter the correct column so Postgres never tries to
+// cast a legacy string against the uuid `id` column.
+function submissionIdFilter(query, memberId) {
+    return UUID_RE.test(memberId) ? query.eq('id', memberId) : query.eq('legacy_id', memberId);
+}
+
+async function applyMenus(plannedMenus, rows) {
     const now = new Date().toISOString();
 
-    // --- JSON fallback (always) ---
+    // Idempotency: reuse the menu a group is already linked to (from a prior
+    // partial run) instead of minting a fresh UUID, so reruns don't duplicate.
+    const existingMenuIdByMember = new Map();
+    for (const row of rows) {
+        const mid = `${row.menu_id || ''}`.trim();
+        if (mid) existingMenuIdByMember.set(idFor(row), mid);
+    }
+    const menus = plannedMenus.map((m) => {
+        let reused = null;
+        for (const memberId of m.memberIds) {
+            const existing = existingMenuIdByMember.get(memberId);
+            if (existing) { reused = existing; break; }
+        }
+        return { id: reused || crypto.randomUUID(), reused: !!reused, ...m };
+    });
+
+    // --- Supabase first (source of truth in prod), one menu at a time so a
+    // failure leaves a consistent applied prefix we then mirror locally. ---
+    const applied = [];
+    let remoteMenuRows = 0;
+    let remoteLinks = 0;
+    let failure = null;
+    if (isSupabaseConfigured()) {
+        const supabase = getSupabaseClient();
+        try {
+            for (const menu of menus) {
+                const { error: menuErr } = await supabase.from('menus').upsert({
+                    id: menu.id,
+                    property: menu.property,
+                    service_period: menu.servicePeriod,
+                    name: menu.name,
+                    current_submission_id: menu.currentSubmissionId,
+                    status: 'active',
+                    created_at: now,
+                    updated_at: now,
+                }, { onConflict: 'id' });
+                if (menuErr) throw new Error(`menu upsert failed: ${menuErr.message}`);
+                remoteMenuRows++;
+                for (const memberId of menu.memberIds) {
+                    if (existingMenuIdByMember.get(memberId) === menu.id) continue; // already linked
+                    const { error, count } = await submissionIdFilter(
+                        supabase.from('submissions').update({ menu_id: menu.id }, { count: 'exact' }),
+                        memberId,
+                    );
+                    if (error) throw new Error(`link failed for ${memberId}: ${error.message}`);
+                    remoteLinks += count || 0;
+                }
+                applied.push(menu);
+            }
+        } catch (error) {
+            failure = error; // reconcile local to the applied prefix, then rethrow
+        }
+    } else {
+        applied.push(...menus);
+    }
+
+    // --- Reconcile the local mirror to exactly the applied set (overwrite, not
+    // merge) so a stale prior-run menus.json can't disagree with Supabase. ---
     const localSubs = await readJson(SUBMISSIONS_JSON, {});
-    const localMenus = await readJson(MENUS_JSON, {});
+    const localMenus = {};
     let localMenuRows = 0;
     let localLinks = 0;
-    for (const menu of menus) {
+    for (const menu of applied) {
         localMenus[menu.id] = {
             id: menu.id,
             property: menu.property,
@@ -103,43 +166,49 @@ async function applyMenus(plannedMenus) {
             updated_at: now,
         };
         localMenuRows++;
+    }
+    // Drop dangling links (to menus no longer present), then set applied links.
+    const validMenuIds = new Set(Object.keys(localMenus));
+    for (const key of Object.keys(localSubs)) {
+        const mid = localSubs[key].menu_id;
+        if (mid && !validMenuIds.has(mid)) localSubs[key].menu_id = null;
+    }
+    for (const menu of applied) {
         for (const memberId of menu.memberIds) {
             if (localSubs[memberId]) { localSubs[memberId].menu_id = menu.id; localLinks++; }
         }
     }
-    if (Object.keys(localMenus).length) await fsp.writeFile(MENUS_JSON, JSON.stringify(localMenus, null, 2));
+    await fsp.writeFile(MENUS_JSON, JSON.stringify(localMenus, null, 2));
     await fsp.writeFile(SUBMISSIONS_JSON, JSON.stringify(localSubs, null, 2));
 
-    // --- Supabase (when configured) ---
-    let remoteMenuRows = 0;
-    let remoteLinks = 0;
+    if (failure) throw failure;
+    const reused = menus.filter((m) => m.reused).length;
+    return { menus: applied, localMenuRows, localLinks, remoteMenuRows, remoteLinks, reused };
+}
+
+// Clean slate in both stores so --apply can run fresh after a bad partial run.
+async function resetMenus() {
+    let remoteMenus = 0;
+    let remoteUnlinked = 0;
     if (isSupabaseConfigured()) {
         const supabase = getSupabaseClient();
-        for (const menu of menus) {
-            const { error: menuErr } = await supabase.from('menus').upsert({
-                id: menu.id,
-                property: menu.property,
-                service_period: menu.servicePeriod,
-                name: menu.name,
-                current_submission_id: menu.currentSubmissionId,
-                status: 'active',
-                created_at: now,
-                updated_at: now,
-            }, { onConflict: 'id' });
-            if (menuErr) throw new Error(`menu upsert failed: ${menuErr.message}`);
-            remoteMenuRows++;
-            for (const memberId of menu.memberIds) {
-                // memberId is the public id (legacy_id||id); match either column.
-                const { error, count } = await supabase
-                    .from('submissions')
-                    .update({ menu_id: menu.id }, { count: 'exact' })
-                    .or(`id.eq.${memberId},legacy_id.eq.${memberId}`);
-                if (error) throw new Error(`link failed for ${memberId}: ${error.message}`);
-                remoteLinks += count || 0;
-            }
-        }
+        const { error: unlinkErr, count: unlinked } = await supabase
+            .from('submissions').update({ menu_id: null }, { count: 'exact' }).not('menu_id', 'is', null);
+        if (unlinkErr) throw new Error(`reset unlink failed: ${unlinkErr.message}`);
+        remoteUnlinked = unlinked || 0;
+        const { error: delErr, count: deleted } = await supabase
+            .from('menus').delete({ count: 'exact' }).not('id', 'is', null);
+        if (delErr) throw new Error(`reset delete menus failed: ${delErr.message}`);
+        remoteMenus = deleted || 0;
     }
-    return { menus, localMenuRows, localLinks, remoteMenuRows, remoteLinks };
+    const localSubs = await readJson(SUBMISSIONS_JSON, {});
+    let localUnlinked = 0;
+    for (const key of Object.keys(localSubs)) {
+        if (localSubs[key].menu_id) { localSubs[key].menu_id = null; localUnlinked++; }
+    }
+    await fsp.writeFile(SUBMISSIONS_JSON, JSON.stringify(localSubs, null, 2));
+    await fsp.writeFile(MENUS_JSON, JSON.stringify({}, null, 2));
+    return { remoteMenus, remoteUnlinked, localUnlinked };
 }
 
 async function applyReview(csvPath) {
@@ -175,8 +244,10 @@ async function applyReview(csvPath) {
     const setMenuId = async (submissionId, menuId) => {
         if (localSubs[submissionId]) localSubs[submissionId].menu_id = menuId;
         if (supabase) {
-            const { error } = await supabase.from('submissions').update({ menu_id: menuId })
-                .or(`id.eq.${submissionId},legacy_id.eq.${submissionId}`);
+            const { error } = await submissionIdFilter(
+                supabase.from('submissions').update({ menu_id: menuId }),
+                submissionId,
+            );
             if (error) throw new Error(`link failed for ${submissionId}: ${error.message}`);
         }
     };
@@ -222,6 +293,12 @@ async function applyReview(csvPath) {
     const apply = args.includes('--apply');
     const reviewFlagIdx = args.indexOf('--apply-review');
 
+    if (args.includes('--reset')) {
+        const result = await resetMenus();
+        console.log(`Reset: deleted Supabase menus=${result.remoteMenus}, unlinked Supabase submissions=${result.remoteUnlinked}, unlinked local submissions=${result.localUnlinked}. Local menus.json cleared.`);
+        return;
+    }
+
     if (reviewFlagIdx >= 0) {
         const csvPath = args[reviewFlagIdx + 1];
         if (!csvPath) throw new Error('--apply-review requires a CSV path');
@@ -240,9 +317,9 @@ async function applyReview(csvPath) {
     console.log(`Ambiguous (needs human review): ${summary.ambiguous} → ${path.relative(process.cwd(), REVIEW_CSV)}`);
 
     if (!apply) {
-        console.log('Dry-run: no menus written. Re-run with --apply after reviewing the CSV.');
+        console.log('Dry-run: no menus written. Re-run with --apply after reviewing the CSV. (Use --reset to clear a bad partial run first.)');
         return;
     }
-    const result = await applyMenus(plan.menus);
-    console.log(`Applied: JSON menus=${result.localMenuRows}, JSON links=${result.localLinks}; Supabase menus=${result.remoteMenuRows}, Supabase links=${result.remoteLinks}.`);
+    const result = await applyMenus(plan.menus, rows);
+    console.log(`Applied: JSON menus=${result.localMenuRows}, JSON links=${result.localLinks}; Supabase menus=${result.remoteMenuRows}, Supabase links=${result.remoteLinks}; reused existing menus=${result.reused}.`);
 })().catch((error) => { console.error(error); process.exitCode = 1; });
