@@ -399,6 +399,10 @@ async function applyReview(csvPath) {
 
     if (!apply) {
         console.log('Dry-run: no menus written. Re-run with --apply after reviewing the CSV. (Use --reset to clear a bad partial run first.)');
+        // npm strips flags without a `--` separator, which silently lands here.
+        if (args.length === 0) {
+            console.log('Note: no flags received. With npm, pass them after `--`, e.g.  npm run backfill:menus -- --apply   (or -- --relink-drafts).');
+        }
         return;
     }
     const result = await applyMenus(plan.menus, rows);
