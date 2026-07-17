@@ -217,6 +217,9 @@ async function applyReview(csvPath) {
     const header = headerLine.split(',');
     const decisionIdx = header.indexOf('decision');
     const subIdx = header.indexOf('submission_id');
+    const propIdx = header.indexOf('property');
+    const serviceIdx = header.indexOf('service_period');
+    const nameIdx = header.indexOf('name');
     if (decisionIdx < 0 || subIdx < 0) throw new Error('review CSV missing submission_id/decision columns');
 
     const localSubs = await readJson(SUBMISSIONS_JSON, {});
@@ -226,7 +229,7 @@ async function applyReview(csvPath) {
     let linked = 0;
     let created = 0;
 
-    // Build lookup: candidate current id -> menu id (from already-applied menus).
+    // current_submission_id -> menu id (already-applied menus + any we create here).
     const menuByCurrent = new Map();
     for (const menu of Object.values(localMenus)) menuByCurrent.set(`${menu.current_submission_id}`, menu.id);
 
@@ -252,33 +255,56 @@ async function applyReview(csvPath) {
         }
     };
 
-    for (const line of rows) {
+    // Parse rows once so an anchor's own row fields are available when its menu
+    // is created (rows in a cluster all point at the same anchor id).
+    const records = rows.map((line) => {
         const cells = parseCells(line);
-        const submissionId = `${cells[subIdx] || ''}`.trim();
-        const decision = `${cells[decisionIdx] || ''}`.trim();
-        if (!submissionId || !decision) continue;
+        return {
+            submissionId: `${cells[subIdx] || ''}`.trim(),
+            decision: `${cells[decisionIdx] || ''}`.trim(),
+            property: propIdx >= 0 ? `${cells[propIdx] || ''}`.trim() : '',
+            servicePeriod: serviceIdx >= 0 ? `${cells[serviceIdx] || ''}`.trim() : '',
+            name: nameIdx >= 0 ? `${cells[nameIdx] || ''}`.trim() : '',
+        };
+    }).filter((r) => r.submissionId && r.decision);
+    const fieldsById = new Map(records.map((r) => [r.submissionId, r]));
+
+    const createMenu = async (currentSubmissionId, fields) => {
+        const menuId = crypto.randomUUID();
+        const menuRow = {
+            id: menuId,
+            property: fields.property || localSubs[currentSubmissionId]?.property || '',
+            service_period: fields.servicePeriod || localSubs[currentSubmissionId]?.service_period || '',
+            name: fields.name || localSubs[currentSubmissionId]?.project_name || '',
+            current_submission_id: currentSubmissionId,
+            status: 'active', created_at: now, updated_at: now,
+        };
+        localMenus[menuId] = menuRow;
+        if (supabase) {
+            const { error } = await supabase.from('menus').upsert(menuRow, { onConflict: 'id' });
+            if (error) throw new Error(`menu create failed: ${error.message}`);
+        }
+        menuByCurrent.set(currentSubmissionId, menuId);
+        return menuId;
+    };
+
+    for (const rec of records) {
+        const { submissionId, decision } = rec;
         if (decision.toLowerCase() === 'new_menu' || decision.toLowerCase() === 'separate') {
-            const sub = localSubs[submissionId];
-            const menuId = crypto.randomUUID();
-            const menuRow = {
-                id: menuId,
-                property: sub?.property || '',
-                service_period: sub?.service_period || '',
-                name: sub?.project_name || '',
-                current_submission_id: submissionId,
-                status: 'active', created_at: now, updated_at: now,
-            };
-            localMenus[menuId] = menuRow;
-            if (supabase) {
-                const { error } = await supabase.from('menus').upsert(menuRow, { onConflict: 'id' });
-                if (error) throw new Error(`menu create failed: ${error.message}`);
-            }
+            const menuId = await createMenu(submissionId, rec);
             await setMenuId(submissionId, menuId);
             created++;
         } else {
-            // decision is a candidate current id → link into that menu.
-            const menuId = menuByCurrent.get(decision);
-            if (!menuId) { console.warn(`No menu for decision "${decision}" (submission ${submissionId}) — skipped`); continue; }
+            // decision is an anchor submission id: this submission is a version of
+            // the menu whose CURRENT version is <anchor>. Reuse the menu if it
+            // exists (from --apply or an earlier row in this batch), else create it
+            // anchored there. Point every row in a cluster at the same anchor to
+            // merge them into one menu.
+            let menuId = menuByCurrent.get(decision);
+            if (!menuId) {
+                menuId = await createMenu(decision, fieldsById.get(decision) || rec);
+                created++;
+            }
             await setMenuId(submissionId, menuId);
             linked++;
         }
