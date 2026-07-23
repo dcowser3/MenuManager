@@ -467,7 +467,6 @@
             <div class="stat"><div class="label">Detected Patterns</div><div class="value"><%= totalRules %></div></div>
             <div class="stat"><div class="label">Pending Review</div><div class="value"><%= pendingRules.length %></div></div>
             <div class="stat"><div class="label">Accepted Rules</div><div class="value"><%= acceptedRules.length %></div></div>
-            <div class="stat"><div class="label">Active Pre-AI</div><div class="value"><%= (curatedActiveRules || []).length + (activeExactRules || []).length %></div></div>
         </div>
 
         <%
@@ -592,96 +591,6 @@
             </div>
         </form>
 
-        <!-- Active Pre-AI Rules -->
-        <h3 class="section-title">Active Pre-AI Rules</h3>
-        <div class="panel">
-            These rules are already applied before the AI review. Pending system proposals are not active until accepted, and stale system proposals without current eligible evidence are ignored.
-        </div>
-        <div class="compact-grid">
-            <% (curatedActiveRules || []).forEach((rule) => { %>
-                <div class="rule-card">
-                    <div class="rule-card-title"><%= rule.label %></div>
-                    <div class="small"><%= rule.detail %></div>
-                    <div class="rule-card-meta">
-                        <span class="badge human"><%= rule.source %></span>
-                        <span class="badge accepted"><%= rule.status %></span>
-                        <% if (rule.evidenceCount > 0) { %>
-                            <span class="badge">Evidence <%= rule.evidenceCount %></span>
-                        <% } %>
-                    </div>
-                </div>
-            <% }) %>
-        </div>
-        <details class="compact-details">
-            <summary>Accepted Exact Replacement Rules Active In Pre-AI (<%= (activeExactRules || []).length %>)</summary>
-            <div class="details-body">
-                <% if (!activeExactRules || activeExactRules.length === 0) { %>
-                    <div class="empty">No accepted exact replacement rules are active beyond the curated code guards.</div>
-                <% } else { %>
-                    <table class="compact-table">
-                        <thead>
-                            <tr>
-                                <th>Original</th>
-                                <th>Corrected</th>
-                                <th>Rule</th>
-                                <th>Implementation</th>
-                                <th>Source</th>
-                                <th>Scope</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                        <% activeExactRules.forEach((rule) => { %>
-                            <tr>
-                                <td><%= rule.original_text || '' %></td>
-                                <td><%= rule.corrected_text || '' %></td>
-                                <td><%= rule.rule || '' %></td>
-                                <td><%= rule.implementation_detail || '' %></td>
-                                <td><span class="badge <%= rule.source %>"><%= rule.source %></span></td>
-                                <td><%= rule.location || '' %><%= rule.is_location_specific ? '' : ' (global)' %></td>
-                            </tr>
-                        <% }) %>
-                        </tbody>
-                    </table>
-                <% } %>
-            </div>
-        </details>
-        <details class="compact-details">
-            <summary>Accepted Manual Guidance (<%= (manualGuidanceRules || []).length %>)</summary>
-            <div class="details-body">
-                <% if (!manualGuidanceRules || manualGuidanceRules.length === 0) { %>
-                    <div class="empty">No accepted manual guidance rules yet.</div>
-                <% } else { %>
-                    <table class="compact-table">
-                        <thead>
-                            <tr>
-                                <th>Rule</th>
-                                <th>Menu Scope</th>
-                                <th>Location</th>
-                                <th>Reviewer</th>
-                                <th>Created</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                        <% manualGuidanceRules.forEach((rule) => { %>
-                            <tr>
-                                <td><%= rule.rule || '' %></td>
-                                <td><%= menuScopeLabel(rule.applies_to_menu_type) %></td>
-                                <td>
-                                    <%= rule.location || '' %><%= rule.is_location_specific ? '' : ' (global)' %>
-                                    <% if (rule.other_applicable_locations && rule.other_applicable_locations.length > 0) { %>
-                                        <div class="small">Also: <%= rule.other_applicable_locations.join(', ') %></div>
-                                    <% } %>
-                                </td>
-                                <td><%= rule.reviewer_name || '' %></td>
-                                <td><%= formatDashboardTime(rule.created_at) %></td>
-                            </tr>
-                        <% }) %>
-                        </tbody>
-                    </table>
-                <% } %>
-            </div>
-        </details>
-
         <!-- Pending Rules (need human review) -->
         <% if (pendingRules.length > 0) { %>
             <h3 class="section-title">Pending Rules (Awaiting Review)</h3>
@@ -693,6 +602,7 @@
                         <th>Rule</th>
                         <th>Menu Scope</th>
                         <th>Source</th>
+                        <th>Reviewer</th>
                         <th>Project / Location</th>
                         <th>Created / From</th>
                         <th>Signals</th>
@@ -713,6 +623,7 @@
                         <td><%= rule.rule || '' %></td>
                         <td><%= menuScopeLabel(rule.applies_to_menu_type) %></td>
                         <td><span class="badge <%= rule.source %>"><%= rule.source %></span></td>
+                        <td><%= rule.reviewer_name || '—' %></td>
                         <td>
                             <div><%= rule.restaurant_name || '' %></div>
                             <div class="small"><%= rule.location || '' %><%= rule.is_location_specific ? '' : ' (global)' %></div>
@@ -822,6 +733,7 @@
                         <th>Project / Menu</th>
                         <th>Location</th>
                         <th>Source</th>
+                        <th>Reviewer</th>
                         <th>Created</th>
                     </tr>
                 </thead>
@@ -843,6 +755,7 @@
                             <% } %>
                         </td>
                         <td><span class="badge <%= rule.source %>"><%= rule.source %></span></td>
+                        <td><%= rule.reviewer_name || '—' %></td>
                         <td><%= formatDashboardTime(rule.created_at) %></td>
                     </tr>
                 <% }) %>
