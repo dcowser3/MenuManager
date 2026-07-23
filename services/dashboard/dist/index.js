@@ -1821,6 +1821,12 @@ function describeAcceptedRuleImplementation(rule) {
         detail: `Accepted explanation is not active in Pre-AI because it is ${reasonText}; use it for human review or prompt work.`,
     };
 }
+// `resolved` marks a detected pattern that has already been dealt with — a
+// built-in Pre-AI replacement, an accepted correction rule, or a rule already
+// sitting in the pending/rejected queue. The learning page hides resolved
+// patterns so the Detected Patterns section only surfaces rows that still need
+// a human decision. Unresolved rows (no rule yet, or context-dependent with no
+// rule) get a "promote to pending rule" action instead of wasting screen space.
 function describeDetectedPatternImplementation(pattern, correctionRules) {
     const source = `${pattern.source || ''}`.trim();
     const target = `${pattern.target || ''}`.trim();
@@ -1830,18 +1836,20 @@ function describeDetectedPatternImplementation(pattern, correctionRules) {
         return {
             status: 'Covered by built-in Pre-AI',
             detail: `Pre-AI already replaces the exact phrase "${builtInReplacement.from}" with "${builtInReplacement.to}".`,
+            resolved: true,
         };
     }
     const matchingRules = correctionRules.filter((rule) => correctionRulePairKey(rule.original_text, rule.corrected_text) === pairKey);
     const acceptedMatch = matchingRules.find((rule) => rule.status === 'accepted');
     if (acceptedMatch) {
-        return describeAcceptedRuleImplementation(acceptedMatch);
+        return { ...describeAcceptedRuleImplementation(acceptedMatch), resolved: true };
     }
     const pendingMatch = matchingRules.find((rule) => rule.status === 'pending');
     if (pendingMatch) {
         return {
             status: 'Pending review',
             detail: 'A matching correction-rule proposal exists, but it is not active until a reviewer accepts it.',
+            resolved: true,
         };
     }
     const rejectedMatch = matchingRules.find((rule) => rule.status === 'rejected');
@@ -1849,6 +1857,7 @@ function describeDetectedPatternImplementation(pattern, correctionRules) {
         return {
             status: 'Rejected',
             detail: 'A matching correction-rule proposal was rejected; no Pre-AI adjustment is active for this pattern.',
+            resolved: true,
         };
     }
     const eligibility = (0, pre_ai_deterministic_rules_1.getAcceptedCorrectionRulePreAiEligibility)({
@@ -1861,11 +1870,13 @@ function describeDetectedPatternImplementation(pattern, correctionRules) {
         return {
             status: 'Context guidance only',
             detail: `No blind replacement is active because ${eligibility.contextTerm || 'this term'} depends on usage; handle through reviewer judgment or prompt guidance.`,
+            resolved: false,
         };
     }
     return {
         status: 'No implementation yet',
         detail: 'Auto-scanned evidence only; no matching built-in Pre-AI rule or accepted correction-rule implementation was found.',
+        resolved: false,
     };
 }
 app.get('/learning', async (_req, res) => {
@@ -1951,44 +1962,21 @@ app.get('/learning', async (_req, res) => {
         });
         const activeExactRules = acceptedRules.filter((rule) => rule.implementation_status === 'Active exact replacement');
         const manualGuidanceRules = acceptedRules.filter((rule) => rule.pre_ai_status === 'Manual guidance');
-        const detectedPatterns = rawDetectedPatterns.map((pattern) => {
+        // Only surface patterns that still need a human decision. Anything
+        // already covered (built-in Pre-AI, accepted rule) or already in the
+        // queue (pending/rejected) is hidden — those rows were just wasting
+        // screen space. Unresolved rows get a promote-to-pending action.
+        const detectedPatterns = rawDetectedPatterns
+            .map((pattern) => {
             const implementation = describeDetectedPatternImplementation(pattern, correctionRules);
             return {
                 ...pattern,
                 implementation_status: implementation.status,
                 implementation_detail: implementation.detail,
+                resolved: implementation.resolved,
             };
-        });
-        const curatedActiveRules = [
-            {
-                label: 'veggies -> vegetables',
-                detail: 'Accepted human guidance, except veggie burger wording.',
-                source: 'human',
-                status: 'Active code guard',
-                evidenceCount: acceptedRules.filter((rule) => `${rule.rule || ''} ${rule.original_text || ''} ${rule.corrected_text || ''}`.toLowerCase().includes('veggies')).length,
-            },
-            {
-                label: 'Tres Leches -> add V',
-                detail: 'Accepted human guidance that Tres Leches needs vegetarian code V.',
-                source: 'human',
-                status: 'Active code guard',
-                evidenceCount: acceptedRules.filter((rule) => `${rule.rule || ''} ${rule.original_text || ''}`.toLowerCase().includes('tres leches')).length,
-            },
-            {
-                label: 'poached egg -> raw marker',
-                detail: 'Accepted human guidance for poached egg asterisks.',
-                source: 'human',
-                status: 'Active code guard',
-                evidenceCount: acceptedRules.filter((rule) => `${rule.rule || ''} ${rule.original_text || ''}`.toLowerCase().includes('poached egg')).length,
-            },
-            {
-                label: 'sunny-side-up egg -> raw marker',
-                detail: 'Accepted human guidance for sunny-side-up egg asterisks.',
-                source: 'human',
-                status: 'Active code guard',
-                evidenceCount: acceptedRules.filter((rule) => `${rule.rule || ''} ${rule.original_text || ''}`.toLowerCase().includes('sunny side')).length,
-            },
-        ];
+        })
+            .filter((pattern) => !pattern.resolved);
         const differStatus = {
             rulesOk: !!rulesResult.ok,
             trainingOk: !!trainingResult.ok,
@@ -2009,7 +1997,6 @@ app.get('/learning', async (_req, res) => {
             acceptedRules,
             activeExactRules,
             manualGuidanceRules,
-            curatedActiveRules,
             recentSubmissions,
             learningSubmissions: decoratedLearningSubmissions,
             propertyOptions,

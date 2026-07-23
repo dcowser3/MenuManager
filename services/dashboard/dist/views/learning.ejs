@@ -464,10 +464,9 @@
         <div class="stats">
             <div class="stat"><div class="label">Last Scan</div><div class="value"><%= formatDashboardTime(generatedAt) %></div></div>
             <div class="stat"><div class="label">Submissions Analyzed</div><div class="value"><%= totalEntries %></div></div>
-            <div class="stat"><div class="label">Detected Patterns</div><div class="value"><%= totalRules %></div></div>
+            <div class="stat"><div class="label">Patterns Needing Action</div><div class="value"><%= detectedPatterns.length %></div></div>
             <div class="stat"><div class="label">Pending Review</div><div class="value"><%= pendingRules.length %></div></div>
             <div class="stat"><div class="label">Accepted Rules</div><div class="value"><%= acceptedRules.length %></div></div>
-            <div class="stat"><div class="label">Active Pre-AI</div><div class="value"><%= (curatedActiveRules || []).length + (activeExactRules || []).length %></div></div>
         </div>
 
         <%
@@ -484,6 +483,12 @@
                 original_text: rule.original_text || '',
                 corrected_text: rule.corrected_text || '',
                 submission_ids: Array.isArray(rule.submission_ids) ? rule.submission_ids : [],
+            }));
+            const detectedPatternPromotePayload = (detectedPatterns || []).map((pattern, index) => ({
+                index,
+                original_text: pattern.source || '',
+                corrected_text: pattern.target || '',
+                change_type: pattern.kind || 'content',
             }));
             const menuScopeLabel = (value) => {
                 if (value === 'food') return 'Food menus';
@@ -597,21 +602,6 @@
         <div class="panel">
             These rules are already applied before the AI review. Pending system proposals are not active until accepted, and stale system proposals without current eligible evidence are ignored.
         </div>
-        <div class="compact-grid">
-            <% (curatedActiveRules || []).forEach((rule) => { %>
-                <div class="rule-card">
-                    <div class="rule-card-title"><%= rule.label %></div>
-                    <div class="small"><%= rule.detail %></div>
-                    <div class="rule-card-meta">
-                        <span class="badge human"><%= rule.source %></span>
-                        <span class="badge accepted"><%= rule.status %></span>
-                        <% if (rule.evidenceCount > 0) { %>
-                            <span class="badge">Evidence <%= rule.evidenceCount %></span>
-                        <% } %>
-                    </div>
-                </div>
-            <% }) %>
-        </div>
         <details class="compact-details">
             <summary>Accepted Exact Replacement Rules Active In Pre-AI (<%= (activeExactRules || []).length %>)</summary>
             <div class="details-body">
@@ -693,6 +683,7 @@
                         <th>Rule</th>
                         <th>Menu Scope</th>
                         <th>Source</th>
+                        <th>Reviewer</th>
                         <th>Project / Location</th>
                         <th>Created / From</th>
                         <th>Signals</th>
@@ -713,6 +704,7 @@
                         <td><%= rule.rule || '' %></td>
                         <td><%= menuScopeLabel(rule.applies_to_menu_type) %></td>
                         <td><span class="badge <%= rule.source %>"><%= rule.source %></span></td>
+                        <td><%= rule.reviewer_name || '—' %></td>
                         <td>
                             <div><%= rule.restaurant_name || '' %></div>
                             <div class="small"><%= rule.location || '' %><%= rule.is_location_specific ? '' : ' (global)' %></div>
@@ -822,6 +814,7 @@
                         <th>Project / Menu</th>
                         <th>Location</th>
                         <th>Source</th>
+                        <th>Reviewer</th>
                         <th>Created</th>
                     </tr>
                 </thead>
@@ -843,6 +836,7 @@
                             <% } %>
                         </td>
                         <td><span class="badge <%= rule.source %>"><%= rule.source %></span></td>
+                        <td><%= rule.reviewer_name || '—' %></td>
                         <td><%= formatDashboardTime(rule.created_at) %></td>
                     </tr>
                 <% }) %>
@@ -852,13 +846,13 @@
             </div>
         </details>
 
-        <!-- Detected Patterns (read-only reference from differ) -->
-        <h3 class="section-title">Detected Patterns (Auto-Scanned)</h3>
+        <!-- Detected Patterns needing a decision (auto-scanned, not yet a rule) -->
+        <h3 class="section-title">Detected Patterns (Needs a Decision)</h3>
         <div class="small" style="margin-bottom:.5rem;">
-            Patterns detected by the differ service from before/after document comparisons. These are <strong>not</strong> injected into the prompt and are <strong>not</strong> applied by Pre-AI checks unless a reviewer accepts a safe exact rule above. Use them as reference when annotating corrections.
+            Patterns the differ found in before/after documents that are <strong>not</strong> yet covered by a rule. Anything already handled — built-in Pre-AI, an accepted rule, or a rule already pending/rejected — is hidden. For each pattern below, add a short explanation to promote it to a <strong>pending rule</strong> the overnight improvement cycle will pick up.
         </div>
         <% if (!detectedPatterns || detectedPatterns.length === 0) { %>
-            <div class="empty">No patterns detected yet. Once corrected documents are processed, patterns will appear here.</div>
+            <div class="empty">Nothing to review — every detected pattern is already covered by a rule or awaiting review above.</div>
         <% } else { %>
             <table>
                 <thead>
@@ -866,28 +860,44 @@
                         <th>Pattern</th>
                         <th>Type</th>
                         <th>Evidence Status</th>
-                        <th>Implementation</th>
-                        <th>What Code Does</th>
                         <th>Signals</th>
                         <th>Last Seen</th>
+                        <th>Action</th>
                     </tr>
                 </thead>
                 <tbody>
-                <% detectedPatterns.forEach((pattern) => { %>
+                <% detectedPatterns.forEach((pattern, patternIndex) => { %>
                     <tr>
                         <td>
                             <strong><%= pattern.source %></strong> -> <strong><%= pattern.target %></strong>
+                            <% if (pattern.implementation_status === 'Context guidance only') { %>
+                                <div class="small" title="<%= pattern.implementation_detail || '' %>">context-dependent — an explanation helps the cycle route it</div>
+                            <% } %>
                         </td>
                         <td><%= pattern.kind %></td>
                         <td><span class="badge <%= pattern.category === 'active' ? 'candidate' : pattern.category %>"><%= pattern.status_label || (pattern.category === 'active' ? 'Candidate' : pattern.category === 'weak' ? 'Below threshold' : pattern.category === 'conflicted' ? 'Conflicted' : pattern.category) %></span></td>
-                        <td><span class="badge <%= pattern.implementation_status === 'Active exact replacement' || pattern.implementation_status === 'Active code guard' || pattern.implementation_status === 'Covered by built-in Pre-AI' ? 'accepted' : 'system' %>"><%= pattern.implementation_status || 'No implementation yet' %></span></td>
-                        <td><%= pattern.implementation_detail || '' %></td>
                         <td>
                             <div>Occurrences: <strong><%= pattern.occurrences %></strong></div>
                             <div>Submissions: <strong><%= pattern.submission_count %></strong></div>
                             <div>Confidence: <strong><%= Number(pattern.confidence || 0).toFixed(2) %></strong></div>
                         </td>
                         <td><%= formatDashboardTime(pattern.last_seen_at) %></td>
+                        <td>
+                            <button class="btn success" type="button" onclick="togglePatternPromote('<%= patternIndex %>', this)">Add rule</button>
+                        </td>
+                    </tr>
+                    <tr class="examples-row" id="pattern-promote-row-<%= patternIndex %>" style="display:none;">
+                        <td colspan="6">
+                            <div class="examples-panel">
+                                <div class="small" style="margin-bottom:.4rem;">Promote <strong><%= pattern.source %></strong> -> <strong><%= pattern.target %></strong> to a pending rule. Explain <em>why</em> the correction applies — this becomes the rule text the improvement cycle reasons over.</div>
+                                <textarea id="pattern-promote-note-<%= patternIndex %>" rows="2" style="width:100%;box-sizing:border-box;" placeholder="e.g. 'St-Germain' is the correct brand spelling and punctuation"></textarea>
+                                <div class="btn-group" style="margin-top:.4rem;">
+                                    <button class="btn success" type="button" onclick="promoteDetectedPattern('<%= patternIndex %>', this)">Save as pending rule</button>
+                                    <button class="btn secondary" type="button" onclick="togglePatternPromote('<%= patternIndex %>', this)">Cancel</button>
+                                    <span class="small" id="pattern-promote-status-<%= patternIndex %>"></span>
+                                </div>
+                            </div>
+                        </td>
                     </tr>
                 <% }) %>
                 </tbody>
@@ -945,6 +955,59 @@
         const ruleExamplesPayload = <%- jsonForScript(pendingRuleExamplePayload) %>;
         const ruleExamplesById = new Map(ruleExamplesPayload.map((rule) => [String(rule.id), rule]));
         const loadedRuleExamples = new Set();
+
+        const detectedPatternPromotePayload = <%- jsonForScript(detectedPatternPromotePayload) %>;
+        const detectedPatternById = new Map(detectedPatternPromotePayload.map((p) => [String(p.index), p]));
+
+        function togglePatternPromote(index, button) {
+            const row = document.getElementById(`pattern-promote-row-${index}`);
+            if (!row) return;
+            const opening = row.style.display === 'none';
+            row.style.display = opening ? '' : 'none';
+            if (opening) {
+                const note = document.getElementById(`pattern-promote-note-${index}`);
+                if (note) note.focus();
+            }
+        }
+
+        async function promoteDetectedPattern(index, button) {
+            const pattern = detectedPatternById.get(String(index));
+            const statusEl = document.getElementById(`pattern-promote-status-${index}`);
+            const note = (document.getElementById(`pattern-promote-note-${index}`)?.value || '').trim();
+            const setStatus = (msg, cls) => { if (statusEl) { statusEl.textContent = msg; statusEl.className = `small ${cls || ''}`; } };
+            if (!pattern) { setStatus('Pattern not found.', 'err'); return; }
+            if (!note) { setStatus('Add an explanation before saving.', 'err'); return; }
+
+            const reviewerName = (document.getElementById('manual-rule-reviewer')?.value || '').trim()
+                || (window.prompt('Reviewer name (required to attribute this rule):') || '').trim();
+            if (!reviewerName) { setStatus('Reviewer name is required.', 'err'); return; }
+
+            if (button) button.disabled = true;
+            setStatus('Saving...', '');
+            try {
+                const response = await fetch('/api/learning/correction-rules', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        rule: note,
+                        original_text: pattern.original_text || null,
+                        corrected_text: pattern.corrected_text || null,
+                        change_type: pattern.change_type || 'content',
+                        applies_to_menu_type: 'all',
+                        is_location_specific: false,
+                        reviewer_name: reviewerName,
+                        source: 'human',
+                    }),
+                });
+                const result = await response.json().catch(() => ({}));
+                if (!response.ok) throw new Error(result.error || 'Failed to save rule');
+                setStatus('Saved as pending rule.', 'ok');
+                setTimeout(() => window.location.reload(), 600);
+            } catch (error) {
+                setStatus(error.message || 'Save failed.', 'err');
+                if (button) button.disabled = false;
+            }
+        }
 
         function escapeHtml(value) {
             return String(value || '')
