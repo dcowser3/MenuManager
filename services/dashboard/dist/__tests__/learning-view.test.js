@@ -21,7 +21,6 @@ function renderLearningView(overrides = {}) {
         acceptedRules: [],
         activeExactRules: [],
         manualGuidanceRules: [],
-        curatedActiveRules: [],
         recentSubmissions: [],
         learningSubmissions: [],
         propertyOptions: [],
@@ -164,16 +163,9 @@ describe('learning dashboard view', () => {
         expect(html).toContain("fetch('/api/learning/correction-rules'");
         expect(html).toContain('applies_to_menu_type');
     });
-    test('shows active pre-AI rules without rendering the full AI prompt', () => {
+    test('renders the pre-AI rule tables and audit log without rendering the full AI prompt', () => {
         const html = renderLearningView({
             basePrompt: 'SECRET PROMPT TEXT',
-            curatedActiveRules: [{
-                    label: 'veggies -> vegetables',
-                    detail: 'Accepted human guidance, except veggie burger wording.',
-                    source: 'human',
-                    status: 'Active code guard',
-                    evidenceCount: 2,
-                }],
             activeExactRules: [{
                     original_text: 'tomatoes',
                     corrected_text: 'tomato',
@@ -218,13 +210,14 @@ describe('learning dashboard view', () => {
                 }],
         });
         expect(html).toContain('Active Pre-AI Rules');
-        expect(html).toContain('veggies -&gt; vegetables');
         expect(html).toContain('Accepted Exact Replacement Rules Active In Pre-AI (1)');
+        expect(html).toContain('Accepted Manual Guidance (1)');
+        // The four static example cards were removed; the data tables remain.
+        expect(html).not.toContain('veggies -&gt; vegetables');
+        expect(html).not.toContain('rule-card-title');
         expect(html).toContain('Pre-AI replaces the exact phrase &#34;tomatoes&#34; with &#34;tomato&#34; when menu and property scope match.');
         expect(html).toContain('What Code Does');
-        expect(html).toContain('Accepted Manual Guidance (1)');
         expect(html).toContain('Beverage menus keep zero-proof section names.');
-        expect(html).toContain('Beverage menus');
         expect(html).toContain('Accepted Correction Rule Audit Log (2)');
         expect(html).toContain('Project / Menu');
         expect(html).not.toContain('<th>Restaurant</th>');
@@ -249,11 +242,13 @@ describe('learning dashboard view', () => {
         expect(html).toContain('tartare');
         expect(html).toContain('tartar');
         expect(html).toContain('Candidate');
-        expect(html).toContain('Implementation');
-        expect(html).toContain('What Code Does');
-        expect(html).toContain('Context guidance only');
+        // Reworked table: patterns are promoted to pending rules via an action button.
+        expect(html).toContain('Detected Patterns (Needs a Decision)');
+        expect(html).toContain('Add rule');
+        expect(html).toContain('promote it to a <strong>pending rule</strong>');
+        // Context-dependent patterns show an inline hint; the full detail rides in the title attribute.
+        expect(html).toContain('context-dependent — an explanation helps the cycle route it');
         expect(html).toContain('No blind replacement is active because tartare depends on usage');
-        expect(html).toContain('not</strong> applied by Pre-AI checks unless a reviewer accepts a safe exact rule above');
         expect(html).not.toContain('>active</span>');
     });
     test('keeps stale system proposals out of the actionable pending table', () => {
