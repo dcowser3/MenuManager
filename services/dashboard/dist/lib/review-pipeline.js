@@ -28,6 +28,7 @@ const embedded_set_menu_guard_1 = require("./embedded-set-menu-guard");
 const price_integrity_guard_1 = require("./price-integrity-guard");
 const menu_footer_1 = require("./menu-footer");
 const qa_prompt_builder_1 = require("./qa-prompt-builder");
+const tenant_config_1 = require("@menumanager/tenant-config");
 // Suggestion types forced to critical severity in parseAIResponse (layer 2 of
 // critical-error blocking). Exported as data so the review-rules manifest can
 // enumerate them without re-reading the implementation.
@@ -263,7 +264,11 @@ const TRAILING_PRICE_FOR_ALLERGEN_CHECK = /\s+\$?\d+(?:[.,]\d+)?(?:\s*(?:each|pp
 const TRAILING_ALLERGEN_CLUSTER = /\s(?:[A-Z]{1,2}(?:,[A-Z]{1,2})+|VG|[A-Z])$/;
 function enforceAllergenProgramCheck(menuContent, suggestions) {
     const existing = [...(suggestions || [])];
-    const hasAllergenSuggestion = existing.some((s) => `${s.type || ''}`.toLowerCase().includes('allergen'));
+    // Only an existing menu-wide allergen flag suppresses the injection.
+    // Per-dish AI allergen suggestions must NOT — a menu with zero codes
+    // still deserves the critical "no allergen program" banner.
+    const hasAllergenSuggestion = existing.some((s) => `${s.type || ''}`.toLowerCase().includes('allergen') &&
+        `${s.menuItem || ''}`.toLowerCase().includes('entire menu'));
     const lines = (menuContent || '').split('\n').map((l) => l.trim()).filter(Boolean);
     const codedLines = lines.filter((line) => {
         const withoutPrice = line.replace(TRAILING_PRICE_FOR_ALLERGEN_CHECK, '');
@@ -404,7 +409,12 @@ function parseAIResponse(feedback, originalMenu) {
         }
         return s;
     });
-    const correctedMenu = normalizeRawAsteriskPlacement(correctedMenuRaw);
+    // Marker placement is a brand convention (rulebook.rawMarkerPlacement).
+    // 'preserve' tenants keep the author's placement; only the default
+    // 'description_end' convention canonicalizes.
+    const correctedMenu = (0, tenant_config_1.getTenantConfig)().rulebook.rawMarkerPlacement === 'preserve'
+        ? correctedMenuRaw
+        : normalizeRawAsteriskPlacement(correctedMenuRaw);
     return {
         correctedMenu,
         suggestions

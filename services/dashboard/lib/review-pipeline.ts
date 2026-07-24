@@ -20,6 +20,7 @@ import {
 import { guardCorrectedMenuPrices } from './price-integrity-guard';
 import { RAW_NOTICE_PATTERN, normalizeMenuFooter, stripManagedFooterText } from './menu-footer';
 import { QaPromptSectionId, buildFinalPrompt } from './qa-prompt-builder';
+import { getTenantConfig } from '@menumanager/tenant-config';
 
 export type ReviewSuggestion = {
     type?: string;
@@ -334,8 +335,12 @@ export function enforceAllergenProgramCheck(
     suggestions: ReviewSuggestion[]
 ): ReviewSuggestion[] {
     const existing = [...(suggestions || [])];
+    // Only an existing menu-wide allergen flag suppresses the injection.
+    // Per-dish AI allergen suggestions must NOT — a menu with zero codes
+    // still deserves the critical "no allergen program" banner.
     const hasAllergenSuggestion = existing.some((s) =>
-        `${s.type || ''}`.toLowerCase().includes('allergen'));
+        `${s.type || ''}`.toLowerCase().includes('allergen') &&
+        `${s.menuItem || ''}`.toLowerCase().includes('entire menu'));
 
     const lines = (menuContent || '').split('\n').map((l) => l.trim()).filter(Boolean);
     const codedLines = lines.filter((line) => {
@@ -505,7 +510,12 @@ export function parseAIResponse(feedback: string, originalMenu: string): ParsedA
         return s;
     });
 
-    const correctedMenu = normalizeRawAsteriskPlacement(correctedMenuRaw);
+    // Marker placement is a brand convention (rulebook.rawMarkerPlacement).
+    // 'preserve' tenants keep the author's placement; only the default
+    // 'description_end' convention canonicalizes.
+    const correctedMenu = getTenantConfig().rulebook.rawMarkerPlacement === 'preserve'
+        ? correctedMenuRaw
+        : normalizeRawAsteriskPlacement(correctedMenuRaw);
 
     return {
         correctedMenu,

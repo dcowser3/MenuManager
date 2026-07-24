@@ -90,6 +90,15 @@ export interface TenantRulebook {
     guidelinesAnchor: string;
     /** Heading the prompt-builder injects the custom allergen key after. */
     allergensAnchor: string;
+    /**
+     * Raw-consumption marker (*) placement convention.
+     * 'description_end' (default): markers are normalized to the canonical
+     * position — attached to the last description word, before allergens/price.
+     * 'preserve': the author's marker placement is house style — deterministic
+     * and post-AI passes must not move markers, and the AI is instructed to
+     * leave placement alone (missing markers are still flagged).
+     */
+    rawMarkerPlacement?: 'description_end' | 'preserve';
 }
 export interface TenantDraftSessions {
     /** Number of idle days before shared menu-edit drafts expire. */

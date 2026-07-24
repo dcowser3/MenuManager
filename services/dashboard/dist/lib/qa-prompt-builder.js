@@ -11,6 +11,10 @@ const tenant_config_1 = require("@menumanager/tenant-config");
 // Registry of every runtime prompt section. Consumed by the review-rules
 // manifest so prompt-layer rules are enumerable alongside code rules.
 exports.QA_PROMPT_SECTIONS = {
+    raw_marker_placement: {
+        description: 'Instructs the AI to preserve the author\'s raw-marker (*) placement as house style; missing markers are still flagged but none are moved.',
+        appliesWhen: "rulebook.rawMarkerPlacement === 'preserve'",
+    },
     prix_fixe: {
         description: 'Prix fixe pricing/course-numbering rules; suppresses per-dish missing-price flags and requires a single top price plus numbered courses.',
         appliesWhen: "menuType === 'prix_fixe'",
@@ -125,6 +129,10 @@ Note: Use ONLY these allergen codes when checking allergen compliance. Do not us
         sections.push('allergens');
     }
     let finalPrompt = qaPrompt;
+    if ((0, tenant_config_1.getTenantConfig)().rulebook.rawMarkerPlacement === 'preserve' && !omit.has('raw_marker_placement')) {
+        finalPrompt = `${finalPrompt}\n\nIMPORTANT RAW-MARKER PLACEMENT (HOUSE STYLE OVERRIDE):\n- This menu's house style controls raw-consumption marker (*) placement. Do NOT move, reposition, or re-attach existing raw markers; leave each one exactly where the author placed it (including markers attached to dish names).\n- Still FLAG raw/undercooked items that are MISSING a marker (as suggestions), and note inconsistencies where comparable items in the same section differ (e.g., one steak marked, another not) — but do not relocate any marker in CORRECTED MENU.`;
+        sections.push('raw_marker_placement');
+    }
     if (!omit.has('corrected_menu_structure_rules')) {
         finalPrompt = `${finalPrompt}\n\nIMPORTANT CORRECTED MENU STRUCTURE RULES:\n- The CORRECTED MENU section must contain every submitted menu line in the same order.\n- Do not summarize, shorten, condense, omit, merge, reorder, or rewrite the menu structure.\n- Do not add section headings or line breaks that were not in the submitted menu.\n- Apply only high-confidence corrections inline and leave all other text unchanged.`;
         finalPrompt = `${finalPrompt}\n- Never delete submitted dishes, beverages, options, headings, or standalone item lines. If a line seems wrong, duplicated, invalid, or not orderable, leave it in CORRECTED MENU and report the issue in SUGGESTIONS.`;

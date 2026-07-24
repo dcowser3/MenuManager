@@ -108,6 +108,7 @@ exports.DEFAULT_TENANT_CONFIG = {
         seedFile: 'rulebook/qa_prompt.txt',
         guidelinesAnchor: '## RSH MENU GUIDELINES - COMPREHENSIVE RULES',
         allergensAnchor: '### 7. ALLERGENS',
+        rawMarkerPlacement: 'description_end',
     },
     draftSessions: {
         expiryDays: 30,
