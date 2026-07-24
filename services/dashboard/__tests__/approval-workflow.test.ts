@@ -210,4 +210,61 @@ describe('approval workflow learning provenance', () => {
             { timeout: 60000 }
         );
     });
+
+    // Regression: a reviewer lost an evening of edits to a false "approval failed" when the
+    // finalize tail outlived the timeout after the approval was already stored.
+    test('browser approval reports success when finalize times out but the approval persisted', async () => {
+        const deps = createDeps();
+        const submission = {
+            id: 'sub-1',
+            ai_draft_path: '/tmp/documents/sub-1/sub-1-draft.docx',
+            menu_content: 'Draft menu',
+            project_name: 'Summer Menu',
+            property: 'Tamayo - Denver',
+            asset_type: 'PRINT',
+            filename: 'summer-menu.docx',
+        };
+        deps.axios.get
+            .mockResolvedValueOnce({ data: submission })
+            .mockResolvedValueOnce({ data: { ...submission, status: 'approved' } });
+        deps.axios.post.mockRejectedValue(Object.assign(new Error('timeout of 60000ms exceeded'), { code: 'ECONNABORTED' }));
+        const handlers = createApprovalWorkflowHandlers(deps as any);
+        const res = createJsonResponse();
+
+        await handlers.submitBrowserApproval({
+            params: { submissionId: 'sub-1' },
+            body: { editorHtml: '<p>Guacamole</p>', menuContentText: 'Guacamole' },
+        }, res);
+
+        expect(res.statusCode).toBe(200);
+        expect(res.body).toEqual(expect.objectContaining({ success: true, submissionId: 'sub-1' }));
+        expect(res.body.warning).toMatch(/follow-up steps/i);
+    });
+
+    test('browser approval still fails when finalize fails and the approval did not persist', async () => {
+        const deps = createDeps();
+        const submission = {
+            id: 'sub-1',
+            ai_draft_path: '/tmp/documents/sub-1/sub-1-draft.docx',
+            menu_content: 'Draft menu',
+            project_name: 'Summer Menu',
+            property: 'Tamayo - Denver',
+            asset_type: 'PRINT',
+            filename: 'summer-menu.docx',
+        };
+        deps.axios.get
+            .mockResolvedValueOnce({ data: submission })
+            .mockResolvedValueOnce({ data: { ...submission, status: 'pending' } });
+        deps.axios.post.mockRejectedValue(new Error('connect ECONNREFUSED'));
+        const handlers = createApprovalWorkflowHandlers(deps as any);
+        const res = createJsonResponse();
+
+        await handlers.submitBrowserApproval({
+            params: { submissionId: 'sub-1' },
+            body: { editorHtml: '<p>Guacamole</p>', menuContentText: 'Guacamole' },
+        }, res);
+
+        expect(res.statusCode).toBe(500);
+        expect(res.body).toEqual(expect.objectContaining({ error: 'Failed to submit browser approval' }));
+    });
 });

@@ -43,6 +43,35 @@ describe('approval baseline helpers', () => {
             extractionMode: 'approved',
         });
     });
+    // Regression: reopening an approved submission used to reload the pre-approval original,
+    // which made reviewers believe a saved approval had been lost.
+    test('prioritizes the approved docx once the submission is approved', () => {
+        const candidates = (0, approval_baseline_1.getApprovalSourceDocCandidates)({
+            id: 'form-123',
+            status: 'approved',
+            filename: 'Spring Menu.docx',
+            original_path: '/tmp/original.docx',
+            final_path: '/tmp/final.docx',
+        });
+        expect(candidates.map((candidate) => candidate.sourceMode)).toEqual([
+            'approved_docx',
+            'original_docx',
+        ]);
+        expect(candidates[0]).toMatchObject({ filePath: '/tmp/final.docx' });
+    });
+    test('keeps the submitted original first while the submission is still pending', () => {
+        const candidates = (0, approval_baseline_1.getApprovalSourceDocCandidates)({
+            id: 'form-123',
+            status: 'pending',
+            filename: 'Spring Menu.docx',
+            original_path: '/tmp/original.docx',
+            final_path: '/tmp/final.docx',
+        });
+        expect(candidates.map((candidate) => candidate.sourceMode)).toEqual([
+            'original_docx',
+            'approved_docx',
+        ]);
+    });
     test('loads approval baseline from submitted original docx when baseline also exists', async () => {
         mockedFs.access.mockResolvedValue(undefined);
         const extractApprovedFromDocx = jest.fn();

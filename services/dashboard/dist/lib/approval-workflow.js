@@ -31,6 +31,19 @@ function createApprovalWorkflowHandlers(deps) {
         }
         return null;
     };
+    // Used to tell a genuinely failed approval apart from one that was saved before a
+    // downstream call timed out. Treats an unreadable status as "not approved" so an
+    // unrelated outage can never report a lost approval as saved.
+    const isSubmissionApproved = async (submissionId) => {
+        try {
+            const check = await deps.axios.get(`${deps.DB_SERVICE_URL}/submissions/${encodeURIComponent(submissionId)}`);
+            return `${check.data?.status || ''}`.trim().toLowerCase() === 'approved';
+        }
+        catch (error) {
+            console.error('Failed to verify submission status after finalize failure:', error.message);
+            return false;
+        }
+    };
     const persistApprovedSubmission = async (input) => {
         await deps.axios.put(`${deps.DB_SERVICE_URL}/submissions/${input.submissionId}`, {
             ...(0, approval_transitions_1.buildApprovedSubmissionUpdate)({
@@ -183,16 +196,36 @@ function createApprovalWorkflowHandlers(deps) {
             }, {
                 outputPath: approvedPath,
             });
-            const finalizeResponse = await deps.axios.post(`${deps.CLICKUP_SERVICE_URL}/approval/finalize`, (0, approval_transitions_1.buildApprovalFinalizeRequest)({
-                submissionId: submission.id || submissionId,
-                approvedPath,
-                approvedFileName,
-            }), { timeout: deps.CLICKUP_APPROVAL_FINALIZE_TIMEOUT_MS });
+            const finalizeSubmissionId = submission.id || submissionId;
+            let finalizeData = {};
+            let finalizeWarning;
+            try {
+                const finalizeResponse = await deps.axios.post(`${deps.CLICKUP_SERVICE_URL}/approval/finalize`, (0, approval_transitions_1.buildApprovalFinalizeRequest)({
+                    submissionId: finalizeSubmissionId,
+                    approvedPath,
+                    approvedFileName,
+                }), { timeout: deps.CLICKUP_APPROVAL_FINALIZE_TIMEOUT_MS });
+                finalizeData = finalizeResponse.data || {};
+            }
+            catch (finalizeError) {
+                // Finalize marks the submission approved and then runs a slow tail
+                // (SharePoint, ClickUp, notification email) that can outlast this call's
+                // timeout. Failing here without checking told reviewers their approval was
+                // lost when it had already been saved, sending them off to redo hours of
+                // edits. Confirm the persisted state before reporting failure.
+                if (!(await isSubmissionApproved(finalizeSubmissionId))) {
+                    throw finalizeError;
+                }
+                console.warn(`Finalize call failed for ${finalizeSubmissionId}, but the submission is approved; ` +
+                    `reporting success and leaving follow-up steps to their own alerting: ${finalizeError.message}`);
+                finalizeWarning = 'Approval saved. Some follow-up steps (ClickUp, SharePoint, notification email) may still be finishing.';
+            }
             res.json({
                 success: true,
-                submissionId: submission.id || submissionId,
+                submissionId: finalizeSubmissionId,
                 approvedPath,
-                clickup: finalizeResponse.data || {},
+                clickup: finalizeData,
+                ...(finalizeWarning ? { warning: finalizeWarning } : {}),
             });
         }
         catch (error) {

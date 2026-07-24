@@ -40,6 +40,7 @@ type LoadApprovalBaselineOptions = {
 
 type SubmissionLike = {
     id?: string;
+    status?: string;
     filename?: string;
     original_path?: string;
     final_path?: string;
@@ -203,10 +204,27 @@ function getSourceLabelForCandidate(candidate: ApprovalSourceDocumentCandidate):
 export function getApprovalSourceDocCandidates(submission: SubmissionLike): ApprovalSourceDocumentCandidate[] {
     const candidates: ApprovalSourceDocumentCandidate[] = [];
 
-    // Prefer the submission artifact (generated DOCX at submit time) so the editor matches
-    // what chefs get from "Download" and what was produced from the form — not the
-    // modification baseline reference doc, which can be an older approved version.
     const originalPath = coalesceString(submission.original_path);
+    const finalPath = coalesceString(submission.final_path);
+    const approvedDocFirst = `${submission.status || ''}`.trim().toLowerCase() === 'approved' && !!finalPath;
+
+    const approvedDocCandidate: ApprovalSourceDocumentCandidate = {
+        fileName: coalesceString(submission.filename, `${submission.id || 'submission'}.docx`),
+        filePath: finalPath,
+        sourceMode: 'approved_docx',
+        extractionMode: 'unapproved',
+    };
+
+    // Once approved, the approved DOCX is the current version of the menu. Reopening the
+    // editor used to reload the pre-approval submission regardless, so reviewers who came
+    // back to a saved approval saw their edits missing and assumed the save had failed.
+    if (approvedDocFirst) {
+        candidates.push(approvedDocCandidate);
+    }
+
+    // Otherwise prefer the submission artifact (generated DOCX at submit time) so the editor
+    // matches what chefs get from "Download" and what was produced from the form — not the
+    // modification baseline reference doc, which can be an older approved version.
     if (originalPath) {
         candidates.push({
             fileName: coalesceString(submission.filename, `${submission.id || 'submission'}.docx`),
@@ -216,14 +234,8 @@ export function getApprovalSourceDocCandidates(submission: SubmissionLike): Appr
         });
     }
 
-    const finalPath = coalesceString(submission.final_path);
-    if (finalPath) {
-        candidates.push({
-            fileName: coalesceString(submission.filename, `${submission.id || 'submission'}.docx`),
-            filePath: finalPath,
-            sourceMode: 'approved_docx',
-            extractionMode: 'unapproved',
-        });
+    if (finalPath && !approvedDocFirst) {
+        candidates.push(approvedDocCandidate);
     }
 
     const revisionBaselinePath = coalesceString(submission.revision_baseline_doc_path);
