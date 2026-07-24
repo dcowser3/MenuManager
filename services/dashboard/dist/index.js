@@ -4578,6 +4578,18 @@ async function syncEffectivePromptFromDb() {
         const filePrompt = await fs_1.promises.readFile(qaPromptPath, 'utf-8');
         const effective = (0, improvement_cycle_core_1.pickEffectivePrompt)(approvedProposals, filePrompt);
         if (effective.source === 'approved_proposal' && effective.prompt !== filePrompt) {
+            // The runtime file differs from the DB's latest approved prompt. Normally
+            // this is a stale Docker-baked file we should restore over. But it is ALSO
+            // exactly what a hand edit to qa_prompt.txt looks like — and those get
+            // silently reverted here (has bitten us repeatedly). Log loudly with hashes
+            // and lengths so a manual edit that is about to be lost is visible in the
+            // startup logs, and point at the tool that makes such edits durable.
+            const fileHash = crypto_1.default.createHash('sha256').update(filePrompt, 'utf8').digest('hex').slice(0, 12);
+            const dbHash = crypto_1.default.createHash('sha256').update(effective.prompt, 'utf8').digest('hex').slice(0, 12);
+            console.warn(`Overwriting runtime QA prompt with DB approved copy — runtime file (${filePrompt.length} chars, sha256 ${fileHash}) ` +
+                `differs from DB latest approved (${effective.prompt.length} chars, sha256 ${dbHash}). ` +
+                'If the runtime file was hand-edited, those edits are being reverted now. ' +
+                'To make hand edits durable, run: node scripts/commit-runtime-prompt.js --apply');
             await fs_1.promises.writeFile(qaPromptPath, effective.prompt, 'utf-8');
             console.log('Restored approved QA prompt from prompt_proposals (file was stale after redeploy).');
         }

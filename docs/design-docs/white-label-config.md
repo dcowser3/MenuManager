@@ -54,6 +54,7 @@ done once.
 | Template validation + download | `parser/src/validator.ts`, `dashboard/index.ts` | `template.*` |
 | Prompt injection anchors + debrand | `qa-prompt-builder.ts`, `improvement-cycle-core.ts`, `ai-review/index.ts` | `rulebook.guidelinesAnchor`, `rulebook.allergensAnchor` |
 | Rulebook seed | `config/rulebook/qa_prompt.txt`; startup `ensureRuntimePromptSeed()` in `dashboard/index.ts` | `rulebook.seedFile` |
+| Raw-marker placement convention | `review-pipeline.ts` (post-AI canonicalization gate), `qa-prompt-builder.ts` (`raw_marker_placement` prompt section) | `rulebook.rawMarkerPlacement` — `'description_end'` (default, canonicalize) or `'preserve'` (author placement is house style; missing markers still flagged). Shared-lib change: needs `./dev-up.sh --rebuild` |
 | Property seed | `db/index.ts` `buildDefaultPropertyCatalog()`, `dashboard/lib/property-catalog.ts` | `propertiesSeedFile` |
 
 The theme partial (`views/partials/theme.ejs`) is included near each view's
@@ -83,6 +84,18 @@ nothing (this has bitten us):
 Rule of thumb: hot-fix in `sop-processor/qa_prompt.txt`, then make it durable
 via the proposal flow; touch `config/rulebook/qa_prompt.txt` only when changing
 what a *fresh* install starts with.
+
+**Making a hand edit durable without the proposal flow.** Run
+`node scripts/commit-runtime-prompt.js` (dry run — reports whether the DB's
+latest approved prompt still matches the runtime file) and then
+`node scripts/commit-runtime-prompt.js --apply` to insert an `approved`
+`prompt_proposals` row equal to the current `sop-processor/qa_prompt.txt`. That
+row becomes the latest approved proposal, so `syncEffectivePromptFromDb()` finds
+DB == file and the next restart is a no-op instead of a revert. Re-run it after
+any hand edit. As a safety net, `syncEffectivePromptFromDb()` now logs a loud
+warning (with lengths + sha256) whenever it is about to overwrite a runtime file
+that differs from the DB copy, so a hand edit that is about to be lost is visible
+in the startup logs.
 
 ## Verification
 
