@@ -19,6 +19,50 @@
         return Object.prototype.hasOwnProperty.call(obj, key);
     }
 
+    const DRAFT_KEY_PREFIX = 'menumanager.approvalDraft.v1:';
+    const DRAFT_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+    const DRAFT_SAVE_DEBOUNCE_MS = 1500;
+
+    function draftStorageKey(submissionId) {
+        return `${DRAFT_KEY_PREFIX}${submissionId || 'unknown'}`;
+    }
+
+    /**
+     * Cheap content fingerprint, used to tell whether a stored draft still belongs to
+     * the baseline now being edited. Restoring a draft onto different source content
+     * would silently submit edits made against a document the reviewer never saw.
+     */
+    function fingerprintText(value) {
+        const text = String(value || '');
+        let hash = 5381;
+        for (let i = 0; i < text.length; i++) {
+            hash = ((hash << 5) + hash + text.charCodeAt(i)) | 0;
+        }
+        return `${text.length}:${hash}`;
+    }
+
+    function isRestorableDraft(draft, expected) {
+        if (!draft || typeof draft !== 'object') return false;
+        if (!draft.html || typeof draft.html !== 'string') return false;
+        if (draft.baseline !== expected.baselineFingerprint) return false;
+        if (!Number.isFinite(draft.savedAt)) return false;
+        if (expected.now - draft.savedAt > expected.maxAgeMs) return false;
+        // Nothing to recover when the draft never diverged from the submitted text.
+        return `${draft.text || ''}` !== `${expected.baselineText || ''}`;
+    }
+
+    function formatDraftAge(savedAt, now) {
+        // Floor, not round: a draft saved 30 seconds ago reads as "moments ago", not
+        // "1 minute ago".
+        const minutes = Math.max(0, Math.floor((now - savedAt) / 60000));
+        if (minutes < 1) return 'moments ago';
+        if (minutes < 60) return `${minutes} minute${minutes === 1 ? '' : 's'} ago`;
+        const hours = Math.round(minutes / 60);
+        if (hours < 24) return `${hours} hour${hours === 1 ? '' : 's'} ago`;
+        const days = Math.round(hours / 24);
+        return `${days} day${days === 1 ? '' : 's'} ago`;
+    }
+
     function createApprovalPreviewController(config) {
         const settings = config || {};
         const elements = settings.elements || {};
@@ -123,6 +167,92 @@
 
         function getEditorHtml() {
             return editor.innerHTML || '';
+        }
+
+        // Local draft recovery. This editor has no server-side draft store, and adding one
+        // would mean a hand-applied migration that has silently lagged in production before
+        // — failing back to container-local JSON that a redeploy discards, which is exactly
+        // the loss this guards against. localStorage keeps a reviewer's session across a
+        // crash, an accidental close, or a failed submit without that risk.
+        const draftKey = draftStorageKey(settings.submissionId);
+        const draftSaveDebounceMs = Number.isFinite(settings.draftSaveDebounceMs)
+            ? settings.draftSaveDebounceMs
+            : DRAFT_SAVE_DEBOUNCE_MS;
+        const draftMaxAgeMs = Number.isFinite(settings.draftMaxAgeMs)
+            ? settings.draftMaxAgeMs
+            : DRAFT_MAX_AGE_MS;
+        const baselineFingerprint = fingerprintText(baselineFixedText);
+        let draftSaveTimer = null;
+
+        function getDraftStorage() {
+            if (settings.storage) return settings.storage;
+            try {
+                return global.localStorage || null;
+            } catch (error) {
+                return null; // Private mode or blocked storage.
+            }
+        }
+
+        function readStoredDraft() {
+            const storage = getDraftStorage();
+            if (!storage) return null;
+            try {
+                const raw = storage.getItem(draftKey);
+                return raw ? JSON.parse(raw) : null;
+            } catch (error) {
+                return null;
+            }
+        }
+
+        function clearStoredDraft() {
+            clearTimeout(draftSaveTimer);
+            const storage = getDraftStorage();
+            if (!storage) return;
+            try {
+                storage.removeItem(draftKey);
+            } catch (error) {
+                // Storage unavailable; nothing to clean up.
+            }
+        }
+
+        function saveDraftNow() {
+            const storage = getDraftStorage();
+            if (!storage) return;
+            const text = getEditorText();
+            if (text === baselineFixedText) {
+                clearStoredDraft(); // Back at the submitted text — nothing worth recovering.
+                return;
+            }
+            try {
+                storage.setItem(draftKey, JSON.stringify({
+                    html: getEditorHtml(),
+                    text,
+                    savedAt: Date.now(),
+                    baseline: baselineFingerprint,
+                }));
+            } catch (error) {
+                // Quota or blocked storage. Recovery is best-effort and must never
+                // interrupt an edit in progress.
+                console.warn('Could not save approval editor draft:', error && error.message);
+            }
+        }
+
+        function scheduleDraftSave() {
+            clearTimeout(draftSaveTimer);
+            draftSaveTimer = setTimeout(saveDraftNow, draftSaveDebounceMs);
+        }
+
+        function restoreDraftIfAvailable() {
+            const draft = readStoredDraft();
+            const restorable = isRestorableDraft(draft, {
+                baselineFingerprint,
+                baselineText: baselineFixedText,
+                maxAgeMs: draftMaxAgeMs,
+                now: Date.now(),
+            });
+            if (!restorable) return null;
+            editor.innerHTML = draft.html;
+            return draft;
         }
 
         function logPreviewTiming(label, timings) {
@@ -467,6 +597,9 @@
                 }
 
                 const targetSubmissionId = (data && data.submissionId) || settings.submissionId;
+                // Only after the server confirms the approval — a failed submit must leave
+                // the draft intact, since that is precisely when it is needed.
+                clearStoredDraft();
                 submitBtn.textContent = 'Loading corrections...';
                 global.location.assign(settings.learningUrlBase + encodeURIComponent(targetSubmissionId));
             } catch (error) {
@@ -509,23 +642,43 @@
             lastRenderedEditorHtml = baselineEditorHtml;
             preview.innerHTML = rendered.html;
             markPreviewFresh(rendered);
+            clearStoredDraft(); // Explicit revert — the recovered session is no longer wanted.
             editor.focus();
             showAlert('Editor reset to the submitted menu text.', 'success');
         }
 
         worker = canUseWorker ? createWorker() : null;
         editor.innerHTML = baselineEditorHtml;
+        const restoredDraft = restoreDraftIfAvailable();
+        const initialEditorText = restoredDraft ? getEditorText() : baselineFixedText;
+        const initialEditorHtml = restoredDraft ? getEditorHtml() : baselineEditorHtml;
         const initialRendered = renderPreviewOnMainThread(
-            baselineFixedText,
-            baselineEditorHtml,
+            initialEditorText,
+            initialEditorHtml,
             null
         );
-        lastRenderedHtml = initialRendered.html;
-        lastRenderedEditorHtml = baselineEditorHtml;
-        preview.innerHTML = initialRendered.html;
-        markPreviewFresh(initialRendered);
+        applyRenderedPreview(initialRendered, initialEditorText, initialEditorHtml);
 
-        editor.addEventListener('input', () => schedulePreviewUpdate());
+        if (restoredDraft) {
+            editorHasUserInput = true;
+            showAlert(
+                `Restored your unsaved edits from ${formatDraftAge(restoredDraft.savedAt, Date.now())}. `
+                + 'Use "Restore Original" to go back to the submitted menu.',
+                'success'
+            );
+        }
+
+        editor.addEventListener('input', () => {
+            schedulePreviewUpdate();
+            scheduleDraftSave();
+        });
+
+        // Closing the tab mid-debounce would otherwise drop the last edits — the exact
+        // moment recovery matters most.
+        const flushDraftOnExit = () => saveDraftNow();
+        if (typeof global.addEventListener === 'function') {
+            global.addEventListener('beforeunload', flushDraftOnExit);
+        }
         editor.addEventListener('keydown', (event) => {
             const key = String(event.key || '').toLowerCase();
             if ((event.metaKey || event.ctrlKey) && key === 'b') {
@@ -546,8 +699,14 @@
                     latestRevision,
                 };
             },
+            saveDraftNow,
+            clearStoredDraft,
             destroy() {
                 destroyed = true;
+                clearTimeout(draftSaveTimer);
+                if (typeof global.removeEventListener === 'function') {
+                    global.removeEventListener('beforeunload', flushDraftOnExit);
+                }
                 clearTimeout(previewUpdateTimer);
                 cancelActiveAndQueued();
                 if (worker) worker.terminate();
@@ -558,6 +717,10 @@
 
     const api = {
         createApprovalPreviewController,
+        draftStorageKey,
+        fingerprintText,
+        isRestorableDraft,
+        formatDraftAge,
     };
 
     global.MenuApprovalPreviewController = api;
