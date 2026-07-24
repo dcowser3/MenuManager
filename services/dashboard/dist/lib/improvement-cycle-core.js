@@ -11,6 +11,8 @@ exports.supersededProposalReviewBlock = supersededProposalReviewBlock;
 exports.evaluateSecretExpiry = evaluateSecretExpiry;
 exports.pickEffectivePrompt = pickEffectivePrompt;
 exports.isGuardDiscardReason = isGuardDiscardReason;
+exports.isReasoningModel = isReasoningModel;
+exports.isRequestTooLarge429 = isRequestTooLarge429;
 exports.buildImprovementLlmPayload = buildImprovementLlmPayload;
 exports.involvesContextDependentTerm = involvesContextDependentTerm;
 exports.locateCorrectionSite = locateCorrectionSite;
@@ -197,13 +199,34 @@ const CONTEXT_LEAK_MARKERS = [
     '## Sample Before/After Documents',
 ];
 /**
+ * True when the model must use the reasoning-model API shape (no temperature,
+ * max_completion_tokens instead of max_tokens). Covers the o-series (o1, o3,
+ * o4-mini, …) and the gpt-5 family (gpt-5, gpt-5.1, gpt-5-mini, …) — gpt-5
+ * reasoning models reject non-default temperature, so routing them down the
+ * non-reasoning path turns a working call into a 400. gpt-4o / gpt-4o-mini do
+ * NOT match ("o" is not followed by a digit) and stay on the non-reasoning path.
+ */
+function isReasoningModel(model) {
+    return /o[0-9]|gpt-5|reasoning/i.test(model || '');
+}
+/**
+ * True for a 429 body that says a SINGLE request exceeds the org's per-minute
+ * token cap ("Request too large for <model> … on tokens per min (TPM)").
+ * Waiting and retrying can never succeed — the same request stays too large —
+ * so callers must fail fast instead of burning the retry budget (observed
+ * Jul 14 2026: six pointless 16s retries against o3's 30k TPM cap).
+ */
+function isRequestTooLarge429(bodyText) {
+    return /request too large/i.test(`${bodyText || ''}`);
+}
+/**
  * Pure builder for the OpenAI chat payload used by the improvement/consolidation LLM call.
  * Extracted so it is jest-testable (prevents hidden API contract bugs in script).
  * - Non-reasoning: includes temperature + max_tokens.
- * - o-series/reasoning: uses max_completion_tokens (no temperature); budget should cover reasoning tokens.
+ * - o-series / gpt-5 / reasoning: uses max_completion_tokens (no temperature); budget should cover reasoning tokens.
  */
 function buildImprovementLlmPayload(model, systemPrompt, userPrompt, env = {}) {
-    const isReasoning = /o[0-9]|reasoning/i.test(model || '');
+    const isReasoning = isReasoningModel(model);
     const payload = {
         model,
         messages: [

@@ -666,6 +666,36 @@ describe('buildImprovementLlmPayload (F0 extraction)', () => {
         const p = (0, improvement_cycle_core_1.buildImprovementLlmPayload)('o4-mini', 's', 'u');
         expect(p.max_completion_tokens).toBe(32000);
     });
+    test('gpt-5 family routes down the reasoning path (no temperature — gpt-5 rejects it)', () => {
+        for (const model of ['gpt-5', 'gpt-5.1', 'gpt-5-mini', 'gpt-5.4-pro-2026-03-05']) {
+            const p = (0, improvement_cycle_core_1.buildImprovementLlmPayload)(model, 's', 'u');
+            expect(p).not.toHaveProperty('temperature');
+            expect(p).not.toHaveProperty('max_tokens');
+            expect(p.max_completion_tokens).toBe(32000);
+        }
+    });
+});
+describe('isReasoningModel', () => {
+    test('matches o-series and gpt-5 family', () => {
+        for (const m of ['o1', 'o3', 'o3-mini', 'o4-mini', 'gpt-5', 'gpt-5.1', 'gpt-5-mini', 'GPT-5.2']) {
+            expect((0, improvement_cycle_core_1.isReasoningModel)(m)).toBe(true);
+        }
+    });
+    test('does not match gpt-4o family or empty', () => {
+        for (const m of ['gpt-4o', 'gpt-4o-mini', 'gpt-4.1', 'gpt-4-turbo', '', undefined]) {
+            expect((0, improvement_cycle_core_1.isReasoningModel)(m)).toBe(false);
+        }
+    });
+});
+describe('isRequestTooLarge429 (fail-fast guard)', () => {
+    test('matches the request-too-large TPM body', () => {
+        const body = '{"error":{"message":"Request too large for o3 in organization org-x on tokens per min (TPM): Limit 30000, Requested 31299","type":"tokens","code":"rate_limit_exceeded"}}';
+        expect((0, improvement_cycle_core_1.isRequestTooLarge429)(body)).toBe(true);
+    });
+    test('does not match a normal transient 429 or empty body', () => {
+        expect((0, improvement_cycle_core_1.isRequestTooLarge429)('{"error":{"message":"Rate limit reached for o3: try again in 12s","type":"requests"}}')).toBe(false);
+        expect((0, improvement_cycle_core_1.isRequestTooLarge429)('')).toBe(false);
+    });
 });
 describe('consolidation mode (F1 / Fix 8)', () => {
     test('CONSOLIDATION_SYSTEM_PROMPT exists and is distinct', () => {
