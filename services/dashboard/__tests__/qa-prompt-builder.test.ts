@@ -1,3 +1,20 @@
+// Pin rawMarkerPlacement so these tests are deterministic regardless of the ambient
+// config/tenant.json (a demo tenant may set 'preserve', which injects the extra
+// raw_marker_placement section). Defaults to 'description_end'; the dedicated
+// 'preserve' test below flips this to exercise the house-style branch.
+// (jest.mock factories may only close over vars prefixed with `mock`.)
+let mockRawMarkerPlacement: 'description_end' | 'preserve' = 'description_end';
+jest.mock('@menumanager/tenant-config', () => {
+    const actual = jest.requireActual('@menumanager/tenant-config');
+    return {
+        ...actual,
+        getTenantConfig: () => {
+            const cfg = actual.getTenantConfig();
+            return { ...cfg, rulebook: { ...cfg.rulebook, rawMarkerPlacement: mockRawMarkerPlacement } };
+        },
+    };
+});
+
 import { RAW_NOTICE_TEXT } from '../lib/menu-footer';
 import { QA_PROMPT_SECTIONS, buildFinalPrompt } from '../lib/qa-prompt-builder';
 import { analyzeEmbeddedSetMenus } from '../lib/embedded-set-menu-guard';
@@ -39,6 +56,29 @@ describe('buildFinalPrompt (extracted from handleBasicCheck)', () => {
         expect(prompt).not.toContain('PRIX FIXE / PRE-FIX MENU RULES');
         expect(prompt).not.toContain('IMPORTANT PRE-AI DETERMINISTIC CHECKS');
         expect(prompt).not.toContain('IMPORTANT SCOPE FOR THIS REVIEW');
+    });
+
+    test("rawMarkerPlacement 'preserve' injects the house-style raw-marker section", () => {
+        mockRawMarkerPlacement = 'preserve';
+        try {
+            const { prompt, sections } = buildFinalPrompt(BASE_PROMPT, {
+                precheckEnabled: false,
+                embeddedSetMenuAnalysis: EMPTY_SET_MENU,
+            });
+            expect(sections).toContain('raw_marker_placement');
+            expect(prompt).toContain('IMPORTANT RAW-MARKER PLACEMENT (HOUSE STYLE OVERRIDE):');
+        } finally {
+            mockRawMarkerPlacement = 'description_end';
+        }
+    });
+
+    test("rawMarkerPlacement default omits the house-style raw-marker section", () => {
+        const { prompt, sections } = buildFinalPrompt(BASE_PROMPT, {
+            precheckEnabled: false,
+            embeddedSetMenuAnalysis: EMPTY_SET_MENU,
+        });
+        expect(sections).not.toContain('raw_marker_placement');
+        expect(prompt).not.toContain('IMPORTANT RAW-MARKER PLACEMENT (HOUSE STYLE OVERRIDE):');
     });
 
     test('prix fixe rules are injected at the top of the guidelines section', () => {

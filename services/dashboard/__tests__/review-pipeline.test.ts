@@ -215,7 +215,9 @@ describe('reconcileCriticalSuggestionsAgainstCorrectedMenuWithDiagnostics', () =
 });
 
 describe('runPostAiPipeline (full guard chain)', () => {
-    const menu = 'DINNER MENU\n\nGUACAMOLE\nfresh avocado, lime 12\n\nCAESAR SALAD\nromaine, parmesan 14';
+    // Carries allergen codes so it is a genuinely well-formed menu — otherwise the
+    // food-menu allergen-program check injects a critical "no allergen program".
+    const menu = 'DINNER MENU\n\nGUACAMOLE\nfresh avocado, lime V,VG 12\n\nCAESAR SALAD\nromaine, parmesan D,G 14';
 
     test('passes a well-formed AI response through unchanged with no criticals', () => {
         const result = runPostAiPipeline({
@@ -315,6 +317,8 @@ describe('runPostAiPipeline (full guard chain)', () => {
         const result = runPostAiPipeline({
             feedback: buildFeedback(menu, []),
             preCheckedReviewBody: menu,
+            // Beverage menu: the food-only allergen-program check must not fire here.
+            templateType: 'beverage',
             acceptedCorrectionRules: [],
             embeddedSetMenuAnalysis: { sections: [], issues: [] },
             precheckEnabled: false,

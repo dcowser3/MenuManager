@@ -497,7 +497,12 @@ function runPostAiPipeline(args) {
     if (args.menuType === 'prix_fixe') {
         finalSuggestions = enforcePrixFixeCriticalChecks(correctedMenuSanitized, finalSuggestions);
     }
-    finalSuggestions = enforceAllergenProgramCheck(correctedMenuSanitized, finalSuggestions);
+    // Allergen coding is a food-menu program; beverage menus legitimately carry no
+    // allergen codes, so the "no allergen program" critical is a false positive on
+    // them. Gate to food menus (default when templateType is unset).
+    if (args.templateType !== 'beverage') {
+        finalSuggestions = enforceAllergenProgramCheck(correctedMenuSanitized, finalSuggestions);
+    }
     finalSuggestions = detectKnownTextArtifactSuggestions(correctedMenuSanitized, finalSuggestions);
     const hasCriticalErrors = finalSuggestions.some(s => s.severity === 'critical');
     const criticalSuggestions = finalSuggestions.filter(s => s.severity === 'critical');

@@ -120,6 +120,12 @@ Allergen legend lines, the canonical foodborne-illness notice, and price/welcome
 
 ## Layer 2 — Runtime prompt sections (instructions added to the base prompt)
 
+### Prompt section: raw_marker_placement
+
+Instructs the AI to preserve the author's raw-marker (*) placement as house style; missing markers are still flagged but none are moved. Applies when: rulebook.rawMarkerPlacement === 'preserve'.
+
+- id: `prompt/raw_marker_placement` · category: prompt · implementation: `services/dashboard/lib/qa-prompt-builder.ts#buildFinalPrompt`
+
 ### Prompt section: prix_fixe
 
 Prix fixe pricing/course-numbering rules; suppresses per-dish missing-price flags and requires a single top price plus numbered courses. Applies when: menuType === 'prix_fixe'.

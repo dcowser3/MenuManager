@@ -1613,6 +1613,23 @@
       "source": "code_metadata"
     },
     {
+      "id": "prompt/raw_marker_placement",
+      "layer": "prompt_section",
+      "category": "prompt",
+      "title": "Prompt section: raw_marker_placement",
+      "description": "Instructs the AI to preserve the author's raw-marker (*) placement as house style; missing markers are still flagged but none are moved. Applies when: rulebook.rawMarkerPlacement === 'preserve'.",
+      "implementation": {
+        "file": "services/dashboard/lib/qa-prompt-builder.ts",
+        "exportName": "buildFinalPrompt"
+      },
+      "data": {
+        "sectionId": "raw_marker_placement",
+        "description": "Instructs the AI to preserve the author's raw-marker (*) placement as house style; missing markers are still flagged but none are moved.",
+        "appliesWhen": "rulebook.rawMarkerPlacement === 'preserve'"
+      },
+      "source": "code_data"
+    },
+    {
       "id": "prompt/prix_fixe",
       "layer": "prompt_section",
       "category": "prompt",
