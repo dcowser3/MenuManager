@@ -16,6 +16,7 @@ const crypto_1 = __importDefault(require("crypto"));
 const supabase_client_1 = require("@menumanager/supabase-client");
 const approval_finalization_1 = require("./lib/approval-finalization");
 const smtp_config_1 = require("./lib/smtp-config");
+const graph_mail_1 = require("./lib/graph-mail");
 const sharepoint_filenames_1 = require("./lib/sharepoint-filenames");
 const sharepoint_upload_logging_1 = require("./lib/sharepoint-upload-logging");
 const clickup_due_date_1 = require("./lib/clickup-due-date");
@@ -54,6 +55,45 @@ const hasSmtpConfig = smtpConfig.enabled;
 const mailFromAddress = smtpConfig.fromAddress;
 let cachedGraphToken = null;
 const mailTransporter = hasSmtpConfig ? nodemailer_1.default.createTransport(smtpConfig.transportOptions) : null;
+const GRAPH_MAILBOX_ADDRESS = (0, graph_mail_1.getGraphMailboxAddress)();
+const hasGraphMail = (0, graph_mail_1.isGraphMailConfigured)();
+/**
+ * Send service mail over Graph when it is configured, falling back to SMTP.
+ *
+ * SMTP cannot reach port 25 from Lightsail, so Graph is the only transport that
+ * actually delivers in production; the SMTP fallback exists for environments
+ * (local, other hosts) where Graph is not configured.
+ */
+async function sendServiceEmail(message, fromLabel) {
+    if (hasGraphMail) {
+        try {
+            await (0, graph_mail_1.sendGraphMail)({
+                message,
+                mailboxAddress: GRAPH_MAILBOX_ADDRESS,
+                getAccessToken: getGraphAccessToken,
+            });
+            return 'graph';
+        }
+        catch (graphError) {
+            if (!mailTransporter) {
+                throw graphError;
+            }
+            console.error(`Graph sendMail failed, falling back to SMTP: ${graphError.message}`);
+        }
+    }
+    if (!mailTransporter) {
+        throw new Error('No mail transport configured (set GRAPH_* for Graph, or SMTP_*).');
+    }
+    await mailTransporter.sendMail({
+        from: `"${fromLabel}" <${mailFromAddress}>`,
+        to: message.to,
+        ...(message.cc?.length ? { cc: message.cc } : {}),
+        subject: message.subject,
+        html: message.html,
+        ...(message.attachments?.length ? { attachments: message.attachments } : {}),
+    });
+    return 'smtp';
+}
 const ALERT_EMAIL = process.env.ALERT_EMAIL || '';
 const DASHBOARD_URL = process.env.DASHBOARD_URL || 'http://localhost:3005';
 const alertCooldowns = new Map();
@@ -64,14 +104,13 @@ function sendAdminAlert(alert) {
         return;
     alertCooldowns.set(alert.alert_type, Date.now());
     (0, supabase_client_1.logAlert)(alert);
-    if (mailTransporter && ALERT_EMAIL) {
+    if ((hasGraphMail || mailTransporter) && ALERT_EMAIL) {
         const severityLabel = alert.severity.toUpperCase();
-        mailTransporter.sendMail({
-            from: `"Menu Manager Alerts" <${mailFromAddress}>`,
+        sendServiceEmail({
             to: ALERT_EMAIL,
             subject: `[${severityLabel}] ${alert.alert_type.replace(/_/g, ' ')} — Menu Manager`,
             html: (0, supabase_client_1.buildAlertEmailHtml)(alert, DASHBOARD_URL),
-        }).catch((err) => console.error('Failed to send alert email:', err.message));
+        }, 'Menu Manager Alerts').catch((err) => console.error('Failed to send alert email:', err.message));
     }
 }
 function describeServiceError(error) {
@@ -447,8 +486,8 @@ function sanitizeAttachmentFilename(rawName, fallbackBase, defaultExtension = '.
     return withExt || `${fallbackBase}${defaultExtension}`;
 }
 async function sendCorrectionsReadyNotification(payload) {
-    if (!hasSmtpConfig) {
-        console.warn('SMTP not configured. Skipping corrections_ready notification.');
+    if (!hasGraphMail && !hasSmtpConfig) {
+        console.warn('No mail transport configured. Skipping corrections_ready notification.');
         return;
     }
     if (!payload.submitterEmail) {
@@ -456,8 +495,7 @@ async function sendCorrectionsReadyNotification(payload) {
         return;
     }
     const correctedBuffer = await fs_1.default.promises.readFile(payload.correctedPath);
-    await mailTransporter.sendMail({
-        from: `"Menu Review Bot" <${mailFromAddress}>`,
+    const transport = await sendServiceEmail({
         to: payload.submitterEmail,
         subject: `Corrections Ready: ${payload.projectName || payload.filename || 'Menu Submission'}`,
         html: `
@@ -473,8 +511,8 @@ async function sendCorrectionsReadyNotification(payload) {
                 contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
             },
         ],
-    });
-    console.log(`Notification email (corrections_ready) sent successfully to ${payload.submitterEmail}.`);
+    }, 'Menu Review Bot');
+    console.log(`Notification email (corrections_ready) sent successfully to ${payload.submitterEmail} via ${transport}.`);
 }
 async function uploadTaskAttachment(taskId, filePath, preferredFilename, contentType) {
     const fieldCandidates = ['attachment[]', 'attachment'];

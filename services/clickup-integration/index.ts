@@ -19,6 +19,7 @@ import {
     buildSharePointApprovedDocxAssetRecord,
 } from './lib/approval-finalization';
 import { buildSmtpRuntimeConfig } from './lib/smtp-config';
+import { GraphMailMessage, getGraphMailboxAddress, isGraphMailConfigured, sendGraphMail } from './lib/graph-mail';
 import { buildSharePointApprovedFilename } from './lib/sharepoint-filenames';
 import { logSharePointUploadEvent } from './lib/sharepoint-upload-logging';
 import { clickUpDueDateMillis } from './lib/clickup-due-date';
@@ -71,6 +72,47 @@ const mailFromAddress = smtpConfig.fromAddress;
 let cachedGraphToken: { accessToken: string; expiresAt: number } | null = null;
 
 const mailTransporter = hasSmtpConfig ? nodemailer.createTransport(smtpConfig.transportOptions as any) : null;
+const GRAPH_MAILBOX_ADDRESS = getGraphMailboxAddress();
+const hasGraphMail = isGraphMailConfigured();
+
+/**
+ * Send service mail over Graph when it is configured, falling back to SMTP.
+ *
+ * SMTP cannot reach port 25 from Lightsail, so Graph is the only transport that
+ * actually delivers in production; the SMTP fallback exists for environments
+ * (local, other hosts) where Graph is not configured.
+ */
+async function sendServiceEmail(message: GraphMailMessage, fromLabel: string): Promise<'graph' | 'smtp'> {
+    if (hasGraphMail) {
+        try {
+            await sendGraphMail({
+                message,
+                mailboxAddress: GRAPH_MAILBOX_ADDRESS,
+                getAccessToken: getGraphAccessToken,
+            });
+            return 'graph';
+        } catch (graphError: any) {
+            if (!mailTransporter) {
+                throw graphError;
+            }
+            console.error(`Graph sendMail failed, falling back to SMTP: ${graphError.message}`);
+        }
+    }
+
+    if (!mailTransporter) {
+        throw new Error('No mail transport configured (set GRAPH_* for Graph, or SMTP_*).');
+    }
+
+    await mailTransporter.sendMail({
+        from: `"${fromLabel}" <${mailFromAddress}>`,
+        to: message.to,
+        ...(message.cc?.length ? { cc: message.cc } : {}),
+        subject: message.subject,
+        html: message.html,
+        ...(message.attachments?.length ? { attachments: message.attachments } : {}),
+    });
+    return 'smtp';
+}
 
 const ALERT_EMAIL = process.env.ALERT_EMAIL || '';
 const DASHBOARD_URL = process.env.DASHBOARD_URL || 'http://localhost:3005';
@@ -84,14 +126,13 @@ function sendAdminAlert(alert: SystemAlert): void {
 
     logAlert(alert);
 
-    if (mailTransporter && ALERT_EMAIL) {
+    if ((hasGraphMail || mailTransporter) && ALERT_EMAIL) {
         const severityLabel = alert.severity.toUpperCase();
-        mailTransporter.sendMail({
-            from: `"Menu Manager Alerts" <${mailFromAddress}>`,
+        sendServiceEmail({
             to: ALERT_EMAIL,
             subject: `[${severityLabel}] ${alert.alert_type.replace(/_/g, ' ')} — Menu Manager`,
             html: buildAlertEmailHtml(alert, DASHBOARD_URL),
-        }).catch((err: any) => console.error('Failed to send alert email:', err.message));
+        }, 'Menu Manager Alerts').catch((err: any) => console.error('Failed to send alert email:', err.message));
     }
 }
 
@@ -656,8 +697,8 @@ async function sendCorrectionsReadyNotification(payload: {
     correctedPath: string;
     filename?: string;
 }): Promise<void> {
-    if (!hasSmtpConfig) {
-        console.warn('SMTP not configured. Skipping corrections_ready notification.');
+    if (!hasGraphMail && !hasSmtpConfig) {
+        console.warn('No mail transport configured. Skipping corrections_ready notification.');
         return;
     }
 
@@ -667,8 +708,7 @@ async function sendCorrectionsReadyNotification(payload: {
     }
 
     const correctedBuffer = await fs.promises.readFile(payload.correctedPath);
-    await mailTransporter!.sendMail({
-        from: `"Menu Review Bot" <${mailFromAddress}>`,
+    const transport = await sendServiceEmail({
         to: payload.submitterEmail,
         subject: `Corrections Ready: ${payload.projectName || payload.filename || 'Menu Submission'}`,
         html: `
@@ -684,8 +724,8 @@ async function sendCorrectionsReadyNotification(payload: {
                 contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
             },
         ],
-    });
-    console.log(`Notification email (corrections_ready) sent successfully to ${payload.submitterEmail}.`);
+    }, 'Menu Review Bot');
+    console.log(`Notification email (corrections_ready) sent successfully to ${payload.submitterEmail} via ${transport}.`);
 }
 
 async function uploadTaskAttachment(
