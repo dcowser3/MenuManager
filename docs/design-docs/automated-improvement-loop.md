@@ -125,15 +125,18 @@ Reviewers can add manual rules on the learning dashboard that *contradict* past 
 The deploy workflow ([.github/workflows/deploy-lightsail.yml](../../.github/workflows/deploy-lightsail.yml)) installs the cron idempotently on every deploy — no manual host setup:
 
 ```cron
-15 9 */2 * * /usr/bin/flock -n /tmp/menumanager-improve.lock <DEPLOY_PATH>/scripts/run-improvement-cycle-cron.sh >> /tmp/menumanager-improve-cron.log 2>&1
+15 9 * * * /usr/bin/flock -n /tmp/menumanager-improve.lock <DEPLOY_PATH>/scripts/run-improvement-cycle-cron.sh >> /tmp/menumanager-improve-cron.log 2>&1
 ```
 
-[scripts/run-improvement-cycle-cron.sh](../../scripts/run-improvement-cycle-cron.sh) detects `docker` vs `sudo docker` (same logic as the deploy) and runs `node /app/scripts/improvement-cycle.js` inside the dashboard container, where the compose `.env`, built `dist/`, and the persistent `menumanager_tmp`/`menumanager_logs` volumes live. 09:15 UTC = overnight US, so proposals are waiting at the start of the day. Since Jul 2026 the cadence is **every other day** (`*/2` on day-of-month; a daily proposal was more than reviewers consumed). Month boundaries can occasionally give back-to-back runs (31st → 1st) — harmless, the correction gate makes an empty run a no-op.
+[scripts/run-improvement-cycle-cron.sh](../../scripts/run-improvement-cycle-cron.sh) detects `docker` vs `sudo docker` (same logic as the deploy) and runs `node /app/scripts/improvement-cycle.js` inside the dashboard container, where the compose `.env`, built `dist/`, and the persistent `menumanager_tmp`/`menumanager_logs` volumes live. 09:15 UTC = overnight US, so proposals are waiting at the start of the day.
 
-Idempotency layers: host `flock` → script lock file (`tmp/improvement-cycle/.lock`, stale 6h) → one proposal per `cycle_id` (day) → pending-proposal gate.
+**Cadence lives in the script, not the cron (Jul 25 2026).** Reviewers want a proposal roughly every other day, but expressing that as `*/2` in cron meant a run that died had no second chance for 48 hours — and its only symptom was a missing email. The cron now fires **nightly** and `shouldDeferForCadence` (`improvement-cycle-core.ts`) exits quietly when the last proposal the cycle produced is newer than `IMPROVE_MIN_HOURS_BETWEEN_PROPOSALS` (default 40h). Same visible rhythm, but a failed night self-heals the next night. `--force`/`--consolidate` bypass it; the cadence check reads only `source in (improvement_cycle, consolidation)` so manual reconcile rows don't hold the gate shut.
+
+Idempotency layers: host `flock` → script lock file (`tmp/improvement-cycle/.lock`, stale 6h) → cadence gate (40h) → one proposal per `cycle_id` (day) → pending-proposal gate.
 
 ### Runbook
 
+- **A missing proposal email now always has a companion email.** Any crash before the proposal is stored sends a `Review-improvement cycle FAILED (<date>) — no proposal generated` email to `IMPROVE_NOTIFY_EMAIL` with the error text and a link to re-run (`sendCycleFailureEmail`), on top of the `improvement_cycle_failed` row in `system_alerts`. The DB row alone was not enough: `/alerts` exists but nobody opens it, so every outage looked identical from the outside (no email) and was only found by someone digging. **Silence should now mean "nothing to propose" — if you get neither a proposal nor a failure email, suspect the cron/host, not the cycle.**
 - **Cycle log:** `menumanager_logs` volume → `docker compose exec dashboard tail -50 /app/logs/improvement-cycle.log`. Cron wrapper issues land in `/tmp/menumanager-improve-cron.log` on the host.
 - **Verify the cron is installed:** `crontab -l | grep improvement-cycle` on the Lightsail host (the deploy logs print "Improvement-cycle cron installed").
 - **Run manually:** `docker compose exec dashboard node /app/scripts/improvement-cycle.js` (add `--dry-run` to inspect the assembled context without an LLM call, `--force` to bypass the gate, `--skip-eval` to skip the eval step).
@@ -151,6 +154,16 @@ On Jul 14 2026 the daily run silently died: the assembled context (~31k tokens, 
 - **Fail fast:** `isRequestTooLarge429` detects the "Request too large … (TPM)" body and the script aborts immediately instead of retrying.
 - **Never silent:** any cycle crash now inserts an `improvement_cycle_failed` row into `system_alerts` (`recordCycleFailureAlert` in the script) — previously only email-step failures were recorded.
 - **Cadence:** cron moved from daily to every other day (see Phase E).
+
+## Jul 25 2026 — OpenAI 500 killed the run; the recurring pattern addressed
+
+The 09:15 UTC run started with 20 unconsumed corrections (Jul 23–25, mostly Isabella's beverage-menu accent fixes) and died at 09:19 on `OpenAI API error 500: server_error` — a transient upstream fault. `postImprovementCompletion` retried `429` only, so any other non-OK status threw on the first hit and `main().catch` ended the run. Corrections were untouched (still unconsumed), but the next scheduled attempt was 48h out and the user's only signal was a missing email.
+
+That was the **fourth** distinct root cause producing the identical symptom (Jun schema drift → gate saw 0; Jul 10 stale `NOT NULL` → gate saw 0; Jul 14 TPM cap → abort; Jul 25 upstream 500 → abort). The pattern, not any single bug, is what got fixed:
+
+1. **Transient retries** (`isTransientOpenAiFailure` + `IMPROVE_TRANSIENT_RETRIES`, default 4, backoff 5/15/45/90s) cover 5xx and network faults on their own budget, separate from the 429 path. `429` keeps its rate-limit-aware handling and request-too-large fail-fast.
+2. **Failure emails** (`sendCycleFailureEmail`) — the run can no longer fail quietly into a table nobody reads. See the runbook bullet above.
+3. **Nightly cron + in-script cadence** — a failed night retries the next night instead of waiting out the `*/2` gap. See Phase E.
 
 ## Operational note: Supabase schema drift (correction rules)
 

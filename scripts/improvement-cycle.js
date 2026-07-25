@@ -151,12 +151,42 @@ async function postImprovementCompletion(messages) {
     // call trips the limit. OpenAI tells us how long to wait ("try again in Xs"); we honor
     // that (or Retry-After) and retry the same request. Capped so a stuck limit still fails.
     const maxRateLimitRetries = Number(process.env.IMPROVE_RATE_LIMIT_RETRIES || 6);
+    // Transient (non-429) failures — 5xx and network faults — get their own budget.
+    // Without this a single OpenAI 500 aborted the entire cycle and the only
+    // symptom was a missing proposal email (Jul 25 2026).
+    const maxTransientRetries = Number(process.env.IMPROVE_TRANSIENT_RETRIES || 4);
+    let transientAttempt = 0;
+    const backoffTransient = async (label) => {
+        const waitMs = Math.min(5000 * 3 ** transientAttempt, 90000);
+        transientAttempt += 1;
+        console.warn(`OpenAI transient failure (attempt ${transientAttempt}/${maxTransientRetries}); waiting ${Math.round(waitMs / 1000)}s then retrying. ${label}`);
+        await new Promise((r) => setTimeout(r, waitMs));
+    };
     for (let rlAttempt = 0; ; rlAttempt++) {
-        const response = await fetch('https://api.openai.com/v1/chat/completions', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
-            body: JSON.stringify(payload),
-        });
+        let response;
+        try {
+            response = await fetch('https://api.openai.com/v1/chat/completions', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+                body: JSON.stringify(payload),
+            });
+        } catch (error) {
+            if (transientAttempt < maxTransientRetries && core.isTransientOpenAiFailure({ error })) {
+                await backoffTransient(`${error.message}`.slice(0, 160));
+                rlAttempt -= 1; // a network fault is not a rate-limit attempt
+                continue;
+            }
+            throw new Error(`OpenAI request failed (${transientAttempt} transient retr${transientAttempt === 1 ? 'y' : 'ies'} exhausted): ${error.message}`);
+        }
+        if (response.status !== 429 && !response.ok && core.isTransientOpenAiFailure({ status: response.status })) {
+            const bodyText = await response.text();
+            if (transientAttempt < maxTransientRetries) {
+                await backoffTransient(`HTTP ${response.status}: ${bodyText.slice(0, 160)}`);
+                rlAttempt -= 1;
+                continue;
+            }
+            throw new Error(`OpenAI API error ${response.status} after ${transientAttempt} transient retries: ${bodyText.slice(0, 500)}`);
+        }
         if (response.status === 429 && rlAttempt < maxRateLimitRetries) {
             const bodyText = await response.text();
             // Fail fast when the single request is bigger than the org's TPM cap:
@@ -638,7 +668,7 @@ async function main() {
     await checkGraphSecretExpiry(supabase, core);
 
     // Idempotency: one proposal per calendar day (cycle_id = YYYY-MM-DD).
-    const [{ count: unconsumedCount }, { data: pendingProposals }, { data: existing }] = await Promise.all([
+    const [{ count: unconsumedCount }, { data: pendingProposals }, { data: existing }, { data: lastProposals }] = await Promise.all([
         supabase.from('correction_rules').select('*', { count: 'exact', head: true })
             .is('prompt_cycle_id', null).in('status', ['accepted', 'pending']),
         supabase.from('prompt_proposals')
@@ -650,8 +680,29 @@ async function main() {
             .select('id, status')
             .eq('cycle_id', baseCycleId)
             .maybeSingle(),
+        supabase.from('prompt_proposals')
+            .select('cycle_id, created_at')
+            .in('source', ['improvement_cycle', 'consolidation'])
+            .order('created_at', { ascending: false })
+            .limit(1),
     ]);
     const pendingProposal = (pendingProposals || [])[0] || null;
+
+    // Cadence: the cron fires every night; this keeps the every-other-day rhythm
+    // while letting a night that failed retry itself the next night instead of
+    // waiting out a 48h cron gap.
+    const lastProposal = (lastProposals || [])[0] || null;
+    const cadence = core.shouldDeferForCadence({
+        lastProposalCreatedAt: lastProposal?.created_at,
+        nowMs: Date.now(),
+        minHours: Number(process.env.IMPROVE_MIN_HOURS_BETWEEN_PROPOSALS || 40),
+        // Manual invocations (force / consolidate / dry-run) are never rate-limited by cadence.
+        force: !!args.force || !!args.consolidate || !!args.dryRun,
+    });
+    if (cadence.defer) {
+        console.log(`Cadence: skipping — ${cadence.reason} (last proposal ${lastProposal?.cycle_id}).`);
+        return;
+    }
     const minNewCorrections = Number.parseInt(process.env.IMPROVE_MIN_NEW_CORRECTIONS || '1', 10);
     const gate = core.shouldRunCycle({
         unconsumedCorrectionCount: unconsumedCount || 0,
@@ -1415,9 +1466,44 @@ async function recordCycleFailureAlert(error) {
     }
 }
 
+// A system_alerts row is only visible to someone who opens /alerts, and nobody
+// does. Every improvement-cycle outage so far (Jun schema drift, Jul 10 stale
+// NOT NULL, Jul 14 TPM cap, Jul 25 OpenAI 500) looked identical from the outside:
+// no email. Emailing the failure to the same address the proposal would have
+// gone to means silence now reliably means "nothing to propose".
+async function sendCycleFailureEmail(error) {
+    const to = process.env.IMPROVE_NOTIFY_EMAIL || process.env.FORM_ATTEMPT_ALERT_EMAIL || 'dcowser@richardsandoval.com';
+    try {
+        const core = requireDashboardLib('improvement-cycle-core');
+        const alertMail = requireDashboardLib('alert-mail');
+        const deps = buildCycleMailDeps(alertMail);
+        if (!alertMail.canSendAlertMail(deps)) {
+            console.warn('Cycle failed and no mail transport is configured — failure is only visible in /alerts and the cron log.');
+            return;
+        }
+        const baseUrl = core.resolveDashboardPublicUrl(process.env);
+        const cycleDay = new Date().toISOString().slice(0, 10);
+        await alertMail.sendAlertMail({
+            subject: `Review-improvement cycle FAILED (${cycleDay}) — no proposal generated`,
+            to,
+            html: [
+                `<p>The automated improvement cycle for <strong>${cycleDay}</strong> failed before it could produce a proposal, so no proposal email is coming.</p>`,
+                `<p><strong>Error:</strong></p>`,
+                `<pre style="white-space:pre-wrap;font-size:12px;background:#f5f5f5;padding:8px;border-radius:4px">${escapeHtmlLite(`${error.message || error}`.slice(0, 1200))}</pre>`,
+                `<p>Reviewer corrections are safe — they stay unconsumed and will be picked up by the next run.</p>`,
+                `<p>To retry now: open <a href="${baseUrl}/learning/prompt-proposal">the proposal page</a> and use <strong>Run cycle now</strong>. Full detail at <a href="${baseUrl}/alerts">/alerts</a>.</p>`,
+            ].join('\n'),
+        }, deps);
+        console.log(`Cycle-failure email sent to ${to}.`);
+    } catch (mailError) {
+        console.warn(`Could not send cycle-failure email: ${mailError.message}`);
+    }
+}
+
 main().catch(async (error) => {
     console.error(`Improvement cycle failed: ${error.message}`);
     await recordCycleFailureAlert(error);
+    await sendCycleFailureEmail(error);
     releaseLock();
     process.exit(1);
 });

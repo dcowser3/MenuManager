@@ -31,7 +31,53 @@ import {
     buildFencePreservationNote,
     countFencedCodeDelimiters,
     runImprovementProposalWithRetry,
+    shouldDeferForCadence,
+    isTransientOpenAiFailure,
 } from '../lib/improvement-cycle-core';
+
+describe('shouldDeferForCadence', () => {
+    const now = Date.parse('2026-07-25T09:15:00Z');
+    const hoursAgo = (h: number) => new Date(now - h * 3_600_000).toISOString();
+
+    test('defers when the last proposal is inside the cadence window', () => {
+        const res = shouldDeferForCadence({ lastProposalCreatedAt: hoursAgo(24), nowMs: now, minHours: 40 });
+        expect(res.defer).toBe(true);
+        expect(res.reason).toContain('cadence requires 40h');
+    });
+
+    test('runs once the window has passed', () => {
+        expect(shouldDeferForCadence({ lastProposalCreatedAt: hoursAgo(41), nowMs: now, minHours: 40 }).defer).toBe(false);
+    });
+
+    test('a failed night (no proposal produced) retries the next night', () => {
+        // Last proposal 3 days ago because the last two runs crashed before insert.
+        expect(shouldDeferForCadence({ lastProposalCreatedAt: hoursAgo(72), nowMs: now, minHours: 40 }).defer).toBe(false);
+    });
+
+    test('force, no history, unreadable timestamp and a zero window never defer', () => {
+        expect(shouldDeferForCadence({ lastProposalCreatedAt: hoursAgo(1), nowMs: now, minHours: 40, force: true }).defer).toBe(false);
+        expect(shouldDeferForCadence({ lastProposalCreatedAt: null, nowMs: now, minHours: 40 }).defer).toBe(false);
+        expect(shouldDeferForCadence({ lastProposalCreatedAt: 'not-a-date', nowMs: now, minHours: 40 }).defer).toBe(false);
+        expect(shouldDeferForCadence({ lastProposalCreatedAt: hoursAgo(1), nowMs: now, minHours: 0 }).defer).toBe(false);
+    });
+});
+
+describe('isTransientOpenAiFailure', () => {
+    test('5xx is transient, 4xx is not', () => {
+        expect(isTransientOpenAiFailure({ status: 500 })).toBe(true);
+        expect(isTransientOpenAiFailure({ status: 503 })).toBe(true);
+        expect(isTransientOpenAiFailure({ status: 400 })).toBe(false);
+        expect(isTransientOpenAiFailure({ status: 401 })).toBe(false);
+    });
+
+    test('network faults are transient', () => {
+        expect(isTransientOpenAiFailure({ error: { message: 'fetch failed' } })).toBe(true);
+        expect(isTransientOpenAiFailure({ error: { message: 'read ECONNRESET' } })).toBe(true);
+        expect(isTransientOpenAiFailure({ error: { message: 'socket hang up' } })).toBe(true);
+        expect(isTransientOpenAiFailure({ error: { message: 'Invalid JSON in response' } })).toBe(false);
+        expect(isTransientOpenAiFailure({})).toBe(false);
+    });
+});
 
 describe('shouldRunCycle gating', () => {
     const pending = { id: 'p-old', cycle_id: '2026-07-01' };

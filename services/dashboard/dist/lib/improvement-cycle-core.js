@@ -5,6 +5,8 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.CONSOLIDATION_SYSTEM_PROMPT = exports.IMPROVEMENT_SYSTEM_PROMPT = exports.IDENTICAL_CANDIDATE_EVAL_NOTE = exports.CONTEXT_DEPENDENT_TERMS = exports.CURRENT_PROMPT_END_MARKER = exports.CURRENT_PROMPT_BEGIN_MARKER = exports.PROMPT_UNCHANGED_SENTINEL = exports.CORRECTION_ROUTING_LANES = exports.PROPOSED_RULE_CHANGE_TYPES = void 0;
 exports.shouldRunCycle = shouldRunCycle;
+exports.shouldDeferForCadence = shouldDeferForCadence;
+exports.isTransientOpenAiFailure = isTransientOpenAiFailure;
 exports.assembleSupersedeCorrectionSet = assembleSupersedeCorrectionSet;
 exports.buildReplayUnavailableForCorrections = buildReplayUnavailableForCorrections;
 exports.supersededProposalReviewBlock = supersededProposalReviewBlock;
@@ -70,6 +72,54 @@ function shouldRunCycle(input) {
         };
     }
     return { run: true, mode: 'new', reason: `${input.unconsumedCorrectionCount} unconsumed correction(s) ready` };
+}
+/**
+ * Cadence gate. The cron runs DAILY; this decides whether enough time has passed
+ * since the last proposal to make another one.
+ *
+ * Why not just schedule the cron every other day: a run that dies (transient
+ * OpenAI error, eval crash) then had no second chance for 48h, and the only
+ * symptom was a missing email (observed Jul 14 and Jul 25 2026). Running daily
+ * and gating on "hours since the last proposal we actually produced" keeps the
+ * every-other-day cadence reviewers asked for while letting a failed run retry
+ * the next night on its own.
+ */
+function shouldDeferForCadence(input) {
+    if (input.force)
+        return { defer: false, reason: 'forced run', hoursSince: null };
+    const minHours = Number.isFinite(input.minHours) ? Math.max(0, input.minHours) : 0;
+    if (!minHours)
+        return { defer: false, reason: 'cadence gate disabled', hoursSince: null };
+    const raw = `${input.lastProposalCreatedAt || ''}`.trim();
+    if (!raw)
+        return { defer: false, reason: 'no previous proposal', hoursSince: null };
+    const lastMs = Date.parse(raw);
+    if (!Number.isFinite(lastMs))
+        return { defer: false, reason: 'previous proposal has an unreadable timestamp', hoursSince: null };
+    const hoursSince = (input.nowMs - lastMs) / 3600000;
+    if (hoursSince < minHours) {
+        return {
+            defer: true,
+            reason: `last proposal was ${hoursSince.toFixed(1)}h ago; cadence requires ${minHours}h between proposals`,
+            hoursSince,
+        };
+    }
+    return { defer: false, reason: `last proposal was ${hoursSince.toFixed(1)}h ago`, hoursSince };
+}
+/**
+ * Transient-failure classifier for the improvement LLM call. 429 has its own
+ * (rate-limit aware) path; this covers 5xx server errors and network faults,
+ * which previously aborted the whole cycle on the first hit — a single OpenAI
+ * 500 killed the Jul 25 2026 proposal.
+ */
+function isTransientOpenAiFailure(input) {
+    const status = Number(input.status);
+    if (Number.isFinite(status) && status >= 500)
+        return true;
+    const message = `${input.error?.message || ''}`;
+    if (!message)
+        return false;
+    return /ECONNRESET|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|ECONNREFUSED|socket hang up|network|fetch failed|terminated/i.test(message);
 }
 /** Supersede mode: unconsumed + corrections stamped to the pending proposal's cycle (excludes proposal-* rows). */
 function assembleSupersedeCorrectionSet(unconsumed, carriedOver) {
