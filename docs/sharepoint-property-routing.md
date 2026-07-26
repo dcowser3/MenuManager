@@ -56,22 +56,50 @@ so this cannot be diagnosed or repaired from inside the app.
 
 ## Granting the app a new site (admin action)
 
-Least-privilege path, keeps `Sites.Selected`. A SharePoint/Entra admin runs this
-once per site — the app cannot do it for itself:
+**Who can do this:** Derian holds the SharePoint Administrator role (granted by
+Verticomm, Jun 11 2026), so this is self-serve — no ticket needed. Verticomm's
+standing request is to **keep the app at `Sites.Selected`** and ask them before
+any app takes broader permissions.
+
+**There is no UI for it.** Per-site grants to an Entra app are API-only:
+
+- The site's own Permissions / "Share site" UI manages *user and group* access.
+  It cannot grant an application.
+- SharePoint admin center → "API access" approves *tenant-wide* Graph permission
+  requests, which is the opposite of what we want here.
+- The legacy `_layouts/15/appinv.aspx` page grants ACS app-only permissions, a
+  retired model that does not apply to Entra apps using Graph.
+
+So it's PnP PowerShell (needs the SharePoint Administrator role) or a Graph call
+from an identity holding `Sites.FullControl.All`:
 
 ```powershell
+Install-Module PnP.PowerShell -Scope CurrentUser        # first time only
+Register-PnPEntraIDAppForInteractiveLogin `
+  -ApplicationName "PnP PowerShell (Menu Manager admin)" `
+  -Tenant richardsandoval.onmicrosoft.com -Interactive  # first time only
+
 Connect-PnPOnline -Url "https://richardsandoval.sharepoint.com/sites/Lona" -Interactive
-Grant-PnPAzureADAppSitePermission -AppId "347b024c-3b49-40bb-b59f-02c6023849cb" -DisplayName "Menu Manager" -Site "https://richardsandoval.sharepoint.com/sites/Lona" -Permissions Write
+Grant-PnPAzureADAppSitePermission `
+  -AppId "347b024c-3b49-40bb-b59f-02c6023849cb" `
+  -DisplayName "Menu Manager" `
+  -Site "https://richardsandoval.sharepoint.com/sites/Lona" `
+  -Permissions Write
 ```
 
-The Graph equivalent (`POST /sites/{site-id}/permissions`) requires the *caller*
-to hold `Sites.FullControl.All`, so it has to be an admin identity, not this app.
+`Register-PnPEntraIDAppForInteractiveLogin` is required since Microsoft retired
+the shared multi-tenant PnP app — PnP now needs its own registration in the
+tenant. It is a one-time step and unrelated to the Menu Manager app registration.
 
-The broader alternative is to add the `Sites.ReadWrite.All` application role to
-the registration in Entra with admin consent, after which the app reaches every
-site with no per-site step. That trades the current least-privilege posture for
-convenience — pick deliberately; `Sites.Selected` is why a compromised key today
-reaches 11 sites instead of all of them.
+The Graph equivalent (`POST /sites/{site-id}/permissions`) needs the *caller* to
+hold `Sites.FullControl.All`, so it is an admin identity either way — never this
+app, which cannot grant itself anything.
+
+The broader alternative — adding the `Sites.ReadWrite.All` application role in
+Entra with admin consent, after which the app reaches every site with no per-site
+step — is what Verticomm has asked us not to do. It is also the weaker posture:
+`Sites.Selected` is why a leaked key today reaches 11 sites instead of all of
+them. Per-site grants are a few seconds each; keep them.
 
 ## Configure the property
 
