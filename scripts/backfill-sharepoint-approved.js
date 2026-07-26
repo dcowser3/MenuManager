@@ -62,7 +62,7 @@ async function graphToken(){
 }
 
 (async()=>{
-  const supabase=createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY||process.env.SUPABASE_ANON_KEY);
+  const supabase=createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY||process.env.SUPABASE_SERVICE_KEY);
   const token=await graphToken();
   const auth={Authorization:`Bearer ${token}`};
   const G=(p,opts={})=>axios.get(`https://graph.microsoft.com/v1.0${p}`,{headers:auth,...opts}).then(r=>r.data);

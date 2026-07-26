@@ -30,13 +30,17 @@ export function getSupabaseClient(): SupabaseClient {
     }
 
     const supabaseUrl = process.env.SUPABASE_URL;
+    // Service-role only. The anon key was previously accepted as a last-resort
+    // fallback, which meant a deploy missing the service key would come up
+    // "working" and then fail every write once RLS is on (migration
+    // 20260725_enable_row_level_security.sql). Fail loudly instead.
     const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY
-        || process.env.SUPABASE_SERVICE_KEY
-        || process.env.SUPABASE_ANON_KEY;
+        || process.env.SUPABASE_SERVICE_KEY;
 
     if (!supabaseUrl || !supabaseKey) {
         throw new Error(
-            'Missing Supabase credentials. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY (or legacy SUPABASE_SERVICE_KEY, or SUPABASE_ANON_KEY) in .env'
+            'Missing Supabase credentials. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY (or legacy SUPABASE_SERVICE_KEY) in .env. '
+            + 'The anon key is not accepted: RLS denies it on every table.'
         );
     }
 
@@ -48,6 +52,5 @@ export function isSupabaseConfigured(): boolean {
     return !!(process.env.SUPABASE_URL && (
         process.env.SUPABASE_SERVICE_ROLE_KEY
         || process.env.SUPABASE_SERVICE_KEY
-        || process.env.SUPABASE_ANON_KEY
     ));
 }

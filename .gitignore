@@ -24,6 +24,10 @@ venv/
 .venv/
 **/.venv/
 
+# Ignore macOS Finder metadata
+.DS_Store
+**/.DS_Store
+
 # Ignore Microsoft Word temporary files
 ~$*.docx
 ~$*.doc

@@ -1,3 +1,20 @@
+// Pin rawMarkerPlacement so these tests are deterministic regardless of the
+// ambient config/tenant.json (a demo tenant may set 'preserve', which turns off
+// the post-AI marker canonicalization inside parseAIResponse). Defaults to the
+// RSH convention; the dedicated 'preserve' tests below flip it.
+// (jest.mock factories may only close over vars prefixed with `mock`.)
+let mockRawMarkerPlacement: 'description_end' | 'preserve' = 'description_end';
+jest.mock('@menumanager/tenant-config', () => {
+    const actual = jest.requireActual('@menumanager/tenant-config');
+    return {
+        ...actual,
+        getTenantConfig: () => {
+            const cfg = actual.getTenantConfig();
+            return { ...cfg, rulebook: { ...cfg.rulebook, rawMarkerPlacement: mockRawMarkerPlacement } };
+        },
+    };
+});
+
 import {
     FORCED_CRITICAL_EXACT_TYPES,
     FORCED_CRITICAL_NORMALIZED_TYPES,
@@ -94,6 +111,47 @@ describe('normalizeRawAsteriskPlacement (post-AI canonicalization)', () => {
         expect(normalizeRawAsteriskPlacement(notice)).toBe(notice);
         expect(normalizeRawAsteriskPlacement('RAW BAR*')).toBe('RAW BAR*');
         expect(normalizeRawAsteriskPlacement('G gluten | V veg | *raw item')).toBe('G gluten | V veg | *raw item');
+    });
+});
+
+// The 'preserve' branch (rulebook.rawMarkerPlacement) shipped untested: only the
+// prompt-side section had coverage, not the post-AI decision in parseAIResponse
+// that actually suppresses canonicalization for tenants whose house style keeps
+// the author's marker position.
+describe("rawMarkerPlacement branch in parseAIResponse", () => {
+    const authored = 'Steak Tartare*, capers, egg yolk D,G 24';
+    const canonical = 'Steak Tartare, capers, egg yolk * D,G 24';
+
+    afterEach(() => {
+        mockRawMarkerPlacement = 'description_end';
+    });
+
+    test("default 'description_end' canonicalizes the AI's corrected menu", () => {
+        const parsed = parseAIResponse(buildFeedback(authored, []), authored);
+        expect(parsed.correctedMenu).toBe(canonical);
+    });
+
+    test("'preserve' leaves the author's marker placement exactly as written", () => {
+        mockRawMarkerPlacement = 'preserve';
+        const parsed = parseAIResponse(buildFeedback(authored, []), authored);
+        expect(parsed.correctedMenu).toBe(authored);
+    });
+
+    test("'preserve' does not collapse duplicate markers either", () => {
+        mockRawMarkerPlacement = 'preserve';
+        const parsed = parseAIResponse(buildFeedback('Salmon Crudo*, ponzu* 16', []), 'Salmon Crudo*, ponzu* 16');
+        expect(parsed.correctedMenu).toBe('Salmon Crudo*, ponzu* 16');
+    });
+
+    test("'preserve' still parses suggestions and applies the other guards", () => {
+        mockRawMarkerPlacement = 'preserve';
+        const parsed = parseAIResponse(buildFeedback(authored, [
+            { type: 'Missing Price', confidence: 'high', menuItem: 'Tartare', description: 'x', recommendation: 'y' },
+        ]), authored);
+        expect(parsed.correctedMenu).toBe(authored);
+        expect(parsed.suggestions).toHaveLength(1);
+        // Severity forcing is independent of marker placement.
+        expect(parsed.suggestions[0].severity).toBe('critical');
     });
 });
 

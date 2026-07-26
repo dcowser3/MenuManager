@@ -3638,8 +3638,7 @@ const CRITICAL_SUPABASE_SCHEMA: Record<string, string[]> = {
 async function fetchRequiredColumns(table: string): Promise<string[] | null> {
     const url = process.env.SUPABASE_URL;
     const key = process.env.SUPABASE_SERVICE_ROLE_KEY
-        || process.env.SUPABASE_SERVICE_KEY
-        || process.env.SUPABASE_ANON_KEY;
+        || process.env.SUPABASE_SERVICE_KEY;
     if (!url || !key) return null;
     try {
         const resp = await fetch(`${url.replace(/\/$/, '')}/rest/v1/`, {

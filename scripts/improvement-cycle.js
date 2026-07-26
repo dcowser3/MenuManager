@@ -71,7 +71,7 @@ function getSupabase() {
     const url = process.env.SUPABASE_URL;
     const key = requireSupabaseServiceKey(process.env);
     if (!url || !key) {
-        throw new Error('SUPABASE_URL and a service key are required (SUPABASE_SERVICE_ROLE_KEY, legacy SUPABASE_SERVICE_KEY, or SUPABASE_ANON_KEY)');
+        throw new Error('SUPABASE_URL and a service key are required (SUPABASE_SERVICE_ROLE_KEY or legacy SUPABASE_SERVICE_KEY)');
     }
     return createClient(url, key);
 }

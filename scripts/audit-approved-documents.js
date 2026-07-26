@@ -42,9 +42,9 @@ function restoredPath(submission) {
 }
 
 async function loadRecords() {
-  if (process.env.SUPABASE_URL && (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_ANON_KEY)) {
+  if (process.env.SUPABASE_URL && (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY)) {
     const { createClient } = require('@supabase/supabase-js');
-    const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_ANON_KEY;
+    const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY;
     const supabase = createClient(process.env.SUPABASE_URL, key);
     const { data: submissions, error } = await supabase.from('submissions').select('*').in('status', [...approvedStatuses]);
     if (error) throw new Error(`Failed to read submissions: ${error.message}`);

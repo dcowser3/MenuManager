@@ -14,8 +14,8 @@ All variables are configured in `.env` at the project root. See `.env.example` f
 | `OPENAI_API_KEY` | OpenAI API key for AI review service |
 | `INTERNAL_API_TOKEN` | Shared secret required on internal service-to-service requests between dashboard, db, parser, ai-review, differ, and clickup-integration |
 | `SUPABASE_URL` | Supabase project URL |
-| `SUPABASE_ANON_KEY` | Supabase anonymous key |
-| `SUPABASE_SERVICE_ROLE_KEY` | **Canonical** Supabase service-role key (matches the modern Supabase dashboard label). Scripts and services resolve keys in this order: `SUPABASE_SERVICE_ROLE_KEY` → legacy `SUPABASE_SERVICE_KEY` → `SUPABASE_ANON_KEY`. |
+| `SUPABASE_ANON_KEY` | Supabase anonymous key. **Unused by the application** and deliberately not a fallback anywhere: RLS (`supabase/migrations/20260725_enable_row_level_security.sql`) denies it on every table. Safe to leave unset. |
+| `SUPABASE_SERVICE_ROLE_KEY` | **Canonical** Supabase service-role key (matches the modern Supabase dashboard label). Scripts and services resolve keys in this order: `SUPABASE_SERVICE_ROLE_KEY` → legacy `SUPABASE_SERVICE_KEY`. The anon key is **not** in the chain — accepting it would let a misconfigured deploy come up looking healthy and then silently fail every write under RLS. |
 | `SUPABASE_SERVICE_KEY` | Legacy alias for the service-role key; still accepted if `SUPABASE_SERVICE_ROLE_KEY` is unset. |
 
 ## Optional

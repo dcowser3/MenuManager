@@ -93,6 +93,9 @@ Docker is the default local workflow: `./dev-up.sh` uses [docker-compose.dev.yml
 ### Roadmap / what's planned
 → [docs/roadmap.md](docs/roadmap.md) — implementation phases, status, planned services, cost estimates.
 
+### A property's approved menus aren't reaching SharePoint
+→ [docs/sharepoint-property-routing.md](docs/sharepoint-property-routing.md) — the two per-property requirements (`Sites.Selected` grant + routing columns), how to tell which one is missing, and how to configure one.
+
 ### Feature deep-dives (design decisions)
 → [docs/design-docs/index.md](docs/design-docs/index.md) — catalog. Notable entries:
 

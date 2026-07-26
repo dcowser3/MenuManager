@@ -21,7 +21,7 @@ import {
 import { buildSmtpRuntimeConfig } from './lib/smtp-config';
 import { GraphMailMessage, getGraphMailboxAddress, isGraphMailConfigured, sendGraphMail } from './lib/graph-mail';
 import { buildSharePointApprovedFilename } from './lib/sharepoint-filenames';
-import { logSharePointUploadEvent } from './lib/sharepoint-upload-logging';
+import { describeSharePointSkip, logSharePointUploadEvent } from './lib/sharepoint-upload-logging';
 import { clickUpDueDateMillis } from './lib/clickup-due-date';
 import {
     isDirectIsabellaMarketingHandoff,
@@ -119,10 +119,13 @@ const DASHBOARD_URL = process.env.DASHBOARD_URL || 'http://localhost:3005';
 const alertCooldowns = new Map<string, number>();
 const ALERT_COOLDOWN_MS = 15 * 60 * 1000;
 
-function sendAdminAlert(alert: SystemAlert): void {
-    const lastSent = alertCooldowns.get(alert.alert_type) || 0;
+// cooldownKey defaults to alert_type. Pass a narrower key for per-entity alerts
+// (e.g. per-property routing gaps) so one property's alert does not swallow
+// another's inside the 15-minute window — the cooldown also gates the DB row.
+function sendAdminAlert(alert: SystemAlert, cooldownKey: string = alert.alert_type): void {
+    const lastSent = alertCooldowns.get(cooldownKey) || 0;
     if (Date.now() - lastSent < ALERT_COOLDOWN_MS) return;
-    alertCooldowns.set(alert.alert_type, Date.now());
+    alertCooldowns.set(cooldownKey, Date.now());
 
     logAlert(alert);
 
@@ -1480,22 +1483,31 @@ async function finalizeApprovedSubmission(input: {
             console.warn(`SharePoint upload reported success for submission ${submission.id} without a storage path`);
         } else if (sharePointUpload.skipped) {
             console.log(`Skipped SharePoint upload for submission ${submission.id}: ${sharePointUpload.skipped}`);
-            if (sharePointUpload.skipped === 'graph credentials not configured') {
+            const skipContext = sharePointUploadContext({
+                submission,
+                property: submission.property,
+                servicePeriod: submission.service_period || submission.raw_payload?.servicePeriod,
+                localFilePath: input.approvedPath,
+                uploadFileName: input.approvedFileName,
+                skipped: sharePointUpload.skipped,
+            });
+            // Both skip reasons alert. The routing-config one matters most: most
+            // properties have never been given SharePoint routing (Jul 2026: 41 of
+            // 52), so those approvals completed looking healthy while the approved
+            // DOCX quietly never reached SharePoint.
+            const skipAlert = describeSharePointSkip(sharePointUpload.skipped, {
+                projectName: submission.project_name,
+                property: submission.property,
+            });
+            if (skipAlert) {
                 sendAdminAlert({
-                    alert_type: 'sharepoint_upload_skipped',
-                    severity: 'warning',
+                    alert_type: skipAlert.alert_type,
+                    severity: skipAlert.severity,
                     service: 'clickup-integration',
                     submission_id: submission.id,
-                    message: `Skipped SharePoint upload for "${submission.project_name}" because Graph credentials are not configured`,
-                    details: sharePointUploadContext({
-                        submission,
-                        property: submission.property,
-                        servicePeriod: submission.service_period || submission.raw_payload?.servicePeriod,
-                        localFilePath: input.approvedPath,
-                        uploadFileName: input.approvedFileName,
-                        skipped: sharePointUpload.skipped,
-                    }),
-                });
+                    message: skipAlert.message,
+                    details: skipContext,
+                }, skipAlert.cooldownKey);
             }
         }
     } catch (sharePointError: any) {

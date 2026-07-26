@@ -1,8 +1,13 @@
 'use strict';
 
-/** Canonical Supabase service-role key resolution (F3). Prefer modern dashboard label. */
+/**
+ * Canonical Supabase service-role key resolution (F3). Prefer modern dashboard label.
+ * The anon key is deliberately NOT a fallback: RLS (migration
+ * 20260725_enable_row_level_security.sql) denies it on every table, so accepting
+ * it would turn a misconfigured job into a silent no-op instead of a clear error.
+ */
 function resolveSupabaseServiceKey(env = process.env) {
-    return env.SUPABASE_SERVICE_ROLE_KEY || env.SUPABASE_SERVICE_KEY || env.SUPABASE_ANON_KEY || '';
+    return env.SUPABASE_SERVICE_ROLE_KEY || env.SUPABASE_SERVICE_KEY || '';
 }
 
 function requireSupabaseServiceKey(env = process.env) {
@@ -10,7 +15,7 @@ function requireSupabaseServiceKey(env = process.env) {
     const key = resolveSupabaseServiceKey(env);
     if (!url || !key) {
         throw new Error(
-            'SUPABASE_URL and a service key are required (SUPABASE_SERVICE_ROLE_KEY, legacy SUPABASE_SERVICE_KEY, or SUPABASE_ANON_KEY)'
+            'SUPABASE_URL and a service key are required (SUPABASE_SERVICE_ROLE_KEY or legacy SUPABASE_SERVICE_KEY)'
         );
     }
     return key;

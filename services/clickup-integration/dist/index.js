@@ -98,11 +98,14 @@ const ALERT_EMAIL = process.env.ALERT_EMAIL || '';
 const DASHBOARD_URL = process.env.DASHBOARD_URL || 'http://localhost:3005';
 const alertCooldowns = new Map();
 const ALERT_COOLDOWN_MS = 15 * 60 * 1000;
-function sendAdminAlert(alert) {
-    const lastSent = alertCooldowns.get(alert.alert_type) || 0;
+// cooldownKey defaults to alert_type. Pass a narrower key for per-entity alerts
+// (e.g. per-property routing gaps) so one property's alert does not swallow
+// another's inside the 15-minute window — the cooldown also gates the DB row.
+function sendAdminAlert(alert, cooldownKey = alert.alert_type) {
+    const lastSent = alertCooldowns.get(cooldownKey) || 0;
     if (Date.now() - lastSent < ALERT_COOLDOWN_MS)
         return;
-    alertCooldowns.set(alert.alert_type, Date.now());
+    alertCooldowns.set(cooldownKey, Date.now());
     (0, supabase_client_1.logAlert)(alert);
     if ((hasGraphMail || mailTransporter) && ALERT_EMAIL) {
         const severityLabel = alert.severity.toUpperCase();
@@ -1092,22 +1095,31 @@ async function finalizeApprovedSubmission(input) {
         }
         else if (sharePointUpload.skipped) {
             console.log(`Skipped SharePoint upload for submission ${submission.id}: ${sharePointUpload.skipped}`);
-            if (sharePointUpload.skipped === 'graph credentials not configured') {
+            const skipContext = sharePointUploadContext({
+                submission,
+                property: submission.property,
+                servicePeriod: submission.service_period || submission.raw_payload?.servicePeriod,
+                localFilePath: input.approvedPath,
+                uploadFileName: input.approvedFileName,
+                skipped: sharePointUpload.skipped,
+            });
+            // Both skip reasons alert. The routing-config one matters most: most
+            // properties have never been given SharePoint routing (Jul 2026: 41 of
+            // 52), so those approvals completed looking healthy while the approved
+            // DOCX quietly never reached SharePoint.
+            const skipAlert = (0, sharepoint_upload_logging_1.describeSharePointSkip)(sharePointUpload.skipped, {
+                projectName: submission.project_name,
+                property: submission.property,
+            });
+            if (skipAlert) {
                 sendAdminAlert({
-                    alert_type: 'sharepoint_upload_skipped',
-                    severity: 'warning',
+                    alert_type: skipAlert.alert_type,
+                    severity: skipAlert.severity,
                     service: 'clickup-integration',
                     submission_id: submission.id,
-                    message: `Skipped SharePoint upload for "${submission.project_name}" because Graph credentials are not configured`,
-                    details: sharePointUploadContext({
-                        submission,
-                        property: submission.property,
-                        servicePeriod: submission.service_period || submission.raw_payload?.servicePeriod,
-                        localFilePath: input.approvedPath,
-                        uploadFileName: input.approvedFileName,
-                        skipped: sharePointUpload.skipped,
-                    }),
-                });
+                    message: skipAlert.message,
+                    details: skipContext,
+                }, skipAlert.cooldownKey);
             }
         }
     }
