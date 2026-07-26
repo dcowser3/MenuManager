@@ -22,11 +22,29 @@ raises a `sharepoint_property_unconfigured` alert (per property, so one property
 does not mute another) instead of only writing a console line — before that, the
 approval completed looking healthy and the DOCX simply never left the box.
 
-## Current state (Jul 25 2026)
+## Current state (Jul 26 2026)
 
-11 of 52 properties are configured. The other 41 — including all three Lona
-locations (Nashville, Tampa, Fort Lauderdale) — have null `sharepoint_*` routing
-and silently skip upload on every approval.
+15 of 52 properties are configured. The remaining 37 have null `sharepoint_*`
+routing and silently skip upload on every approval.
+
+Configured Jul 26 on sites Verticomm had already granted back in June, but that
+nobody had wired up — they had been skipping uploads for seven weeks:
+
+| Property | Site | Base folder |
+|---|---|---|
+| Toro Toro - Four Seasons - Houston | `Cascade-RSHPartnerHUB` | `Four Seasons Houston/Four Seasons Houston/Toro Toro/Culinary/MENUS` |
+| Toro Toro - Grosvenor House - Dubai | `RSHPartnerHub-GrosvenorHouseDubai` | `Grosvenor House Dubai` |
+| Lona - Marriott Tampa Water Street - Tampa | `Cascade-RSHPartnerHUB` | `Marriott Tampa/LONA TAMPA/CULINARY/MENUS` |
+| Anchor & Brine - Marriott Tampa Water Street - Tampa | `Cascade-RSHPartnerHUB` | `Marriott Tampa/ANCHOR & BRINE/CULINARY/MENUS` |
+
+**A granted site is only half the job.** Both June grants sat unused because no
+one set the routing columns afterward, and the skip was silent — the lesson that
+motivated the `sharepoint_property_unconfigured` alert. After any new grant, run
+the sync script and confirm the property leaves the unconfigured list.
+
+Still blocked on a grant: the `Lona` site (Nashville and Fort Lauderdale). For
+most of the other 37, no destination folder exists in SharePoint at all, which is
+a marketing decision rather than an access problem.
 
 ## Verifying access before configuring
 
@@ -117,12 +135,27 @@ The script resolves and stores the drive id, so later uploads skip site lookup.
 
 Existing conventions to match when picking the folder path:
 
-- Single-location brands: site `OwnedOperated2-<Brand>`, folder
+- **RSH-owned, single-location brands:** site `OwnedOperated2-<Brand>`, folder
   `<Brand>/Brand & Marketing/Media Library/Menu Files`
   (Tamayo, Maya NYC, Aqimero, Venga Venga, tán).
-- Multi-location brands: one site per brand, folder
+- **RSH-owned, multi-location brands:** one site per brand, folder
   `<Brand> by Chef Richard Sandoval/Marketing - Locations/<City>/Menus`
   (Toro, Toro Toro).
+- **Partner hubs** (`Cascade-RSHPartnerHUB`, `RSHPartnerHub-*`): a hotel partner
+  owns the site and the layout is operational, not marketing-shaped. Menus live at
+  `<Hotel>/<Restaurant>/CULINARY/MENUS`, whose subfolders are service periods
+  (Brunch / Dinner / Lunch) or years. Verified Jul 2026 for Toro Toro Houston,
+  Lona Tampa, and Anchor & Brine.
+
+  **Trap:** several partner restaurants also have a top-level `Menus` / `MENUS`
+  folder next to `CULINARY`. Those are stale 2022–2023 archives containing only an
+  `OLD` or year subfolder. The live path is the one under `CULINARY`. Check
+  `lastModifiedDateTime` before choosing — picking the archive would file new
+  approvals somewhere nobody looks.
+
+  Grosvenor House Dubai is flatter still: the partner supplied a single folder
+  link, which resolves to `Grosvenor House Dubai` at the library root, and that is
+  the configured base.
 
 Lona has three locations, so it most likely follows the multi-location shape —
 but confirm against the actual site rather than assuming; the folder must exist.
