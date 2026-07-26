@@ -36,8 +36,23 @@ describe('describePublicUrlMisconfiguration', () => {
         expect((0, improvement_cycle_core_1.describePublicUrlMisconfiguration)({ DASHBOARD_URL: 'http://localhost:3005' })).toBeNull();
         expect((0, improvement_cycle_core_1.describePublicUrlMisconfiguration)({ DASHBOARD_URL: 'http://localhost:3005', NODE_ENV: 'development' })).toBeNull();
     });
-    test('silent when a real public address is configured', () => {
-        expect((0, improvement_cycle_core_1.describePublicUrlMisconfiguration)({ DASHBOARD_URL: 'http://3.231.96.95:3005', NODE_ENV: 'production' })).toBeNull();
+    test('flags a bare-IP base — reachable, but an untrusted-looking link that rots when the IP changes', () => {
+        const warning = (0, improvement_cycle_core_1.describePublicUrlMisconfiguration)({ DASHBOARD_URL: 'http://3.231.96.95:3005', NODE_ENV: 'production' });
+        expect(warning).toContain('raw IP');
+        expect(warning).toContain('sandovalhospitalitymenumanager.live');
+    });
+    test('flags plain HTTP on a real hostname', () => {
+        expect((0, improvement_cycle_core_1.describePublicUrlMisconfiguration)({ DASHBOARD_URL: 'http://menus.example.com', NODE_ENV: 'production' }))
+            .toContain('plain HTTP');
+    });
+    test('isBareIpBaseUrl distinguishes IPs from hostnames', () => {
+        expect((0, improvement_cycle_core_1.isBareIpBaseUrl)('http://3.231.96.95:3005')).toBe(true);
+        expect((0, improvement_cycle_core_1.isBareIpBaseUrl)('https://10.0.0.1')).toBe(true);
+        expect((0, improvement_cycle_core_1.isBareIpBaseUrl)('https://sandovalhospitalitymenumanager.live')).toBe(false);
+        expect((0, improvement_cycle_core_1.isBareIpBaseUrl)('https://1.2.3.4.example.com')).toBe(false);
+    });
+    test('silent when a real public HTTPS address is configured', () => {
+        expect((0, improvement_cycle_core_1.describePublicUrlMisconfiguration)({ DASHBOARD_URL: 'https://sandovalhospitalitymenumanager.live', NODE_ENV: 'production' })).toBeNull();
         expect((0, improvement_cycle_core_1.describePublicUrlMisconfiguration)({
             DASHBOARD_URL: 'http://localhost:3005',
             DASHBOARD_PUBLIC_URL: 'https://menus.example.com',

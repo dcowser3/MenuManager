@@ -46,7 +46,7 @@ All variables are configured in `.env` at the project root. See `.env.example` f
 | `BASIC_AI_LEARNED_RULE_FETCH_TIMEOUT_MS` | Dashboard timeout in milliseconds when loading accepted correction rules from the DB service before Basic AI Check (default: `2500`) |
 | `SOP_DOC_PATH` | Path to SOP document (default: `samples/sop.txt`) |
 | `NEW_SUBMISSION_FORM_DEFAULT` | Which flow `/form` serves. Unset/default → the new upload-first flow; `false`/`0`/`no`/`off` → the legacy multi-section flow as a temporary rollback. The new flow is always reachable at `/form-new` and the legacy flow at `/form-legacy` regardless of this flag. |
-| `DASHBOARD_URL` | Base URL for email links (default: `http://localhost:3005`) |
+| `DASHBOARD_URL` | Base URL for every generated outbound link — proposal emails, alert emails, and the Approval Editor link written into ClickUp tasks (default: `http://localhost:3005`). **Production must be `https://sandovalhospitalitymenumanager.live`** (nginx on the Lightsail host terminates TLS and proxies `/` to 3005, ClickUp webhooks to 3007). It read `http://3.231.96.95:3005` until Jul 26 2026, so recipients got bare-IP HTTP links that mail filters flag — the domain and its cert already existed. Read at module load: after changing it, recreate the `dashboard` and `clickup-integration` containers. `describePublicUrlMisconfiguration` raises a `dashboard_public_url_misconfigured` alert if production ever resolves a loopback, bare-IP, or plain-HTTP base again. |
 | `DB_SERVICE_URL` | Base URL for DB service (default: `http://localhost:3004`) |
 | `AI_REVIEW_URL` | Base URL for AI review service (default: `http://localhost:3002`) |
 | `DIFFER_SERVICE_URL` | Base URL for differ service (default: `http://localhost:3006`) |

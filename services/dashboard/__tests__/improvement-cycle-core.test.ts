@@ -35,6 +35,7 @@ import {
     isTransientOpenAiFailure,
     describePublicUrlMisconfiguration,
     isLoopbackBaseUrl,
+    isBareIpBaseUrl,
 } from '../lib/improvement-cycle-core';
 
 describe('shouldDeferForCadence', () => {
@@ -80,8 +81,26 @@ describe('describePublicUrlMisconfiguration', () => {
         expect(describePublicUrlMisconfiguration({ DASHBOARD_URL: 'http://localhost:3005', NODE_ENV: 'development' })).toBeNull();
     });
 
-    test('silent when a real public address is configured', () => {
-        expect(describePublicUrlMisconfiguration({ DASHBOARD_URL: 'http://3.231.96.95:3005', NODE_ENV: 'production' })).toBeNull();
+    test('flags a bare-IP base — reachable, but an untrusted-looking link that rots when the IP changes', () => {
+        const warning = describePublicUrlMisconfiguration({ DASHBOARD_URL: 'http://3.231.96.95:3005', NODE_ENV: 'production' });
+        expect(warning).toContain('raw IP');
+        expect(warning).toContain('sandovalhospitalitymenumanager.live');
+    });
+
+    test('flags plain HTTP on a real hostname', () => {
+        expect(describePublicUrlMisconfiguration({ DASHBOARD_URL: 'http://menus.example.com', NODE_ENV: 'production' }))
+            .toContain('plain HTTP');
+    });
+
+    test('isBareIpBaseUrl distinguishes IPs from hostnames', () => {
+        expect(isBareIpBaseUrl('http://3.231.96.95:3005')).toBe(true);
+        expect(isBareIpBaseUrl('https://10.0.0.1')).toBe(true);
+        expect(isBareIpBaseUrl('https://sandovalhospitalitymenumanager.live')).toBe(false);
+        expect(isBareIpBaseUrl('https://1.2.3.4.example.com')).toBe(false);
+    });
+
+    test('silent when a real public HTTPS address is configured', () => {
+        expect(describePublicUrlMisconfiguration({ DASHBOARD_URL: 'https://sandovalhospitalitymenumanager.live', NODE_ENV: 'production' })).toBeNull();
         expect(describePublicUrlMisconfiguration({
             DASHBOARD_URL: 'http://localhost:3005',
             DASHBOARD_PUBLIC_URL: 'https://menus.example.com',

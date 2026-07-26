@@ -1318,10 +1318,29 @@ export function describePublicUrlMisconfiguration(env: {
 }): string | null {
     if (`${env.NODE_ENV || ''}` !== 'production') return null;
     const resolved = resolveDashboardPublicUrl(env);
-    if (!isLoopbackBaseUrl(resolved)) return null;
-    return `Outbound links resolve to ${resolved}, which is unreachable outside the container. `
-        + 'Set DASHBOARD_URL (or DASHBOARD_PUBLIC_URL) to the public dashboard address in the host .env '
-        + 'and recreate the dashboard container.';
+    const fix = 'Set DASHBOARD_URL (or DASHBOARD_PUBLIC_URL) in the host .env to '
+        + 'https://sandovalhospitalitymenumanager.live and recreate the dashboard + clickup-integration containers.';
+
+    if (isLoopbackBaseUrl(resolved)) {
+        return `Outbound links resolve to ${resolved}, which is unreachable outside the container. ${fix}`;
+    }
+    // A bare IP is reachable, so nothing breaks outright — but recipients get an
+    // unauthenticated http://<ip>:<port> link that mail filters and browsers flag,
+    // and it silently rots if the instance IP changes. Production ran this way
+    // until Jul 26 2026 even though the domain and its cert already existed.
+    if (isBareIpBaseUrl(resolved)) {
+        return `Outbound links resolve to ${resolved} — a raw IP rather than the public domain. `
+            + `Recipients see an untrusted-looking link and it breaks if the instance IP changes. ${fix}`;
+    }
+    if (/^http:\/\//i.test(resolved)) {
+        return `Outbound links resolve to ${resolved}, which is plain HTTP. ${fix}`;
+    }
+    return null;
+}
+
+export function isBareIpBaseUrl(url: string): boolean {
+    const host = `${url || ''}`.trim().replace(/^https?:\/\//i, '').split('/')[0].split(':')[0];
+    return /^\d{1,3}(\.\d{1,3}){3}$/.test(host);
 }
 
 function escapeHtml(value: unknown): string {
