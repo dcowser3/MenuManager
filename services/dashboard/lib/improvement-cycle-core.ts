@@ -1298,6 +1298,32 @@ export function resolveDashboardPublicUrl(env: {
     return `${env.DASHBOARD_PUBLIC_URL || env.DASHBOARD_URL || 'http://localhost:3005'}`.replace(/\/+$/, '');
 }
 
+export function isLoopbackBaseUrl(url: string): boolean {
+    return /^https?:\/\/(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])(:\d+)?$/i.test(`${url || ''}`.trim().replace(/\/+$/, ''));
+}
+
+/**
+ * A production run that resolves a loopback base URL emails links nobody outside
+ * the container can open (observed Jul 26 2026: the proposal email's "Review the
+ * proposal" link pointed at http://localhost:3005 because neither
+ * DASHBOARD_PUBLIC_URL nor DASHBOARD_URL was set on the host). The email still
+ * sends — a broken link beats no notification — but the run says so loudly.
+ * Returns null when the configuration is fine, or outside production, where a
+ * localhost base is correct.
+ */
+export function describePublicUrlMisconfiguration(env: {
+    DASHBOARD_PUBLIC_URL?: string | null;
+    DASHBOARD_URL?: string | null;
+    NODE_ENV?: string | null;
+}): string | null {
+    if (`${env.NODE_ENV || ''}` !== 'production') return null;
+    const resolved = resolveDashboardPublicUrl(env);
+    if (!isLoopbackBaseUrl(resolved)) return null;
+    return `Outbound links resolve to ${resolved}, which is unreachable outside the container. `
+        + 'Set DASHBOARD_URL (or DASHBOARD_PUBLIC_URL) to the public dashboard address in the host .env '
+        + 'and recreate the dashboard container.';
+}
+
 function escapeHtml(value: unknown): string {
     return `${value ?? ''}`
         .replace(/&/g, '&amp;')

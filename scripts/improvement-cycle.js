@@ -495,6 +495,26 @@ function buildCycleMailDeps(alertMail) {
     return deps;
 }
 
+// Shared by every outbound-email path: a production run that would send loopback
+// links is a live misconfiguration, and the email itself can't report it (its own
+// link is the broken thing). Log it and leave a row behind.
+async function warnIfPublicUrlUnreachable(supabase, core, context) {
+    const problem = core.describePublicUrlMisconfiguration(process.env);
+    if (!problem) return;
+    console.warn(`DASHBOARD URL MISCONFIGURED: ${problem}`);
+    try {
+        await supabase.from('system_alerts').insert({
+            alert_type: 'dashboard_public_url_misconfigured',
+            severity: 'warning',
+            service: 'improvement-cycle',
+            message: `Emailed links are unreachable: ${problem}`,
+            details: { ...context, resolvedUrl: core.resolveDashboardPublicUrl(process.env) },
+        });
+    } catch (error) {
+        console.warn(`Could not record public-url alert: ${error.message}`);
+    }
+}
+
 async function recordEmailAlert(supabase, severity, message, details) {
     try {
         await supabase.from('system_alerts').insert({
@@ -521,6 +541,7 @@ async function sendProposalEmail(supabase, { cycleId, evalStatus, evalSummary, c
             await recordEmailAlert(supabase, 'warning', msg, { cycleId, recipient: to, reason: 'no_transport' });
             return;
         }
+        await warnIfPublicUrlUnreachable(supabase, core, { cycleId, email: 'proposal' });
         const baseUrl = core.resolveDashboardPublicUrl(process.env);
         const tImp = evalSummary?.triggers_improved || 0;
         const tTot = (evalSummary?.triggers || []).length || (evalSummary?.triggers_improved || 0) + (evalSummary?.triggers_unchanged || 0) + (evalSummary?.triggers_regressed || 0);
@@ -597,6 +618,7 @@ async function sendPendingProposalReminderEmail(supabase, { proposal, unconsumed
             return;
         }
 
+        await warnIfPublicUrlUnreachable(supabase, core, { cycleId, email: 'reminder' });
         const baseUrl = core.resolveDashboardPublicUrl(process.env);
         const message = core.buildPendingProposalReminderEmail({
             proposal,

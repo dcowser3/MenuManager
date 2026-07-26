@@ -33,6 +33,8 @@ import {
     runImprovementProposalWithRetry,
     shouldDeferForCadence,
     isTransientOpenAiFailure,
+    describePublicUrlMisconfiguration,
+    isLoopbackBaseUrl,
 } from '../lib/improvement-cycle-core';
 
 describe('shouldDeferForCadence', () => {
@@ -59,6 +61,41 @@ describe('shouldDeferForCadence', () => {
         expect(shouldDeferForCadence({ lastProposalCreatedAt: null, nowMs: now, minHours: 40 }).defer).toBe(false);
         expect(shouldDeferForCadence({ lastProposalCreatedAt: 'not-a-date', nowMs: now, minHours: 40 }).defer).toBe(false);
         expect(shouldDeferForCadence({ lastProposalCreatedAt: hoursAgo(1), nowMs: now, minHours: 0 }).defer).toBe(false);
+    });
+});
+
+describe('describePublicUrlMisconfiguration', () => {
+    test('flags a production run that would email loopback links', () => {
+        const warning = describePublicUrlMisconfiguration({ DASHBOARD_URL: 'http://localhost:3005', NODE_ENV: 'production' });
+        expect(warning).toContain('unreachable outside the container');
+        expect(warning).toContain('DASHBOARD_URL');
+    });
+
+    test('flags an entirely unset config in production (falls back to localhost)', () => {
+        expect(describePublicUrlMisconfiguration({ NODE_ENV: 'production' })).not.toBeNull();
+    });
+
+    test('silent outside production, where localhost is correct', () => {
+        expect(describePublicUrlMisconfiguration({ DASHBOARD_URL: 'http://localhost:3005' })).toBeNull();
+        expect(describePublicUrlMisconfiguration({ DASHBOARD_URL: 'http://localhost:3005', NODE_ENV: 'development' })).toBeNull();
+    });
+
+    test('silent when a real public address is configured', () => {
+        expect(describePublicUrlMisconfiguration({ DASHBOARD_URL: 'http://3.231.96.95:3005', NODE_ENV: 'production' })).toBeNull();
+        expect(describePublicUrlMisconfiguration({
+            DASHBOARD_URL: 'http://localhost:3005',
+            DASHBOARD_PUBLIC_URL: 'https://menus.example.com',
+            NODE_ENV: 'production',
+        })).toBeNull();
+    });
+
+    test('isLoopbackBaseUrl covers the loopback spellings, not lookalikes', () => {
+        for (const url of ['http://localhost:3005', 'http://127.0.0.1:3005', 'https://localhost', 'http://0.0.0.0:3005', 'http://localhost:3005/']) {
+            expect(isLoopbackBaseUrl(url)).toBe(true);
+        }
+        for (const url of ['http://3.231.96.95:3005', 'https://menus.example.com', 'http://localhost.example.com']) {
+            expect(isLoopbackBaseUrl(url)).toBe(false);
+        }
     });
 });
 
