@@ -1141,6 +1141,7 @@ async function main() {
                 currentPrompt: effective.prompt,
                 replayEvidence: args.consolidate ? [] : replayEvidence,
                 sourceCorrections: args.consolidate ? [] : correctionRules,
+                existingAcceptedRules: args.consolidate ? [] : (acceptedRules || []),
                 consolidation: !!args.consolidate,
             },
             callLlm: postImprovementCompletion,

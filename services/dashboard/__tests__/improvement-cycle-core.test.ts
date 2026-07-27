@@ -36,6 +36,8 @@ import {
     describePublicUrlMisconfiguration,
     isLoopbackBaseUrl,
     isBareIpBaseUrl,
+    findRuleConflicts,
+    involvesContextDependentTerm,
 } from '../lib/improvement-cycle-core';
 
 describe('shouldDeferForCadence', () => {
@@ -371,6 +373,41 @@ describe('validateImprovementLlmOutput', () => {
         expect(output.proposed_prompt).toBe(current);
         expect(output.proposed_replacement_rules).toHaveLength(1);
         expect(output.warnings.some((w) => w.includes('code fence structure'))).toBe(true);
+    });
+
+    test('an odd fence count that the rewrite preserves is allowed through, with a repair warning', () => {
+        // Regression: the live prompt has 7 fence lines. The guard used to require an even
+        // count outright, so every possible rewrite was discarded and the cycle could never
+        // change the prompt (cycle 2026-07-26 burned all 3 attempts on "7 -> 7").
+        const fences = ['```', 'block a', '```', '```', 'block b', '```', '```', 'block c'];
+        const current = ['Rules here.', ...fences].join('\n');
+        const proposed = ['Rules here, now clearer.', ...fences].join('\n');
+
+        const output = validateImprovementLlmOutput(
+            { proposed_prompt: proposed },
+            { currentPrompt: current }
+        );
+
+        expect(countFencedCodeDelimiters(current) % 2).toBe(1);
+        expect(output.promptUnchanged).toBe(false);
+        expect(output.proposed_prompt).toBe(proposed);
+        expect(output.warnings.some((w) => w.includes('unbalanced Markdown code fence count (5)'))).toBe(true);
+    });
+
+    test('rose/rosé replacements are rejected as context-dependent in both directions', () => {
+        expect(involvesContextDependentTerm('rose', 'rosé')).toBe('rose');
+        expect(involvesContextDependentTerm('Honeyed Rosé', 'Honeyed Rose')).toBe('rose');
+
+        const output = validateImprovementLlmOutput({
+            proposed_prompt: 'P'.repeat(600),
+            proposed_replacement_rules: [
+                { ...validRule, original_text: 'rose', corrected_text: 'rosé', change_type: 'diacritic' },
+                { ...validRule, original_text: 'rosé', corrected_text: 'rose', change_type: 'diacritic' },
+            ],
+        });
+
+        expect(output.proposed_replacement_rules).toHaveLength(0);
+        expect(output.warnings.filter((w) => w.includes('context-dependent'))).toHaveLength(2);
     });
 
     test('an identical rewrite is recognized as unchanged and oversized rewrites warn', () => {
@@ -1249,5 +1286,92 @@ describe('C4a inferred_from_guidance', () => {
         }, { currentPrompt: 'cur' });
         expect(out.proposed_replacement_rules).toHaveLength(0);
         expect(out.warnings.some((w) => /context-dependent/.test(w))).toBe(true);
+    });
+});
+
+describe('findRuleConflicts', () => {
+    const proposed = (original: string, corrected: string, menuType: 'all' | 'food' | 'beverage' = 'all') => ({
+        original_text: original,
+        corrected_text: corrected,
+        applies_to_menu_type: menuType,
+    });
+
+    test('flags a variant spelling of a brand that an accepted rule already canonicalizes', () => {
+        // Cycle 2026-07-26 proposed this while an accepted rule already normalized the brand.
+        const conflicts = findRuleConflicts(
+            [proposed('ste. germaine', 'st-germaine', 'beverage')],
+            [{ id: 'r1', original_text: 'st. germain', corrected_text: 'St-Germain', applies_to_menu_type: 'beverage' }]
+        );
+
+        expect(conflicts).toHaveLength(1);
+        expect(conflicts[0].kind).toBe('variant');
+        expect(conflicts[0].drop).toBe(false);
+        expect(conflicts[0].existingRuleId).toBe('r1');
+        expect(conflicts[0].message).toContain('St-Germain');
+    });
+
+    test('drops a rule that is the exact inverse of an accepted rule', () => {
+        const conflicts = findRuleConflicts(
+            [proposed('rosé', 'rose')],
+            [{ id: 'r2', original_text: 'rose', corrected_text: 'rosé', applies_to_menu_type: 'all' }]
+        );
+
+        expect(conflicts).toHaveLength(1);
+        expect(conflicts[0].kind).toBe('inverse');
+        expect(conflicts[0].drop).toBe(true);
+    });
+
+    test('flags two rules that disagree on the output for the same input', () => {
+        const conflicts = findRuleConflicts(
+            [proposed('aji', 'ajÍ')],
+            [{ id: 'r3', original_text: 'aji', corrected_text: 'ají amarillo', applies_to_menu_type: 'all' }]
+        );
+
+        expect(conflicts).toHaveLength(1);
+        expect(conflicts[0].kind).toBe('contradiction');
+    });
+
+    test('flags a rule whose output another accepted rule immediately rewrites', () => {
+        const conflicts = findRuleConflicts(
+            [proposed('mayonaise', 'mayonnaise')],
+            [{ id: 'r4', original_text: 'mayonnaise', corrected_text: 'aioli', applies_to_menu_type: 'all' }]
+        );
+
+        expect(conflicts).toHaveLength(1);
+        expect(conflicts[0].kind).toBe('chain');
+    });
+
+    test('ignores unrelated rules and non-overlapping menu scopes', () => {
+        expect(findRuleConflicts(
+            [proposed('del maguay', 'del maguey', 'beverage')],
+            [{ id: 'r5', original_text: 'veggies', corrected_text: 'vegetables', applies_to_menu_type: 'food' }]
+        )).toHaveLength(0);
+
+        // Same brand variant, but food-only vs beverage-only: no overlap, no conflict.
+        expect(findRuleConflicts(
+            [proposed('ste. germaine', 'st-germaine', 'beverage')],
+            [{ id: 'r6', original_text: 'st. germain', corrected_text: 'St-Germain', applies_to_menu_type: 'food' }]
+        )).toHaveLength(0);
+    });
+
+    test('validation surfaces conflicts as warnings and removes only the inverse rule', () => {
+        const output = validateImprovementLlmOutput(
+            {
+                proposed_prompt: 'P'.repeat(600),
+                proposed_replacement_rules: [
+                    { original_text: 'ste. germaine', corrected_text: 'st-germaine', change_type: 'spelling', applies_to_menu_type: 'beverage' },
+                    { original_text: 'del maguay', corrected_text: 'del maguey', change_type: 'spelling', applies_to_menu_type: 'beverage' },
+                ],
+            },
+            {
+                existingAcceptedRules: [
+                    { id: 'r1', original_text: 'st. germain', corrected_text: 'St-Germain', applies_to_menu_type: 'beverage' },
+                ],
+            }
+        );
+
+        // The variant rule is kept for the human to adjudicate, but is flagged.
+        expect(output.proposed_replacement_rules.map((r) => r.original_text)).toEqual(['ste. germaine', 'del maguay']);
+        expect(output.warnings.some((w) => w.includes('1 edit(s) from "St-Germain"'))).toBe(true);
     });
 });

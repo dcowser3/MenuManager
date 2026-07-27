@@ -423,13 +423,19 @@ export function buildImprovementLlmPayload(
 // - berry/berries: a standalone fruit listing reads as plural ("berries"), but
 //   the same word is correct as a singular modifier ("berry compote", "berry
 //   coulis") — number-context-dependent, not an always-safe swap.
-// Match on whole words, case-insensitive.
-export const CONTEXT_DEPENDENT_TERMS = ['tartare', 'tartar', 'berry', 'berries'];
+// - rose/rosé: "rosé" is the wine, "rose" is the flower/rose water. Reviewers have
+//   corrected in BOTH directions (rose->rosé for wine, rosé->rose for "Honeyed Rose"),
+//   so neither blanket direction is safe: an accepted blanket rose->rosé rule was
+//   rewriting "rose water" to "rosé water" against explicit reviewer intent.
+// Match on whole words, case- and accent-insensitively (so "rosé" is caught by "rose").
+export const CONTEXT_DEPENDENT_TERMS = ['tartare', 'tartar', 'berry', 'berries', 'rose'];
 
 export function involvesContextDependentTerm(...texts: string[]): string | null {
     for (const term of CONTEXT_DEPENDENT_TERMS) {
-        const pattern = new RegExp(`\\b${term}\\b`, 'i');
-        if (texts.some((text) => pattern.test(`${text || ''}`))) return term;
+        const pattern = new RegExp(`\\b${stripDiacriticsForComparison(term)}\\b`, 'i');
+        // Compare against the diacritic-stripped text: `\b` does not treat accented
+        // letters as word characters, so `\brosé\b` would never match standalone "rosé".
+        if (texts.some((text) => pattern.test(stripDiacriticsForComparison(`${text || ''}`)))) return term;
     }
     return null;
 }
@@ -713,12 +719,129 @@ export function validateCorrectionRouting(
     return { routing: ordered, warnings, unresolvedFromRouting };
 }
 
+export type ExistingCorrectionRule = {
+    id?: string | null;
+    original_text?: string | null;
+    corrected_text?: string | null;
+    applies_to_menu_type?: string | null;
+    status?: string | null;
+};
+
+export type RuleConflict = {
+    kind: 'contradiction' | 'inverse' | 'chain' | 'variant';
+    proposedIndex: number; // 1-based, matches the "rule N" numbering in warnings
+    existingRuleId: string | null;
+    message: string;
+    drop: boolean;
+};
+
+/** Fold away everything that is cosmetic for brand/spelling comparison. */
+function normalizeForConflict(value: string): string {
+    return stripDiacriticsForComparison(`${value || ''}`)
+        .replace(/[.\-_'’"]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+/** Bounded Levenshtein: returns maxDistance + 1 as soon as it is exceeded. */
+function editDistanceAtMost(a: string, b: string, maxDistance: number): number {
+    if (Math.abs(a.length - b.length) > maxDistance) return maxDistance + 1;
+    let prev = Array.from({ length: b.length + 1 }, (_, i) => i);
+    for (let i = 1; i <= a.length; i++) {
+        const curr = [i];
+        let rowMin = i;
+        for (let j = 1; j <= b.length; j++) {
+            const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+            curr[j] = Math.min(curr[j - 1] + 1, prev[j] + 1, prev[j - 1] + cost);
+            if (curr[j] < rowMin) rowMin = curr[j];
+        }
+        if (rowMin > maxDistance) return maxDistance + 1;
+        prev = curr;
+    }
+    return prev[b.length];
+}
+
+function menuScopesOverlap(a?: string | null, b?: string | null): boolean {
+    const left = `${a || 'all'}`.toLowerCase();
+    const right = `${b || 'all'}`.toLowerCase();
+    return left === 'all' || right === 'all' || left === right;
+}
+
+/**
+ * Cross-check proposed replacement rules against the rules already accepted in
+ * `correction_rules`. The improvement LLM sees the manifest but has repeatedly failed to
+ * notice that a new rule fights an existing one — cycle 2026-07-26 proposed
+ * "ste. germaine" -> "st-germaine" while an accepted rule already normalized the same brand
+ * to "St-Germain". These checks are deterministic, so they do not depend on model quality.
+ */
+export function findRuleConflicts(
+    proposedRules: Array<Pick<ProposedReplacementRule, 'original_text' | 'corrected_text' | 'applies_to_menu_type'>>,
+    existingRules: ExistingCorrectionRule[]
+): RuleConflict[] {
+    const conflicts: RuleConflict[] = [];
+    const existing = (existingRules || []).filter((r) => r && r.original_text && r.corrected_text);
+
+    for (const [index, rule] of proposedRules.entries()) {
+        const proposedIndex = index + 1;
+        const from = normalizeForConflict(rule.original_text);
+        const to = normalizeForConflict(rule.corrected_text);
+        if (!from || !to) continue;
+
+        for (const other of existing) {
+            if (!menuScopesOverlap(rule.applies_to_menu_type, other.applies_to_menu_type)) continue;
+            const otherFrom = normalizeForConflict(other.original_text || '');
+            const otherTo = normalizeForConflict(other.corrected_text || '');
+            const otherId = other.id ? String(other.id) : null;
+            if (!otherFrom || !otherTo) continue;
+
+            // Same input, different output — one of the two must be wrong.
+            if (from === otherFrom && to !== otherTo) {
+                conflicts.push({
+                    kind: 'contradiction', proposedIndex, existingRuleId: otherId, drop: false,
+                    message: `rule ${proposedIndex} contradicts accepted rule ${otherId || '(unknown id)'}: both match "${rule.original_text}" but produce "${rule.corrected_text}" vs "${other.corrected_text}" — accepting this leaves two rules fighting over the same text`,
+                });
+                continue;
+            }
+            // A -> B while an accepted rule says B -> A: guaranteed oscillation, never valid.
+            if (from === otherTo && to === otherFrom) {
+                conflicts.push({
+                    kind: 'inverse', proposedIndex, existingRuleId: otherId, drop: true,
+                    message: `rule ${proposedIndex} dropped: it is the exact inverse of accepted rule ${otherId || '(unknown id)'} ("${other.original_text}" -> "${other.corrected_text}"); the two would undo each other, so this is context-dependent and belongs in the prompt, not a replacement rule`,
+                });
+                continue;
+            }
+            // This rule's output is another rule's input — the result gets re-corrected downstream.
+            if (to === otherFrom) {
+                conflicts.push({
+                    kind: 'chain', proposedIndex, existingRuleId: otherId, drop: false,
+                    message: `rule ${proposedIndex} produces "${rule.corrected_text}", which accepted rule ${otherId || '(unknown id)'} then rewrites to "${other.corrected_text}" — target the final form directly`,
+                });
+                continue;
+            }
+            // Near-identical corrected forms: the canonical spelling already exists and this
+            // rule is teaching a variant of it (the St-Germain / st-germaine case).
+            if (to !== otherTo && Math.min(to.length, otherTo.length) >= 6) {
+                const distance = editDistanceAtMost(to, otherTo, 2);
+                if (distance >= 1 && distance <= 2) {
+                    conflicts.push({
+                        kind: 'variant', proposedIndex, existingRuleId: otherId, drop: false,
+                        message: `rule ${proposedIndex} normalizes to "${rule.corrected_text}", which is ${distance} edit(s) from "${other.corrected_text}" in accepted rule ${otherId || '(unknown id)'} — these are probably the same brand/term with one canonical spelling; verify which form is correct before accepting`,
+                    });
+                }
+            }
+        }
+    }
+    return conflicts;
+}
+
 export function validateImprovementLlmOutput(
     raw: unknown,
     opts: {
         currentPrompt?: string;
         replayEvidence?: ReplayEvidenceEntry[];
         sourceCorrections?: Array<{ id?: string; original_text?: string | null; corrected_text?: string | null; submission_id?: string; rule?: string | null }>;
+        /** Already-accepted correction_rules, cross-checked by findRuleConflicts. */
+        existingAcceptedRules?: ExistingCorrectionRule[];
         // Consolidation mode (F1): relaxes normal length/shrink warnings; adds reduction % checks; drops rules/recs.
         consolidation?: boolean;
     } = {}
@@ -756,11 +879,19 @@ export function validateImprovementLlmOutput(
     if (!promptUnchanged && opts.currentPrompt) {
         const currentFenceCount = countMarkdownCodeFences(opts.currentPrompt);
         const proposedFenceCount = countMarkdownCodeFences(proposedPrompt);
-        if (proposedFenceCount % 2 !== 0 || proposedFenceCount !== currentFenceCount) {
+        // The guard exists to stop a rewrite from breaking the fenced response-format blocks,
+        // so it compares against the CURRENT prompt — never against an absolute "must be even"
+        // standard. The live prompt has carried an odd fence count since the response-format
+        // block was added; an absolute parity check rejects *every* possible rewrite, including
+        // one that reproduces the structure exactly, which silently made the cycle incapable of
+        // ever changing the prompt (cycle 2026-07-26 burned all 3 attempts on "7 -> 7").
+        if (proposedFenceCount !== currentFenceCount) {
             warnings.push(`proposed_prompt changed Markdown code fence structure (${currentFenceCount} -> ${proposedFenceCount}); treating the prompt as unchanged`);
             proposedPrompt = opts.currentPrompt;
             promptUnchanged = true;
             promptUnchangedReason = 'fence_guard';
+        } else if (currentFenceCount % 2 !== 0) {
+            warnings.push(`current prompt has an unbalanced Markdown code fence count (${currentFenceCount}); the rewrite preserved it, but the prompt's fenced blocks should be repaired`);
         }
     }
     const isConsolidation = !!opts.consolidation;
@@ -825,6 +956,20 @@ export function validateImprovementLlmOutput(
                 : [],
             ...(inferredFromGuidance ? { inferred_from_guidance: true } : {}),
         });
+    }
+
+    // Cross-check the surviving rules against what is already accepted. Runs before the
+    // routing cross-check below so a dropped rule's correction is recorded as unrouted.
+    if (Array.isArray(opts.existingAcceptedRules) && opts.existingAcceptedRules.length > 0) {
+        const conflicts = findRuleConflicts(rules, opts.existingAcceptedRules);
+        const dropIndexes = new Set<number>();
+        for (const conflict of conflicts) {
+            warnings.push(conflict.message);
+            if (conflict.drop) dropIndexes.add(conflict.proposedIndex);
+        }
+        if (dropIndexes.size > 0) {
+            for (const index of [...dropIndexes].sort((a, b) => b - a)) rules.splice(index - 1, 1);
+        }
     }
 
     const recommendations: CodeRecommendation[] = [];
