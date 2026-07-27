@@ -1080,3 +1080,44 @@ describe('findRuleConflicts', () => {
         expect(output.warnings.some((w) => w.includes('1 edit(s) from "St-Germain"'))).toBe(true);
     });
 });
+describe('minimalChangedSpan', () => {
+    test('strips unchanged leading words', () => {
+        expect((0, improvement_cycle_core_1.minimalChangedSpan)('Smoked Old Fashion', 'Smoked Old Fashioned'))
+            .toMatchObject({ from: 'Fashion', to: 'Fashioned', trimmedPrefix: 'Smoked Old' });
+        expect((0, improvement_cycle_core_1.minimalChangedSpan)('del maguay', 'del maguey'))
+            .toMatchObject({ from: 'maguay', to: 'maguey', trimmedPrefix: 'del' });
+    });
+    test('strips unchanged trailing context, including punctuation', () => {
+        expect((0, improvement_cycle_core_1.minimalChangedSpan)('Veggie,', 'Vegetable,'))
+            .toMatchObject({ from: 'Veggie', to: 'Vegetable', trimmedSuffix: ',' });
+        expect((0, improvement_cycle_core_1.minimalChangedSpan)('pickled carrots', 'pickled carrot'))
+            .toMatchObject({ from: 'carrots', to: 'carrot', trimmedPrefix: 'pickled' });
+    });
+    test('returns null for rules that are already minimal', () => {
+        expect((0, improvement_cycle_core_1.minimalChangedSpan)('tequileno', 'tequileño')).toBeNull();
+        expect((0, improvement_cycle_core_1.minimalChangedSpan)('mexcican', 'mexican')).toBeNull();
+        expect((0, improvement_cycle_core_1.minimalChangedSpan)('veggies', 'vegetables')).toBeNull();
+    });
+    test('never splits a word across the span boundary', () => {
+        // "Fashion"/"Fashioned" share a 7-char prefix; the span must start at the word.
+        const span = (0, improvement_cycle_core_1.minimalChangedSpan)('Old Fashion', 'Old Fashioned');
+        expect(span).toMatchObject({ from: 'Fashion', to: 'Fashioned' });
+    });
+    test('returns null on degenerate input', () => {
+        expect((0, improvement_cycle_core_1.minimalChangedSpan)('same', 'same')).toBeNull();
+        expect((0, improvement_cycle_core_1.minimalChangedSpan)('', 'x')).toBeNull();
+    });
+    test('validation warns on an under-generalized rule without dropping it', () => {
+        const output = (0, improvement_cycle_core_1.validateImprovementLlmOutput)({
+            proposed_prompt: 'P'.repeat(600),
+            proposed_replacement_rules: [
+                { original_text: 'Smoked Old Fashion', corrected_text: 'Smoked Old Fashioned', change_type: 'spelling' },
+                { original_text: 'tequileno', corrected_text: 'tequileño', change_type: 'diacritic' },
+            ],
+        });
+        expect(output.proposed_replacement_rules).toHaveLength(2);
+        const spanWarnings = output.warnings.filter((w) => w.includes('carries unchanged context'));
+        expect(spanWarnings).toHaveLength(1);
+        expect(spanWarnings[0]).toContain('"Fashion" -> "Fashioned"');
+    });
+});

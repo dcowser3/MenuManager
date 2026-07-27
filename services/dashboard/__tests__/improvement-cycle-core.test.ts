@@ -38,6 +38,7 @@ import {
     isBareIpBaseUrl,
     findRuleConflicts,
     involvesContextDependentTerm,
+    minimalChangedSpan,
 } from '../lib/improvement-cycle-core';
 
 describe('shouldDeferForCadence', () => {
@@ -1373,5 +1374,53 @@ describe('findRuleConflicts', () => {
         // The variant rule is kept for the human to adjudicate, but is flagged.
         expect(output.proposed_replacement_rules.map((r) => r.original_text)).toEqual(['ste. germaine', 'del maguay']);
         expect(output.warnings.some((w) => w.includes('1 edit(s) from "St-Germain"'))).toBe(true);
+    });
+});
+
+describe('minimalChangedSpan', () => {
+    test('strips unchanged leading words', () => {
+        expect(minimalChangedSpan('Smoked Old Fashion', 'Smoked Old Fashioned'))
+            .toMatchObject({ from: 'Fashion', to: 'Fashioned', trimmedPrefix: 'Smoked Old' });
+        expect(minimalChangedSpan('del maguay', 'del maguey'))
+            .toMatchObject({ from: 'maguay', to: 'maguey', trimmedPrefix: 'del' });
+    });
+
+    test('strips unchanged trailing context, including punctuation', () => {
+        expect(minimalChangedSpan('Veggie,', 'Vegetable,'))
+            .toMatchObject({ from: 'Veggie', to: 'Vegetable', trimmedSuffix: ',' });
+        expect(minimalChangedSpan('pickled carrots', 'pickled carrot'))
+            .toMatchObject({ from: 'carrots', to: 'carrot', trimmedPrefix: 'pickled' });
+    });
+
+    test('returns null for rules that are already minimal', () => {
+        expect(minimalChangedSpan('tequileno', 'tequileño')).toBeNull();
+        expect(minimalChangedSpan('mexcican', 'mexican')).toBeNull();
+        expect(minimalChangedSpan('veggies', 'vegetables')).toBeNull();
+    });
+
+    test('never splits a word across the span boundary', () => {
+        // "Fashion"/"Fashioned" share a 7-char prefix; the span must start at the word.
+        const span = minimalChangedSpan('Old Fashion', 'Old Fashioned');
+        expect(span).toMatchObject({ from: 'Fashion', to: 'Fashioned' });
+    });
+
+    test('returns null on degenerate input', () => {
+        expect(minimalChangedSpan('same', 'same')).toBeNull();
+        expect(minimalChangedSpan('', 'x')).toBeNull();
+    });
+
+    test('validation warns on an under-generalized rule without dropping it', () => {
+        const output = validateImprovementLlmOutput({
+            proposed_prompt: 'P'.repeat(600),
+            proposed_replacement_rules: [
+                { original_text: 'Smoked Old Fashion', corrected_text: 'Smoked Old Fashioned', change_type: 'spelling' },
+                { original_text: 'tequileno', corrected_text: 'tequileño', change_type: 'diacritic' },
+            ],
+        });
+
+        expect(output.proposed_replacement_rules).toHaveLength(2);
+        const spanWarnings = output.warnings.filter((w) => w.includes('carries unchanged context'));
+        expect(spanWarnings).toHaveLength(1);
+        expect(spanWarnings[0]).toContain('"Fashion" -> "Fashioned"');
     });
 });

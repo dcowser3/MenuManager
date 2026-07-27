@@ -20,6 +20,7 @@ exports.involvesContextDependentTerm = involvesContextDependentTerm;
 exports.locateCorrectionSite = locateCorrectionSite;
 exports.buildCorrectionExcerptWindows = buildCorrectionExcerptWindows;
 exports.validateCorrectionRouting = validateCorrectionRouting;
+exports.minimalChangedSpan = minimalChangedSpan;
 exports.findRuleConflicts = findRuleConflicts;
 exports.validateImprovementLlmOutput = validateImprovementLlmOutput;
 exports.countFencedCodeDelimiters = countFencedCodeDelimiters;
@@ -578,6 +579,57 @@ function validateCorrectionRouting(rawRouting, opts = {}) {
     }
     return { routing: ordered, warnings, unresolvedFromRouting };
 }
+function isWordCharacter(ch) {
+    return !!ch && /[\p{L}\p{N}]/u.test(ch);
+}
+/**
+ * Narrow a replacement rule to the span that actually differs, dropping unchanged
+ * words carried along on either edge. Reviewer corrections arrive as whole menu lines,
+ * and the improvement LLM often keeps that framing: cycle 2026-07-27 proposed
+ * "Smoked Old Fashion" -> "Smoked Old Fashioned" and "del maguay" -> "del maguey",
+ * which then only fire on those exact phrasings. Boundaries are snapped to whole words
+ * so the span never cuts mid-token.
+ *
+ * Returns null when nothing can be trimmed (the rule is already minimal).
+ */
+function minimalChangedSpan(originalText, correctedText) {
+    const original = `${originalText || ''}`;
+    const corrected = `${correctedText || ''}`;
+    if (!original || !corrected || original === corrected)
+        return null;
+    let prefix = 0;
+    while (prefix < original.length && prefix < corrected.length && original[prefix] === corrected[prefix])
+        prefix++;
+    // Back off to a word boundary: never split a token across the edge of the span.
+    while (prefix > 0 && isWordCharacter(original[prefix - 1])
+        && (isWordCharacter(original[prefix]) || isWordCharacter(corrected[prefix])))
+        prefix--;
+    let suffix = 0;
+    while (suffix < original.length - prefix && suffix < corrected.length - prefix
+        && original[original.length - 1 - suffix] === corrected[corrected.length - 1 - suffix])
+        suffix++;
+    while (suffix > 0) {
+        const oi = original.length - suffix;
+        const ci = corrected.length - suffix;
+        if (isWordCharacter(original[oi]) && (isWordCharacter(original[oi - 1]) || isWordCharacter(corrected[ci - 1])))
+            suffix--;
+        else
+            break;
+    }
+    if (prefix === 0 && suffix === 0)
+        return null;
+    const from = original.slice(prefix, original.length - suffix).trim();
+    const to = corrected.slice(prefix, corrected.length - suffix).trim();
+    if (!from || !to || from === to)
+        return null;
+    const trimmedPrefix = original.slice(0, prefix).trim();
+    const trimmedSuffix = original.slice(original.length - suffix).trim();
+    // Whitespace-only edges are not a generalization; a carried word OR a carried
+    // punctuation mark is ("Veggie," never fires on "Veggie Fajitas").
+    if (!trimmedPrefix && !trimmedSuffix)
+        return null;
+    return { from, to, trimmedPrefix, trimmedSuffix };
+}
 /** Fold away everything that is cosmetic for brand/spelling comparison. */
 function normalizeForConflict(value) {
     return stripDiacriticsForComparison(`${value || ''}`)
@@ -787,6 +839,16 @@ function validateImprovementLlmOutput(raw, opts = {}) {
                 : [],
             ...(inferredFromGuidance ? { inferred_from_guidance: true } : {}),
         });
+    }
+    // Flag rules that carry unchanged context on either edge, so they only fire on the
+    // exact phrasing the reviewer happened to correct. Advisory: how much context a rule
+    // needs to stay safe is a human call, so this never rewrites or drops the rule.
+    for (const [index, rule] of rules.entries()) {
+        const span = minimalChangedSpan(rule.original_text, rule.corrected_text);
+        if (!span)
+            continue;
+        const carried = [span.trimmedPrefix, span.trimmedSuffix].filter(Boolean).map((t) => `"${t}"`).join(' / ');
+        warnings.push(`rule ${index + 1} carries unchanged context (${carried}), so it only fires on this exact phrasing; the minimal change is "${span.from}" -> "${span.to}" — narrow it unless the surrounding words are needed to stay unambiguous`);
     }
     // Cross-check the surviving rules against what is already accepted. Runs before the
     // routing cross-check below so a dropped rule's correction is recorded as unrouted.
