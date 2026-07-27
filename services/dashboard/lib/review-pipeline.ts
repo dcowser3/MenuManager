@@ -20,6 +20,7 @@ import {
 import { guardCorrectedMenuPrices } from './price-integrity-guard';
 import { RAW_NOTICE_PATTERN, normalizeMenuFooter, stripManagedFooterText } from './menu-footer';
 import { QaPromptSectionId, buildFinalPrompt } from './qa-prompt-builder';
+import { buildNearMissBriefing } from './canonical-vocabulary-provider';
 import { getTenantConfig } from '@menumanager/tenant-config';
 
 export type ReviewSuggestion = {
@@ -736,12 +737,19 @@ export async function runFullReviewPipeline(
         ? { sections: [], issues: [] }
         : analyzeEmbeddedSetMenus(preCheckedReviewBody);
 
+    // Scanned AFTER the deterministic pre-AI pass so already-applied fixes are not
+    // re-flagged. Reuses the rules fetched above — no additional read.
+    const nearMissBriefing = await buildNearMissBriefing(preCheckedReviewBody, {
+        fetchAcceptedRules: async () => acceptedCorrectionRules || [],
+    });
+
     const promptInfo = buildFinalPrompt(opts.basePrompt, {
         menuType: opts.menuType,
         effectiveAllergens: effectiveReviewAllergens,
         changedOnlyMode: false,
         precheckEnabled,
         embeddedSetMenuAnalysis,
+        nearMissBriefing,
     }, { omitSections: opts.omitSections || [] });
 
     const feedback = await aiCaller(preCheckedReviewBody, promptInfo.prompt);

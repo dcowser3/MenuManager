@@ -17,7 +17,8 @@ export type QaPromptSectionId =
     | 'add_on_price_rules'
     | 'standard_item_price_rules'
     | 'selection_instruction_rules'
-    | 'embedded_set_menu_rules';
+    | 'embedded_set_menu_rules'
+    | 'canonical_vocabulary_near_misses';
 
 // Registry of every runtime prompt section. Consumed by the review-rules
 // manifest so prompt-layer rules are enumerable alongside code rules.
@@ -66,6 +67,10 @@ export const QA_PROMPT_SECTIONS: Record<QaPromptSectionId, { description: string
         description: 'Explains detected embedded set-menu sections (package title + total price + choice-of headings) so included dishes are not flagged for missing prices.',
         appliesWhen: 'embedded set-menu sections detected in a non prix-fixe menu',
     },
+    canonical_vocabulary_near_misses: {
+        description: 'Lists deterministic near-misses against the canonical menu vocabulary (accent errors, brand misspellings, and both-forms-valid terms) for the model to adjudicate. Advisory only — nothing is replaced automatically.',
+        appliesWhen: 'near-miss findings were computed for this menu (CANONICAL_VOCABULARY_ENABLED)',
+    },
 };
 
 export type QaPromptContext = {
@@ -74,6 +79,12 @@ export type QaPromptContext = {
     changedOnlyMode?: boolean;
     precheckEnabled: boolean;
     embeddedSetMenuAnalysis: { sections: any[]; issues: any[] };
+    /**
+     * Pre-rendered near-miss briefing from the canonical vocabulary
+     * (canonical-vocabulary.ts). Empty or absent means nothing to say, and the
+     * section is omitted entirely — the prompt is byte-identical to before.
+     */
+    nearMissBriefing?: string;
 };
 
 export function buildFinalPrompt(
@@ -170,6 +181,11 @@ Note: Use ONLY these allergen codes when checking allergen compliance. Do not us
         finalPrompt = `${finalPrompt}\n\nIMPORTANT CORRECTED MENU STRUCTURE RULES:\n- The CORRECTED MENU section must contain every submitted menu line in the same order.\n- Do not summarize, shorten, condense, omit, merge, reorder, or rewrite the menu structure.\n- Do not add section headings or line breaks that were not in the submitted menu.\n- Apply only high-confidence corrections inline and leave all other text unchanged.`;
         finalPrompt = `${finalPrompt}\n- Never delete submitted dishes, beverages, options, headings, or standalone item lines. If a line seems wrong, duplicated, invalid, or not orderable, leave it in CORRECTED MENU and report the issue in SUGGESTIONS.`;
         sections.push('corrected_menu_structure_rules');
+    }
+    const nearMissBriefing = `${ctx.nearMissBriefing || ''}`.trim();
+    if (nearMissBriefing && !omit.has('canonical_vocabulary_near_misses')) {
+        finalPrompt = `${finalPrompt}\n\n${nearMissBriefing}`;
+        sections.push('canonical_vocabulary_near_misses');
     }
     if (ctx.precheckEnabled && !omit.has('pre_ai_deterministic_checks')) {
         finalPrompt = `${finalPrompt}\n\nIMPORTANT PRE-AI DETERMINISTIC CHECKS:\n- Allowlisted spelling, diacritic, allergen-code formatting, raw-marker placement, and accepted correction-rule replacements have already been applied before this AI review.\n- Do not re-report those already-applied deterministic edits as remaining suggestions.\n- Focus on remaining semantic, contextual, uncertain, or reviewer-needed issues.`;

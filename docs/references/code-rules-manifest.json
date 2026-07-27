@@ -1800,6 +1800,23 @@
       "source": "code_data"
     },
     {
+      "id": "prompt/canonical_vocabulary_near_misses",
+      "layer": "prompt_section",
+      "category": "prompt",
+      "title": "Prompt section: canonical_vocabulary_near_misses",
+      "description": "Lists deterministic near-misses against the canonical menu vocabulary (accent errors, brand misspellings, and both-forms-valid terms) for the model to adjudicate. Advisory only — nothing is replaced automatically. Applies when: near-miss findings were computed for this menu (CANONICAL_VOCABULARY_ENABLED).",
+      "implementation": {
+        "file": "services/dashboard/lib/qa-prompt-builder.ts",
+        "exportName": "buildFinalPrompt"
+      },
+      "data": {
+        "sectionId": "canonical_vocabulary_near_misses",
+        "description": "Lists deterministic near-misses against the canonical menu vocabulary (accent errors, brand misspellings, and both-forms-valid terms) for the model to adjudicate. Advisory only — nothing is replaced automatically.",
+        "appliesWhen": "near-miss findings were computed for this menu (CANONICAL_VOCABULARY_ENABLED)"
+      },
+      "source": "code_data"
+    },
+    {
       "id": "parse/forced-critical/missing-price",
       "layer": "parse_normalization",
       "category": "severity",

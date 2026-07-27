@@ -186,6 +186,12 @@ Explains detected embedded set-menu sections (package title + total price + choi
 
 - id: `prompt/embedded_set_menu_rules` · category: prompt · implementation: `services/dashboard/lib/qa-prompt-builder.ts#buildFinalPrompt`
 
+### Prompt section: canonical_vocabulary_near_misses
+
+Lists deterministic near-misses against the canonical menu vocabulary (accent errors, brand misspellings, and both-forms-valid terms) for the model to adjudicate. Advisory only — nothing is replaced automatically. Applies when: near-miss findings were computed for this menu (CANONICAL_VOCABULARY_ENABLED).
+
+- id: `prompt/canonical_vocabulary_near_misses` · category: prompt · implementation: `services/dashboard/lib/qa-prompt-builder.ts#buildFinalPrompt`
+
 ## Layer 3 — Response parsing and severity normalization
 
 ### Missing severity defaults to normal

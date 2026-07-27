@@ -28,6 +28,7 @@ const embedded_set_menu_guard_1 = require("./embedded-set-menu-guard");
 const price_integrity_guard_1 = require("./price-integrity-guard");
 const menu_footer_1 = require("./menu-footer");
 const qa_prompt_builder_1 = require("./qa-prompt-builder");
+const canonical_vocabulary_provider_1 = require("./canonical-vocabulary-provider");
 const tenant_config_1 = require("@menumanager/tenant-config");
 // Suggestion types forced to critical severity in parseAIResponse (layer 2 of
 // critical-error blocking). Exported as data so the review-rules manifest can
@@ -546,12 +547,18 @@ async function runFullReviewPipeline(rawMenuContent, opts, aiCaller) {
     const embeddedSetMenuAnalysis = opts.menuType === 'prix_fixe'
         ? { sections: [], issues: [] }
         : (0, embedded_set_menu_guard_1.analyzeEmbeddedSetMenus)(preCheckedReviewBody);
+    // Scanned AFTER the deterministic pre-AI pass so already-applied fixes are not
+    // re-flagged. Reuses the rules fetched above — no additional read.
+    const nearMissBriefing = await (0, canonical_vocabulary_provider_1.buildNearMissBriefing)(preCheckedReviewBody, {
+        fetchAcceptedRules: async () => acceptedCorrectionRules || [],
+    });
     const promptInfo = (0, qa_prompt_builder_1.buildFinalPrompt)(opts.basePrompt, {
         menuType: opts.menuType,
         effectiveAllergens: effectiveReviewAllergens,
         changedOnlyMode: false,
         precheckEnabled,
         embeddedSetMenuAnalysis,
+        nearMissBriefing,
     }, { omitSections: opts.omitSections || [] });
     const feedback = await aiCaller(preCheckedReviewBody, promptInfo.prompt);
     const post = runPostAiPipeline({

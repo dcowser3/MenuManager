@@ -113,6 +113,7 @@ import {
     stripManagedFooterText,
 } from './lib/menu-footer';
 import { buildFinalPrompt } from './lib/qa-prompt-builder';
+import { buildNearMissBriefing } from './lib/canonical-vocabulary-provider';
 import {
     parseAIResponse,
     reconcileCriticalSuggestionsAgainstCorrectedMenu,
@@ -3369,12 +3370,19 @@ async function handleBasicCheck(req: any, res: any) {
         const qaPromptPath = path.join(getRepoRoot(), 'sop-processor', 'qa_prompt.txt');
         const qaPrompt = await fs.readFile(qaPromptPath, 'utf-8');
 
+        // Scanned AFTER the deterministic pre-AI pass so already-applied fixes are not
+        // re-flagged. Reuses the rules fetched above — no additional read.
+        const nearMissBriefing = await buildNearMissBriefing(preCheckedReviewBody, {
+            fetchAcceptedRules: async () => acceptedCorrectionRules || [],
+        });
+
         const promptInfo = buildFinalPrompt(qaPrompt, {
             menuType,
             effectiveAllergens: effectiveReviewAllergens,
             changedOnlyMode,
             precheckEnabled: BASIC_AI_PRECHECK_ENABLED,
             embeddedSetMenuAnalysis,
+            nearMissBriefing,
         });
         const finalPrompt = promptInfo.prompt;
         diagnosticsPromptSections.push(...promptInfo.sections);

@@ -77,6 +77,7 @@ const pre_ai_deterministic_rules_1 = require("./lib/pre-ai-deterministic-rules")
 const basic_ai_check_audit_1 = require("./lib/basic-ai-check-audit");
 const menu_footer_1 = require("./lib/menu-footer");
 const qa_prompt_builder_1 = require("./lib/qa-prompt-builder");
+const canonical_vocabulary_provider_1 = require("./lib/canonical-vocabulary-provider");
 const review_pipeline_1 = require("./lib/review-pipeline");
 const improvement_cycle_core_1 = require("./lib/improvement-cycle-core");
 var upload_security_2 = require("./lib/upload-security");
@@ -2984,12 +2985,18 @@ async function handleBasicCheck(req, res) {
         // Load QA prompt
         const qaPromptPath = path.join(getRepoRoot(), 'sop-processor', 'qa_prompt.txt');
         const qaPrompt = await fs_1.promises.readFile(qaPromptPath, 'utf-8');
+        // Scanned AFTER the deterministic pre-AI pass so already-applied fixes are not
+        // re-flagged. Reuses the rules fetched above — no additional read.
+        const nearMissBriefing = await (0, canonical_vocabulary_provider_1.buildNearMissBriefing)(preCheckedReviewBody, {
+            fetchAcceptedRules: async () => acceptedCorrectionRules || [],
+        });
         const promptInfo = (0, qa_prompt_builder_1.buildFinalPrompt)(qaPrompt, {
             menuType,
             effectiveAllergens: effectiveReviewAllergens,
             changedOnlyMode,
             precheckEnabled: BASIC_AI_PRECHECK_ENABLED,
             embeddedSetMenuAnalysis,
+            nearMissBriefing,
         });
         const finalPrompt = promptInfo.prompt;
         diagnosticsPromptSections.push(...promptInfo.sections);
