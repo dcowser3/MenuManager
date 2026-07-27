@@ -484,6 +484,9 @@
                 if (rule.source === 'system') {
                     return { origin: 'Detected pattern scan', menuName };
                 }
+                if (rule.source === 'extraction') {
+                    return { origin: 'Recovered from accepted whole-line rules', menuName: '' };
+                }
                 if (!submissionId || isManualSubmissionId(submissionId)) {
                     return { origin: 'General add-rule area', menuName: '' };
                 }

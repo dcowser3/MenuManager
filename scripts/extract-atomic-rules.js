@@ -109,7 +109,11 @@ async function main() {
         other_applicable_locations: [],
         restaurant_name: allRestaurants,
         reviewer_name: 'atomic-extraction',
-        source: 'system',
+        // NOT 'system': that source is gated on the differ's current pattern scan
+        // rediscovering the pair (dashboard index.ts), which hides these from the review
+        // queue. Extraction provenance is stronger — the pair comes from corrections a
+        // human already accepted.
+        source: 'extraction',
         status: 'pending',
         occurrences: c.occurrences,
     }));
