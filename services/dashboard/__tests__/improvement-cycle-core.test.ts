@@ -39,6 +39,7 @@ import {
     findRuleConflicts,
     involvesContextDependentTerm,
     minimalChangedSpan,
+    extractAtomicRulesFromCorpus,
 } from '../lib/improvement-cycle-core';
 
 describe('shouldDeferForCadence', () => {
@@ -1422,5 +1423,56 @@ describe('minimalChangedSpan', () => {
         const spanWarnings = output.warnings.filter((w) => w.includes('carries unchanged context'));
         expect(spanWarnings).toHaveLength(1);
         expect(spanWarnings[0]).toContain('"Fashion" -> "Fashioned"');
+    });
+});
+
+describe('extractAtomicRulesFromCorpus', () => {
+    const line = (id: string, original: string, corrected: string) =>
+        ({ id, original_text: original, corrected_text: corrected, applies_to_menu_type: 'all' });
+
+    test('recovers the atomic pair trapped inside whole-line corrections', () => {
+        const report = extractAtomicRulesFromCorpus([
+            line('a', 'Grilled Tlayuda, chorizo, pickled veggies, crema fresca D,V 25', 'Grilled Tlayuda, chorizo, pickled vegetables, crema fresca D,V 25'),
+            line('b', 'Market Plate, seasonal veggies, salsa verde 18', 'Market Plate, seasonal vegetables, salsa verde 18'),
+        ]);
+
+        expect(report.candidates).toHaveLength(1);
+        expect(report.candidates[0]).toMatchObject({
+            original_text: 'veggies',
+            corrected_text: 'vegetables',
+            occurrences: 2,
+        });
+        expect(report.candidates[0].source_rule_ids).toEqual(['a', 'b']);
+    });
+
+    test('a pair recovered in both directions is reported as context-dependent, never proposed', () => {
+        const report = extractAtomicRulesFromCorpus([
+            line('a', 'Salad, mixed berry compote, cream 12', 'Salad, mixed berries compote, cream 12'),
+            line('b', 'Parfait, fresh berries yogurt, granola 9', 'Parfait, fresh berry yogurt, granola 9'),
+        ]);
+
+        expect(report.candidates).toHaveLength(0);
+        expect(report.contextDependent.length).toBeGreaterThan(0);
+    });
+
+    test('skips multi-edit lines and does not re-propose covered pairs', () => {
+        const report = extractAtomicRulesFromCorpus([
+            line('a', 'Tostada, aji amarillo, creme fraiche 14', 'Tostada, ají amarillo, crème fraîche 14'),
+            { id: 'b', original_text: 'flat bread', corrected_text: 'flatbread', applies_to_menu_type: 'all' },
+            line('c', 'Starter, warm flat bread, dip 8', 'Starter, warm flatbread, dip 8'),
+        ]);
+
+        expect(report.skipped.some((s) => s.id === 'a')).toBe(true);
+        expect(report.alreadyCovered).toContainEqual({ original_text: 'flat bread', corrected_text: 'flatbread' });
+        expect(report.candidates.map((c) => c.original_text)).not.toContain('flat bread');
+    });
+
+    test('filters pairs touching a known context-dependent term', () => {
+        const report = extractAtomicRulesFromCorpus([
+            line('a', 'Tuna tartare, avocado, citrus 21', 'Tuna tartar, avocado, citrus 21'),
+        ]);
+
+        expect(report.candidates).toHaveLength(0);
+        expect(report.contextDependent[0].reason).toContain('tartare');
     });
 });

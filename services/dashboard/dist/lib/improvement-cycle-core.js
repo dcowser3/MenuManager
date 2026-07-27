@@ -21,6 +21,8 @@ exports.locateCorrectionSite = locateCorrectionSite;
 exports.buildCorrectionExcerptWindows = buildCorrectionExcerptWindows;
 exports.validateCorrectionRouting = validateCorrectionRouting;
 exports.minimalChangedSpan = minimalChangedSpan;
+exports.isAtomicRuleText = isAtomicRuleText;
+exports.extractAtomicRulesFromCorpus = extractAtomicRulesFromCorpus;
 exports.findRuleConflicts = findRuleConflicts;
 exports.validateImprovementLlmOutput = validateImprovementLlmOutput;
 exports.countFencedCodeDelimiters = countFencedCodeDelimiters;
@@ -629,6 +631,96 @@ function minimalChangedSpan(originalText, correctedText) {
     if (!trimmedPrefix && !trimmedSuffix)
         return null;
     return { from, to, trimmedPrefix, trimmedSuffix };
+}
+const MAX_ATOMIC_WORDS = 3;
+const MAX_ATOMIC_CHARS = 40;
+function isAtomicRuleText(text) {
+    const value = `${text || ''}`.trim();
+    return !!value && value.split(/\s+/).length <= MAX_ATOMIC_WORDS && value.length <= MAX_ATOMIC_CHARS;
+}
+/**
+ * Recover atomic replacement rules trapped inside whole-line corrections.
+ *
+ * Reviewers correct a menu line at a time, so the learned corpus stores whole lines:
+ * "veggies -> vegetables" only ever existed inside two "Grilled Tlayuda, …" rows, which
+ * means the loop had nothing to generalize from and a reviewer had to re-explain
+ * "Veggie -> Vegetable" from scratch months later.
+ *
+ * Extraction is deliberately conservative and never auto-accepts:
+ * - a row must reduce to a single contiguous changed span (multi-edit lines are skipped)
+ * - a pair recovered in BOTH directions is reported as context-dependent, never proposed
+ * - pairs already covered by an atomic rule, or touching a known context-dependent term,
+ *   are filtered out
+ */
+function extractAtomicRulesFromCorpus(rules) {
+    const report = { candidates: [], contextDependent: [], alreadyCovered: [], skipped: [] };
+    const rows = (rules || []).filter((r) => r && r.original_text && r.corrected_text);
+    const existingAtomic = new Set();
+    for (const row of rows) {
+        if (isAtomicRuleText(row.original_text || '')) {
+            existingAtomic.add(`${normalizeForConflict(row.original_text || '')}→${normalizeForConflict(row.corrected_text || '')}`);
+        }
+    }
+    const recovered = new Map();
+    for (const row of rows) {
+        const id = row.id ? String(row.id) : null;
+        if (isAtomicRuleText(row.original_text || ''))
+            continue; // already usable as-is
+        const span = minimalChangedSpan(row.original_text || '', row.corrected_text || '');
+        if (!span) {
+            report.skipped.push({ id, reason: 'no single contiguous changed span (multi-edit line)' });
+            continue;
+        }
+        if (!isAtomicRuleText(span.from) || !isAtomicRuleText(span.to)) {
+            report.skipped.push({ id, reason: `recovered span is not atomic ("${span.from}" -> "${span.to}")` });
+            continue;
+        }
+        const key = `${normalizeForConflict(span.from)}→${normalizeForConflict(span.to)}`;
+        const existing = recovered.get(key);
+        if (existing) {
+            existing.occurrences++;
+            if (id)
+                existing.source_rule_ids.push(id);
+            continue;
+        }
+        recovered.set(key, {
+            original_text: span.from,
+            corrected_text: span.to,
+            change_type: isDiacriticOnlyReplacement(span.from, span.to) ? 'diacritic' : 'spelling',
+            source_rule_ids: id ? [id] : [],
+            occurrences: 1,
+        });
+    }
+    for (const [key, candidate] of recovered) {
+        const [from, to] = key.split('→');
+        // Recovered in both directions: the corpus itself proves this depends on context.
+        if (recovered.has(`${to}→${from}`)) {
+            if (from < to) {
+                report.contextDependent.push({
+                    a: candidate.original_text,
+                    b: candidate.corrected_text,
+                    reason: 'recovered in both directions from approved corrections; belongs in the prompt, not a replacement rule',
+                });
+            }
+            continue;
+        }
+        if (existingAtomic.has(key)) {
+            report.alreadyCovered.push({ original_text: candidate.original_text, corrected_text: candidate.corrected_text });
+            continue;
+        }
+        const contextTerm = involvesContextDependentTerm(candidate.original_text, candidate.corrected_text);
+        if (contextTerm) {
+            report.contextDependent.push({
+                a: candidate.original_text,
+                b: candidate.corrected_text,
+                reason: `involves the known context-dependent term "${contextTerm}"`,
+            });
+            continue;
+        }
+        report.candidates.push(candidate);
+    }
+    report.candidates.sort((a, b) => b.occurrences - a.occurrences || a.original_text.localeCompare(b.original_text));
+    return report;
 }
 /** Fold away everything that is cosmetic for brand/spelling comparison. */
 function normalizeForConflict(value) {
