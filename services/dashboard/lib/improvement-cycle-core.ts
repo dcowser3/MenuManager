@@ -911,7 +911,7 @@ function normalizeForConflict(value: string): string {
 }
 
 /** Bounded Levenshtein: returns maxDistance + 1 as soon as it is exceeded. */
-function editDistanceAtMost(a: string, b: string, maxDistance: number): number {
+export function editDistanceAtMost(a: string, b: string, maxDistance: number): number {
     if (Math.abs(a.length - b.length) > maxDistance) return maxDistance + 1;
     let prev = Array.from({ length: b.length + 1 }, (_, i) => i);
     for (let i = 1; i <= a.length; i++) {

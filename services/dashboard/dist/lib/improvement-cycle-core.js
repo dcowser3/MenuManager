@@ -23,6 +23,7 @@ exports.validateCorrectionRouting = validateCorrectionRouting;
 exports.minimalChangedSpan = minimalChangedSpan;
 exports.isAtomicRuleText = isAtomicRuleText;
 exports.extractAtomicRulesFromCorpus = extractAtomicRulesFromCorpus;
+exports.editDistanceAtMost = editDistanceAtMost;
 exports.findRuleConflicts = findRuleConflicts;
 exports.validateImprovementLlmOutput = validateImprovementLlmOutput;
 exports.countFencedCodeDelimiters = countFencedCodeDelimiters;
