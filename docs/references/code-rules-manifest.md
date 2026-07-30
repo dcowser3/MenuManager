@@ -10,7 +10,7 @@ not part of the committed copy.
 
 ## Layer 1 — Deterministic pre-AI checks (before the model runs)
 
-### Built-in exact replacements (56)
+### Built-in exact replacements (58)
 
 | From | To | Type |
 |------|----|------|
@@ -45,6 +45,8 @@ not part of the committed copy.
 | tajin | tajín | Diacritics |
 | tampiquena | tampiqueña | Diacritics |
 | huancaina | huancaína | Diacritics |
+| patron | Patrón | Diacritics |
+| josé cuervo | Jose Cuervo | Diacritics |
 | ceasar | caesar | Spelling |
 | cesar | caesar | Spelling |
 | mozarella | mozzarella | Spelling |

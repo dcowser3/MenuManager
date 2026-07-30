@@ -103,6 +103,7 @@ Docker is the default local workflow: `./dev-up.sh` uses [docker-compose.dev.yml
 |-------|------|
 | ClickUp integration | [docs/design-docs/clickup-integration.md](docs/design-docs/clickup-integration.md) |
 | Critical error blocking (3-layer detection) | [docs/design-docs/critical-error-blocking.md](docs/design-docs/critical-error-blocking.md) |
+| Diacritics policy (ALL CAPS + brand orthography pins) | [docs/design-docs/diacritics-policy.md](docs/design-docs/diacritics-policy.md) |
 | Submitter autofill | [docs/design-docs/submitter-autofill.md](docs/design-docs/submitter-autofill.md) |
 | Design approval (DOCX vs PDF) | [docs/design-docs/design-approval.md](docs/design-docs/design-approval.md) |
 | Approval attestation | [docs/design-docs/approval-attestation.md](docs/design-docs/approval-attestation.md) |

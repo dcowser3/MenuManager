@@ -714,6 +714,52 @@
       "source": "code_data"
     },
     {
+      "id": "pre-ai/replacement/patron",
+      "layer": "pre_ai_deterministic",
+      "category": "diacritics",
+      "title": "patron -> Patrón",
+      "description": "Built-in exact diacritics replacement applied before the AI review (word-boundary, case-preserving).",
+      "examples": [
+        {
+          "before": "patron",
+          "after": "Patrón"
+        }
+      ],
+      "implementation": {
+        "file": "services/dashboard/lib/pre-ai-deterministic-rules.ts",
+        "exportName": "BUILT_IN_REPLACEMENTS"
+      },
+      "data": {
+        "from": "patron",
+        "to": "Patrón",
+        "type": "Diacritics"
+      },
+      "source": "code_data"
+    },
+    {
+      "id": "pre-ai/replacement/josé-cuervo",
+      "layer": "pre_ai_deterministic",
+      "category": "diacritics",
+      "title": "josé cuervo -> Jose Cuervo",
+      "description": "Built-in exact diacritics replacement applied before the AI review (word-boundary, case-preserving).",
+      "examples": [
+        {
+          "before": "josé cuervo",
+          "after": "Jose Cuervo"
+        }
+      ],
+      "implementation": {
+        "file": "services/dashboard/lib/pre-ai-deterministic-rules.ts",
+        "exportName": "BUILT_IN_REPLACEMENTS"
+      },
+      "data": {
+        "from": "josé cuervo",
+        "to": "Jose Cuervo",
+        "type": "Diacritics"
+      },
+      "source": "code_data"
+    },
+    {
       "id": "pre-ai/replacement/ceasar",
       "layer": "pre_ai_deterministic",
       "category": "spelling",

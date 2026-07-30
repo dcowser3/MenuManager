@@ -104,6 +104,22 @@ export const BUILT_IN_REPLACEMENTS: ReplacementRule[] = [
     { from: 'tampiquena', to: 'tampiqueña', type: 'Diacritics' },
     { from: 'huancaina', to: 'huancaína', type: 'Diacritics' },
 
+    // Brand orthography.
+    //
+    // ALL CAPS is NOT a diacritic exemption. Human-approved finals carry 268 accented
+    // all-caps tokens against 51 unaccented ones ("ROSÉ", "CHÂTEAU", "AÑEJO", "TEQUILEÑO"),
+    // so a menu set in caps takes the same accents a title-case one does. matchCase already
+    // upper-cases the accented target, so every rule above applies unchanged in caps.
+    //
+    // What actually varies is the brand, and that is a fact about the trademark rather than
+    // anything derivable from the surrounding text: Patrón registers with the accent, Jose
+    // Cuervo without it. Left to judgment, the two get decided per menu — one dessert menu
+    // ended up with "PATRÓN Extra Añejo" and "PATRON EL ALTO" in the same approved final.
+    // Both directions are pinned here so the answer is the same on every menu, and because
+    // the whole pass re-runs after the AI, the model can neither omit nor invent them.
+    { from: 'patron', to: 'Patrón', type: 'Diacritics' },
+    { from: 'josé cuervo', to: 'Jose Cuervo', type: 'Diacritics' },
+
     // Exact spelling fixes. Contextual terminology preferences remain in the AI/human lane.
     { from: 'ceasar', to: 'caesar', type: 'Spelling' },
     { from: 'cesar', to: 'caesar', type: 'Spelling' },
