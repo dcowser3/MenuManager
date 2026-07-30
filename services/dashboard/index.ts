@@ -3833,6 +3833,10 @@ async function handleBasicCheck(req: any, res: any) {
             aiResponse: {
                 status: qaResponse?.status,
                 statusText: qaResponse?.statusText,
+                // Which model actually produced this review, as reported by
+                // ai-review. Needed to attribute review quality to a model after a
+                // model switch; null for responses from a pre-2026-07-30 ai-review.
+                model: qaResponse?.data?.model || null,
                 rawFeedbackLength: `${feedback || ''}`.length,
                 rawFeedback: feedback || '',
             },

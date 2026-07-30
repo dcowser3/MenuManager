@@ -238,8 +238,12 @@ app.post('/run-qa-check', async (req, res) => {
         });
 
         const feedback = qaResponse.data.choices[0].message?.content || "No feedback generated.";
-        
-        res.status(200).json({ feedback });
+
+        // Report the model back so the caller can record WHICH model reviewed a
+        // menu (the dashboard writes it into basic_ai_check_audits). Without this,
+        // reviews cannot be attributed to a model after a switch — the exact gap
+        // that made the gpt-4o-mini -> gpt-5.6-luna change unverifiable in history.
+        res.status(200).json({ feedback, model: qaResponse.data.model || AI_REVIEW_MODEL });
 
     } catch (error: any) {
         console.error('Error during QA check:', error);
