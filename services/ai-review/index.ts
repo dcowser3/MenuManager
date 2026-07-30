@@ -22,7 +22,11 @@ const configuration = new Configuration({
     apiKey: process.env.OPENAI_API_KEY,
 });
 const openai = new OpenAIApi(configuration);
-const AI_REVIEW_MODEL = process.env.AI_REVIEW_MODEL || 'gpt-4o-mini';
+// gpt-5.6-luna since 2026-07-30: on the 60-case eval slice it beat gpt-4o-mini on
+// composite (75.5% vs 70.5%) and, more importantly, on correction precision
+// (78.1% vs 59.3% — false positives 68 -> 28) at $0.005/review. See
+// handoff-model-portability-research.md for the full comparison.
+const AI_REVIEW_MODEL = process.env.AI_REVIEW_MODEL || 'gpt-5.6-luna';
 // Menu review is a correction task, not a creative one: pin temperature so the
 // SAME menu produces the SAME review run-to-run. Default 0; overridable via env
 // for deliberate A/B testing. (OpenAI temp 0 still has minor backend drift, but
@@ -31,6 +35,15 @@ const AI_REVIEW_MODEL = process.env.AI_REVIEW_MODEL || 'gpt-4o-mini';
 const AI_REVIEW_TEMPERATURE = Number.isFinite(Number(process.env.AI_REVIEW_TEMPERATURE))
     ? Number(process.env.AI_REVIEW_TEMPERATURE)
     : 0;
+// Reasoning-class models (o-series, gpt-5 family incl. gpt-5.6-luna) reject any
+// non-default temperature with a 400, so the pinned temperature above must be
+// omitted for them. Same test as isReasoningModel() in
+// services/dashboard/lib/improvement-cycle-core.ts ("o" must be followed by a
+// digit, so gpt-4o / gpt-4o-mini keep their pinned temperature).
+const AI_REVIEW_MODEL_SUPPORTS_TEMPERATURE = !/o[0-9]|gpt-5|reasoning/i.test(AI_REVIEW_MODEL);
+function temperatureParam(temperature: number): { temperature?: number } {
+    return AI_REVIEW_MODEL_SUPPORTS_TEMPERATURE ? { temperature } : {};
+}
 const DOCUMENT_STORAGE_ROOT = process.env.DOCUMENT_STORAGE_ROOT || path.join(__dirname, '..', '..', '..', 'tmp', 'documents');
 
 app.use(express.json());
@@ -166,7 +179,7 @@ app.post('/approved-dishes/quality-check', async (req, res) => {
 
         const response = await openai.createChatCompletion({
             model: AI_REVIEW_MODEL,
-            temperature: 0,
+            ...temperatureParam(0),
             messages: [
                 {
                     role: 'system',
@@ -217,7 +230,7 @@ app.post('/run-qa-check', async (req, res) => {
         console.log('Running QA check...');
         const qaResponse = await openai.createChatCompletion({
             model: AI_REVIEW_MODEL,
-            temperature: AI_REVIEW_TEMPERATURE,
+            ...temperatureParam(AI_REVIEW_TEMPERATURE),
             messages: [
                 { role: 'system', content: prompt },
                 { role: 'user', content: `Here is the menu text to review:\n\n---\n\n${text}` }
@@ -295,7 +308,7 @@ Configure OPENAI_API_KEY in .env for real AI reviews.
 
             const qaResponse = await openai.createChatCompletion({
                 model: AI_REVIEW_MODEL,
-                temperature: AI_REVIEW_TEMPERATURE,
+                ...temperatureParam(AI_REVIEW_TEMPERATURE),
                 messages: [
                     { role: 'system', content: qaPrompt },
                     { role: 'user', content: `Here is the menu text to review:\n\n---\n\n${text}` }

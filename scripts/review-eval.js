@@ -27,7 +27,11 @@
  *   --source all|production|training-menus|zengo-samples   Sources for --build-dataset (default all)
  *   --dataset-only             Build the dataset and exit (no replay)
  *   --prompt <file>            Base prompt file (default sop-processor/qa_prompt.txt)
- *   --model <model>            OpenAI model (default REVIEW_EVAL_MODEL || AI_REVIEW_MODEL || gpt-4o-mini)
+ *   --model <model>            Model id (default REVIEW_EVAL_MODEL || AI_REVIEW_MODEL || gpt-4o-mini).
+ *                              A provider-namespaced id ("google/gemini-3-flash",
+ *                              "anthropic/claude-sonnet-5") routes through OpenRouter and
+ *                              needs OPENROUTER_API_KEY; plain ids go to OpenAI directly.
+ *                              REVIEW_EVAL_PROVIDER=openrouter forces OpenRouter routing.
  *   --rules live|snapshot:<f>|candidate:<f>   Accepted correction-rules source (default live)
  *   --no-deterministic         Disable the deterministic pre/post passes
  *   --no-ai                    Skip the AI call (echo feedback); deterministic-only eval
@@ -98,7 +102,7 @@ function parseArgs(argv) {
         dataset: defaultDatasetPath,
         source: 'all',
         prompt: path.join(repoRoot, 'sop-processor', 'qa_prompt.txt'),
-        model: process.env.REVIEW_EVAL_MODEL || process.env.AI_REVIEW_MODEL || 'gpt-4o-mini',  // B5: pin a dated snapshot (e.g. gpt-4o-mini-2024-07-18) matching prod AI_REVIEW_MODEL for eval fidelity
+        model: process.env.REVIEW_EVAL_MODEL || process.env.AI_REVIEW_MODEL || 'gpt-5.6-luna',  // B5: pin a dated snapshot matching prod AI_REVIEW_MODEL for eval fidelity
         rules: 'live',
         deterministic: true,
         ai: true,
@@ -421,14 +425,44 @@ function cacheKey(parts) {
     return crypto.createHash('sha256').update(parts.join(' ')).digest('hex');
 }
 
-async function callOpenAi({ model, temperature, seed, prompt, text }) {
-    const apiKey = process.env.OPENAI_API_KEY;
-    if (!apiKey || apiKey === 'your-openai-api-key-here') {
-        throw new Error('OPENAI_API_KEY is required unless --no-ai is used');
+/**
+ * Where to send the chat call. OpenRouter model ids are namespaced
+ * ("google/gemini-3-flash", "anthropic/claude-sonnet-5"), OpenAI's are not, so the
+ * slash selects the provider; REVIEW_EVAL_PROVIDER=openrouter forces it for the
+ * rare unnamespaced case. Lets a single --model flag A/B non-OpenAI candidates
+ * without touching the production services.
+ */
+function resolveChatTarget(model) {
+    const useOpenRouter = `${model}`.includes('/') || process.env.REVIEW_EVAL_PROVIDER === 'openrouter';
+    if (!useOpenRouter) {
+        const apiKey = process.env.OPENAI_API_KEY;
+        if (!apiKey || apiKey === 'your-openai-api-key-here') {
+            throw new Error('OPENAI_API_KEY is required unless --no-ai is used');
+        }
+        return { provider: 'openai', url: 'https://api.openai.com/v1/chat/completions', apiKey, extraHeaders: {} };
     }
+    const apiKey = process.env.OPENROUTER_API_KEY;
+    if (!apiKey) {
+        throw new Error(`OPENROUTER_API_KEY is required for provider-namespaced model "${model}"`);
+    }
+    return {
+        provider: 'openrouter',
+        url: 'https://openrouter.ai/api/v1/chat/completions',
+        apiKey,
+        // OpenRouter attributes usage to an app when these are present; harmless otherwise.
+        extraHeaders: { 'HTTP-Referer': 'https://github.com/dcowser3/MenuManager', 'X-Title': 'MenuManager review eval' },
+    };
+}
+
+async function callOpenAi({ model, temperature, seed, prompt, text }) {
+    const target = resolveChatTarget(model);
+    // Reasoning-class models (o-series, gpt-5 family incl. gpt-5.6-luna) reject a
+    // non-default temperature with a 400; they DO accept seed, so repeatability
+    // still comes from the seed + the response cache. Same test as
+    // isReasoningModel() in services/dashboard/lib/improvement-cycle-core.ts.
     const body = {
         model,
-        temperature,
+        ...(/o[0-9]|gpt-5|reasoning/i.test(model) ? {} : { temperature }),
         seed,
         messages: [
             { role: 'system', content: prompt },
@@ -438,18 +472,18 @@ async function callOpenAi({ model, temperature, seed, prompt, text }) {
     let lastError;
     for (let attempt = 0; attempt < 3; attempt += 1) {
         try {
-            const response = await fetch('https://api.openai.com/v1/chat/completions', {
+            const response = await fetch(target.url, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${target.apiKey}`, ...target.extraHeaders },
                 body: JSON.stringify(body),
             });
             if (response.status === 429 || response.status >= 500) {
-                lastError = new Error(`OpenAI ${response.status}: ${await response.text()}`);
+                lastError = new Error(`${target.provider} ${response.status}: ${await response.text()}`);
                 await new Promise((r) => setTimeout(r, 2000 * (attempt + 1)));
                 continue;
             }
             if (!response.ok) {
-                throw new Error(`OpenAI ${response.status}: ${(await response.text()).slice(0, 400)}`);
+                throw new Error(`${target.provider} ${response.status}: ${(await response.text()).slice(0, 400)}`);
             }
             const json = await response.json();
             return {
@@ -461,7 +495,7 @@ async function callOpenAi({ model, temperature, seed, prompt, text }) {
             await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)));
         }
     }
-    throw lastError || new Error('OpenAI call failed');
+    throw lastError || new Error(`${target.provider} call failed`);
 }
 
 function buildEchoFeedback(text) {
@@ -994,6 +1028,9 @@ async function main() {
             label: args.label,
             prompt: args.prompt,
             model: args.model,
+            // Which API served the call — comparing two reports means comparing
+            // providers too when one arm was routed through OpenRouter.
+            provider: args.ai ? resolveChatTarget(args.model).provider : 'none',
             ai: args.ai,
             temperature: args.temperature,
             seed: args.seed,

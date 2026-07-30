@@ -3085,7 +3085,11 @@ async function requestErrorReportAiTriage(report: ReturnType<typeof normalizeErr
         },
         body: JSON.stringify({
             model: ERROR_REPORT_TRIAGE_MODEL,
-            temperature: 0.2,
+            // This model falls back to IMPROVE_MODEL / AI_REVIEW_MODEL, so it
+            // inherits reasoning-class models (gpt-5 family), which reject a
+            // non-default temperature with a 400. Same test as isReasoningModel()
+            // in lib/improvement-cycle-core.ts.
+            ...(/o[0-9]|gpt-5|reasoning/i.test(ERROR_REPORT_TRIAGE_MODEL) ? {} : { temperature: 0.2 }),
             messages: [
                 {
                     role: 'system',

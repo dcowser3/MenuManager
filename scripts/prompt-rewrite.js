@@ -105,8 +105,12 @@ async function callLLM(systemPrompt, userPrompt) {
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userPrompt },
       ],
-      temperature: 0.3,
-      max_tokens: 16000,
+      // Reasoning-class models (o-series, gpt-5 family) reject a non-default
+      // temperature and require max_completion_tokens. Same test as
+      // isReasoningModel() in services/dashboard/lib/improvement-cycle-core.ts.
+      ...(/o[0-9]|gpt-5|reasoning/i.test(model)
+        ? { max_completion_tokens: 16000 }
+        : { temperature: 0.3, max_tokens: 16000 }),
     }),
   });
 
