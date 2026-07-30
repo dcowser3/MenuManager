@@ -703,28 +703,16 @@ async function main() {
             .eq('cycle_id', baseCycleId)
             .maybeSingle(),
         supabase.from('prompt_proposals')
-            .select('cycle_id, created_at')
+            .select('cycle_id, created_at, status')
             .in('source', ['improvement_cycle', 'consolidation'])
             .order('created_at', { ascending: false })
-            .limit(1),
+            .limit(10),
     ]);
     const pendingProposal = (pendingProposals || [])[0] || null;
 
-    // Cadence: the cron fires every night; this keeps the every-other-day rhythm
-    // while letting a night that failed retry itself the next night instead of
-    // waiting out a 48h cron gap.
-    const lastProposal = (lastProposals || [])[0] || null;
-    const cadence = core.shouldDeferForCadence({
-        lastProposalCreatedAt: lastProposal?.created_at,
-        nowMs: Date.now(),
-        minHours: Number(process.env.IMPROVE_MIN_HOURS_BETWEEN_PROPOSALS || 40),
-        // Manual invocations (force / consolidate / dry-run) are never rate-limited by cadence.
-        force: !!args.force || !!args.consolidate || !!args.dryRun,
-    });
-    if (cadence.defer) {
-        console.log(`Cadence: skipping — ${cadence.reason} (last proposal ${lastProposal?.cycle_id}).`);
-        return;
-    }
+    // Compute the run gate BEFORE cadence: a supersede (pending proposal + new
+    // corrections → refresh it) must be able to bypass the cadence clock, so the
+    // gate's decision is an input to the cadence check.
     const minNewCorrections = Number.parseInt(process.env.IMPROVE_MIN_NEW_CORRECTIONS || '1', 10);
     const gate = core.shouldRunCycle({
         unconsumedCorrectionCount: unconsumedCount || 0,
@@ -733,6 +721,29 @@ async function main() {
         force: !!args.force,
     });
     const supersedePending = gate.run && gate.mode === 'supersede' ? gate.pendingProposal : null;
+
+    // Cadence: the cron fires every night; this keeps the every-other-day rhythm
+    // while letting a night that failed retry itself the next night instead of
+    // waiting out a 48h cron gap. The anchor is the most recent proposal that
+    // consumed reviewer attention — rejected/superseded rows don't count (a
+    // rejected proposal must not buy 40h of silence). Refreshing an already-
+    // pending proposal (supersede) bypasses the clock entirely.
+    const supersedeEligible = gate.run && gate.mode === 'supersede';
+    const lastProposal = core.pickCadenceAnchor(lastProposals || []);
+    const cadence = core.shouldDeferForCadence({
+        lastProposalCreatedAt: lastProposal?.created_at,
+        nowMs: Date.now(),
+        minHours: Number(process.env.IMPROVE_MIN_HOURS_BETWEEN_PROPOSALS || 40),
+        // Manual invocations (force / consolidate / dry-run) are never rate-limited by cadence.
+        force: !!args.force || !!args.consolidate || !!args.dryRun,
+        supersedeEligible,
+    });
+    if (supersedeEligible) {
+        console.log(`Cadence: bypassed — supersede eligible (${gate.reason}).`);
+    } else if (cadence.defer) {
+        console.log(`Cadence: skipping — ${cadence.reason} (anchor ${lastProposal?.cycle_id || 'none'}).`);
+        return;
+    }
 
     if (existing && !args.force && existing.status === 'pending') {
         console.log(`Proposal already exists for ${baseCycleId} (status: pending); exiting.`);

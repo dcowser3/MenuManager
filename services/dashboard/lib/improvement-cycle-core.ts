@@ -58,6 +58,30 @@ export function shouldRunCycle(input: CycleGateInput): CycleGateResult {
 }
 
 /**
+ * Pick the proposal that anchors the cadence clock: the most recent one that
+ * actually consumed reviewer attention. Rejected and superseded proposals are
+ * skipped — a rejection is the reviewer saying "this didn't count," and a
+ * superseded proposal was replaced before it was ever acted on, so neither
+ * should buy IMPROVE_MIN_HOURS_BETWEEN_PROPOSALS of silence.
+ *
+ * Callers pass the latest few proposals (newest first); the first non-rejected,
+ * non-superseded row wins. A missing or unknown status counts as an anchor
+ * (fail toward deferral — an unreadable row must not open the floodgates).
+ * Returns null when every row is rejected/superseded.
+ */
+export function pickCadenceAnchor(
+    proposals: Array<{ cycle_id?: string; created_at?: string; status?: string }>
+): { cycle_id?: string; created_at?: string; status?: string } | null {
+    for (const proposal of proposals || []) {
+        if (!proposal) continue;
+        const status = `${proposal.status || ''}`.trim().toLowerCase();
+        if (status === 'rejected' || status === 'superseded') continue;
+        return proposal;
+    }
+    return null;
+}
+
+/**
  * Cadence gate. The cron runs DAILY; this decides whether enough time has passed
  * since the last proposal to make another one.
  *
@@ -67,15 +91,24 @@ export function shouldRunCycle(input: CycleGateInput): CycleGateResult {
  * and gating on "hours since the last proposal we actually produced" keeps the
  * every-other-day cadence reviewers asked for while letting a failed run retry
  * the next night on its own.
+ *
+ * The anchor is the most recent proposal that consumed reviewer attention —
+ * rejected and superseded proposals are excluded (via pickCadenceAnchor)
+ * because they never counted. A supersede-eligible run (a pending proposal
+ * being refreshed with new corrections) bypasses cadence entirely; the every-
+ * other-day rhythm still governs the normal new-proposal path.
  */
 export function shouldDeferForCadence(input: {
-    /** created_at of the most recent proposal produced by the cycle, any status. */
+    /** created_at of the cadence anchor: most recent attention-consuming proposal. */
     lastProposalCreatedAt?: string | null;
     nowMs: number;
     minHours: number;
     force?: boolean;
+    /** A pending proposal is being superseded with new corrections; cadence does not apply. */
+    supersedeEligible?: boolean;
 }): { defer: boolean; reason: string; hoursSince: number | null } {
     if (input.force) return { defer: false, reason: 'forced run', hoursSince: null };
+    if (input.supersedeEligible) return { defer: false, reason: 'supersede eligible; cadence bypassed', hoursSince: null };
     const minHours = Number.isFinite(input.minHours) ? Math.max(0, input.minHours) : 0;
     if (!minHours) return { defer: false, reason: 'cadence gate disabled', hoursSince: null };
     const raw = `${input.lastProposalCreatedAt || ''}`.trim();

@@ -32,6 +32,7 @@ import {
     countFencedCodeDelimiters,
     runImprovementProposalWithRetry,
     shouldDeferForCadence,
+    pickCadenceAnchor,
     isTransientOpenAiFailure,
     describePublicUrlMisconfiguration,
     isLoopbackBaseUrl,
@@ -66,6 +67,54 @@ describe('shouldDeferForCadence', () => {
         expect(shouldDeferForCadence({ lastProposalCreatedAt: null, nowMs: now, minHours: 40 }).defer).toBe(false);
         expect(shouldDeferForCadence({ lastProposalCreatedAt: 'not-a-date', nowMs: now, minHours: 40 }).defer).toBe(false);
         expect(shouldDeferForCadence({ lastProposalCreatedAt: hoursAgo(1), nowMs: now, minHours: 0 }).defer).toBe(false);
+    });
+
+    test('a supersede-eligible run bypasses cadence even inside the window', () => {
+        const res = shouldDeferForCadence({ lastProposalCreatedAt: hoursAgo(1), nowMs: now, minHours: 40, supersedeEligible: true });
+        expect(res.defer).toBe(false);
+        expect(res.reason).toContain('supersede eligible');
+    });
+
+    test('force still short-circuits ahead of the supersede check', () => {
+        expect(shouldDeferForCadence({ lastProposalCreatedAt: hoursAgo(1), nowMs: now, minHours: 40, force: true, supersedeEligible: false }).reason).toBe('forced run');
+    });
+
+    test('Jul 29→30 regression: anchor 24h ago still defers plain new-mode runs', () => {
+        // The anchor here is already the attention-consuming proposal (rejected rows are
+        // excluded upstream by pickCadenceAnchor). A plain new-proposal run must still wait.
+        const res = shouldDeferForCadence({ lastProposalCreatedAt: hoursAgo(24), nowMs: now, minHours: 40 });
+        expect(res.defer).toBe(true);
+    });
+});
+
+describe('pickCadenceAnchor', () => {
+    const row = (cycle_id: string, status: string, created_at = '2026-07-29T09:15:00Z') => ({ cycle_id, status, created_at });
+
+    test('skips a leading rejected row and returns the approved one behind it', () => {
+        const anchor = pickCadenceAnchor([
+            row('2026-07-29', 'rejected'),
+            row('2026-07-27', 'approved'),
+        ]);
+        expect(anchor?.cycle_id).toBe('2026-07-27');
+    });
+
+    test('skips a rejected+superseded chain to the first attention-consuming row', () => {
+        const anchor = pickCadenceAnchor([
+            row('2026-07-29', 'rejected'),
+            row('2026-07-28', 'superseded'),
+            row('2026-07-27', 'pending'),
+        ]);
+        expect(anchor?.cycle_id).toBe('2026-07-27');
+    });
+
+    test('returns null when every row is rejected or superseded', () => {
+        expect(pickCadenceAnchor([row('a', 'rejected'), row('b', 'superseded')])).toBeNull();
+        expect(pickCadenceAnchor([])).toBeNull();
+    });
+
+    test('a missing or unknown status counts as an anchor (fail toward deferral)', () => {
+        expect(pickCadenceAnchor([{ cycle_id: 'x', created_at: '2026-07-29T09:15:00Z' }])?.cycle_id).toBe('x');
+        expect(pickCadenceAnchor([row('y', 'weird-status')])?.cycle_id).toBe('y');
     });
 });
 
