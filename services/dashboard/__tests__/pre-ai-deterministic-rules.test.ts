@@ -40,6 +40,35 @@ describe('runPreAiDeterministicChecks', () => {
         ].join('\n'));
     });
 
+    it('pins brand orthography in both directions and treats ALL CAPS as no exemption', () => {
+        const result = runPreAiDeterministicChecks([
+            'PATRON EL ALTO 91',
+            'PATRÓN Extra Añejo, Añejo and Reposado',
+            'Patron Silver 15',
+            'JOSE CUERVO RESERVA DE LA FAMILIA 38',
+            'JOSÉ CUERVO ESPECIAL SILVER 55',
+            'José Cuervo Tradicional Plata 16',
+            'Familia Zuccardi Jose, Mendoza, Argentina 175',
+        ].join('\n'));
+
+        expect(result.menuText).toBe([
+            'PATRÓN EL ALTO 91',
+            'PATRÓN Extra Añejo, Añejo and Reposado',
+            'Patrón Silver 15',
+            'JOSE CUERVO RESERVA DE LA FAMILIA 38',
+            'JOSE CUERVO ESPECIAL SILVER 55',
+            'Jose Cuervo Tradicional Plata 16',
+            'Familia Zuccardi Jose, Mendoza, Argentina 175',
+        ].join('\n'));
+    });
+
+    it('leaves the English word "patrons" alone when pinning the Patrón brand', () => {
+        const result = runPreAiDeterministicChecks('Our patrons must be 21 years or older');
+
+        expect(result.menuText).toBe('Our patrons must be 21 years or older');
+        expect(result.appliedCorrections).toEqual([]);
+    });
+
     it('adds the cheese modifier to Cotija without duplicating or changing hyphenated forms', () => {
         const result = runPreAiDeterministicChecks([
             'Esquites, sweet yellow corn, spicy aioli, cotija, bacon* D 17',

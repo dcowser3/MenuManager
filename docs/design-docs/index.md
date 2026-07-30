@@ -13,6 +13,7 @@ Catalog of design decisions and feature documentation for Menu Manager.
 | [Approval Attestation](approval-attestation.md) | Complete | Required manager approval attestation before submission |
 | [Approved Dish Quality](approved-dish-quality.md) | Implemented | Provenance display, quality flags, idempotent extraction, and AI checks for questionable rows |
 | [Dish Name Formatting](dish-name-formatting.md) | Implemented | Deterministic dish-name bolding after Basic AI Check with conservative shared-extractor anchors |
+| [Diacritics Policy](diacritics-policy.md) | Implemented | ALL CAPS takes accents like any other case; brand orthography is pinned deterministically per brand (`Patrón` accented, `Jose Cuervo` not) |
 | [Revision / Modification Flow](revision-modification-flow.md) | Complete | Dual-path revision workflow with DB search or uploaded approved baseline DOCX |
 | [Submission Form Redesign](submission-form-redesign.md) | Implemented | Upload-first, progressively-revealed `/form`: upload drives the menu side-by-side, auto-filled details, approval, AI button, and a FLIP float-down |
 | [Reviewer Learning Loop](reviewer-learning-loop.md) | Complete (Phase 1) | Auto-learns recurring human reviewer corrections and injects stable rules into QA prompt |
