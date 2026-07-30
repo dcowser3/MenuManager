@@ -140,7 +140,7 @@ Deterministic pre-AI checks already apply approved exact spelling replacements a
 Continue to review for contextual spelling or terminology issues that cannot be safely handled by exact replacement rules:
 - "chili" vs. "chile" depends on whether the phrase is an English ingredient/cooking term or a named Spanish chile.
 - "tartar" vs. "tartare" depends on whether the item is a condiment or a raw protein preparation. Use "tartar" for sauces and "tartare" for raw protein dishes.
-- "mayo" vs. "aioli" is not an absolute replacement; flag only when the menu context clearly supports the change.
+- "mayo" vs. "aioli" is not an absolute replacement; flag only when the menu context clearly supports the change. For example, on a Mexican Street Corn item, it can be appropriate to correct "mayo" to "aioli" when the sauce is clearly an aioli-style flavored mayonnaise.
 - Word order and redundant-word issues should be suggestions unless the correction is objective and high confidence.
 
 Additional terms:
@@ -154,7 +154,7 @@ Additional terms:
 
 Deterministic pre-AI checks already apply the approved high-confidence diacritic allowlist and accepted human-learned diacritic rules. Do NOT re-report those already-applied deterministic edits as remaining suggestions.
 
-Continue to flag remaining accent or diacritic issues only when they are contextual, uncertain, or outside the deterministic allowlist. Be careful with words that can be valid with or without accents depending on context, such as "rose"/"rosé", "mas"/"más", "patron"/"Patrón", and property/name cases like "Lena"/"Leña".
+Continue to flag remaining accent or diacritic issues only when they are contextual, uncertain, or outside the deterministic allowlist. Be careful with words that can be valid with or without accents depending on context, such as "rose"/"rosé" (use "rosé" for wines and wine styles, but "rose" for the flower or floral flavor notes, e.g., "Honeyed Rose" cocktail), "mas"/"más", "patron"/"Patrón", and property/name cases like "Lena"/"Leña".
 
 ---
 
@@ -162,22 +162,20 @@ Continue to flag remaining accent or diacritic issues only when they are context
 
 #### 5.1 Hyphenation Rules
 
-**USE hyphens for compound adjective modifiers (adjective + past participle):**
-- sun-dried (tomato)
-- house-made
-- wood-fired
-- dashi-braised (bok choy)
-- adobo-marinated
-- karaage-style
-- Stir-Fried (Wagyu Beef)
-- Singaporean-style
-- Corn-Fed (Chicken)
-- 24-Hour Braised (Short Ribs) - time-based compounds use hyphens
+**THE TEST — apply this before consulting the example lists below.** Hyphenate a two-word compound when BOTH are true:
+1. The second word is a **past participle** — braised, dried, fired, marinated, seared, roasted, fed, infused, battered, smoked, cured, crusted, glazed, pressed, style.
+2. The pair sits **before** the noun it describes.
 
-**USE hyphens for compound cooking methods:**
-- stir-fried
-- pan-seared
-- slow-roasted
+The first word may be a **noun** (an ingredient, chile, region, or time: guajillo, dashi, adobo, corn, beer, mesquite) or an **adjective** (slow, house, sun, wood). Both take the hyphen — what triggers the rule is the past participle, not the part of speech of the first word.
+
+- Guajillo-Braised (Beef) — "guajillo" is an ingredient noun, "braised" is a past participle → hyphen
+- dashi-braised (bok choy), adobo-marinated (chicken), beer-battered (mahi), mesquite-grilled (steak)
+- sun-dried (tomato), house-made, wood-fired, slow-roasted, pan-seared, stir-fried
+- Corn-Fed (Chicken), Stir-Fried (Wagyu Beef), karaage-style, Singaporean-style
+- jalapeño-infused (blanco) and similar "[ingredient]-infused" compounds when they function as modifiers before a noun
+- 24-Hour Braised (Short Ribs) — the time compound "24-Hour" takes the hyphen; "Braised" then stands alone. This is NOT a precedent for leaving "[ingredient] Braised" unhyphenated.
+
+**Title case does not change the rule.** "Guajillo Braised Beef" in a Title Case dish name is corrected to "Guajillo-Braised Beef" exactly as "guajillo braised beef" would be.
 
 **USE hyphens for compound flavor modifiers before nouns:**
 - miso-guajillo (marinade)
@@ -185,16 +183,18 @@ Continue to flag remaining accent or diacritic issues only when they are context
 - yuzu-chipotle (dressing)
 - lime-chili (dressing)
 
-**DO NOT use hyphens for ingredient combinations:**
+**DO NOT use hyphens for ingredient combinations (noun + noun, no participle):**
 - peanut guajillo (NOT peanut-guajillo)
 - mango chipotle (NOT mango-chipotle)
 - lime cilantro (NOT lime-cilantro)
 - guajillo macha (NOT guajillo-macha) - Exception: if part of a sauce name like "guajillo–macha sauce"
 
+**How to tell the two apart.** A word appearing in the DO-NOT list is not banned from ever being hyphenated — it is left open only when paired with another plain ingredient noun. "guajillo macha" is ingredient + ingredient, so it stays open. "Guajillo-Braised" is ingredient + past participle, so it takes the hyphen. Check the second word first: if it is a past participle, THE TEST above governs and the DO-NOT list does not apply.
+
 **CRITICAL — Preserve ingredient separators exactly as written:**
 - DO NOT change hyphens to commas or vice versa (e.g., keep "pineapple-habanero sauce" exactly as-is)
-- DO NOT split compound words with hyphens unless a specific rule above applies
-- Only apply the hyphenation rules above when the pattern clearly matches; when in doubt, preserve the original punctuation
+- DO NOT split a single word into hyphenated parts
+- "When in doubt, preserve the original punctuation" applies to punctuation you cannot classify. It does NOT override THE TEST above, which is a definite rule: a modifier + past participle before a noun is a missing hyphen, not an ambiguous case.
 - Every change to ingredient separators or punctuation MUST be flagged as a correction — never silently rewrite
 
 #### 5.2 Redundant Words to AVOID (Flag as Suggestions)
@@ -237,6 +237,7 @@ When a dish name includes both protein and preparation method, the preparation/s
 #### 6.2 Ingredients = SINGULAR
 - cherry tomato, almond, arugula (not cherry tomatoes, almonds)
 - mushroom (NOT mushrooms), sesame seed (NOT sesame seeds) when listing ingredients
+- potato (NOT potatoes), carrot (NOT carrots) when listing ingredients like "rainbow potato" or "pickled carrot"
 - Adjectives modifying plural nouns stay singular: "Vegetable Spring Roll" (NOT "Vegetables Spring Roll")
 
 #### 6.3 Exceptions (Always Plural)
@@ -403,7 +404,7 @@ When reviewing menu text:
 4. **Add raw/undercooked item asterisks** for ambiguous cases still missing after deterministic pre-AI checks (Section 8). Also include a suggestion so the reviewer sees the change.
 5. **Check plural/singular** usage (Section 6) - MEDIUM CONFIDENCE
 6. **Flag redundant words** (Section 5.2) - MEDIUM CONFIDENCE
-7. **Fix hyphenation** per rules (Section 5.1) - MEDIUM CONFIDENCE
+7. **Fix hyphenation** per rules (Section 5.1) - MEDIUM CONFIDENCE, except a modifier + past participle before a noun ("Guajillo Braised Beef" → "Guajillo-Braised Beef"), which is HIGH CONFIDENCE and MUST be applied in CORRECTED MENU
 8. **Flag duplicate menu items** - if same dish appears twice, flag for review - MEDIUM CONFIDENCE
 9. **Suggest "cheese" modifier** where missing (Section 5.3) - LOW CONFIDENCE
 10. **Validate pricing**: Every dish must have a price unless it is inside a full-menu prix fixe or an embedded set-menu section. Bare item prices inside embedded set-menu sections are critical "Set Menu Item Price" issues; explicit plus-price premiums are allowed.
