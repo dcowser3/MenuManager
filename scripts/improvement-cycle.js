@@ -423,7 +423,18 @@ function makeReplayAiCaller({ model, temperature, seed, cacheDir }) {
         if (!apiKey || apiKey === 'your-openai-api-key-here') {
             throw new Error('OPENAI_API_KEY required for replay');
         }
-        const body = { model, temperature, seed, messages: [{ role: 'system', content: prompt }, { role: 'user', content: `Here is the menu text to review:\n\n---\n\n${text}` }] };
+        // Reasoning-class models reject a non-default temperature with a 400. This
+        // caller resolves REVIEW_EVAL_MODEL || AI_REVIEW_MODEL, so the moment
+        // production review moved to gpt-5.6-luna every replay would 400 — and the
+        // catch in the caller turns that into `replay_unavailable` for every
+        // correction, silently gutting the cycle's evidence step. Same test as
+        // isReasoningModel() in services/dashboard/lib/improvement-cycle-core.ts.
+        const body = {
+            model,
+            ...(/o[0-9]|gpt-5|reasoning/i.test(model) ? {} : { temperature }),
+            seed,
+            messages: [{ role: 'system', content: prompt }, { role: 'user', content: `Here is the menu text to review:\n\n---\n\n${text}` }],
+        };
         let lastErr;
         for (let attempt = 0; attempt < 3; attempt += 1) {
             try {
@@ -679,6 +690,7 @@ async function main() {
     const args = parseArgs(process.argv.slice(2));
     const core = requireDashboardLib('improvement-cycle-core');
     const manifestLib = requireDashboardLib('review-rules-manifest');
+    const executorModel = process.env.AI_REVIEW_MODEL || 'gpt-4o-mini';
     const supabase = getSupabase();
     const baseCycleId = new Date().toISOString().slice(0, 10);
     let cycleId = baseCycleId;
@@ -1069,7 +1081,7 @@ async function main() {
                 '## Code Rules Manifest (deterministic layers — you cannot edit these, but propose changes against them)',
                 manifestMarkdown,
             ].join('\n');
-            systemPromptToUse = core.CONSOLIDATION_SYSTEM_PROMPT;
+            systemPromptToUse = core.buildConsolidationSystemPrompt({ executorModel });
             console.log(`LLM context size (consolidation): ~${(systemPromptToUse.length + userPrompt.length).toLocaleString()} chars`);
         } else {
             const replayByCorrId = new Map(replayEvidence.map((e) => [e.correction_id, e]));
@@ -1121,9 +1133,10 @@ async function main() {
                 priorEvalContext,
                 priorRejectionContext ? `\n## Prior Rejected Attempts (feedback for this cycle)\n${priorRejectionContext}` : '',
             ].join('\n');
-            systemPromptToUse = core.IMPROVEMENT_SYSTEM_PROMPT;
+            systemPromptToUse = core.buildImprovementSystemPrompt({ executorModel });
             console.log(`LLM context size: ~${(systemPromptToUse.length + userPrompt.length).toLocaleString()} chars`);
         }
+        console.log(`Executor model in assembled system prompt: ${executorModel}`);
 
         // C1: inject the exact fence count to preserve (computed at assembly time) so the model
         // is told, up front and on every retry, exactly how many fenced blocks must survive.
@@ -1134,6 +1147,7 @@ async function main() {
             const dryDir = path.join(repoRoot, 'tmp', 'improvement-cycle', `${cycleId}-dry-run`);
             await fsp.mkdir(dryDir, { recursive: true });
             await fsp.writeFile(path.join(dryDir, 'user_prompt.txt'), userPrompt);
+            await fsp.writeFile(path.join(dryDir, 'system_prompt.txt'), systemPromptToUse);
             console.log(`Dry run: context written to ${dryDir}; no LLM call, no proposal.`);
             return;
         }
