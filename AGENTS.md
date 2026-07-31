@@ -1,5 +1,7 @@
 # AGENTS.md
 
+All your Responses: summarize task completion prioritizing brevity
+
 > AI-powered menu submission review and approval system for chefs worldwide.
 
 This file is the canonical agent-instruction document for the repo. Keep it small. Load topic-specific docs (see [Topic Pointers](#topic-pointers) below) only when the work actually touches that area.
