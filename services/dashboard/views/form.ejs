@@ -3083,6 +3083,31 @@
             return headers;
         }
 
+        // Read a fetch() Response as JSON without letting a non-JSON body (e.g. an
+        // HTML error page from a proxy 502/413 or an unhandled server error) surface
+        // as a confusing "Unexpected token '<'" parse error. On a non-OK response we
+        // prefer the server's JSON `error` message, then fall back to a clean message.
+        async function readJsonResponse(response, fallbackMessage) {
+            const contentType = response.headers.get('content-type') || '';
+            const rawText = await response.text();
+            let data = null;
+            if (contentType.includes('application/json')) {
+                try {
+                    data = rawText ? JSON.parse(rawText) : {};
+                } catch (_) {
+                    data = null;
+                }
+            }
+            if (!response.ok) {
+                const serverMessage = data && (data.error || data.message);
+                throw new Error(serverMessage || fallbackMessage || ('Request failed (HTTP ' + response.status + ')'));
+            }
+            if (data === null) {
+                throw new Error(fallbackMessage || 'The server returned an unexpected response. Please try again.');
+            }
+            return data;
+        }
+
         function getAttemptMetadata(extra) {
             return {
                 attemptId: formAttemptId,
@@ -4657,10 +4682,7 @@
                     headers: getAttemptHeaders(options.headers || {}),
                     body: form,
                 });
-                const data = await response.json();
-                if (!response.ok) {
-                    throw new Error(data.error || options.failureMessage);
-                }
+                const data = await readJsonResponse(response, options.failureMessage);
 
                 return { data, file, status: response.status };
             } catch (error) {
@@ -4866,10 +4888,7 @@
                     headers: getAttemptHeaders({ 'x-menumanager-revision-source': 'uploaded_unapproved' }),
                     body: form,
                 });
-                const data = await response.json();
-                if (!response.ok) {
-                    throw new Error(data.error || 'Failed to extract unapproved document');
-                }
+                const data = await readJsonResponse(response, 'Failed to extract unapproved document');
 
                 unapprovedMode = true;
                 unapprovedAnnotations = data.annotations || [];
@@ -4969,10 +4988,7 @@
                     headers: getAttemptHeaders({ 'x-menumanager-revision-source': 'uploaded_unapproved' }),
                     body: form,
                 });
-                const data = await response.json();
-                if (!response.ok) {
-                    throw new Error(data.error || 'Failed to extract menu document');
-                }
+                const data = await readJsonResponse(response, 'Failed to extract menu document');
 
                 applyUnapprovedUploadData(data, file);
                 menuUploaded = true;

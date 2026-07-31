@@ -2721,7 +2721,11 @@ async function requestErrorReportAiTriage(report, incident) {
         },
         body: JSON.stringify({
             model: ERROR_REPORT_TRIAGE_MODEL,
-            temperature: 0.2,
+            // This model falls back to IMPROVE_MODEL / AI_REVIEW_MODEL, so it
+            // inherits reasoning-class models (gpt-5 family), which reject a
+            // non-default temperature with a 400. Same test as isReasoningModel()
+            // in lib/improvement-cycle-core.ts.
+            ...(/o[0-9]|gpt-5|reasoning/i.test(ERROR_REPORT_TRIAGE_MODEL) ? {} : { temperature: 0.2 }),
             messages: [
                 {
                     role: 'system',
@@ -3402,6 +3406,10 @@ async function handleBasicCheck(req, res) {
             aiResponse: {
                 status: qaResponse?.status,
                 statusText: qaResponse?.statusText,
+                // Which model actually produced this review, as reported by
+                // ai-review. Needed to attribute review quality to a model after a
+                // model switch; null for responses from a pre-2026-07-30 ai-review.
+                model: qaResponse?.data?.model || null,
                 rawFeedbackLength: `${feedback || ''}`.length,
                 rawFeedback: feedback || '',
             },
@@ -4605,6 +4613,73 @@ async function syncEffectivePromptFromDb() {
         console.warn('Effective-prompt sync skipped:', error?.message || error);
     }
 }
+// Final JSON error handler. Registered AFTER every route so it can catch errors
+// thrown by route middleware (multer, etc.) — the body-parser error handler near
+// the top of the file runs earlier in the stack and cannot see these. Without this,
+// a multer failure (e.g. LIMIT_FILE_SIZE on the /api/**-upload routes) falls through
+// to Express's default handler, which returns an HTML page. Clients that call
+// `response.json()` then choke with `Unexpected token '<', "<html> ..."`, masking the
+// real cause (see the unapproved-upload incident). Always answer these with JSON.
+app.use((error, req, res, next) => {
+    if (res.headersSent) {
+        return next(error);
+    }
+    if (error instanceof multer_1.default.MulterError) {
+        const isFileSize = error.code === 'LIMIT_FILE_SIZE';
+        const statusCode = isFileSize ? 413 : 400;
+        const maxUploadMb = Math.round(upload_security_1.MAX_UPLOAD_BYTES / (1024 * 1024));
+        const clientMessage = isFileSize
+            ? `File is too large. The maximum upload size is ${maxUploadMb} MB. Reduce embedded images or email ${PUBLIC_FORM_SUPPORT_EMAIL} if the document must exceed this.`
+            : `Upload rejected (${error.code}). Please check the file and try again, or email ${PUBLIC_FORM_SUPPORT_EMAIL}.`;
+        const attemptEvent = {
+            attemptId: req.get('x-menumanager-attempt-id'),
+            eventType: 'upload_rejected',
+            route: req.originalUrl || req.url,
+            statusCode,
+            submitterEmail: req.get('x-menumanager-submitter-email'),
+            projectName: req.get('x-menumanager-project'),
+            property: req.get('x-menumanager-property'),
+            submissionMode: req.get('x-menumanager-submit-mode'),
+            revisionSource: req.get('x-menumanager-revision-source'),
+            details: {
+                multerCode: error.code,
+                multerField: error.field || null,
+                maxUploadBytes: upload_security_1.MAX_UPLOAD_BYTES,
+                contentLength: req.get('content-length') || null,
+                method: req.method,
+            },
+            errorMessage: error.message,
+        };
+        void (0, form_attempt_logging_1.logFormAttemptEvent)(attemptEvent);
+        sendFormAttemptFailureEmail(attemptEvent);
+        sendAdminAlert({
+            alert_type: 'form_upload_rejected',
+            severity: 'warning',
+            service: 'dashboard',
+            message: `Upload rejected (${error.code}) on ${req.originalUrl || req.url}`,
+            details: {
+                attemptId: req.get('x-menumanager-attempt-id') || null,
+                route: req.originalUrl || req.url,
+                multerCode: error.code,
+                contentLength: req.get('content-length') || null,
+                submitterEmail: req.get('x-menumanager-submitter-email') || null,
+                projectName: req.get('x-menumanager-project') || null,
+                property: req.get('x-menumanager-property') || null,
+                submissionMode: req.get('x-menumanager-submit-mode') || null,
+                revisionSource: req.get('x-menumanager-revision-source') || null,
+                maxUploadBytes: upload_security_1.MAX_UPLOAD_BYTES,
+            },
+        });
+        return res.status(statusCode).json({ error: clientMessage });
+    }
+    // Any other unhandled error: still answer API/JSON callers with JSON so they get
+    // the status and a message instead of an HTML page they cannot parse.
+    console.error(`Unhandled error on ${req.method} ${req.originalUrl || req.url}:`, error?.message || error);
+    return res.status(error?.status || error?.statusCode || 500).json({
+        error: 'Something went wrong processing this request.',
+        details: error?.message,
+    });
+});
 if (require.main === module) {
     void ensureRuntimePromptSeed().then(() => syncEffectivePromptFromDb());
     app.listen(port, () => {
