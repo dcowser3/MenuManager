@@ -168,6 +168,7 @@ const FUNCTIONAL_ENTRIES: ManifestRuleEntry[] = [
         examples: [
             { before: 'picked herbs', after: 'picked herbs' },
             { before: 'twice-baked', after: 'twice-baked' },
+            { before: 'marinated 24 hours', after: 'marinated 24 hours' },
         ],
         implementation: { file: 'services/dashboard/lib/protected-terms-guard.ts', exportName: 'restoreProtectedTerms' },
         source: 'code_metadata',

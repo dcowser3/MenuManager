@@ -18,4 +18,11 @@ describe('restoreProtectedTerms', () => {
 
         expect(restoreProtectedTerms(original, corrected).correctedMenu).toBe(original);
     });
+
+    test('protects menu voice in marinated 24 hours', () => {
+        const original = 'Chicken, half bird marinated 24 hours, lemon jus 32';
+        const corrected = 'Chicken, half bird marinated for 24 hours, lemon jus 32';
+
+        expect(restoreProtectedTerms(original, corrected).correctedMenu).toBe(original);
+    });
 });

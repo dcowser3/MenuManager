@@ -1528,6 +1528,10 @@
         {
           "before": "twice-baked",
           "after": "twice-baked"
+        },
+        {
+          "before": "marinated 24 hours",
+          "after": "marinated 24 hours"
         }
       ],
       "implementation": {

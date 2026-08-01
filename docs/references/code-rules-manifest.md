@@ -264,6 +264,7 @@ The full deterministic pre-AI pass is re-applied to the AI-corrected menu so the
 Restores protected phrases that were present in the submitted menu if the AI rewrites them in its corrected-menu output. This guard is anchored to the original line and runs before the remaining post-AI guards.
 - `picked herbs` -> `picked herbs`
 - `twice-baked` -> `twice-baked`
+- `marinated 24 hours` -> `marinated 24 hours`
 
 - id: `post-ai/protected-terms` · category: protected_terms · implementation: `services/dashboard/lib/protected-terms-guard.ts#restoreProtectedTerms`
 

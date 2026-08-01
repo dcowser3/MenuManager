@@ -1,4 +1,4 @@
-export const PROTECTED_TERMS = ['picked herbs', 'twice-baked'] as const;
+export const PROTECTED_TERMS = ['picked herbs', 'twice-baked', 'marinated 24 hours'] as const;
 
 export type ProtectedTermGuardResult = {
     correctedMenu: string;
@@ -20,6 +20,10 @@ function normalizedProtectionText(value: string): string {
         .replace(/[\u0300-\u036f]/g, '')
         .toLowerCase()
         .replace(/[^a-z0-9]/g, '');
+}
+
+function normalizedProtectionTextWithoutOptionalFor(value: string): string {
+    return normalizedProtectionText(`${value || ''}`.replace(/\bfor\b/gi, ''));
 }
 
 function editDistance(left: string, right: string): number {
@@ -67,7 +71,10 @@ function restoreProtectedTermOnLine(
                 const candidateText = nextLine.slice(tokens[tokenStart].start, tokens[tokenEnd].end);
                 const candidateNormalized = normalizedProtectionText(candidateText);
                 if (!candidateNormalized) continue;
-                const distance = editDistance(target, candidateNormalized);
+                const distance = Math.min(
+                    editDistance(target, candidateNormalized),
+                    editDistance(target, normalizedProtectionTextWithoutOptionalFor(candidateText))
+                );
                 if (distance > 1) continue;
                 const positionDistance = Math.abs(tokenStart - originalWordIndex);
                 if (!best || distance < best.distance || (distance === best.distance && positionDistance < best.positionDistance)) {
