@@ -137,13 +137,13 @@ describe('runPreAiDeterministicChecks', () => {
         ].join('\n'));
 
         expect(result.menuText).toBe([
-            'Hollandaise Sauce, egg yolk, butter* 15',
-            'Béarnaise Sauce, egg yolk, tarragon* 16',
-            'Steak Frites, fries, traditional Caesar dressing* 24',
-            'Tiramisu, mascarpone, espresso* 12',
-            'Tostada, cured egg yolk, avocado* 15',
-            'Meringue, berries, cream* 10',
-            'Whiskey Sour, lemon, egg white* 14',
+            'Hollandaise Sauce*, egg yolk, butter 15',
+            'Béarnaise Sauce*, egg yolk, tarragon 16',
+            'Steak Frites*, fries, traditional Caesar dressing 24',
+            'Tiramisu*, mascarpone, espresso 12',
+            'Tostada*, cured egg yolk, avocado 15',
+            'Meringue*, berries, cream 10',
+            'Whiskey Sour*, lemon, egg white 14',
         ].join('\n'));
     });
 
