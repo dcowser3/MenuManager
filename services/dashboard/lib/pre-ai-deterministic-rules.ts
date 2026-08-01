@@ -646,7 +646,12 @@ function shouldAddRawAsterisk(line: string): boolean {
 }
 
 function addRawAsterisk(line: string): string {
-    return normalizeRawAsteriskPlacementForLine(`${line.trimEnd()} *`);
+    const trimmed = line.trimEnd();
+    const descriptionComma = trimmed.search(/,\s*(?=[^,]*\p{Ll})/u);
+    if (descriptionComma > 0) {
+        return `${trimmed.slice(0, descriptionComma).trimEnd()}*${trimmed.slice(descriptionComma)}`;
+    }
+    return normalizeRawAsteriskPlacementForLine(`${trimmed} *`);
 }
 
 export function getAcceptedCorrectionRulePreAiEligibility(rule: AcceptedCorrectionRule): AcceptedCorrectionRulePreAiEligibility {

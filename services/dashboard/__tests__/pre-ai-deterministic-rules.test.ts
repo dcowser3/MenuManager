@@ -120,7 +120,7 @@ describe('runPreAiDeterministicChecks', () => {
         ].join('\n'));
 
         expect(result.menuText).toBe([
-            '14 oz Wagyu Ribeye, red chile truffle butter, crispy potatoes* 68',
+            '14 oz Wagyu Ribeye*, red chile truffle butter, crispy potatoes 68',
             'Longbone Pork Ribeye*, tomatillo, hominy, spiced agave, grilled corn 40',
         ].join('\n'));
     });
@@ -166,8 +166,8 @@ describe('runPreAiDeterministicChecks', () => {
             'Veggie Burger, lettuce V 18',
             'TORO TORO TRES LECHES D,E,G,TN,V',
             'Tres Leches Cake D,G,V 12',
-            'Avocado Toast, poached egg, sourdough* G 19',
-            'Huevos Rancheros, sunny side up egg* D 22',
+            'Avocado Toast*, poached egg, sourdough G 19',
+            'Huevos Rancheros*, sunny side up egg D 22',
         ].join('\n'));
         expect(result.appliedCorrections).toEqual(expect.arrayContaining([
             expect.objectContaining({
@@ -184,12 +184,12 @@ describe('runPreAiDeterministicChecks', () => {
             expect.objectContaining({
                 type: 'Raw Item',
                 original: 'Avocado Toast, poached egg, sourdough G 19',
-                corrected: 'Avocado Toast, poached egg, sourdough* G 19',
+                corrected: 'Avocado Toast*, poached egg, sourdough G 19',
             }),
             expect.objectContaining({
                 type: 'Raw Item',
                 original: 'Huevos Rancheros, sunny side up egg D 22',
-                corrected: 'Huevos Rancheros, sunny side up egg* D 22',
+                corrected: 'Huevos Rancheros*, sunny side up egg D 22',
             }),
         ]));
     });
@@ -235,7 +235,7 @@ describe('runPreAiDeterministicChecks', () => {
         expect(result.menuText).toBe([
             'Shrimp Cocktail Ceviche, poached marinated shrimp, aguachile rojo, avocado S 26',
             'Temptation Oysters, spinach butter, jalapeño, parmesan, panko D,G,S 28',
-            'Oysters on the Half Shell, mignonette* S 24',
+            'Oysters on the Half Shell*, mignonette S 24',
         ].join('\n'));
         expect(result.appliedCorrections.filter((c) => c.type === 'Raw Item')).toHaveLength(1);
     });
