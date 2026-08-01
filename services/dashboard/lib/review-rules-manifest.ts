@@ -90,7 +90,7 @@ const FUNCTIONAL_ENTRIES: ManifestRuleEntry[] = [
         layer: 'pre_ai_deterministic',
         category: 'raw_markers',
         title: 'Missing raw-marker insertion for strong raw terms',
-        description: 'Adds a missing raw marker to dishes containing strong raw/undercooked terms: tartare, sashimi, raw/uncooked ceviche, crudo, tiradito, poke, raw or half-shell oysters, explicit raw tuna/salmon/hamachi/fish/beef, poached egg, sunny-side-up egg.',
+        description: 'Adds a missing raw marker to dishes containing strong raw/undercooked terms: tartare, sashimi, raw/uncooked ceviche, crudo, tiradito, poke, raw or half-shell oysters, explicit raw tuna/salmon/hamachi/fish/beef, poached egg, sunny-side-up egg, hollandaise, bearnaise/béarnaise, Caesar dressing, tiramisu, cured egg yolk, meringue, and egg white. Newly added egg-preparation terms are excluded when the same line states braised, slow-roasted, confit, or well-done.',
         examples: [{ before: 'salmon sashimi, ponzu 19', after: 'salmon sashimi, ponzu* 19' }],
         implementation: { file: PRE_AI_FILE, exportName: 'shouldAddRawAsterisk' },
         source: 'code_metadata',

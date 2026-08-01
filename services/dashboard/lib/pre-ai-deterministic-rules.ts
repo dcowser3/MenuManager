@@ -633,6 +633,10 @@ function shouldAddRawAsterisk(line: string): boolean {
     if (/\boysters?\b/.test(normalized) && !/\b(?:raw\s+oysters?|oysters?\s+on\s+the\s+half\s+shell|half[-\s]shell\s+oysters?)\b/.test(normalized)) {
         return false;
     }
+    const hasNewRawEggTerm = /\b(?:hollandaise|bearnaise|béarnaise|caesar\s+dressing|tiramisu|cured\s+egg\s+yolk|meringue|egg[-\s]+white)\b/.test(normalized);
+    if (hasNewRawEggTerm && /\b(?:braised|slow[-\s]?roasted|confit|well[-\s]?done)\b/.test(normalized)) {
+        return false;
+    }
     if (/:/.test(line) && /\b[A-Z]{1,3}\s*,/.test(line)) {
         return false;
     }
@@ -642,7 +646,7 @@ function shouldAddRawAsterisk(line: string): boolean {
     if (!hasPrice && (!hasTrailingAllergenCluster || !hasDescriptionComma)) {
         return false;
     }
-    return /\b(?:sashimi|tartare|carpaccio|crudo|ceviche|tiradito|poke|raw\s+(?:tuna|salmon|hamachi|fish|beef|oysters?)|oysters?\s+on\s+the\s+half\s+shell|half[-\s]shell\s+oysters?|sunny[-\s]side(?:[-\s]up)?\s+eggs?|sunny[-\s]side[-\s]up|poached\s+eggs?|soft[-\s]boiled|rib[-\s]?eye)\b/i.test(line);
+    return /\b(?:sashimi|tartare|carpaccio|crudo|ceviche|tiradito|poke|raw\s+(?:tuna|salmon|hamachi|fish|beef|oysters?)|oysters?\s+on\s+the\s+half\s+shell|half[-\s]shell\s+oysters?|sunny[-\s]side(?:[-\s]up)?\s+eggs?|sunny[-\s]side[-\s]up|poached\s+eggs?|soft[-\s]boiled|rib[-\s]?eye|hollandaise|bearnaise|béarnaise|caesar\s+dressing|tiramisu|cured\s+egg\s+yolk|meringue|egg[-\s]+white)\b/i.test(line);
 }
 
 function addRawAsterisk(line: string): string {

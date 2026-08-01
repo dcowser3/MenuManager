@@ -125,6 +125,45 @@ describe('runPreAiDeterministicChecks', () => {
         ].join('\n'));
     });
 
+    it('adds markers for SOP-listed raw egg preparations', () => {
+        const result = runPreAiDeterministicChecks([
+            'Hollandaise Sauce, egg yolk, butter 15',
+            'Béarnaise Sauce, egg yolk, tarragon 16',
+            'Steak Frites, fries, traditional Caesar dressing 24',
+            'Tiramisu, mascarpone, espresso 12',
+            'Tostada, cured egg yolk, avocado 15',
+            'Meringue, berries, cream 10',
+            'Whiskey Sour, lemon, egg white 14',
+        ].join('\n'));
+
+        expect(result.menuText).toBe([
+            'Hollandaise Sauce, egg yolk, butter* 15',
+            'Béarnaise Sauce, egg yolk, tarragon* 16',
+            'Steak Frites, fries, traditional Caesar dressing* 24',
+            'Tiramisu, mascarpone, espresso* 12',
+            'Tostada, cured egg yolk, avocado* 15',
+            'Meringue, berries, cream* 10',
+            'Whiskey Sour, lemon, egg white* 14',
+        ].join('\n'));
+    });
+
+    it('excludes newly added raw egg terms when the line states a cooking method', () => {
+        const result = runPreAiDeterministicChecks([
+            'Braised Beef, hollandaise, potatoes 24',
+            'Slow-Roasted Chicken, Caesar dressing, herbs 22',
+            'Confit Duck, meringue, fruit 26',
+            'Well-Done Steak, bearnaise, fries 30',
+        ].join('\n'));
+
+        expect(result.menuText).toBe([
+            'Braised Beef, hollandaise, potatoes 24',
+            'Slow-Roasted Chicken, Caesar dressing, herbs 22',
+            'Confit Duck, meringue, fruit 26',
+            'Well-Done Steak, bearnaise, fries 30',
+        ].join('\n'));
+        expect(result.appliedCorrections.filter((c) => c.type === 'Raw Item')).toHaveLength(0);
+    });
+
     it('keeps raw asterisks attached to the last dish-name word', () => {
         const result = runPreAiDeterministicChecks([
             'Hamachi New Style Sashimi * CE,F,G,MU 98',
