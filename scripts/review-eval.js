@@ -32,6 +32,8 @@
  *                              "anthropic/claude-sonnet-5") routes through OpenRouter and
  *                              needs OPENROUTER_API_KEY; plain ids go to OpenAI directly.
  *                              REVIEW_EVAL_PROVIDER=openrouter forces OpenRouter routing.
+ *   --baseline-model <model>   Model for the baseline arm's confirmation re-run
+ *                              (default: the candidate --model).
  *   --rules live|snapshot:<f>|candidate:<f>   Accepted correction-rules source (default live)
  *   --no-deterministic         Disable the deterministic pre/post passes
  *   --no-ai                    Skip the AI call (echo feedback); deterministic-only eval
@@ -52,6 +54,8 @@
  *   --baseline-prompt <file>   Baseline prompt for back-to-back regression confirmation
  *                              (usually the current/effective prompt the baseline used).
  *   --baseline-rules <spec>    Baseline correction-rules source for confirmation (default live)
+ *   --ablation-limit <n>       Cases per omitted prompt section for --ablate-sections (default 3)
+ *   --concurrency <n>          Concurrent case evaluations (default 1)
  *   --no-confirm-regressions   Skip confirmation. By default, each flagged regression is
  *                              re-checked by re-running the BASELINE and CANDIDATE configs
  *                              back-to-back (same time window) and kept only if the candidate
@@ -73,6 +77,11 @@ require('dotenv').config({ path: path.join(repoRoot, '.env') });
 const defaultOutRoot = path.join(repoRoot, 'tmp', 'review-eval');
 const defaultDatasetPath = path.join(defaultOutRoot, 'dataset.jsonl');
 const cacheDir = path.join(defaultOutRoot, 'cache');
+const {
+    classifyMaterialDisagreement,
+    summarizeMaterialDisagreements,
+    sortMaterialDisagreements,
+} = require('./review-eval-helpers');
 
 // ---------------------------------------------------------------------------
 // Library loading (ts-node first, dist fallback) -- same pattern as ab-replay.
@@ -94,6 +103,19 @@ function requireLib(service, relPath) {
     return require(distPath);
 }
 
+function requireLlmAdapter() {
+    const sourcePath = path.join(repoRoot, 'services', 'llm-adapter', 'src', 'index.ts');
+    try {
+        const tsNodeRegister = require.resolve('ts-node/register/transpile-only', { paths: [repoRoot] });
+        require(tsNodeRegister);
+        return require(sourcePath);
+    } catch {
+        const distPath = path.join(repoRoot, 'services', 'llm-adapter', 'dist', 'index.js');
+        if (fs.existsSync(distPath)) return require(distPath);
+        throw new Error('LLM adapter unavailable; run npm run build --workspace=services/llm-adapter');
+    }
+}
+
 // ---------------------------------------------------------------------------
 function parseArgs(argv) {
     const args = {
@@ -103,6 +125,7 @@ function parseArgs(argv) {
         source: 'all',
         prompt: path.join(repoRoot, 'sop-processor', 'qa_prompt.txt'),
         model: process.env.REVIEW_EVAL_MODEL || process.env.AI_REVIEW_MODEL || 'gpt-5.6-luna',  // B5: pin a dated snapshot matching prod AI_REVIEW_MODEL for eval fidelity
+        baselineModel: '',
         rules: 'live',
         deterministic: true,
         ai: true,
@@ -122,6 +145,8 @@ function parseArgs(argv) {
         baselinePrompt: '',
         baselineRules: 'live',
         ablateSections: false,
+        ablationLimit: 3,
+        concurrency: 1,
     };
     for (let i = 0; i < argv.length; i += 1) {
         const arg = argv[i];
@@ -131,6 +156,7 @@ function parseArgs(argv) {
         else if (arg === '--source') args.source = argv[++i] || args.source;
         else if (arg === '--prompt') args.prompt = path.resolve(argv[++i] || args.prompt);
         else if (arg === '--model') args.model = argv[++i] || args.model;
+        else if (arg === '--baseline-model') args.baselineModel = argv[++i] || args.baselineModel;
         else if (arg === '--rules') args.rules = argv[++i] || args.rules;
         else if (arg === '--no-deterministic') args.deterministic = false;
         else if (arg === '--no-ai') args.ai = false;
@@ -145,12 +171,16 @@ function parseArgs(argv) {
         else if (arg === '--no-confirm-regressions') args.confirmRegressions = false;
         else if (arg === '--baseline-prompt') args.baselinePrompt = path.resolve(argv[++i] || '');
         else if (arg === '--baseline-rules') args.baselineRules = argv[++i] || args.baselineRules;
+        else if (arg === '--ablation-limit') args.ablationLimit = Number.parseInt(argv[++i] || '3', 10);
+        else if (arg === '--concurrency') args.concurrency = Number.parseInt(argv[++i] || '1', 10);
         else if (arg === '--json') args.json = true;
         else if (arg === '--ablate-sections') args.ablateSections = true;
         else if (arg === '--help' || arg === '-h') { printHelp(); process.exit(0); }
         else throw new Error(`Unknown argument: ${arg}`);
     }
     if (!Number.isFinite(args.limit) || args.limit <= 0) args.limit = Number.POSITIVE_INFINITY;
+    if (!Number.isFinite(args.ablationLimit) || args.ablationLimit <= 0) args.ablationLimit = 3;
+    if (!Number.isFinite(args.concurrency) || args.concurrency <= 0) args.concurrency = 1;
     return args;
 }
 
@@ -425,92 +455,42 @@ function cacheKey(parts) {
     return crypto.createHash('sha256').update(parts.join(' ')).digest('hex');
 }
 
-/**
- * Where to send the chat call. OpenRouter model ids are namespaced
- * ("google/gemini-3-flash", "anthropic/claude-sonnet-5"), OpenAI's are not, so the
- * slash selects the provider; REVIEW_EVAL_PROVIDER=openrouter forces it for the
- * rare unnamespaced case. Lets a single --model flag A/B non-OpenAI candidates
- * without touching the production services.
- */
-function resolveChatTarget(model) {
-    const useOpenRouter = `${model}`.includes('/') || process.env.REVIEW_EVAL_PROVIDER === 'openrouter';
-    if (!useOpenRouter) {
-        const apiKey = process.env.OPENAI_API_KEY;
-        if (!apiKey || apiKey === 'your-openai-api-key-here') {
-            throw new Error('OPENAI_API_KEY is required unless --no-ai is used');
-        }
-        return { provider: 'openai', url: 'https://api.openai.com/v1/chat/completions', apiKey, extraHeaders: {} };
-    }
-    const apiKey = process.env.OPENROUTER_API_KEY;
-    if (!apiKey) {
-        throw new Error(`OPENROUTER_API_KEY is required for provider-namespaced model "${model}"`);
-    }
-    return {
-        provider: 'openrouter',
-        url: 'https://openrouter.ai/api/v1/chat/completions',
-        apiKey,
-        // OpenRouter attributes usage to an app when these are present; harmless otherwise.
-        extraHeaders: { 'HTTP-Referer': 'https://github.com/dcowser3/MenuManager', 'X-Title': 'MenuManager review eval' },
-    };
-}
-
 async function callOpenAi({ model, temperature, seed, prompt, text }) {
-    const target = resolveChatTarget(model);
-    // Reasoning-class models (o-series, gpt-5 family incl. gpt-5.6-luna) reject a
-    // non-default temperature with a 400; they DO accept seed, so repeatability
-    // still comes from the seed + the response cache. Same test as
-    // isReasoningModel() in services/dashboard/lib/improvement-cycle-core.ts.
-    const body = {
-        model,
-        ...(/o[0-9]|gpt-5|reasoning/i.test(model) ? {} : { temperature }),
-        seed,
-        messages: [
+    const adapter = requireLlmAdapter();
+    return adapter.callChat({ model }, [
             { role: 'system', content: prompt },
             { role: 'user', content: `Here is the menu text to review:\n\n---\n\n${text}` },
-        ],
-    };
-    let lastError;
-    for (let attempt = 0; attempt < 3; attempt += 1) {
-        try {
-            const response = await fetch(target.url, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${target.apiKey}`, ...target.extraHeaders },
-                body: JSON.stringify(body),
-            });
-            if (response.status === 429 || response.status >= 500) {
-                lastError = new Error(`${target.provider} ${response.status}: ${await response.text()}`);
-                await new Promise((r) => setTimeout(r, 2000 * (attempt + 1)));
-                continue;
-            }
-            if (!response.ok) {
-                throw new Error(`${target.provider} ${response.status}: ${(await response.text()).slice(0, 400)}`);
-            }
-            const json = await response.json();
-            return {
-                feedback: json.choices?.[0]?.message?.content || '',
-                usage: json.usage || {},
-            };
-        } catch (error) {
-            lastError = error;
-            await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)));
-        }
-    }
-    throw lastError || new Error(`${target.provider} call failed`);
+        ], {
+            provider: process.env.REVIEW_EVAL_LLM_PROVIDER || process.env.REVIEW_EVAL_PROVIDER
+                || (`${model}`.includes('/') ? 'openrouter' : undefined),
+            temperature,
+            seed,
+            retry: {
+                maxRateLimitRetries: Number(process.env.REVIEW_EVAL_RATE_LIMIT_RETRIES || 2),
+                maxTransientRetries: Number(process.env.REVIEW_EVAL_TRANSIENT_RETRIES || 2),
+            },
+        });
 }
 
 function buildEchoFeedback(text) {
+    const { AI_REVIEW_FENCES } = requireLib('dashboard', 'lib/review-response-contract');
     return [
-        '=== CORRECTED MENU ===',
+        AI_REVIEW_FENCES.correctedMenuStart,
         text,
-        '=== END CORRECTED MENU ===',
+        AI_REVIEW_FENCES.correctedMenuEnd,
         '',
-        '=== SUGGESTIONS ===',
+        AI_REVIEW_FENCES.suggestionsStart,
         '[]',
-        '=== END SUGGESTIONS ===',
+        AI_REVIEW_FENCES.suggestionsEnd,
     ].join('\n');
 }
 
 function makeAiCaller(args, usageTotals) {
+    const recordSystemFingerprint = (fingerprint) => {
+        if (fingerprint && !usageTotals.system_fingerprints.includes(fingerprint)) {
+            usageTotals.system_fingerprints.push(fingerprint);
+        }
+    };
     return async (text, prompt) => {
         if (!args.ai) return buildEchoFeedback(text);
         const key = cacheKey([args.model, `${args.temperature}`, `${args.seed}`, prompt, text]);
@@ -518,6 +498,7 @@ function makeAiCaller(args, usageTotals) {
         if (fs.existsSync(cachePath)) {
             const cached = JSON.parse(fs.readFileSync(cachePath, 'utf8'));
             usageTotals.cacheHits += 1;
+            recordSystemFingerprint(cached.system_fingerprint);
             return cached.feedback;
         }
         const result = await callOpenAi({
@@ -530,16 +511,18 @@ function makeAiCaller(args, usageTotals) {
         usageTotals.apiCalls += 1;
         usageTotals.promptTokens += result.usage.prompt_tokens || 0;
         usageTotals.completionTokens += result.usage.completion_tokens || 0;
+        recordSystemFingerprint(result.system_fingerprint);
         await fsp.mkdir(cacheDir, { recursive: true });
         await fsp.writeFile(cachePath, JSON.stringify({
             model: args.model,
             temperature: args.temperature,
             seed: args.seed,
-            feedback: result.feedback,
+            feedback: result.content,
             usage: result.usage,
+            system_fingerprint: result.system_fingerprint,
             cachedAt: new Date().toISOString(),
         }, null, 2));
-        return result.feedback;
+        return result.content;
     };
 }
 
@@ -615,7 +598,8 @@ async function runEval(args, dataset, rulesInfo, libs, baselineConfig) {
             const inputStyleSimilarity = boundedLevenshteinSimilarity(inputStyle, truthStyle);
             const candidateStyleSimilarity = boundedLevenshteinSimilarity(candidateStyle, truthStyle);
             const corrections = scoreCorrections(evalCase.raw_input, candidate, scoringTruth);
-            const composite = compositeCaseScore(candidateStyleSimilarity, corrections);
+            const fenceMissing = !!result.post?.parsed?.fenceMissing;
+            const composite = fenceMissing ? 0 : compositeCaseScore(candidateStyleSimilarity, corrections);
 
             return {
                 case_id: evalCase.case_id,
@@ -648,7 +632,9 @@ async function runEval(args, dataset, rulesInfo, libs, baselineConfig) {
                     extra: corrections.extra.slice(0, 10),
                 },
                 composite: round(composite),
-                exactMatch: candidateStrict === truthStrict,
+                exactMatch: !fenceMissing && candidateStrict === truthStrict,
+                fenceMissing,
+                groundTruthCorrectionCount: corrections.truePositives + corrections.falseNegatives,
                 criticalSuggestionCount: result.post.criticalSuggestions.length,
                 suggestionCount: result.finalSuggestions.length,
                 deterministicCorrections: result.preAiDeterministic.appliedCorrections.length,
@@ -657,36 +643,47 @@ async function runEval(args, dataset, rulesInfo, libs, baselineConfig) {
     };
 
     const candidateBasePrompt = fs.readFileSync(args.prompt, 'utf8');
-    const usageTotals = { apiCalls: 0, cacheHits: 0, promptTokens: 0, completionTokens: 0 };
+    const usageTotals = { apiCalls: 0, cacheHits: 0, promptTokens: 0, completionTokens: 0, system_fingerprints: [] };
     const primaryAiCaller = makeAiCaller(args, usageTotals);
     // Fresh-call caller (distinct cache key via an alternate seed) used to re-run
     // BOTH configs back-to-back during confirmation, so OpenAI's temporal drift
     // affects both equally and cancels out of the comparison.
-    const recheckAiCaller = makeAiCaller({ ...args, seed: args.seed + 7919 }, usageTotals);
+    const recheckCandidateAiCaller = makeAiCaller({ ...args, seed: args.seed + 7919 }, usageTotals);
+    const recheckBaselineAiCaller = baselineConfig
+        ? makeAiCaller({ ...args, model: baselineConfig.model, seed: args.seed + 7919 }, usageTotals)
+        : null;
 
     const evaluateCandidate = makeEvaluator(candidateBasePrompt, rulesInfo.rules, primaryAiCaller);
-    const evaluateCandidateFresh = makeEvaluator(candidateBasePrompt, rulesInfo.rules, recheckAiCaller);
+    const evaluateCandidateFresh = makeEvaluator(candidateBasePrompt, rulesInfo.rules, recheckCandidateAiCaller);
     const evaluateBaselineFresh = baselineConfig
-        ? makeEvaluator(baselineConfig.prompt, baselineConfig.rulesInfo.rules, recheckAiCaller)
+        ? makeEvaluator(baselineConfig.prompt, baselineConfig.rulesInfo.rules, recheckBaselineAiCaller)
         : null;
 
     const cases = selectCases(args, dataset);
     const caseById = new Map(cases.map((c) => [c.case_id, c]));
-    console.log(`Evaluating ${cases.length} cases | model=${args.ai ? args.model : 'no-ai'} | rules=${rulesInfo.description} | deterministic=${args.deterministic}`);
+    const concurrency = Math.min(args.concurrency, Math.max(1, cases.length));
+    console.log(`Evaluating ${cases.length} cases | model=${args.ai ? args.model : 'no-ai'} | rules=${rulesInfo.description} | deterministic=${args.deterministic} | concurrency=${concurrency}`);
 
     const caseReports = [];
     const errors = [];
-    for (const [index, evalCase] of cases.entries()) {
-        process.stdout.write(`  [${index + 1}/${cases.length}] ${evalCase.label.slice(0, 60)} ... `);
-        try {
-            const report = await evaluateCandidate(evalCase);
-            caseReports.push(report);
-            console.log(`composite ${report.composite.toFixed(4)}`);
-        } catch (error) {
-            errors.push({ case_id: evalCase.case_id, label: evalCase.label, error: error.message });
-            console.log(`ERROR: ${error.message.slice(0, 120)}`);
+    let nextCaseIndex = 0;
+    const evaluateNextCase = async () => {
+        while (true) {
+            const index = nextCaseIndex++;
+            if (index >= cases.length) return;
+            const evalCase = cases[index];
+            process.stdout.write(`  [${index + 1}/${cases.length}] ${evalCase.label.slice(0, 60)} ... `);
+            try {
+                const report = await evaluateCandidate(evalCase);
+                caseReports.push(report);
+                console.log(`composite ${report.composite.toFixed(4)}`);
+            } catch (error) {
+                errors.push({ case_id: evalCase.case_id, label: evalCase.label, error: error.message });
+                console.log(`ERROR: ${error.message.slice(0, 120)}`);
+            }
         }
-    }
+    };
+    await Promise.all(Array.from({ length: concurrency }, () => evaluateNextCase()));
 
     const rerunCandidateCase = async (caseId) => {
         const evalCase = caseById.get(caseId);
@@ -699,28 +696,41 @@ async function runEval(args, dataset, rulesInfo, libs, baselineConfig) {
     };
 
     // F2 real ablation: for --ablate-sections, re-run a limited slice of cases omitting each section in turn
-    // and record avg composite delta vs the full-prompt run for those cases. Respects --limit via case count.
+    // and record avg composite delta vs the full-prompt run for those cases. The cap is explicit so Stage 3
+    // can raise it without changing the default smoke-test cost.
     let ablation = null;
     if (args.ablateSections) {
         try {
             const { QA_PROMPT_SECTIONS } = requireLib('dashboard', 'lib/qa-prompt-builder');
             const ids = Object.keys(QA_PROMPT_SECTIONS || {});
-            const limitedCases = cases.slice(0, Math.min(3, cases.length));
+            const limitedCases = cases.slice(0, Math.min(args.ablationLimit, cases.length));
             if (limitedCases.length) {
                 const limitedReports = caseReports.slice(0, limitedCases.length);
-                const baseAvg = aggregate(limitedReports).avgComposite;
+                const baseSummary = aggregate(limitedReports);
+                const baseAvg = baseSummary.avgComposite;
                 const rows = [];
                 for (const sid of ids) {
                     const abFn = makeEvaluator(candidateBasePrompt, (rulesInfo && rulesInfo.rules) || [], primaryAiCaller, { omitSections: [sid] });
-                    let sum = 0; let n = 0;
-                    for (const c of limitedCases) {
+                    const ablationReports = await Promise.all(limitedCases.map(async (c) => {
                         try {
-                            const rep = await abFn(c);
-                            sum += rep.composite || 0; n++;
-                        } catch (_) {}
+                            return await abFn(c);
+                        } catch (_) {
+                            return null;
+                        }
+                    }));
+                    let sum = 0; let n = 0;
+                    for (const rep of ablationReports) {
+                        if (rep) { sum += rep.composite || 0; n++; }
                     }
                     const abAvg = n ? (sum / n) : baseAvg;
-                    rows.push({ section: sid, delta_pp: round(abAvg - baseAvg), note: n ? '' : 'no cases' });
+                    const ablationSummary = aggregate(ablationReports.filter(Boolean));
+                    rows.push({
+                        section: sid,
+                        delta_pp: round(abAvg - baseAvg),
+                        f1_delta: round(ablationSummary.corrections.f1 - baseSummary.corrections.f1),
+                        evaluatedCases: n,
+                        note: n ? '' : 'no cases',
+                    });
                 }
                 ablation = rows;
             }
@@ -753,6 +763,7 @@ function aggregate(caseReports) {
             acc[c.similarity.outcome] = (acc[c.similarity.outcome] || 0) + 1;
             return acc;
         }, { improved: 0, same: 0, regressed: 0 }),
+        fenceMissingCount: caseReports.filter((c) => c.fenceMissing).length,
     };
     const tp = totals.corrections.truePositives;
     const fp = totals.corrections.falsePositives;
@@ -786,11 +797,14 @@ function compareWithBaseline(baselineReport, caseReports, noiseEpsilon) {
             candidateComposite: current.composite,
             delta,
             confirmed_delta: null,   // populated by confirmRegressions when back-to-back run; null otherwise (B0)
+            disagreementClass: classifyMaterialDisagreement(baseline, current, noiseEpsilon),
             outcome,
         });
     }
     const regressions = comparisons.filter((c) => c.outcome === 'regressed').sort((a, b) => a.delta - b.delta);
     const improvements = comparisons.filter((c) => c.outcome === 'improved').sort((a, b) => b.delta - a.delta);
+    const disagreementSummary = summarizeMaterialDisagreements(comparisons)
+        .map((summary) => ({ ...summary, meanDelta: round(summary.meanDelta) }));
     return {
         baselineGeneratedAt: baselineReport.generatedAt,
         baselineLabel: baselineReport.config?.label || '',
@@ -808,6 +822,8 @@ function compareWithBaseline(baselineReport, caseReports, noiseEpsilon) {
         noiseRegressed: null,
         regressions: regressions.slice(0, 20),
         improvements: improvements.slice(0, 20),
+        disagreementSummary,
+        materialDisagreements: sortMaterialDisagreements(comparisons),
         // Full list (unsliced) for the confirmation pass; trimmed before storage.
         allRegressions: regressions,
     };
@@ -871,6 +887,7 @@ function buildMarkdown(report) {
         `Generated: ${report.generatedAt}`,
         `Label: ${report.config.label || '(none)'}`,
         `Model: ${report.model || report.config.model} ${report.config.ai ? '' : '(deterministic)'} | temp ${report.config.temperature} | seed ${report.config.seed}  (pin REVIEW_EVAL_MODEL=...-YYYY-MM-DD snapshot for lower drift)`,
+        `Baseline model: ${report.config.baselineModel}`,
         `Prompt: ${report.config.prompt}`,
         `Rules: ${report.config.rulesDescription}`,
         `Deterministic pre/post passes: ${report.config.deterministic}`,
@@ -882,6 +899,7 @@ function buildMarkdown(report) {
         `- Avg similarity (candidate vs human final): ${(s.avgSimilarity * 100).toFixed(3)}%`,
         `- Avg similarity (raw input vs human final): ${(s.avgInputSimilarity * 100).toFixed(3)}% (what similarity would be with NO review)`,
         `- Avg improvement over raw input: ${(s.avgDeltaVsInput * 100).toFixed(4)} pp (improved ${s.outcomesVsInput.improved}, same ${s.outcomesVsInput.same}, regressed ${s.outcomesVsInput.regressed})`,
+        `- Fence-missing responses: ${s.fenceMissingCount || 0} (each is scored as a failure)`,
         `- Correction-level: TP ${s.corrections.truePositives}, FP ${s.corrections.falsePositives}, FN ${s.corrections.falseNegatives} | precision ${(s.corrections.precision * 100).toFixed(2)}%, recall ${(s.corrections.recall * 100).toFixed(2)}%, F1 ${(s.corrections.f1 * 100).toFixed(2)}%`,
         `- Residual word-level diffs vs human final: ${s.corrections.remainingDiffs}`,
         `- AI usage: ${report.usage.apiCalls} calls, ${report.usage.cacheHits} cache hits, ${report.usage.promptTokens + report.usage.completionTokens} tokens`,
@@ -919,6 +937,22 @@ function buildMarkdown(report) {
             }
             lines.push('');
         }
+        if ((b.disagreementSummary || []).some((summary) => summary.count > 0)) {
+            lines.push('### Material Disagreement Classes');
+            lines.push('| Class | Count | Mean delta |');
+            lines.push('|-------|------:|-----------:|');
+            for (const summary of b.disagreementSummary) {
+                lines.push(`| ${summary.class} | ${summary.count} | ${(summary.meanDelta * 100).toFixed(4)} pp |`);
+            }
+            lines.push('');
+        }
+        if ((b.materialDisagreements || []).length) {
+            lines.push('### Material Disagreements for Adjudication (substantive first)');
+            for (const disagreement of b.materialDisagreements) {
+                lines.push(`- [${disagreement.disagreementClass}] ${disagreement.label}: ${(disagreement.baselineComposite * 100).toFixed(3)}% -> ${(disagreement.candidateComposite * 100).toFixed(3)}% (delta ${(disagreement.delta * 100).toFixed(4)} pp)`);
+            }
+            lines.push('');
+        }
     }
 
     lines.push('## Worst Cases (by composite)');
@@ -930,6 +964,15 @@ function buildMarkdown(report) {
         }
         for (const extra of c.corrections.extra.slice(0, 3)) {
             lines.push(`  - overcorrected ${extra.kind}: \`${extra.from}\` -> \`${extra.to}\``);
+        }
+    }
+
+    const fenceMissingCases = report.cases.filter((c) => c.fenceMissing);
+    if (fenceMissingCases.length) {
+        lines.push('', '## Fence-Missing Failures');
+        lines.push('The model omitted the corrected-menu response fence; production would fail safe to the input, so eval scores these cases as composite 0.');
+        for (const c of fenceMissingCases) {
+            lines.push(`- ${c.label} [${c.source}]: composite 0.000%`);
         }
     }
 
@@ -985,7 +1028,9 @@ async function main() {
         textSimilarity: requireLib('dashboard', 'lib/text-similarity'),
         evalScoring: requireLib('differ', 'lib/eval-scoring'),
         preAiRules: requireLib('dashboard', 'lib/pre-ai-deterministic-rules'),
+        improvementCore: requireLib('dashboard', 'lib/improvement-cycle-core'),
     };
+    args.baselineModel = libs.improvementCore.resolveEvalBaselineModel(args.model, args.baselineModel);
     const rulesInfo = await resolveCorrectionRules(args.rules);
 
     // Baseline config for back-to-back regression confirmation (optional). Needs
@@ -997,6 +1042,7 @@ async function main() {
         baselineConfig = {
             prompt: fs.readFileSync(args.baselinePrompt, 'utf8'),
             rulesInfo: await resolveCorrectionRules(args.baselineRules),
+            model: args.baselineModel,
         };
     } else if (args.baseline && args.confirmRegressions && args.ai && !args.baselinePrompt) {
         console.warn('Note: --baseline-prompt not provided; regression confirmation (back-to-back re-run) is disabled, so flagged regressions may include temporal-drift noise.');
@@ -1028,9 +1074,17 @@ async function main() {
             label: args.label,
             prompt: args.prompt,
             model: args.model,
+            baselineModel: args.baselineModel,
             // Which API served the call — comparing two reports means comparing
             // providers too when one arm was routed through OpenRouter.
-            provider: args.ai ? resolveChatTarget(args.model).provider : 'none',
+            provider: args.ai
+                ? requireLlmAdapter().resolveProvider(
+                    { model: args.model },
+                    { provider: process.env.REVIEW_EVAL_LLM_PROVIDER || process.env.REVIEW_EVAL_PROVIDER
+                        || (`${args.model}`.includes('/') ? 'openrouter' : undefined) }
+                )
+                : 'none',
+            system_fingerprints: usageTotals.system_fingerprints,
             ai: args.ai,
             temperature: args.temperature,
             seed: args.seed,

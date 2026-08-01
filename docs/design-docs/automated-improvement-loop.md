@@ -16,6 +16,10 @@ Automates the manual "collect ~10 reviewer corrections, ask an AI how to improve
 | D | Improvement cycle (`npm run improve:cycle`) + proposal page extension | Implemented |
 | E | Scheduled Lightsail cron (every other day) + runbook | Implemented |
 
+## Shared chat adapter (Phase B)
+
+All four portability-sensitive call sites use `services/llm-adapter`: the AI review service, improvement-cycle analysis and replay, prompt rewrite, and review-eval. The adapter owns model capability data (including the reasoning-model temperature and token-parameter rules), OpenAI/OpenRouter target resolution, vendor-prefix mapping, normalized usage/fingerprint extraction, and one retry policy. Provider failover is deliberately manual through `LLM_PROVIDER` or a per-call-site override; quota exhaustion logs the provider and the environment flip needed to switch, without silently sending the same job to another provider.
+
 ## Phase A — Training-triple data capture (Implemented)
 
 Every approved submission should yield a full training triple: **raw input → AI review output → human-approved final (+ reviewer explanations)**. Before Phase A, the raw pre-review menu content (what the chef sent to the Basic AI Check, *before* client-side corrections were applied on the form) existed only in `ai_request.text` audit JSON (post-deterministic) and transient logs, and audits could not be joined to the submission they became.
@@ -68,6 +72,18 @@ The handler keeps HTTP concerns (fallbacks, audits, diagnostics, logging) and de
 - **Regression confirmation (nondeterminism guard):** the eval AI (gpt-4o-mini, temp 0) drifts *over time* — the SAME config re-run minutes later can swing a large menu's composite by tens of points (verified: identical config 12 min apart moved −6.27pp with 2 false regressions on 6 cases; seed variation back-to-back, by contrast, was byte-identical — so the noise is temporal, not seed-based). Comparing a stored baseline run to a later candidate run therefore conflates real config effects with that drift. Baseline compare handles it in two layers: (1) per-case deltas within a noise floor (`--noise-epsilon`, default 0.02 = 2pp) count as "same"; (2) each larger flagged regression is re-checked by re-running the **baseline and candidate configs back-to-back in the same time window** (`--baseline-prompt`/`--baseline-rules`) and kept only if the candidate is still ≥2pp below baseline on that fresh pair (`classifyConfirmedRegression` in `eval-scoring.ts`); otherwise the gap was temporal drift and the case moves back to "same". `eval_status`, the exit code, and the dashboard count reflect **confirmed** regressions only; flagged/confirmed/noise are all surfaced. `--no-confirm-regressions` disables it. This stops the verdict crying wolf — observed in production: trivial prompt changes flagged 4–11 "regressions" that were pure temporal drift on (tartare-free) beverage/kids menus. The improvement cycle passes the current prompt as `--baseline-prompt` automatically.
 - Reports land in `tmp/review-eval/<timestamp>-<label>/report.{json,md}`.
 
+## Phase C3 — Response-fence contract hardening (Implemented)
+
+`services/dashboard/lib/review-response-contract.ts` owns the four AI response markers used by prompt assembly, `parseAIResponse`, eval echo mode, and the improvement-cycle prompt-shape guard. If the corrected-menu fence is absent, production still fails safe to the original menu, but `parseAIResponse` logs the condition and the completed audit records `fence_missing: true` (with a nullable Supabase column and migration). The eval harness carries the flag into each case, scores the case as a failure, and lists fence-missing cases in `report.md` instead of letting input echo score as a near-pass.
+
+## Phase D3 — Eval disagreement decomposition (Implemented)
+
+When `review-eval.js` compares a candidate report with `--baseline`, every material per-case delta is classified as `substantive` or `clean_menu_spurious_edit`. The latter is reserved for zero/near-zero ground-truth corrections where the disagreement crosses from zero false positives to one or more (or vice versa), isolating the composite cliff caused by a single unnecessary edit. Baseline comparison JSON now includes per-class counts and signed mean deltas, while `report.md` includes the same table and an adjudication list ordered with substantive cases first. The composite formula is unchanged; this phase only decomposes the measurement.
+
+## Phase E — Stage 3 prompt-fit grid (Implemented)
+
+The Stage 3 artifact is [prompt-fit-attribution-2026-07-31.md](../../prompt-fit-attribution-2026-07-31.md). `sop-processor/qa_prompt_minimal.txt` provides a short task/output-contract/allergen-key base prompt. The eval harness accepts `--ablation-limit <n>` for the per-section cap and `--concurrency <n>` for bounded parallel replay; the default ablation cap and serial behavior remain unchanged. The 251-case full/minimal grid was run for `gpt-4o-mini-2024-07-18` and `gpt-5.6-luna`; both models also received 10-case-per-section ablations with composite and F1 deltas recorded. This phase is measurement-only: no prompt section was removed from production.
+
 ## Phase B — Generated rules manifest (Implemented)
 
 `npm run rules:manifest` ([scripts/generate-rules-manifest.js](../../scripts/generate-rules-manifest.js)) emits a single catalog of every review rule applied in code, built by [services/dashboard/lib/review-rules-manifest.ts](../../services/dashboard/lib/review-rules-manifest.ts):
@@ -104,6 +120,8 @@ Drift prevention (`services/dashboard/__tests__/review-rules-manifest.test.ts`):
 ### Saving a correction = proposing, not applying (single gate)
 
 A reviewer-saved correction is a **proposal**, not a live rule. `buildCorrectionRuleRecord` (`services/dashboard/lib/learning-correction-rules.ts`) stamps every human save `status: 'pending'`, so the pre-AI deterministic pass (which only reads `status: 'accepted'`) never applies it on save. The correction still feeds the cycle (the gate reads `accepted` + `pending`, unconsumed), which routes it *using the reviewer's explanation* — replacement rule vs prompt reasoning vs code change — and only the cycle's approved replacement rules (inserted directly as `source: 'system'`, `status: 'accepted'`) reach the deterministic pass. This closes the path where a context-dependent fix (e.g. a human-saved `berry → berries`) went live as a blind global find/replace the moment it was saved, skipping lane-routing, eval, and approval.
+
+Exact accepted replacement rules may set `force_target_case = true` when the corrected spelling's capitalization is canonical rather than inherited from the source. The default is `false`, preserving source casing for ordinary diacritic and spelling rules; only explicitly marked rules such as `maldon → Maldon` force the stored target casing.
 
 Defense in depth: `isSafeLearnedRule` (`services/dashboard/lib/pre-ai-deterministic-rules.ts`) now also runs `involvesContextDependentTerm`, so a context-dependent term can never be applied as a deterministic replacement regardless of how it reached the DB — the same guard the cycle's `validateImprovementLlmOutput` already applies to LLM-proposed rules. `CONTEXT_DEPENDENT_TERMS` covers homographs (`tartare`/`tartar`) and number-context terms (`berry`/`berries`).
 
@@ -260,3 +278,20 @@ Implemented per the handoff in `docs/improvement-loop-proposal-clarity-fixes.md`
 **Required manual step:** apply `supabase/migrations/20260711_add_prompt_proposal_disposition_routing.sql` and `20260711_add_correction_rule_examples.sql` in the Supabase SQL editor. Both the cycle insert and the `correction_rules` insert degrade gracefully (strip the new columns + log a migration warning) until they are applied; `CRITICAL_SUPABASE_SCHEMA` lists the new columns so startup raises a `supabase_schema_drift` alert if they are missing.
 
 Docs updated in same change set; new C1–C4 unit + view tests (112 dashboard core/view/learning tests green); tsc clean across dashboard + db. Pre-existing `review-pipeline.test.ts` failures are unrelated.
+
+## July 31, 2026 authoring-gap hardening
+
+- The improvement and consolidation system prompts are built with the resolved `AI_REVIEW_MODEL` executor name. They explicitly tell the reasoning author that the QA prompt is executed by a smaller, non-reasoning model and require explicit `IF ... THEN ...` decision procedures, point-of-use rules, and replay evidence to outrank claims that a still-missed correction is already covered.
+- `validateImprovementLlmOutput` now checks every `still_missed` correction even when an unrelated prompt edit exists. Each correction must be covered by a surviving replacement rule, a code recommendation/analysis mention, or a changed prompt span containing its correction text or meaningful category tokens; otherwise a correction-specific `unresolved_still_missed` warning is emitted and the existing retry feedback path receives it.
+
+## July 31, 2026 replay model-parameter gate
+
+- Replay requests use the same centralized reasoning-model classification as the improvement caller: reasoning models receive `seed` without `temperature`, while non-reasoning models receive both. Exhausted replay retries now log the resolved model, HTTP status, and a bounded error-body excerpt before the cycle records `replay_unavailable`.
+
+## July 31, 2026 review model provenance
+
+- Basic AI Check audit rows now persist nullable top-level `model` and `system_fingerprint` values returned by `ai-review`; historical rows remain null because no backfill is possible. Eval reports record the distinct provider fingerprints observed during each run under `config.system_fingerprints`.
+
+## July 31, 2026 baseline-model confirmation
+
+- Regression confirmation accepts `--baseline-model`; the baseline fresh arm now uses a caller keyed to that model while the candidate fresh arm retains the candidate model. Omitting the flag preserves the prior candidate-model behavior. Reports record `config.baselineModel` and the Markdown header identifies the baseline model.
