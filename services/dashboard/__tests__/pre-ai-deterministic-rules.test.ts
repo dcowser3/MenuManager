@@ -134,16 +134,18 @@ describe('runPreAiDeterministicChecks', () => {
             'Tostada, cured egg yolk, avocado 15',
             'Meringue, berries, cream 10',
             'Whiskey Sour, lemon, egg white 14',
+            'add to any entrée: oscar topping - jumbo lump crab meat, hollandaise 12',
         ].join('\n'));
 
         expect(result.menuText).toBe([
             'Hollandaise Sauce*, egg yolk, butter 15',
             'Béarnaise Sauce*, egg yolk, tarragon 16',
-            'Steak Frites*, fries, traditional Caesar dressing 24',
+            'Steak Frites, fries, traditional Caesar dressing* 24',
             'Tiramisu*, mascarpone, espresso 12',
-            'Tostada*, cured egg yolk, avocado 15',
+            'Tostada, cured egg yolk, avocado* 15',
             'Meringue*, berries, cream 10',
-            'Whiskey Sour*, lemon, egg white 14',
+            'Whiskey Sour, lemon, egg white* 14',
+            'add to any entrée: oscar topping - jumbo lump crab meat, hollandaise* 12',
         ].join('\n'));
     });
 
@@ -205,8 +207,8 @@ describe('runPreAiDeterministicChecks', () => {
             'Veggie Burger, lettuce V 18',
             'TORO TORO TRES LECHES D,E,G,TN,V',
             'Tres Leches Cake D,G,V 12',
-            'Avocado Toast*, poached egg, sourdough G 19',
-            'Huevos Rancheros*, sunny side up egg D 22',
+            'Avocado Toast, poached egg, sourdough* G 19',
+            'Huevos Rancheros, sunny side up egg* D 22',
         ].join('\n'));
         expect(result.appliedCorrections).toEqual(expect.arrayContaining([
             expect.objectContaining({
@@ -223,12 +225,12 @@ describe('runPreAiDeterministicChecks', () => {
             expect.objectContaining({
                 type: 'Raw Item',
                 original: 'Avocado Toast, poached egg, sourdough G 19',
-                corrected: 'Avocado Toast*, poached egg, sourdough G 19',
+                corrected: 'Avocado Toast, poached egg, sourdough* G 19',
             }),
             expect.objectContaining({
                 type: 'Raw Item',
                 original: 'Huevos Rancheros, sunny side up egg D 22',
-                corrected: 'Huevos Rancheros*, sunny side up egg D 22',
+                corrected: 'Huevos Rancheros, sunny side up egg* D 22',
             }),
         ]));
     });

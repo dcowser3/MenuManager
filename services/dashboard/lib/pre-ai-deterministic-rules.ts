@@ -622,6 +622,8 @@ function normalizeRawAsteriskPlacementForLine(line: string): string {
     return `${working}*`;
 }
 
+const RAW_ASTERISK_TERM_PATTERN = /\b(?:sashimi|tartare|carpaccio|crudo|ceviche|tiradito|poke|raw\s+(?:tuna|salmon|hamachi|fish|beef|oysters?)|oysters?\s+on\s+the\s+half\s+shell|half[-\s]shell\s+oysters?|sunny[-\s]side(?:[-\s]up)?\s+eggs?|sunny[-\s]side[-\s]up|poached\s+eggs?|soft[-\s]boiled|rib[-\s]?eye|hollandaise|bearnaise|béarnaise|caesar\s+dressing|tiramisu|cured\s+egg\s+yolk|meringue|egg[-\s]+white)\b/i;
+
 function shouldAddRawAsterisk(line: string): boolean {
     const normalized = line.toLowerCase();
     if (!normalized.trim() || normalized.includes('*') || /consuming raw or undercooked/.test(normalized)) {
@@ -646,13 +648,14 @@ function shouldAddRawAsterisk(line: string): boolean {
     if (!hasPrice && (!hasTrailingAllergenCluster || !hasDescriptionComma)) {
         return false;
     }
-    return /\b(?:sashimi|tartare|carpaccio|crudo|ceviche|tiradito|poke|raw\s+(?:tuna|salmon|hamachi|fish|beef|oysters?)|oysters?\s+on\s+the\s+half\s+shell|half[-\s]shell\s+oysters?|sunny[-\s]side(?:[-\s]up)?\s+eggs?|sunny[-\s]side[-\s]up|poached\s+eggs?|soft[-\s]boiled|rib[-\s]?eye|hollandaise|bearnaise|béarnaise|caesar\s+dressing|tiramisu|cured\s+egg\s+yolk|meringue|egg[-\s]+white)\b/i.test(line);
+    return RAW_ASTERISK_TERM_PATTERN.test(line);
 }
 
 function addRawAsterisk(line: string): string {
     const trimmed = line.trimEnd();
     const descriptionComma = trimmed.search(/,\s*(?=[^,]*\p{Ll})/u);
-    if (descriptionComma > 0) {
+    const rawTermMatch = trimmed.match(RAW_ASTERISK_TERM_PATTERN);
+    if (descriptionComma > 0 && rawTermMatch?.index !== undefined && rawTermMatch.index < descriptionComma) {
         return `${trimmed.slice(0, descriptionComma).trimEnd()}*${trimmed.slice(descriptionComma)}`;
     }
     return normalizeRawAsteriskPlacementForLine(`${trimmed} *`);
