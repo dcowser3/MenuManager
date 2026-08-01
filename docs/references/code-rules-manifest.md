@@ -259,6 +259,14 @@ The full deterministic pre-AI pass is re-applied to the AI-corrected menu so the
 
 - id: `post-ai/deterministic-re-run` · category: deterministic · implementation: `services/dashboard/lib/pre-ai-deterministic-rules.ts#runPreAiDeterministicChecks`
 
+### Protected culinary terms
+
+Restores protected phrases that were present in the submitted menu if the AI rewrites them in its corrected-menu output. This guard is anchored to the original line and runs before the remaining post-AI guards.
+- `picked herbs` -> `picked herbs`
+- `twice-baked` -> `twice-baked`
+
+- id: `post-ai/protected-terms` · category: protected_terms · implementation: `services/dashboard/lib/protected-terms-guard.ts#restoreProtectedTerms`
+
 ### Leading menu title preservation
 
 Restores a leading "Menu"/"Menus" title line when the AI-corrected output dropped it.

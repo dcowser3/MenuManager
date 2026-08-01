@@ -17,15 +17,16 @@ jest.mock('@menumanager/tenant-config', () => {
     };
 });
 const review_pipeline_1 = require("../lib/review-pipeline");
+const review_response_contract_1 = require("../lib/review-response-contract");
 function buildFeedback(correctedMenu, suggestions) {
     return [
-        '=== CORRECTED MENU ===',
+        review_response_contract_1.AI_REVIEW_FENCES.correctedMenuStart,
         correctedMenu,
-        '=== END CORRECTED MENU ===',
+        review_response_contract_1.AI_REVIEW_FENCES.correctedMenuEnd,
         '',
-        '=== SUGGESTIONS ===',
+        review_response_contract_1.AI_REVIEW_FENCES.suggestionsStart,
         JSON.stringify(suggestions),
-        '=== END SUGGESTIONS ===',
+        review_response_contract_1.AI_REVIEW_FENCES.suggestionsEnd,
     ].join('\n');
 }
 describe('parseAIResponse (extracted from index.ts)', () => {
@@ -34,12 +35,14 @@ describe('parseAIResponse (extracted from index.ts)', () => {
             { type: 'Spelling', confidence: 'high', menuItem: 'GUACAMOLE', description: 'x', recommendation: 'y' },
         ]), 'ORIGINAL');
         expect(parsed.correctedMenu).toBe('GUACAMOLE\nfresh avocado 12');
+        expect(parsed.fenceMissing).toBe(false);
         expect(parsed.suggestions).toHaveLength(1);
         expect(parsed.suggestions[0].severity).toBe('normal');
     });
     test('falls back to the original menu when markers are absent and to [] on bad JSON', () => {
         const parsed = (0, review_pipeline_1.parseAIResponse)('no markers here', 'ORIGINAL MENU');
         expect(parsed.correctedMenu).toBe('ORIGINAL MENU');
+        expect(parsed.fenceMissing).toBe(true);
         expect(parsed.suggestions).toEqual([]);
         const badJson = (0, review_pipeline_1.parseAIResponse)('=== CORRECTED MENU ===\nMENU\n=== END CORRECTED MENU ===\n=== SUGGESTIONS ===\nnot json\n=== END SUGGESTIONS ===', 'ORIGINAL');
         expect(badJson.suggestions).toEqual([]);
@@ -325,6 +328,47 @@ describe('runPostAiPipeline (full guard chain)', () => {
             severity: 'normal',
             recommendation: 'Change "ctes de provence" to "côtes de provence".',
         });
+    });
+    test('restores protected terms after the model rewrites them', () => {
+        const original = [
+            'DINNER MENU',
+            'Chicken, picked herbs, twice-baked potatoes D 24',
+        ].join('\n');
+        const modelRewrite = [
+            'DINNER MENU',
+            'Chicken, pickled herbs, twice -baked potatoes D 24',
+        ].join('\n');
+        const result = (0, review_pipeline_1.runPostAiPipeline)({
+            feedback: buildFeedback(modelRewrite, []),
+            preCheckedReviewBody: original,
+            acceptedCorrectionRules: [],
+            embeddedSetMenuAnalysis: { sections: [], issues: [] },
+            precheckEnabled: false,
+        });
+        expect(result.correctedMenuSanitized).toBe(original);
+        expect(result.protectedTerms.restoredTerms).toEqual(['picked herbs', 'twice-baked']);
+        expect(result.correctedMenuSanitized).not.toContain('pickled herbs');
+        expect(result.correctedMenuSanitized).not.toContain('twice -baked');
+    });
+    test('restores protected terms after a model suggestion is auto-applied', () => {
+        const original = 'Chicken, picked herbs, twice-baked potatoes D 24';
+        const modelRewrite = 'Chicken, pickled herbs, twice -baked potatoes D 24';
+        const result = (0, review_pipeline_1.runPostAiPipeline)({
+            feedback: buildFeedback(modelRewrite, [
+                {
+                    type: 'Spelling',
+                    confidence: 'high',
+                    menuItem: original,
+                    recommendation: 'Change "picked herbs" to "pickled herbs".',
+                },
+            ]),
+            preCheckedReviewBody: original,
+            acceptedCorrectionRules: [],
+            embeddedSetMenuAnalysis: { sections: [], issues: [] },
+            precheckEnabled: false,
+        });
+        expect(result.correctedMenuSanitized).toBe(original);
+        expect(result.correctedMenuSanitized).not.toContain('pickled herbs');
     });
 });
 describe('enforceAllergenProgramCheck', () => {

@@ -1,48 +1,106 @@
-import { jest } from '@jest/globals';
+import http from 'http';
 
-// Mocking OpenAI API
-jest.mock('openai', () => ({
-    Configuration: jest.fn(),
-    OpenAIApi: jest.fn(() => ({
-        createChatCompletion: jest.fn(async () => ({
-            data: {
-                choices: [
-                    {
-                        message: {
-                            content: JSON.stringify({
-                                pass: true,
-                                confidence: 0.9,
-                                needs_resubmit: false,
-                                issues: [],
-                                summary: 'Looks good.',
-                                redlined_doc: 'base64-encoded-doc'
-                            })
-                        }
-                    }
-                ]
-            }
-        }))
-    }))
-}));
+function postJson(app: any, path: string, body: unknown): Promise<{ status: number; body: any }> {
+    return new Promise((resolve, reject) => {
+        const server = http.createServer(app);
+        server.listen(0, '127.0.0.1', () => {
+            const address = server.address() as { port: number };
+            const payload = JSON.stringify(body);
+            const request = http.request({
+                hostname: '127.0.0.1',
+                port: address.port,
+                path,
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Content-Length': Buffer.byteLength(payload),
+                    'x-menumanager-internal-token': 'test-internal-token',
+                },
+            }, (response) => {
+                let text = '';
+                response.setEncoding('utf8');
+                response.on('data', (chunk) => { text += chunk; });
+                response.on('end', () => {
+                    server.close();
+                    resolve({ status: response.statusCode || 0, body: JSON.parse(text) });
+                });
+            });
+            request.on('error', (error) => {
+                server.close();
+                reject(error);
+            });
+            request.write(payload);
+            request.end();
+        });
+    });
+}
 
 describe('AI Review Service', () => {
-    it('should return a valid AI review response', async () => {
-        // This is a placeholder for a more complete test.
-        // A full test would involve setting up a test server and making a request to the /ai-review endpoint.
-        // For now, this test primarily verifies the OpenAI mock.
-        
-        const { OpenAIApi } = require('openai');
-        const openai = new OpenAIApi();
+    const originalFetch = global.fetch;
+    let app: any;
 
-        const response = await openai.createChatCompletion({
-            model: 'gpt-3.5-turbo',
-            messages: [{ role: 'user', content: 'test' }]
+    beforeAll(async () => {
+        process.env.INTERNAL_API_TOKEN = 'test-internal-token';
+        process.env.OPENAI_API_KEY = 'test-openai-key';
+        process.env.AI_REVIEW_MODEL = 'gpt-5.6-luna';
+        process.env.BASIC_AI_CHECK_SEED = '12345';
+        ({ app } = await import('../index'));
+    });
+
+    afterEach(() => {
+        global.fetch = originalFetch;
+    });
+
+    afterAll(() => {
+        delete process.env.INTERNAL_API_TOKEN;
+        delete process.env.OPENAI_API_KEY;
+        delete process.env.AI_REVIEW_MODEL;
+        delete process.env.BASIC_AI_CHECK_SEED;
+    });
+
+    it('builds the real reasoning-model request through the adapter and parses the fenced response', async () => {
+        const fetchMock = jest.fn(async (_url: string, init: any) => {
+            const request = JSON.parse(init.body);
+            expect(request.model).toBe('gpt-5.6-luna');
+            expect(request.temperature).toBeUndefined();
+            expect(request.seed).toBe(12345);
+            expect(request.max_tokens).toBeUndefined();
+            expect(request.max_completion_tokens).toBeUndefined();
+            expect(request.messages).toEqual([
+                { role: 'system', content: 'Use the menu QA rules.' },
+                { role: 'user', content: 'Here is the menu text to review:\n\n---\n\nTACOS 12' },
+            ]);
+            return {
+                ok: true,
+                status: 200,
+                headers: { get: () => null },
+                text: async () => JSON.stringify({
+                    model: 'gpt-5.6-luna',
+                    system_fingerprint: null,
+                    choices: [{
+                        message: {
+                            content: '=== CORRECTED MENU ===\nTACOS 12\n=== END CORRECTED MENU ===',
+                        },
+                        finish_reason: 'stop',
+                    }],
+                    usage: { prompt_tokens: 11, completion_tokens: 8, total_tokens: 19 },
+                }),
+            } as any;
         });
-        
-        const reviewResult = JSON.parse(response.data.choices[0].message.content);
+        global.fetch = fetchMock as any;
 
-        expect(reviewResult.pass).toBe(true);
-        expect(reviewResult.confidence).toBe(0.9);
+        const result = await postJson(app, '/run-qa-check', {
+            prompt: 'Use the menu QA rules.',
+            text: 'TACOS 12',
+        });
+
+        expect(result.status).toBe(200);
+        expect(result.body).toEqual({
+            feedback: '=== CORRECTED MENU ===\nTACOS 12\n=== END CORRECTED MENU ===',
+            model: 'gpt-5.6-luna',
+            system_fingerprint: null,
+        });
+        expect(fetchMock).toHaveBeenCalledTimes(1);
     });
 
     it('parses approved dish quality verdicts from model JSON', async () => {

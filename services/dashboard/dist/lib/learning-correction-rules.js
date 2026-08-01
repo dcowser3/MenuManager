@@ -77,6 +77,7 @@ function buildCorrectionRuleRecord(payload, catalog) {
         correction_id: text(payload.correction_id) || manualRuleId('manual-rule'),
         original_text: originalText,
         corrected_text: correctedText,
+        force_target_case: payload.force_target_case === true,
         change_type: text(payload.change_type) || null,
         rule: text(payload.rule),
         applies_to_menu_type: normalizeMenuRuleScope(payload.applies_to_menu_type),

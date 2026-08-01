@@ -40,6 +40,9 @@ describe('Basic AI Check audit logging', () => {
             aiResponse: {
                 rawFeedback: 'y'.repeat(12),
             },
+            model: 'gpt-5.1',
+            systemFingerprint: 'fp-test-123',
+            fenceMissing: true,
         }, {
             BASIC_AI_CHECK_AUDIT_MAX_CHARS: '5',
         });
@@ -54,6 +57,9 @@ describe('Basic AI Check audit logging', () => {
             changed_line_count: 0,
             menu_text_length: 20,
             prompt_length: 200,
+            model: 'gpt-5.1',
+            system_fingerprint: 'fp-test-123',
+            fence_missing: true,
         });
         expect(normalized.ai_request.text).toContain('...[truncated');
         expect(normalized.ai_request.prompt).toBe('xxxxx\n...[truncated 7 chars]');
@@ -64,6 +70,9 @@ describe('Basic AI Check audit logging', () => {
             attemptId: 'attempt-456',
             checkId: 'check-789',
             eventType: 'completed',
+            model: 'gpt-5.1',
+            systemFingerprint: 'fp-row-456',
+            fenceMissing: true,
             aiRequest: { text: 'Athletic N/A\nLagunitas N/A' },
             finalResult: { correctedMenu: 'Athletic N/A\nLagunitas N/A' },
         });
@@ -72,6 +81,9 @@ describe('Basic AI Check audit logging', () => {
             attempt_id: 'attempt-456',
             check_id: 'check-789',
             event_type: 'completed',
+            model: 'gpt-5.1',
+            system_fingerprint: 'fp-row-456',
+            fence_missing: true,
             ai_request: expect.objectContaining({
                 text: 'Athletic N/A\nLagunitas N/A',
             }),
@@ -136,6 +148,24 @@ describe('Basic AI Check audit logging', () => {
         expect(retryPayload).not.toHaveProperty('baseline_menu_content_raw');
         expect(retryPayload).not.toHaveProperty('submission_id');
         expect(retryPayload.attempt_id).toBe('attempt-legacy');
+    });
+    test('logs an explicit insert failure when both the normal and legacy audit writes fail', async () => {
+        const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+        mockInsert
+            .mockResolvedValueOnce({ error: { message: "Could not find the 'model' column of 'basic_ai_check_audits' in the schema cache" } })
+            .mockResolvedValueOnce({ error: { message: 'permission denied for table basic_ai_check_audits' } });
+        await (0, basic_ai_check_audit_1.logBasicAiCheckAudit)({
+            attemptId: 'attempt-audit-failure',
+            checkId: 'check-audit-failure',
+            eventType: 'completed',
+        });
+        expect(errorSpy).toHaveBeenCalledWith('[basic-ai-check-audit] INSERT FAILED after legacy retry', expect.objectContaining({
+            attemptId: 'attempt-audit-failure',
+            checkId: 'check-audit-failure',
+            eventType: 'completed',
+            retryError: 'permission denied for table basic_ai_check_audits',
+        }));
+        errorSpy.mockRestore();
     });
     test('linkBasicAiCheckAuditsToSubmission no-ops without Supabase or ids', async () => {
         mockIsSupabaseConfigured.mockReturnValue(false);

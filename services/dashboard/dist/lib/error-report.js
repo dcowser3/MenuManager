@@ -89,6 +89,11 @@ function normalizeErrorReport(body) {
 function decodeScreenshotDataUrl(dataUrl, maxBytes = exports.MAX_SCREENSHOT_BYTES) {
     if (typeof dataUrl !== 'string')
         return null;
+    // Reject oversized payloads before running the base64 regex. Very large
+    // strings can otherwise exhaust the regex engine's stack before the
+    // equivalent post-match guard gets a chance to run.
+    if (dataUrl.length > maxBytes * 1.4 + 64)
+        return null;
     const match = /^data:image\/(png|jpeg);base64,([A-Za-z0-9+/=\s]+)$/.exec(dataUrl);
     if (!match)
         return null;

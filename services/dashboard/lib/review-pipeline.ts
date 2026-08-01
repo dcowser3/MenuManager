@@ -22,6 +22,8 @@ import { RAW_NOTICE_PATTERN, normalizeMenuFooter, stripManagedFooterText } from 
 import { QaPromptSectionId, buildFinalPrompt } from './qa-prompt-builder';
 import { buildNearMissBriefing } from './canonical-vocabulary-provider';
 import { getTenantConfig } from '@menumanager/tenant-config';
+import { AI_REVIEW_FENCES } from './review-response-contract';
+import { ProtectedTermGuardResult, restoreProtectedTerms } from './protected-terms-guard';
 
 export type ReviewSuggestion = {
     type?: string;
@@ -34,6 +36,8 @@ export type ReviewSuggestion = {
 
 export type ParsedAiResponse = {
     correctedMenu: string;
+    /** True when the model omitted the corrected-menu response fence and the parser used the fail-safe input echo. */
+    fenceMissing: boolean;
     suggestions: Array<{
         type: string;
         confidence: string;
@@ -60,6 +64,10 @@ export function normalizeForSuggestionMatch(input: string): string {
         .replace(/[^a-z0-9\s]/g, ' ')
         .replace(/\s+/g, ' ')
         .trim();
+}
+
+function escapeRegExp(value: string): string {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 export function looksLikePriceOnLine(line: string): boolean {
@@ -450,11 +458,19 @@ export function detectKnownTextArtifactSuggestions(
 
 export function parseAIResponse(feedback: string, originalMenu: string): ParsedAiResponse {
     // Extract corrected menu between markers
-    const correctedMenuMatch = feedback.match(/=== CORRECTED MENU ===\s*\n([\s\S]*?)\n=== END CORRECTED MENU ===/);
+    const correctedMenuMatch = feedback.match(new RegExp(
+        `${escapeRegExp(AI_REVIEW_FENCES.correctedMenuStart)}\\s*\\n([\\s\\S]*?)\\n${escapeRegExp(AI_REVIEW_FENCES.correctedMenuEnd)}`
+    ));
+    const fenceMissing = !correctedMenuMatch;
+    if (fenceMissing) {
+        console.warn('AI response missing the corrected-menu fence; using the original menu as the fail-safe output');
+    }
     const correctedMenuRaw = correctedMenuMatch ? correctedMenuMatch[1].trim() : originalMenu;
 
     // Extract suggestions JSON between markers
-    const suggestionsMatch = feedback.match(/=== SUGGESTIONS ===\s*\n([\s\S]*?)\n=== END SUGGESTIONS ===/);
+    const suggestionsMatch = feedback.match(new RegExp(
+        `${escapeRegExp(AI_REVIEW_FENCES.suggestionsStart)}\\s*\\n([\\s\\S]*?)\\n${escapeRegExp(AI_REVIEW_FENCES.suggestionsEnd)}`
+    ));
     let suggestions: Array<any> = [];
 
     if (suggestionsMatch) {
@@ -520,6 +536,7 @@ export function parseAIResponse(feedback: string, originalMenu: string): ParsedA
 
     return {
         correctedMenu,
+        fenceMissing,
         suggestions
     };
 }
@@ -591,6 +608,7 @@ export type PostAiPipelineArgs = {
 export type PostAiPipelineResult = {
     parsed: ParsedAiResponse;
     postAiDeterministic: PreAiDeterministicResult;
+    protectedTerms: ProtectedTermGuardResult;
     titleGuard: MenuTitleGuardResult;
     structureGuard: CorrectedMenuStructureGuardResult;
     guardedCorrectedMenu: string;
@@ -616,7 +634,8 @@ export function runPostAiPipeline(args: PostAiPipelineArgs): PostAiPipelineResul
         allergenLegend: args.effectiveReviewAllergens,
         acceptedCorrectionRules: args.acceptedCorrectionRules,
     });
-    const titleGuard = preserveLeadingMenuTitle(args.preCheckedReviewBody, postAiDeterministic.menuText);
+    const protectedTerms = restoreProtectedTerms(args.preCheckedReviewBody, postAiDeterministic.menuText);
+    const titleGuard = preserveLeadingMenuTitle(args.preCheckedReviewBody, protectedTerms.correctedMenu);
     const structureGuard = assessCorrectedMenuStructure(args.preCheckedReviewBody, titleGuard.correctedMenu);
     const guardedCorrectedMenu = structureGuard.safe ? titleGuard.correctedMenu : args.preCheckedReviewBody;
     if (!structureGuard.safe) {
@@ -641,8 +660,22 @@ export function runPostAiPipeline(args: PostAiPipelineArgs): PostAiPipelineResul
     );
     const correctedAfterHighConfidence = priceIntegrityGuard.correctedMenu;
     const suggestionsAfterAutoApply = priceIntegrityGuard.suggestions;
+    // Re-run the protected-term guard after every model-driven auto-apply. A
+    // suggestion can otherwise reintroduce a rewrite that the earlier guard
+    // correctly removed from the model's corrected-menu block.
+    const finalProtectedTerms = restoreProtectedTerms(
+        args.preCheckedReviewBody,
+        correctedAfterHighConfidence
+    );
+    const protectedTermsResult: ProtectedTermGuardResult = {
+        correctedMenu: finalProtectedTerms.correctedMenu,
+        restoredTerms: Array.from(new Set([
+            ...protectedTerms.restoredTerms,
+            ...finalProtectedTerms.restoredTerms,
+        ])),
+    };
 
-    const correctedMenuSanitized = stripManagedFooterText(correctedAfterHighConfidence);
+    const correctedMenuSanitized = stripManagedFooterText(protectedTermsResult.correctedMenu);
     const reconciliation = reconcileCriticalSuggestionsAgainstCorrectedMenuWithDiagnostics(
         correctedMenuSanitized,
         suggestionsAfterAutoApply
@@ -668,6 +701,7 @@ export function runPostAiPipeline(args: PostAiPipelineArgs): PostAiPipelineResul
     return {
         parsed,
         postAiDeterministic,
+        protectedTerms: protectedTermsResult,
         titleGuard,
         structureGuard,
         guardedCorrectedMenu,

@@ -9,6 +9,7 @@ export interface CorrectionRuleRecord {
     correction_id: string;
     original_text: string | null;
     corrected_text: string | null;
+    force_target_case: boolean;
     change_type: string | null;
     rule: string;
     applies_to_menu_type: string;
@@ -107,6 +108,7 @@ export function buildCorrectionRuleRecord(payload: any, catalog: Array<{ name?: 
         correction_id: text(payload.correction_id) || manualRuleId('manual-rule'),
         original_text: originalText,
         corrected_text: correctedText,
+        force_target_case: payload.force_target_case === true,
         change_type: text(payload.change_type) || null,
         rule: text(payload.rule),
         applies_to_menu_type: normalizeMenuRuleScope(payload.applies_to_menu_type),

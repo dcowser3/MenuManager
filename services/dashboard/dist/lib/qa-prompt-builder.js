@@ -4,10 +4,12 @@
 // (eval harness) builds byte-identical prompts to production.
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.QA_PROMPT_SECTIONS = void 0;
+exports.hasAiReviewFenceContract = hasAiReviewFenceContract;
 exports.buildFinalPrompt = buildFinalPrompt;
 const menu_footer_1 = require("./menu-footer");
 const embedded_set_menu_guard_1 = require("./embedded-set-menu-guard");
 const tenant_config_1 = require("@menumanager/tenant-config");
+const review_response_contract_1 = require("./review-response-contract");
 // Registry of every runtime prompt section. Consumed by the review-rules
 // manifest so prompt-layer rules are enumerable alongside code rules.
 exports.QA_PROMPT_SECTIONS = {
@@ -60,7 +62,13 @@ exports.QA_PROMPT_SECTIONS = {
         appliesWhen: 'near-miss findings were computed for this menu (CANONICAL_VOCABULARY_ENABLED)',
     },
 };
+function hasAiReviewFenceContract(prompt) {
+    return Object.values(review_response_contract_1.AI_REVIEW_FENCES).every((marker) => `${prompt || ''}`.includes(marker));
+}
 function buildFinalPrompt(basePrompt, ctx, opts = {}) {
+    if (!hasAiReviewFenceContract(basePrompt)) {
+        console.warn('QA prompt is missing one or more AI response fence markers; model output may fall back to the original menu');
+    }
     const omit = new Set(opts.omitSections || []);
     const sections = [];
     let qaPrompt = basePrompt;

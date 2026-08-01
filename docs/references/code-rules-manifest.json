@@ -1515,6 +1515,28 @@
       "source": "code_metadata"
     },
     {
+      "id": "post-ai/protected-terms",
+      "layer": "post_ai_guard",
+      "category": "protected_terms",
+      "title": "Protected culinary terms",
+      "description": "Restores protected phrases that were present in the submitted menu if the AI rewrites them in its corrected-menu output. This guard is anchored to the original line and runs before the remaining post-AI guards.",
+      "examples": [
+        {
+          "before": "picked herbs",
+          "after": "picked herbs"
+        },
+        {
+          "before": "twice-baked",
+          "after": "twice-baked"
+        }
+      ],
+      "implementation": {
+        "file": "services/dashboard/lib/protected-terms-guard.ts",
+        "exportName": "restoreProtectedTerms"
+      },
+      "source": "code_metadata"
+    },
+    {
       "id": "post-ai/menu-title-guard",
       "layer": "post_ai_guard",
       "category": "structure",

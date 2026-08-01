@@ -3,8 +3,9 @@
 // gating, effective-prompt resolution, LLM-output validation, eval summarization,
 // and the mapping from LLM-proposed rules to correction_rules payloads.
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.CONSOLIDATION_SYSTEM_PROMPT = exports.IMPROVEMENT_SYSTEM_PROMPT = exports.IDENTICAL_CANDIDATE_EVAL_NOTE = exports.CONTEXT_DEPENDENT_TERMS = exports.CURRENT_PROMPT_END_MARKER = exports.CURRENT_PROMPT_BEGIN_MARKER = exports.PROMPT_UNCHANGED_SENTINEL = exports.CORRECTION_ROUTING_LANES = exports.PROPOSED_RULE_CHANGE_TYPES = void 0;
+exports.IDENTICAL_CANDIDATE_EVAL_NOTE = exports.CONTEXT_DEPENDENT_TERMS = exports.CURRENT_PROMPT_END_MARKER = exports.CURRENT_PROMPT_BEGIN_MARKER = exports.PROMPT_UNCHANGED_SENTINEL = exports.CORRECTION_ROUTING_LANES = exports.PROPOSED_RULE_CHANGE_TYPES = void 0;
 exports.shouldRunCycle = shouldRunCycle;
+exports.pickCadenceAnchor = pickCadenceAnchor;
 exports.shouldDeferForCadence = shouldDeferForCadence;
 exports.isTransientOpenAiFailure = isTransientOpenAiFailure;
 exports.assembleSupersedeCorrectionSet = assembleSupersedeCorrectionSet;
@@ -16,6 +17,8 @@ exports.isGuardDiscardReason = isGuardDiscardReason;
 exports.isReasoningModel = isReasoningModel;
 exports.isRequestTooLarge429 = isRequestTooLarge429;
 exports.buildImprovementLlmPayload = buildImprovementLlmPayload;
+exports.buildReplayRequestBody = buildReplayRequestBody;
+exports.resolveEvalBaselineModel = resolveEvalBaselineModel;
 exports.involvesContextDependentTerm = involvesContextDependentTerm;
 exports.locateCorrectionSite = locateCorrectionSite;
 exports.buildCorrectionExcerptWindows = buildCorrectionExcerptWindows;
@@ -45,7 +48,11 @@ exports.isBareIpBaseUrl = isBareIpBaseUrl;
 exports.buildPendingProposalReminderEmail = buildPendingProposalReminderEmail;
 exports.mapProposedRuleToCorrectionRulePayload = mapProposedRuleToCorrectionRulePayload;
 exports.buildCodeRecommendationIssue = buildCodeRecommendationIssue;
+exports.buildImprovementSystemPrompt = buildImprovementSystemPrompt;
+exports.buildConsolidationSystemPrompt = buildConsolidationSystemPrompt;
 const tenant_config_1 = require("@menumanager/tenant-config");
+const llm_adapter_1 = require("@menumanager/llm-adapter");
+const review_response_contract_1 = require("./review-response-contract");
 function shouldRunCycle(input) {
     const min = Math.max(1, input.minNewCorrections);
     const pending = input.pendingProposal && input.pendingProposal.cycle_id
@@ -82,6 +89,29 @@ function shouldRunCycle(input) {
     return { run: true, mode: 'new', reason: `${input.unconsumedCorrectionCount} unconsumed correction(s) ready` };
 }
 /**
+ * Pick the proposal that anchors the cadence clock: the most recent one that
+ * actually consumed reviewer attention. Rejected and superseded proposals are
+ * skipped — a rejection is the reviewer saying "this didn't count," and a
+ * superseded proposal was replaced before it was ever acted on, so neither
+ * should buy IMPROVE_MIN_HOURS_BETWEEN_PROPOSALS of silence.
+ *
+ * Callers pass the latest few proposals (newest first); the first non-rejected,
+ * non-superseded row wins. A missing or unknown status counts as an anchor
+ * (fail toward deferral — an unreadable row must not open the floodgates).
+ * Returns null when every row is rejected/superseded.
+ */
+function pickCadenceAnchor(proposals) {
+    for (const proposal of proposals || []) {
+        if (!proposal)
+            continue;
+        const status = `${proposal.status || ''}`.trim().toLowerCase();
+        if (status === 'rejected' || status === 'superseded')
+            continue;
+        return proposal;
+    }
+    return null;
+}
+/**
  * Cadence gate. The cron runs DAILY; this decides whether enough time has passed
  * since the last proposal to make another one.
  *
@@ -91,10 +121,18 @@ function shouldRunCycle(input) {
  * and gating on "hours since the last proposal we actually produced" keeps the
  * every-other-day cadence reviewers asked for while letting a failed run retry
  * the next night on its own.
+ *
+ * The anchor is the most recent proposal that consumed reviewer attention —
+ * rejected and superseded proposals are excluded (via pickCadenceAnchor)
+ * because they never counted. A supersede-eligible run (a pending proposal
+ * being refreshed with new corrections) bypasses cadence entirely; the every-
+ * other-day rhythm still governs the normal new-proposal path.
  */
 function shouldDeferForCadence(input) {
     if (input.force)
         return { defer: false, reason: 'forced run', hoursSince: null };
+    if (input.supersedeEligible)
+        return { defer: false, reason: 'supersede eligible; cadence bypassed', hoursSince: null };
     const minHours = Number.isFinite(input.minHours) ? Math.max(0, input.minHours) : 0;
     if (!minHours)
         return { defer: false, reason: 'cadence gate disabled', hoursSince: null };
@@ -265,7 +303,7 @@ const CONTEXT_LEAK_MARKERS = [
  * NOT match ("o" is not followed by a digit) and stay on the non-reasoning path.
  */
 function isReasoningModel(model) {
-    return /o[0-9]|gpt-5|reasoning/i.test(model || '');
+    return (0, llm_adapter_1.isReasoningModel)(model);
 }
 /**
  * True for a 429 body that says a SINGLE request exceeds the org's per-minute
@@ -301,6 +339,30 @@ function buildImprovementLlmPayload(model, systemPrompt, userPrompt, env = {}) {
         payload.max_completion_tokens = Number(env.IMPROVE_MAX_COMPLETION_TOKENS || 32000);
     }
     return payload;
+}
+/**
+ * Pure builder for the chat payload used by improvement-cycle replay calls.
+ * Reasoning-class models accept seed but reject a non-default temperature, so
+ * temperature is omitted for them while non-reasoning models receive both
+ * sampling controls.
+ */
+function buildReplayRequestBody(opts) {
+    const body = {
+        model: opts.model,
+        seed: opts.seed,
+        messages: [
+            { role: 'system', content: opts.prompt },
+            { role: 'user', content: `Here is the menu text to review:\n\n---\n\n${opts.text}` },
+        ],
+    };
+    if (!isReasoningModel(opts.model))
+        body.temperature = opts.temperature;
+    return body;
+}
+/** Resolve the incumbent model for confirmation without changing the historical
+ * default: absent --baseline-model means use the candidate model. */
+function resolveEvalBaselineModel(candidateModel, baselineModel) {
+    return String(baselineModel || '').trim() || candidateModel;
 }
 // Terms whose correct form depends on what the dish actually IS (or how the
 // word is used in the line), not on spelling — a blind find-replace would
@@ -854,14 +916,22 @@ function validateImprovementLlmOutput(raw, opts = {}) {
     if (!promptUnchanged && opts.currentPrompt) {
         const currentFenceCount = countMarkdownCodeFences(opts.currentPrompt);
         const proposedFenceCount = countMarkdownCodeFences(proposedPrompt);
+        const hasResponseFenceContract = (text) => Object.values(review_response_contract_1.AI_REVIEW_FENCES).every((marker) => text.includes(marker));
+        const responseFenceContractMissing = hasResponseFenceContract(opts.currentPrompt)
+            && !hasResponseFenceContract(proposedPrompt);
         // The guard exists to stop a rewrite from breaking the fenced response-format blocks,
         // so it compares against the CURRENT prompt — never against an absolute "must be even"
         // standard. The live prompt has carried an odd fence count since the response-format
         // block was added; an absolute parity check rejects *every* possible rewrite, including
         // one that reproduces the structure exactly, which silently made the cycle incapable of
         // ever changing the prompt (cycle 2026-07-26 burned all 3 attempts on "7 -> 7").
-        if (proposedFenceCount !== currentFenceCount) {
-            warnings.push(`proposed_prompt changed Markdown code fence structure (${currentFenceCount} -> ${proposedFenceCount}); treating the prompt as unchanged`);
+        if (proposedFenceCount !== currentFenceCount || responseFenceContractMissing) {
+            if (proposedFenceCount !== currentFenceCount) {
+                warnings.push(`proposed_prompt changed Markdown code fence structure (${currentFenceCount} -> ${proposedFenceCount}); treating the prompt as unchanged`);
+            }
+            if (responseFenceContractMissing) {
+                warnings.push('proposed_prompt removed one or more AI response fence markers; treating the prompt as unchanged');
+            }
             proposedPrompt = opts.currentPrompt;
             promptUnchanged = true;
             promptUnchangedReason = 'fence_guard';
@@ -922,6 +992,7 @@ function validateImprovementLlmOutput(raw, opts = {}) {
         rules.push({
             original_text: originalText,
             corrected_text: correctedText,
+            ...(rule.force_target_case === true ? { force_target_case: true } : {}),
             change_type: changeType,
             rule: explanation || `Replace "${originalText}" with "${correctedText}".`,
             applies_to_menu_type: menuType === 'food' || menuType === 'beverage' ? menuType : 'all',
@@ -1044,29 +1115,56 @@ function validateImprovementLlmOutput(raw, opts = {}) {
         }
         validatedCoverageClaims.push({ correction_id: cid, prompt_quote: quote, explanation: expl });
     }
-    // Fix 2: unresolved_still_missed check. If prompt unchanged, any still_missed correction
-    // must be referenced by at least one proposed replacement rule (exact text match) or a
-    // code recommendation (loose text mention). Otherwise the proposal claims "nothing to do"
-    // while evidence shows the current pipeline still misses it.
+    // Fix 2: unresolved_still_missed check. Every still_missed correction must be covered by
+    // a proposed replacement rule, a code recommendation/analysis mention, or a changed prompt
+    // span near the correction. Replay evidence outranks the author's claim that the prompt
+    // already covers it, even when the proposal changed some unrelated prompt text.
     let unresolvedStillMissed = false;
     const stillMissed = (opts.replayEvidence || []).filter((e) => e.status === 'still_missed');
-    if (promptUnchanged && stillMissed.length) {
-        const referenced = stillMissed.filter((e) => {
-            const o = asText(e.original_text, 240);
-            const c = asText(e.corrected_text, 240);
-            // A rule covers this correction if its (narrower) from-text sits inside the correction
-            // line — not only on an exact pair match, which would false-flag every narrowed rule.
-            const ruleHits = rules.some((r) => ruleCoversCorrection(r, o, c));
-            if (ruleHits)
-                return true;
-            const hay = (recommendations.map((r) => `${r.title} ${r.description}`).join(' ') + ' ' + analysis).toLowerCase();
-            if (!o && !c)
-                return false;
-            return hay.includes(o.toLowerCase()) || hay.includes(c.toLowerCase());
-        });
-        if (referenced.length < stillMissed.length) {
+    const changedPromptSpan = opts.currentPrompt && !promptUnchanged
+        ? minimalChangedSpan(opts.currentPrompt, proposedPrompt)
+        : null;
+    const changedPromptHay = changedPromptSpan
+        ? `${changedPromptSpan.from} ${changedPromptSpan.to}`.toLowerCase()
+        : '';
+    const promptCoverageStopwords = new Set([
+        'about', 'after', 'again', 'also', 'and', 'are', 'been', 'before', 'being', 'between',
+        'both', 'but', 'come', 'could', 'does', 'each', 'from', 'have', 'into', 'just', 'more',
+        'most', 'must', 'only', 'other', 'over', 'same', 'should', 'some', 'such', 'than',
+        'that', 'their', 'there', 'these', 'they', 'this', 'those', 'through', 'under', 'very',
+        'what', 'when', 'where', 'which', 'while', 'with', 'would',
+    ]);
+    const meaningfulCorrectionTokens = (value) => {
+        const tokens = `${value ?? ''}`.toLowerCase().match(/[\p{L}\p{N}]{4,}/gu) || [];
+        return [...new Set(tokens.filter((token) => !promptCoverageStopwords.has(token)))];
+    };
+    const promptChangedNearCorrection = (originalText, correctedText) => {
+        if (!changedPromptHay)
+            return false;
+        // Prefer the literal correction pair. This catches a rewritten decision procedure
+        // that states the exact trigger/action, even when its surrounding section changed.
+        if ((originalText && changedPromptHay.includes(originalText.toLowerCase()))
+            || (correctedText && changedPromptHay.includes(correctedText.toLowerCase()))) {
+            return true;
+        }
+        // A category-level rewrite may not contain either full correction line. Treat overlap
+        // with a non-stopword token (>3 chars) as evidence that the changed section is relevant.
+        return meaningfulCorrectionTokens(`${originalText} ${correctedText}`)
+            .some((token) => changedPromptHay.includes(token));
+    };
+    for (const e of stillMissed) {
+        const correctionId = asText(e.correction_id, 200) || '(unknown)';
+        const o = asText(e.original_text, 240).toLowerCase();
+        const c = asText(e.corrected_text, 240).toLowerCase();
+        // A rule covers this correction if its (narrower) from-text sits inside the correction
+        // line — not only on an exact pair match, which would false-flag every narrowed rule.
+        const ruleHits = rules.some((r) => ruleCoversCorrection(r, o, c));
+        const hay = (recommendations.map((r) => `${r.title} ${r.description}`).join(' ') + ' ' + analysis).toLowerCase();
+        const recommendationHits = !!((o || c) && ((o && hay.includes(o)) || (c && hay.includes(c))));
+        const promptHits = promptChangedNearCorrection(o, c);
+        if (!ruleHits && !recommendationHits && !promptHits) {
             unresolvedStillMissed = true;
-            warnings.push('unresolved_still_missed: prompt is unchanged and one or more still_missed corrections lack a covering replacement rule or code recommendation');
+            warnings.push(`unresolved_still_missed: correction ${correctionId} is still_missed but the proposal neither changed the prompt near it nor covers it with a rule/recommendation ("already covered" claims are falsified by replay evidence)`);
         }
     }
     // C3: per-correction routing table. Enforced only when we have identifiable source
@@ -1414,6 +1512,7 @@ function mapProposedRuleToCorrectionRulePayload(rule, proposalId, index, reviewe
         correction_id: `proposal-${proposalId}-rule-${index}`,
         original_text: rule.original_text,
         corrected_text: rule.corrected_text,
+        force_target_case: rule.force_target_case === true,
         change_type: rule.change_type,
         rule: rule.rule,
         applies_to_menu_type: rule.applies_to_menu_type,
@@ -1456,11 +1555,33 @@ function buildCodeRecommendationIssue(recommendation, proposal, dashboardUrl) {
         labels: ['improvement-cycle'],
     };
 }
-exports.IMPROVEMENT_SYSTEM_PROMPT = `You are the review-process engineer for an AI menu editor at ${(0, tenant_config_1.getTenantConfig)().name} (${(0, tenant_config_1.getTenantConfig)().shortName}).
+function buildExecutorAwarenessSection(executorModel) {
+    return `CRITICAL — WHO EXECUTES YOUR PROMPT:
+The QA prompt is NOT executed by you. It is executed by ${executorModel}, a much
+smaller, non-reasoning model. Write for THAT model:
+- It does not resolve implication, cross-references, or contradictions. A rule that is
+  "covered" by a category header, an example elsewhere, or a general principle is NOT
+  covered for this model. Coverage that requires assembling information from two places
+  in the prompt does not exist.
+- Write explicit decision procedures: IF <named trigger condition> THEN <action>, with
+  the trigger words the model will actually see in menu text. State rules at the point
+  of use, not once in a header.
+- Never leave a rule in tension with an example or list elsewhere in the prompt; the
+  executor resolves conflicts by token frequency, not by reasoning about intent.
+- REPLAY EVIDENCE OUTRANKS YOUR READING: if replay shows a correction is still_missed,
+  the prompt does NOT cover it for the executor — no matter what the text appears to say
+  to you. "The prompt already accounts for this" is never an acceptable resolution for a
+  still_missed correction. Rewrite the covering passage as an explicit decision
+  procedure, or route the correction to a replacement rule or code recommendation.`;
+}
+function buildImprovementSystemPrompt(opts) {
+    return `You are the review-process engineer for an AI menu editor at ${(0, tenant_config_1.getTenantConfig)().name} (${(0, tenant_config_1.getTenantConfig)().shortName}).
 
 The review process has TWO halves:
 1. A natural-language QA prompt (provided below) used by the review model.
 2. Deterministic CODE rules applied before and after the model (a complete manifest is provided below). You cannot change code directly.
+
+${buildExecutorAwarenessSection(opts.executorModel)}
 
 You will receive new human-reviewer corrections (with their explanations), the current prompt, the code-rules manifest, and recent evaluation results.
 
@@ -1551,14 +1672,18 @@ Respond with ONLY a JSON object in this exact shape:
     }
   ]
 }`;
+}
 /**
  * Dedicated system prompt for --consolidate (Fix 8 / F1).
  * Task is prompt surgery for concision/structure only — not driven by new corrections.
  * Same JSON output contract as the normal improvement prompt so the rest of the pipeline (validate, eval, storage) stays the same.
  */
-exports.CONSOLIDATION_SYSTEM_PROMPT = `You are the review-process engineer for an AI menu editor at ${(0, tenant_config_1.getTenantConfig)().name} (${(0, tenant_config_1.getTenantConfig)().shortName}).
+function buildConsolidationSystemPrompt(opts) {
+    return `You are the review-process engineer for an AI menu editor at ${(0, tenant_config_1.getTenantConfig)().name} (${(0, tenant_config_1.getTenantConfig)().shortName}).
 
 Your job in this run is to **consolidate and tighten** the existing QA prompt without losing coverage or intent.
+
+${buildExecutorAwarenessSection(opts.executorModel)}
 
 Rules for this consolidation pass:
 - Merge redundant or overlapping rules into a single clearer statement.
@@ -1579,3 +1704,4 @@ Output contract (identical shape to normal improvement proposals):
 If the input is already minimal, a small honest reduction is acceptable. Never produce a longer prompt.
 
 Respond with ONLY a JSON object in the exact shape above.`;
+}

@@ -5,6 +5,7 @@
 import { RAW_NOTICE_TEXT } from './menu-footer';
 import { buildEmbeddedSetMenuPromptSection } from './embedded-set-menu-guard';
 import { getTenantConfig } from '@menumanager/tenant-config';
+import { AI_REVIEW_FENCES } from './review-response-contract';
 
 export type QaPromptSectionId =
     | 'prix_fixe'
@@ -87,6 +88,10 @@ export type QaPromptContext = {
     nearMissBriefing?: string;
 };
 
+export function hasAiReviewFenceContract(prompt: string): boolean {
+    return Object.values(AI_REVIEW_FENCES).every((marker) => `${prompt || ''}`.includes(marker));
+}
+
 export function buildFinalPrompt(
     basePrompt: string,
     ctx: QaPromptContext,
@@ -95,6 +100,9 @@ export function buildFinalPrompt(
     prompt: string;
     sections: QaPromptSectionId[];
 } {
+    if (!hasAiReviewFenceContract(basePrompt)) {
+        console.warn('QA prompt is missing one or more AI response fence markers; model output may fall back to the original menu');
+    }
     const omit = new Set(opts.omitSections || []);
     const sections: QaPromptSectionId[] = [];
     let qaPrompt = basePrompt;

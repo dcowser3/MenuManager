@@ -32,6 +32,9 @@ export type BasicAiCheckAuditEvent = {
     criticalSuggestionsCount?: unknown;
     aiRequest?: unknown;
     aiResponse?: unknown;
+    model?: unknown;
+    systemFingerprint?: unknown;
+    fenceMissing?: unknown;
     parsedResponse?: unknown;
     finalResult?: unknown;
     guardDiagnostics?: unknown;
@@ -69,6 +72,11 @@ function textOrNull(value: unknown, maxLength = 255, multiline = false): string 
 function numberOrNull(value: unknown): number | null {
     const parsed = Number.parseInt(`${value ?? ''}`, 10);
     return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+}
+
+function booleanOrNull(value: unknown): boolean | null {
+    if (value === undefined || value === null || value === '') return null;
+    return value === true || /^(1|true|yes|on)$/i.test(String(value).trim());
 }
 
 function truncateString(value: string, maxChars: number): string {
@@ -143,6 +151,9 @@ export function normalizeBasicAiCheckAuditEvent(
         critical_suggestions_count: numberOrNull(event.criticalSuggestionsCount),
         ai_request: aiRequest,
         ai_response: aiResponse,
+        model: textOrNull(event.model, 200),
+        system_fingerprint: textOrNull(event.systemFingerprint, 200),
+        fence_missing: booleanOrNull(event.fenceMissing),
         parsed_response: truncateJson(event.parsedResponse ?? null, maxChars),
         final_result: truncateJson(event.finalResult ?? null, maxChars),
         guard_diagnostics: truncateJson(event.guardDiagnostics ?? null, maxChars),
@@ -185,13 +196,29 @@ export async function linkBasicAiCheckAuditsToSubmission(
     }
 }
 
-// Columns added by migration 20260611_add_review_training_links.sql. If that
-// migration has not been applied yet, retry the insert without them so the
-// pre-existing audit stream keeps flowing instead of dropping rows.
-const TRAINING_LINK_AUDIT_COLUMNS = ['menu_content_raw', 'baseline_menu_content_raw', 'submission_id'] as const;
+// Optional audit columns are added by migrations over time. If a deployment
+// has not applied one yet, retry without it so the pre-existing audit stream
+// keeps flowing instead of dropping the whole row.
+const OPTIONAL_AUDIT_COLUMNS = [
+    'menu_content_raw',
+    'baseline_menu_content_raw',
+    'submission_id',
+    'model',
+    'system_fingerprint',
+    'fence_missing',
+] as const;
 
-function isMissingTrainingLinkColumnError(message: string): boolean {
-    return TRAINING_LINK_AUDIT_COLUMNS.some((column) => `${message || ''}`.includes(column));
+function isMissingOptionalAuditColumnError(message: string): boolean {
+    return OPTIONAL_AUDIT_COLUMNS.some((column) => `${message || ''}`.includes(column));
+}
+
+function auditFailureContext(event: BasicAiCheckAuditEvent): Record<string, unknown> {
+    return {
+        attemptId: textOrNull(event.attemptId, 100),
+        checkId: textOrNull(event.checkId, 100),
+        eventType: textOrNull(event.eventType, 80),
+        route: textOrNull(event.route, 160),
+    };
 }
 
 export async function logBasicAiCheckAudit(event: BasicAiCheckAuditEvent): Promise<void> {
@@ -205,26 +232,37 @@ export async function logBasicAiCheckAudit(event: BasicAiCheckAuditEvent): Promi
             .from('basic_ai_check_audits')
             .insert(normalized);
 
-        if (error && isMissingTrainingLinkColumnError(error.message)) {
+        if (error && isMissingOptionalAuditColumnError(error.message)) {
             const legacyRecord = { ...normalized };
-            for (const column of TRAINING_LINK_AUDIT_COLUMNS) {
+            for (const column of OPTIONAL_AUDIT_COLUMNS) {
                 delete legacyRecord[column];
             }
             const { error: retryError } = await supabase
                 .from('basic_ai_check_audits')
                 .insert(legacyRecord);
             if (retryError) {
-                console.error('Failed to log Basic AI Check audit (legacy retry):', retryError.message);
+                console.error('[basic-ai-check-audit] INSERT FAILED after legacy retry', {
+                    ...auditFailureContext(event),
+                    originalError: error.message,
+                    retryError: retryError.message,
+                });
             } else {
-                console.warn('Basic AI Check audit stored without training-link columns; apply migration 20260611_add_review_training_links.sql');
+                console.warn('Basic AI Check audit stored without one or more optional columns; apply the corresponding audit migrations');
             }
             return;
         }
 
         if (error) {
-            console.error('Failed to log Basic AI Check audit:', error.message);
+            console.error('[basic-ai-check-audit] INSERT FAILED', {
+                ...auditFailureContext(event),
+                error: error.message,
+            });
         }
     } catch (error: any) {
-        console.error('Basic AI Check audit logging failed:', error.message);
+        console.error('[basic-ai-check-audit] LOGGER EXCEPTION', {
+            ...auditFailureContext(event),
+            error: error?.message || `${error}`,
+            stack: error?.stack,
+        });
     }
 }

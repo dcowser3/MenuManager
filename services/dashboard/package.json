@@ -15,6 +15,7 @@
   "dependencies": {
     "@menumanager/diff-core": "*",
     "@menumanager/internal-auth": "*",
+    "@menumanager/llm-adapter": "*",
     "@menumanager/supabase-client": "*",
     "@menumanager/tenant-config": "*",
     "axios": "^1.6.2",

@@ -2,6 +2,19 @@
 
 All variables are configured in `.env` at the project root. See `.env.example` for a template.
 
+## Model provenance and production pinning
+
+The four job-specific model variables have separate responsibilities:
+
+- `AI_REVIEW_MODEL` controls menu QA calls in `services/ai-review`; if unset, code uses `gpt-5.6-luna`.
+- `REVIEW_EVAL_MODEL` controls the review-eval harness and improvement-cycle replay; its fallback chain is `REVIEW_EVAL_MODEL` → `AI_REVIEW_MODEL` → `gpt-4o-mini`.
+- `IMPROVE_MODEL` controls improvement-cycle analysis; its fallback chain is `IMPROVE_MODEL` → `PROMPT_REWRITE_MODEL` → `o3`.
+- `PROMPT_REWRITE_MODEL` controls `scripts/prompt-rewrite.js` and is the improvement-cycle fallback; if unset, its code default is `gpt-4o`.
+
+Chat calls use the shared `services/llm-adapter` module. `LLM_PROVIDER` is `openai` by default; set it to `openrouter` for manual failover. The optional per-call-site overrides are `AI_REVIEW_LLM_PROVIDER`, `IMPROVE_LLM_PROVIDER`, `PROMPT_REWRITE_LLM_PROVIDER`, and `REVIEW_EVAL_LLM_PROVIDER`. OpenRouter model IDs are mapped centrally to vendor-prefixed IDs (for example, `gpt-5.6-luna` becomes `openai/gpt-5.6-luna`); no automatic provider fallback occurs. `OPENROUTER_API_KEY` is required when OpenRouter is selected.
+
+Production must use dated model snapshots, never floating aliases such as `-latest`. Silent provider drift can change review/eval behavior, so model changes must be explicit, eval-gated migration events. The `.env.example` file contains a dated `PROD VALUES AS OF 2026-07-31` placeholder block for the production values to be filled in by Derian; it intentionally contains no production secrets.
+
 ## Required
 
 | Variable | Description |
@@ -31,8 +44,14 @@ All variables are configured in `.env` at the project root. See `.env.example` f
 | `FORM_ATTEMPT_ALERT_EMAIL` | Email address that receives production public-form failure alerts such as `413` submit errors, plus user-initiated "Report this problem" emails with the page screenshot and client-state JSON attached (default: config bundle `emails.formAttemptAlert`) |
 | `PUBLIC_FORM_SUPPORT_EMAIL` | Email address shown to submitters in the form footer and blocking/red form errors as the manual fallback next to the "Report this problem" button (default: config bundle `emails.publicSupport`) |
 | `ERROR_REPORT_FORCE_EMAIL` | Set `true` to send "Report this problem" emails outside production (normally they only email in production; the report is always saved to `tmp/error-reports/` and logged to `form_attempt_logs`) |
-| `AI_REVIEW_MODEL` | OpenAI model used by AI review service (default: `gpt-5.6-luna` since 2026-07-30; previously `gpt-4o-mini`). Pin to a dated snapshot and set the same value for `REVIEW_EVAL_MODEL` (B5) to reduce eval drift. The switch was made on eval evidence: +4.9pp composite and correction precision 59.3% -> 78.1% (false positives 68 -> 28) on a 60-case slice, at ~$0.005/review. **Reasoning-class models reject a non-default `temperature`**, so `AI_REVIEW_TEMPERATURE` is omitted from the request for them (see below). Note `ERROR_REPORT_TRIAGE_MODEL` falls back to this value, so changing it also changes problem-report triage. |
+| `AI_REVIEW_MODEL` | OpenAI model used by AI review service (default: `gpt-5.6-luna` since 2026-07-30; previously `gpt-4o-mini`). Production should use a dated snapshot and keep the resolved value aligned with `REVIEW_EVAL_MODEL` when evaluating production behavior. The switch was made on eval evidence: +4.9pp composite and correction precision 59.3% -> 78.1% (false positives 68 -> 28) on a 60-case slice, at ~$0.005/review. **Reasoning-class models reject a non-default `temperature`**, so `AI_REVIEW_TEMPERATURE` is omitted from the request for them (see below). Note `ERROR_REPORT_TRIAGE_MODEL` falls back to this value, so changing it also changes problem-report triage. |
+| `LLM_PROVIDER` | Shared chat provider (`openai` or `openrouter`; default `openai`). Failover is manual: change this value or a per-call-site override and restart the relevant service/job. |
+| `AI_REVIEW_LLM_PROVIDER` | Optional provider override for `services/ai-review`; otherwise uses `LLM_PROVIDER` |
+| `IMPROVE_LLM_PROVIDER` | Optional provider override for improvement-cycle analysis; otherwise uses `LLM_PROVIDER` |
+| `PROMPT_REWRITE_LLM_PROVIDER` | Optional provider override for `scripts/prompt-rewrite.js`; otherwise uses `LLM_PROVIDER` |
+| `REVIEW_EVAL_LLM_PROVIDER` | Optional provider override for `scripts/review-eval.js` and improvement-cycle replay; `REVIEW_EVAL_PROVIDER` remains a compatibility alias |
 | `AI_REVIEW_TEMPERATURE` | **Ignored for reasoning-class models** (o-series, gpt-5 family incl. `gpt-5.6-luna`) — they reject any non-default temperature with a 400, so the parameter is omitted from the request; repeatability there comes from the deterministic layers alone. Applies to `gpt-4o`-class models only. Sampling temperature for the menu QA review calls (`/run-qa-check` and the post-submit Tier-1 review). Default `0` — menu review is a correction task, not a creative one, so randomness is undesirable. Previously these calls sent no temperature (OpenAI default = 1), which made the same menu produce a different review each run. Note: temp 0 reduces but does not fully eliminate model nondeterminism (gpt-4o-mini still has backend drift); the deterministic pre-AI checks and structure/price guards are what actually make the final reviewed menu consistent. Override only for deliberate A/B testing. |
+| `BASIC_AI_CHECK_SEED` | Optional non-negative integer override for the Basic AI Check provider seed. The code default is `42`; this is a partial reproducibility mitigation only, and reasoning-model/backend nondeterminism can remain. |
 | `APPROVED_DISH_AI_QUALITY_TIMEOUT_MS` | DB-service timeout in milliseconds when asking ai-review to classify questionable extracted dish rows (default: `20000`) |
 | `BASIC_AI_CHECK_TIMEOUT_MS` | Dashboard timeout in milliseconds for background public-form Basic AI Check calls to ai-review (default: `120000`; falls back to `AI_REVIEW_QA_TIMEOUT_MS` if set) |
 | `AI_REVIEW_SUBMIT_TIMEOUT_MS` | Dashboard timeout in milliseconds for the post-submit full AI review handoff (default: `BASIC_AI_CHECK_TIMEOUT_MS`, normally `120000`) |
@@ -82,8 +101,12 @@ All variables are configured in `.env` at the project root. See `.env.example` f
 | `IMPROVE_NOTIFY_EMAIL` | Recipient for "proposal ready" emails — **and for cycle-failure emails** (default: `FORM_ATTEMPT_ALERT_EMAIL`) |
 | `IMPROVE_SKIP_EVAL` | Set `1` to skip the auto-eval step of the improvement cycle (proposal stored with `eval_status: skipped`) |
 | `IMPROVE_EVAL_LIMIT` | Cap the number of eval cases per improvement-cycle run (default: all) |
-| `REVIEW_EVAL_MODEL` | OpenAI model for the review eval harness (default: `AI_REVIEW_MODEL` or `gpt-5.6-luna`). B5: pin both REVIEW_EVAL_MODEL and production AI_REVIEW_MODEL to the same dated snapshot (e.g. gpt-4o-mini-YYYY-MM-DD); the resolved value is emitted at top-level `model` in report.json. |
+| `PROMPT_REWRITE_MODEL` | OpenAI model used by `scripts/prompt-rewrite.js`; it is also the fallback for `IMPROVE_MODEL`. If unset, the code default is `gpt-4o`. |
+| `REVIEW_EVAL_MODEL` | OpenAI model for the review eval harness and improvement-cycle replay (default chain: `REVIEW_EVAL_MODEL || AI_REVIEW_MODEL || gpt-4o-mini`). Pin it and production `AI_REVIEW_MODEL` to the same dated snapshot when measuring production behavior; the resolved value is emitted at top-level `model` in `report.json`. |
 | `OPENROUTER_API_KEY` | OpenRouter key used by the eval harness when `--model` is provider-namespaced (`google/gemini-3-flash`, `anthropic/claude-sonnet-5`, `openai/gpt-5.6-luna`). Lets a candidate model be A/B'd against the historical dataset without touching the production services, which always call OpenAI directly. Not required for plain OpenAI model ids. |
+| `LLM_TRANSIENT_RETRIES` | Shared adapter retry count for network and HTTP 5xx failures (default `4`) |
+| `LLM_RATE_LIMIT_RETRIES` | Shared adapter retry count for retryable HTTP 429 responses (default `6`); quota exhaustion and request-too-large responses fail fast |
+| `LLM_TRANSIENT_BASE_DELAY_MS` / `LLM_MAX_RETRY_DELAY_MS` | Shared adapter transient backoff base and cap (defaults `5000` / `90000`) |
 | `REVIEW_EVAL_PROVIDER` | Set `openrouter` to force the eval harness through OpenRouter even for an unnamespaced model id (default: routing is inferred from the `/` in the id). |
 | `DASHBOARD_PUBLIC_URL` | Optional base URL override for improvement-cycle notification email links and proposal-related GitHub issue provenance. When unset, these links use `DASHBOARD_URL`, then fall back to `http://localhost:3005` for local development. |
 | `GITHUB_TOKEN` | GitHub personal access token with `issues:write` on `GITHUB_REPO`. When set, approving a proposal files each code recommendation as a GitHub issue; when unset, issue filing is skipped with a log line |

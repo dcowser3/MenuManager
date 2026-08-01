@@ -68,7 +68,7 @@ Menu Manager is an npm-workspace monorepo with Express microservices and shared 
 | `differ` | 3006 | AI draft vs. human-approved comparison for training |
 | `clickup-integration` | 3007 | ClickUp task creation, webhook handling, approval handoff |
 
-Shared workspace packages include `diff-core`, `internal-auth`, `supabase-client`, and `tenant-config`. DOCX redlining/extraction scripts live in `services/docx-redliner/`.
+Shared workspace packages include `diff-core`, `internal-auth`, `llm-adapter`, `supabase-client`, and `tenant-config`. DOCX redlining/extraction scripts live in `services/docx-redliner/`.
 
 The app is white-labelable: all business-specific values (branding, emails, allergen key, approval roles, menu-template markers, and seed rules/properties) live in one config bundle at `config/` and are loaded by `@menumanager/tenant-config`. To stand up the app for another business, copy `config.example/` to `config/` and edit it — no code changes. See [docs/onboarding-new-business.md](docs/onboarding-new-business.md).
 

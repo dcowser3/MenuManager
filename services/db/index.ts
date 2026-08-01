@@ -80,6 +80,7 @@ type CorrectionRuleRecord = {
     correction_id: string;
     original_text: string | null;
     corrected_text: string | null;
+    force_target_case: boolean;
     change_type: string | null;
     rule: string;
     applies_to_menu_type: string;
@@ -1474,6 +1475,7 @@ function buildCorrectionRuleStorageRecord(record: any): CorrectionRuleRecord | n
         correction_id: `${record.correction_id}`,
         original_text: record.original_text || null,
         corrected_text: record.corrected_text || null,
+        force_target_case: record.force_target_case === true,
         change_type: record.change_type || null,
         rule: `${record.rule}`,
         applies_to_menu_type: appliesToMenuType,
@@ -1579,6 +1581,7 @@ function buildCorrectionRuleUpdateFields(updates: any): Record<string, any> {
         'is_location_specific',
         'other_applicable_locations',
         'change_type',
+        'force_target_case',
         'restaurant_name',
         'location',
         'project_name',
@@ -1598,6 +1601,10 @@ function buildCorrectionRuleUpdateFields(updates: any): Record<string, any> {
             throw new Error('applies_to_menu_type must be all, food, or beverage');
         }
         allowedFields.applies_to_menu_type = normalized;
+    }
+
+    if (allowedFields.force_target_case !== undefined && typeof allowedFields.force_target_case !== 'boolean') {
+        throw new Error('force_target_case must be boolean');
     }
 
     return allowedFields;
@@ -3618,7 +3625,7 @@ const CRITICAL_SUPABASE_SCHEMA: Record<string, string[]> = {
     menus: ['property', 'service_period', 'name', 'current_submission_id', 'status'],
     draft_sessions: ['token', 'base_submission_id', 'form_state', 'status', 'submitted_submission_id', 'last_edited_by', 'menu_id'],
     form_attempt_logs: ['draft_session_id'],
-    basic_ai_check_audits: ['menu_content_raw', 'submission_id'],
+    basic_ai_check_audits: ['menu_content_raw', 'submission_id', 'model', 'system_fingerprint', 'fence_missing'],
     prompt_proposals: ['proposed_rules', 'eval_status', 'accepted_rules', 'source', 'llm_warnings', 'replay_evidence', 'unresolved_still_missed', 'coverage_claims', 'prompt_length', 'superseded_by_cycle_id', 'superseded_from_cycle_id', 'supersede_carried_correction_count', 'supersede_new_correction_count', 'disposition', 'correction_routing'],
 };
 

@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 const improvement_cycle_core_1 = require("../lib/improvement-cycle-core");
+const review_response_contract_1 = require("../lib/review-response-contract");
 describe('shouldDeferForCadence', () => {
     const now = Date.parse('2026-07-25T09:15:00Z');
     const hoursAgo = (h) => new Date(now - h * 3600000).toISOString();
@@ -21,6 +22,46 @@ describe('shouldDeferForCadence', () => {
         expect((0, improvement_cycle_core_1.shouldDeferForCadence)({ lastProposalCreatedAt: null, nowMs: now, minHours: 40 }).defer).toBe(false);
         expect((0, improvement_cycle_core_1.shouldDeferForCadence)({ lastProposalCreatedAt: 'not-a-date', nowMs: now, minHours: 40 }).defer).toBe(false);
         expect((0, improvement_cycle_core_1.shouldDeferForCadence)({ lastProposalCreatedAt: hoursAgo(1), nowMs: now, minHours: 0 }).defer).toBe(false);
+    });
+    test('a supersede-eligible run bypasses cadence even inside the window', () => {
+        const res = (0, improvement_cycle_core_1.shouldDeferForCadence)({ lastProposalCreatedAt: hoursAgo(1), nowMs: now, minHours: 40, supersedeEligible: true });
+        expect(res.defer).toBe(false);
+        expect(res.reason).toContain('supersede eligible');
+    });
+    test('force still short-circuits ahead of the supersede check', () => {
+        expect((0, improvement_cycle_core_1.shouldDeferForCadence)({ lastProposalCreatedAt: hoursAgo(1), nowMs: now, minHours: 40, force: true, supersedeEligible: false }).reason).toBe('forced run');
+    });
+    test('Jul 29→30 regression: anchor 24h ago still defers plain new-mode runs', () => {
+        // The anchor here is already the attention-consuming proposal (rejected rows are
+        // excluded upstream by pickCadenceAnchor). A plain new-proposal run must still wait.
+        const res = (0, improvement_cycle_core_1.shouldDeferForCadence)({ lastProposalCreatedAt: hoursAgo(24), nowMs: now, minHours: 40 });
+        expect(res.defer).toBe(true);
+    });
+});
+describe('pickCadenceAnchor', () => {
+    const row = (cycle_id, status, created_at = '2026-07-29T09:15:00Z') => ({ cycle_id, status, created_at });
+    test('skips a leading rejected row and returns the approved one behind it', () => {
+        const anchor = (0, improvement_cycle_core_1.pickCadenceAnchor)([
+            row('2026-07-29', 'rejected'),
+            row('2026-07-27', 'approved'),
+        ]);
+        expect(anchor?.cycle_id).toBe('2026-07-27');
+    });
+    test('skips a rejected+superseded chain to the first attention-consuming row', () => {
+        const anchor = (0, improvement_cycle_core_1.pickCadenceAnchor)([
+            row('2026-07-29', 'rejected'),
+            row('2026-07-28', 'superseded'),
+            row('2026-07-27', 'pending'),
+        ]);
+        expect(anchor?.cycle_id).toBe('2026-07-27');
+    });
+    test('returns null when every row is rejected or superseded', () => {
+        expect((0, improvement_cycle_core_1.pickCadenceAnchor)([row('a', 'rejected'), row('b', 'superseded')])).toBeNull();
+        expect((0, improvement_cycle_core_1.pickCadenceAnchor)([])).toBeNull();
+    });
+    test('a missing or unknown status counts as an anchor (fail toward deferral)', () => {
+        expect((0, improvement_cycle_core_1.pickCadenceAnchor)([{ cycle_id: 'x', created_at: '2026-07-29T09:15:00Z' }])?.cycle_id).toBe('x');
+        expect((0, improvement_cycle_core_1.pickCadenceAnchor)([row('y', 'weird-status')])?.cycle_id).toBe('y');
     });
 });
 describe('describePublicUrlMisconfiguration', () => {
@@ -282,6 +323,21 @@ describe('validateImprovementLlmOutput', () => {
         expect(output.proposed_replacement_rules).toHaveLength(1);
         expect(output.warnings.some((w) => w.includes('code fence structure'))).toBe(true);
     });
+    test('response fence markers are part of the prompt-shape guard contract', () => {
+        const current = [
+            'Response format:',
+            '```json',
+            ...Object.values(review_response_contract_1.AI_REVIEW_FENCES),
+            '```',
+            'Rules continue here.',
+        ].join('\n');
+        const proposed = current.replace(review_response_contract_1.AI_REVIEW_FENCES.suggestionsEnd, 'REMOVED');
+        const output = (0, improvement_cycle_core_1.validateImprovementLlmOutput)({ proposed_prompt: proposed }, { currentPrompt: current });
+        expect(output.promptUnchanged).toBe(true);
+        expect(output.promptUnchangedReason).toBe('fence_guard');
+        expect(output.proposed_prompt).toBe(current);
+        expect(output.warnings.some((w) => w.includes('AI response fence markers'))).toBe(true);
+    });
     test('an odd fence count that the rewrite preserves is allowed through, with a repair warning', () => {
         // Regression: the live prompt has 7 fence lines. The guard used to require an even
         // count outright, so every possible rewrite was discarded and the cycle could never
@@ -357,6 +413,42 @@ describe('validateImprovementLlmOutput', () => {
         });
         expect(out.unresolved_still_missed).toBe(true);
     });
+    test('still_missed remains unresolved when a changed prompt span is unrelated', () => {
+        const out = (0, improvement_cycle_core_1.validateImprovementLlmOutput)({ proposed_prompt: 'Rule for oranges.', analysis: 'Updated an unrelated rule.' }, {
+            currentPrompt: 'Rule for apples.',
+            replayEvidence: [{ correction_id: 'c1', original_text: 'veggies', corrected_text: 'vegetables', status: 'still_missed' }],
+        });
+        expect(out.promptUnchanged).toBe(false);
+        expect(out.unresolved_still_missed).toBe(true);
+        expect(out.warnings.some((w) => /unresolved_still_missed: correction c1/.test(w))).toBe(true);
+    });
+    test('still_missed is resolved when the changed prompt span contains the correction', () => {
+        const out = (0, improvement_cycle_core_1.validateImprovementLlmOutput)({ proposed_prompt: 'Rule: use vegetables for veggies.', analysis: 'Made the trigger and action explicit.' }, {
+            currentPrompt: 'Rule: use the old wording.',
+            replayEvidence: [{ correction_id: 'c1', original_text: 'veggies', corrected_text: 'vegetables', status: 'still_missed' }],
+        });
+        expect(out.promptUnchanged).toBe(false);
+        expect(out.unresolved_still_missed).toBeFalsy();
+        expect(out.warnings.some((w) => /unresolved_still_missed: correction c1/.test(w))).toBe(false);
+    });
+    test('still_missed remains resolved by a covering replacement rule despite an unrelated prompt change', () => {
+        const out = (0, improvement_cycle_core_1.validateImprovementLlmOutput)({
+            proposed_prompt: 'Rule for oranges.',
+            analysis: 'Updated an unrelated rule.',
+            proposed_replacement_rules: [{
+                    original_text: 'veggies',
+                    corrected_text: 'vegetables',
+                    change_type: 'terminology',
+                    rule: 'Use the full term.',
+                }],
+        }, {
+            currentPrompt: 'Rule for apples.',
+            replayEvidence: [{ correction_id: 'c1', original_text: 'veggies', corrected_text: 'vegetables', status: 'still_missed' }],
+        });
+        expect(out.promptUnchanged).toBe(false);
+        expect(out.unresolved_still_missed).toBeFalsy();
+        expect(out.warnings.some((w) => /unresolved_still_missed: correction c1/.test(w))).toBe(false);
+    });
     test('Fix 5: valid coverage_claim + still_missed + no rule/cover still sets unresolved_still_missed (replay outranks citation)', () => {
         const current = 'The prompt says use vegetables for veggies and other terms.';
         const out = (0, improvement_cycle_core_1.validateImprovementLlmOutput)({
@@ -409,12 +501,21 @@ describe('validateImprovementLlmOutput', () => {
     });
 });
 describe('improvement system prompt', () => {
+    test('builds an executor-aware prompt without hardcoding a different executor', () => {
+        const prompt = (0, improvement_cycle_core_1.buildImprovementSystemPrompt)({ executorModel: 'test-model-x' });
+        expect(prompt).toContain('test-model-x');
+        expect(prompt).toContain('non-reasoning');
+        expect(prompt).toContain('still_missed');
+        expect(prompt).toContain('decision procedure');
+        expect(prompt).not.toContain('gpt-4o-mini');
+    });
     test('treats missed prompt-lane corrections as evidence current guidance needs sharpening', () => {
-        expect(improvement_cycle_core_1.IMPROVEMENT_SYSTEM_PROMPT).toContain('Treat every new reviewer correction as evidence');
+        const prompt = (0, improvement_cycle_core_1.buildImprovementSystemPrompt)({ executorModel: 'test-model-x' });
+        expect(prompt).toContain('Treat every new reviewer correction as evidence');
         // Updated language from Fix 2 (replay evidence + still_missed discipline)
-        expect(improvement_cycle_core_1.IMPROVEMENT_SYSTEM_PROMPT).toContain('still_missed');
+        expect(prompt).toContain('still_missed');
         // B2 updated wording; replay outranks citation (case-insensitive match)
-        expect(improvement_cycle_core_1.IMPROVEMENT_SYSTEM_PROMPT.toLowerCase()).toContain('replay evidence outranks');
+        expect(prompt.toLowerCase()).toContain('replay evidence outranks');
     });
 });
 describe('eval summary + status', () => {
@@ -783,6 +884,27 @@ describe('buildImprovementLlmPayload (F0 extraction)', () => {
         }
     });
 });
+describe('buildReplayRequestBody (Phase 0)', () => {
+    const args = { model: 'model', temperature: 0, seed: 42, prompt: 'system', text: 'menu' };
+    test('omits temperature but keeps seed for reasoning models', () => {
+        const body = (0, improvement_cycle_core_1.buildReplayRequestBody)({ ...args, model: 'gpt-5.1' });
+        expect(body).not.toHaveProperty('temperature');
+        expect(body).toMatchObject({ model: 'gpt-5.1', seed: 42 });
+    });
+    test('includes temperature and seed for non-reasoning models', () => {
+        const body = (0, improvement_cycle_core_1.buildReplayRequestBody)({ ...args, model: 'gpt-4o-mini' });
+        expect(body).toMatchObject({ model: 'gpt-4o-mini', temperature: 0, seed: 42 });
+    });
+});
+describe('resolveEvalBaselineModel (Phase 2)', () => {
+    test('defaults to the candidate model for backward-compatible confirmation', () => {
+        expect((0, improvement_cycle_core_1.resolveEvalBaselineModel)('candidate-model')).toBe('candidate-model');
+        expect((0, improvement_cycle_core_1.resolveEvalBaselineModel)('candidate-model', '  ')).toBe('candidate-model');
+    });
+    test('uses the explicit incumbent model when provided', () => {
+        expect((0, improvement_cycle_core_1.resolveEvalBaselineModel)('candidate-model', 'incumbent-model')).toBe('incumbent-model');
+    });
+});
 describe('isReasoningModel', () => {
     test('matches o-series and gpt-5 family', () => {
         for (const m of ['o1', 'o3', 'o3-mini', 'o4-mini', 'gpt-5', 'gpt-5.1', 'gpt-5-mini', 'GPT-5.2']) {
@@ -806,11 +928,17 @@ describe('isRequestTooLarge429 (fail-fast guard)', () => {
     });
 });
 describe('consolidation mode (F1 / Fix 8)', () => {
-    test('CONSOLIDATION_SYSTEM_PROMPT exists and is distinct', () => {
-        expect(typeof improvement_cycle_core_1.CONSOLIDATION_SYSTEM_PROMPT).toBe('string');
-        expect(improvement_cycle_core_1.CONSOLIDATION_SYSTEM_PROMPT.length).toBeGreaterThan(200);
-        expect(improvement_cycle_core_1.CONSOLIDATION_SYSTEM_PROMPT).toContain('consolidate');
-        expect(improvement_cycle_core_1.CONSOLIDATION_SYSTEM_PROMPT).not.toBe(improvement_cycle_core_1.IMPROVEMENT_SYSTEM_PROMPT);
+    test('builds an executor-aware consolidation prompt', () => {
+        const prompt = (0, improvement_cycle_core_1.buildConsolidationSystemPrompt)({ executorModel: 'test-model-x' });
+        expect(typeof prompt).toBe('string');
+        expect(prompt.length).toBeGreaterThan(200);
+        expect(prompt).toContain('consolidate');
+        expect(prompt).toContain('test-model-x');
+        expect(prompt).toContain('non-reasoning');
+        expect(prompt).toContain('still_missed');
+        expect(prompt).toContain('decision procedure');
+        expect(prompt).not.toContain('gpt-4o-mini');
+        expect(prompt).not.toBe((0, improvement_cycle_core_1.buildImprovementSystemPrompt)({ executorModel: 'test-model-x' }));
     });
     test('validator in consolidation mode: drops rules/recs, warns on <5% or >50% reduction, does not fire short/growth', () => {
         const current = 'x'.repeat(10000);

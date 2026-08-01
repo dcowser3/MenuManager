@@ -30,6 +30,31 @@ describe('runPreAiDeterministicChecks', () => {
             'Ají Lime Sauce 4',
         ].join('\n'));
     });
+    it('pins brand orthography in both directions and treats ALL CAPS as no exemption', () => {
+        const result = (0, pre_ai_deterministic_rules_1.runPreAiDeterministicChecks)([
+            'PATRON EL ALTO 91',
+            'PATRÓN Extra Añejo, Añejo and Reposado',
+            'Patron Silver 15',
+            'JOSE CUERVO RESERVA DE LA FAMILIA 38',
+            'JOSÉ CUERVO ESPECIAL SILVER 55',
+            'José Cuervo Tradicional Plata 16',
+            'Familia Zuccardi Jose, Mendoza, Argentina 175',
+        ].join('\n'));
+        expect(result.menuText).toBe([
+            'PATRÓN EL ALTO 91',
+            'PATRÓN Extra Añejo, Añejo and Reposado',
+            'Patrón Silver 15',
+            'JOSE CUERVO RESERVA DE LA FAMILIA 38',
+            'JOSE CUERVO ESPECIAL SILVER 55',
+            'Jose Cuervo Tradicional Plata 16',
+            'Familia Zuccardi Jose, Mendoza, Argentina 175',
+        ].join('\n'));
+    });
+    it('leaves the English word "patrons" alone when pinning the Patrón brand', () => {
+        const result = (0, pre_ai_deterministic_rules_1.runPreAiDeterministicChecks)('Our patrons must be 21 years or older');
+        expect(result.menuText).toBe('Our patrons must be 21 years or older');
+        expect(result.appliedCorrections).toEqual([]);
+    });
     it('adds the cheese modifier to Cotija without duplicating or changing hyphenated forms', () => {
         const result = (0, pre_ai_deterministic_rules_1.runPreAiDeterministicChecks)([
             'Esquites, sweet yellow corn, spicy aioli, cotija, bacon* D 17',
@@ -69,6 +94,16 @@ describe('runPreAiDeterministicChecks', () => {
             'Guacamole V 12',
         ].join('\n'));
         expect(result.appliedCorrections.filter((c) => c.type === 'Raw Item')).toHaveLength(3);
+    });
+    it('adds a marker for ribeye and does not double-mark an existing ribeye marker', () => {
+        const result = (0, pre_ai_deterministic_rules_1.runPreAiDeterministicChecks)([
+            '14 oz Wagyu Ribeye, red chile truffle butter, crispy potatoes 68',
+            'Longbone Pork Ribeye*, tomatillo, hominy, spiced agave, grilled corn 40',
+        ].join('\n'));
+        expect(result.menuText).toBe([
+            '14 oz Wagyu Ribeye, red chile truffle butter, crispy potatoes* 68',
+            'Longbone Pork Ribeye*, tomatillo, hominy, spiced agave, grilled corn 40',
+        ].join('\n'));
     });
     it('keeps raw asterisks attached to the last dish-name word', () => {
         const result = (0, pre_ai_deterministic_rules_1.runPreAiDeterministicChecks)([
@@ -192,6 +227,28 @@ describe('runPreAiDeterministicChecks', () => {
             ruleId: 'rule-1',
         }));
     });
+    it('applies the accepted thick-cut hyphenation rule once', () => {
+        const result = (0, pre_ai_deterministic_rules_1.runPreAiDeterministicChecks)('Corinne Wedge, gorgonzola, thick cut bacon, pickled onion, cucumber, buttermilk dressing 17', {
+            acceptedCorrectionRules: [{
+                    id: 'canonical-hyphenation-thick-cut-20260731',
+                    status: 'accepted',
+                    source: 'system',
+                    original_text: 'thick cut',
+                    corrected_text: 'thick-cut',
+                    force_target_case: false,
+                    change_type: 'spelling',
+                    rule: 'Use the standard compound modifier spelling: thick-cut.',
+                    is_location_specific: false,
+                    location: 'All properties (global rule)',
+                }],
+        });
+        expect(result.menuText).toBe('Corinne Wedge, gorgonzola, thick-cut bacon, pickled onion, cucumber, buttermilk dressing 17');
+        expect(result.appliedCorrections).toContainEqual(expect.objectContaining({
+            source: 'accepted_correction_rule',
+            original: 'thick cut',
+            corrected: 'thick-cut',
+        }));
+    });
     it('applies learned spelling and diacritic rules without requiring the same accent marks', () => {
         const rules = [
             {
@@ -225,6 +282,105 @@ describe('runPreAiDeterministicChecks', () => {
         expect(result.appliedCorrections).not.toEqual(expect.arrayContaining([
             expect.objectContaining({ original: 'crème anglaise' }),
         ]));
+    });
+    it('applies the accepted canonical culinary diacritic rules once and records them as learned corrections', () => {
+        const rules = [
+            ['gruyere', 'gruyère'],
+            ['puree', 'purée'],
+            ['entree', 'entrée'],
+            ['crudite', 'crudité'],
+        ].map(([original_text, corrected_text]) => ({
+            id: `canonical-${original_text}`,
+            status: 'accepted',
+            source: 'system',
+            original_text,
+            corrected_text,
+            change_type: 'diacritic',
+            rule: `Use ${corrected_text}.`,
+            is_location_specific: false,
+            location: 'All properties (global rule)',
+        }));
+        const result = (0, pre_ai_deterministic_rules_1.runPreAiDeterministicChecks)([
+            'cheese, gruyere, herbs 12',
+            'mango puree, lime 10',
+            'choose entree, house salad 18',
+            'crudite, ranch 14',
+        ].join('\n'), { acceptedCorrectionRules: rules });
+        expect(result.menuText).toBe([
+            'cheese, gruyère, herbs 12',
+            'mango purée, lime 10',
+            'choose entrée, house salad 18',
+            'crudité, ranch 14',
+        ].join('\n'));
+        // puree and entree are already covered by built-in replacements; the
+        // accepted rules remain considered but do not duplicate those edits.
+        expect(result.appliedCorrections.filter((correction) => correction.source === 'accepted_correction_rule'))
+            .toHaveLength(2);
+        expect(result.learnedRulesConsidered).toBe(4);
+        expect(result.learnedRulesApplied).toBe(2);
+    });
+    it('forces canonical target casing only when an accepted rule opts in', () => {
+        const rules = [
+            ['maldon', 'Maldon'],
+            ['marcona', 'Marcona'],
+            ['reggiano', 'Reggiano'],
+        ].map(([original_text, corrected_text]) => ({
+            id: `canonical-case-${original_text}`,
+            status: 'accepted',
+            source: 'system',
+            original_text,
+            corrected_text,
+            force_target_case: true,
+            change_type: 'capitalization',
+            rule: `Use ${corrected_text}.`,
+            is_location_specific: false,
+            location: 'All properties (global rule)',
+        }));
+        const result = (0, pre_ai_deterministic_rules_1.runPreAiDeterministicChecks)([
+            'maldon salt 8',
+            'Maldon salt 9',
+            'marcona almonds 10',
+            'reggiano cheese 11',
+            'REGGIANO cheese 12',
+        ].join('\n'), { acceptedCorrectionRules: rules });
+        expect(result.menuText).toBe([
+            'Maldon salt 8',
+            'Maldon salt 9',
+            'Marcona almonds 10',
+            'Reggiano cheese 11',
+            'Reggiano cheese 12',
+        ].join('\n'));
+    });
+    it('keeps source-casing preservation when accepted diacritic rules opt out', () => {
+        const rules = [
+            ['gruyere', 'gruyère'],
+            ['puree', 'purée'],
+            ['entree', 'entrée'],
+            ['crudite', 'crudité'],
+        ].map(([original_text, corrected_text]) => ({
+            id: `canonical-diacritic-case-${original_text}`,
+            status: 'accepted',
+            source: 'system',
+            original_text,
+            corrected_text,
+            force_target_case: false,
+            change_type: 'diacritic',
+            rule: `Use ${corrected_text}.`,
+            is_location_specific: false,
+            location: 'All properties (global rule)',
+        }));
+        const result = (0, pre_ai_deterministic_rules_1.runPreAiDeterministicChecks)([
+            'GRUYERE 8',
+            'PUREE 9',
+            'ENTREE 10',
+            'CRUDITE 11',
+        ].join('\n'), { acceptedCorrectionRules: rules });
+        expect(result.menuText).toBe([
+            'GRUYÈRE 8',
+            'PURÉE 9',
+            'ENTRÉE 10',
+            'CRUDITÉ 11',
+        ].join('\n'));
     });
     it('never applies context-dependent learned rules as blind replacements', () => {
         const rules = [

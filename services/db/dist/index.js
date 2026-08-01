@@ -3392,7 +3392,7 @@ const CRITICAL_SUPABASE_SCHEMA = {
     menus: ['property', 'service_period', 'name', 'current_submission_id', 'status'],
     draft_sessions: ['token', 'base_submission_id', 'form_state', 'status', 'submitted_submission_id', 'last_edited_by', 'menu_id'],
     form_attempt_logs: ['draft_session_id'],
-    basic_ai_check_audits: ['menu_content_raw', 'submission_id'],
+    basic_ai_check_audits: ['menu_content_raw', 'submission_id', 'model', 'system_fingerprint'],
     prompt_proposals: ['proposed_rules', 'eval_status', 'accepted_rules', 'source', 'llm_warnings', 'replay_evidence', 'unresolved_still_missed', 'coverage_claims', 'prompt_length', 'superseded_by_cycle_id', 'superseded_from_cycle_id', 'supersede_carried_correction_count', 'supersede_new_correction_count', 'disposition', 'correction_routing'],
 };
 // Columns that MUST be nullable (shared NULLABLE_COLUMNS). A stale NOT NULL

@@ -45,6 +45,21 @@ exports.BUILT_IN_REPLACEMENTS = [
     { from: 'tajin', to: 'tajín', type: 'Diacritics' },
     { from: 'tampiquena', to: 'tampiqueña', type: 'Diacritics' },
     { from: 'huancaina', to: 'huancaína', type: 'Diacritics' },
+    // Brand orthography.
+    //
+    // ALL CAPS is NOT a diacritic exemption. Human-approved finals carry 268 accented
+    // all-caps tokens against 51 unaccented ones ("ROSÉ", "CHÂTEAU", "AÑEJO", "TEQUILEÑO"),
+    // so a menu set in caps takes the same accents a title-case one does. matchCase already
+    // upper-cases the accented target, so every rule above applies unchanged in caps.
+    //
+    // What actually varies is the brand, and that is a fact about the trademark rather than
+    // anything derivable from the surrounding text: Patrón registers with the accent, Jose
+    // Cuervo without it. Left to judgment, the two get decided per menu — one dessert menu
+    // ended up with "PATRÓN Extra Añejo" and "PATRON EL ALTO" in the same approved final.
+    // Both directions are pinned here so the answer is the same on every menu, and because
+    // the whole pass re-runs after the AI, the model can neither omit nor invent them.
+    { from: 'patron', to: 'Patrón', type: 'Diacritics' },
+    { from: 'josé cuervo', to: 'Jose Cuervo', type: 'Diacritics' },
     // Exact spelling fixes. Contextual terminology preferences remain in the AI/human lane.
     { from: 'ceasar', to: 'caesar', type: 'Spelling' },
     { from: 'cesar', to: 'caesar', type: 'Spelling' },
@@ -215,7 +230,7 @@ function applyAccentInsensitiveReplacementRule(line, lineIndex, rule, source, me
         if (!startMap || !endMap)
             continue;
         const original = line.slice(startMap.start, endMap.end);
-        const corrected = matchCase(original, rule.to);
+        const corrected = rule.forceTargetCase ? rule.to : matchCase(original, rule.to);
         nextLine += line.slice(lastOriginalIndex, startMap.start);
         if (original === corrected
             || (settings.skipIfAlreadyCorrected
@@ -246,7 +261,7 @@ function applyReplacementRule(line, lineIndex, rule, source, metadata = {}, sett
     const corrections = [];
     const re = replacementRegExp(rule.from);
     const nextLine = line.replace(re, (match, offset) => {
-        const corrected = matchCase(match, rule.to);
+        const corrected = rule.forceTargetCase ? rule.to : matchCase(match, rule.to);
         if (match === corrected) {
             return match;
         }
@@ -471,7 +486,7 @@ function shouldAddRawAsterisk(line) {
     if (!hasPrice && (!hasTrailingAllergenCluster || !hasDescriptionComma)) {
         return false;
     }
-    return /\b(?:sashimi|tartare|carpaccio|crudo|ceviche|tiradito|poke|raw\s+(?:tuna|salmon|hamachi|fish|beef|oysters?)|oysters?\s+on\s+the\s+half\s+shell|half[-\s]shell\s+oysters?|sunny[-\s]side(?:[-\s]up)?\s+eggs?|sunny[-\s]side[-\s]up|poached\s+eggs?|soft[-\s]boiled)\b/i.test(line);
+    return /\b(?:sashimi|tartare|carpaccio|crudo|ceviche|tiradito|poke|raw\s+(?:tuna|salmon|hamachi|fish|beef|oysters?)|oysters?\s+on\s+the\s+half\s+shell|half[-\s]shell\s+oysters?|sunny[-\s]side(?:[-\s]up)?\s+eggs?|sunny[-\s]side[-\s]up|poached\s+eggs?|soft[-\s]boiled|rib[-\s]?eye)\b/i.test(line);
 }
 function addRawAsterisk(line) {
     return normalizeRawAsteriskPlacementForLine(`${line.trimEnd()} *`);
@@ -493,7 +508,10 @@ function getAcceptedCorrectionRulePreAiEligibility(rule) {
     if (contextTerm) {
         return { eligible: false, reason: 'context_dependent', contextTerm };
     }
-    if (!LEARNED_RULE_CHANGE_TYPES.has(changeType)) {
+    // Capitalization rules are deterministic only when they explicitly opt in
+    // to the stored target casing. Without the flag, preserve the historical
+    // source-casing behavior and do not activate a broad case rewrite.
+    if (!LEARNED_RULE_CHANGE_TYPES.has(changeType) && !(changeType === 'capitalization' && rule.force_target_case === true)) {
         return { eligible: false, reason: 'unsupported_change_type' };
     }
     if (!original || !corrected) {
@@ -526,6 +544,7 @@ function applyAcceptedCorrectionRules(lines, options) {
             from: `${rule.original_text || ''}`.trim(),
             to: `${rule.corrected_text || ''}`.trim(),
             type: 'Learned Rule',
+            forceTargetCase: rule.force_target_case === true,
         };
         for (let i = 0; i < nextLines.length; i++) {
             const metadata = {

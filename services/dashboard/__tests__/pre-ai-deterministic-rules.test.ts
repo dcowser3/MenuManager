@@ -113,6 +113,18 @@ describe('runPreAiDeterministicChecks', () => {
         expect(result.appliedCorrections.filter((c) => c.type === 'Raw Item')).toHaveLength(3);
     });
 
+    it('adds a marker for ribeye and does not double-mark an existing ribeye marker', () => {
+        const result = runPreAiDeterministicChecks([
+            '14 oz Wagyu Ribeye, red chile truffle butter, crispy potatoes 68',
+            'Longbone Pork Ribeye*, tomatillo, hominy, spiced agave, grilled corn 40',
+        ].join('\n'));
+
+        expect(result.menuText).toBe([
+            '14 oz Wagyu Ribeye, red chile truffle butter, crispy potatoes* 68',
+            'Longbone Pork Ribeye*, tomatillo, hominy, spiced agave, grilled corn 40',
+        ].join('\n'));
+    });
+
     it('keeps raw asterisks attached to the last dish-name word', () => {
         const result = runPreAiDeterministicChecks([
             'Hamachi New Style Sashimi * CE,F,G,MU 98',
@@ -256,6 +268,35 @@ describe('runPreAiDeterministicChecks', () => {
         }));
     });
 
+    it('applies the accepted thick-cut hyphenation rule once', () => {
+        const result = runPreAiDeterministicChecks(
+            'Corinne Wedge, gorgonzola, thick cut bacon, pickled onion, cucumber, buttermilk dressing 17',
+            {
+                acceptedCorrectionRules: [{
+                    id: 'canonical-hyphenation-thick-cut-20260731',
+                    status: 'accepted',
+                    source: 'system',
+                    original_text: 'thick cut',
+                    corrected_text: 'thick-cut',
+                    force_target_case: false,
+                    change_type: 'spelling',
+                    rule: 'Use the standard compound modifier spelling: thick-cut.',
+                    is_location_specific: false,
+                    location: 'All properties (global rule)',
+                }],
+            }
+        );
+
+        expect(result.menuText).toBe(
+            'Corinne Wedge, gorgonzola, thick-cut bacon, pickled onion, cucumber, buttermilk dressing 17'
+        );
+        expect(result.appliedCorrections).toContainEqual(expect.objectContaining({
+            source: 'accepted_correction_rule',
+            original: 'thick cut',
+            corrected: 'thick-cut',
+        }));
+    });
+
     it('applies learned spelling and diacritic rules without requiring the same accent marks', () => {
         const rules: AcceptedCorrectionRule[] = [
             {
@@ -291,6 +332,114 @@ describe('runPreAiDeterministicChecks', () => {
         expect(result.appliedCorrections).not.toEqual(expect.arrayContaining([
             expect.objectContaining({ original: 'crème anglaise' }),
         ]));
+    });
+
+    it('applies the accepted canonical culinary diacritic rules once and records them as learned corrections', () => {
+        const rules: AcceptedCorrectionRule[] = [
+            ['gruyere', 'gruyère'],
+            ['puree', 'purée'],
+            ['entree', 'entrée'],
+            ['crudite', 'crudité'],
+        ].map(([original_text, corrected_text]) => ({
+            id: `canonical-${original_text}`,
+            status: 'accepted',
+            source: 'system',
+            original_text,
+            corrected_text,
+            change_type: 'diacritic',
+            rule: `Use ${corrected_text}.`,
+            is_location_specific: false,
+            location: 'All properties (global rule)',
+        }));
+
+        const result = runPreAiDeterministicChecks([
+            'cheese, gruyere, herbs 12',
+            'mango puree, lime 10',
+            'choose entree, house salad 18',
+            'crudite, ranch 14',
+        ].join('\n'), { acceptedCorrectionRules: rules });
+
+        expect(result.menuText).toBe([
+            'cheese, gruyère, herbs 12',
+            'mango purée, lime 10',
+            'choose entrée, house salad 18',
+            'crudité, ranch 14',
+        ].join('\n'));
+        // puree and entree are already covered by built-in replacements; the
+        // accepted rules remain considered but do not duplicate those edits.
+        expect(result.appliedCorrections.filter((correction) => correction.source === 'accepted_correction_rule'))
+            .toHaveLength(2);
+        expect(result.learnedRulesConsidered).toBe(4);
+        expect(result.learnedRulesApplied).toBe(2);
+    });
+
+    it('forces canonical target casing only when an accepted rule opts in', () => {
+        const rules: AcceptedCorrectionRule[] = [
+            ['maldon', 'Maldon'],
+            ['marcona', 'Marcona'],
+            ['reggiano', 'Reggiano'],
+        ].map(([original_text, corrected_text]) => ({
+            id: `canonical-case-${original_text}`,
+            status: 'accepted',
+            source: 'system',
+            original_text,
+            corrected_text,
+            force_target_case: true,
+            change_type: 'capitalization',
+            rule: `Use ${corrected_text}.`,
+            is_location_specific: false,
+            location: 'All properties (global rule)',
+        }));
+
+        const result = runPreAiDeterministicChecks([
+            'maldon salt 8',
+            'Maldon salt 9',
+            'marcona almonds 10',
+            'reggiano cheese 11',
+            'REGGIANO cheese 12',
+        ].join('\n'), { acceptedCorrectionRules: rules });
+
+        expect(result.menuText).toBe([
+            'Maldon salt 8',
+            'Maldon salt 9',
+            'Marcona almonds 10',
+            'Reggiano cheese 11',
+            'Reggiano cheese 12',
+        ].join('\n'));
+    });
+
+    it('keeps source-casing preservation when accepted diacritic rules opt out', () => {
+        const rules: AcceptedCorrectionRule[] = [
+            ['gruyere', 'gruyère'],
+            ['puree', 'purée'],
+            ['entree', 'entrée'],
+            ['crudite', 'crudité'],
+        ].map(([original_text, corrected_text]) => ({
+            id: `canonical-diacritic-case-${original_text}`,
+            status: 'accepted',
+            source: 'system',
+            original_text,
+            corrected_text,
+            force_target_case: false,
+            change_type: 'diacritic',
+            rule: `Use ${corrected_text}.`,
+            is_location_specific: false,
+            location: 'All properties (global rule)',
+        }));
+
+        const result = runPreAiDeterministicChecks([
+            'GRUYERE 8',
+            'PUREE 9',
+            'ENTREE 10',
+            'CRUDITE 11',
+        ].join('\n'), { acceptedCorrectionRules: rules });
+
+        expect(result.menuText).toBe([
+            'GRUYÈRE 8',
+            'PURÉE 9',
+            'ENTRÉE 10',
+            'CRUDITÉ 11',
+        ].join('\n'));
     });
 
     it('never applies context-dependent learned rules as blind replacements', () => {

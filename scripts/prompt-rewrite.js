@@ -40,6 +40,19 @@ function getSupabase() {
   return createClient(url, key);
 }
 
+function requireLlmAdapter() {
+  const sourcePath = path.join(getRepoRoot(), 'services', 'llm-adapter', 'src', 'index.ts');
+  try {
+    const tsNodeRegister = require.resolve('ts-node/register/transpile-only', { paths: [getRepoRoot()] });
+    require(tsNodeRegister);
+    return require(sourcePath);
+  } catch {
+    const distPath = path.join(getRepoRoot(), 'services', 'llm-adapter', 'dist', 'index.js');
+    if (fs.existsSync(distPath)) return require(distPath);
+    throw new Error('LLM adapter unavailable; run npm run build --workspace=services/llm-adapter');
+  }
+}
+
 function resolvePythonBin(repoRoot) {
   const venvPython = path.join(repoRoot, 'services', 'docx-redliner', 'venv', 'bin', 'python');
   if (fs.existsSync(venvPython)) return venvPython;
@@ -85,45 +98,21 @@ function generateDiff(oldText, newText) {
 }
 
 async function callLLM(systemPrompt, userPrompt) {
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey || apiKey === 'sk-your_openai_api_key_here') {
-    throw new Error('OPENAI_API_KEY is required for prompt rewrite');
-  }
-
   const model = process.env.PROMPT_REWRITE_MODEL || 'gpt-4o';
-
-  // Use fetch (available in Node 18+)
-  const response = await fetch('https://api.openai.com/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model,
-      messages: [
+  const adapter = requireLlmAdapter();
+  const capabilities = adapter.getModelCapabilities(model);
+  const response = await adapter.callChat({ model }, [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userPrompt },
-      ],
-      // Reasoning-class models (o-series, gpt-5 family) reject a non-default
-      // temperature and require max_completion_tokens. Same test as
-      // isReasoningModel() in services/dashboard/lib/improvement-cycle-core.ts.
-      ...(/o[0-9]|gpt-5|reasoning/i.test(model)
-        ? { max_completion_tokens: 16000 }
-        : { temperature: 0.3, max_tokens: 16000 }),
-    }),
-  });
-
-  if (!response.ok) {
-    const errorBody = await response.text();
-    throw new Error(`OpenAI API error ${response.status}: ${errorBody}`);
-  }
-
-  const data = await response.json();
+      ], {
+        provider: process.env.PROMPT_REWRITE_LLM_PROVIDER || undefined,
+        temperature: capabilities.supportsTemperature ? 0.3 : undefined,
+        maxTokens: 16000,
+      });
   return {
-    content: data.choices[0]?.message?.content || '',
-    model: data.model,
-    usage: data.usage,
+    content: response.content,
+    model: response.model,
+    usage: response.usage,
   };
 }
 

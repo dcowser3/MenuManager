@@ -36,30 +36,32 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.app = void 0;
 exports.parseDishQualityAiResponse = parseDishQualityAiResponse;
 exports.buildDishQualityPrompt = buildDishQualityPrompt;
 const express = require("express");
-const openai_1 = require("openai");
 const dotenv = require("dotenv");
 const fs_1 = require("fs");
 const fsSync = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const axios_1 = __importDefault(require("axios"));
 const internal_auth_1 = require("@menumanager/internal-auth");
+const llm_adapter_1 = require("@menumanager/llm-adapter");
 const tenant_config_1 = require("@menumanager/tenant-config");
 // Load .env from project root (works whether running from src or dist)
 const envPath = path.resolve(__dirname, '../../../.env');
 console.log(`Loading .env from: ${envPath}`);
 dotenv.config({ path: envPath });
-const app = express();
+exports.app = express();
 const port = 3002;
 const DB_SERVICE_URL = process.env.DB_SERVICE_URL || 'http://localhost:3004';
 const internalApi = (0, internal_auth_1.createInternalApiClient)(axios_1.default);
-const configuration = new openai_1.Configuration({
-    apiKey: process.env.OPENAI_API_KEY,
-});
-const openai = new openai_1.OpenAIApi(configuration);
-const AI_REVIEW_MODEL = process.env.AI_REVIEW_MODEL || 'gpt-4o-mini';
+// gpt-5.6-luna since 2026-07-30: on the 60-case eval slice it beat gpt-4o-mini on
+// composite (75.5% vs 70.5%) and, more importantly, on correction precision
+// (78.1% vs 59.3% — false positives 68 -> 28) at $0.005/review. See
+// handoff-model-portability-research.md for the full comparison.
+const AI_REVIEW_MODEL = process.env.AI_REVIEW_MODEL || 'gpt-5.6-luna';
+const AI_REVIEW_PROVIDER = process.env.AI_REVIEW_LLM_PROVIDER;
 // Menu review is a correction task, not a creative one: pin temperature so the
 // SAME menu produces the SAME review run-to-run. Default 0; overridable via env
 // for deliberate A/B testing. (OpenAI temp 0 still has minor backend drift, but
@@ -68,11 +70,21 @@ const AI_REVIEW_MODEL = process.env.AI_REVIEW_MODEL || 'gpt-4o-mini';
 const AI_REVIEW_TEMPERATURE = Number.isFinite(Number(process.env.AI_REVIEW_TEMPERATURE))
     ? Number(process.env.AI_REVIEW_TEMPERATURE)
     : 0;
+function parseOptionalNonNegativeInteger(value) {
+    if (value === undefined || value === null || `${value}`.trim() === '') {
+        return undefined;
+    }
+    const parsed = Number(value);
+    return Number.isInteger(parsed) && parsed >= 0 ? parsed : undefined;
+}
+const BASIC_AI_CHECK_SEED = parseOptionalNonNegativeInteger(process.env.BASIC_AI_CHECK_SEED) ?? 42;
 const DOCUMENT_STORAGE_ROOT = process.env.DOCUMENT_STORAGE_ROOT || path.join(__dirname, '..', '..', '..', 'tmp', 'documents');
-app.use(express.json());
-app.use(internal_auth_1.requireInternalServiceAuth);
-function hasConfiguredOpenAIKey() {
-    return !!process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY !== 'your-openai-api-key-here';
+exports.app.use(express.json());
+exports.app.use(internal_auth_1.requireInternalServiceAuth);
+function hasConfiguredLlmKey() {
+    const provider = AI_REVIEW_PROVIDER || process.env.LLM_PROVIDER || 'openai';
+    const key = provider === 'openrouter' ? process.env.OPENROUTER_API_KEY : process.env.OPENAI_API_KEY;
+    return !!key && !/^(?:your-openai-api-key-here|sk-your_openai_api_key_here|sk-or-\.\.\.)$/.test(key);
 }
 function normalizeVerdict(value) {
     if (value === 'dish' || value === 'not_dish' || value === 'uncertain') {
@@ -142,13 +154,13 @@ function buildDishQualityPrompt(input) {
         JSON.stringify(input.rows, null, 2),
     ].join('\n');
 }
-app.post('/approved-dishes/quality-check', async (req, res) => {
+exports.app.post('/approved-dishes/quality-check', async (req, res) => {
     const rows = Array.isArray(req.body?.rows) ? req.body.rows.slice(0, 100) : [];
     if (rows.length === 0) {
         return res.status(400).json({ error: 'rows are required' });
     }
-    if (!hasConfiguredOpenAIKey()) {
-        return res.status(503).json({ error: 'OpenAI API key not configured' });
+    if (!hasConfiguredLlmKey()) {
+        return res.status(503).json({ error: 'LLM API key not configured' });
     }
     try {
         const prompt = buildDishQualityPrompt({
@@ -156,21 +168,17 @@ app.post('/approved-dishes/quality-check', async (req, res) => {
             servicePeriod: `${req.body?.servicePeriod || ''}`.trim(),
             rows,
         });
-        const response = await openai.createChatCompletion({
-            model: AI_REVIEW_MODEL,
-            temperature: 0,
-            messages: [
-                {
-                    role: 'system',
-                    content: 'You classify extracted menu rows. Respond with strict JSON only.',
-                },
-                {
-                    role: 'user',
-                    content: prompt,
-                },
-            ],
-        });
-        const content = response.data.choices[0].message?.content || '';
+        const response = await (0, llm_adapter_1.callChat)({ model: AI_REVIEW_MODEL }, [
+            {
+                role: 'system',
+                content: 'You classify extracted menu rows. Respond with strict JSON only.',
+            },
+            {
+                role: 'user',
+                content: prompt,
+            },
+        ], { provider: AI_REVIEW_PROVIDER, temperature: 0 });
+        const content = response.content;
         res.json({
             results: parseDishQualityAiResponse(content, rows),
         });
@@ -187,31 +195,39 @@ app.post('/approved-dishes/quality-check', async (req, res) => {
  * QA Check Endpoint - Used by parser to run pre-check validation
  * This runs the same QA prompt that chefs should use before submitting
  */
-app.post('/run-qa-check', async (req, res) => {
-    const { text, prompt } = req.body;
+exports.app.post('/run-qa-check', async (req, res) => {
+    const { text, prompt, seed } = req.body;
     if (!text || !prompt) {
         return res.status(400).send('Missing text or prompt for QA check.');
     }
     try {
-        const hasOpenAIKey = !!process.env.OPENAI_API_KEY &&
-            process.env.OPENAI_API_KEY !== 'your-openai-api-key-here';
+        const hasOpenAIKey = hasConfiguredLlmKey();
         if (!hasOpenAIKey) {
             return res.status(503).json({
-                error: 'OpenAI API key not configured',
+                error: 'LLM API key not configured',
                 feedback: 'QA check unavailable - API key not set'
             });
         }
         console.log('Running QA check...');
-        const qaResponse = await openai.createChatCompletion({
-            model: AI_REVIEW_MODEL,
+        const resolvedSeed = parseOptionalNonNegativeInteger(seed) ?? BASIC_AI_CHECK_SEED;
+        const qaResponse = await (0, llm_adapter_1.callChat)({ model: AI_REVIEW_MODEL }, [
+            { role: 'system', content: prompt },
+            { role: 'user', content: `Here is the menu text to review:\n\n---\n\n${text}` }
+        ], {
+            provider: AI_REVIEW_PROVIDER,
             temperature: AI_REVIEW_TEMPERATURE,
-            messages: [
-                { role: 'system', content: prompt },
-                { role: 'user', content: `Here is the menu text to review:\n\n---\n\n${text}` }
-            ],
+            seed: resolvedSeed,
         });
-        const feedback = qaResponse.data.choices[0].message?.content || "No feedback generated.";
-        res.status(200).json({ feedback });
+        const feedback = qaResponse.content || "No feedback generated.";
+        // Report the model back so the caller can record WHICH model reviewed a
+        // menu (the dashboard writes it into basic_ai_check_audits). Without this,
+        // reviews cannot be attributed to a model after a switch — the exact gap
+        // that made the gpt-4o-mini -> gpt-5.6-luna change unverifiable in history.
+        res.status(200).json({
+            feedback,
+            model: qaResponse.model || AI_REVIEW_MODEL,
+            system_fingerprint: qaResponse.system_fingerprint,
+        });
     }
     catch (error) {
         console.error('Error during QA check:', error);
@@ -221,15 +237,15 @@ app.post('/run-qa-check', async (req, res) => {
         });
     }
 });
-app.post('/ai-review', async (req, res) => {
+exports.app.post('/ai-review', async (req, res) => {
     // We'll now expect more metadata from the parser service
     const { text, submission_id, submitter_email, filename, original_path } = req.body;
     if (!text || !submission_id) {
         return res.status(400).send('Missing text or submission_id for review.');
     }
     try {
-        // Check if OpenAI API key is configured
-        const hasOpenAIKey = !!process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY !== 'your-openai-api-key-here';
+        // Check if the configured LLM provider has a usable key.
+        const hasOpenAIKey = hasConfiguredLlmKey();
         let generalQaFeedback = '';
         let redlinedContent = '';
         let issueCount = 0;
@@ -264,20 +280,16 @@ Configure OPENAI_API_KEY in .env for real AI reviews.
 ==============================================`;
         }
         else {
-            // Real AI mode with OpenAI
-            console.log(`Using OpenAI model ${AI_REVIEW_MODEL} for submission ${submission_id}`);
+            // Real AI mode through the configured provider.
+            console.log(`Using ${AI_REVIEW_PROVIDER || process.env.LLM_PROVIDER || 'openai'} model ${AI_REVIEW_MODEL} for submission ${submission_id}`);
             // --- Tier 1: Run the General QA Prompt ---
             const qaPromptPath = path.join(__dirname, '..', '..', '..', 'sop-processor', 'qa_prompt.txt');
             const qaPrompt = await fs_1.promises.readFile(qaPromptPath, 'utf-8');
-            const qaResponse = await openai.createChatCompletion({
-                model: AI_REVIEW_MODEL,
-                temperature: AI_REVIEW_TEMPERATURE,
-                messages: [
-                    { role: 'system', content: qaPrompt },
-                    { role: 'user', content: `Here is the menu text to review:\n\n---\n\n${text}` }
-                ],
-            });
-            generalQaFeedback = qaResponse.data.choices[0].message?.content || "No feedback generated.";
+            const qaResponse = await (0, llm_adapter_1.callChat)({ model: AI_REVIEW_MODEL }, [
+                { role: 'system', content: qaPrompt },
+                { role: 'user', content: `Here is the menu text to review:\n\n---\n\n${text}` }
+            ], { provider: AI_REVIEW_PROVIDER, temperature: AI_REVIEW_TEMPERATURE });
+            generalQaFeedback = qaResponse.content || "No feedback generated.";
             issueCount = (generalQaFeedback.match(/Description of Issue:/g) || []).length;
         }
         // Temporarily increased threshold to 99 for testing red-lining functionality
@@ -358,7 +370,7 @@ function parseAICorrectedText(aiText) {
     return cleaned.trim();
 }
 if (require.main === module) {
-    app.listen(port, () => {
+    exports.app.listen(port, () => {
         console.log(`ai-review service listening at http://localhost:${port}`);
         console.log(`Document storage root: ${DOCUMENT_STORAGE_ROOT}`);
     });

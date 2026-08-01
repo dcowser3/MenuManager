@@ -16,7 +16,8 @@ jest.mock('@menumanager/tenant-config', () => {
 });
 
 import { RAW_NOTICE_TEXT } from '../lib/menu-footer';
-import { QA_PROMPT_SECTIONS, buildFinalPrompt } from '../lib/qa-prompt-builder';
+import { QA_PROMPT_SECTIONS, buildFinalPrompt, hasAiReviewFenceContract } from '../lib/qa-prompt-builder';
+import { AI_REVIEW_FENCES } from '../lib/review-response-contract';
 import { analyzeEmbeddedSetMenus } from '../lib/embedded-set-menu-guard';
 
 const BASE_PROMPT = [
@@ -30,6 +31,12 @@ const BASE_PROMPT = [
 const EMPTY_SET_MENU = { sections: [], issues: [] };
 
 describe('buildFinalPrompt (extracted from handleBasicCheck)', () => {
+    test('detects the complete AI response fence contract at assembly time', () => {
+        const prompt = Object.values(AI_REVIEW_FENCES).join('\n');
+        expect(hasAiReviewFenceContract(prompt)).toBe(true);
+        expect(hasAiReviewFenceContract(prompt.replace(AI_REVIEW_FENCES.correctedMenuStart, 'missing'))).toBe(false);
+    });
+
     test('always appends the standard tail sections in canonical order', () => {
         const { prompt, sections } = buildFinalPrompt(BASE_PROMPT, {
             precheckEnabled: false,

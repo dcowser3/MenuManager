@@ -19,6 +19,21 @@ const basePayload = {
 };
 
 describe('buildCorrectionRuleRecord', () => {
+    it('defaults force_target_case to false and preserves an explicit true value', () => {
+        const base = {
+            submission_id: 'submission-case',
+            correction_id: 'correction-case',
+            original_text: 'maldon',
+            corrected_text: 'Maldon',
+            change_type: 'capitalization',
+            rule: 'Use Maldon.',
+            source: 'system',
+        };
+
+        expect(buildCorrectionRuleRecord(base, [])).toMatchObject({ force_target_case: false });
+        expect(buildCorrectionRuleRecord({ ...base, force_target_case: true }, []))
+            .toMatchObject({ force_target_case: true });
+    });
     test('accepts the legacy global placeholder for non-location-specific rules', () => {
         const record = buildCorrectionRuleRecord({
             ...basePayload,

@@ -188,6 +188,14 @@ function parsePositiveInteger(value: string | undefined, fallback: number): numb
     return Math.floor(parsed);
 }
 
+function parseOptionalNonNegativeInteger(value: string | undefined): number | undefined {
+    if (value === undefined || value === null || `${value}`.trim() === '') {
+        return undefined;
+    }
+    const parsed = Number(value);
+    return Number.isInteger(parsed) && parsed >= 0 ? parsed : undefined;
+}
+
 function parseBooleanFlag(value: any): boolean {
     return /^(1|true|yes|on)$/i.test(String(value || '').trim());
 }
@@ -213,6 +221,7 @@ const BASIC_AI_CHECK_DEBUG_ENABLED = process.env.BASIC_AI_CHECK_DEBUG_ENABLED !=
     ? parseBooleanFlag(process.env.BASIC_AI_CHECK_DEBUG_ENABLED)
     : process.env.NODE_ENV !== 'production';
 const BASIC_AI_CHECK_DEBUG_MAX_CHARS = parsePositiveInteger(process.env.BASIC_AI_CHECK_DEBUG_MAX_CHARS, 60000);
+const BASIC_AI_CHECK_SEED = parseOptionalNonNegativeInteger(process.env.BASIC_AI_CHECK_SEED) ?? 42;
 
 type BasicCheckJob = {
     id: string;
@@ -3394,6 +3403,7 @@ async function handleBasicCheck(req: any, res: any) {
         const buildAiRequestAudit = () => ({
             url: `${AI_REVIEW_URL}/run-qa-check`,
             timeoutMs: BASIC_AI_CHECK_TIMEOUT_MS,
+            seed: BASIC_AI_CHECK_SEED ?? null,
             textLength: preCheckedReviewBody.length,
             promptLength: finalPrompt.length,
             text: preCheckedReviewBody,
@@ -3443,7 +3453,8 @@ async function handleBasicCheck(req: any, res: any) {
         try {
             qaResponse = await internalApi.post(`${AI_REVIEW_URL}/run-qa-check`, {
                 text: preCheckedReviewBody,
-                prompt: finalPrompt
+                prompt: finalPrompt,
+                seed: BASIC_AI_CHECK_SEED,
             }, {
                 timeout: BASIC_AI_CHECK_TIMEOUT_MS
             });
@@ -3617,9 +3628,15 @@ async function handleBasicCheck(req: any, res: any) {
                 aiResponse: {
                     status: qaResponse?.status,
                     statusText: qaResponse?.statusText,
+                    model: qaResponse?.data?.model || null,
+                    system_fingerprint: (qaResponse?.data as any)?.system_fingerprint || null,
+                    fence_missing: true,
                     body: qaResponse?.data,
                     aiFailure,
                 },
+                model: qaResponse?.data?.model || null,
+                systemFingerprint: (qaResponse?.data as any)?.system_fingerprint || null,
+                fenceMissing: true,
                 deterministicDiagnostics: {
                     preAiDeterministic: {
                         enabled: BASIC_AI_PRECHECK_ENABLED,
@@ -3720,6 +3737,7 @@ async function handleBasicCheck(req: any, res: any) {
         const {
             parsed,
             postAiDeterministic,
+            protectedTerms,
             titleGuard,
             structureGuard,
             guardedCorrectedMenu,
@@ -3742,6 +3760,7 @@ async function handleBasicCheck(req: any, res: any) {
         console.log('Suggestions count:', parsed.suggestions.length);
         console.log('Leading Menu title restored:', titleGuard.restored);
         console.log('Structure guard safe:', structureGuard.safe);
+        console.log('Protected terms restored:', protectedTerms.restoredTerms.length);
         console.log('Allergen order guard dropped:', allergenGuard.droppedSuggestions.length);
         console.log('Embedded set sections detected:', embeddedSetMenuAnalysis.sections.length);
         console.log('Embedded set price suggestions added:', setMenuGuard.synthesizedSuggestions.length);
@@ -3817,6 +3836,9 @@ async function handleBasicCheck(req: any, res: any) {
                     learnedRulesConsidered: postAiDeterministic.learnedRulesConsidered,
                     learnedRulesApplied: postAiDeterministic.learnedRulesApplied,
                 },
+                protectedTerms: {
+                    restoredTerms: protectedTerms.restoredTerms,
+                },
                 priceIntegrityGuard: {
                     changedPriceCount: priceIntegrityGuard.changes.length,
                     changes: priceIntegrityGuard.changes,
@@ -3836,11 +3858,17 @@ async function handleBasicCheck(req: any, res: any) {
                 // Which model actually produced this review, as reported by
                 // ai-review. Needed to attribute review quality to a model after a
                 // model switch; null for responses from a pre-2026-07-30 ai-review.
-                model: qaResponse?.data?.model || null,
-                rawFeedbackLength: `${feedback || ''}`.length,
+                    model: qaResponse?.data?.model || null,
+                    system_fingerprint: (qaResponse?.data as any)?.system_fingerprint || null,
+                    fence_missing: parsed.fenceMissing,
+                    rawFeedbackLength: `${feedback || ''}`.length,
                 rawFeedback: feedback || '',
             },
+            model: qaResponse?.data?.model || null,
+            systemFingerprint: (qaResponse?.data as any)?.system_fingerprint || null,
+            fenceMissing: parsed.fenceMissing,
             parsedResponse: {
+                fenceMissing: parsed.fenceMissing,
                 correctedMenuLength: parsed.correctedMenu.length,
                 correctedMenu: parsed.correctedMenu,
                 suggestions: parsed.suggestions,
@@ -3860,6 +3888,10 @@ async function handleBasicCheck(req: any, res: any) {
                     learnedRulesApplied: postAiDeterministic.learnedRulesApplied,
                     appliedCorrections: postAiDeterministic.appliedCorrections,
                     correctedMenu: postAiDeterministic.menuText,
+                },
+                protectedTerms: {
+                    restoredTerms: protectedTerms.restoredTerms,
+                    correctedMenu: protectedTerms.correctedMenu,
                 },
             },
             guardDiagnostics: {

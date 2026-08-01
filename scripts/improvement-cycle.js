@@ -65,6 +65,19 @@ function requireDashboardLib(relPath) {
     return require(distPath);
 }
 
+function requireLlmAdapter() {
+    const sourcePath = path.join(repoRoot, 'services', 'llm-adapter', 'src', 'index.ts');
+    try {
+        const tsNodeRegister = require.resolve('ts-node/register/transpile-only', { paths: [repoRoot] });
+        require(tsNodeRegister);
+        return require(sourcePath);
+    } catch {
+        const distPath = path.join(repoRoot, 'services', 'llm-adapter', 'dist', 'index.js');
+        if (fs.existsSync(distPath)) return require(distPath);
+        throw new Error('LLM adapter unavailable; run npm run build --workspace=services/llm-adapter');
+    }
+}
+
 const { requireSupabaseServiceKey } = require('./lib/supabase-key');
 
 function getSupabase() {
@@ -135,97 +148,29 @@ function extractCleanMenuText(pythonBin, docxPath) {
 // Low-level completion for a full messages array (C1: the retry controller grows the
 // conversation across attempts, so the caller works from messages, not a fixed system+user pair).
 async function postImprovementCompletion(messages) {
-    const apiKey = process.env.OPENAI_API_KEY;
-    if (!apiKey || apiKey === 'your-openai-api-key-here') {
-        throw new Error('OPENAI_API_KEY is required for the improvement cycle');
-    }
     const model = process.env.IMPROVE_MODEL || process.env.PROMPT_REWRITE_MODEL || 'o3';
-    const core = requireDashboardLib('improvement-cycle-core');
-    const isR = core.isReasoningModel(model);
-    const payload = { model, messages, response_format: { type: 'json_object' } };
-    if (!isR) { payload.max_tokens = 16000; payload.temperature = 0.2; } else { payload.max_completion_tokens = Number(process.env.IMPROVE_MAX_COMPLETION_TOKENS || 32000); }
-
-    // Honor 429 rate-limit back-off instead of aborting the whole cycle. This matters
-    // especially with C1's guard-retry, which can fire a second large o3 call moments
-    // after the first — on a low per-minute token cap (o3 default TPM is 30k) the second
-    // call trips the limit. OpenAI tells us how long to wait ("try again in Xs"); we honor
-    // that (or Retry-After) and retry the same request. Capped so a stuck limit still fails.
-    const maxRateLimitRetries = Number(process.env.IMPROVE_RATE_LIMIT_RETRIES || 6);
-    // Transient (non-429) failures — 5xx and network faults — get their own budget.
-    // Without this a single OpenAI 500 aborted the entire cycle and the only
-    // symptom was a missing proposal email (Jul 25 2026).
-    const maxTransientRetries = Number(process.env.IMPROVE_TRANSIENT_RETRIES || 4);
-    let transientAttempt = 0;
-    const backoffTransient = async (label) => {
-        const waitMs = Math.min(5000 * 3 ** transientAttempt, 90000);
-        transientAttempt += 1;
-        console.warn(`OpenAI transient failure (attempt ${transientAttempt}/${maxTransientRetries}); waiting ${Math.round(waitMs / 1000)}s then retrying. ${label}`);
-        await new Promise((r) => setTimeout(r, waitMs));
-    };
-    for (let rlAttempt = 0; ; rlAttempt++) {
-        let response;
-        try {
-            response = await fetch('https://api.openai.com/v1/chat/completions', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
-                body: JSON.stringify(payload),
-            });
-        } catch (error) {
-            if (transientAttempt < maxTransientRetries && core.isTransientOpenAiFailure({ error })) {
-                await backoffTransient(`${error.message}`.slice(0, 160));
-                rlAttempt -= 1; // a network fault is not a rate-limit attempt
-                continue;
-            }
-            throw new Error(`OpenAI request failed (${transientAttempt} transient retr${transientAttempt === 1 ? 'y' : 'ies'} exhausted): ${error.message}`);
+    const adapter = requireLlmAdapter();
+    const capabilities = adapter.getModelCapabilities(model);
+    const result = await adapter.callChat(
+        { model },
+        messages,
+        {
+            provider: process.env.IMPROVE_LLM_PROVIDER || undefined,
+            temperature: capabilities.supportsTemperature ? 0.2 : undefined,
+            maxTokens: capabilities.maxTokensParam === 'max_completion_tokens'
+                ? Number(process.env.IMPROVE_MAX_COMPLETION_TOKENS || 32000)
+                : 16000,
+            jsonMode: true,
+            retry: {
+                maxRateLimitRetries: Number(process.env.IMPROVE_RATE_LIMIT_RETRIES || 6),
+                maxTransientRetries: Number(process.env.IMPROVE_TRANSIENT_RETRIES || 4),
+            },
         }
-        if (response.status !== 429 && !response.ok && core.isTransientOpenAiFailure({ status: response.status })) {
-            const bodyText = await response.text();
-            if (transientAttempt < maxTransientRetries) {
-                await backoffTransient(`HTTP ${response.status}: ${bodyText.slice(0, 160)}`);
-                rlAttempt -= 1;
-                continue;
-            }
-            throw new Error(`OpenAI API error ${response.status} after ${transientAttempt} transient retries: ${bodyText.slice(0, 500)}`);
-        }
-        if (response.status === 429 && rlAttempt < maxRateLimitRetries) {
-            const bodyText = await response.text();
-            // Fail fast when the single request is bigger than the org's TPM cap:
-            // no amount of waiting makes the same request fit (observed Jul 2026:
-            // 31k-token request vs o3's 30k TPM cap burned all 6 retries for nothing).
-            if (core.isRequestTooLarge429(bodyText)) {
-                throw new Error(
-                    `OpenAI 429 (request too large): a single ${model} request exceeds the org's tokens-per-minute cap — retrying cannot help. `
-                    + `Reduce context or set IMPROVE_MODEL to a model with a higher TPM limit. ${bodyText.slice(0, 300)}`
-                );
-            }
-            let waitMs = 0;
-            const retryAfter = response.headers.get('retry-after');
-            if (retryAfter && Number.isFinite(Number(retryAfter))) {
-                waitMs = Number(retryAfter) * 1000;
-            }
-            if (!waitMs) {
-                const m = bodyText.match(/try again in ([\d.]+)\s*(ms|s)?/i);
-                if (m) waitMs = Math.ceil(parseFloat(m[1]) * (m[2] === 'ms' ? 1 : 1000));
-            }
-            // Pad by 1s to clear the window; floor 2s, cap 90s.
-            waitMs = Math.min(Math.max((waitMs || 15000) + 1000, 2000), 90000);
-            console.warn(`OpenAI 429 rate limit (attempt ${rlAttempt + 1}/${maxRateLimitRetries}); waiting ${Math.round(waitMs / 1000)}s then retrying. ${bodyText.slice(0, 160)}`);
-            await new Promise((r) => setTimeout(r, waitMs));
-            continue;
-        }
-        if (!response.ok) {
-            throw new Error(`OpenAI API error ${response.status}: ${(await response.text()).slice(0, 500)}`);
-        }
-        const data = await response.json();
-        if (data?.choices?.[0]?.finish_reason === 'length') {
-            throw new Error('LLM output truncated — raise IMPROVE_MAX_COMPLETION_TOKENS (reasoning models charge hidden tokens against the budget)');
-        }
-        return {
-            content: data.choices?.[0]?.message?.content || '',
-            model: data.model,
-            usage: data.usage,
-        };
+    );
+    if (result.finish_reason === 'length') {
+        throw new Error('LLM output truncated — raise IMPROVE_MAX_COMPLETION_TOKENS (reasoning models charge hidden tokens against the budget)');
     }
+    return { content: result.content, model: result.model, usage: result.usage };
 }
 
 function runEvalHarness(args) {
@@ -412,6 +357,7 @@ function requireDifferLib(relPath) {
 // Minimal cached AI caller mirroring review-eval's cache so replays are free on repeat.
 function makeReplayAiCaller({ model, temperature, seed, cacheDir }) {
     const cryptoMod = require('crypto');
+    const adapter = requireLlmAdapter();
     return async (text, prompt) => {
         const key = cryptoMod.createHash('sha256').update([model, `${temperature}`, `${seed}`, prompt, text].join('\u0000')).digest('hex');
         const cachePath = path.join(cacheDir, `${key}.json`);
@@ -419,47 +365,26 @@ function makeReplayAiCaller({ model, temperature, seed, cacheDir }) {
             const cached = JSON.parse(fs.readFileSync(cachePath, 'utf8'));
             return cached.feedback;
         }
-        const apiKey = process.env.OPENAI_API_KEY;
-        if (!apiKey || apiKey === 'your-openai-api-key-here') {
-            throw new Error('OPENAI_API_KEY required for replay');
-        }
-        // Reasoning-class models reject a non-default temperature with a 400. This
-        // caller resolves REVIEW_EVAL_MODEL || AI_REVIEW_MODEL, so the moment
-        // production review moved to gpt-5.6-luna every replay would 400 — and the
-        // catch in the caller turns that into `replay_unavailable` for every
-        // correction, silently gutting the cycle's evidence step. Same test as
-        // isReasoningModel() in services/dashboard/lib/improvement-cycle-core.ts.
-        const body = {
-            model,
-            ...(/o[0-9]|gpt-5|reasoning/i.test(model) ? {} : { temperature }),
-            seed,
-            messages: [{ role: 'system', content: prompt }, { role: 'user', content: `Here is the menu text to review:\n\n---\n\n${text}` }],
-        };
-        let lastErr;
-        for (let attempt = 0; attempt < 3; attempt += 1) {
-            try {
-                const resp = await fetch('https://api.openai.com/v1/chat/completions', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
-                    body: JSON.stringify(body),
-                });
-                if (resp.status === 429 || resp.status >= 500) {
-                    lastErr = new Error(`OpenAI ${resp.status}`);
-                    await new Promise((r) => setTimeout(r, 2000 * (attempt + 1)));
-                    continue;
-                }
-                if (!resp.ok) throw new Error(`OpenAI ${resp.status}: ${(await resp.text()).slice(0, 300)}`);
-                const json = await resp.json();
-                const feedback = json.choices?.[0]?.message?.content || '';
-                await fsp.mkdir(cacheDir, { recursive: true });
-                await fsp.writeFile(cachePath, JSON.stringify({ model, temperature, seed, feedback, usage: json.usage || {}, cachedAt: new Date().toISOString() }, null, 2));
-                return feedback;
-            } catch (e) {
-                lastErr = e;
-                await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)));
+        const response = await adapter.callChat(
+            { model },
+            [
+                { role: 'system', content: prompt },
+                { role: 'user', content: `Here is the menu text to review:\n\n---\n\n${text}` },
+            ],
+            {
+                provider: process.env.REVIEW_EVAL_LLM_PROVIDER || process.env.REVIEW_EVAL_PROVIDER || undefined,
+                temperature,
+                seed,
+                retry: {
+                    maxRateLimitRetries: Number(process.env.REVIEW_EVAL_RATE_LIMIT_RETRIES || 2),
+                    maxTransientRetries: Number(process.env.REVIEW_EVAL_TRANSIENT_RETRIES || 2),
+                },
             }
-        }
-        throw lastErr || new Error('OpenAI replay call failed');
+        );
+        const feedback = response.content;
+        await fsp.mkdir(cacheDir, { recursive: true });
+        await fsp.writeFile(cachePath, JSON.stringify({ model, temperature, seed, feedback, usage: response.usage, system_fingerprint: response.system_fingerprint, cachedAt: new Date().toISOString() }, null, 2));
+        return feedback;
     };
 }
 

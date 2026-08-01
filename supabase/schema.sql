@@ -504,6 +504,7 @@ CREATE TABLE IF NOT EXISTS correction_rules (
     -- The correction itself
     original_text TEXT,
     corrected_text TEXT,
+    force_target_case BOOLEAN NOT NULL DEFAULT false,
     change_type VARCHAR(50),              -- 'diacritic', 'spelling', 'punctuation',
                                           -- 'capitalization', 'content', 'formatting'
 
@@ -719,6 +720,9 @@ CREATE TABLE IF NOT EXISTS basic_ai_check_audits (
     critical_suggestions_count INTEGER,
     ai_request JSONB,                          -- exact bounded request sent to ai-review /run-qa-check
     ai_response JSONB,                         -- raw bounded response/failure from ai-review
+    model TEXT,                                -- model reported by the provider for this review
+    system_fingerprint TEXT,                   -- provider backend fingerprint when available
+    fence_missing BOOLEAN,                      -- true when the AI omitted the corrected-menu response fence
     parsed_response JSONB,                     -- parsed corrected-menu block and suggestions
     final_result JSONB,                        -- final corrected menu after dashboard guards
     guard_diagnostics JSONB,

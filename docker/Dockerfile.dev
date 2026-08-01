@@ -2,7 +2,7 @@
 #
 # Differences from Dockerfile.service:
 #   - Includes ts-node-dev so services can hot-reload from bind-mounted source.
-#   - Builds shared libs (internal-auth, supabase-client) so their dist/index.js
+#   - Builds shared libs (internal-auth, llm-adapter, supabase-client, tenant-config) so their dist/index.js
 #     resolves at runtime even though consuming services run via ts-node-dev.
 #   - Includes shared JS libs (diff-core) so workspace imports and browser-served
 #     helper files resolve inside service containers.
@@ -28,6 +28,7 @@ RUN apt-get update \
 # service's tsconfig extends ../../tsconfig.json.
 COPY package.json package-lock.json tsconfig.json jest.config.js ./
 COPY services/internal-auth/package.json ./services/internal-auth/
+COPY services/llm-adapter/package.json ./services/llm-adapter/
 COPY services/supabase-client/package.json ./services/supabase-client/
 COPY services/tenant-config/package.json ./services/tenant-config/
 COPY services/diff-core/package.json ./services/diff-core/
@@ -43,10 +44,12 @@ RUN npm ci --include=dev
 
 # 2. Build the shared TS libraries so consumers can import @menumanager/*.
 COPY services/internal-auth ./services/internal-auth
+COPY services/llm-adapter ./services/llm-adapter
 COPY services/supabase-client ./services/supabase-client
 COPY services/tenant-config ./services/tenant-config
 COPY services/diff-core ./services/diff-core
-RUN cd services/supabase-client && npx tsc \
+RUN cd services/llm-adapter && npx tsc \
+    && cd ../supabase-client && npx tsc \
     && cd ../internal-auth && npx tsc \
     && cd ../tenant-config && npx tsc
 

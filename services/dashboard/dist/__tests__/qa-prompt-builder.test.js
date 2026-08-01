@@ -18,6 +18,7 @@ jest.mock('@menumanager/tenant-config', () => {
 });
 const menu_footer_1 = require("../lib/menu-footer");
 const qa_prompt_builder_1 = require("../lib/qa-prompt-builder");
+const review_response_contract_1 = require("../lib/review-response-contract");
 const embedded_set_menu_guard_1 = require("../lib/embedded-set-menu-guard");
 const BASE_PROMPT = [
     'You are a menu editor.',
@@ -28,6 +29,11 @@ const BASE_PROMPT = [
 ].join('\n');
 const EMPTY_SET_MENU = { sections: [], issues: [] };
 describe('buildFinalPrompt (extracted from handleBasicCheck)', () => {
+    test('detects the complete AI response fence contract at assembly time', () => {
+        const prompt = Object.values(review_response_contract_1.AI_REVIEW_FENCES).join('\n');
+        expect((0, qa_prompt_builder_1.hasAiReviewFenceContract)(prompt)).toBe(true);
+        expect((0, qa_prompt_builder_1.hasAiReviewFenceContract)(prompt.replace(review_response_contract_1.AI_REVIEW_FENCES.correctedMenuStart, 'missing'))).toBe(false);
+    });
     test('always appends the standard tail sections in canonical order', () => {
         const { prompt, sections } = (0, qa_prompt_builder_1.buildFinalPrompt)(BASE_PROMPT, {
             precheckEnabled: false,

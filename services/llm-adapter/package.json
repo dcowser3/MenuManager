@@ -1,0 +1,15 @@
+{
+  "name": "@menumanager/llm-adapter",
+  "version": "1.0.0",
+  "description": "Provider-neutral chat completion adapter for Menu Manager",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.9.2"
+  }
+}

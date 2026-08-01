@@ -16,6 +16,7 @@ export type AcceptedCorrectionRule = {
     id?: string;
     original_text?: string;
     corrected_text?: string;
+    force_target_case?: boolean;
     change_type?: string | null;
     rule?: string;
     source?: string;
@@ -59,6 +60,7 @@ export type ReplacementRule = {
     from: string;
     to: string;
     type: PreAiAppliedCorrection['type'];
+    forceTargetCase?: boolean;
 };
 
 const COMMON_ALLERGEN_CODES = new Set([
@@ -325,7 +327,7 @@ function applyAccentInsensitiveReplacementRule(
         if (!startMap || !endMap) continue;
 
         const original = line.slice(startMap.start, endMap.end);
-        const corrected = matchCase(original, rule.to);
+        const corrected = rule.forceTargetCase ? rule.to : matchCase(original, rule.to);
         nextLine += line.slice(lastOriginalIndex, startMap.start);
 
         if (
@@ -371,7 +373,7 @@ function applyReplacementRule(
     const corrections: PreAiAppliedCorrection[] = [];
     const re = replacementRegExp(rule.from);
     const nextLine = line.replace(re, (match, offset: number) => {
-        const corrected = matchCase(match, rule.to);
+        const corrected = rule.forceTargetCase ? rule.to : matchCase(match, rule.to);
         if (match === corrected) {
             return match;
         }
@@ -640,7 +642,7 @@ function shouldAddRawAsterisk(line: string): boolean {
     if (!hasPrice && (!hasTrailingAllergenCluster || !hasDescriptionComma)) {
         return false;
     }
-    return /\b(?:sashimi|tartare|carpaccio|crudo|ceviche|tiradito|poke|raw\s+(?:tuna|salmon|hamachi|fish|beef|oysters?)|oysters?\s+on\s+the\s+half\s+shell|half[-\s]shell\s+oysters?|sunny[-\s]side(?:[-\s]up)?\s+eggs?|sunny[-\s]side[-\s]up|poached\s+eggs?|soft[-\s]boiled)\b/i.test(line);
+    return /\b(?:sashimi|tartare|carpaccio|crudo|ceviche|tiradito|poke|raw\s+(?:tuna|salmon|hamachi|fish|beef|oysters?)|oysters?\s+on\s+the\s+half\s+shell|half[-\s]shell\s+oysters?|sunny[-\s]side(?:[-\s]up)?\s+eggs?|sunny[-\s]side[-\s]up|poached\s+eggs?|soft[-\s]boiled|rib[-\s]?eye)\b/i.test(line);
 }
 
 function addRawAsterisk(line: string): string {
@@ -664,7 +666,10 @@ export function getAcceptedCorrectionRulePreAiEligibility(rule: AcceptedCorrecti
     if (contextTerm) {
         return { eligible: false, reason: 'context_dependent', contextTerm };
     }
-    if (!LEARNED_RULE_CHANGE_TYPES.has(changeType)) {
+    // Capitalization rules are deterministic only when they explicitly opt in
+    // to the stored target casing. Without the flag, preserve the historical
+    // source-casing behavior and do not activate a broad case rewrite.
+    if (!LEARNED_RULE_CHANGE_TYPES.has(changeType) && !(changeType === 'capitalization' && rule.force_target_case === true)) {
         return { eligible: false, reason: 'unsupported_change_type' };
     }
     if (!original || !corrected) {
@@ -708,6 +713,7 @@ function applyAcceptedCorrectionRules(
             from: `${rule.original_text || ''}`.trim(),
             to: `${rule.corrected_text || ''}`.trim(),
             type: 'Learned Rule',
+            forceTargetCase: rule.force_target_case === true,
         };
 
         for (let i = 0; i < nextLines.length; i++) {
