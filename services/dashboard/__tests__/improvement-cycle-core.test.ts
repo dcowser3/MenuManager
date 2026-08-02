@@ -664,13 +664,26 @@ describe('validateImprovementLlmOutput', () => {
 });
 
 describe('improvement system prompt', () => {
-    test('builds an executor-aware prompt without hardcoding a different executor', () => {
-        const prompt = buildImprovementSystemPrompt({ executorModel: 'test-model-x' });
-        expect(prompt).toContain('test-model-x');
-        expect(prompt).toContain('non-reasoning');
-        expect(prompt).toContain('still_missed');
-        expect(prompt).toContain('decision procedure');
+    const replayEvidenceRule = 'REPLAY EVIDENCE OUTRANKS YOUR READING';
+
+    test('uses reasoning-executor guidance for a reasoning executor', () => {
+        const prompt = buildImprovementSystemPrompt({ executorModel: 'gpt-5.6-luna' });
+        expect(prompt).toContain('gpt-5.6-luna');
+        expect(prompt).toContain('a reasoning\nmodel');
+        expect(prompt).toContain('concise and goal-oriented');
+        expect(prompt).toContain('Explicit decision procedures are still REQUIRED');
+        expect(prompt).toContain(replayEvidenceRule);
+        expect(prompt).not.toContain('non-reasoning');
         expect(prompt).not.toContain('gpt-4o-mini');
+    });
+
+    test('uses non-reasoning-executor guidance for a non-reasoning executor', () => {
+        const prompt = buildImprovementSystemPrompt({ executorModel: 'gpt-4o-mini' });
+        expect(prompt).toContain('gpt-4o-mini');
+        expect(prompt).toContain('smaller, non-reasoning model');
+        expect(prompt).toContain('explicit decision procedures');
+        expect(prompt).toContain(replayEvidenceRule);
+        expect(prompt).not.toContain('a reasoning\nmodel');
     });
 
     test('treats missed prompt-lane corrections as evidence current guidance needs sharpening', () => {
@@ -1164,6 +1177,14 @@ describe('consolidation mode (F1 / Fix 8)', () => {
         expect(prompt).toContain('decision procedure');
         expect(prompt).not.toContain('gpt-4o-mini');
         expect(prompt).not.toBe(buildImprovementSystemPrompt({ executorModel: 'test-model-x' }));
+    });
+
+    test('uses reasoning-executor guidance in the consolidation prompt', () => {
+        const prompt = buildConsolidationSystemPrompt({ executorModel: 'gpt-5.6-luna' });
+        expect(prompt).toContain('gpt-5.6-luna');
+        expect(prompt).toContain('a reasoning\nmodel');
+        expect(prompt).toContain('REPLAY EVIDENCE OUTRANKS YOUR READING');
+        expect(prompt).not.toContain('non-reasoning');
     });
 
     test('validator in consolidation mode: drops rules/recs, warns on <5% or >50% reduction, does not fire short/growth', () => {

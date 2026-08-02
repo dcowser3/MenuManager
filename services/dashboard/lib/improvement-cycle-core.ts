@@ -1912,6 +1912,26 @@ export function buildCodeRecommendationIssue(
 }
 
 function buildExecutorAwarenessSection(executorModel: string): string {
+    const replayEvidenceRule = `- REPLAY EVIDENCE OUTRANKS YOUR READING: if replay shows a correction is still_missed,
+  the prompt does NOT cover it for the executor — no matter what the text appears to say
+  to you. "The prompt already accounts for this" is never an acceptable resolution for a
+  still_missed correction. Rewrite the covering passage as an explicit decision
+  procedure, or route the correction to a replacement rule or code recommendation.`;
+
+    if (isReasoningModel(executorModel)) {
+        return `CRITICAL — WHO EXECUTES YOUR PROMPT:
+The QA prompt is NOT executed by you. It is executed by ${executorModel}, a reasoning
+model. Write for THAT model:
+- Keep rules concise and goal-oriented. Do not add chain-of-thought scaffolding or
+  redundant restatement.
+- Explicit decision procedures are still REQUIRED for consistency and auditability: the
+  rulebook is the specification reviewers approve, not a hint. State rules at the point
+  of use, with the trigger words the model will actually see in menu text.
+- Never leave a rule in tension with an example or list elsewhere in the prompt; make
+  the intended resolution explicit.
+${replayEvidenceRule}`;
+    }
+
     return `CRITICAL — WHO EXECUTES YOUR PROMPT:
 The QA prompt is NOT executed by you. It is executed by ${executorModel}, a much
 smaller, non-reasoning model. Write for THAT model:
@@ -1924,11 +1944,7 @@ smaller, non-reasoning model. Write for THAT model:
   of use, not once in a header.
 - Never leave a rule in tension with an example or list elsewhere in the prompt; the
   executor resolves conflicts by token frequency, not by reasoning about intent.
-- REPLAY EVIDENCE OUTRANKS YOUR READING: if replay shows a correction is still_missed,
-  the prompt does NOT cover it for the executor — no matter what the text appears to say
-  to you. "The prompt already accounts for this" is never an acceptable resolution for a
-  still_missed correction. Rewrite the covering passage as an explicit decision
-  procedure, or route the correction to a replacement rule or code recommendation.`;
+${replayEvidenceRule}`;
 }
 
 export function buildImprovementSystemPrompt(opts: { executorModel: string }): string {

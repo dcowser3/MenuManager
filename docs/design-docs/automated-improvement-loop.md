@@ -281,7 +281,7 @@ Docs updated in same change set; new C1–C4 unit + view tests (112 dashboard co
 
 ## July 31, 2026 authoring-gap hardening
 
-- The improvement and consolidation system prompts are built with the resolved `AI_REVIEW_MODEL` executor name. They explicitly tell the reasoning author that the QA prompt is executed by a smaller, non-reasoning model and require explicit `IF ... THEN ...` decision procedures, point-of-use rules, and replay evidence to outrank claims that a still-missed correction is already covered.
+- The improvement and consolidation system prompts are built with the resolved `AI_REVIEW_MODEL` executor name and characterize that executor accurately. Non-reasoning executors receive explicit `IF ... THEN ...` decision procedures and point-of-use rules; reasoning executors receive concise, goal-oriented rules while retaining explicit procedures for consistency and auditability. In both cases, replay evidence outranks claims that a still-missed correction is already covered.
 - `validateImprovementLlmOutput` now checks every `still_missed` correction even when an unrelated prompt edit exists. Each correction must be covered by a surviving replacement rule, a code recommendation/analysis mention, or a changed prompt span containing its correction text or meaningful category tokens; otherwise a correction-specific `unresolved_still_missed` warning is emitted and the existing retry feedback path receives it.
 
 ## July 31, 2026 replay model-parameter gate
