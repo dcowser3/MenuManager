@@ -54,6 +54,36 @@ export type ParsedAiResponse = {
 export const FORCED_CRITICAL_EXACT_TYPES = ['Missing Price', 'Incomplete Dish Name'] as const;
 export const FORCED_CRITICAL_NORMALIZED_TYPES = ['set menu item price', 'course progression', 'pricing structure'] as const;
 
+const STRING_SUGGESTION_DEFAULTS = {
+    type: 'General Review Note',
+    confidence: 'medium',
+    severity: 'normal',
+    menuItem: '',
+    recommendation: '',
+} as const;
+
+// The model occasionally emits a bare string in the suggestions array. Normalize
+// it here, at the response boundary, so every downstream guard can rely on the
+// canonical object shape instead of failing while assigning severity.
+function normalizeSuggestionShape(suggestion: unknown): ReviewSuggestion | null {
+    if (typeof suggestion === 'string') {
+        return { ...STRING_SUGGESTION_DEFAULTS, description: suggestion };
+    }
+    if (!suggestion || typeof suggestion !== 'object' || Array.isArray(suggestion)) {
+        return null;
+    }
+    const raw = suggestion as Record<string, unknown>;
+    return {
+        ...raw,
+        type: `${raw.type || ''}`,
+        confidence: `${raw.confidence || ''}`,
+        severity: raw.severity ? `${raw.severity}` : undefined,
+        menuItem: `${raw.menuItem || ''}`,
+        description: `${raw.description || ''}`,
+        recommendation: `${raw.recommendation || ''}`,
+    };
+}
+
 export function stripDiacritics(input: string): string {
     return (input || '').normalize('NFD').replace(/[̀-ͯ]/g, '');
 }
@@ -476,7 +506,12 @@ export function parseAIResponse(feedback: string, originalMenu: string): ParsedA
     if (suggestionsMatch) {
         try {
             const jsonStr = suggestionsMatch[1].trim();
-            suggestions = JSON.parse(jsonStr);
+            const parsedSuggestions = JSON.parse(jsonStr);
+            suggestions = Array.isArray(parsedSuggestions)
+                ? parsedSuggestions
+                    .map(normalizeSuggestionShape)
+                    .filter((suggestion): suggestion is ReviewSuggestion => suggestion !== null)
+                : [];
             console.log(`Parsed ${suggestions.length} suggestions from JSON`);
         } catch (e) {
             console.error('Failed to parse suggestions JSON:', e);
@@ -485,16 +520,12 @@ export function parseAIResponse(feedback: string, originalMenu: string): ParsedA
     }
 
     // Normalize severity on all suggestions
-    suggestions = suggestions.map(s => {
+    suggestions = suggestions.map((suggestion) => {
+        const s = { ...suggestion, severity: suggestion.severity || 'normal' };
         const type = (s.type || '').toString().trim().toLowerCase();
         const descLower = (s.description || '').toLowerCase();
         const recLower = (s.recommendation || '').toLowerCase();
         const combined = `${descLower} ${recLower}`;
-
-        // Default missing severity to "normal"
-        if (!s.severity) {
-            s.severity = 'normal';
-        }
 
         const isPrixFixeTopPriceIssue =
             /prix\s*fixe/.test(combined) &&

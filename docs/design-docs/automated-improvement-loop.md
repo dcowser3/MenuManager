@@ -292,6 +292,10 @@ Docs updated in same change set; new C1–C4 unit + view tests (112 dashboard co
 
 - Basic AI Check audit rows now persist nullable top-level `model` and `system_fingerprint` values returned by `ai-review`; historical rows remain null because no backfill is possible. Eval reports record the distinct provider fingerprints observed during each run under `config.system_fingerprints`.
 
+## August 2, 2026 evaluator response-shape hardening
+
+- The shared review-response parser normalizes a bare string in the AI suggestions array into a canonical non-critical review-note object before post-AI guards run. This prevents malformed-but-recoverable model output from dropping an evaluator case; genuine evaluator errors remain reported by the harness.
+
 ## July 31, 2026 baseline-model confirmation
 
 - Regression confirmation accepts `--baseline-model`; the baseline fresh arm now uses a caller keyed to that model while the candidate fresh arm retains the candidate model. Omitting the flag preserves the prior candidate-model behavior. Reports record `config.baselineModel` and the Markdown header identifies the baseline model.

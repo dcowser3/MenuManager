@@ -54,6 +54,32 @@ describe('parseAIResponse (extracted from index.ts)', () => {
         expect(parsed.suggestions[0].severity).toBe('normal');
     });
 
+    test('normalizes a string suggestion to the canonical object shape', () => {
+        const parsed = parseAIResponse(
+            buildFeedback('MENU', ['Prices are not shown for the listed menu items; confirm whether prices should be added.']),
+            'MENU'
+        );
+        expect(parsed.suggestions).toEqual([{
+            type: 'General Review Note',
+            confidence: 'medium',
+            severity: 'normal',
+            menuItem: '',
+            description: 'Prices are not shown for the listed menu items; confirm whether prices should be added.',
+            recommendation: '',
+        }]);
+    });
+
+    test('normalizes strings while preserving object suggestions in a mixed array', () => {
+        const parsed = parseAIResponse(buildFeedback('MENU', [
+            'Verify the price for Smoked BARBECUE Pulled Pork Sliders; the listed price “1” appears incomplete or incorrect.',
+            { type: 'Spelling', confidence: 'high', menuItem: 'Maldon', description: 'Capitalization', recommendation: 'Use Maldon.' },
+        ]), 'MENU');
+        expect(parsed.suggestions).toEqual(expect.arrayContaining([
+            expect.objectContaining({ type: 'General Review Note', severity: 'normal', confidence: 'medium' }),
+            expect.objectContaining({ type: 'Spelling', severity: 'normal', menuItem: 'Maldon' }),
+        ]));
+    });
+
     test('falls back to the original menu when markers are absent and to [] on bad JSON', () => {
         const parsed = parseAIResponse('no markers here', 'ORIGINAL MENU');
         expect(parsed.correctedMenu).toBe('ORIGINAL MENU');

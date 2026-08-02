@@ -37,6 +37,34 @@ const protected_terms_guard_1 = require("./protected-terms-guard");
 // enumerate them without re-reading the implementation.
 exports.FORCED_CRITICAL_EXACT_TYPES = ['Missing Price', 'Incomplete Dish Name'];
 exports.FORCED_CRITICAL_NORMALIZED_TYPES = ['set menu item price', 'course progression', 'pricing structure'];
+const STRING_SUGGESTION_DEFAULTS = {
+    type: 'General Review Note',
+    confidence: 'medium',
+    severity: 'normal',
+    menuItem: '',
+    recommendation: '',
+};
+// The model occasionally emits a bare string in the suggestions array. Normalize
+// it here, at the response boundary, so every downstream guard can rely on the
+// canonical object shape instead of failing while assigning severity.
+function normalizeSuggestionShape(suggestion) {
+    if (typeof suggestion === 'string') {
+        return { ...STRING_SUGGESTION_DEFAULTS, description: suggestion };
+    }
+    if (!suggestion || typeof suggestion !== 'object' || Array.isArray(suggestion)) {
+        return null;
+    }
+    const raw = suggestion;
+    return {
+        ...raw,
+        type: `${raw.type || ''}`,
+        confidence: `${raw.confidence || ''}`,
+        severity: raw.severity ? `${raw.severity}` : undefined,
+        menuItem: `${raw.menuItem || ''}`,
+        description: `${raw.description || ''}`,
+        recommendation: `${raw.recommendation || ''}`,
+    };
+}
 function stripDiacritics(input) {
     return (input || '').normalize('NFD').replace(/[̀-ͯ]/g, '');
 }
@@ -377,7 +405,12 @@ function parseAIResponse(feedback, originalMenu) {
     if (suggestionsMatch) {
         try {
             const jsonStr = suggestionsMatch[1].trim();
-            suggestions = JSON.parse(jsonStr);
+            const parsedSuggestions = JSON.parse(jsonStr);
+            suggestions = Array.isArray(parsedSuggestions)
+                ? parsedSuggestions
+                    .map(normalizeSuggestionShape)
+                    .filter((suggestion) => suggestion !== null)
+                : [];
             console.log(`Parsed ${suggestions.length} suggestions from JSON`);
         }
         catch (e) {
@@ -386,15 +419,12 @@ function parseAIResponse(feedback, originalMenu) {
         }
     }
     // Normalize severity on all suggestions
-    suggestions = suggestions.map(s => {
+    suggestions = suggestions.map((suggestion) => {
+        const s = { ...suggestion, severity: suggestion.severity || 'normal' };
         const type = (s.type || '').toString().trim().toLowerCase();
         const descLower = (s.description || '').toLowerCase();
         const recLower = (s.recommendation || '').toLowerCase();
         const combined = `${descLower} ${recLower}`;
-        // Default missing severity to "normal"
-        if (!s.severity) {
-            s.severity = 'normal';
-        }
         const isPrixFixeTopPriceIssue = /prix\s*fixe/.test(combined) &&
             /(price at the top|single price at the top|include a prix fixe price at the top|top of the menu)/.test(combined);
         const isCourseNumberingIssue = type === 'course numbering' ||

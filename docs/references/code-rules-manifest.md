@@ -202,6 +202,12 @@ AI suggestions without a severity are assigned severity "normal" before any crit
 
 - id: `parse/severity-default-normal` · category: severity · implementation: `services/dashboard/lib/review-pipeline.ts#parseAIResponse`
 
+### String suggestions normalize to review-note objects
+
+A bare string in the AI suggestions array is normalized at the parse boundary to a canonical General Review Note object with medium confidence and normal severity, so downstream review guards can score it safely.
+
+- id: `parse/string-suggestion-normalization` · category: response_shape · implementation: `services/dashboard/lib/review-pipeline.ts#parseAIResponse`
+
 ### Prix-fixe top-price and course-numbering phrases force critical
 
 Suggestions whose description/recommendation mention a prix fixe price at the top of the menu, or prix-fixe course numbering, are forced to critical severity even when the AI omitted the type.

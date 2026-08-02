@@ -123,6 +123,15 @@ const FUNCTIONAL_ENTRIES: ManifestRuleEntry[] = [
         source: 'code_metadata',
     },
     {
+        id: 'parse/string-suggestion-normalization',
+        layer: 'parse_normalization',
+        category: 'response_shape',
+        title: 'String suggestions normalize to review-note objects',
+        description: 'A bare string in the AI suggestions array is normalized at the parse boundary to a canonical General Review Note object with medium confidence and normal severity, so downstream review guards can score it safely.',
+        implementation: { file: REVIEW_PIPELINE_FILE, exportName: 'parseAIResponse' },
+        source: 'code_metadata',
+    },
+    {
         id: 'parse/prix-fixe-phrase-critical',
         layer: 'parse_normalization',
         category: 'severity',
