@@ -68,6 +68,9 @@ describe('draft sessions', () => {
     const baselineMatchHandler = getRouteHandler('post', '/submissions/baseline-match');
     let drafts: Record<string, any>;
 
+    // The default idle-draft expiry rule is 30 days; keep active-session fixtures fresh.
+    const activeDraftTimestamp = () => new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+
     const submissions = {
         'form-approved': {
             id: 'form-approved',
@@ -131,6 +134,8 @@ describe('draft sessions', () => {
     });
 
     test('rejects stale autosave when the server has a newer updated_at', async () => {
+        const updatedAt = activeDraftTimestamp();
+        const staleClientUpdatedAt = new Date(Date.parse(updatedAt) - 60_000).toISOString();
         drafts['draft-1'] = {
             id: 'draft-1',
             token: 'share-token',
@@ -138,14 +143,14 @@ describe('draft sessions', () => {
             menu_content_html: '<p>Old</p>',
             form_state: {},
             status: 'active',
-            created_at: '2026-07-01T00:00:00.000Z',
-            updated_at: '2026-07-02T00:00:00.000Z',
+            created_at: staleClientUpdatedAt,
+            updated_at: updatedAt,
         };
 
         const response = await invokeJsonHandler(saveHandler, {
             params: { token: 'share-token' },
             body: {
-                updatedAt: '2026-07-01T23:59:00.000Z',
+                updatedAt: staleClientUpdatedAt,
                 menuContentHtml: '<p>Overwrite</p>',
                 formState: {},
             },
@@ -157,6 +162,7 @@ describe('draft sessions', () => {
     });
 
     test('locks a draft after submit and rejects later autosave', async () => {
+        const updatedAt = activeDraftTimestamp();
         drafts['draft-1'] = {
             id: 'draft-1',
             token: 'share-token',
@@ -164,8 +170,8 @@ describe('draft sessions', () => {
             menu_content_html: '<p>Current</p>',
             form_state: {},
             status: 'active',
-            created_at: '2026-07-01T00:00:00.000Z',
-            updated_at: '2026-07-02T00:00:00.000Z',
+            created_at: updatedAt,
+            updated_at: updatedAt,
         };
 
         const locked = await invokeJsonHandler(submitHandler, {
