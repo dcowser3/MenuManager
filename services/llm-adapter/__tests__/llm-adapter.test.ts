@@ -53,6 +53,12 @@ describe('llm adapter', () => {
             .toBe(JSON.stringify({ model: 'gpt-5.6-luna', messages }));
     });
 
+    test('omits a disabled seed while retaining it for models that support seeds', () => {
+        const messages = [{ role: 'user' as const, content: 'test' }];
+        expect(buildChatRequestBody({ model: 'gpt-5.6-luna' }, messages, { seed: 42 })).toMatchObject({ seed: 42 });
+        expect(buildChatRequestBody({ model: 'gpt-5.6-luna' }, messages, { seed: undefined })).not.toHaveProperty('seed');
+    });
+
     test('preserves OpenAI ids and maps plain ids to OpenRouter vendor ids centrally', () => {
         expect(mapOpenRouterModelId('gpt-5.6-luna')).toBe('openai/gpt-5.6-luna');
         expect(mapOpenRouterModelId('anthropic/claude-sonnet-5')).toBe('anthropic/claude-sonnet-5');

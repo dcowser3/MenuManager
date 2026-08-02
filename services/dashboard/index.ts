@@ -221,7 +221,12 @@ const BASIC_AI_CHECK_DEBUG_ENABLED = process.env.BASIC_AI_CHECK_DEBUG_ENABLED !=
     ? parseBooleanFlag(process.env.BASIC_AI_CHECK_DEBUG_ENABLED)
     : process.env.NODE_ENV !== 'production';
 const BASIC_AI_CHECK_DEBUG_MAX_CHARS = parsePositiveInteger(process.env.BASIC_AI_CHECK_DEBUG_MAX_CHARS, 60000);
-const BASIC_AI_CHECK_SEED = parseOptionalNonNegativeInteger(process.env.BASIC_AI_CHECK_SEED) ?? 42;
+function resolveAiReviewSeed(env: Record<string, string | undefined> = process.env): number | undefined {
+    const configured = env.AI_REVIEW_SEED ?? env.BASIC_AI_CHECK_SEED;
+    if (configured !== undefined && configured.trim() === '') return undefined;
+    return parseOptionalNonNegativeInteger(configured) ?? 42;
+}
+const AI_REVIEW_SEED = resolveAiReviewSeed();
 
 type BasicCheckJob = {
     id: string;
@@ -1804,6 +1809,7 @@ const submissionWorkflowHandlers = createSubmissionWorkflowHandlers({
     DEFAULT_ALLERGEN_KEY,
     PUBLIC_FORM_SUPPORT_EMAIL,
     AI_REVIEW_SUBMIT_TIMEOUT_MS,
+    AI_REVIEW_SEED,
     CLICKUP_TASK_CREATE_TIMEOUT_MS,
     getTempUploadsDir,
     getSubmissionDocumentDir,
@@ -3403,7 +3409,7 @@ async function handleBasicCheck(req: any, res: any) {
         const buildAiRequestAudit = () => ({
             url: `${AI_REVIEW_URL}/run-qa-check`,
             timeoutMs: BASIC_AI_CHECK_TIMEOUT_MS,
-            seed: BASIC_AI_CHECK_SEED ?? null,
+            seed: AI_REVIEW_SEED ?? null,
             textLength: preCheckedReviewBody.length,
             promptLength: finalPrompt.length,
             text: preCheckedReviewBody,
@@ -3430,6 +3436,7 @@ async function handleBasicCheck(req: any, res: any) {
             menuTextLength: menuContent.length,
             preAiTextLength: preCheckedReviewBody.length,
             promptLength: finalPrompt.length,
+            seed: AI_REVIEW_SEED,
             menuContentRaw: menuContent,
             baselineMenuContentRaw: changedOnlyMode ? baselineMenuContent : undefined,
             ...extra,
@@ -3454,7 +3461,9 @@ async function handleBasicCheck(req: any, res: any) {
             qaResponse = await internalApi.post(`${AI_REVIEW_URL}/run-qa-check`, {
                 text: preCheckedReviewBody,
                 prompt: finalPrompt,
-                seed: BASIC_AI_CHECK_SEED,
+                // Null is intentional: it tells ai-review that an explicitly
+                // empty AI_REVIEW_SEED disables the provider seed.
+                seed: AI_REVIEW_SEED ?? null,
             }, {
                 timeout: BASIC_AI_CHECK_TIMEOUT_MS
             });
@@ -3630,6 +3639,7 @@ async function handleBasicCheck(req: any, res: any) {
                     statusText: qaResponse?.statusText,
                     model: qaResponse?.data?.model || null,
                     system_fingerprint: (qaResponse?.data as any)?.system_fingerprint || null,
+                    finish_reason: (qaResponse?.data as any)?.finish_reason || null,
                     fence_missing: true,
                     body: qaResponse?.data,
                     aiFailure,
@@ -3860,6 +3870,7 @@ async function handleBasicCheck(req: any, res: any) {
                 // model switch; null for responses from a pre-2026-07-30 ai-review.
                     model: qaResponse?.data?.model || null,
                     system_fingerprint: (qaResponse?.data as any)?.system_fingerprint || null,
+                    finish_reason: (qaResponse?.data as any)?.finish_reason || null,
                     fence_missing: parsed.fenceMissing,
                     rawFeedbackLength: `${feedback || ''}`.length,
                 rawFeedback: feedback || '',

@@ -46,8 +46,10 @@ describe('Basic AI Check audit logging', () => {
             },
             aiResponse: {
                 rawFeedback: 'y'.repeat(12),
+                finish_reason: 'stop',
             },
             model: 'gpt-5.1',
+            seed: 42,
             systemFingerprint: 'fp-test-123',
             fenceMissing: true,
         }, {
@@ -66,12 +68,14 @@ describe('Basic AI Check audit logging', () => {
             menu_text_length: 20,
             prompt_length: 200,
             model: 'gpt-5.1',
+            seed: 42,
             system_fingerprint: 'fp-test-123',
             fence_missing: true,
         });
         expect((normalized.ai_request as any).text).toContain('...[truncated');
         expect((normalized.ai_request as any).prompt).toBe('xxxxx\n...[truncated 7 chars]');
         expect((normalized.ai_response as any).rawFeedback).toBe('yyyyy\n...[truncated 7 chars]');
+        expect((normalized.ai_response as any).finish_reason).toBe('stop');
     });
 
     test('inserts an audit row when Supabase is configured', async () => {
@@ -80,6 +84,7 @@ describe('Basic AI Check audit logging', () => {
             checkId: 'check-789',
             eventType: 'completed',
             model: 'gpt-5.1',
+            seed: 42,
             systemFingerprint: 'fp-row-456',
             fenceMissing: true,
             aiRequest: { text: 'Athletic N/A\nLagunitas N/A' },
@@ -93,6 +98,7 @@ describe('Basic AI Check audit logging', () => {
             event_type: 'completed',
             model: 'gpt-5.1',
             system_fingerprint: 'fp-row-456',
+            seed: 42,
             fence_missing: true,
             ai_request: expect.objectContaining({
                 text: 'Athletic N/A\nLagunitas N/A',

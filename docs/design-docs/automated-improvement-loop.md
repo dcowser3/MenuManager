@@ -296,6 +296,10 @@ Docs updated in same change set; new C1–C4 unit + view tests (112 dashboard co
 
 - The shared review-response parser normalizes a bare string in the AI suggestions array into a canonical non-critical review-note object before post-AI guards run. This prevents malformed-but-recoverable model output from dropping an evaluator case; genuine evaluator errors remain reported by the harness.
 
+## August 2, 2026 review seed provenance
+
+- Production review calls resolve `AI_REVIEW_SEED` once (default `42`; an empty value disables it) and pass it through the capability-aware adapter. The Basic AI Check audit row records the resolved seed next to the model. A seed reduces output variance but does not guarantee determinism because provider-side batching can vary. Apply `supabase/migrations/20260802_add_basic_ai_check_audit_seed.sql` before deploying this audit-column write.
+
 ## July 31, 2026 baseline-model confirmation
 
 - Regression confirmation accepts `--baseline-model`; the baseline fresh arm now uses a caller keyed to that model while the candidate fresh arm retains the candidate model. Omitting the flag preserves the prior candidate-model behavior. Reports record `config.baselineModel` and the Markdown header identifies the baseline model.

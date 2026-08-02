@@ -25,6 +25,7 @@ type SubmissionWorkflowDeps = {
     DEFAULT_ALLERGEN_KEY: string;
     PUBLIC_FORM_SUPPORT_EMAIL?: string;
     AI_REVIEW_SUBMIT_TIMEOUT_MS: number;
+    AI_REVIEW_SEED?: number;
     CLICKUP_TASK_CREATE_TIMEOUT_MS: number;
     getTempUploadsDir: () => string;
     getSubmissionDocumentDir: (projectName: string, property: string, submissionId: string) => string;
@@ -133,7 +134,8 @@ export function createSubmissionWorkflowHandlers(deps: SubmissionWorkflowDeps) {
                 submission_id: input.submissionId,
                 submitter_email: input.submitterEmail,
                 filename: input.filename,
-                original_path: input.originalPath
+                original_path: input.originalPath,
+                seed: deps.AI_REVIEW_SEED ?? null,
             }, { timeout: deps.AI_REVIEW_SUBMIT_TIMEOUT_MS });
 
             console.log(`✓ AI review triggered for ${input.submissionId}`);

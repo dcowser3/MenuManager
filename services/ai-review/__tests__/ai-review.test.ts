@@ -43,7 +43,7 @@ describe('AI Review Service', () => {
         process.env.INTERNAL_API_TOKEN = 'test-internal-token';
         process.env.OPENAI_API_KEY = 'test-openai-key';
         process.env.AI_REVIEW_MODEL = 'gpt-5.6-luna';
-        process.env.BASIC_AI_CHECK_SEED = '12345';
+        process.env.AI_REVIEW_SEED = '12345';
         ({ app } = await import('../index'));
     });
 
@@ -55,21 +55,11 @@ describe('AI Review Service', () => {
         delete process.env.INTERNAL_API_TOKEN;
         delete process.env.OPENAI_API_KEY;
         delete process.env.AI_REVIEW_MODEL;
-        delete process.env.BASIC_AI_CHECK_SEED;
+        delete process.env.AI_REVIEW_SEED;
     });
 
     it('builds the real reasoning-model request through the adapter and parses the fenced response', async () => {
         const fetchMock = jest.fn(async (_url: string, init: any) => {
-            const request = JSON.parse(init.body);
-            expect(request.model).toBe('gpt-5.6-luna');
-            expect(request.temperature).toBeUndefined();
-            expect(request.seed).toBe(12345);
-            expect(request.max_tokens).toBeUndefined();
-            expect(request.max_completion_tokens).toBeUndefined();
-            expect(request.messages).toEqual([
-                { role: 'system', content: 'Use the menu QA rules.' },
-                { role: 'user', content: 'Here is the menu text to review:\n\n---\n\nTACOS 12' },
-            ]);
             return {
                 ok: true,
                 status: 200,
@@ -99,8 +89,24 @@ describe('AI Review Service', () => {
             feedback: '=== CORRECTED MENU ===\nTACOS 12\n=== END CORRECTED MENU ===',
             model: 'gpt-5.6-luna',
             system_fingerprint: null,
+            finish_reason: 'stop',
         });
         expect(fetchMock).toHaveBeenCalledTimes(1);
+        const request = JSON.parse(fetchMock.mock.calls[0][1].body);
+        expect(request).toEqual({
+            model: 'gpt-5.6-luna',
+            seed: 12345,
+            messages: [
+                { role: 'system', content: 'Use the menu QA rules.' },
+                { role: 'user', content: 'Here is the menu text to review:\n\n---\n\nTACOS 12' },
+            ],
+        });
+    });
+
+    it('allows an explicitly empty AI_REVIEW_SEED to disable the provider seed', async () => {
+        const { resolveAiReviewSeed } = await import('../index');
+        expect(resolveAiReviewSeed({ AI_REVIEW_SEED: '' })).toBeUndefined();
+        expect(resolveAiReviewSeed({})).toBe(42);
     });
 
     it('parses approved dish quality verdicts from model JSON', async () => {

@@ -33,6 +33,7 @@ export type BasicAiCheckAuditEvent = {
     aiRequest?: unknown;
     aiResponse?: unknown;
     model?: unknown;
+    seed?: unknown;
     systemFingerprint?: unknown;
     fenceMissing?: unknown;
     parsedResponse?: unknown;
@@ -152,6 +153,7 @@ export function normalizeBasicAiCheckAuditEvent(
         ai_request: aiRequest,
         ai_response: aiResponse,
         model: textOrNull(event.model, 200),
+        seed: numberOrNull(event.seed),
         system_fingerprint: textOrNull(event.systemFingerprint, 200),
         fence_missing: booleanOrNull(event.fenceMissing),
         parsed_response: truncateJson(event.parsedResponse ?? null, maxChars),
@@ -204,6 +206,7 @@ const OPTIONAL_AUDIT_COLUMNS = [
     'baseline_menu_content_raw',
     'submission_id',
     'model',
+    'seed',
     'system_fingerprint',
     'fence_missing',
 ] as const;

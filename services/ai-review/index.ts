@@ -41,7 +41,16 @@ function parseOptionalNonNegativeInteger(value: unknown): number | undefined {
     return Number.isInteger(parsed) && parsed >= 0 ? parsed : undefined;
 }
 
-const BASIC_AI_CHECK_SEED = parseOptionalNonNegativeInteger(process.env.BASIC_AI_CHECK_SEED) ?? 42;
+export function resolveAiReviewSeed(env: Record<string, string | undefined> = process.env): number | undefined {
+    // An explicitly empty AI_REVIEW_SEED is the opt-out; an absent or invalid
+    // value safely uses the production default. BASIC_AI_CHECK_SEED remains a
+    // temporary compatibility alias for existing local configurations.
+    const configured = env.AI_REVIEW_SEED ?? env.BASIC_AI_CHECK_SEED;
+    if (configured !== undefined && configured.trim() === '') return undefined;
+    return parseOptionalNonNegativeInteger(configured) ?? 42;
+}
+
+const AI_REVIEW_SEED = resolveAiReviewSeed();
 const DOCUMENT_STORAGE_ROOT = process.env.DOCUMENT_STORAGE_ROOT || path.join(__dirname, '..', '..', '..', 'tmp', 'documents');
 
 app.use(express.json());
@@ -186,7 +195,7 @@ app.post('/approved-dishes/quality-check', async (req, res) => {
                     role: 'user',
                     content: prompt,
                 },
-            ], { provider: AI_REVIEW_PROVIDER, temperature: 0 });
+            ], { provider: AI_REVIEW_PROVIDER, temperature: 0, seed: AI_REVIEW_SEED });
 
         const content = response.content;
         res.json({
@@ -223,7 +232,9 @@ app.post('/run-qa-check', async (req, res) => {
         }
 
         console.log('Running QA check...');
-        const resolvedSeed = parseOptionalNonNegativeInteger(seed) ?? BASIC_AI_CHECK_SEED;
+        const resolvedSeed = seed === null || (typeof seed === 'string' && seed.trim() === '')
+            ? undefined
+            : parseOptionalNonNegativeInteger(seed) ?? AI_REVIEW_SEED;
         const qaResponse = await callChat({ model: AI_REVIEW_MODEL }, [
                 { role: 'system', content: prompt },
                 { role: 'user', content: `Here is the menu text to review:\n\n---\n\n${text}` }
@@ -243,6 +254,7 @@ app.post('/run-qa-check', async (req, res) => {
             feedback,
             model: qaResponse.model || AI_REVIEW_MODEL,
             system_fingerprint: qaResponse.system_fingerprint,
+            finish_reason: qaResponse.finish_reason,
         });
 
     } catch (error: any) {
@@ -313,7 +325,7 @@ Configure OPENAI_API_KEY in .env for real AI reviews.
             const qaResponse = await callChat({ model: AI_REVIEW_MODEL }, [
                     { role: 'system', content: qaPrompt },
                     { role: 'user', content: `Here is the menu text to review:\n\n---\n\n${text}` }
-                ], { provider: AI_REVIEW_PROVIDER, temperature: AI_REVIEW_TEMPERATURE });
+                ], { provider: AI_REVIEW_PROVIDER, temperature: AI_REVIEW_TEMPERATURE, seed: AI_REVIEW_SEED });
             generalQaFeedback = qaResponse.content || "No feedback generated.";
             issueCount = (generalQaFeedback.match(/Description of Issue:/g) || []).length;
         }
