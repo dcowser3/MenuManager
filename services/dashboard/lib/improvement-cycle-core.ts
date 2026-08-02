@@ -313,6 +313,7 @@ export type ProposedReplacementRule = {
 // every input, not just the ones the model chose to mention.
 export type CorrectionRoutingLane =
     | 'replacement_rule'
+    | 'existing_rule'
     | 'prompt'
     | 'code_recommendation'
     | 'already_correct'
@@ -335,6 +336,7 @@ export type CorrectionRoutingEntry = {
 
 export const CORRECTION_ROUTING_LANES = new Set<CorrectionRoutingLane>([
     'replacement_rule',
+    'existing_rule',
     'prompt',
     'code_recommendation',
     'already_correct',
@@ -673,7 +675,8 @@ function ruleCoversCorrection(
  *    unresolved_still_missed),
  *  - allows 'already_correct' only when replay says now_correct,
  *  - cross-checks 'replacement_rule' lanes against the rules that survived validation
- *    (a routing pointing at a dropped rule downgrades to 'unrouted').
+ *    (a routing pointing at a dropped rule downgrades to 'unrouted'), and
+ *  - allows 'existing_rule' only when an accepted deterministic rule covers the correction.
  * Pure + exported so it is jest-testable independently of the LLM call.
  */
 export function validateCorrectionRouting(
@@ -682,6 +685,8 @@ export function validateCorrectionRouting(
         sourceCorrections?: Array<{ id?: string; original_text?: string | null; corrected_text?: string | null; rule?: string | null }>;
         replayEvidence?: ReplayEvidenceEntry[];
         survivingRules?: Array<{ original_text: string; corrected_text: string }>;
+        /** Accepted deterministic rules loaded by the cycle; absent fails closed for existing_rule claims. */
+        acceptedRules?: Array<{ original_text?: string | null; corrected_text?: string | null }>;
     } = {}
 ): { routing: CorrectionRoutingEntry[]; warnings: string[]; unresolvedFromRouting: boolean } {
     const warnings: string[] = [];
@@ -697,6 +702,7 @@ export function validateCorrectionRouting(
     // Only cross-check replacement_rule lanes when the caller supplied the surviving rule set
     // (an empty array is a valid "no rules survived" assertion; undefined means "skip the check").
     const crossCheckRules = Array.isArray(opts.survivingRules);
+    const crossCheckAcceptedRules = Array.isArray(opts.acceptedRules);
 
     // Parse model-provided routing entries, keyed by correction_id (first wins; dupes warn).
     const byId = new Map<string, CorrectionRoutingEntry>();
@@ -750,7 +756,7 @@ export function validateCorrectionRouting(
     // Per-entry cross-checks.
     for (const entry of byId.values()) {
         const replay = replayById.get(entry.correction_id);
-        if (replay === 'still_missed' && (entry.lane === 'dismissed' || entry.lane === 'already_correct')) {
+        if (replay === 'still_missed' && (entry.lane === 'dismissed' || entry.lane === 'already_correct' || entry.lane === 'existing_rule')) {
             warnings.push(`correction ${entry.correction_id} is tagged still_missed by replay but routed "${entry.lane}"; replay evidence outranks this — it must result in a concrete change`);
             unresolvedFromRouting = true;
         }
@@ -769,6 +775,21 @@ export function validateCorrectionRouting(
                     entry.lane = 'unrouted';
                     entry.note = entry.note ? `${entry.note} (rule dropped in validation)` : 'routed rule dropped in validation';
                 }
+            }
+        }
+        if (entry.lane === 'existing_rule') {
+            const src = sourceById.get(entry.correction_id);
+            const covered = crossCheckAcceptedRules
+                && !!src?.original_text
+                && !!src?.corrected_text
+                && (opts.acceptedRules || []).some((r) => ruleCoversCorrection(r, src.original_text, src.corrected_text));
+            if (!covered) {
+                const reason = !crossCheckAcceptedRules
+                    ? 'the accepted-rule set was not supplied'
+                    : 'no accepted deterministic rule covers its exact fix';
+                warnings.push(`correction ${entry.correction_id} routed to existing_rule but ${reason}; recorded as unrouted`);
+                entry.lane = 'unrouted';
+                entry.note = entry.note ? `${entry.note} (existing rule not verified)` : 'existing rule not verified';
             }
         }
     }
@@ -1375,6 +1396,7 @@ export function validateImprovementLlmOutput(
             sourceCorrections: opts.sourceCorrections,
             replayEvidence: opts.replayEvidence,
             survivingRules: rules,
+            acceptedRules: opts.existingAcceptedRules,
         });
         for (const w of routed.warnings) warnings.push(w);
         if (routed.unresolvedFromRouting) unresolvedStillMissed = true;
@@ -2000,8 +2022,9 @@ Handling contradictions (policy changes):
 
 Per-correction routing (REQUIRED):
 - You MUST emit a "correction_routing" entry for EVERY source correction, using its correction_id from the REPLAY EVIDENCE list. This is how the reviewer sees what happened to each input; a correction you silently drop looks like it vanished.
-- lane is one of: "replacement_rule" (handled by a deterministic rule you propose), "prompt" (handled by your prompt change), "code_recommendation" (needs a code guard you recommend), "already_correct" (the pipeline already produces the fix — ONLY legal when replay says now_correct), "dismissed" (invalid/out-of-scope correction, with a reason).
-- A correction tagged still_missed by replay may NOT be routed "dismissed" or "already_correct" — replay proves the pipeline still gets it wrong, so it must be routed to a concrete change.
+- lane is one of: "replacement_rule" (handled by a deterministic rule you propose), "existing_rule" (an accepted deterministic rule already contains the exact fix), "prompt" (handled by your prompt change), "code_recommendation" (needs a code guard you recommend), "already_correct" (the pipeline already produces the fix — ONLY legal when replay says now_correct), "dismissed" (invalid/out-of-scope correction, with a reason).
+- Use "existing_rule" ONLY when the Code Rules Manifest / accepted rules already contain the correction's exact deterministic fix. It is the right lane for manually seeded rules when replay is unavailable; do not propose a duplicate rule. A still_missed replay still outranks this lane because it proves the existing rule is not firing.
+- A correction tagged still_missed by replay may NOT be routed "dismissed", "already_correct", or "existing_rule" — replay proves the pipeline still gets it wrong, so it must be routed to a concrete change.
 - "target" names the specific rule, prompt section, or recommendation; "note" is a one-line reason.
 
 Respond with ONLY a JSON object in this exact shape:
@@ -2024,7 +2047,7 @@ Respond with ONLY a JSON object in this exact shape:
   "correction_routing": [
     {
       "correction_id": "<id from the REPLAY EVIDENCE list>",
-      "lane": "replacement_rule|prompt|code_recommendation|already_correct|dismissed",
+      "lane": "replacement_rule|existing_rule|prompt|code_recommendation|already_correct|dismissed",
       "target": "rule original->corrected, prompt section name, or recommendation title",
       "note": "one-line reason"
     }

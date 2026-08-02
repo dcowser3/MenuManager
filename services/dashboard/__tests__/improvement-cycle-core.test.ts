@@ -1390,6 +1390,55 @@ describe('C3 validateCorrectionRouting', () => {
         expect(out.routing.find((r) => r.correction_id === 'a')!.lane).toBe('replacement_rule');
     });
 
+    test('existing_rule cleanly routes a manually seeded accepted rule when replay is unavailable', () => {
+        const out = validateCorrectionRouting(
+            [{ correction_id: 'a', lane: 'existing_rule', target: 'gruyere -> gruyère', note: 'already seeded' }],
+            {
+                sourceCorrections: [{ id: 'a', original_text: 'gruyere', corrected_text: 'gruyère' }],
+                replayEvidence: [{ correction_id: 'a', status: 'replay_unavailable' }] as any,
+                acceptedRules: [{ original_text: 'gruyere', corrected_text: 'gruyère' }],
+            },
+        );
+        expect(out.routing[0].lane).toBe('existing_rule');
+        expect(out.warnings).toEqual([]);
+        expect(out.unresolvedFromRouting).toBe(false);
+    });
+
+    test('existing_rule without a matching accepted rule downgrades to unrouted', () => {
+        const out = validateCorrectionRouting(
+            [{ correction_id: 'a', lane: 'existing_rule', target: 'gruyere -> gruyère', note: '' }],
+            {
+                sourceCorrections: [{ id: 'a', original_text: 'gruyere', corrected_text: 'gruyère' }],
+                acceptedRules: [{ original_text: 'maldon', corrected_text: 'Maldon' }],
+            },
+        );
+        expect(out.routing[0].lane).toBe('unrouted');
+        expect(out.warnings.some((w) => /existing_rule.*no accepted deterministic rule/.test(w))).toBe(true);
+    });
+
+    test('still_missed replay evidence outranks an existing_rule claim', () => {
+        const out = validateCorrectionRouting(
+            [{ correction_id: 'a', lane: 'existing_rule', target: 'gruyere -> gruyère', note: '' }],
+            {
+                sourceCorrections: [{ id: 'a', original_text: 'gruyere', corrected_text: 'gruyère' }],
+                replayEvidence: [{ correction_id: 'a', status: 'still_missed' }] as any,
+                acceptedRules: [{ original_text: 'gruyere', corrected_text: 'gruyère' }],
+            },
+        );
+        expect(out.routing[0].lane).toBe('existing_rule');
+        expect(out.unresolvedFromRouting).toBe(true);
+        expect(out.warnings.some((w) => /still_missed by replay but routed "existing_rule"; replay evidence outranks this/.test(w))).toBe(true);
+    });
+
+    test('existing_rule fails closed when the accepted-rule set is absent', () => {
+        const out = validateCorrectionRouting(
+            [{ correction_id: 'a', lane: 'existing_rule', target: 'gruyere -> gruyère', note: '' }],
+            { sourceCorrections: [{ id: 'a', original_text: 'gruyere', corrected_text: 'gruyère' }] },
+        );
+        expect(out.routing[0].lane).toBe('unrouted');
+        expect(out.warnings.some((w) => /accepted-rule set was not supplied/.test(w))).toBe(true);
+    });
+
     test('a rule NARROWER than the correction line is not falsely flagged as dropped', () => {
         const out = validateCorrectionRouting(
             [{ correction_id: 'a', lane: 'replacement_rule', target: 'CAST IRON CHICKEN -> CAST-IRON CHICKEN', note: '' }],

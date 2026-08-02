@@ -266,6 +266,7 @@ exports.PROPOSED_RULE_CHANGE_TYPES = new Set([
 ]);
 exports.CORRECTION_ROUTING_LANES = new Set([
     'replacement_rule',
+    'existing_rule',
     'prompt',
     'code_recommendation',
     'already_correct',
@@ -538,7 +539,8 @@ function ruleCoversCorrection(rule, correctionOriginal, correctionCorrected) {
  *    unresolved_still_missed),
  *  - allows 'already_correct' only when replay says now_correct,
  *  - cross-checks 'replacement_rule' lanes against the rules that survived validation
- *    (a routing pointing at a dropped rule downgrades to 'unrouted').
+ *    (a routing pointing at a dropped rule downgrades to 'unrouted'), and
+ *  - allows 'existing_rule' only when an accepted deterministic rule covers the correction.
  * Pure + exported so it is jest-testable independently of the LLM call.
  */
 function validateCorrectionRouting(rawRouting, opts = {}) {
@@ -556,6 +558,7 @@ function validateCorrectionRouting(rawRouting, opts = {}) {
     // Only cross-check replacement_rule lanes when the caller supplied the surviving rule set
     // (an empty array is a valid "no rules survived" assertion; undefined means "skip the check").
     const crossCheckRules = Array.isArray(opts.survivingRules);
+    const crossCheckAcceptedRules = Array.isArray(opts.acceptedRules);
     // Parse model-provided routing entries, keyed by correction_id (first wins; dupes warn).
     const byId = new Map();
     for (const value of Array.isArray(rawRouting) ? rawRouting : []) {
@@ -606,7 +609,7 @@ function validateCorrectionRouting(rawRouting, opts = {}) {
     // Per-entry cross-checks.
     for (const entry of byId.values()) {
         const replay = replayById.get(entry.correction_id);
-        if (replay === 'still_missed' && (entry.lane === 'dismissed' || entry.lane === 'already_correct')) {
+        if (replay === 'still_missed' && (entry.lane === 'dismissed' || entry.lane === 'already_correct' || entry.lane === 'existing_rule')) {
             warnings.push(`correction ${entry.correction_id} is tagged still_missed by replay but routed "${entry.lane}"; replay evidence outranks this — it must result in a concrete change`);
             unresolvedFromRouting = true;
         }
@@ -625,6 +628,21 @@ function validateCorrectionRouting(rawRouting, opts = {}) {
                     entry.lane = 'unrouted';
                     entry.note = entry.note ? `${entry.note} (rule dropped in validation)` : 'routed rule dropped in validation';
                 }
+            }
+        }
+        if (entry.lane === 'existing_rule') {
+            const src = sourceById.get(entry.correction_id);
+            const covered = crossCheckAcceptedRules
+                && !!src?.original_text
+                && !!src?.corrected_text
+                && (opts.acceptedRules || []).some((r) => ruleCoversCorrection(r, src.original_text, src.corrected_text));
+            if (!covered) {
+                const reason = !crossCheckAcceptedRules
+                    ? 'the accepted-rule set was not supplied'
+                    : 'no accepted deterministic rule covers its exact fix';
+                warnings.push(`correction ${entry.correction_id} routed to existing_rule but ${reason}; recorded as unrouted`);
+                entry.lane = 'unrouted';
+                entry.note = entry.note ? `${entry.note} (existing rule not verified)` : 'existing rule not verified';
             }
         }
     }
@@ -1177,6 +1195,7 @@ function validateImprovementLlmOutput(raw, opts = {}) {
             sourceCorrections: opts.sourceCorrections,
             replayEvidence: opts.replayEvidence,
             survivingRules: rules,
+            acceptedRules: opts.existingAcceptedRules,
         });
         for (const w of routed.warnings)
             warnings.push(w);
@@ -1556,6 +1575,24 @@ function buildCodeRecommendationIssue(recommendation, proposal, dashboardUrl) {
     };
 }
 function buildExecutorAwarenessSection(executorModel) {
+    const replayEvidenceRule = `- REPLAY EVIDENCE OUTRANKS YOUR READING: if replay shows a correction is still_missed,
+  the prompt does NOT cover it for the executor — no matter what the text appears to say
+  to you. "The prompt already accounts for this" is never an acceptable resolution for a
+  still_missed correction. Rewrite the covering passage as an explicit decision
+  procedure, or route the correction to a replacement rule or code recommendation.`;
+    if (isReasoningModel(executorModel)) {
+        return `CRITICAL — WHO EXECUTES YOUR PROMPT:
+The QA prompt is NOT executed by you. It is executed by ${executorModel}, a reasoning
+model. Write for THAT model:
+- Keep rules concise and goal-oriented. Do not add chain-of-thought scaffolding or
+  redundant restatement.
+- Explicit decision procedures are still REQUIRED for consistency and auditability: the
+  rulebook is the specification reviewers approve, not a hint. State rules at the point
+  of use, with the trigger words the model will actually see in menu text.
+- Never leave a rule in tension with an example or list elsewhere in the prompt; make
+  the intended resolution explicit.
+${replayEvidenceRule}`;
+    }
     return `CRITICAL — WHO EXECUTES YOUR PROMPT:
 The QA prompt is NOT executed by you. It is executed by ${executorModel}, a much
 smaller, non-reasoning model. Write for THAT model:
@@ -1568,11 +1605,7 @@ smaller, non-reasoning model. Write for THAT model:
   of use, not once in a header.
 - Never leave a rule in tension with an example or list elsewhere in the prompt; the
   executor resolves conflicts by token frequency, not by reasoning about intent.
-- REPLAY EVIDENCE OUTRANKS YOUR READING: if replay shows a correction is still_missed,
-  the prompt does NOT cover it for the executor — no matter what the text appears to say
-  to you. "The prompt already accounts for this" is never an acceptable resolution for a
-  still_missed correction. Rewrite the covering passage as an explicit decision
-  procedure, or route the correction to a replacement rule or code recommendation.`;
+${replayEvidenceRule}`;
 }
 function buildImprovementSystemPrompt(opts) {
     return `You are the review-process engineer for an AI menu editor at ${(0, tenant_config_1.getTenantConfig)().name} (${(0, tenant_config_1.getTenantConfig)().shortName}).
@@ -1627,8 +1660,9 @@ Handling contradictions (policy changes):
 
 Per-correction routing (REQUIRED):
 - You MUST emit a "correction_routing" entry for EVERY source correction, using its correction_id from the REPLAY EVIDENCE list. This is how the reviewer sees what happened to each input; a correction you silently drop looks like it vanished.
-- lane is one of: "replacement_rule" (handled by a deterministic rule you propose), "prompt" (handled by your prompt change), "code_recommendation" (needs a code guard you recommend), "already_correct" (the pipeline already produces the fix — ONLY legal when replay says now_correct), "dismissed" (invalid/out-of-scope correction, with a reason).
-- A correction tagged still_missed by replay may NOT be routed "dismissed" or "already_correct" — replay proves the pipeline still gets it wrong, so it must be routed to a concrete change.
+- lane is one of: "replacement_rule" (handled by a deterministic rule you propose), "existing_rule" (an accepted deterministic rule already contains the exact fix), "prompt" (handled by your prompt change), "code_recommendation" (needs a code guard you recommend), "already_correct" (the pipeline already produces the fix — ONLY legal when replay says now_correct), "dismissed" (invalid/out-of-scope correction, with a reason).
+- Use "existing_rule" ONLY when the Code Rules Manifest / accepted rules already contain the correction's exact deterministic fix. It is the right lane for manually seeded rules when replay is unavailable; do not propose a duplicate rule. A still_missed replay still outranks this lane because it proves the existing rule is not firing.
+- A correction tagged still_missed by replay may NOT be routed "dismissed", "already_correct", or "existing_rule" — replay proves the pipeline still gets it wrong, so it must be routed to a concrete change.
 - "target" names the specific rule, prompt section, or recommendation; "note" is a one-line reason.
 
 Respond with ONLY a JSON object in this exact shape:
@@ -1651,7 +1685,7 @@ Respond with ONLY a JSON object in this exact shape:
   "correction_routing": [
     {
       "correction_id": "<id from the REPLAY EVIDENCE list>",
-      "lane": "replacement_rule|prompt|code_recommendation|already_correct|dismissed",
+      "lane": "replacement_rule|existing_rule|prompt|code_recommendation|already_correct|dismissed",
       "target": "rule original->corrected, prompt section name, or recommendation title",
       "note": "one-line reason"
     }

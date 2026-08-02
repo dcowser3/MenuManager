@@ -259,7 +259,8 @@
                             <%
                                 const laneClass = (r.lane === 'unrouted' || r.lane === 'dismissed') ? 'rejected'
                                     : (r.lane === 'already_correct' ? 'no_effect' : 'approved');
-                                const stillMissedConflict = r.replay_status === 'still_missed' && (r.lane === 'dismissed' || r.lane === 'already_correct' || r.lane === 'unrouted');
+                                const laneLabel = r.lane === 'existing_rule' ? 'existing deterministic rule' : r.lane;
+                                const stillMissedConflict = r.replay_status === 'still_missed' && (r.lane === 'dismissed' || r.lane === 'already_correct' || r.lane === 'existing_rule' || r.lane === 'unrouted');
                             %>
                             <tr<%= stillMissedConflict ? ' style="background:#fff5f5;"' : '' %>>
                                 <td class="small">
@@ -278,7 +279,7 @@
                                     <% } %>
                                 </td>
                                 <td class="small"><%= r.replay_status || '—' %></td>
-                                <td><span class="badge <%= laneClass %>"><%= r.lane %></span></td>
+                                <td><span class="badge <%= laneClass %>"><%= laneLabel %></span></td>
                                 <td class="small"><%= r.target || '' %></td>
                                 <td class="small"><%= r.note || '' %></td>
                             </tr>

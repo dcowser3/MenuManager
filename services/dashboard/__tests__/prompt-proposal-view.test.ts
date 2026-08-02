@@ -256,6 +256,7 @@ describe('prompt-proposal view', () => {
                 disposition: 'prompt_change',
                 correction_routing: [
                     { correction_id: 'a1', lane: 'prompt', target: 'section 4', note: 'sharpened', replay_status: 'still_missed', original_text: 'veggies', corrected_text: 'vegetables' },
+                    { correction_id: 'seeded', lane: 'existing_rule', target: 'gruyere -> gruyère', note: 'already accepted', replay_status: 'replay_unavailable', original_text: 'gruyere', corrected_text: 'gruyère' },
                     { correction_id: 'b2', lane: 'dismissed', target: '', note: 'invalid', replay_status: 'not_verifiable', original_text: null, corrected_text: null, guidance: 'LAURENT-PERRIER must always be hyphenated' },
                 ],
             },
@@ -266,6 +267,7 @@ describe('prompt-proposal view', () => {
         expect(html).toContain('LAURENT-PERRIER must always be hyphenated');
         expect(html).not.toContain('freeform · b2');
         expect(html).toContain('guidance only');
+        expect(html).toContain('existing deterministic rule');
     });
 
     test('C4a: renders the inferred-from-guidance badge on synthesized rules', () => {

@@ -501,13 +501,24 @@ describe('validateImprovementLlmOutput', () => {
     });
 });
 describe('improvement system prompt', () => {
-    test('builds an executor-aware prompt without hardcoding a different executor', () => {
-        const prompt = (0, improvement_cycle_core_1.buildImprovementSystemPrompt)({ executorModel: 'test-model-x' });
-        expect(prompt).toContain('test-model-x');
-        expect(prompt).toContain('non-reasoning');
-        expect(prompt).toContain('still_missed');
-        expect(prompt).toContain('decision procedure');
+    const replayEvidenceRule = 'REPLAY EVIDENCE OUTRANKS YOUR READING';
+    test('uses reasoning-executor guidance for a reasoning executor', () => {
+        const prompt = (0, improvement_cycle_core_1.buildImprovementSystemPrompt)({ executorModel: 'gpt-5.6-luna' });
+        expect(prompt).toContain('gpt-5.6-luna');
+        expect(prompt).toContain('a reasoning\nmodel');
+        expect(prompt).toContain('concise and goal-oriented');
+        expect(prompt).toContain('Explicit decision procedures are still REQUIRED');
+        expect(prompt).toContain(replayEvidenceRule);
+        expect(prompt).not.toContain('non-reasoning');
         expect(prompt).not.toContain('gpt-4o-mini');
+    });
+    test('uses non-reasoning-executor guidance for a non-reasoning executor', () => {
+        const prompt = (0, improvement_cycle_core_1.buildImprovementSystemPrompt)({ executorModel: 'gpt-4o-mini' });
+        expect(prompt).toContain('gpt-4o-mini');
+        expect(prompt).toContain('smaller, non-reasoning model');
+        expect(prompt).toContain('explicit decision procedures');
+        expect(prompt).toContain(replayEvidenceRule);
+        expect(prompt).not.toContain('a reasoning\nmodel');
     });
     test('treats missed prompt-lane corrections as evidence current guidance needs sharpening', () => {
         const prompt = (0, improvement_cycle_core_1.buildImprovementSystemPrompt)({ executorModel: 'test-model-x' });
@@ -940,6 +951,13 @@ describe('consolidation mode (F1 / Fix 8)', () => {
         expect(prompt).not.toContain('gpt-4o-mini');
         expect(prompt).not.toBe((0, improvement_cycle_core_1.buildImprovementSystemPrompt)({ executorModel: 'test-model-x' }));
     });
+    test('uses reasoning-executor guidance in the consolidation prompt', () => {
+        const prompt = (0, improvement_cycle_core_1.buildConsolidationSystemPrompt)({ executorModel: 'gpt-5.6-luna' });
+        expect(prompt).toContain('gpt-5.6-luna');
+        expect(prompt).toContain('a reasoning\nmodel');
+        expect(prompt).toContain('REPLAY EVIDENCE OUTRANKS YOUR READING');
+        expect(prompt).not.toContain('non-reasoning');
+    });
     test('validator in consolidation mode: drops rules/recs, warns on <5% or >50% reduction, does not fire short/growth', () => {
         const current = 'x'.repeat(10000);
         const tooLittle = current; // 0% reduction (promptUnchanged will be detected but we force proposed different length)
@@ -1091,6 +1109,39 @@ describe('C3 validateCorrectionRouting', () => {
     test('replacement_rule that matches a surviving rule is kept', () => {
         const out = (0, improvement_cycle_core_1.validateCorrectionRouting)([{ correction_id: 'a', lane: 'replacement_rule', target: 'X->Y', note: '' }, { correction_id: 'b', lane: 'prompt', target: 's', note: '' }], { sourceCorrections: sources, survivingRules: [{ original_text: 'X', corrected_text: 'Y' }] });
         expect(out.routing.find((r) => r.correction_id === 'a').lane).toBe('replacement_rule');
+    });
+    test('existing_rule cleanly routes a manually seeded accepted rule when replay is unavailable', () => {
+        const out = (0, improvement_cycle_core_1.validateCorrectionRouting)([{ correction_id: 'a', lane: 'existing_rule', target: 'gruyere -> gruyère', note: 'already seeded' }], {
+            sourceCorrections: [{ id: 'a', original_text: 'gruyere', corrected_text: 'gruyère' }],
+            replayEvidence: [{ correction_id: 'a', status: 'replay_unavailable' }],
+            acceptedRules: [{ original_text: 'gruyere', corrected_text: 'gruyère' }],
+        });
+        expect(out.routing[0].lane).toBe('existing_rule');
+        expect(out.warnings).toEqual([]);
+        expect(out.unresolvedFromRouting).toBe(false);
+    });
+    test('existing_rule without a matching accepted rule downgrades to unrouted', () => {
+        const out = (0, improvement_cycle_core_1.validateCorrectionRouting)([{ correction_id: 'a', lane: 'existing_rule', target: 'gruyere -> gruyère', note: '' }], {
+            sourceCorrections: [{ id: 'a', original_text: 'gruyere', corrected_text: 'gruyère' }],
+            acceptedRules: [{ original_text: 'maldon', corrected_text: 'Maldon' }],
+        });
+        expect(out.routing[0].lane).toBe('unrouted');
+        expect(out.warnings.some((w) => /existing_rule.*no accepted deterministic rule/.test(w))).toBe(true);
+    });
+    test('still_missed replay evidence outranks an existing_rule claim', () => {
+        const out = (0, improvement_cycle_core_1.validateCorrectionRouting)([{ correction_id: 'a', lane: 'existing_rule', target: 'gruyere -> gruyère', note: '' }], {
+            sourceCorrections: [{ id: 'a', original_text: 'gruyere', corrected_text: 'gruyère' }],
+            replayEvidence: [{ correction_id: 'a', status: 'still_missed' }],
+            acceptedRules: [{ original_text: 'gruyere', corrected_text: 'gruyère' }],
+        });
+        expect(out.routing[0].lane).toBe('existing_rule');
+        expect(out.unresolvedFromRouting).toBe(true);
+        expect(out.warnings.some((w) => /still_missed by replay but routed "existing_rule"; replay evidence outranks this/.test(w))).toBe(true);
+    });
+    test('existing_rule fails closed when the accepted-rule set is absent', () => {
+        const out = (0, improvement_cycle_core_1.validateCorrectionRouting)([{ correction_id: 'a', lane: 'existing_rule', target: 'gruyere -> gruyère', note: '' }], { sourceCorrections: [{ id: 'a', original_text: 'gruyere', corrected_text: 'gruyère' }] });
+        expect(out.routing[0].lane).toBe('unrouted');
+        expect(out.warnings.some((w) => /accepted-rule set was not supplied/.test(w))).toBe(true);
     });
     test('a rule NARROWER than the correction line is not falsely flagged as dropped', () => {
         const out = (0, improvement_cycle_core_1.validateCorrectionRouting)([{ correction_id: 'a', lane: 'replacement_rule', target: 'CAST IRON CHICKEN -> CAST-IRON CHICKEN', note: '' }], {
