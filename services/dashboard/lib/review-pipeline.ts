@@ -291,16 +291,68 @@ export function reconcileCriticalSuggestionsAgainstCorrectedMenuWithDiagnostics(
     return { suggestions: kept, droppedSuggestions };
 }
 
+export interface TopLevelPrixFixePriceEvidence {
+    found: boolean;
+    matchedLine?: string;
+    matchedLineIndex?: number;
+    matchedToken?: string;
+    reason?: string;
+}
+
+const PRICE_AMOUNT = String.raw`\d{1,4}(?:[.,]\d{1,2})?`;
+const EXPLICIT_PRICE_PATTERNS: Array<{ reason: string; pattern: RegExp }> = [
+    { reason: 'per_person_marker', pattern: new RegExp(`\\b(${PRICE_AMOUNT})\\s*(?:pp\\b|per\\s+person\\b)`, 'i') },
+    { reason: 'currency_symbol', pattern: new RegExp(`([$€£])\\s*(${PRICE_AMOUNT})\\b`, 'i') },
+    { reason: 'currency_code', pattern: new RegExp(`\\b(?:(${PRICE_AMOUNT})\\s*(AED|USD|EUR|GBP|CAD|AUD)|(AED|USD|EUR|GBP|CAD|AUD)\\s*(${PRICE_AMOUNT}))\\b`, 'i') },
+    { reason: 'wine_pairing', pattern: new RegExp(`\\b(${PRICE_AMOUNT})\\s*(?:\\|\\s*)?(?:wine|beverage|alcohol)\\s+pairing\\b`, 'i') },
+];
+const PACKAGE_PRICE_CONTEXT = /\b(?:prix\s*fixe|bottomless|set\s+menu|selection\s+per\s+course|choice(?:\s+one)?\s+selection\s+per\s+course|choice\s+per\s+course|omakase|package)\b/i;
+const STANDALONE_PRICE = new RegExp(`^\\s*([$€£]?${PRICE_AMOUNT})(?:\\s*(?:pp|per\\s+person))?\\s*$`, 'i');
+const NUMERIC_TOKEN = new RegExp(`\\b${PRICE_AMOUNT}\\b`, 'g');
+
+export function detectTopLevelPrixFixePrice(menuContent: string): TopLevelPrixFixePriceEvidence {
+    const topWindow = (menuContent || '').split('\n').map((line) => line.trim()).filter(Boolean).slice(0, 5);
+
+    for (let lineIndex = 0; lineIndex < topWindow.length; lineIndex += 1) {
+        const line = topWindow[lineIndex];
+        for (const { reason, pattern } of EXPLICIT_PRICE_PATTERNS) {
+            const match = line.match(pattern);
+            if (match) {
+                return { found: true, matchedLine: line, matchedLineIndex: lineIndex, matchedToken: match[0], reason };
+            }
+        }
+
+        const standaloneMatch = line.match(STANDALONE_PRICE);
+        if (standaloneMatch && !/\b(?:19|20)\d{2}\b/.test(line)) {
+            return { found: true, matchedLine: line, matchedLineIndex: lineIndex, matchedToken: standaloneMatch[1], reason: 'standalone_price' };
+        }
+
+        if (!PACKAGE_PRICE_CONTEXT.test(line) || /,.*,.+\b\d{1,4}(?:[.,]\d{1,2})?\s*$/.test(line)) continue;
+
+        for (const match of line.matchAll(NUMERIC_TOKEN)) {
+            const token = match[0];
+            const start = match.index || 0;
+            const before = line.slice(Math.max(0, start - 12), start);
+            const after = line.slice(start + token.length, start + token.length + 16);
+            if (/\b(?:19|20)\d{2}\b/.test(token)) continue;
+            if (/\d:\s*$/.test(before) || /^\s*:\d/.test(after)) continue;
+            if (/^\s*(?:-|\s)*(?:hours?|hrs?|minutes?|mins?)\b/i.test(after)) continue;
+            if (/^\s*(?:courses?|course)\b/i.test(after)) continue;
+            return { found: true, matchedLine: line, matchedLineIndex: lineIndex, matchedToken: token, reason: 'package_context' };
+        }
+    }
+
+    return { found: false, reason: 'no_price_evidence_in_first_five_non_empty_lines' };
+}
+
 export function enforcePrixFixeCriticalChecks(
     menuContent: string,
     suggestions: ReviewSuggestion[]
 ): ReviewSuggestion[] {
     const existing = [...(suggestions || [])];
     const nonEmptyLines = (menuContent || '').split('\n').map((l) => l.trim()).filter(Boolean);
-    const topWindow = nonEmptyLines.slice(0, 5);
-
-    const topPricePattern = /^\$?\d+(?:[.,]\d+)?(?:\s*\|\s*\$?\d+(?:[.,]\d+)?)?(?:\s*(?:pp|per\s*person|wine\s*pairing))?$/i;
-    const hasTopPrixFixePrice = topWindow.some((line) => topPricePattern.test(line));
+    const priceEvidence = detectTopLevelPrixFixePrice(menuContent);
+    const hasTopPrixFixePrice = priceEvidence.found;
 
     const headingPattern = /\b(appetizers?|starters?|specialties|mains?|entrees?|desserts?|first course|second course|third course|course)\b/i;
     const headingIndexes = nonEmptyLines
@@ -318,23 +370,29 @@ export function enforcePrixFixeCriticalChecks(
         });
     }
 
-    const hasTopPriceSuggestion = existing.some((s) => {
-        const combined = `${s.type || ''} ${s.description || ''} ${s.recommendation || ''}`.toLowerCase();
-        return /prix\s*fixe/.test(combined) && /price.*top|top.*price|single.*price/.test(combined);
-    });
+    const isTopPriceSuggestion = (s: ReviewSuggestion) => {
+        const type = `${s.type || ''}`.toLowerCase();
+        const combined = `${type} ${s.description || ''} ${s.recommendation || ''}`.toLowerCase();
+        return type === 'pricing structure' && /(?:overall|package|prix\s*fixe|top(?:-level)?).*price|price.*(?:top|prix\s*fixe|package)/.test(combined)
+            || /prix\s*fixe/.test(combined) && /price.*top|top.*price|single.*price/.test(combined);
+    };
     const hasCourseNumberSuggestion = existing.some((s) => {
         const combined = `${s.type || ''} ${s.description || ''} ${s.recommendation || ''}`.toLowerCase();
         return /course numbering|numbered courses|course number/.test(combined);
     });
 
-    if (!hasTopPrixFixePrice && !hasTopPriceSuggestion) {
+    if (!hasTopPrixFixePrice) {
+        // Canonicalize any AI version of this warning to one deterministic issue.
+        for (let index = existing.length - 1; index >= 0; index -= 1) {
+            if (isTopPriceSuggestion(existing[index])) existing.splice(index, 1);
+        }
         existing.push({
             type: 'PRICING STRUCTURE',
             confidence: 'high',
             severity: 'critical',
             menuItem: 'Prix Fixe Menu',
-            description: 'Prix fixe menu is missing a single top-level price at the top of the menu.',
-            recommendation: 'Add a single prix fixe price at the top (optionally with pairing price, e.g., "185 | 85 wine pairing").'
+            description: 'No overall prix-fixe or package price was detected near the top of the menu.',
+            recommendation: 'Add a clearly labeled overall price near the top of the menu, including each package option when multiple options are offered.'
         });
     }
 
@@ -349,15 +407,18 @@ export function enforcePrixFixeCriticalChecks(
         });
     }
 
+    // Explicit deterministic evidence is authoritative over contradictory AI output.
+    const reconciled = hasTopPrixFixePrice ? existing.filter((s) => !isTopPriceSuggestion(s)) : existing;
+
     // Remove course numbering suggestions if numbers ARE present (AI false positive)
     if (hasCourseHeadings && !missingCourseNumbers) {
-        return existing.filter((s) => {
+        return reconciled.filter((s) => {
             const combined = `${s.type || ''} ${s.description || ''} ${s.recommendation || ''}`.toLowerCase();
             return !/course numbering|numbered courses|course number|not numbered/.test(combined);
         });
     }
 
-    return existing;
+    return reconciled;
 }
 
 // Deterministic allergen-program check: if no dish line on the menu carries an

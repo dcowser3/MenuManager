@@ -79,8 +79,9 @@ function buildFinalPrompt(basePrompt, ctx, opts = {}) {
 This is a PRIX FIXE (pre-fix) menu. Apply these special rules:
 
 1. **PRICING STRUCTURE**: Prix fixe menus should have:
-   - A single prix fixe price at the TOP of the menu (format: 00.00PP, 00.00pp, or just a whole number)
+   - One or more clearly labeled overall prix fixe/package prices near the TOP of the menu
    - Treat PP/pp as "per person" and count prices like "50.00pp" as valid top-level prices
+   - Multiple labeled package options are valid (for example, "Bottomless Food & Drink 68 pp | Bottomless Food 39 pp")
    - Optional wine/alcohol pairing price listed alongside (e.g., "185 | 85 wine pairing")
    - Individual dishes do NOT need their own prices - this is CORRECT for prix fixe menus
    - Do NOT flag missing prices on individual courses/dishes

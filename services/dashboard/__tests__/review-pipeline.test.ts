@@ -21,6 +21,7 @@ import {
     detectKnownTextArtifactSuggestions,
     enforceAllergenProgramCheck,
     enforcePrixFixeCriticalChecks,
+    detectTopLevelPrixFixePrice,
     normalizeRawAsteriskPlacement,
     parseAIResponse,
     reconcileCriticalSuggestionsAgainstCorrectedMenuWithDiagnostics,
@@ -206,6 +207,61 @@ describe('enforcePrixFixeCriticalChecks', () => {
             { type: 'Course Numbering', severity: 'critical', menuItem: 'Courses', description: 'courses are not numbered', recommendation: 'number them' },
         ]);
         expect(result).toEqual([]);
+    });
+
+    test.each([
+        '68 pp',
+        '50.00PP',
+        'Bottomless Food & Drink 68 pp',
+        'Bottomless Food & Drink 68 pp | Bottomless Food 39 pp',
+        '85 | 40 wine pairing',
+        '3 Courses | 60 | Your selection per course',
+        'Three courses 35 Choice per course',
+        'Choice One Selection Per Course 65',
+        'Bloody Mary Omakase Bar 22',
+        '275 AED – A full Margarita Pitcher...',
+        '$60',
+        '€60',
+        '£60',
+    ])('recognizes valid top-level price evidence: %s', (line) => {
+        expect(detectTopLevelPrixFixePrice(line)).toMatchObject({ found: true, matchedLine: line });
+        expect(enforcePrixFixeCriticalChecks(line, []).filter((s) => s.type === 'PRICING STRUCTURE')).toEqual([]);
+    });
+
+    test.each([
+        '3 Courses',
+        '2-hour time limit per table',
+        'Available from 5:30pm',
+        'January 2026',
+        'Menu\nA La Carte\nGuacamole, onion, tomato, cilantro, lime VG 20',
+        'Menu\nFirst Course\nSecond Course\nThird Course\nFourth Course\n68 pp',
+    ])('rejects non-price or out-of-window evidence: %s', (menu) => {
+        expect(detectTopLevelPrixFixePrice(menu)).toEqual(expect.objectContaining({ found: false }));
+    });
+
+    test('removes an AI missing-price warning when explicit price evidence exists', () => {
+        const result = enforcePrixFixeCriticalChecks('Bottomless Food & Drink 68 pp | Bottomless Food 39 pp', [{
+            type: 'PRICING STRUCTURE',
+            severity: 'critical',
+            menuItem: 'Prix Fixe Menu',
+            description: 'Prix fixe menu is missing a single price at the top.',
+            recommendation: 'Add a prix fixe price at the top of the menu.',
+        }]);
+        expect(result).toEqual([]);
+    });
+
+    test('adds exactly one pricing critical for a genuinely unpriced menu', () => {
+        const result = enforcePrixFixeCriticalChecks(unnumberedNoPrice, [{
+            type: 'Missing Price',
+            severity: 'critical',
+            menuItem: 'Entire menu',
+            description: 'The prix fixe menu does not show an overall package price.',
+            recommendation: 'Add the applicable prix fixe price near the top of the menu.',
+        }]);
+        const pricing = result.filter((s) => s.type === 'PRICING STRUCTURE');
+        expect(pricing).toHaveLength(1);
+        expect(result.filter((s) => s.type === 'Missing Price')).toHaveLength(0);
+        expect(pricing[0]).toMatchObject({ severity: 'critical', confidence: 'high' });
     });
 });
 

@@ -17,7 +17,7 @@ The AI review enforces "hard stops" for critical issues that block submission.
 | **Course Progression** | Prix fixe menus | AI flags it; backend forces `critical` via normalizer | No |
 | **Pricing Structure** | Prix fixe menus | AI flags it; backend forces `critical` via normalizer | No |
 
-**Prix fixe exemption:** Individual dishes on prix fixe menus do NOT need prices — only the top-level prix fixe price is required. The top-level price can use the per-person suffix `PP`/`pp`, so values like `50.00pp` count as valid prices.
+**Prix fixe exemption:** Individual dishes on prix fixe menus do NOT need prices — only one or more overall prix fixe/package prices near the top are required. The deterministic check examines the first five non-empty lines and accepts labeled or multiple package prices, per-person markers, currency symbols/codes, pairing prices, and bare amounts with strong package context. For example, both `50.00pp` and `Bottomless Food & Drink 68 pp | Bottomless Food 39 pp` are valid evidence. Course counts, times, durations, dates/years, and à-la-carte dish rows do not satisfy the rule.
 
 **Embedded set-menu exemption:** A standard menu can contain an embedded set section, such as `Quick Lunch Menu $38` followed by `choice of one appetizer & one entree`. Included dishes inside that section do not need item prices. Bare trailing prices on included dishes are critical `Set Menu Item Price` issues; explicit plus prices like `+5` or `+ AED 50` are treated as premium upcharges and allowed.
 
