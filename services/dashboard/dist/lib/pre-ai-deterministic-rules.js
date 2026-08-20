@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.BUILT_IN_REPLACEMENTS = void 0;
+exports.normalizeSingularIngredientFormsOnLine = normalizeSingularIngredientFormsOnLine;
 exports.ensureCotijaCheeseModifierOnLine = ensureCotijaCheeseModifierOnLine;
 exports.getAcceptedCorrectionRulePreAiEligibility = getAcceptedCorrectionRulePreAiEligibility;
 exports.runPreAiDeterministicChecks = runPreAiDeterministicChecks;
@@ -86,6 +87,10 @@ exports.BUILT_IN_REPLACEMENTS = [
     { from: 'veggies', to: 'vegetables', type: 'Spelling' },
     { from: 'chilli', to: 'chili', type: 'Spelling' },
     { from: 'pepper corn', to: 'peppercorn', type: 'Spelling' },
+    // Canonical tenant terminology from the SOP vocabulary table. This is an
+    // absolute business rule, so it must not depend on the review model noticing it.
+    { from: 'mayonnaise', to: 'aioli', type: 'Terminology' },
+    { from: 'mayo', to: 'aioli', type: 'Terminology' },
 ];
 const LEARNED_RULE_CHANGE_TYPES = new Set([
     '',
@@ -282,6 +287,62 @@ function applyReplacementRule(line, lineIndex, rule, source, metadata = {}, sett
     });
     return { line: nextLine, corrections };
 }
+const CONSERVATIVE_SINGULAR_INGREDIENT_PATTERNS = [
+    // Dish-name modifier: the ingredient noun modifying Tequeños is singular.
+    { pattern: /^(\s*)(prawns)(?=\s+tequeños\b)/iu, corrected: 'prawn' },
+    // Bare comma-delimited ingredients. Prepared/count phrases such as
+    // "sautéed prawns" and "three pickles" deliberately do not match.
+    { pattern: /(,\s*)(cucumber\s+pickles)(?=\s*,)/giu, corrected: 'cucumber pickle' },
+    { pattern: /(,\s*)(jalapeños)(?=\s*,)/giu, corrected: 'jalapeño' },
+    { pattern: /(,\s*)(prawns)(?=\s*,)/giu, corrected: 'prawn' },
+    { pattern: /(,\s*)(pickles)(?=\s*,)/giu, corrected: 'pickle' },
+];
+/**
+ * Apply only the high-signal subset of the SOP's singular-ingredient rule. The
+ * general rule remains contextual; this guard targets bare list nouns and the
+ * verified Prawn Tequeños modifier while preserving counted/prepared plurals.
+ */
+function normalizeSingularIngredientFormsOnLine(line, lineIndex) {
+    let nextLine = line;
+    const corrections = [];
+    for (const { pattern, corrected } of CONSERVATIVE_SINGULAR_INGREDIENT_PATTERNS) {
+        pattern.lastIndex = 0;
+        nextLine = nextLine.replace(pattern, (match, prefix, original) => {
+            const replacement = matchCase(original, corrected);
+            if (original === replacement)
+                return match;
+            corrections.push({
+                type: 'Singular/Plural',
+                source: 'built_in',
+                original,
+                corrected: replacement,
+                lineIndex,
+                rule: 'Ingredient descriptions use singular nouns unless a listed exception or an explicit count applies.',
+            });
+            return `${prefix}${replacement}`;
+        });
+    }
+    // A standalone side can carry only an allergen cluster and optional price, so it
+    // has no comma delimiter to identify it as a menu item.
+    const standalone = nextLine.match(/^(\s*)(pickles)(\s+.+)$/iu);
+    if (standalone) {
+        const suffix = standalone[3].trim();
+        const metadataOnly = /^[A-Z]{1,3}(?:\s*,\s*[A-Z]{1,3})*(?:\s+(?:(?:[$€£]\s*)?\d{1,4}(?:[.]\d{1,2})?|MKT|MP))?$/u.test(suffix);
+        if (metadataOnly) {
+            const replacement = matchCase(standalone[2], 'pickle');
+            nextLine = `${standalone[1]}${replacement}${standalone[3]}`;
+            corrections.push({
+                type: 'Singular/Plural',
+                source: 'built_in',
+                original: standalone[2],
+                corrected: replacement,
+                lineIndex,
+                rule: 'Ingredient descriptions use singular nouns unless a listed exception or an explicit count applies.',
+            });
+        }
+    }
+    return { line: nextLine, corrections };
+}
 function learnedRuleUsesAccentInsensitiveMatching(rule) {
     const changeType = `${rule.change_type || ''}`.trim().toLowerCase();
     if (!['diacritic', 'diacritics', 'spelling', 'typo'].includes(changeType)) {
@@ -466,6 +527,7 @@ function normalizeRawAsteriskPlacementForLine(line) {
     }
     return `${working}*`;
 }
+const RAW_ASTERISK_TERM_PATTERN = /\b(?:sashimi|tartare|carpaccio|crudo|ceviche|tiradito|poke|raw\s+(?:tuna|salmon|hamachi|fish|beef|oysters?)|oysters?\s+on\s+the\s+half\s+shell|half[-\s]shell\s+oysters?|sunny[-\s]side(?:[-\s]up)?\s+eggs?|sunny[-\s]side[-\s]up|poached\s+eggs?|soft[-\s]boiled|rib[-\s]?eye|hollandaise|bearnaise|béarnaise|caesar\s+dressing|tiramisu|cured\s+egg\s+yolk|meringue|egg[-\s]+white)\b/i;
 function shouldAddRawAsterisk(line) {
     const normalized = line.toLowerCase();
     if (!normalized.trim() || normalized.includes('*') || /consuming raw or undercooked/.test(normalized)) {
@@ -477,6 +539,10 @@ function shouldAddRawAsterisk(line) {
     if (/\boysters?\b/.test(normalized) && !/\b(?:raw\s+oysters?|oysters?\s+on\s+the\s+half\s+shell|half[-\s]shell\s+oysters?)\b/.test(normalized)) {
         return false;
     }
+    const hasNewRawEggTerm = /\b(?:hollandaise|bearnaise|béarnaise|caesar\s+dressing|tiramisu|cured\s+egg\s+yolk|meringue|egg[-\s]+white)\b/.test(normalized);
+    if (hasNewRawEggTerm && /\b(?:braised|slow[-\s]?roasted|confit|well[-\s]?done)\b/.test(normalized)) {
+        return false;
+    }
     if (/:/.test(line) && /\b[A-Z]{1,3}\s*,/.test(line)) {
         return false;
     }
@@ -486,10 +552,16 @@ function shouldAddRawAsterisk(line) {
     if (!hasPrice && (!hasTrailingAllergenCluster || !hasDescriptionComma)) {
         return false;
     }
-    return /\b(?:sashimi|tartare|carpaccio|crudo|ceviche|tiradito|poke|raw\s+(?:tuna|salmon|hamachi|fish|beef|oysters?)|oysters?\s+on\s+the\s+half\s+shell|half[-\s]shell\s+oysters?|sunny[-\s]side(?:[-\s]up)?\s+eggs?|sunny[-\s]side[-\s]up|poached\s+eggs?|soft[-\s]boiled|rib[-\s]?eye)\b/i.test(line);
+    return RAW_ASTERISK_TERM_PATTERN.test(line);
 }
 function addRawAsterisk(line) {
-    return normalizeRawAsteriskPlacementForLine(`${line.trimEnd()} *`);
+    const trimmed = line.trimEnd();
+    const descriptionComma = trimmed.search(/,\s*(?=[^,]*\p{Ll})/u);
+    const rawTermMatch = trimmed.match(RAW_ASTERISK_TERM_PATTERN);
+    if (descriptionComma > 0 && rawTermMatch?.index !== undefined && rawTermMatch.index < descriptionComma) {
+        return `${trimmed.slice(0, descriptionComma).trimEnd()}*${trimmed.slice(descriptionComma)}`;
+    }
+    return normalizeRawAsteriskPlacementForLine(`${trimmed} *`);
 }
 function getAcceptedCorrectionRulePreAiEligibility(rule) {
     const changeType = `${rule.change_type || ''}`.trim().toLowerCase();
@@ -590,6 +662,9 @@ function runPreAiDeterministicChecks(menuText, options = {}) {
             nextLine = result.line;
             appliedCorrections.push(...result.corrections);
         }
+        const singularResult = normalizeSingularIngredientFormsOnLine(nextLine, lineIndex);
+        nextLine = singularResult.line;
+        appliedCorrections.push(...singularResult.corrections);
         const tresLechesResult = ensureTresLechesVegetarianCodeOnLine(nextLine, lineIndex, validAllergenCodes);
         nextLine = tresLechesResult.line;
         appliedCorrections.push(...tresLechesResult.corrections);

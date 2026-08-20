@@ -124,6 +124,7 @@ import {
     evaluateSecretExpiry,
     mapProposedRuleToCorrectionRulePayload,
     pickEffectivePrompt,
+    promptProposalApprovalBlock,
     resolveDashboardPublicUrl,
     supersededProposalReviewBlock,
 } from './lib/improvement-cycle-core';
@@ -2621,6 +2622,7 @@ app.get('/learning/prompt-proposal', async (_req, res) => {
             proposal,
             history,
             thinRuleUncheckedDefault: thinUnchecked,
+            approvalBlock: promptProposalApprovalBlock(proposal),
         });
     } catch (error: any) {
         console.error('Error loading prompt proposal page:', error.message);
@@ -2700,6 +2702,12 @@ app.post('/api/learning/prompt-proposal/:id/review', async (req, res) => {
         }
 
         const approved = status === 'approved' || status === 'approved_modified';
+        if (approved) {
+            const approvalBlock = promptProposalApprovalBlock(proposalRecord);
+            if (approvalBlock) {
+                return res.status(409).json(approvalBlock);
+            }
+        }
         const proposedRules: any[] = Array.isArray(proposalRecord?.proposed_rules) ? proposalRecord.proposed_rules : [];
         const selectedIndexes: number[] = Array.isArray(accepted_rule_indexes)
             ? accepted_rule_indexes.map((value: any) => Number.parseInt(`${value}`, 10)).filter((value: number) => Number.isInteger(value) && value >= 0 && value < proposedRules.length)

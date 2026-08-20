@@ -3,7 +3,7 @@ import { involvesContextDependentTerm } from './improvement-cycle-core';
 export type PreAiCorrectionSource = 'built_in' | 'accepted_correction_rule';
 
 export type PreAiAppliedCorrection = {
-    type: 'Spelling' | 'Diacritics' | 'Terminology' | 'Allergen Code' | 'Raw Item' | 'Learned Rule';
+    type: 'Spelling' | 'Diacritics' | 'Terminology' | 'Singular/Plural' | 'Allergen Code' | 'Raw Item' | 'Learned Rule';
     source: PreAiCorrectionSource;
     original: string;
     corrected: string;
@@ -148,6 +148,11 @@ export const BUILT_IN_REPLACEMENTS: ReplacementRule[] = [
     { from: 'veggies', to: 'vegetables', type: 'Spelling' },
     { from: 'chilli', to: 'chili', type: 'Spelling' },
     { from: 'pepper corn', to: 'peppercorn', type: 'Spelling' },
+
+    // Canonical tenant terminology from the SOP vocabulary table. This is an
+    // absolute business rule, so it must not depend on the review model noticing it.
+    { from: 'mayonnaise', to: 'aioli', type: 'Terminology' },
+    { from: 'mayo', to: 'aioli', type: 'Terminology' },
 ];
 
 const LEARNED_RULE_CHANGE_TYPES = new Set([
@@ -394,6 +399,75 @@ function applyReplacementRule(
         });
         return corrected;
     });
+
+    return { line: nextLine, corrections };
+}
+
+type SingularIngredientPattern = {
+    pattern: RegExp;
+    corrected: string;
+};
+
+const CONSERVATIVE_SINGULAR_INGREDIENT_PATTERNS: SingularIngredientPattern[] = [
+    // Dish-name modifier: the ingredient noun modifying Tequeños is singular.
+    { pattern: /^(\s*)(prawns)(?=\s+tequeños\b)/iu, corrected: 'prawn' },
+
+    // Bare comma-delimited ingredients. Prepared/count phrases such as
+    // "sautéed prawns" and "three pickles" deliberately do not match.
+    { pattern: /(,\s*)(cucumber\s+pickles)(?=\s*,)/giu, corrected: 'cucumber pickle' },
+    { pattern: /(,\s*)(jalapeños)(?=\s*,)/giu, corrected: 'jalapeño' },
+    { pattern: /(,\s*)(prawns)(?=\s*,)/giu, corrected: 'prawn' },
+    { pattern: /(,\s*)(pickles)(?=\s*,)/giu, corrected: 'pickle' },
+];
+
+/**
+ * Apply only the high-signal subset of the SOP's singular-ingredient rule. The
+ * general rule remains contextual; this guard targets bare list nouns and the
+ * verified Prawn Tequeños modifier while preserving counted/prepared plurals.
+ */
+export function normalizeSingularIngredientFormsOnLine(
+    line: string,
+    lineIndex: number
+): { line: string; corrections: PreAiAppliedCorrection[] } {
+    let nextLine = line;
+    const corrections: PreAiAppliedCorrection[] = [];
+
+    for (const { pattern, corrected } of CONSERVATIVE_SINGULAR_INGREDIENT_PATTERNS) {
+        pattern.lastIndex = 0;
+        nextLine = nextLine.replace(pattern, (match, prefix: string, original: string) => {
+            const replacement = matchCase(original, corrected);
+            if (original === replacement) return match;
+            corrections.push({
+                type: 'Singular/Plural',
+                source: 'built_in',
+                original,
+                corrected: replacement,
+                lineIndex,
+                rule: 'Ingredient descriptions use singular nouns unless a listed exception or an explicit count applies.',
+            });
+            return `${prefix}${replacement}`;
+        });
+    }
+
+    // A standalone side can carry only an allergen cluster and optional price, so it
+    // has no comma delimiter to identify it as a menu item.
+    const standalone = nextLine.match(/^(\s*)(pickles)(\s+.+)$/iu);
+    if (standalone) {
+        const suffix = standalone[3].trim();
+        const metadataOnly = /^[A-Z]{1,3}(?:\s*,\s*[A-Z]{1,3})*(?:\s+(?:(?:[$€£]\s*)?\d{1,4}(?:[.]\d{1,2})?|MKT|MP))?$/u.test(suffix);
+        if (metadataOnly) {
+            const replacement = matchCase(standalone[2], 'pickle');
+            nextLine = `${standalone[1]}${replacement}${standalone[3]}`;
+            corrections.push({
+                type: 'Singular/Plural',
+                source: 'built_in',
+                original: standalone[2],
+                corrected: replacement,
+                lineIndex,
+                rule: 'Ingredient descriptions use singular nouns unless a listed exception or an explicit count applies.',
+            });
+        }
+    }
 
     return { line: nextLine, corrections };
 }
@@ -779,6 +853,10 @@ export function runPreAiDeterministicChecks(
             nextLine = result.line;
             appliedCorrections.push(...result.corrections);
         }
+
+        const singularResult = normalizeSingularIngredientFormsOnLine(nextLine, lineIndex);
+        nextLine = singularResult.line;
+        appliedCorrections.push(...singularResult.corrections);
 
         const tresLechesResult = ensureTresLechesVegetarianCodeOnLine(nextLine, lineIndex, validAllergenCodes);
         nextLine = tresLechesResult.line;

@@ -43,6 +43,8 @@ import {
     involvesContextDependentTerm,
     minimalChangedSpan,
     extractAtomicRulesFromCorpus,
+    promptProposalApprovalBlock,
+    resolveTriggerEvalCaseId,
 } from '../lib/improvement-cycle-core';
 import { AI_REVIEW_FENCES } from '../lib/review-response-contract';
 
@@ -490,7 +492,7 @@ describe('validateImprovementLlmOutput', () => {
         const identical = validateImprovementLlmOutput({ proposed_prompt: current }, { currentPrompt: current });
         expect(identical.promptUnchanged).toBe(true);
 
-        const bloated = validateImprovementLlmOutput({ proposed_prompt: 'Q'.repeat(2000) }, { currentPrompt: current });
+        const bloated = validateImprovementLlmOutput({ proposed_prompt: 'Q'.repeat(1060) }, { currentPrompt: current });
         expect(bloated.promptUnchanged).toBe(false);
         expect(bloated.warnings.some((w) => w.includes('review for bloat'))).toBe(true);
     });
@@ -576,6 +578,48 @@ describe('validateImprovementLlmOutput', () => {
         expect(out.promptUnchanged).toBe(false);
         expect(out.unresolved_still_missed).toBeFalsy();
         expect(out.warnings.some((w) => /unresolved_still_missed: correction c1/.test(w))).toBe(false);
+    });
+
+    test('an explicit singular rule plus a still_missed replay requires code, not more prompt examples', () => {
+        const currentPrompt = '#### 6.2 Ingredients = SINGULAR\n- mushroom (NOT mushrooms)';
+        const out = validateImprovementLlmOutput(
+            {
+                proposed_prompt: `${currentPrompt}\n- Use jalapeño instead of jalapeños in guacamole.`,
+                analysis: 'Added a singular example.',
+                correction_routing: [{ correction_id: 's1', lane: 'prompt', target: '6.2', note: 'more examples' }],
+            },
+            {
+                currentPrompt,
+                replayEvidence: [{ correction_id: 's1', original_text: 'Guacamole, jalapeños, avocado', corrected_text: 'Guacamole, jalapeño, avocado', status: 'still_missed' }],
+                sourceCorrections: [{ id: 's1', original_text: 'Guacamole, jalapeños, avocado', corrected_text: 'Guacamole, jalapeño, avocado', rule: 'standard is singualr' }],
+            },
+        );
+        expect(out.unresolved_still_missed).toBe(true);
+        expect(out.warnings.some((warning) => /adding more prompt examples is not sufficient/.test(warning))).toBe(true);
+    });
+
+    test('a partial replacement rule cannot hide a second edit on the same corrected line', () => {
+        const out = validateImprovementLlmOutput(
+            {
+                proposed_prompt: 'UNCHANGED',
+                proposed_replacement_rules: [{
+                    original_text: 'cashew nuts sauce',
+                    corrected_text: 'cashew sauce',
+                    change_type: 'terminology',
+                    rule: 'translation fix',
+                }],
+            },
+            {
+                currentPrompt: 'CURRENT',
+                replayEvidence: [{
+                    correction_id: 'multi',
+                    original_text: 'Dish, cashew nuts sauce, shimeji pickles',
+                    corrected_text: 'Dish, cashew sauce, pickled shimeji mushroom',
+                    status: 'still_missed',
+                }],
+            },
+        );
+        expect(out.unresolved_still_missed).toBe(true);
     });
 
     test('still_missed remains resolved by a covering replacement rule despite an unrelated prompt change', () => {
@@ -693,6 +737,8 @@ describe('improvement system prompt', () => {
         expect(prompt).toContain('still_missed');
         // B2 updated wording; replay outranks citation (case-insensitive match)
         expect(prompt.toLowerCase()).toContain('replay evidence outranks');
+        expect(prompt).toContain('Ingredients = SINGULAR');
+        expect(prompt).toContain('prompt growth above 5%');
     });
 });
 
@@ -941,6 +987,18 @@ describe('classifyTriggerFromComparisonEntry (Follow-up 1)', () => {
     });
 });
 
+describe('resolveTriggerEvalCaseId', () => {
+    test('uses the canonical legacy-id case recorded while building the dataset', () => {
+        expect(resolveTriggerEvalCaseId('uuid-1', {
+            'uuid-1': 'production:form-1786813965574',
+        })).toBe('production:form-1786813965574');
+    });
+
+    test('falls back to the submission id for older trigger metadata', () => {
+        expect(resolveTriggerEvalCaseId('uuid-1', null)).toBe('production:uuid-1');
+    });
+});
+
 describe('buildCorrectionExcerptWindows + locate (Fix 6 / B3)', () => {
 
     test('locate finds case-insensitive and diacritic tolerant sites', () => {
@@ -1078,6 +1136,56 @@ describe('supersededProposalReviewBlock (409 guard)', () => {
         expect(block?.error).toContain('superseded');
         expect(block?.error).toContain('2026-07-02');
         expect(block?.superseded_by_cycle_id).toBe('2026-07-02');
+    });
+});
+
+describe('promptProposalApprovalBlock', () => {
+    test('blocks regressed and failed candidates', () => {
+        expect(promptProposalApprovalBlock({ eval_status: 'regressed' })?.reason).toBe('eval_regressed');
+        expect(promptProposalApprovalBlock({ eval_status: 'failed' })?.reason).toBe('eval_failed');
+    });
+
+    test('blocks unresolved replay misses', () => {
+        expect(promptProposalApprovalBlock({
+            eval_status: 'no_effect',
+            unresolved_still_missed: true,
+        })?.reason).toBe('unresolved_misses');
+    });
+
+    test('blocks a prompt rewrite when every motivating trigger is unavailable', () => {
+        expect(promptProposalApprovalBlock({
+            eval_status: 'no_effect',
+            disposition: 'rules_and_prompt',
+            correction_rule_count: 12,
+            eval_summary: {
+                triggers: [{ case_id: 'production:legacy-1', submission_id: 'uuid-1', baseline_composite: null, candidate_composite: null, delta: null, status: 'unavailable' }],
+            } as any,
+        })?.reason).toBe('trigger_eval_unavailable');
+    });
+
+    test('blocks prompt rewrites that were skipped or demonstrated no effect', () => {
+        expect(promptProposalApprovalBlock({
+            eval_status: 'no_effect',
+            disposition: 'prompt_change',
+            correction_rule_count: 1,
+        })?.reason).toBe('eval_no_effect');
+        expect(promptProposalApprovalBlock({
+            eval_status: 'skipped',
+            disposition: 'rules_and_prompt',
+            correction_rule_count: 1,
+        })?.reason).toBe('eval_skipped');
+    });
+
+    test('allows a passing scored proposal and does not block rejection-only metadata', () => {
+        expect(promptProposalApprovalBlock({
+            eval_status: 'passed',
+            disposition: 'prompt_change',
+            correction_rule_count: 1,
+            eval_summary: {
+                triggers: [{ case_id: 'production:legacy-1', submission_id: 'uuid-1', baseline_composite: 0.5, candidate_composite: 0.8, delta: 0.3, status: 'improved' }],
+            } as any,
+        })).toBeNull();
+        expect(promptProposalApprovalBlock(null)).toBeNull();
     });
 });
 

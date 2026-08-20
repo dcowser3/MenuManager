@@ -168,7 +168,7 @@ Idempotency layers: host `flock` → script lock file (`tmp/improvement-cycle/.l
 
 On Jul 14 2026 the daily run silently died: the assembled context (~31k tokens, 8 corrections) exceeded the org's o3 rate tier of 30k tokens **per minute**, and a single request larger than the TPM cap can never succeed — but the 429 handler treated it as transient and burned all 6 retries (16s waits) before failing, leaving no proposal, no email, and no alert. Only the Lightsail cron log knew. Fixes shipped:
 
-- **Model:** `IMPROVE_MODEL=gpt-5.1` in production (500k TPM, stronger than o3). `isReasoningModel` (`improvement-cycle-core.ts`) now routes the gpt-5 family down the reasoning payload path (no `temperature`, `max_completion_tokens`) — previously the `/o[0-9]|reasoning/` check missed gpt-5 and would have sent `temperature: 0.2`, which gpt-5 reasoning models reject. An earlier stopgap on o4-mini worked but broke prompt code-fence discipline on its first run (guard caught it; proposal shipped rules-only), reinforcing that this call wants a strong model.
+- **Model:** The August 20 production proposal was authored by `gpt-5.1-2025-11-13`; the recommended/default quality target is now `gpt-5.6-sol`. `isReasoningModel` (`improvement-cycle-core.ts`) routes the GPT-5 family down the reasoning payload path (no `temperature`, `max_completion_tokens`) — previously the `/o[0-9]|reasoning/` check missed GPT-5 and would have sent `temperature: 0.2`, which reasoning models reject. An earlier stopgap on o4-mini worked but broke prompt code-fence discipline on its first run (guard caught it; proposal shipped rules-only), reinforcing that this call wants a strong model.
 - **Fail fast:** `isRequestTooLarge429` detects the "Request too large … (TPM)" body and the script aborts immediately instead of retrying.
 - **Never silent:** any cycle crash now inserts an `improvement_cycle_failed` row into `system_alerts` (`recordCycleFailureAlert` in the script) — previously only email-step failures were recorded.
 - **Cadence:** cron moved from daily to every other day (see Phase E).
@@ -307,3 +307,13 @@ Docs updated in same change set; new C1–C4 unit + view tests (112 dashboard co
 ## July 31, 2026 baseline-model confirmation
 
 - Regression confirmation accepts `--baseline-model`; the baseline fresh arm now uses a caller keyed to that model while the candidate fresh arm retains the candidate model. Omitting the flag preserves the prior candidate-model behavior. Reports record `config.baselineModel` and the Markdown header identifies the baseline model.
+
+## August 20, 2026 regression-approval and trigger-identity hardening
+
+The `2026-08-20` proposal exposed two distinct control failures. It correctly received a `regressed` eval verdict, but the review page still allowed approval. Its motivating submissions also appeared as unavailable because correction rows carried submission UUIDs while production eval cases were keyed by `legacy_id` (`production:form-*`).
+
+- Trigger-case assembly now records the canonical eval case id for every source submission. Baseline, candidate, supplemental `--case` runs, and trigger summaries reuse that mapping instead of reconstructing `production:<uuid>`.
+- The dashboard blocks approval of proposals with `regressed` or `failed` evals, unresolved replay misses, and prompt rewrites whose eval is `skipped`, `no_effect`, or unable to score any motivating trigger. Rejection remains available so corrections can be unconsumed and reconsidered.
+- Proposal validation no longer treats analysis prose as implementation, no longer lets one partial replacement rule hide another edit on the same corrected line, and flags prompt growth above 5%.
+- If replay still misses a singular-ingredient correction while the current prompt already contains the explicit `Ingredients = SINGULAR` rule, adding more examples is not accepted as resolution; the proposal must supply a deterministic rule or code recommendation.
+- Proposal authoring now defaults/recommends `gpt-5.6-sol` for quality-critical analysis, while the high-volume menu-review model remains independently configured through `AI_REVIEW_MODEL`.

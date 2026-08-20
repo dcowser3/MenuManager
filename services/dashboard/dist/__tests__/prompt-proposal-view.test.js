@@ -127,6 +127,23 @@ describe('prompt-proposal view', () => {
         expect(html).toContain('-1.230 pp');
         expect(html).not.toContain('proposed-rule-checkbox');
     });
+    test('shows an approval block and removes approve buttons for an unsafe pending proposal', () => {
+        const html = renderProposalView({
+            proposal: {
+                ...baseProposal,
+                eval_status: 'regressed',
+            },
+            approvalBlock: {
+                reason: 'eval_regressed',
+                error: 'This proposal cannot be approved because its evaluation confirmed regressions.',
+            },
+        });
+        expect(html).toContain('Approval blocked');
+        expect(html).toContain('evaluation confirmed regressions');
+        expect(html).not.toContain('onclick="submitReview(\'approved\')"');
+        expect(html).not.toContain('onclick="submitReview(\'approved_modified\')"');
+        expect(html).toContain('Reject');
+    });
     test('renders legacy proposals without eval or rules sections', () => {
         const html = renderProposalView({
             proposal: {

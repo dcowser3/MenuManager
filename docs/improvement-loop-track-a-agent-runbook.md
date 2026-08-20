@@ -45,7 +45,7 @@ docker compose -f docker-compose.dev.yml exec dashboard node /app/scripts/improv
 
 Verify:
 
-1. Model line reports the reasoning default (`o3` or the configured `IMPROVE_MODEL`) and the call SUCCEEDS — no `OpenAI API error 400` (this validates the `max_completion_tokens` fix live), no truncation error. If truncation: note it and re-run with `IMPROVE_MAX_COMPLETION_TOKENS=48000`.
+1. Model line reports the quality default (`gpt-5.6-sol` or the configured `IMPROVE_MODEL`) and the call SUCCEEDS — no `OpenAI API error 400` (this validates the `max_completion_tokens` fix live), no truncation error. If truncation: note it and re-run with `IMPROVE_MAX_COMPLETION_TOKENS=48000`.
 2. Eval runs baseline + candidate; verdict is `passed`, `no_effect`, or `regressed` — anything `failed` is a finding (capture the eval stderr from the log).
 3. Proposal row lands in `prompt_proposals` with `replay_evidence` populated and `prompt_length` set (validates both degrade-column paths took the non-degraded branch).
 4. On `http://localhost:3005/learning/prompt-proposal`:

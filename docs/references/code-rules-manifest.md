@@ -10,7 +10,7 @@ not part of the committed copy.
 
 ## Layer 1 — Deterministic pre-AI checks (before the model runs)
 
-### Built-in exact replacements (58)
+### Built-in exact replacements (60)
 
 | From | To | Type |
 |------|----|------|
@@ -72,6 +72,8 @@ not part of the committed copy.
 | veggies | vegetables | Spelling |
 | chilli | chili | Spelling |
 | pepper corn | peppercorn | Spelling |
+| mayonnaise | aioli | Terminology |
+| mayo | aioli | Terminology |
 
 ### Allergen code cluster formatting
 
@@ -93,6 +95,14 @@ Adds "cheese" after Cotija when it is used as an ingredient name, preserving cap
 - `Esquites, corn, cotija, bacon D 17` -> `Esquites, corn, cotija cheese, bacon D 17`
 
 - id: `pre-ai/cotija-cheese-modifier` · category: terminology · implementation: `services/dashboard/lib/pre-ai-deterministic-rules.ts#ensureCotijaCheeseModifierOnLine`
+
+### Conservative singular ingredient forms
+
+Applies the high-signal subset of the SOP singular-ingredient rule to bare comma-delimited jalapeños, prawns, pickles, and cucumber pickles; the verified Prawn Tequeños noun modifier; and a standalone Pickle side. Counted or prepared plurals such as "three pickles" and "sautéed prawns" are preserved.
+- `Guacamole, jalapeños, avocado 18` -> `Guacamole, jalapeño, avocado 18`
+- `Encocado, black cod, prawns, squid 38` -> `Encocado, black cod, prawn, squid 38`
+
+- id: `pre-ai/singular-ingredient-forms` · category: singular_plural · implementation: `services/dashboard/lib/pre-ai-deterministic-rules.ts#normalizeSingularIngredientFormsOnLine`
 
 ### Raw-marker spacing normalization (pre-AI, conservative)
 

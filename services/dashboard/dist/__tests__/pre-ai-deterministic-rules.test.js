@@ -76,6 +76,43 @@ describe('runPreAiDeterministicChecks', () => {
         }));
         expect(result.appliedCorrections).toHaveLength(1);
     });
+    it('enforces the canonical mayo-to-aioli SOP rule before and after model review', () => {
+        const result = (0, pre_ai_deterministic_rules_1.runPreAiDeterministicChecks)([
+            'Avocado Salad, yellow chili mayo, yuzu kosho 75',
+            'Tuna Roll, spicy mayonnaise-style sauce 22',
+            'Aioli Trio, garlic aioli 18',
+        ].join('\n'));
+        expect(result.menuText).toBe([
+            'Avocado Salad, yellow chili aioli, yuzu kosho 75',
+            'Tuna Roll, spicy aioli-style sauce 22',
+            'Aioli Trio, garlic aioli 18',
+        ].join('\n'));
+        expect(result.appliedCorrections.filter((correction) => correction.type === 'Terminology')).toEqual([
+            expect.objectContaining({ original: 'mayo', corrected: 'aioli' }),
+            expect.objectContaining({ original: 'mayonnaise', corrected: 'aioli' }),
+        ]);
+    });
+    it('catches conservative singular-ingredient misses while preserving counted or prepared plurals', () => {
+        const result = (0, pre_ai_deterministic_rules_1.runPreAiDeterministicChecks)([
+            'Smoked Guacamole, jalapeños, avocado, coriander, lime 90',
+            'Tuna Ceviche*, almond sauce, cucumber pickles, praline 105',
+            'Prawns Tequeños, sautéed prawns, filo dough 80',
+            'Encocado, black cod, prawns, squid, coconut 190',
+            'pickles C,D,G,SY 200',
+            'Burger, three pickles on the side 24',
+            'Taco, sautéed prawns, avocado 18',
+        ].join('\n'));
+        expect(result.menuText).toBe([
+            'Smoked Guacamole, jalapeño, avocado, coriander, lime 90',
+            'Tuna Ceviche*, almond sauce, cucumber pickle, praline 105',
+            'Prawn Tequeños, sautéed prawns, filo dough 80',
+            'Encocado, black cod, prawn, squid, coconut 190',
+            'pickle C,D,G,SY 200',
+            'Burger, three pickles on the side 24',
+            'Taco, sautéed prawns, avocado 18',
+        ].join('\n'));
+        expect(result.appliedCorrections.filter((correction) => correction.type === 'Singular/Plural')).toHaveLength(5);
+    });
     it('normalizes existing raw marker placement and adds markers for strong raw terms', () => {
         const result = (0, pre_ai_deterministic_rules_1.runPreAiDeterministicChecks)([
             'Tuna Tartare F 24',
@@ -88,7 +125,7 @@ describe('runPreAiDeterministicChecks', () => {
         expect(result.menuText).toBe([
             'Tuna Tartare* F 24',
             'Sashimi* F 18',
-            'Angry Zengo*, spicy tuna, avocado, lemon, yuzu kosho mayo E,F,SE',
+            'Angry Zengo*, spicy tuna, avocado, lemon, yuzu kosho aioli E,F,SE',
             'Sushi & Sashimi Selection',
             '14oz Striploin* D 75',
             'Guacamole V 12',
@@ -101,9 +138,46 @@ describe('runPreAiDeterministicChecks', () => {
             'Longbone Pork Ribeye*, tomatillo, hominy, spiced agave, grilled corn 40',
         ].join('\n'));
         expect(result.menuText).toBe([
-            '14 oz Wagyu Ribeye, red chile truffle butter, crispy potatoes* 68',
+            '14 oz Wagyu Ribeye*, red chile truffle butter, crispy potatoes 68',
             'Longbone Pork Ribeye*, tomatillo, hominy, spiced agave, grilled corn 40',
         ].join('\n'));
+    });
+    it('adds markers for SOP-listed raw egg preparations', () => {
+        const result = (0, pre_ai_deterministic_rules_1.runPreAiDeterministicChecks)([
+            'Hollandaise Sauce, egg yolk, butter 15',
+            'Béarnaise Sauce, egg yolk, tarragon 16',
+            'Steak Frites, fries, traditional Caesar dressing 24',
+            'Tiramisu, mascarpone, espresso 12',
+            'Tostada, cured egg yolk, avocado 15',
+            'Meringue, berries, cream 10',
+            'Whiskey Sour, lemon, egg white 14',
+            'add to any entrée: oscar topping - jumbo lump crab meat, hollandaise 12',
+        ].join('\n'));
+        expect(result.menuText).toBe([
+            'Hollandaise Sauce*, egg yolk, butter 15',
+            'Béarnaise Sauce*, egg yolk, tarragon 16',
+            'Steak Frites, fries, traditional Caesar dressing* 24',
+            'Tiramisu*, mascarpone, espresso 12',
+            'Tostada, cured egg yolk, avocado* 15',
+            'Meringue*, berries, cream 10',
+            'Whiskey Sour, lemon, egg white* 14',
+            'add to any entrée: oscar topping - jumbo lump crab meat, hollandaise* 12',
+        ].join('\n'));
+    });
+    it('excludes newly added raw egg terms when the line states a cooking method', () => {
+        const result = (0, pre_ai_deterministic_rules_1.runPreAiDeterministicChecks)([
+            'Braised Beef, hollandaise, potatoes 24',
+            'Slow-Roasted Chicken, Caesar dressing, herbs 22',
+            'Confit Duck, meringue, fruit 26',
+            'Well-Done Steak, bearnaise, fries 30',
+        ].join('\n'));
+        expect(result.menuText).toBe([
+            'Braised Beef, hollandaise, potatoes 24',
+            'Slow-Roasted Chicken, Caesar dressing, herbs 22',
+            'Confit Duck, meringue, fruit 26',
+            'Well-Done Steak, bearnaise, fries 30',
+        ].join('\n'));
+        expect(result.appliedCorrections.filter((c) => c.type === 'Raw Item')).toHaveLength(0);
     });
     it('keeps raw asterisks attached to the last dish-name word', () => {
         const result = (0, pre_ai_deterministic_rules_1.runPreAiDeterministicChecks)([
@@ -201,7 +275,7 @@ describe('runPreAiDeterministicChecks', () => {
         expect(result.menuText).toBe([
             'Shrimp Cocktail Ceviche, poached marinated shrimp, aguachile rojo, avocado S 26',
             'Temptation Oysters, spinach butter, jalapeño, parmesan, panko D,G,S 28',
-            'Oysters on the Half Shell, mignonette* S 24',
+            'Oysters on the Half Shell*, mignonette S 24',
         ].join('\n'));
         expect(result.appliedCorrections.filter((c) => c.type === 'Raw Item')).toHaveLength(1);
     });

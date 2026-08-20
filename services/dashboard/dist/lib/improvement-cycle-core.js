@@ -11,6 +11,7 @@ exports.isTransientOpenAiFailure = isTransientOpenAiFailure;
 exports.assembleSupersedeCorrectionSet = assembleSupersedeCorrectionSet;
 exports.buildReplayUnavailableForCorrections = buildReplayUnavailableForCorrections;
 exports.supersededProposalReviewBlock = supersededProposalReviewBlock;
+exports.promptProposalApprovalBlock = promptProposalApprovalBlock;
 exports.evaluateSecretExpiry = evaluateSecretExpiry;
 exports.pickEffectivePrompt = pickEffectivePrompt;
 exports.isGuardDiscardReason = isGuardDiscardReason;
@@ -35,6 +36,7 @@ exports.buildGuardRetryMessage = buildGuardRetryMessage;
 exports.runImprovementProposalWithRetry = runImprovementProposalWithRetry;
 exports.decideReplayStatus = decideReplayStatus;
 exports.classifyTriggerFromComparisonEntry = classifyTriggerFromComparisonEntry;
+exports.resolveTriggerEvalCaseId = resolveTriggerEvalCaseId;
 exports.summarizeEvalReport = summarizeEvalReport;
 exports.buildProposalEvalSummary = buildProposalEvalSummary;
 exports.evalStatusFromSummary = evalStatusFromSummary;
@@ -205,6 +207,60 @@ function supersededProposalReviewBlock(proposal) {
         error: `This proposal was superseded and cannot be reviewed.${pointer}`,
         superseded_by_cycle_id: proposal.superseded_by_cycle_id || null,
     };
+}
+/**
+ * Safety gate for approving automated prompt proposals. A reviewer can still reject a
+ * blocked proposal, but a candidate that demonstrably regressed, failed evaluation, left
+ * misses unresolved, or changed the prompt without scoring any motivating submission must
+ * not become the live rulebook.
+ */
+function promptProposalApprovalBlock(proposal) {
+    if (!proposal)
+        return null;
+    const evalStatus = `${proposal.eval_status || ''}`.trim().toLowerCase();
+    if (evalStatus === 'regressed') {
+        return {
+            error: 'This proposal cannot be approved because its evaluation confirmed regressions. Reject it or generate a safer replacement proposal.',
+            reason: 'eval_regressed',
+        };
+    }
+    if (evalStatus === 'failed') {
+        return {
+            error: 'This proposal cannot be approved because its evaluation failed. Re-run evaluation before approving any change.',
+            reason: 'eval_failed',
+        };
+    }
+    if (proposal.unresolved_still_missed) {
+        return {
+            error: 'This proposal cannot be approved because one or more replay-confirmed misses remain unresolved.',
+            reason: 'unresolved_misses',
+        };
+    }
+    const promptChanged = proposal.disposition === 'prompt_change' || proposal.disposition === 'rules_and_prompt';
+    const triggers = Array.isArray(proposal.eval_summary?.triggers) ? proposal.eval_summary.triggers : [];
+    const availableTriggers = triggers.filter((trigger) => trigger.status !== 'unavailable');
+    if (promptChanged
+        && Number(proposal.correction_rule_count || 0) > 0
+        && triggers.length > 0
+        && availableTriggers.length === 0) {
+        return {
+            error: 'This prompt-changing proposal cannot be approved because none of the submissions that motivated it were scored in evaluation.',
+            reason: 'trigger_eval_unavailable',
+        };
+    }
+    if (promptChanged && evalStatus === 'no_effect') {
+        return {
+            error: 'This prompt-changing proposal cannot be approved because evaluation found no improvement on the corrections that motivated it.',
+            reason: 'eval_no_effect',
+        };
+    }
+    if (promptChanged && evalStatus === 'skipped') {
+        return {
+            error: 'This prompt-changing proposal cannot be approved because evaluation was skipped.',
+            reason: 'eval_skipped',
+        };
+    }
+    return null;
 }
 // Azure client secrets expire and then fail silently, taking down ALL Graph
 // features at once (alert/proposal email + SharePoint). Track the expiry date
@@ -962,7 +1018,7 @@ function validateImprovementLlmOutput(raw, opts = {}) {
     if (!promptUnchanged && !isConsolidation && proposedPrompt.length < 500) {
         warnings.push(`proposed_prompt is suspiciously short (${proposedPrompt.length} chars)`);
     }
-    if (!promptUnchanged && !isConsolidation && opts.currentPrompt && proposedPrompt.length > opts.currentPrompt.length * 1.6) {
+    if (!promptUnchanged && !isConsolidation && opts.currentPrompt && proposedPrompt.length > opts.currentPrompt.length * 1.05) {
         warnings.push(`proposed_prompt grew from ${opts.currentPrompt.length} to ${proposedPrompt.length} chars; review for bloat or echoed context`);
     }
     const analysis = asText(parsed.analysis, 20000);
@@ -1134,9 +1190,10 @@ function validateImprovementLlmOutput(raw, opts = {}) {
         validatedCoverageClaims.push({ correction_id: cid, prompt_quote: quote, explanation: expl });
     }
     // Fix 2: unresolved_still_missed check. Every still_missed correction must be covered by
-    // a proposed replacement rule, a code recommendation/analysis mention, or a changed prompt
-    // span near the correction. Replay evidence outranks the author's claim that the prompt
-    // already covers it, even when the proposal changed some unrelated prompt text.
+    // replacement rules that reproduce the complete human correction, a concrete code
+    // recommendation, or a changed prompt span near the correction. Analysis prose is not an
+    // implementation lane. Replay evidence outranks the author's claim that the prompt already
+    // covers it, even when the proposal changed some unrelated prompt text.
     let unresolvedStillMissed = false;
     const stillMissed = (opts.replayEvidence || []).filter((e) => e.status === 'still_missed');
     const changedPromptSpan = opts.currentPrompt && !promptUnchanged
@@ -1170,16 +1227,44 @@ function validateImprovementLlmOutput(raw, opts = {}) {
         return meaningfulCorrectionTokens(`${originalText} ${correctedText}`)
             .some((token) => changedPromptHay.includes(token));
     };
+    const normalizeCoverageText = (value) => value.toLowerCase().replace(/\s+/g, ' ').trim();
+    const escapeCoverageRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const rulesFullyTransformCorrection = (originalText, correctedText) => {
+        let transformed = originalText;
+        for (const rule of rules) {
+            const from = `${rule.original_text || ''}`;
+            if (!from)
+                continue;
+            transformed = transformed.replace(new RegExp(escapeCoverageRegExp(from), 'giu'), rule.corrected_text);
+        }
+        return normalizeCoverageText(transformed) === normalizeCoverageText(correctedText);
+    };
+    const sourceByCorrectionId = new Map((opts.sourceCorrections || [])
+        .filter((correction) => correction?.id)
+        .map((correction) => [String(correction.id), correction]));
+    const currentPromptHasExplicitSingularRule = /ingredients\s*=\s*singular/i.test(opts.currentPrompt || '');
     for (const e of stillMissed) {
         const correctionId = asText(e.correction_id, 200) || '(unknown)';
         const o = asText(e.original_text, 240).toLowerCase();
         const c = asText(e.corrected_text, 240).toLowerCase();
-        // A rule covers this correction if its (narrower) from-text sits inside the correction
-        // line — not only on an exact pair match, which would false-flag every narrowed rule.
-        const ruleHits = rules.some((r) => ruleCoversCorrection(r, o, c));
-        const hay = (recommendations.map((r) => `${r.title} ${r.description}`).join(' ') + ' ' + analysis).toLowerCase();
-        const recommendationHits = !!((o || c) && ((o && hay.includes(o)) || (c && hay.includes(c))));
+        // A narrowed rule only resolves a whole-line correction if applying all proposed rules
+        // reproduces the complete corrected line. This prevents one rule from hiding a second
+        // independent edit on the same reviewer correction.
+        const ruleHits = rulesFullyTransformCorrection(o, c);
+        const recommendationHay = recommendations.map((r) => `${r.title} ${r.description}`).join(' ').toLowerCase();
+        const sourceGuidance = `${sourceByCorrectionId.get(correctionId)?.rule || ''}`.toLowerCase();
+        const guidanceTokens = meaningfulCorrectionTokens(sourceGuidance);
+        const recommendationHits = !!recommendationHay && (((o || c) && ((o && recommendationHay.includes(o)) || (c && recommendationHay.includes(c))))
+            || guidanceTokens.some((token) => recommendationHay.includes(token)));
         const promptHits = promptChangedNearCorrection(o, c);
+        // "singualr" is a recurring reviewer typo in the saved guidance; treat it as
+        // the same category signal so the safety gate cannot silently miss that row.
+        const singularRuleWasAlreadyExplicit = currentPromptHasExplicitSingularRule && /\b(?:singular|singualr)\b/i.test(sourceGuidance);
+        if (singularRuleWasAlreadyExplicit && !ruleHits && !recommendationHits) {
+            unresolvedStillMissed = true;
+            warnings.push(`unresolved_still_missed: correction ${correctionId} is a singular-ingredient miss even though the current prompt already has an explicit "Ingredients = SINGULAR" rule; adding more prompt examples is not sufficient — propose a deterministic rule or code guard`);
+            continue;
+        }
         if (!ruleHits && !recommendationHits && !promptHits) {
             unresolvedStillMissed = true;
             warnings.push(`unresolved_still_missed: correction ${correctionId} is still_missed but the proposal neither changed the prompt near it nor covers it with a rule/recommendation ("already covered" claims are falsified by replay evidence)`);
@@ -1337,6 +1422,12 @@ function classifyTriggerFromComparisonEntry(entry, noiseEpsilon = 0.02) {
     if (d < -noiseEpsilon)
         return 'regressed';
     return 'unchanged';
+}
+/** Resolve the eval case id for a correction submission. Production cases are keyed by
+ * legacy_id when present, while correction rows usually carry the UUID; the cycle records
+ * this mapping while ensuring trigger cases so later scoring does not look up the wrong id. */
+function resolveTriggerEvalCaseId(submissionId, caseIdsBySubmission) {
+    return `${caseIdsBySubmission?.[submissionId] || `production:${submissionId}`}`;
 }
 function summarizeEvalReport(label, report, reportPath) {
     return {
@@ -1641,6 +1732,8 @@ Prompt rewrite rules:
   - replay_unavailable: no raw input was available for replay.
   - not_verifiable: this correction is freeform guidance (no exact original/corrected text pair) and cannot be mechanically replay-verified; use judgment.
 - When a still_missed correction occurs in a context the prompt already "mentions," prefer adding concrete examples, decision tables, or counter-examples over appending another abstract sentence. If prompt text is fundamentally unreliable for the case, recommend a deterministic code guard instead of more prompt text, and say so.
+- Before routing a still_missed correction to the prompt, search the CURRENT PROMPT for a directly applicable rule and emit a coverage_claim when one exists. If the current prompt already states the same rule explicitly (for example, "Ingredients = SINGULAR") and replay still misses it, do NOT append more examples and call that resolved: route it to a deterministic replacement rule or code_recommendation unless you can identify a genuine contradiction or ambiguity that your rewrite removes.
+- Keep the rewritten prompt at or below the current character count whenever possible. Replace or consolidate existing wording instead of appending duplicate guidance; prompt growth above 5% is automatically flagged for bloat review.
 - Only leave the prompt unchanged when every source correction is fully handled by deterministic replacement rules, code recommendations, or a clearly invalid/out-of-scope reviewer correction — AND no correction is tagged still_missed. A still_missed correction is positive evidence the current process (prompt + code) does not yet produce the human fix; UNCHANGED is prohibited unless that evidence is addressed by a rule or code recommendation you also propose. In the analysis, explain the routing with reference to the replay tags.
 - If your analysis asserts that a correction is already covered by the current prompt, you MUST also emit a "coverage_claims" entry with a verbatim contiguous substring copied from the CURRENT PROMPT (exact characters, not paraphrased). Deterministic rule coverage should be cited via manifest ids in rules or code recs instead. A citation alone does not excuse a still_missed correction; if replay shows the pipeline still misses it, you must still propose a concrete change (restructuring, examples, or code guard).
 - The current prompt is provided between "=== BEGIN CURRENT PROMPT ===" and "=== END CURRENT PROMPT ===" markers. Your proposed_prompt must contain ONLY the rewritten prompt text itself — never the markers, the Code Rules Manifest, the corrections list, or any other context sections from this message.

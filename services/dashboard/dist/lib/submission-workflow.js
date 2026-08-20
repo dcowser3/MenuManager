@@ -103,7 +103,8 @@ function createSubmissionWorkflowHandlers(deps) {
                 submission_id: input.submissionId,
                 submitter_email: input.submitterEmail,
                 filename: input.filename,
-                original_path: input.originalPath
+                original_path: input.originalPath,
+                seed: deps.AI_REVIEW_SEED ?? null,
             }, { timeout: deps.AI_REVIEW_SUBMIT_TIMEOUT_MS });
             console.log(`✓ AI review triggered for ${input.submissionId}`);
         }

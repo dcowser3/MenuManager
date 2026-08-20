@@ -140,7 +140,7 @@ Deterministic pre-AI checks already apply approved exact spelling replacements a
 Continue to review for contextual spelling or terminology issues that cannot be safely handled by exact replacement rules:
 - "chili" vs. "chile" depends on whether the phrase is an English ingredient/cooking term or a named Spanish chile.
 - "tartar" vs. "tartare" depends on whether the item is a condiment or a raw protein preparation. Use "tartar" for sauces and "tartare" for raw protein dishes.
-- "mayo" vs. "aioli" is not an absolute replacement; flag only when the menu context clearly supports the change. For example, on a Mexican Street Corn item, it can be appropriate to correct "mayo" to "aioli" when the sauce is clearly an aioli-style flavored mayonnaise.
+- Use "aioli" instead of "mayo" or "mayonnaise" on final menus. This is an absolute vocabulary rule: change every standalone "mayo" or "mayonnaise" term to "aioli".
 - Word order and redundant-word issues should be suggestions unless the correction is objective and high confidence.
 
 Additional terms:

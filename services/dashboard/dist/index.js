@@ -157,7 +157,13 @@ const BASIC_AI_CHECK_DEBUG_ENABLED = process.env.BASIC_AI_CHECK_DEBUG_ENABLED !=
     ? parseBooleanFlag(process.env.BASIC_AI_CHECK_DEBUG_ENABLED)
     : process.env.NODE_ENV !== 'production';
 const BASIC_AI_CHECK_DEBUG_MAX_CHARS = parsePositiveInteger(process.env.BASIC_AI_CHECK_DEBUG_MAX_CHARS, 60000);
-const BASIC_AI_CHECK_SEED = parseOptionalNonNegativeInteger(process.env.BASIC_AI_CHECK_SEED) ?? 42;
+function resolveAiReviewSeed(env = process.env) {
+    const configured = env.AI_REVIEW_SEED ?? env.BASIC_AI_CHECK_SEED;
+    if (configured !== undefined && configured.trim() === '')
+        return undefined;
+    return parseOptionalNonNegativeInteger(configured) ?? 42;
+}
+const AI_REVIEW_SEED = resolveAiReviewSeed();
 const basicCheckJobs = new Map();
 function truncateDiagnosticText(value) {
     const text = typeof value === 'string' ? value : JSON.stringify(value ?? '', null, 2);
@@ -1537,6 +1543,7 @@ const submissionWorkflowHandlers = (0, submission_workflow_1.createSubmissionWor
     DEFAULT_ALLERGEN_KEY,
     PUBLIC_FORM_SUPPORT_EMAIL,
     AI_REVIEW_SUBMIT_TIMEOUT_MS,
+    AI_REVIEW_SEED,
     CLICKUP_TASK_CREATE_TIMEOUT_MS,
     getTempUploadsDir,
     getSubmissionDocumentDir,
@@ -2271,6 +2278,7 @@ app.get('/learning/prompt-proposal', async (_req, res) => {
             proposal,
             history,
             thinRuleUncheckedDefault: thinUnchecked,
+            approvalBlock: (0, improvement_cycle_core_1.promptProposalApprovalBlock)(proposal),
         });
     }
     catch (error) {
@@ -2344,6 +2352,12 @@ app.post('/api/learning/prompt-proposal/:id/review', async (req, res) => {
             return res.status(409).json(supersededBlock);
         }
         const approved = status === 'approved' || status === 'approved_modified';
+        if (approved) {
+            const approvalBlock = (0, improvement_cycle_core_1.promptProposalApprovalBlock)(proposalRecord);
+            if (approvalBlock) {
+                return res.status(409).json(approvalBlock);
+            }
+        }
         const proposedRules = Array.isArray(proposalRecord?.proposed_rules) ? proposalRecord.proposed_rules : [];
         const selectedIndexes = Array.isArray(accepted_rule_indexes)
             ? accepted_rule_indexes.map((value) => Number.parseInt(`${value}`, 10)).filter((value) => Number.isInteger(value) && value >= 0 && value < proposedRules.length)
@@ -3033,7 +3047,7 @@ async function handleBasicCheck(req, res) {
         const buildAiRequestAudit = () => ({
             url: `${AI_REVIEW_URL}/run-qa-check`,
             timeoutMs: BASIC_AI_CHECK_TIMEOUT_MS,
-            seed: BASIC_AI_CHECK_SEED ?? null,
+            seed: AI_REVIEW_SEED ?? null,
             textLength: preCheckedReviewBody.length,
             promptLength: finalPrompt.length,
             text: preCheckedReviewBody,
@@ -3060,6 +3074,7 @@ async function handleBasicCheck(req, res) {
             menuTextLength: menuContent.length,
             preAiTextLength: preCheckedReviewBody.length,
             promptLength: finalPrompt.length,
+            seed: AI_REVIEW_SEED,
             menuContentRaw: menuContent,
             baselineMenuContentRaw: changedOnlyMode ? baselineMenuContent : undefined,
             ...extra,
@@ -3078,7 +3093,9 @@ async function handleBasicCheck(req, res) {
             qaResponse = await internalApi.post(`${AI_REVIEW_URL}/run-qa-check`, {
                 text: preCheckedReviewBody,
                 prompt: finalPrompt,
-                seed: BASIC_AI_CHECK_SEED,
+                // Null is intentional: it tells ai-review that an explicitly
+                // empty AI_REVIEW_SEED disables the provider seed.
+                seed: AI_REVIEW_SEED ?? null,
             }, {
                 timeout: BASIC_AI_CHECK_TIMEOUT_MS
             });
@@ -3248,6 +3265,7 @@ async function handleBasicCheck(req, res) {
                     statusText: qaResponse?.statusText,
                     model: qaResponse?.data?.model || null,
                     system_fingerprint: qaResponse?.data?.system_fingerprint || null,
+                    finish_reason: qaResponse?.data?.finish_reason || null,
                     fence_missing: true,
                     body: qaResponse?.data,
                     aiFailure,
@@ -3449,6 +3467,7 @@ async function handleBasicCheck(req, res) {
                 // model switch; null for responses from a pre-2026-07-30 ai-review.
                 model: qaResponse?.data?.model || null,
                 system_fingerprint: qaResponse?.data?.system_fingerprint || null,
+                finish_reason: qaResponse?.data?.finish_reason || null,
                 fence_missing: parsed.fenceMissing,
                 rawFeedbackLength: `${feedback || ''}`.length,
                 rawFeedback: feedback || '',

@@ -27,7 +27,7 @@
  *
  * Env:
  *   IMPROVE_MIN_NEW_CORRECTIONS  Gate threshold (default 1)
- *   IMPROVE_MODEL                Analysis model (default PROMPT_REWRITE_MODEL || o3 reasoning-class)
+ *   IMPROVE_MODEL                Analysis model (default PROMPT_REWRITE_MODEL || gpt-5.6-sol)
  *   IMPROVE_NOTIFY_EMAIL         Proposal-ready email (default FORM_ATTEMPT_ALERT_EMAIL)
  *   IMPROVE_SKIP_EVAL=1          Skip the auto-eval step (eval_status: skipped)
  *   IMPROVE_EVAL_LIMIT           Cap eval cases per run (default: all)
@@ -148,7 +148,10 @@ function extractCleanMenuText(pythonBin, docxPath) {
 // Low-level completion for a full messages array (C1: the retry controller grows the
 // conversation across attempts, so the caller works from messages, not a fixed system+user pair).
 async function postImprovementCompletion(messages) {
-    const model = process.env.IMPROVE_MODEL || process.env.PROMPT_REWRITE_MODEL || 'o3';
+    // Proposal authoring is a low-volume, quality-critical workload. Use the flagship
+    // reasoning model when no deployment override is present; menu review remains on the
+    // lower-latency model configured separately via AI_REVIEW_MODEL.
+    const model = process.env.IMPROVE_MODEL || process.env.PROMPT_REWRITE_MODEL || 'gpt-5.6-sol';
     const adapter = requireLlmAdapter();
     const capabilities = adapter.getModelCapabilities(model);
     const result = await adapter.callChat(
@@ -204,12 +207,16 @@ function findLatestEvalReport() {
 // Ensure each trigger submission has a production:<key> case in the eval dataset so the
 // harness will score it. Missing triggers are built on the fly using the same
 // audit/raw/approved fallback as buildProductionCases in review-eval.js.
-// Returns { built: string[], unavailable: string[] } (built may include already-present).
+// Returns { built: string[], unavailable: string[], caseIdsBySubmission: object }.
+// Production case ids prefer submissions.legacy_id, while correction rows usually carry the
+// UUID; retaining this map prevents the scoring step from looking up production:<uuid> when
+// the dataset row is actually production:<legacy_id>.
 async function ensureTriggerCasesInDataset(supabaseClient, submissionIds, datasetPath) {
     const built = [];
     const unavailable = [];
+    const caseIdsBySubmission = {};
     const distinct = [...new Set((submissionIds || []).filter(Boolean))];
-    if (!distinct.length) return { built, unavailable };
+    if (!distinct.length) return { built, unavailable, caseIdsBySubmission };
 
     // Load currently present case_ids
     const present = new Set();
@@ -259,6 +266,7 @@ async function ensureTriggerCasesInDataset(supabaseClient, submissionIds, datase
         if (!s) { unavailable.push(sid); continue; }
         const canonical = s.legacy_id || s.id;
         const caseId = `production:${canonical}`;
+        caseIdsBySubmission[sid] = caseId;
         if (present.has(caseId)) {
             built.push(caseId);
             continue;
@@ -270,7 +278,7 @@ async function ensureTriggerCasesInDataset(supabaseClient, submissionIds, datase
         toBuild.push({ sid, s, caseId });
     }
 
-    if (!toBuild.length) return { built, unavailable };
+    if (!toBuild.length) return { built, unavailable, caseIdsBySubmission };
 
     // Fetch audits for the toBuild set
     const attemptIds = toBuild.map((n) => n.s.form_attempt_id).filter(Boolean);
@@ -335,7 +343,7 @@ async function ensureTriggerCasesInDataset(supabaseClient, submissionIds, datase
         fs.mkdirSync(path.dirname(datasetPath), { recursive: true });
         fs.appendFileSync(datasetPath, append);
     }
-    return { built, unavailable };
+    return { built, unavailable, caseIdsBySubmission };
 }
 
 function round8(v) {
@@ -916,7 +924,7 @@ async function main() {
 
         // 4b. (Fix 1) Ensure trigger submissions are present in the eval dataset so progression can be measured.
         const datasetPath = path.join(repoRoot, 'tmp', 'review-eval', 'dataset.jsonl');
-        let triggerInfo = { built: [], unavailable: [] };
+        let triggerInfo = { built: [], unavailable: [], caseIdsBySubmission: {} };
         try {
             triggerInfo = await ensureTriggerCasesInDataset(supabase, submissionIds, datasetPath);
             console.log(`Trigger cases ensured — built ${triggerInfo.built.length}, unavailable ${triggerInfo.unavailable.length}`);
@@ -1199,6 +1207,8 @@ async function main() {
                             }
                         }
                         function findCase(m, sid) {
+                            const expectedCaseId = core.resolveTriggerEvalCaseId(sid, triggerInfo.caseIdsBySubmission);
+                            if (m.has(expectedCaseId)) return m.get(expectedCaseId);
                             for (const [k, v] of m.entries()) {
                                 if (k === `production:${sid}` || k.endsWith(`:${sid}`)) return v;
                             }
@@ -1211,7 +1221,7 @@ async function main() {
                             const suppBase = runEvalHarness([
                                 '--prompt', currentPromptPath, '--rules', 'live',
                                 '--label', `improve-${cycleId}-triggers-base`,
-                                ...missingSids.flatMap((s) => ['--case', `production:${s}`]),
+                                ...missingSids.flatMap((s) => ['--case', core.resolveTriggerEvalCaseId(s, triggerInfo.caseIdsBySubmission)]),
                             ]);
                             const suppBCases = (suppBase.ok && suppBase.reportPath)
                                 ? JSON.parse(fs.readFileSync(suppBase.reportPath, 'utf8')).cases || []
@@ -1223,7 +1233,7 @@ async function main() {
                                     '--baseline', suppBase.reportPath,
                                     '--baseline-prompt', currentPromptPath, '--baseline-rules', 'live',
                                     '--label', `improve-${cycleId}-triggers-cand`,
-                                    ...missingSids.flatMap((s) => ['--case', `production:${s}`]),
+                                    ...missingSids.flatMap((s) => ['--case', core.resolveTriggerEvalCaseId(s, triggerInfo.caseIdsBySubmission)]),
                                 ]);
                                 const suppFull = (suppCand.ok && suppCand.reportPath)
                                     ? JSON.parse(fs.readFileSync(suppCand.reportPath, 'utf8'))
@@ -1253,7 +1263,7 @@ async function main() {
                             if (!cand) {
                                 tna++;
                                 trigs.push({
-                                    case_id: `production:${sid}`,
+                                    case_id: core.resolveTriggerEvalCaseId(sid, triggerInfo.caseIdsBySubmission),
                                     submission_id: sid,
                                     baseline_composite: null,
                                     candidate_composite: null,
@@ -1267,7 +1277,9 @@ async function main() {
                             const cComp = round8(cand.composite);
                             // Prefer confirmed_delta (B0 / Follow-up 1: the fresh back-to-back when confirmation ran).
                             // Fall back to freshDelta (older reports) then raw delta.
-                            const entry = compDeltaByCase.get(cand.case_id) || compDeltaByCase.get(`production:${sid}`);
+                            const entry = compDeltaByCase.get(cand.case_id)
+                                || compDeltaByCase.get(core.resolveTriggerEvalCaseId(sid, triggerInfo.caseIdsBySubmission))
+                                || compDeltaByCase.get(`production:${sid}`);
                             let delta = null;
                             if (entry) {
                                 if (entry.confirmed_delta != null) delta = round8(entry.confirmed_delta);

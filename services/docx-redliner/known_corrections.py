@@ -9,12 +9,13 @@ The training pipeline automatically imports this file.
 
 Format: (original, corrected)
 - Add BOTH directions if the correction is bidirectional
-- Example: ('mayo', 'aioli'), ('aioli', 'mayo')
+- Example: ('mayo', 'aioli')
 """
 
-# Terminology preferences (bidirectional)
+# Terminology correction pairs (add the reverse direction only when both are valid)
 KNOWN_PAIRS = {
-    # NOTE: mayo/aioli removed - not an absolute rule, clients may prefer either
+    ('mayo', 'aioli'),
+    ('mayonnaise', 'aioli'),
 
     # Abbreviations
     ('bbq', 'barbeque'), ('barbeque', 'bbq'),
@@ -68,7 +69,8 @@ KNOWN_PAIRS = {
 # These are RSH-specific word preferences: always use the corrected term
 TERMINOLOGY_CORRECTIONS = {
     'crust': 'rim',           # For cocktails: "salt rim" not "salt crust"
-    # NOTE: mayo/aioli removed - not an absolute rule, clients may prefer either
+    'mayo': 'aioli',          # Canonical SOP vocabulary rule
+    'mayonnaise': 'aioli',    # Canonical SOP vocabulary rule
     'bbq': 'barbeque sauce',  # Expand abbreviation
     'sorbete': 'sorbet',      # Spanish to English/French
 }
@@ -81,7 +83,11 @@ CONTEXT_HINTS = {
         'keywords': ['paloma', 'margarita', 'martini', 'rim', 'salt', 'sugar', 'chili'],
         'note': 'Glass rim terminology - use "rim" for cocktail glasses, not "crust"'
     },
-    # NOTE: mayo/aioli context hints removed - not an absolute rule
+    ('mayo', 'aioli'): {
+        'item_types': ['food'],
+        'keywords': ['mayo', 'mayonnaise'],
+        'note': 'Canonical SOP terminology - use aioli instead of mayo or mayonnaise'
+    },
 }
 
 # Common abbreviations that should be expanded
@@ -130,4 +136,3 @@ def get_context_hints(original: str, corrected: str) -> dict:
     """
     key = (original.lower().strip(), corrected.lower().strip())
     return CONTEXT_HINTS.get(key, {})
-

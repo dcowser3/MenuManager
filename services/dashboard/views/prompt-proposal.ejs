@@ -153,6 +153,7 @@
                 when new annotated corrections exist; <code>npm run prompt:rewrite</code> remains the manual fallback.
             </div>
         <% } else { %>
+            <% const proposalApprovalBlock = typeof approvalBlock !== 'undefined' ? approvalBlock : null; %>
             <div class="card">
                 <div class="meta-grid">
                     <div class="meta-item">
@@ -219,6 +220,14 @@
                     <% } %>
                 </div>
             </div>
+
+            <% if (proposal.status === 'pending' && proposalApprovalBlock) { %>
+                <div class="card" style="border-color:var(--danger); background:#fff5f5;">
+                    <strong style="color:var(--danger)">Approval blocked</strong>
+                    <div style="margin-top:.3rem;"><%= proposalApprovalBlock.error %></div>
+                    <div class="small" style="margin-top:.25rem;">You can reject this proposal so its source corrections return to the next improvement cycle.</div>
+                </div>
+            <% } %>
 
             <%
                 // C2: plain-language headline for the code-computed disposition (what the
@@ -543,8 +552,10 @@
                         <textarea id="reviewerNotes" placeholder="Any notes about this prompt change..."></textarea>
                     </div>
                     <div class="btn-group">
-                        <button class="btn success" onclick="submitReview('approved')">Approve As-Is</button>
-                        <button class="btn" onclick="submitReview('approved_modified')">Approve With Edits</button>
+                        <% if (!proposalApprovalBlock) { %>
+                            <button class="btn success" onclick="submitReview('approved')">Approve As-Is</button>
+                            <button class="btn" onclick="submitReview('approved_modified')">Approve With Edits</button>
+                        <% } %>
                         <button class="btn danger" onclick="submitReview('rejected')">Reject</button>
                     </div>
                     <div class="status-msg" id="reviewStatus"></div>

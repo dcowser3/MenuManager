@@ -53,6 +53,19 @@ const FUNCTIONAL_ENTRIES = [
         source: 'code_metadata',
     },
     {
+        id: 'pre-ai/singular-ingredient-forms',
+        layer: 'pre_ai_deterministic',
+        category: 'singular_plural',
+        title: 'Conservative singular ingredient forms',
+        description: 'Applies the high-signal subset of the SOP singular-ingredient rule to bare comma-delimited jalapeños, prawns, pickles, and cucumber pickles; the verified Prawn Tequeños noun modifier; and a standalone Pickle side. Counted or prepared plurals such as "three pickles" and "sautéed prawns" are preserved.',
+        examples: [
+            { before: 'Guacamole, jalapeños, avocado 18', after: 'Guacamole, jalapeño, avocado 18' },
+            { before: 'Encocado, black cod, prawns, squid 38', after: 'Encocado, black cod, prawn, squid 38' },
+        ],
+        implementation: { file: PRE_AI_FILE, exportName: 'normalizeSingularIngredientFormsOnLine' },
+        source: 'code_metadata',
+    },
+    {
         id: 'pre-ai/raw-asterisk-placement',
         layer: 'pre_ai_deterministic',
         category: 'raw_markers',

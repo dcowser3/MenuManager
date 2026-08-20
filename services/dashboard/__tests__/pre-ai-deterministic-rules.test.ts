@@ -92,6 +92,47 @@ describe('runPreAiDeterministicChecks', () => {
         expect(result.appliedCorrections).toHaveLength(1);
     });
 
+    it('enforces the canonical mayo-to-aioli SOP rule before and after model review', () => {
+        const result = runPreAiDeterministicChecks([
+            'Avocado Salad, yellow chili mayo, yuzu kosho 75',
+            'Tuna Roll, spicy mayonnaise-style sauce 22',
+            'Aioli Trio, garlic aioli 18',
+        ].join('\n'));
+
+        expect(result.menuText).toBe([
+            'Avocado Salad, yellow chili aioli, yuzu kosho 75',
+            'Tuna Roll, spicy aioli-style sauce 22',
+            'Aioli Trio, garlic aioli 18',
+        ].join('\n'));
+        expect(result.appliedCorrections.filter((correction) => correction.type === 'Terminology')).toEqual([
+            expect.objectContaining({ original: 'mayo', corrected: 'aioli' }),
+            expect.objectContaining({ original: 'mayonnaise', corrected: 'aioli' }),
+        ]);
+    });
+
+    it('catches conservative singular-ingredient misses while preserving counted or prepared plurals', () => {
+        const result = runPreAiDeterministicChecks([
+            'Smoked Guacamole, jalapeños, avocado, coriander, lime 90',
+            'Tuna Ceviche*, almond sauce, cucumber pickles, praline 105',
+            'Prawns Tequeños, sautéed prawns, filo dough 80',
+            'Encocado, black cod, prawns, squid, coconut 190',
+            'pickles C,D,G,SY 200',
+            'Burger, three pickles on the side 24',
+            'Taco, sautéed prawns, avocado 18',
+        ].join('\n'));
+
+        expect(result.menuText).toBe([
+            'Smoked Guacamole, jalapeño, avocado, coriander, lime 90',
+            'Tuna Ceviche*, almond sauce, cucumber pickle, praline 105',
+            'Prawn Tequeños, sautéed prawns, filo dough 80',
+            'Encocado, black cod, prawn, squid, coconut 190',
+            'pickle C,D,G,SY 200',
+            'Burger, three pickles on the side 24',
+            'Taco, sautéed prawns, avocado 18',
+        ].join('\n'));
+        expect(result.appliedCorrections.filter((correction) => correction.type === 'Singular/Plural')).toHaveLength(5);
+    });
+
     it('normalizes existing raw marker placement and adds markers for strong raw terms', () => {
         const result = runPreAiDeterministicChecks([
             'Tuna Tartare F 24',
@@ -105,7 +146,7 @@ describe('runPreAiDeterministicChecks', () => {
         expect(result.menuText).toBe([
             'Tuna Tartare* F 24',
             'Sashimi* F 18',
-            'Angry Zengo*, spicy tuna, avocado, lemon, yuzu kosho mayo E,F,SE',
+            'Angry Zengo*, spicy tuna, avocado, lemon, yuzu kosho aioli E,F,SE',
             'Sushi & Sashimi Selection',
             '14oz Striploin* D 75',
             'Guacamole V 12',

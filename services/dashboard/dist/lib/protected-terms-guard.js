@@ -2,7 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.PROTECTED_TERMS = void 0;
 exports.restoreProtectedTerms = restoreProtectedTerms;
-exports.PROTECTED_TERMS = ['picked herbs', 'twice-baked'];
+exports.PROTECTED_TERMS = ['picked herbs', 'twice-baked', 'marinated 24 hours'];
 function escapeRegExp(value) {
     return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
@@ -16,6 +16,9 @@ function normalizedProtectionText(value) {
         .replace(/[\u0300-\u036f]/g, '')
         .toLowerCase()
         .replace(/[^a-z0-9]/g, '');
+}
+function normalizedProtectionTextWithoutOptionalFor(value) {
+    return normalizedProtectionText(`${value || ''}`.replace(/\bfor\b/gi, ''));
 }
 function editDistance(left, right) {
     const previous = Array.from({ length: right.length + 1 }, (_, index) => index);
@@ -58,7 +61,7 @@ function restoreProtectedTermOnLine(originalLine, correctedLine, protectedTerm) 
                 const candidateNormalized = normalizedProtectionText(candidateText);
                 if (!candidateNormalized)
                     continue;
-                const distance = editDistance(target, candidateNormalized);
+                const distance = Math.min(editDistance(target, candidateNormalized), editDistance(target, normalizedProtectionTextWithoutOptionalFor(candidateText)));
                 if (distance > 1)
                     continue;
                 const positionDistance = Math.abs(tokenStart - originalWordIndex);
