@@ -106,9 +106,14 @@
         }
 
         .btn { border: 1px solid var(--primary); background: var(--primary); color: #fff; text-transform: uppercase; letter-spacing: .1em; font-size: .68rem; padding: .5rem .7rem; cursor: pointer; }
+        .btn:disabled { opacity: .55; cursor: default; }
         .save-status { margin-left: .6rem; font-size: .78rem; color: var(--muted); }
         .save-status.ok { color: var(--success); }
         .save-status.err { color: var(--error); }
+        .bulk-actions { border: 2px solid var(--primary); }
+        .bulk-actions p { color: var(--muted); font-size: .82rem; line-height: 1.5; }
+        .bulk-row { display: grid; grid-template-columns: minmax(220px, 1fr) auto; gap: .75rem; align-items: end; }
+        @media (max-width: 640px) { .bulk-row { grid-template-columns: 1fr; } }
 
         table { width: 100%; border-collapse: collapse; }
         th, td { border: 1px solid var(--border); padding: .5rem .55rem; vertical-align: top; font-size: .8rem; }
@@ -152,6 +157,9 @@
 
         <%
             const dishes = learningDetail.dish_corrections || [];
+            const savedCorrectionIds = (savedCorrectionRules || [])
+                .map((item) => item.correction_id)
+                .filter(Boolean);
             const jsonForScript = (value) => JSON.stringify(value)
                 .replace(/</g, '\\u003c')
                 .replace(/>/g, '\\u003e')
@@ -176,6 +184,12 @@
                 return 'Proposed (awaiting cycle)';
             };
         %>
+        <% if (typeof learningUnavailable !== 'undefined' && learningUnavailable) { %>
+            <div class="card">
+                <strong>Correction details are not available yet.</strong>
+                <div style="margin-top:.35rem; color:var(--muted); font-size:.82rem; line-height:1.5;">The approval is saved. Refresh this page shortly if the reviewer made changes that need explanations.</div>
+            </div>
+        <% } %>
         <% if (dishes.length === 0) { %>
             <div class="card">No dish-level corrections were detected for this submission.</div>
         <% } else { %>
@@ -213,7 +227,7 @@
                                     <span class="annotation-title">Correction Details</span>
                                     <span class="annotation-hint">Explain this correction; the final rule is decided later</span>
                                 </div>
-                                <div class="annotation-fields three-col">
+                                <div class="annotation-fields">
                                     <div class="annotation-field full-width">
                                         <label for="rule-<%= idx %>">Correction Explanation *</label>
                                         <textarea id="rule-<%= idx %>" placeholder="e.g., This dish uses tartar sauce; it is not a raw tartare preparation."></textarea>
@@ -237,10 +251,6 @@
                                             <option value="content">Content</option>
                                             <option value="formatting">Formatting</option>
                                         </select>
-                                    </div>
-                                    <div class="annotation-field">
-                                        <label for="reviewer-<%= idx %>">Reviewer Name *</label>
-                                        <input id="reviewer-<%= idx %>" placeholder="Your name" required>
                                     </div>
                                 </div>
                             </div>
@@ -294,6 +304,21 @@
             <% }) %>
         <% } %>
 
+        <% if (dishes.length > 0) { %>
+            <div class="card bulk-actions">
+                <h3 style="margin-top:0; font-size:.9rem; text-transform:uppercase; letter-spacing:.1em;">Save All Explanations</h3>
+                <p>Add explanations to any corrections above, then save all completed explanations together. Drafts are kept in this browser if you refresh or a save fails.</p>
+                <div class="bulk-row">
+                    <div>
+                        <label for="bulk-reviewer-name">Reviewer Name *</label>
+                        <input id="bulk-reviewer-name" placeholder="Your name" required autocomplete="name">
+                    </div>
+                    <button type="button" class="btn" id="save-all-explanations">Save All Explanations</button>
+                </div>
+                <div style="margin-top:.65rem;"><span class="save-status" id="bulk-save-status"></span></div>
+            </div>
+        <% } %>
+
         <div class="card">
             <h3 style="margin-top:0; font-size:.9rem; text-transform:uppercase; letter-spacing:.1em; color:var(--muted);">Saved Correction Explanations For This Submission</h3>
             <% if (!savedCorrectionRules || savedCorrectionRules.length === 0) { %>
@@ -335,9 +360,11 @@
         </div>
     </div>
 
+    <script src="/js/learning-submission.js"></script>
     <script>
         const dishCorrections = <%- jsonForScript(dishes) %>;
         const submissionContext = <%- jsonForScript(submissionContext) %>;
+        const savedCorrectionIds = <%- jsonForScript(savedCorrectionIds) %>;
 
         function togglePlain(idx) {
             document.getElementById(`plain-${idx}`).classList.toggle('open');
@@ -348,80 +375,14 @@
             document.getElementById(`loc-fields-${idx}`).classList.toggle('open', checked);
         }
 
-        async function saveDishRule(idx) {
-            const statusEl = document.getElementById(`save-status-${idx}`);
-            const dish = dishCorrections[idx];
-            const rule = (document.getElementById(`rule-${idx}`).value || '').trim();
-            const menuScope = (document.getElementById(`menu-scope-${idx}`).value || 'all').trim();
-            const changeType = (document.getElementById(`change-type-${idx}`).value || '').trim();
-            const reviewerName = (document.getElementById(`reviewer-${idx}`).value || '').trim();
-            const isLocationSpecific = document.getElementById(`loc-specific-${idx}`).checked;
-
-            if (!dish) {
-                statusEl.textContent = 'Correction details are missing.';
-                statusEl.className = 'save-status err';
-                return;
-            }
-
-            let location = '';
-            let otherLocations = [];
-            if (isLocationSpecific) {
-                location = (document.getElementById(`location-${idx}`).value || '').trim();
-                const sharedSelect = document.getElementById(`shared-${idx}`);
-                otherLocations = Array.from(sharedSelect.selectedOptions).map((o) => o.value);
-            }
-
-            if (!rule) {
-                statusEl.textContent = 'Explanation is required.';
-                statusEl.className = 'save-status err';
-                return;
-            }
-            if (!reviewerName) {
-                statusEl.textContent = 'Reviewer name is required.';
-                statusEl.className = 'save-status err';
-                return;
-            }
-
-            statusEl.textContent = 'Saving...';
-            statusEl.className = 'save-status';
-
-            try {
-                const response = await fetch('/api/learning/correction-rules', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        submission_id: submissionContext.submissionId,
-                        correction_id: dish.correction_id,
-                        original_text: dish.before_line,
-                        corrected_text: dish.after_line,
-                        change_type: changeType || null,
-                        rule,
-                        applies_to_menu_type: menuScope,
-                        is_location_specific: isLocationSpecific,
-                        project_name: submissionContext.projectName,
-                        restaurant_name: submissionContext.restaurantName,
-                        location,
-                        other_applicable_locations: otherLocations,
-                        reviewer_name: reviewerName,
-                    })
-                });
-                const data = await response.json();
-                if (!response.ok) {
-                    throw new Error(data.error || 'Failed to save explanation');
-                }
-                statusEl.textContent = 'Saved.';
-                statusEl.className = 'save-status ok';
-                setTimeout(() => window.location.reload(), 600);
-            } catch (error) {
-                statusEl.textContent = error.message || 'Save failed.';
-                statusEl.className = 'save-status err';
-            }
-        }
-
-        document.querySelectorAll('.save-rule-btn').forEach((button) => {
-            const idx = Number(button.getAttribute('data-dish-index'));
-            button.addEventListener('click', () => saveDishRule(idx));
-        });
+        MenuLearningSubmission.createLearningSubmissionController({
+            document,
+            storage: window.localStorage,
+            fetch: window.fetch.bind(window),
+            dishCorrections,
+            submissionContext,
+            savedCorrectionIds,
+        }).init();
     </script>
 </body>
 </html>

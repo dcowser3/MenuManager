@@ -60,6 +60,7 @@ The differ skips learning for quick approvals, imports/backfills, AI-only change
   - full original line
   - full corrected line
   - token-level delta summary
+- Browser approval waits for the differ comparison before completing, so the first redirect to this page does not race the creation of its correction details. The detail route also retries briefly and renders the submission page instead of a generic error when comparison data is temporarily unavailable.
 
 ### Reviewer annotation capture
 
@@ -69,6 +70,8 @@ The differ skips learning for quick approvals, imports/backfills, AI-only change
   - menu scope (`all`, `food`, or `beverage`)
   - global scope, or a primary location when the rule is marked location-specific
   - additional configured locations that should share the same location-specific rule
+- Reviewer attribution is entered once in the page-level **Save All Explanations** area. Reviewers can fill any number of explanations and submit all completed entries together; individual save buttons use the same shared reviewer name.
+- Unfinished explanation fields and scope selections are saved as a browser-local draft. Successful saves do not reload the page, and failed, incomplete, or not-yet-submitted explanations remain intact across refreshes.
 - Data is saved as reviewer correction-rule annotations. Accepted exact spelling, diacritic, grammar, and punctuation rules can be applied by the Basic AI Check deterministic pre-AI pass when the rule scope matches the submitted property/template type and the before/after text is not context-dependent. Broad freeform rules and context-dependent terminology notes stay as manual guidance/prompt material.
 - The learning submission page stores correction context in page-level script data and has `Save Explanation` buttons reference corrections by index, so quoted dish text cannot break the button markup.
 

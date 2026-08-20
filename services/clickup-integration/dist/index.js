@@ -1042,6 +1042,7 @@ async function finalizeApprovedSubmission(input) {
     let extractedCleanHtml = '';
     let clickupMarketingAssigneesUpdated = false;
     let marketingAssigneeCount = 0;
+    let learningComparisonReady = false;
     try {
         const extracted = await extractApprovedMenuContent(input.approvedPath);
         extractedRaw = extracted.raw;
@@ -1223,7 +1224,7 @@ async function finalizeApprovedSubmission(input) {
         });
     });
     const originalHtml = submission.raw_payload?.form_payload?.menuContentHtml || submission.menu_content_html;
-    internalApi.post(`${DIFFER_SERVICE_URL}/compare`, {
+    const learningComparison = internalApi.post(`${DIFFER_SERVICE_URL}/compare`, {
         ai_draft_path: submission.ai_draft_path,
         final_path: input.approvedPath,
         original_path: submission.original_path,
@@ -1233,7 +1234,20 @@ async function finalizeApprovedSubmission(input) {
         review_source: input.approvedAssetSource || 'isabella_clickup',
         review_completed_at: new Date().toISOString(),
         changed_by_human: true,
-    }).catch((err) => console.error('Failed to trigger differ comparison:', err.message));
+    });
+    if (input.waitForLearningComparison) {
+        try {
+            await learningComparison;
+            learningComparisonReady = true;
+        }
+        catch (err) {
+            warnings.push('The correction explanations are still being prepared.');
+            console.error('Failed to complete differ comparison before browser redirect:', err.message);
+        }
+    }
+    else {
+        learningComparison.catch((err) => console.error('Failed to trigger differ comparison:', err.message));
+    }
     try {
         await extractApprovedDishesForSubmission({
             submissionId: submission.id,
@@ -1264,6 +1278,7 @@ async function finalizeApprovedSubmission(input) {
         clickupStatusUpdated: !!clickupTaskId && shouldUpdateClickupStatus && !warnings.some((warning) => warning.startsWith('ClickUp status update failed')),
         clickupMarketingAssigneesUpdated,
         marketingAssigneeCount,
+        learningComparisonReady,
         warnings,
     };
 }
@@ -1599,6 +1614,7 @@ app.post('/approval/finalize', async (req, res) => {
             approvedAssetSource: 'browser_approval_editor',
             shouldUpdateClickupStatus: canUpdateClickupTask && attachmentUploaded,
             shouldRouteClickupToMarketing: canUpdateClickupTask && attachmentUploaded,
+            waitForLearningComparison: true,
             skipClickupMarketingReason: canUpdateClickupTask && !attachmentUploaded
                 ? 'Skipped Marketing assignee update because the approved DOCX was not uploaded to the task.'
                 : undefined,
@@ -1611,6 +1627,7 @@ app.post('/approval/finalize', async (req, res) => {
             attachmentUploaded,
             clickupMarketingAssigneesUpdated: result.clickupMarketingAssigneesUpdated,
             marketingAssigneeCount: result.marketingAssigneeCount,
+            learningComparisonReady: result.learningComparisonReady,
             clickupStatusUpdated: result.clickupStatusUpdated,
             warning: warnings.length ? warnings.join(' | ') : undefined,
         });

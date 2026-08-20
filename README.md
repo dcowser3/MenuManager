@@ -76,6 +76,8 @@ The app is white-labelable: all business-specific values (branding, emails, alle
 
 The `/learning` dashboard separates auto-scanned detected patterns from active Pre-AI rules: detected patterns are candidate evidence for reviewer annotation, while only accepted safe exact replacement rules in the Active Pre-AI section can change submitted menu text. Pending Rules shows only unconsumed corrections still awaiting direct review; corrections already consumed by an approved prompt proposal are represented by the generated accepted rules instead. The improvement loop emails when a proposal is ready and sends a reminder when a daily run is blocked by an older pending proposal. Detected patterns and the accepted-rule audit log also show the implementation lane and what the code does next time, or why the note remains guidance only.
 
+After a browser approval, the reviewer is taken directly to its correction-explanations page once comparison details are ready. That page supports one reviewer name plus **Save All Explanations**, keeps unfinished entries as browser-local drafts, and does not erase other explanations after an individual save or validation error.
+
 ## Quick Start
 
 Prerequisites:

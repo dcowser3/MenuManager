@@ -52,7 +52,11 @@ describe('learning-submission view', () => {
         expect(html).toContain('Limit to specific property?');
         expect(html).toContain('Saved Correction Explanations For This Submission');
         expect(html).toContain('No saved explanations yet.');
-        expect(html).toContain('Explanation is required.');
+        expect(html).toContain('Save All Explanations');
+        expect(html).toContain('id="bulk-reviewer-name"');
+        expect(html).toContain('Drafts are kept in this browser');
+        expect(html).not.toContain('id="reviewer-0"');
+        expect(html).not.toContain('window.location.reload()');
         expect(html).not.toContain('Write the actionable rule this correction represents');
         expect(html).not.toContain('Does this rule apply to specific properties?');
         expect(html).not.toContain('<th>Restaurant</th>');
@@ -69,6 +73,6 @@ describe('learning-submission view', () => {
         expect(html).toContain('id="menu-scope-0"');
         expect(html).toContain('<option value="food">Food menus only</option>');
         expect(html).toContain('<option value="beverage">Beverage menus only</option>');
-        expect(html).toContain('applies_to_menu_type: menuScope');
+        expect(html).toContain('/js/learning-submission.js');
     });
 });

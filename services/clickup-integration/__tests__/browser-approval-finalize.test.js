@@ -541,6 +541,47 @@ describe('browser approval finalize route', () => {
         expect(compareCall[1].final_path).not.toBe('/tmp/documents/sub_uploaded_baseline_1/baseline/legacy-approved.docx');
     });
 
+    test('waits for correction details before completing browser approval', async () => {
+        let releaseComparison;
+        let comparisonStarted;
+        const started = new Promise((resolve) => { comparisonStarted = resolve; });
+        const pendingComparison = new Promise((resolve) => { releaseComparison = resolve; });
+        axios.post.mockImplementation(async (url) => {
+            const urlStr = String(url);
+            if (urlStr.includes('login.microsoftonline.com')) {
+                return { data: { access_token: 'graph-token', expires_in: 3600 } };
+            }
+            if (urlStr.includes('/attachment')) {
+                return { data: { id: 'att_456' } };
+            }
+            if (urlStr.includes('http://localhost:3006/compare')) {
+                comparisonStarted();
+                return pendingComparison;
+            }
+            return { data: {} };
+        });
+
+        let completed = false;
+        const request = invokeJsonHandler(finalizeHandler, {
+            body: {
+                submissionId: 'sub_approval_1',
+                approvedPath: '/tmp/documents/sub_approval_1-approved.docx',
+                approvedFileName: 'Spring Menu.docx',
+            },
+        }).then((response) => {
+            completed = true;
+            return response;
+        });
+
+        await started;
+        expect(completed).toBe(false);
+
+        releaseComparison({ data: { success: true, training_data_saved: true } });
+        const response = await request;
+        expect(response.status).toBe(200);
+        expect(response.body.learningComparisonReady).toBe(true);
+    });
+
     test('still moves the task to to do when Marketing assignment fails', async () => {
         axios.put.mockImplementation(async (_url, payload) => {
             if (payload?.assignees) {

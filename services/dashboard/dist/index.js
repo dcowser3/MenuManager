@@ -2023,7 +2023,7 @@ app.get('/learning', async (_req, res) => {
 app.get('/learning/submission/:submissionId', async (req, res) => {
     try {
         const { submissionId } = req.params;
-        const [learningDetailResult, submissionResult, correctionRulesResult, propertiesResult] = await Promise.all([
+        let [learningDetailResult, submissionResult, correctionRulesResult, propertiesResult] = await Promise.all([
             internalApi.get(`${DIFFER_SERVICE_URL}/learning/submissions/${encodeURIComponent(submissionId)}`, { timeout: 3500 })
                 .then((r) => ({ ok: true, data: r.data, error: '' }))
                 .catch((e) => ({ ok: false, data: null, error: e?.message || 'request failed' })),
@@ -2037,10 +2037,27 @@ app.get('/learning/submission/:submissionId', async (req, res) => {
                 .then((r) => ({ ok: true, data: r.data, error: '' }))
                 .catch((e) => ({ ok: false, data: { properties: [] }, error: e?.message || 'request failed' })),
         ]);
-        if (!learningDetailResult.ok || !learningDetailResult.data) {
+        // Browser approval finalization creates the differ comparison just before sending
+        // the reviewer here. A slow filesystem write used to make this first GET lose a
+        // race and render a 404; refreshing worked because the comparison had completed.
+        // Briefly retry the read so the first navigation is the useful explanations page.
+        if (!learningDetailResult.ok && submissionResult.ok) {
+            for (let attempt = 0; attempt < 4 && !learningDetailResult.ok; attempt++) {
+                await new Promise((resolve) => setTimeout(resolve, 250));
+                learningDetailResult = await internalApi
+                    .get(`${DIFFER_SERVICE_URL}/learning/submissions/${encodeURIComponent(submissionId)}`, { timeout: 3500 })
+                    .then((r) => ({ ok: true, data: r.data, error: '' }))
+                    .catch((e) => ({ ok: false, data: null, error: e?.message || 'request failed' }));
+            }
+        }
+        if (!submissionResult.ok || !submissionResult.data) {
             return res.status(404).render('error', { message: 'Learning details not found for this submission' });
         }
-        const learningDetail = learningDetailResult.data;
+        const learningDetail = learningDetailResult.data || {
+            timestamp: submissionResult.data?.reviewed_at || null,
+            dish_correction_count: 0,
+            dish_corrections: [],
+        };
         const submissionMeta = submissionResult.data || {};
         const savedCorrectionRules = correctionRulesResult.data || [];
         const locationOptions = propertiesResult.data?.properties || [];
@@ -2051,6 +2068,7 @@ app.get('/learning/submission/:submissionId', async (req, res) => {
             submissionMeta,
             savedCorrectionRules,
             locationOptions,
+            learningUnavailable: !learningDetailResult.ok,
         });
     }
     catch (error) {
