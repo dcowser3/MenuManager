@@ -18,6 +18,7 @@
  * Usage (from repo root, .env with SUPABASE_* must be present):
  *   node scripts/commit-runtime-prompt.js               # dry run — shows drift, writes nothing
  *   node scripts/commit-runtime-prompt.js --apply        # insert the approved row
+ *   node scripts/commit-runtime-prompt.js --apply --expected-db-sha256 <full-sha256>
  *   node scripts/commit-runtime-prompt.js --apply --reviewer "Derian" --note "re-apply allergen rules"
  *   node scripts/commit-runtime-prompt.js --file path/to/qa_prompt.txt --apply
  *
@@ -46,6 +47,7 @@ function parseArgs(argv) {
         file: path.join(repoRoot, 'sop-processor', 'qa_prompt.txt'),
         reviewer: 'manual reconcile (commit-runtime-prompt.js)',
         note: null,
+        expectedDbSha256: null,
     };
     for (let i = 2; i < argv.length; i += 1) {
         const arg = argv[i];
@@ -54,6 +56,7 @@ function parseArgs(argv) {
         else if (arg === '--file') args.file = path.resolve(argv[++i] || args.file);
         else if (arg === '--reviewer') args.reviewer = `${argv[++i] || args.reviewer}`;
         else if (arg === '--note') args.note = `${argv[++i] || ''}`;
+        else if (arg === '--expected-db-sha256') args.expectedDbSha256 = `${argv[++i] || ''}`.trim().toLowerCase();
         else if (arg === '--help' || arg === '-h') args.help = true;
         else console.warn(`Ignoring unknown argument: ${arg}`);
     }
@@ -68,6 +71,23 @@ function getSupabase() {
 
 function sha(text) {
     return crypto.createHash('sha256').update(text, 'utf8').digest('hex');
+}
+
+function assessPromptReconciliation(runtimeHash, dbHash, expectedDbSha256) {
+    const runtime = `${runtimeHash || ''}`.trim().toLowerCase();
+    const current = `${dbHash || ''}`.trim().toLowerCase();
+    const expected = `${expectedDbSha256 || ''}`.trim().toLowerCase();
+    if (runtime && current && runtime === current) return { status: 'in_sync' };
+    if (expected && !/^[a-f0-9]{64}$/.test(expected)) {
+        return { status: 'blocked', reason: '--expected-db-sha256 must be a full 64-character SHA-256 hash' };
+    }
+    if (expected && current !== expected) {
+        return {
+            status: 'blocked',
+            reason: `DB latest approved hash ${current || '(none)'} does not match expected ${expected}`,
+        };
+    }
+    return { status: 'ready' };
 }
 
 // Mirror pickEffectivePrompt() in services/dashboard/lib/improvement-cycle-core.ts:
@@ -112,11 +132,12 @@ async function main() {
 
     const effective = pickEffective(rows);
     const runtimeHash = sha(runtimePrompt);
+    const dbHash = effective ? sha(effective.prompt) : '';
+    const assessment = assessPromptReconciliation(runtimeHash, dbHash, args.expectedDbSha256);
 
     console.log(`Runtime file:       ${args.file}`);
     console.log(`Runtime length:     ${runtimePrompt.length} chars  (sha256 ${runtimeHash.slice(0, 12)})`);
     if (effective) {
-        const dbHash = sha(effective.prompt);
         console.log(`DB latest approved: proposal ${effective.row.id} (cycle ${effective.row.cycle_id || 'n/a'}, ${effective.row.status}, reviewed ${effective.row.reviewed_at || 'n/a'})`);
         console.log(`DB latest length:   ${effective.prompt.length} chars  (sha256 ${dbHash.slice(0, 12)})`);
         if (dbHash === runtimeHash) {
@@ -127,6 +148,10 @@ async function main() {
     } else {
         console.log('DB latest approved: (none found — no approved proposal exists yet)');
         console.log('\n⚠️  No approved proposal exists; a restart would not restore from DB, but committing the current runtime file makes it the durable source of truth going forward.');
+    }
+
+    if (assessment.status === 'blocked') {
+        throw new Error(`Safe prompt reconciliation blocked: ${assessment.reason}. No changes were written.`);
     }
 
     if (!args.apply) {
@@ -180,7 +205,16 @@ async function main() {
     console.log('   Verify: restart the stack, then re-run this script — it should report "In sync".');
 }
 
-main().catch((err) => {
-    console.error(`\n❌ ${err.message || err}`);
-    process.exit(1);
-});
+if (require.main === module) {
+    main().catch((err) => {
+        console.error(`\n❌ ${err.message || err}`);
+        process.exit(1);
+    });
+}
+
+module.exports = {
+    assessPromptReconciliation,
+    parseArgs,
+    pickEffective,
+    sha,
+};

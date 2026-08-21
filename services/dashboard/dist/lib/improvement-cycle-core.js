@@ -9,6 +9,8 @@ exports.pickCadenceAnchor = pickCadenceAnchor;
 exports.shouldDeferForCadence = shouldDeferForCadence;
 exports.isTransientOpenAiFailure = isTransientOpenAiFailure;
 exports.assembleSupersedeCorrectionSet = assembleSupersedeCorrectionSet;
+exports.partitionCorrectionIdsByReplayStatus = partitionCorrectionIdsByReplayStatus;
+exports.replayResolutionMarker = replayResolutionMarker;
 exports.buildReplayUnavailableForCorrections = buildReplayUnavailableForCorrections;
 exports.supersededProposalReviewBlock = supersededProposalReviewBlock;
 exports.promptProposalApprovalBlock = promptProposalApprovalBlock;
@@ -34,11 +36,13 @@ exports.countFencedCodeDelimiters = countFencedCodeDelimiters;
 exports.buildFencePreservationNote = buildFencePreservationNote;
 exports.buildGuardRetryMessage = buildGuardRetryMessage;
 exports.runImprovementProposalWithRetry = runImprovementProposalWithRetry;
+exports.fullLineCorrectionApplied = fullLineCorrectionApplied;
 exports.decideReplayStatus = decideReplayStatus;
 exports.classifyTriggerFromComparisonEntry = classifyTriggerFromComparisonEntry;
 exports.resolveTriggerEvalCaseId = resolveTriggerEvalCaseId;
 exports.summarizeEvalReport = summarizeEvalReport;
 exports.buildProposalEvalSummary = buildProposalEvalSummary;
+exports.buildRegressionAttribution = buildRegressionAttribution;
 exports.evalStatusFromSummary = evalStatusFromSummary;
 exports.computeDisposition = computeDisposition;
 exports.describeDisposition = describeDisposition;
@@ -54,6 +58,7 @@ exports.buildImprovementSystemPrompt = buildImprovementSystemPrompt;
 exports.buildConsolidationSystemPrompt = buildConsolidationSystemPrompt;
 const tenant_config_1 = require("@menumanager/tenant-config");
 const llm_adapter_1 = require("@menumanager/llm-adapter");
+const diff_core_1 = require("@menumanager/diff-core");
 const review_response_contract_1 = require("./review-response-contract");
 function shouldRunCycle(input) {
     const min = Math.max(1, input.minNewCorrections);
@@ -183,6 +188,22 @@ function assembleSupersedeCorrectionSet(unconsumed, carriedOver) {
     const carriedIds = new Set(carried.map((r) => r.id));
     const newCount = combined.filter((r) => !carriedIds.has(r.id)).length;
     return { combined, carriedCount: carried.length, newCount };
+}
+function partitionCorrectionIdsByReplayStatus(correctionIds, replayEvidence) {
+    const nowCorrect = new Set((replayEvidence || [])
+        .filter((entry) => entry?.status === 'now_correct' && entry.correction_id)
+        .map((entry) => `${entry.correction_id}`));
+    const resolvedIds = [];
+    const proposalIds = [];
+    for (const id of correctionIds || []) {
+        if (!id)
+            continue;
+        (nowCorrect.has(`${id}`) ? resolvedIds : proposalIds).push(`${id}`);
+    }
+    return { resolvedIds, proposalIds };
+}
+function replayResolutionMarker(cycleId) {
+    return `resolved-by-current-pipeline:${`${cycleId || 'unknown'}`.trim() || 'unknown'}`;
 }
 /** When replay cannot run (missing differ lib, etc.), tag every correction replay_unavailable. */
 function buildReplayUnavailableForCorrections(corrections, reason) {
@@ -1384,6 +1405,65 @@ async function runImprovementProposalWithRetry(params) {
     const last = attempts[attempts.length - 1];
     return { validated: last.validated, model: lastModel, usage: lastUsage, attempts, guardRetriesExhausted: !!last?.guardDiscarded, discardedPrompts };
 }
+function normalizeReplayLine(value) {
+    return `${value || ''}`.normalize('NFC').replace(/\s+/g, ' ').trim();
+}
+function normalizedChangedTokens(before, after, type) {
+    return (0, diff_core_1.buildTokenEdits)((0, diff_core_1.tokenizeDiffText)(before), (0, diff_core_1.tokenizeDiffText)(after))
+        .filter((edit) => edit.type === type)
+        .flatMap((edit) => edit.tokens)
+        .filter((token) => token.type !== 'whitespace')
+        .map((token) => token.normalized);
+}
+function multisetContains(actual, expected) {
+    const counts = new Map();
+    for (const token of actual)
+        counts.set(token, (counts.get(token) || 0) + 1);
+    for (const token of expected) {
+        const count = counts.get(token) || 0;
+        if (!count)
+            return false;
+        counts.set(token, count - 1);
+    }
+    return true;
+}
+function replayLineContextOverlap(original, corrected, replayLine) {
+    const normWord = (word) => word.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+    const expectedWords = new Set([...(0, diff_core_1.tokenizeWords)(original), ...(0, diff_core_1.tokenizeWords)(corrected)].map(normWord));
+    const replayWords = (0, diff_core_1.tokenizeWords)(replayLine).map(normWord);
+    if (!expectedWords.size || !replayWords.length)
+        return 0;
+    const overlap = replayWords.filter((word) => expectedWords.has(word)).length;
+    return overlap / Math.max(expectedWords.size, replayWords.length);
+}
+/**
+ * Verify a reviewer correction stored as a complete line against replay output.
+ * The learning signal extractor emits atomic token changes, so comparing those
+ * signals directly with a full before/after line creates false still_missed tags.
+ * This comparison instead verifies the complete expected token delta on the
+ * matching replay line while allowing unrelated deterministic edits on that line.
+ */
+function fullLineCorrectionApplied(originalText, correctedText, replayOutput) {
+    const original = normalizeReplayLine(originalText);
+    const corrected = normalizeReplayLine(correctedText);
+    if (!original || !corrected || !replayOutput)
+        return false;
+    const replayLines = `${replayOutput || ''}`.split('\n').map(normalizeReplayLine).filter(Boolean);
+    if (replayLines.includes(corrected))
+        return true;
+    const expectedDeleted = normalizedChangedTokens(original, corrected, 'delete');
+    const expectedInserted = normalizedChangedTokens(original, corrected, 'insert');
+    if (!expectedDeleted.length && !expectedInserted.length)
+        return false;
+    return replayLines.some((line) => {
+        if (replayLineContextOverlap(original, corrected, line) < 0.5)
+            return false;
+        const actualDeleted = normalizedChangedTokens(original, line, 'delete');
+        const actualInserted = normalizedChangedTokens(original, line, 'insert');
+        return multisetContains(actualDeleted, expectedDeleted)
+            && multisetContains(actualInserted, expectedInserted);
+    });
+}
 /**
  * Pure decision for replay tag of one correction.
  * Follow-up 2: freeform (no original/corrected pair) -> not_verifiable so it never
@@ -1396,7 +1476,14 @@ function decideReplayStatus(originalText, correctedText, replayOutput, signals) 
         return 'not_verifiable';
     if (!replayOutput)
         return 'replay_unavailable';
-    const norm = (x) => `${x || ''}`.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+    const lineLevel = Math.max((0, diff_core_1.tokenizeWords)(o).length, (0, diff_core_1.tokenizeWords)(c).length) > 2
+        || /[,\n]/u.test(o)
+        || /[,\n]/u.test(c);
+    if (lineLevel && fullLineCorrectionApplied(o, c, replayOutput))
+        return 'now_correct';
+    // Atomic correction rows still use the learning signal list. Preserve
+    // diacritics here: accent-only fixes must not collapse to equal strings.
+    const norm = (x) => `${x || ''}`.normalize('NFC').replace(/[’'`]/g, "'").toLowerCase().trim();
     const wantFrom = norm(o);
     const wantTo = norm(c);
     const hit = signals.some((sg) => {
@@ -1456,6 +1543,58 @@ function buildProposalEvalSummary(baseline, candidate, candidateReport) {
             label: entry.label,
             delta: entry.delta,
         })),
+    };
+}
+function confirmedRegressionMap(report) {
+    const map = new Map();
+    for (const entry of report?.baselineComparison?.regressions || []) {
+        if (!entry?.case_id)
+            continue;
+        const raw = entry.confirmed_delta ?? entry.freshDelta ?? entry.delta;
+        map.set(`${entry.case_id}`, Number.isFinite(Number(raw)) ? Number(raw) : null);
+    }
+    return map;
+}
+/**
+ * Attribute a combined candidate regression by replaying only the confirmed
+ * regression cases with prompt-only and rules-only variants. When just one
+ * surface changed, attribution is inferred without additional eval calls.
+ */
+function buildRegressionAttribution(regressions, opts) {
+    const promptMap = confirmedRegressionMap(opts.promptOnlyReport);
+    const rulesMap = confirmedRegressionMap(opts.rulesOnlyReport);
+    const bothChanged = opts.promptChanged && opts.ruleCount > 0;
+    const status = opts.error
+        ? 'failed'
+        : (bothChanged ? 'completed' : 'inferred');
+    const cases = (regressions || []).map((regression) => {
+        const promptRegressed = bothChanged ? promptMap.has(regression.case_id) : opts.promptChanged;
+        const rulesRegressed = bothChanged ? rulesMap.has(regression.case_id) : opts.ruleCount > 0;
+        let cause;
+        if (promptRegressed && rulesRegressed)
+            cause = 'both';
+        else if (promptRegressed)
+            cause = 'prompt';
+        else if (rulesRegressed)
+            cause = 'rules';
+        else
+            cause = 'interaction_or_unstable';
+        return {
+            case_id: regression.case_id,
+            label: regression.label,
+            cause,
+            prompt_only_delta: promptMap.get(regression.case_id) ?? null,
+            rules_only_delta: rulesMap.get(regression.case_id) ?? null,
+        };
+    });
+    return {
+        status,
+        promptChanged: opts.promptChanged,
+        ruleCount: opts.ruleCount,
+        promptOnlyRegressions: promptMap.size,
+        rulesOnlyRegressions: rulesMap.size,
+        cases,
+        ...(opts.error ? { error: opts.error } : {}),
     };
 }
 function evalStatusFromSummary(summary, opts = {}) {

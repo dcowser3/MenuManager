@@ -1312,6 +1312,62 @@ async function main() {
                     } catch (trigErr) {
                         console.warn(`Trigger progression extraction failed: ${trigErr.message}`);
                     }
+
+                    // When a combined prompt+rules candidate regresses, replay
+                    // only the confirmed regression cases through prompt-only
+                    // and rules-only arms. This makes the proposal actionable
+                    // without paying for two additional full 194-case runs.
+                    if (evalSummary.regressed > 0) {
+                        const promptChanged = !validated.promptUnchanged;
+                        const ruleCount = validated.proposed_replacement_rules.length;
+                        const regressionCaseArgs = (evalSummary.regressions || [])
+                            .filter((entry) => entry && entry.case_id)
+                            .flatMap((entry) => ['--case', entry.case_id]);
+                        const attributionDisabled = /^(0|false|no|off)$/i.test(process.env.IMPROVE_REGRESSION_ATTRIBUTION || '');
+
+                        if (promptChanged && ruleCount > 0 && regressionCaseArgs.length && !attributionDisabled) {
+                            console.log(`Attributing ${evalSummary.regressions.length} confirmed regression(s): prompt-only vs rules-only...`);
+                            const promptOnlyRun = runEvalHarness([
+                                '--prompt', candidatePromptPath, '--rules', 'live',
+                                '--baseline', baselineRun.reportPath,
+                                '--baseline-prompt', currentPromptPath, '--baseline-rules', 'live',
+                                '--label', `improve-${cycleId}-attribution-prompt`,
+                                ...regressionCaseArgs,
+                            ]);
+                            const rulesOnlyRun = runEvalHarness([
+                                '--prompt', currentPromptPath, '--rules', `candidate:${candidateRulesPath}`,
+                                '--baseline', baselineRun.reportPath,
+                                '--baseline-prompt', currentPromptPath, '--baseline-rules', 'live',
+                                '--label', `improve-${cycleId}-attribution-rules`,
+                                ...regressionCaseArgs,
+                            ]);
+                            const attributionErrors = [];
+                            if (!promptOnlyRun.ok || !promptOnlyRun.reportPath) attributionErrors.push(`prompt-only eval failed: ${(promptOnlyRun.stderr || promptOnlyRun.stdout).slice(-240)}`);
+                            if (!rulesOnlyRun.ok || !rulesOnlyRun.reportPath) attributionErrors.push(`rules-only eval failed: ${(rulesOnlyRun.stderr || rulesOnlyRun.stdout).slice(-240)}`);
+                            const promptOnlyReport = promptOnlyRun.ok && promptOnlyRun.reportPath
+                                ? JSON.parse(fs.readFileSync(promptOnlyRun.reportPath, 'utf8'))
+                                : null;
+                            const rulesOnlyReport = rulesOnlyRun.ok && rulesOnlyRun.reportPath
+                                ? JSON.parse(fs.readFileSync(rulesOnlyRun.reportPath, 'utf8'))
+                                : null;
+                            evalSummary.regression_attribution = core.buildRegressionAttribution(evalSummary.regressions, {
+                                promptChanged,
+                                ruleCount,
+                                promptOnlyReport,
+                                rulesOnlyReport,
+                                error: attributionErrors.length ? attributionErrors.join(' | ') : undefined,
+                            });
+                            console.log(`Regression attribution: prompt-only ${evalSummary.regression_attribution.promptOnlyRegressions}, rules-only ${evalSummary.regression_attribution.rulesOnlyRegressions}.`);
+                        } else {
+                            evalSummary.regression_attribution = core.buildRegressionAttribution(evalSummary.regressions, {
+                                promptChanged,
+                                ruleCount,
+                                error: attributionDisabled && promptChanged && ruleCount > 0
+                                    ? 'disabled by IMPROVE_REGRESSION_ATTRIBUTION'
+                                    : undefined,
+                            });
+                        }
+                    }
                 }
             }
             console.log(`Eval status: ${evalStatus}${evalSummary?.error ? ` (${evalSummary.error.slice(0, 160)})` : ''}`);
@@ -1396,14 +1452,31 @@ async function main() {
             }
         }
 
-        // 10. Mark corrections consumed.
+        // 10. Mark corrections consumed. Corrections that the replay proved the
+        // current pipeline now produces are retired under a durable resolution
+        // marker instead of the proposal cycle id. A later rejection only
+        // un-consumes rows stamped to this proposal, so already-fixed evidence
+        // does not recycle into every subsequent proposal.
         const ruleIds = correctionRules.map((r) => r.id).filter(Boolean);
-        if (ruleIds.length) {
+        const replayPartitions = core.partitionCorrectionIdsByReplayStatus(ruleIds, replayEvidence);
+        if (replayPartitions.proposalIds.length) {
             const { error: consumeError } = await supabase
                 .from('correction_rules')
                 .update({ prompt_cycle_id: cycleId, consumed_at: new Date().toISOString() })
-                .in('id', ruleIds);
+                .in('id', replayPartitions.proposalIds);
             if (consumeError) console.warn(`Failed to mark corrections consumed: ${consumeError.message}`);
+        }
+        if (replayPartitions.resolvedIds.length) {
+            const resolutionMarker = core.replayResolutionMarker(cycleId);
+            const { error: resolveError } = await supabase
+                .from('correction_rules')
+                .update({ prompt_cycle_id: resolutionMarker, consumed_at: new Date().toISOString() })
+                .in('id', replayPartitions.resolvedIds);
+            if (resolveError) {
+                console.warn(`Failed to retire replay-resolved corrections: ${resolveError.message}`);
+            } else {
+                console.log(`Replay resolution: retired ${replayPartitions.resolvedIds.length} correction(s) already produced by the current pipeline (${resolutionMarker}).`);
+            }
         }
 
         // 11. Artifacts + notification.

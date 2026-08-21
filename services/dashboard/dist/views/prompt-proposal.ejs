@@ -225,7 +225,7 @@
                 <div class="card" style="border-color:var(--danger); background:#fff5f5;">
                     <strong style="color:var(--danger)">Approval blocked</strong>
                     <div style="margin-top:.3rem;"><%= proposalApprovalBlock.error %></div>
-                    <div class="small" style="margin-top:.25rem;">You can reject this proposal so its source corrections return to the next improvement cycle.</div>
+                    <div class="small" style="margin-top:.25rem;">You can reject this proposal so unresolved source corrections return to the next improvement cycle. Corrections replay already proves are fixed stay retired.</div>
                 </div>
             <% } %>
 
@@ -415,7 +415,7 @@
                         <% } else if (trigs.length) { %>
                             <div class="small" style="margin: .4rem 0 .2rem">Trigger cases (submissions whose corrections motivated this proposal — a "passed" verdict requires at least one improved). Rows that couldn't be scored are hidden:</div>
                             <table>
-                                <thead><tr><th>Case / Submission</th><th>Baseline</th><th>Candidate</th><th>Delta</th><th>Status</th></tr></thead>
+                                <thead><tr><th>Case / Submission</th><th>Baseline</th><th>Candidate</th><th>Confirmed Delta</th><th>Status</th></tr></thead>
                                 <tbody>
                                 <% trigScorable.forEach((t) => { %>
                                     <tr>
@@ -440,6 +440,32 @@
                                 <% }) %>
                                 </tbody>
                             </table>
+                            <% const attribution = evalSummary.regression_attribution; %>
+                            <% if (attribution) { %>
+                                <div class="small" style="margin:.7rem 0 .35rem">
+                                    Regression attribution:
+                                    <% if (attribution.status === 'failed') { %>
+                                        attribution could not complete (<%= attribution.error || 'unknown error' %>).
+                                    <% } else if (attribution.status === 'inferred') { %>
+                                        inferred because only <%= attribution.promptChanged ? 'the prompt' : 'replacement rules' %> changed.
+                                    <% } else { %>
+                                        confirmed regression cases replayed through prompt-only and rules-only variants.
+                                    <% } %>
+                                </div>
+                                <table>
+                                    <thead><tr><th>Case</th><th>Cause</th><th>Prompt-only Delta</th><th>Rules-only Delta</th></tr></thead>
+                                    <tbody>
+                                    <% (attribution.cases || []).forEach((entry) => { %>
+                                        <tr>
+                                            <td><%= entry.label %></td>
+                                            <td><%= ({ prompt: 'Prompt', rules: 'Replacement rules', both: 'Both independently', interaction_or_unstable: 'Interaction or unstable' })[entry.cause] || entry.cause %></td>
+                                            <td><%= entry.prompt_only_delta != null ? (entry.prompt_only_delta * 100).toFixed(3) + ' pp' : '—' %></td>
+                                            <td><%= entry.rules_only_delta != null ? (entry.rules_only_delta * 100).toFixed(3) + ' pp' : '—' %></td>
+                                        </tr>
+                                    <% }) %>
+                                    </tbody>
+                                </table>
+                            <% } %>
                         <% } %>
                     <% } %>
                 </div>

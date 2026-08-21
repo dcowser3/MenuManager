@@ -73,6 +73,8 @@ Related docs:
 - Reviewers can annotate learning examples and accepted correction rules on learning dashboards.
 - Accepted manual rules can be scoped globally, to food/beverage menus, or to a property.
 - The automated improvement loop can assemble new annotated corrections, propose prompt/rule changes, run evals, and wait for human approval before applying changes.
+- Replay checks verify complete reviewer edits even when corrections are stored as whole menu lines; corrections already produced by the current pipeline are retired instead of being recycled after a proposal rejection.
+- When a combined prompt-and-rules proposal regresses, the loop re-runs only the confirmed failing cases with prompt-only and rules-only variants so the review page identifies which surface caused each regression.
 - A prompt-changing proposal cannot be approved when evaluation confirms regressions, fails, is skipped, shows no effect, leaves replay misses unresolved, or cannot score any motivating submission.
 - When the daily improvement loop finds a pending proposal with **no** new unconsumed corrections, it emails a reminder for that pending proposal instead of silently skipping the day. When new corrections arrive, it supersedes the pending proposal with a fresh one that combines all evidence.
 - Deterministic rule or prompt-section changes should be followed by `npm run rules:manifest`.

@@ -4,6 +4,7 @@
 
 import { getTenantConfig } from '@menumanager/tenant-config';
 import { isReasoningModel as adapterIsReasoningModel } from '@menumanager/llm-adapter';
+import { buildTokenEdits, tokenizeDiffText, tokenizeWords } from '@menumanager/diff-core';
 import { AI_REVIEW_FENCES } from './review-response-contract';
 
 export type CycleGateInput = {
@@ -179,6 +180,28 @@ export type ReplayEvidenceEntry = {
     corrected_text?: string;
     status: 'still_missed' | 'now_correct' | 'replay_unavailable' | 'not_verifiable';
 };
+
+export function partitionCorrectionIdsByReplayStatus(
+    correctionIds: string[],
+    replayEvidence: ReplayEvidenceEntry[]
+): { resolvedIds: string[]; proposalIds: string[] } {
+    const nowCorrect = new Set(
+        (replayEvidence || [])
+            .filter((entry) => entry?.status === 'now_correct' && entry.correction_id)
+            .map((entry) => `${entry.correction_id}`)
+    );
+    const resolvedIds: string[] = [];
+    const proposalIds: string[] = [];
+    for (const id of correctionIds || []) {
+        if (!id) continue;
+        (nowCorrect.has(`${id}`) ? resolvedIds : proposalIds).push(`${id}`);
+    }
+    return { resolvedIds, proposalIds };
+}
+
+export function replayResolutionMarker(cycleId: string): string {
+    return `resolved-by-current-pipeline:${`${cycleId || 'unknown'}`.trim() || 'unknown'}`;
+}
 
 /** When replay cannot run (missing differ lib, etc.), tag every correction replay_unavailable. */
 export function buildReplayUnavailableForCorrections(
@@ -1659,6 +1682,25 @@ export type ProposalEvalSummary = {
     triggers_unchanged?: number;
     triggers_regressed?: number;
     triggers_unavailable?: number;
+    regression_attribution?: RegressionAttribution;
+};
+
+export type RegressionAttributionCause = 'prompt' | 'rules' | 'both' | 'interaction_or_unstable';
+
+export type RegressionAttribution = {
+    status: 'completed' | 'inferred' | 'failed';
+    promptChanged: boolean;
+    ruleCount: number;
+    promptOnlyRegressions: number;
+    rulesOnlyRegressions: number;
+    cases: Array<{
+        case_id: string;
+        label: string;
+        cause: RegressionAttributionCause;
+        prompt_only_delta: number | null;
+        rules_only_delta: number | null;
+    }>;
+    error?: string;
 };
 
 export type TriggerEval = {
@@ -1669,6 +1711,70 @@ export type TriggerEval = {
     delta: number | null;
     status: 'improved' | 'regressed' | 'unchanged' | 'unavailable';
 };
+
+function normalizeReplayLine(value: string): string {
+    return `${value || ''}`.normalize('NFC').replace(/\s+/g, ' ').trim();
+}
+
+function normalizedChangedTokens(before: string, after: string, type: 'delete' | 'insert'): string[] {
+    return buildTokenEdits(tokenizeDiffText(before), tokenizeDiffText(after))
+        .filter((edit) => edit.type === type)
+        .flatMap((edit) => edit.tokens)
+        .filter((token) => token.type !== 'whitespace')
+        .map((token) => token.normalized);
+}
+
+function multisetContains(actual: string[], expected: string[]): boolean {
+    const counts = new Map<string, number>();
+    for (const token of actual) counts.set(token, (counts.get(token) || 0) + 1);
+    for (const token of expected) {
+        const count = counts.get(token) || 0;
+        if (!count) return false;
+        counts.set(token, count - 1);
+    }
+    return true;
+}
+
+function replayLineContextOverlap(original: string, corrected: string, replayLine: string): number {
+    const normWord = (word: string) => word.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+    const expectedWords = new Set([...tokenizeWords(original), ...tokenizeWords(corrected)].map(normWord));
+    const replayWords = tokenizeWords(replayLine).map(normWord);
+    if (!expectedWords.size || !replayWords.length) return 0;
+    const overlap = replayWords.filter((word) => expectedWords.has(word)).length;
+    return overlap / Math.max(expectedWords.size, replayWords.length);
+}
+
+/**
+ * Verify a reviewer correction stored as a complete line against replay output.
+ * The learning signal extractor emits atomic token changes, so comparing those
+ * signals directly with a full before/after line creates false still_missed tags.
+ * This comparison instead verifies the complete expected token delta on the
+ * matching replay line while allowing unrelated deterministic edits on that line.
+ */
+export function fullLineCorrectionApplied(
+    originalText: string,
+    correctedText: string,
+    replayOutput: string
+): boolean {
+    const original = normalizeReplayLine(originalText);
+    const corrected = normalizeReplayLine(correctedText);
+    if (!original || !corrected || !replayOutput) return false;
+
+    const replayLines = `${replayOutput || ''}`.split('\n').map(normalizeReplayLine).filter(Boolean);
+    if (replayLines.includes(corrected)) return true;
+
+    const expectedDeleted = normalizedChangedTokens(original, corrected, 'delete');
+    const expectedInserted = normalizedChangedTokens(original, corrected, 'insert');
+    if (!expectedDeleted.length && !expectedInserted.length) return false;
+
+    return replayLines.some((line) => {
+        if (replayLineContextOverlap(original, corrected, line) < 0.5) return false;
+        const actualDeleted = normalizedChangedTokens(original, line, 'delete');
+        const actualInserted = normalizedChangedTokens(original, line, 'insert');
+        return multisetContains(actualDeleted, expectedDeleted)
+            && multisetContains(actualInserted, expectedInserted);
+    });
+}
 
 /**
  * Pure decision for replay tag of one correction.
@@ -1685,7 +1791,14 @@ export function decideReplayStatus(
     const c = `${correctedText || ''}`.trim();
     if (!o && !c) return 'not_verifiable';
     if (!replayOutput) return 'replay_unavailable';
-    const norm = (x: string) => `${x || ''}`.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+    const lineLevel = Math.max(tokenizeWords(o).length, tokenizeWords(c).length) > 2
+        || /[,\n]/u.test(o)
+        || /[,\n]/u.test(c);
+    if (lineLevel && fullLineCorrectionApplied(o, c, replayOutput)) return 'now_correct';
+
+    // Atomic correction rows still use the learning signal list. Preserve
+    // diacritics here: accent-only fixes must not collapse to equal strings.
+    const norm = (x: string) => `${x || ''}`.normalize('NFC').replace(/[’'`]/g, "'").toLowerCase().trim();
     const wantFrom = norm(o);
     const wantTo = norm(c);
     const hit = signals.some((sg) => {
@@ -1755,6 +1868,66 @@ export function buildProposalEvalSummary(
             label: entry.label,
             delta: entry.delta,
         })),
+    };
+}
+
+function confirmedRegressionMap(report: any): Map<string, number | null> {
+    const map = new Map<string, number | null>();
+    for (const entry of report?.baselineComparison?.regressions || []) {
+        if (!entry?.case_id) continue;
+        const raw = entry.confirmed_delta ?? entry.freshDelta ?? entry.delta;
+        map.set(`${entry.case_id}`, Number.isFinite(Number(raw)) ? Number(raw) : null);
+    }
+    return map;
+}
+
+/**
+ * Attribute a combined candidate regression by replaying only the confirmed
+ * regression cases with prompt-only and rules-only variants. When just one
+ * surface changed, attribution is inferred without additional eval calls.
+ */
+export function buildRegressionAttribution(
+    regressions: Array<{ case_id: string; label: string }>,
+    opts: {
+        promptChanged: boolean;
+        ruleCount: number;
+        promptOnlyReport?: any;
+        rulesOnlyReport?: any;
+        error?: string;
+    }
+): RegressionAttribution {
+    const promptMap = confirmedRegressionMap(opts.promptOnlyReport);
+    const rulesMap = confirmedRegressionMap(opts.rulesOnlyReport);
+    const bothChanged = opts.promptChanged && opts.ruleCount > 0;
+    const status: RegressionAttribution['status'] = opts.error
+        ? 'failed'
+        : (bothChanged ? 'completed' : 'inferred');
+
+    const cases = (regressions || []).map((regression) => {
+        const promptRegressed = bothChanged ? promptMap.has(regression.case_id) : opts.promptChanged;
+        const rulesRegressed = bothChanged ? rulesMap.has(regression.case_id) : opts.ruleCount > 0;
+        let cause: RegressionAttributionCause;
+        if (promptRegressed && rulesRegressed) cause = 'both';
+        else if (promptRegressed) cause = 'prompt';
+        else if (rulesRegressed) cause = 'rules';
+        else cause = 'interaction_or_unstable';
+        return {
+            case_id: regression.case_id,
+            label: regression.label,
+            cause,
+            prompt_only_delta: promptMap.get(regression.case_id) ?? null,
+            rules_only_delta: rulesMap.get(regression.case_id) ?? null,
+        };
+    });
+
+    return {
+        status,
+        promptChanged: opts.promptChanged,
+        ruleCount: opts.ruleCount,
+        promptOnlyRegressions: promptMap.size,
+        rulesOnlyRegressions: rulesMap.size,
+        cases,
+        ...(opts.error ? { error: opts.error } : {}),
     };
 }
 

@@ -598,6 +598,40 @@ describe('eval summary + status', () => {
         const identical = (0, improvement_cycle_core_1.buildProposalEvalSummary)(baseline, candidate, report(0.80, 0));
         expect((0, improvement_cycle_core_1.evalStatusFromSummary)(identical)).toBe('no_effect');
     });
+    test('attributes combined-candidate regressions to prompt, rules, both, or interaction', () => {
+        const regressions = [
+            { case_id: 'prompt-case', label: 'Prompt case' },
+            { case_id: 'rules-case', label: 'Rules case' },
+            { case_id: 'both-case', label: 'Both case' },
+            { case_id: 'interaction-case', label: 'Interaction case' },
+        ];
+        const armReport = (entries) => ({
+            baselineComparison: { regressions: entries.map((entry) => ({ ...entry, confirmed_delta: entry.delta })) },
+        });
+        const attribution = (0, improvement_cycle_core_1.buildRegressionAttribution)(regressions, {
+            promptChanged: true,
+            ruleCount: 3,
+            promptOnlyReport: armReport([
+                { case_id: 'prompt-case', delta: -0.2 },
+                { case_id: 'both-case', delta: -0.1 },
+            ]),
+            rulesOnlyReport: armReport([
+                { case_id: 'rules-case', delta: -0.3 },
+                { case_id: 'both-case', delta: -0.15 },
+            ]),
+        });
+        expect(attribution.status).toBe('completed');
+        expect(attribution.promptOnlyRegressions).toBe(2);
+        expect(attribution.rulesOnlyRegressions).toBe(2);
+        expect(attribution.cases.map((entry) => entry.cause)).toEqual([
+            'prompt', 'rules', 'both', 'interaction_or_unstable',
+        ]);
+    });
+    test('infers attribution without extra reports when only one surface changed', () => {
+        const regression = [{ case_id: 'c1', label: 'Case 1' }];
+        expect((0, improvement_cycle_core_1.buildRegressionAttribution)(regression, { promptChanged: true, ruleCount: 0 }).cases[0].cause).toBe('prompt');
+        expect((0, improvement_cycle_core_1.buildRegressionAttribution)(regression, { promptChanged: false, ruleCount: 2 }).cases[0].cause).toBe('rules');
+    });
 });
 describe('evaluateSecretExpiry', () => {
     const now = Date.parse('2026-06-15T00:00:00Z');
@@ -728,6 +762,36 @@ describe('decideReplayStatus (Follow-up 2)', () => {
     });
     test('miss but replay ran -> still_missed', () => {
         expect((0, improvement_cycle_core_1.decideReplayStatus)('a', 'b', 'menu with a', [sig('x', 'y')])).toBe('still_missed');
+    });
+    test('recognizes a full-line correction when replay applies the atomic change', () => {
+        const original = 'Smoked Guacamole, jalapeños, avocado, coriander, lime, corn tortilla chips V 90';
+        const corrected = 'Smoked Guacamole, jalapeño, avocado, coriander, lime, corn tortilla chips V 90';
+        const replay = [
+            corrected,
+            'Avocado salad, yellow chili aioli, yuzu kosho 75',
+        ].join('\n');
+        expect((0, improvement_cycle_core_1.fullLineCorrectionApplied)(original, corrected, replay)).toBe(true);
+        expect((0, improvement_cycle_core_1.decideReplayStatus)(original, corrected, replay, [sig('jalapeños', 'jalapeño')])).toBe('now_correct');
+    });
+    test('allows unrelated same-line cleanup while requiring the complete reviewer delta', () => {
+        const original = 'Dish, yellow chili mayo, cucumber pickles D,S 75';
+        const corrected = 'Dish, yellow chili aioli, pickle D,S 75';
+        expect((0, improvement_cycle_core_1.fullLineCorrectionApplied)(original, corrected, 'Dish, yellow chili aioli, pickle D, S 75')).toBe(true);
+        expect((0, improvement_cycle_core_1.fullLineCorrectionApplied)(original, corrected, 'Dish, yellow chili aioli, cucumber pickle D, S 75')).toBe(false);
+    });
+    test('preserves case and diacritics when verifying corrections', () => {
+        expect((0, improvement_cycle_core_1.decideReplayStatus)('BRULEE', 'BRÛLÉE', 'AMANCER PUMKIN BRÛLÉE', [sig('BRULEE', 'BRÛLÉE')])).toBe('now_correct');
+        expect((0, improvement_cycle_core_1.decideReplayStatus)('BRULEE', 'BRÛLÉE', 'AMANCER PUMKIN BRULEE', [])).toBe('still_missed');
+    });
+});
+describe('replay-resolved correction lifecycle', () => {
+    test('separates corrections proven current from corrections that still belong to the proposal', () => {
+        expect((0, improvement_cycle_core_1.partitionCorrectionIdsByReplayStatus)(['c1', 'c2', 'c3'], [
+            { correction_id: 'c1', status: 'now_correct' },
+            { correction_id: 'c2', status: 'still_missed' },
+            { correction_id: 'c3', status: 'replay_unavailable' },
+        ])).toEqual({ resolvedIds: ['c1'], proposalIds: ['c2', 'c3'] });
+        expect((0, improvement_cycle_core_1.replayResolutionMarker)('2026-08-21-manual-1')).toBe('resolved-by-current-pipeline:2026-08-21-manual-1');
     });
 });
 describe('classifyTriggerFromComparisonEntry (Follow-up 1)', () => {

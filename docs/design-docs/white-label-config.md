@@ -92,7 +92,19 @@ latest approved prompt still matches the runtime file) and then
 `prompt_proposals` row equal to the current `sop-processor/qa_prompt.txt`. That
 row becomes the latest approved proposal, so `syncEffectivePromptFromDb()` finds
 DB == file and the next restart is a no-op instead of a revert. Re-run it after
-any hand edit. As a safety net, `syncEffectivePromptFromDb()` now logs a loud
+any hand edit. For production or a repository-shipped prompt migration, add
+`--expected-db-sha256 <full-current-db-sha256>`: the script refuses to write if
+another reviewer changed the approved DB prompt after the hash was captured.
+Run the committed image as a one-off container **before** the dashboard starts
+and overwrites its image copy, for example:
+
+```bash
+docker compose run --rm --no-deps -T dashboard \
+  node /app/scripts/commit-runtime-prompt.js --apply \
+  --expected-db-sha256 <full-current-db-sha256>
+```
+
+As a safety net, `syncEffectivePromptFromDb()` now logs a loud
 warning (with lengths + sha256) whenever it is about to overwrite a runtime file
 that differs from the DB copy, so a hand edit that is about to be lost is visible
 in the startup logs.

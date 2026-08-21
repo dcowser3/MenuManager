@@ -120,11 +120,28 @@ describe('prompt-proposal view', () => {
                     ...baseProposal.eval_summary,
                     regressed: 1,
                     regressions: [{ case_id: 'c1', label: 'TORO MALTA MENU', delta: -0.0123 }],
+                    regression_attribution: {
+                        status: 'completed',
+                        promptChanged: true,
+                        ruleCount: 2,
+                        promptOnlyRegressions: 1,
+                        rulesOnlyRegressions: 0,
+                        cases: [{
+                                case_id: 'c1',
+                                label: 'TORO MALTA MENU',
+                                cause: 'prompt',
+                                prompt_only_delta: -0.0101,
+                                rules_only_delta: null,
+                            }],
+                    },
                 },
             },
         });
         expect(html).toContain('TORO MALTA MENU');
         expect(html).toContain('-1.230 pp');
+        expect(html).toContain('Regression attribution');
+        expect(html).toContain('Prompt-only Delta');
+        expect(html).toContain('-1.010 pp');
         expect(html).not.toContain('proposed-rule-checkbox');
     });
     test('shows an approval block and removes approve buttons for an unsafe pending proposal', () => {
