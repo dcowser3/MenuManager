@@ -20,7 +20,12 @@ import {
 import { guardCorrectedMenuPrices } from './price-integrity-guard';
 import { RAW_NOTICE_PATTERN, normalizeMenuFooter, stripManagedFooterText } from './menu-footer';
 import { QaPromptSectionId, buildFinalPrompt } from './qa-prompt-builder';
-import { buildNearMissBriefing } from './canonical-vocabulary-provider';
+import { buildNearMissAnalysis } from './canonical-vocabulary-provider';
+import {
+    ApprovedVocabularyTerm,
+    NearMissFinding,
+    ensureCanonicalSpellingSuggestions,
+} from './canonical-vocabulary';
 import { getTenantConfig } from '@menumanager/tenant-config';
 import { AI_REVIEW_FENCES } from './review-response-contract';
 import { ProtectedTermGuardResult, restoreProtectedTerms } from './protected-terms-guard';
@@ -693,6 +698,7 @@ export type PostAiPipelineArgs = {
     effectiveReviewAllergens?: string;
     acceptedCorrectionRules: AcceptedCorrectionRule[];
     embeddedSetMenuAnalysis: EmbeddedSetMenuAnalysis;
+    canonicalSpellingFindings?: NearMissFinding[];
     precheckEnabled: boolean;
     checkId?: string;
 };
@@ -786,6 +792,11 @@ export function runPostAiPipeline(args: PostAiPipelineArgs): PostAiPipelineResul
         finalSuggestions = enforceAllergenProgramCheck(correctedMenuSanitized, finalSuggestions);
     }
     finalSuggestions = detectKnownTextArtifactSuggestions(correctedMenuSanitized, finalSuggestions);
+    finalSuggestions = ensureCanonicalSpellingSuggestions(
+        correctedMenuSanitized,
+        finalSuggestions,
+        args.canonicalSpellingFindings || []
+    ) as ReviewSuggestion[];
 
     const hasCriticalErrors = finalSuggestions.some(s => s.severity === 'critical');
     const criticalSuggestions = finalSuggestions.filter(s => s.severity === 'critical');
@@ -818,6 +829,8 @@ export type FullReviewPipelineOptions = {
     property?: string;
     allergens?: string;
     acceptedCorrectionRules?: AcceptedCorrectionRule[];
+    approvedVocabularyTexts?: string[];
+    approvedVocabularyTerms?: ApprovedVocabularyTerm[];
     precheckEnabled?: boolean;
     // F2: when --ablate-sections, omit specific prompt sections for delta measurement.
     omitSections?: import('./qa-prompt-builder').QaPromptSectionId[];
@@ -864,9 +877,14 @@ export async function runFullReviewPipeline(
         : analyzeEmbeddedSetMenus(preCheckedReviewBody);
 
     // Scanned AFTER the deterministic pre-AI pass so already-applied fixes are not
-    // re-flagged. Reuses the rules fetched above — no additional read.
-    const nearMissBriefing = await buildNearMissBriefing(preCheckedReviewBody, {
+    // re-flagged. Offline callers provide approved vocabulary evidence directly.
+    const nearMissAnalysis = await buildNearMissAnalysis(preCheckedReviewBody, {
         fetchAcceptedRules: async () => acceptedCorrectionRules || [],
+        fetchApprovedTexts: async () => opts.approvedVocabularyTexts || [],
+        fetchApprovedTerms: async () => opts.approvedVocabularyTerms || [],
+        // Baseline and candidate evals can run in one process with different
+        // rules. Do not let either side reuse the other side's vocabulary.
+        ttlMs: 0,
     });
 
     const promptInfo = buildFinalPrompt(opts.basePrompt, {
@@ -875,7 +893,7 @@ export async function runFullReviewPipeline(
         changedOnlyMode: false,
         precheckEnabled,
         embeddedSetMenuAnalysis,
-        nearMissBriefing,
+        nearMissBriefing: nearMissAnalysis.briefing,
     }, { omitSections: opts.omitSections || [] });
 
     const feedback = await aiCaller(preCheckedReviewBody, promptInfo.prompt);
@@ -889,6 +907,7 @@ export async function runFullReviewPipeline(
         effectiveReviewAllergens,
         acceptedCorrectionRules,
         embeddedSetMenuAnalysis,
+        canonicalSpellingFindings: nearMissAnalysis.findings,
         precheckEnabled,
     });
 

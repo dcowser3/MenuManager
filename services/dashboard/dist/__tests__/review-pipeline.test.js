@@ -401,6 +401,32 @@ describe('runPostAiPipeline (full guard chain)', () => {
             recommendation: 'Change "ctes de provence" to "côtes de provence".',
         });
     });
+    test('does not silently lose an approved-corpus spelling suspicion the model ignored', () => {
+        const typoMenu = 'Chicken, tamrind glaze D 24';
+        const result = (0, review_pipeline_1.runPostAiPipeline)({
+            feedback: buildFeedback(typoMenu, []),
+            preCheckedReviewBody: typoMenu,
+            acceptedCorrectionRules: [],
+            embeddedSetMenuAnalysis: { sections: [], issues: [] },
+            canonicalSpellingFindings: [{
+                    found: 'tamrind',
+                    canonical: 'tamarind',
+                    kind: 'typo',
+                    distance: 1,
+                    source: 'approved_corpus',
+                    confidence: 'medium',
+                    message: 'near miss',
+                }],
+            precheckEnabled: false,
+        });
+        expect(result.hasCriticalErrors).toBe(false);
+        expect(result.finalSuggestions).toContainEqual(expect.objectContaining({
+            type: 'Spelling',
+            severity: 'normal',
+            confidence: 'medium',
+            menuItem: typoMenu,
+        }));
+    });
     test('restores protected terms after the model rewrites them', () => {
         const original = [
             'DINNER MENU',

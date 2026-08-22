@@ -58,7 +58,7 @@ exports.QA_PROMPT_SECTIONS = {
         appliesWhen: 'embedded set-menu sections detected in a non prix-fixe menu',
     },
     canonical_vocabulary_near_misses: {
-        description: 'Lists deterministic near-misses against the canonical menu vocabulary (accent errors, brand misspellings, and both-forms-valid terms) for the model to adjudicate. Advisory only — nothing is replaced automatically.',
+        description: 'Lists deterministic near-misses against reviewer-confirmed terminology and the approved-menu vocabulary for contextual adjudication. Confirmed canonical fixes run before the model; unresolved unique corpus matches become visible normal-severity suggestions.',
         appliesWhen: 'near-miss findings were computed for this menu (CANONICAL_VOCABULARY_ENABLED)',
     },
 };

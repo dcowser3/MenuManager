@@ -3030,9 +3030,11 @@ async function handleBasicCheck(req, res) {
         const qaPromptPath = path.join(getRepoRoot(), 'sop-processor', 'qa_prompt.txt');
         const qaPrompt = await fs_1.promises.readFile(qaPromptPath, 'utf-8');
         // Scanned AFTER the deterministic pre-AI pass so already-applied fixes are not
-        // re-flagged. Reuses the rules fetched above — no additional read.
-        const nearMissBriefing = await (0, canonical_vocabulary_provider_1.buildNearMissBriefing)(preCheckedReviewBody, {
+        // re-flagged. Accepted rules are reused; approved vocabulary is DB-backed and
+        // cached by the provider for the review hot path.
+        const nearMissAnalysis = await (0, canonical_vocabulary_provider_1.buildNearMissAnalysis)(preCheckedReviewBody, {
             fetchAcceptedRules: async () => acceptedCorrectionRules || [],
+            fetchApprovedTerms: async () => (0, approved_dishes_1.loadApprovedReviewVocabularyTerms)(getRepoRoot()),
         });
         const promptInfo = (0, qa_prompt_builder_1.buildFinalPrompt)(qaPrompt, {
             menuType,
@@ -3040,7 +3042,7 @@ async function handleBasicCheck(req, res) {
             changedOnlyMode,
             precheckEnabled: BASIC_AI_PRECHECK_ENABLED,
             embeddedSetMenuAnalysis,
-            nearMissBriefing,
+            nearMissBriefing: nearMissAnalysis.briefing,
         });
         const finalPrompt = promptInfo.prompt;
         diagnosticsPromptSections.push(...promptInfo.sections);
@@ -3364,6 +3366,7 @@ async function handleBasicCheck(req, res) {
             effectiveReviewAllergens,
             acceptedCorrectionRules,
             embeddedSetMenuAnalysis,
+            canonicalSpellingFindings: nearMissAnalysis.findings,
             precheckEnabled: BASIC_AI_PRECHECK_ENABLED,
             checkId: basicCheckId,
         });

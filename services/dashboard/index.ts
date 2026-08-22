@@ -50,7 +50,11 @@ import {
 } from './lib/submission-confirmation-mail';
 import { createApprovalWorkflowHandlers } from './lib/approval-workflow';
 import { createDesignApprovalWorkflowHandlers } from './lib/design-approval-workflow';
-import { getApprovedDishBrowseData, listApprovedDishBrands } from './lib/approved-dishes';
+import {
+    getApprovedDishBrowseData,
+    listApprovedDishBrands,
+    loadApprovedReviewVocabularyTerms,
+} from './lib/approved-dishes';
 import { ApprovedMenuDownloadRecord, getApprovedMenuDownload, listApprovedMenus, listMenuCards } from './lib/approved-menus';
 import { resolveApprovedDownload } from './lib/approved-download';
 import {
@@ -113,7 +117,7 @@ import {
     stripManagedFooterText,
 } from './lib/menu-footer';
 import { buildFinalPrompt } from './lib/qa-prompt-builder';
-import { buildNearMissBriefing } from './lib/canonical-vocabulary-provider';
+import { buildNearMissAnalysis } from './lib/canonical-vocabulary-provider';
 import {
     parseAIResponse,
     reconcileCriticalSuggestionsAgainstCorrectedMenu,
@@ -3417,9 +3421,11 @@ async function handleBasicCheck(req: any, res: any) {
         const qaPrompt = await fs.readFile(qaPromptPath, 'utf-8');
 
         // Scanned AFTER the deterministic pre-AI pass so already-applied fixes are not
-        // re-flagged. Reuses the rules fetched above — no additional read.
-        const nearMissBriefing = await buildNearMissBriefing(preCheckedReviewBody, {
+        // re-flagged. Accepted rules are reused; approved vocabulary is DB-backed and
+        // cached by the provider for the review hot path.
+        const nearMissAnalysis = await buildNearMissAnalysis(preCheckedReviewBody, {
             fetchAcceptedRules: async () => acceptedCorrectionRules || [],
+            fetchApprovedTerms: async () => loadApprovedReviewVocabularyTerms(getRepoRoot()),
         });
 
         const promptInfo = buildFinalPrompt(qaPrompt, {
@@ -3428,7 +3434,7 @@ async function handleBasicCheck(req: any, res: any) {
             changedOnlyMode,
             precheckEnabled: BASIC_AI_PRECHECK_ENABLED,
             embeddedSetMenuAnalysis,
-            nearMissBriefing,
+            nearMissBriefing: nearMissAnalysis.briefing,
         });
         const finalPrompt = promptInfo.prompt;
         diagnosticsPromptSections.push(...promptInfo.sections);
@@ -3768,6 +3774,7 @@ async function handleBasicCheck(req: any, res: any) {
             effectiveReviewAllergens,
             acceptedCorrectionRules,
             embeddedSetMenuAnalysis,
+            canonicalSpellingFindings: nearMissAnalysis.findings,
             precheckEnabled: BASIC_AI_PRECHECK_ENABLED,
             checkId: basicCheckId,
         });

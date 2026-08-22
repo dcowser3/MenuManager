@@ -1,8 +1,10 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.BUILT_IN_REPLACEMENTS = void 0;
+exports.CURATED_CANONICAL_FOOD_WORDS = exports.BUILT_IN_REPLACEMENTS = void 0;
+exports.normalizeCuratedFoodSpellingsOnLine = normalizeCuratedFoodSpellingsOnLine;
 exports.normalizeSingularIngredientFormsOnLine = normalizeSingularIngredientFormsOnLine;
 exports.ensureCotijaCheeseModifierOnLine = ensureCotijaCheeseModifierOnLine;
+exports.normalizeShrimpCevicheRawMarkerOnLine = normalizeShrimpCevicheRawMarkerOnLine;
 exports.getAcceptedCorrectionRulePreAiEligibility = getAcceptedCorrectionRulePreAiEligibility;
 exports.runPreAiDeterministicChecks = runPreAiDeterministicChecks;
 const improvement_cycle_core_1 = require("./improvement-cycle-core");
@@ -23,6 +25,7 @@ exports.BUILT_IN_REPLACEMENTS = [
     { from: 'aji panca', to: 'ají panca', type: 'Diacritics' },
     { from: 'chile de arbol', to: 'chile de árbol', type: 'Diacritics' },
     { from: 'creme brulee', to: 'crème brûlée', type: 'Diacritics' },
+    { from: 'brulee', to: 'brûlée', type: 'Diacritics' },
     { from: 'creme fraiche', to: 'crème fraîche', type: 'Diacritics' },
     { from: 'aji', to: 'ají', type: 'Diacritics' },
     { from: 'albarino', to: 'albariño', type: 'Diacritics' },
@@ -43,6 +46,8 @@ exports.BUILT_IN_REPLACEMENTS = [
     { from: 'sauteed', to: 'sautéed', type: 'Diacritics' },
     { from: 'saute', to: 'sauté', type: 'Diacritics' },
     { from: 'taquenos', to: 'taqueños', type: 'Diacritics' },
+    { from: 'tequenos', to: 'tequeños', type: 'Diacritics' },
+    { from: 'tequeno', to: 'tequeño', type: 'Diacritics' },
     { from: 'tajin', to: 'tajín', type: 'Diacritics' },
     { from: 'tampiquena', to: 'tampiqueña', type: 'Diacritics' },
     { from: 'huancaina', to: 'huancaína', type: 'Diacritics' },
@@ -87,10 +92,33 @@ exports.BUILT_IN_REPLACEMENTS = [
     { from: 'veggies', to: 'vegetables', type: 'Spelling' },
     { from: 'chilli', to: 'chili', type: 'Spelling' },
     { from: 'pepper corn', to: 'peppercorn', type: 'Spelling' },
+    { from: 'fugeo', to: 'fuego', type: 'Spelling' },
+    { from: 'tamrind', to: 'tamarind', type: 'Spelling' },
+    // Confirmed reviewer terminology and preparation-order corrections. These
+    // are bounded phrases rather than whole-line replacements, so they survive
+    // different dish names, prices, allergens, and surrounding ingredients.
+    { from: 'cashew nuts sauce', to: 'cashew sauce', type: 'Terminology' },
+    { from: 'cashew nut sauce', to: 'cashew sauce', type: 'Terminology' },
+    { from: 'macha sauce', to: 'salsa macha', type: 'Terminology' },
+    { from: 'macha salsa', to: 'salsa macha', type: 'Terminology' },
+    { from: 'shimeji pickles', to: 'pickled shimeji mushroom', type: 'Terminology' },
+    { from: 'shimeji pickle', to: 'pickled shimeji mushroom', type: 'Terminology' },
     // Canonical tenant terminology from the SOP vocabulary table. This is an
     // absolute business rule, so it must not depend on the review model noticing it.
     { from: 'mayonnaise', to: 'aioli', type: 'Terminology' },
     { from: 'mayo', to: 'aioli', type: 'Terminology' },
+];
+/**
+ * Reviewer-confirmed canonical food words. Unlike BUILT_IN_REPLACEMENTS, this
+ * list is matched by bounded Damerau edit distance, so an unseen adjacent
+ * transposition such as FUGEO or a missing letter such as TAMRIND is corrected
+ * without teaching the system every malformed spelling separately.
+ */
+exports.CURATED_CANONICAL_FOOD_WORDS = [
+    { canonical: 'fuego', maxDistance: 1, type: 'Spelling' },
+    { canonical: 'tamarind', maxDistance: 2, type: 'Spelling' },
+    { canonical: 'brûlée', maxDistance: 1, type: 'Diacritics' },
+    { canonical: 'tequeño', maxDistance: 1, type: 'Diacritics' },
 ];
 const LEARNED_RULE_CHANGE_TYPES = new Set([
     '',
@@ -108,6 +136,73 @@ function escapeRegExp(s) {
 }
 function stripDiacritics(input) {
     return (input || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+}
+function boundedDamerauDistance(left, right, maxDistance) {
+    const a = stripDiacritics(left).toLowerCase();
+    const b = stripDiacritics(right).toLowerCase();
+    if (a === b)
+        return 0;
+    if (Math.abs(a.length - b.length) > maxDistance)
+        return maxDistance + 1;
+    const matrix = Array.from({ length: a.length + 1 }, () => Array(b.length + 1).fill(0));
+    for (let i = 0; i <= a.length; i += 1)
+        matrix[i][0] = i;
+    for (let j = 0; j <= b.length; j += 1)
+        matrix[0][j] = j;
+    for (let i = 1; i <= a.length; i += 1) {
+        let rowMin = maxDistance + 1;
+        for (let j = 1; j <= b.length; j += 1) {
+            const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+            matrix[i][j] = Math.min(matrix[i - 1][j] + 1, matrix[i][j - 1] + 1, matrix[i - 1][j - 1] + cost);
+            if (i > 1
+                && j > 1
+                && a[i - 1] === b[j - 2]
+                && a[i - 2] === b[j - 1]) {
+                matrix[i][j] = Math.min(matrix[i][j], matrix[i - 2][j - 2] + 1);
+            }
+            rowMin = Math.min(rowMin, matrix[i][j]);
+        }
+        if (rowMin > maxDistance)
+            return maxDistance + 1;
+    }
+    return matrix[a.length][b.length];
+}
+function normalizeCuratedFoodSpellingsOnLine(line, lineIndex) {
+    const corrections = [];
+    const tokenPattern = /\p{L}+(?:['’]\p{L}+)?/gu;
+    const nextLine = line.replace(tokenPattern, (found) => {
+        const foundFolded = stripDiacritics(found).toLowerCase();
+        const candidates = exports.CURATED_CANONICAL_FOOD_WORDS
+            .map((entry) => ({
+            entry,
+            canonicalFolded: stripDiacritics(entry.canonical).toLowerCase(),
+            distance: boundedDamerauDistance(found, entry.canonical, entry.maxDistance),
+        }))
+            .filter(({ entry, canonicalFolded, distance }) => (distance <= entry.maxDistance
+            && foundFolded[0] === canonicalFolded[0]
+            && foundFolded.at(-1) === canonicalFolded.at(-1)
+            && foundFolded !== `${canonicalFolded}s`
+            && foundFolded !== `${canonicalFolded}es`))
+            .sort((a, b) => a.distance - b.distance || a.entry.canonical.localeCompare(b.entry.canonical));
+        if (!candidates.length)
+            return found;
+        if (candidates.length > 1 && candidates[0].distance === candidates[1].distance)
+            return found;
+        const best = candidates[0];
+        const corrected = matchCase(found, best.entry.canonical);
+        if (found === corrected)
+            return found;
+        corrections.push({
+            type: best.entry.type,
+            source: 'built_in',
+            original: found,
+            corrected,
+            lineIndex,
+            rule: `Use reviewer-confirmed canonical food spelling "${best.entry.canonical}".`,
+        });
+        return corrected;
+    });
+    return { line: nextLine, corrections };
 }
 function normalizeScope(value) {
     return stripDiacritics(`${value || ''}`)
@@ -289,10 +384,10 @@ function applyReplacementRule(line, lineIndex, rule, source, metadata = {}, sett
 }
 const CONSERVATIVE_SINGULAR_INGREDIENT_PATTERNS = [
     // Dish-name modifier: the ingredient noun modifying Tequeños is singular.
-    { pattern: /^(\s*)(prawns)(?=\s+tequeños\b)/iu, corrected: 'prawn' },
+    { pattern: /^(\s*)(prawns)(?=\s+tequeños?\b)/iu, corrected: 'prawn' },
     // Bare comma-delimited ingredients. Prepared/count phrases such as
     // "sautéed prawns" and "three pickles" deliberately do not match.
-    { pattern: /(,\s*)(cucumber\s+pickles)(?=\s*,)/giu, corrected: 'cucumber pickle' },
+    { pattern: /(,\s*)(cucumber\s+pickles)(?=\s*,)/giu, corrected: 'pickle' },
     { pattern: /(,\s*)(jalapeños)(?=\s*,)/giu, corrected: 'jalapeño' },
     { pattern: /(,\s*)(prawns)(?=\s*,)/giu, corrected: 'prawn' },
     { pattern: /(,\s*)(pickles)(?=\s*,)/giu, corrected: 'pickle' },
@@ -528,12 +623,43 @@ function normalizeRawAsteriskPlacementForLine(line) {
     return `${working}*`;
 }
 const RAW_ASTERISK_TERM_PATTERN = /\b(?:sashimi|tartare|carpaccio|crudo|ceviche|tiradito|poke|raw\s+(?:tuna|salmon|hamachi|fish|beef|oysters?)|oysters?\s+on\s+the\s+half\s+shell|half[-\s]shell\s+oysters?|sunny[-\s]side(?:[-\s]up)?\s+eggs?|sunny[-\s]side[-\s]up|poached\s+eggs?|soft[-\s]boiled|rib[-\s]?eye|hollandaise|bearnaise|béarnaise|caesar\s+dressing|tiramisu|cured\s+egg\s+yolk|meringue|egg[-\s]+white)\b/i;
+const INDEPENDENT_RAW_TERM_PATTERN = /\b(?:sashimi|tartare|carpaccio|crudo|tiradito|poke|raw|uncooked|undercooked|oysters?\s+on\s+the\s+half\s+shell|half[-\s]shell\s+oysters?|sunny[-\s]side(?:[-\s]up)?\s+eggs?|sunny[-\s]side[-\s]up|poached\s+eggs?|soft[-\s]boiled|hollandaise|bearnaise|béarnaise|caesar\s+dressing|tiramisu|cured\s+egg\s+yolk|meringue|egg[-\s]+white)\b/i;
+function isCookedShrimpCevicheLine(line) {
+    const normalized = `${line || ''}`.toLowerCase();
+    return /\b(?:shrimp|prawn)\s+ceviche\b/.test(normalized)
+        && !INDEPENDENT_RAW_TERM_PATTERN.test(normalized);
+}
+/** Shrimp ceviche is cooked under the approved house rule unless raw is explicit. */
+function normalizeShrimpCevicheRawMarkerOnLine(line, lineIndex) {
+    if (!isCookedShrimpCevicheLine(line) || !line.includes('*')) {
+        return { line, corrections: [] };
+    }
+    const corrected = line.replace(/\s*\*\s*/g, (match) => (/\s/.test(match) ? ' ' : ''))
+        .replace(/\s{2,}/g, ' ')
+        .trimEnd();
+    if (corrected === line)
+        return { line, corrections: [] };
+    return {
+        line: corrected,
+        corrections: [{
+                type: 'Raw Item',
+                source: 'built_in',
+                original: line,
+                corrected,
+                lineIndex,
+                rule: 'Shrimp ceviche is treated as cooked unless raw or undercooked content is explicit.',
+            }],
+    };
+}
 function shouldAddRawAsterisk(line) {
     const normalized = line.toLowerCase();
     if (!normalized.trim() || normalized.includes('*') || /consuming raw or undercooked/.test(normalized)) {
         return false;
     }
     if (/\bceviche\b/.test(normalized) && /\b(?:poached|cooked)\b/.test(normalized)) {
+        return false;
+    }
+    if (isCookedShrimpCevicheLine(line)) {
         return false;
     }
     if (/\boysters?\b/.test(normalized) && !/\b(?:raw\s+oysters?|oysters?\s+on\s+the\s+half\s+shell|half[-\s]shell\s+oysters?)\b/.test(normalized)) {
@@ -662,6 +788,9 @@ function runPreAiDeterministicChecks(menuText, options = {}) {
             nextLine = result.line;
             appliedCorrections.push(...result.corrections);
         }
+        const spellingResult = normalizeCuratedFoodSpellingsOnLine(nextLine, lineIndex);
+        nextLine = spellingResult.line;
+        appliedCorrections.push(...spellingResult.corrections);
         const singularResult = normalizeSingularIngredientFormsOnLine(nextLine, lineIndex);
         nextLine = singularResult.line;
         appliedCorrections.push(...singularResult.corrections);
@@ -674,6 +803,9 @@ function runPreAiDeterministicChecks(menuText, options = {}) {
         const allergenResult = normalizeAllergenClusterOnLine(nextLine, lineIndex, validAllergenCodes);
         nextLine = allergenResult.line;
         appliedCorrections.push(...allergenResult.corrections);
+        const shrimpCevicheResult = normalizeShrimpCevicheRawMarkerOnLine(nextLine, lineIndex);
+        nextLine = shrimpCevicheResult.line;
+        appliedCorrections.push(...shrimpCevicheResult.corrections);
         const normalizedRaw = normalizeRawAsteriskPlacementForLine(nextLine);
         if (normalizedRaw !== nextLine) {
             appliedCorrections.push({

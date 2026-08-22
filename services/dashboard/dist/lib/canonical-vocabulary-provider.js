@@ -4,15 +4,16 @@ exports.isCanonicalVocabularyEnabled = isCanonicalVocabularyEnabled;
 exports.invalidateCanonicalVocabulary = invalidateCanonicalVocabulary;
 exports.getCanonicalVocabulary = getCanonicalVocabulary;
 exports.buildNearMissBriefing = buildNearMissBriefing;
+exports.buildNearMissAnalysis = buildNearMissAnalysis;
 /**
  * Cached access to the canonical menu vocabulary for the review hot path.
  *
- * Building the vocabulary reads every accepted correction rule, which is far too much work
- * to repeat per submission. The vocabulary changes only when a reviewer accepts a rule, so a
- * short TTL is ample and a stale read costs nothing worse than a missing advisory finding.
+ * Building the vocabulary reads accepted correction rules and aggregated approved-menu terms,
+ * which is far too much work to repeat per submission. A short TTL keeps the review hot path
+ * cheap while still picking up new approvals promptly.
  *
- * Failure is always silent and non-blocking: if the fetch throws, reviews proceed with no
- * briefing rather than erroring. This feature can only ever add a hint to the prompt.
+ * Failure is always silent and non-blocking: if the fetch throws, reviews proceed without
+ * vocabulary findings rather than erroring.
  */
 const canonical_vocabulary_1 = require("./canonical-vocabulary");
 const improvement_cycle_core_1 = require("./improvement-cycle-core");
@@ -37,13 +38,15 @@ async function getCanonicalVocabulary(params) {
     const ttl = params.ttlMs ?? DEFAULT_TTL_MS;
     inFlight = (async () => {
         try {
-            const [acceptedRules, approvedTexts] = await Promise.all([
+            const [acceptedRules, approvedTexts, approvedTerms] = await Promise.all([
                 params.fetchAcceptedRules(),
                 params.fetchApprovedTexts ? params.fetchApprovedTexts() : Promise.resolve([]),
+                params.fetchApprovedTerms ? params.fetchApprovedTerms() : Promise.resolve([]),
             ]);
             const vocabulary = (0, canonical_vocabulary_1.buildCanonicalVocabulary)({
                 acceptedRules: acceptedRules || [],
                 approvedTexts: approvedTexts || [],
+                approvedTerms: approvedTerms || [],
                 seedAmbiguousTerms: improvement_cycle_core_1.CONTEXT_DEPENDENT_TERMS,
             });
             cached = { vocabulary, expiresAt: (params.now ? params.now() : Date.now()) + ttl };
@@ -65,18 +68,22 @@ async function getCanonicalVocabulary(params) {
  * case buildFinalPrompt omits the section and the prompt is unchanged.
  */
 async function buildNearMissBriefing(menuText, params) {
+    return (await buildNearMissAnalysis(menuText, params)).briefing;
+}
+async function buildNearMissAnalysis(menuText, params) {
     if (!isCanonicalVocabularyEnabled(params.env))
-        return '';
+        return { findings: [], briefing: '' };
     if (!`${menuText || ''}`.trim())
-        return '';
+        return { findings: [], briefing: '' };
     const vocabulary = await getCanonicalVocabulary(params);
     if (!vocabulary)
-        return '';
+        return { findings: [], briefing: '' };
     try {
-        return (0, canonical_vocabulary_1.renderNearMissBriefing)((0, canonical_vocabulary_1.findNearMisses)(menuText, vocabulary));
+        const findings = (0, canonical_vocabulary_1.findNearMisses)(menuText, vocabulary);
+        return { findings, briefing: (0, canonical_vocabulary_1.renderNearMissBriefing)(findings) };
     }
     catch (err) {
         console.warn(`Near-miss detection failed; continuing without it. (${err?.message || err})`);
-        return '';
+        return { findings: [], briefing: '' };
     }
 }

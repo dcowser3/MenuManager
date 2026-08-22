@@ -1,4 +1,5 @@
 import {
+    buildNearMissAnalysis,
     buildNearMissBriefing,
     getCanonicalVocabulary,
     invalidateCanonicalVocabulary,
@@ -53,6 +54,29 @@ describe('getCanonicalVocabulary', () => {
         });
         expect(vocabulary).toBeNull();
         warn.mockRestore();
+    });
+
+    test('loads approved-dish terms once with the rest of the cached vocabulary', async () => {
+        const fetchAcceptedRules = jest.fn().mockResolvedValue([]);
+        const fetchApprovedTerms = jest.fn().mockResolvedValue([{ term: 'tamarind', count: 12 }]);
+
+        const first = await buildNearMissAnalysis('tamrind glaze', {
+            fetchAcceptedRules,
+            fetchApprovedTerms,
+        });
+        const second = await buildNearMissAnalysis('tamrind chutney', {
+            fetchAcceptedRules,
+            fetchApprovedTerms,
+        });
+
+        expect(first.findings).toContainEqual(expect.objectContaining({
+            found: 'tamrind',
+            canonical: 'tamarind',
+            source: 'approved_corpus',
+        }));
+        expect(second.briefing).toContain('tamarind');
+        expect(fetchAcceptedRules).toHaveBeenCalledTimes(1);
+        expect(fetchApprovedTerms).toHaveBeenCalledTimes(1);
     });
 });
 

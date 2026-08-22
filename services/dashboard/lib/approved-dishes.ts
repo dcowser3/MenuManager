@@ -10,6 +10,7 @@ import {
     getSupabaseClient,
     isSupabaseConfigured,
 } from '@menumanager/supabase-client';
+import type { ApprovedVocabularyTerm } from './canonical-vocabulary';
 
 const APPROVED_DISHES_TABLE = 'approved_dishes';
 const LOCAL_APPROVED_DISHES_FILE = 'approved_dishes.json';
@@ -30,6 +31,107 @@ type ApprovedDishSourceRow = {
     is_active?: boolean;
     created_at?: string;
 };
+
+export function buildApprovedDishVocabularyTerms(
+    rows: Array<Pick<ApprovedDishSourceRow, 'dish_name' | 'description'>>,
+    minOccurrences = 3
+): ApprovedVocabularyTerm[] {
+    const counts = new Map<string, number>();
+    for (const row of rows || []) {
+        const text = `${row?.dish_name || ''} ${row?.description || ''}`.normalize('NFC').toLowerCase();
+        const words = text.match(/\p{L}+(?:['’]\p{L}+)?/gu) || [];
+        for (const word of words) {
+            if (word.length < 4) continue;
+            counts.set(word, (counts.get(word) || 0) + 1);
+        }
+    }
+    return [...counts.entries()]
+        .filter(([, count]) => count >= minOccurrences)
+        .map(([term, count]) => ({ term, count }))
+        .sort((a, b) => b.count - a.count || a.term.localeCompare(b.term));
+}
+
+export function mergeApprovedVocabularyTerms(
+    ...groups: ApprovedVocabularyTerm[][]
+): ApprovedVocabularyTerm[] {
+    const counts = new Map<string, number>();
+    for (const group of groups) {
+        for (const item of group || []) {
+            const term = `${item?.term || ''}`.normalize('NFC').toLowerCase().trim();
+            const count = Number(item?.count || 0);
+            if (!term || !Number.isFinite(count) || count <= 0) continue;
+            counts.set(term, (counts.get(term) || 0) + count);
+        }
+    }
+    return [...counts.entries()]
+        .map(([term, count]) => ({ term, count }))
+        .sort((a, b) => b.count - a.count || a.term.localeCompare(b.term));
+}
+
+/** Lean vocabulary source for the review hot path; cached by the provider. */
+export async function loadApprovedDishVocabularyTerms(repoRoot: string): Promise<ApprovedVocabularyTerm[]> {
+    let rows: ApprovedDishSourceRow[] = [];
+    if (isSupabaseConfigured()) {
+        const supabase = getSupabaseClient();
+        for (let offset = 0; offset < MAX_DISH_ROWS; offset += PAGE_SIZE) {
+            const { data, error } = await supabase
+                .from(APPROVED_DISHES_TABLE)
+                .select('id,dish_name,description')
+                .eq('is_active', true)
+                .order('id', { ascending: true })
+                .range(offset, offset + PAGE_SIZE - 1);
+            if (error) throw new Error(`Failed to load approved dish vocabulary: ${error.message}`);
+            const page = (data || []) as ApprovedDishSourceRow[];
+            rows = rows.concat(page);
+            if (page.length < PAGE_SIZE) break;
+        }
+    } else {
+        rows = (await readLocalApprovedDishes(repoRoot)).filter((row) => row.is_active !== false);
+    }
+    // Keep every approved word for false-positive protection; only frequent
+    // words become correction candidates inside buildCanonicalVocabulary.
+    return buildApprovedDishVocabularyTerms(rows, 1);
+}
+
+/** Approved full menus protect legitimate headings, drinks, brands, and prose too. */
+export async function loadApprovedMenuVocabularyTerms(repoRoot: string): Promise<ApprovedVocabularyTerm[]> {
+    const approvedTexts: string[] = [];
+    if (isSupabaseConfigured()) {
+        const supabase = getSupabaseClient();
+        for (let offset = 0; offset < MAX_DISH_ROWS; offset += PAGE_SIZE) {
+            const { data, error } = await supabase
+                .from('submissions')
+                .select('id,approved_menu_content')
+                .not('approved_menu_content', 'is', null)
+                .order('id', { ascending: true })
+                .range(offset, offset + PAGE_SIZE - 1);
+            if (error) throw new Error(`Failed to load approved menu vocabulary: ${error.message}`);
+            const page = data || [];
+            for (const row of page) {
+                const text = `${row?.approved_menu_content || ''}`.trim();
+                if (text) approvedTexts.push(text);
+            }
+            if (page.length < PAGE_SIZE) break;
+        }
+    } else {
+        for (const row of await readLocalSubmissions(repoRoot)) {
+            const text = `${row?.approved_menu_content || ''}`.trim();
+            if (text) approvedTexts.push(text);
+        }
+    }
+    return buildApprovedDishVocabularyTerms(
+        approvedTexts.map((description) => ({ description })),
+        1
+    );
+}
+
+export async function loadApprovedReviewVocabularyTerms(repoRoot: string): Promise<ApprovedVocabularyTerm[]> {
+    const [dishTerms, menuTerms] = await Promise.all([
+        loadApprovedDishVocabularyTerms(repoRoot),
+        loadApprovedMenuVocabularyTerms(repoRoot),
+    ]);
+    return mergeApprovedVocabularyTerms(dishTerms, menuTerms);
+}
 
 type ApprovedDishSubmissionRow = {
     id?: string;

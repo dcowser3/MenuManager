@@ -2,6 +2,7 @@ import {
     buildCanonicalVocabulary,
     findNearMisses,
     differsOnlyByAccent,
+    ensureCanonicalSpellingSuggestions,
     renderNearMissBriefing,
 } from '../lib/canonical-vocabulary';
 
@@ -49,6 +50,24 @@ describe('buildCanonicalVocabulary', () => {
         });
         expect(vocab.legitimate.has('tequileño')).toBe(true);
         expect(vocab.legitimate.has('tequileno')).toBe(false);
+    });
+
+    test('promotes frequently approved dish words to contextual canonical candidates', () => {
+        const vocab = buildCanonicalVocabulary({
+            acceptedRules: [],
+            approvedTerms: [
+                { term: 'fuego', count: 8 },
+                { term: 'tamarind', count: 12 },
+                { term: 'rareword', count: 2 },
+            ],
+        });
+
+        expect(vocab.entries).toContainEqual(expect.objectContaining({
+            canonical: 'fuego',
+            source: 'approved_corpus',
+            occurrences: 8,
+        }));
+        expect(vocab.entries.some((entry) => entry.canonical === 'rareword')).toBe(false);
     });
 });
 
@@ -101,6 +120,88 @@ describe('findNearMisses', () => {
         const briefing = renderNearMissBriefing(findNearMisses('el tequileno blanco', vocab));
         expect(briefing).toContain('canonical vocabulary');
         expect(briefing).toContain('tequileño');
+    });
+
+    test('catches unseen transpositions and omissions from approved-menu vocabulary', () => {
+        const corpus = buildCanonicalVocabulary({
+            acceptedRules: [],
+            approvedTerms: [
+                { term: 'tamarind', count: 12 },
+                { term: 'broccolini', count: 8 },
+            ],
+        });
+        const hits = findNearMisses('tamairnd glaze, brocolini side', corpus);
+
+        expect(hits).toEqual(expect.arrayContaining([
+            expect.objectContaining({ found: 'tamairnd', canonical: 'tamarind', source: 'approved_corpus', confidence: 'medium' }),
+            expect.objectContaining({ found: 'brocolini', canonical: 'broccolini', source: 'approved_corpus', confidence: 'medium' }),
+        ]));
+    });
+
+    test('does not guess when two approved words are equally close', () => {
+        const corpus = buildCanonicalVocabulary({
+            acceptedRules: [],
+            approvedTerms: [
+                { term: 'kale', count: 10 },
+                { term: 'male', count: 10 },
+            ],
+        });
+        expect(findNearMisses('bale salad', corpus).some((hit) => hit.found === 'bale')).toBe(false);
+    });
+
+    test('treats even a rare human-approved form as legitimate rather than rewriting it', () => {
+        const corpus = buildCanonicalVocabulary({
+            acceptedRules: [],
+            approvedTerms: [
+                { term: 'whiskey', count: 12 },
+                { term: 'whisky', count: 1 },
+            ],
+        });
+        expect(findNearMisses('single malt whisky', corpus)).toHaveLength(0);
+    });
+});
+
+describe('ensureCanonicalSpellingSuggestions', () => {
+    const finding = {
+        found: 'tamrind',
+        canonical: 'tamarind',
+        kind: 'typo' as const,
+        distance: 1,
+        source: 'approved_corpus' as const,
+        confidence: 'medium' as const,
+        message: 'near miss',
+    };
+
+    test('adds a non-blocking suggestion when the model silently leaves a unique near miss', () => {
+        const suggestions = ensureCanonicalSpellingSuggestions(
+            'Chicken, tamrind glaze 24',
+            [],
+            [finding]
+        );
+        expect(suggestions).toContainEqual(expect.objectContaining({
+            type: 'Spelling',
+            severity: 'normal',
+            confidence: 'medium',
+            menuItem: 'Chicken, tamrind glaze 24',
+        }));
+    });
+
+    test('does not duplicate a model suggestion or report a typo the model corrected', () => {
+        const existing = [{
+            type: 'Spelling',
+            description: 'Change tamrind to tamarind.',
+        }];
+        expect(ensureCanonicalSpellingSuggestions('Chicken, tamrind glaze 24', existing, [finding])).toEqual(existing);
+        expect(ensureCanonicalSpellingSuggestions('Chicken, tamarind glaze 24', [], [finding])).toEqual([]);
+    });
+
+    test('never synthesizes a correction for a context-dependent match', () => {
+        expect(ensureCanonicalSpellingSuggestions('Rose dessert 14', [], [{
+            ...finding,
+            found: 'Rose',
+            canonical: 'rosé',
+            kind: 'ambiguous',
+        }])).toEqual([]);
     });
 });
 

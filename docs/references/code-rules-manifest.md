@@ -10,7 +10,7 @@ not part of the committed copy.
 
 ## Layer 1 — Deterministic pre-AI checks (before the model runs)
 
-### Built-in exact replacements (60)
+### Built-in exact replacements (71)
 
 | From | To | Type |
 |------|----|------|
@@ -22,6 +22,7 @@ not part of the committed copy.
 | aji panca | ají panca | Diacritics |
 | chile de arbol | chile de árbol | Diacritics |
 | creme brulee | crème brûlée | Diacritics |
+| brulee | brûlée | Diacritics |
 | creme fraiche | crème fraîche | Diacritics |
 | aji | ají | Diacritics |
 | albarino | albariño | Diacritics |
@@ -42,6 +43,8 @@ not part of the committed copy.
 | sauteed | sautéed | Diacritics |
 | saute | sauté | Diacritics |
 | taquenos | taqueños | Diacritics |
+| tequenos | tequeños | Diacritics |
+| tequeno | tequeño | Diacritics |
 | tajin | tajín | Diacritics |
 | tampiquena | tampiqueña | Diacritics |
 | huancaina | huancaína | Diacritics |
@@ -72,6 +75,14 @@ not part of the committed copy.
 | veggies | vegetables | Spelling |
 | chilli | chili | Spelling |
 | pepper corn | peppercorn | Spelling |
+| fugeo | fuego | Spelling |
+| tamrind | tamarind | Spelling |
+| cashew nuts sauce | cashew sauce | Terminology |
+| cashew nut sauce | cashew sauce | Terminology |
+| macha sauce | salsa macha | Terminology |
+| macha salsa | salsa macha | Terminology |
+| shimeji pickles | pickled shimeji mushroom | Terminology |
+| shimeji pickle | pickled shimeji mushroom | Terminology |
 | mayonnaise | aioli | Terminology |
 | mayo | aioli | Terminology |
 
@@ -96,13 +107,30 @@ Adds "cheese" after Cotija when it is used as an ingredient name, preserving cap
 
 - id: `pre-ai/cotija-cheese-modifier` · category: terminology · implementation: `services/dashboard/lib/pre-ai-deterministic-rules.ts#ensureCotijaCheeseModifierOnLine`
 
+### Bounded canonical food-word correction
+
+Reviewer-confirmed food words are matched with bounded Damerau edit distance, including adjacent transpositions. Auto-correction requires a unique match with the same first and last letters, limiting collisions with valid culinary, brand, and foreign-language terms.
+- `FUGEO MAYO` -> `FUEGO AIOLI`
+- `tamrind glaze` -> `tamarind glaze`
+
+- id: `pre-ai/curated-canonical-food-spelling` · category: spelling · implementation: `services/dashboard/lib/pre-ai-deterministic-rules.ts#normalizeCuratedFoodSpellingsOnLine`
+
 ### Conservative singular ingredient forms
 
-Applies the high-signal subset of the SOP singular-ingredient rule to bare comma-delimited jalapeños, prawns, pickles, and cucumber pickles; the verified Prawn Tequeños noun modifier; and a standalone Pickle side. Counted or prepared plurals such as "three pickles" and "sautéed prawns" are preserved.
+Applies the high-signal subset of the SOP singular-ingredient rule to bare comma-delimited jalapeños, prawns, pickles, and cucumber pickles; Prawn before either Tequeño or Tequeños; and a standalone Pickle side. Counted or prepared plurals such as "three pickles" and "sautéed prawns" are preserved.
 - `Guacamole, jalapeños, avocado 18` -> `Guacamole, jalapeño, avocado 18`
 - `Encocado, black cod, prawns, squid 38` -> `Encocado, black cod, prawn, squid 38`
+- `Prawns Tequeño, salsa 18` -> `Prawn Tequeño, salsa 18`
+- `Ceviche, cucumber pickles, praline 24` -> `Ceviche, pickle, praline 24`
 
 - id: `pre-ai/singular-ingredient-forms` · category: singular_plural · implementation: `services/dashboard/lib/pre-ai-deterministic-rules.ts#normalizeSingularIngredientFormsOnLine`
+
+### Cooked shrimp ceviche raw-marker exception
+
+Shrimp or prawn ceviche is treated as cooked under the approved house rule, so a raw marker is removed or withheld unless the line explicitly says raw/uncooked/undercooked or contains another independently raw preparation.
+- `Shrimp Ceviche*, lime, avocado C 24` -> `Shrimp Ceviche, lime, avocado C 24`
+
+- id: `pre-ai/cooked-shrimp-ceviche-marker` · category: raw_markers · implementation: `services/dashboard/lib/pre-ai-deterministic-rules.ts#normalizeShrimpCevicheRawMarkerOnLine`
 
 ### Raw-marker spacing normalization (pre-AI, conservative)
 
@@ -113,7 +141,7 @@ When a dish line has exactly one raw marker, spacing drift is fixed: the marker 
 
 ### Missing raw-marker insertion for strong raw terms
 
-Adds a missing raw marker to dishes containing strong raw/undercooked terms: tartare, sashimi, raw/uncooked ceviche, crudo, tiradito, poke, raw or half-shell oysters, explicit raw tuna/salmon/hamachi/fish/beef, poached egg, sunny-side-up egg, hollandaise, bearnaise/béarnaise, Caesar dressing, tiramisu, cured egg yolk, meringue, and egg white. Newly added egg-preparation terms are excluded when the same line states braised, slow-roasted, confit, or well-done.
+Adds a missing raw marker to dishes containing strong raw/undercooked terms: tartare, sashimi, ceviche, crudo, tiradito, poke, raw or half-shell oysters, explicit raw tuna/salmon/hamachi/fish/beef, poached egg, sunny-side-up egg, hollandaise, bearnaise/béarnaise, Caesar dressing, tiramisu, cured egg yolk, meringue, and egg white. Cooked shrimp/prawn ceviche is exempt unless another independently raw term appears. Newly added egg-preparation terms are excluded when the same line states braised, slow-roasted, confit, or well-done.
 - `salmon sashimi, ponzu 19` -> `salmon sashimi, ponzu* 19`
 
 - id: `pre-ai/raw-asterisk-insertion` · category: raw_markers · implementation: `services/dashboard/lib/pre-ai-deterministic-rules.ts#shouldAddRawAsterisk`
@@ -200,7 +228,7 @@ Explains detected embedded set-menu sections (package title + total price + choi
 
 ### Prompt section: canonical_vocabulary_near_misses
 
-Lists deterministic near-misses against the canonical menu vocabulary (accent errors, brand misspellings, and both-forms-valid terms) for the model to adjudicate. Advisory only — nothing is replaced automatically. Applies when: near-miss findings were computed for this menu (CANONICAL_VOCABULARY_ENABLED).
+Lists deterministic near-misses against reviewer-confirmed terminology and the approved-menu vocabulary for contextual adjudication. Confirmed canonical fixes run before the model; unresolved unique corpus matches become visible normal-severity suggestions. Applies when: near-miss findings were computed for this menu (CANONICAL_VOCABULARY_ENABLED).
 
 - id: `prompt/canonical_vocabulary_near_misses` · category: prompt · implementation: `services/dashboard/lib/qa-prompt-builder.ts#buildFinalPrompt`
 
@@ -274,6 +302,12 @@ AI suggestions whose lowercased type equals "pricing structure" are always force
 The full deterministic pre-AI pass is re-applied to the AI-corrected menu so the model cannot reintroduce drift (unsorted allergen clusters, spaced raw markers, reverted replacements).
 
 - id: `post-ai/deterministic-re-run` · category: deterministic · implementation: `services/dashboard/lib/pre-ai-deterministic-rules.ts#runPreAiDeterministicChecks`
+
+### Unresolved canonical spelling finding guarantee
+
+The model receives contextual near misses first. If it leaves a unique non-ambiguous reviewer/corpus match unchanged and does not mention it, the pipeline adds a medium-confidence, normal-severity spelling suggestion so the possible typo cannot silently pass. Ambiguous matches never synthesize a correction.
+
+- id: `post-ai/canonical-spelling-suggestion-guarantee` · category: spelling · implementation: `services/dashboard/lib/canonical-vocabulary.ts#ensureCanonicalSpellingSuggestions`
 
 ### Protected culinary terms
 

@@ -5,6 +5,8 @@
 
 The AI review enforces "hard stops" for critical issues that block submission.
 
+Spelling uncertainty is deliberately not a hard stop. Reviewer-confirmed unique spelling fixes can be applied deterministically; a unique approved-corpus near miss left unresolved by the model becomes a medium-confidence, normal-severity suggestion. Unfamiliar culinary, brand, and multilingual terms therefore remain reviewable without being mislabeled as critical errors.
+
 ## Critical Error Types
 
 | Error | Applies To | Detection | Can Auto-Correct? |

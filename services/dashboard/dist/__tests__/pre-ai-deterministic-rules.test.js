@@ -104,7 +104,7 @@ describe('runPreAiDeterministicChecks', () => {
         ].join('\n'));
         expect(result.menuText).toBe([
             'Smoked Guacamole, jalapeño, avocado, coriander, lime 90',
-            'Tuna Ceviche*, almond sauce, cucumber pickle, praline 105',
+            'Tuna Ceviche*, almond sauce, pickle, praline 105',
             'Prawn Tequeños, sautéed prawns, filo dough 80',
             'Encocado, black cod, prawn, squid, coconut 190',
             'pickle C,D,G,SY 200',
@@ -112,6 +112,53 @@ describe('runPreAiDeterministicChecks', () => {
             'Taco, sautéed prawns, avocado 18',
         ].join('\n'));
         expect(result.appliedCorrections.filter((correction) => correction.type === 'Singular/Plural')).toHaveLength(5);
+    });
+    it('normalizes singular Prawn across Tequeño spelling and number variants', () => {
+        const result = (0, pre_ai_deterministic_rules_1.runPreAiDeterministicChecks)([
+            'Prawns Tequeño, ají amarillo 18',
+            'Prawns Tequeños, salsa 18',
+            'Prawns Tequeno, avocado 18',
+            'Prawns Tequenos, lime 18',
+            'Taco, sautéed prawns, avocado 18',
+        ].join('\n'));
+        expect(result.menuText).toBe([
+            'Prawn Tequeño, ají amarillo 18',
+            'Prawn Tequeños, salsa 18',
+            'Prawn Tequeño, avocado 18',
+            'Prawn Tequeños, lime 18',
+            'Taco, sautéed prawns, avocado 18',
+        ].join('\n'));
+    });
+    it('uses bounded canonical food words to catch unseen typos without changing valid neighbors', () => {
+        const result = (0, pre_ai_deterministic_rules_1.runPreAiDeterministicChecks)([
+            'Feugo Aioli, tamarnd glaze 18',
+            'Crème Brûlee, berries 14',
+            'Juego Pequeño, tamarindo 12',
+        ].join('\n'));
+        expect(result.menuText).toBe([
+            'Fuego Aioli, tamarind glaze 18',
+            'Crème Brûlée, berries 14',
+            'Juego Pequeño, tamarindo 12',
+        ].join('\n'));
+        expect(result.appliedCorrections).toEqual(expect.arrayContaining([
+            expect.objectContaining({ original: 'Feugo', corrected: 'Fuego' }),
+            expect.objectContaining({ original: 'tamarnd', corrected: 'tamarind' }),
+            expect.objectContaining({ original: 'Brûlee', corrected: 'Brûlée' }),
+        ]));
+    });
+    it('implements confirmed reviewer preparation and terminology explanations', () => {
+        const result = (0, pre_ai_deterministic_rules_1.runPreAiDeterministicChecks)([
+            'Watermelon Tiradito*, cashew nuts sauce, chipotle ponzu, jicama, shimeji pickles G,SL,SY,TN 95',
+            'Maduros, macha sauce, crema D 12',
+            'Taco, macha salsa, avocado 18',
+            'Dessert, FUGEO, tamrind, brulee D 14',
+        ].join('\n'));
+        expect(result.menuText).toBe([
+            'Watermelon Tiradito*, cashew sauce, chipotle ponzu, jicama, pickled shimeji mushroom G,SL,SY,TN 95',
+            'Maduros, salsa macha, crema D 12',
+            'Taco, salsa macha, avocado 18',
+            'Dessert, FUEGO, tamarind, brûlée D 14',
+        ].join('\n'));
     });
     it('normalizes existing raw marker placement and adds markers for strong raw terms', () => {
         const result = (0, pre_ai_deterministic_rules_1.runPreAiDeterministicChecks)([
@@ -278,6 +325,20 @@ describe('runPreAiDeterministicChecks', () => {
             'Oysters on the Half Shell*, mignonette S 24',
         ].join('\n'));
         expect(result.appliedCorrections.filter((c) => c.type === 'Raw Item')).toHaveLength(1);
+    });
+    it('removes the raw marker from cooked shrimp ceviche but preserves explicit raw content', () => {
+        const result = (0, pre_ai_deterministic_rules_1.runPreAiDeterministicChecks)([
+            'Shrimp Ceviche*, lime, avocado C 24',
+            'Prawn Ceviche, citrus, onion C 25',
+            'Raw Shrimp Ceviche*, lime, avocado C 24',
+            'Shrimp Ceviche with Tuna Tartare*, lime C,F 28',
+        ].join('\n'));
+        expect(result.menuText).toBe([
+            'Shrimp Ceviche, lime, avocado C 24',
+            'Prawn Ceviche, citrus, onion C 25',
+            'Raw Shrimp Ceviche*, lime, avocado C 24',
+            'Shrimp Ceviche with Tuna Tartare*, lime C,F 28',
+        ].join('\n'));
     });
     it('applies accepted global learned replacement rules exactly', () => {
         const rules = [{

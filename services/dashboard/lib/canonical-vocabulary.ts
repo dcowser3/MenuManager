@@ -9,17 +9,15 @@
  * near-miss detection finds any spelling close to it — so the cost scales with brands
  * alone, and an unseen misspelling is caught the first time it appears.
  *
- * Findings are advisory. They are meant to be injected into the AI review's context so the
- * model adjudicates ("this line says X, which is one accent off canonical Y — verify"),
- * never applied as blind replacements. Deterministic code is good at edit distance and bad
- * at judgment; the model is the reverse.
+ * Findings are contextual. They are injected into the AI review so the model can adjudicate
+ * them; if the model leaves a unique non-ambiguous finding untouched, the post-AI pipeline
+ * turns it into a visible normal-severity suggestion. Database-only candidates are never
+ * applied as blind replacements.
  *
  * Ambiguity is derived, not declared: a term the corpus corrects in BOTH directions
  * ("rose" -> "rosé" for the wine, "rosé" -> "rose" for the flower) is context-dependent by
  * definition, and is reported as a question rather than a correction.
  */
-import { editDistanceAtMost } from './improvement-cycle-core';
-
 export type VocabularyEntry = {
     /** The correct form, accents and all. */
     canonical: string;
@@ -29,11 +27,18 @@ export type VocabularyEntry = {
     ambiguous: boolean;
     /** The competing form, when ambiguous. */
     alternate?: string;
+    source: 'reviewer_rule' | 'approved_corpus' | 'ambiguous_seed';
+    occurrences?: number;
+};
+
+export type ApprovedVocabularyTerm = {
+    term: string;
+    count: number;
 };
 
 export type CanonicalVocabulary = {
     entries: VocabularyEntry[];
-    /** Accent-SENSITIVE forms frequent enough in approved menus to be correct by definition. */
+    /** Accent-SENSITIVE forms seen in a human-approved menu; protects rare valid terms. */
     legitimate: Set<string>;
 };
 
@@ -44,6 +49,8 @@ export type NearMissFinding = {
     kind: 'diacritic' | 'typo' | 'ambiguous';
     distance: number;
     message: string;
+    source: VocabularyEntry['source'];
+    confidence: 'high' | 'medium';
 };
 
 /**
@@ -61,11 +68,19 @@ export const KNOWN_AMBIGUOUS_PAIRS: Array<[string, string]> = [
 const MIN_TERM_LENGTH = 4;
 const MAX_CANONICAL_WORDS = 3;
 const MAX_CANONICAL_CHARS = 40;
-const DEFAULT_MIN_LEGITIMATE_OCCURRENCES = 5;
+const DEFAULT_MIN_LEGITIMATE_OCCURRENCES = 1;
+const DEFAULT_MIN_CORPUS_CANONICAL_OCCURRENCES = 5;
+const CORPUS_STOPWORDS = new Set([
+    'about', 'after', 'again', 'against', 'along', 'also', 'among', 'and', 'another',
+    'before', 'between', 'both', 'chef', 'choice', 'choose', 'each', 'from', 'house',
+    'into', 'made', 'menu', 'more', 'other', 'over', 'served', 'style', 'than', 'that',
+    'their', 'then', 'there', 'these', 'they', 'this', 'those', 'through', 'under',
+    'with', 'without', 'your',
+]);
 
 /** Lowercase, but KEEP accents — the whole point is telling "tequileno" from "tequileño". */
 export function accentSensitiveKey(value: string): string {
-    return `${value || ''}`.toLowerCase().replace(/\s+/g, ' ').trim();
+    return `${value || ''}`.normalize('NFC').toLowerCase().replace(/\s+/g, ' ').trim();
 }
 
 /** Lowercase and fold accents/punctuation — for "are these the same word?" comparisons. */
@@ -109,7 +124,9 @@ export function buildCanonicalVocabulary(params: {
     acceptedRules: Array<{ original_text?: string | null; corrected_text?: string | null }>;
     /** Human-approved menu text — the source of "this form is fine, never flag it". */
     approvedTexts?: string[];
+    approvedTerms?: ApprovedVocabularyTerm[];
     minLegitimateOccurrences?: number;
+    minCorpusCanonicalOccurrences?: number;
     /** Terms already known to be context-dependent; seeds ambiguity before evidence exists. */
     seedAmbiguousTerms?: string[];
     /** Both-forms-valid pairs to guarantee an entry for. Defaults to KNOWN_AMBIGUOUS_PAIRS. */
@@ -156,6 +173,7 @@ export function buildCanonicalVocabulary(params: {
             canonical,
             variants: [variant],
             ambiguous,
+            source: 'reviewer_rule',
             ...(ambiguous ? { alternate: variant } : {}),
         });
     }
@@ -171,7 +189,13 @@ export function buildCanonicalVocabulary(params: {
                 existing.alternate = existing.alternate || alternate;
                 continue;
             }
-            byCanonical.set(key, { canonical, variants: [alternate], ambiguous: true, alternate });
+            byCanonical.set(key, {
+                canonical,
+                variants: [alternate],
+                ambiguous: true,
+                alternate,
+                source: 'ambiguous_seed',
+            });
         }
     }
 
@@ -185,10 +209,40 @@ export function buildCanonicalVocabulary(params: {
             counts.set(key, (counts.get(key) || 0) + 1);
         }
     }
+    for (const item of params.approvedTerms || []) {
+        const term = accentSensitiveKey(item?.term || '');
+        const count = Number(item?.count || 0);
+        if (!term || !Number.isFinite(count) || count <= 0) continue;
+        counts.set(term, (counts.get(term) || 0) + count);
+    }
     const threshold = params.minLegitimateOccurrences ?? DEFAULT_MIN_LEGITIMATE_OCCURRENCES;
     const legitimate = new Set<string>();
     for (const [key, count] of counts) {
         if (count >= threshold) legitimate.add(key);
+    }
+
+    // Frequent words from human-approved dish names and descriptions become
+    // candidate spellings. They remain advisory: unlike reviewer-rule entries,
+    // a corpus word is never blindly applied because menus contain proper names
+    // and multiple languages. It can still guarantee a visible review item when
+    // the model leaves a unique near miss unresolved.
+    const corpusThreshold = params.minCorpusCanonicalOccurrences
+        ?? DEFAULT_MIN_CORPUS_CANONICAL_OCCURRENCES;
+    for (const [term, count] of counts) {
+        if (
+            count < corpusThreshold
+            || CORPUS_STOPWORDS.has(term)
+            || !isCanonicalShaped(term)
+            || term.includes(' ')
+            || byCanonical.has(term)
+        ) continue;
+        byCanonical.set(term, {
+            canonical: term,
+            variants: [],
+            ambiguous: false,
+            source: 'approved_corpus',
+            occurrences: count,
+        });
     }
 
     const entries = [...byCanonical.values()].sort((a, b) => a.canonical.localeCompare(b.canonical));
@@ -196,7 +250,7 @@ export function buildCanonicalVocabulary(params: {
 }
 
 function gramsOf(text: string): string[] {
-    const words = `${text || ''}`.split(/\s+/).map((w) => w.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '')).filter(Boolean);
+    const words = `${text || ''}`.normalize('NFC').split(/\s+/).map((w) => w.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '')).filter(Boolean);
     const grams = [...words];
     for (let i = 0; i < words.length - 1; i++) grams.push(`${words[i]} ${words[i + 1]}`);
     return grams;
@@ -212,6 +266,34 @@ function isContainment(a: string, b: string): boolean {
     return x !== y && (x.includes(y) || y.includes(x));
 }
 
+function damerauDistanceAtMost(left: string, right: string, maxDistance: number): number {
+    if (left === right) return 0;
+    if (Math.abs(left.length - right.length) > maxDistance) return maxDistance + 1;
+    const matrix = Array.from({ length: left.length + 1 }, () => Array(right.length + 1).fill(0));
+    for (let i = 0; i <= left.length; i += 1) matrix[i][0] = i;
+    for (let j = 0; j <= right.length; j += 1) matrix[0][j] = j;
+    for (let i = 1; i <= left.length; i += 1) {
+        for (let j = 1; j <= right.length; j += 1) {
+            const cost = left[i - 1] === right[j - 1] ? 0 : 1;
+            matrix[i][j] = Math.min(
+                matrix[i - 1][j] + 1,
+                matrix[i][j - 1] + 1,
+                matrix[i - 1][j - 1] + cost
+            );
+            if (
+                i > 1
+                && j > 1
+                && left[i - 1] === right[j - 2]
+                && left[i - 2] === right[j - 1]
+            ) {
+                matrix[i][j] = Math.min(matrix[i][j], matrix[i - 2][j - 2] + 1);
+            }
+        }
+    }
+    const distance = matrix[left.length][right.length];
+    return distance <= maxDistance ? distance : maxDistance + 1;
+}
+
 export function findNearMisses(
     menuText: string,
     vocabulary: CanonicalVocabulary,
@@ -220,78 +302,152 @@ export function findNearMisses(
     const maxTypoDistance = opts.maxTypoDistance ?? 2;
     const findings: NearMissFinding[] = [];
     const reported = new Set<string>();
+    const exactEntries = new Map<string, VocabularyEntry>();
+    const variantEntries = new Map<string, VocabularyEntry[]>();
+    const entriesByFoldedLength = new Map<number, VocabularyEntry[]>();
+    for (const entry of vocabulary.entries) {
+        exactEntries.set(accentSensitiveKey(entry.canonical), entry);
+        const length = accentInsensitiveKey(entry.canonical).length;
+        entriesByFoldedLength.set(length, [...(entriesByFoldedLength.get(length) || []), entry]);
+        for (const variant of entry.variants) {
+            const key = accentSensitiveKey(variant);
+            variantEntries.set(key, [...(variantEntries.get(key) || []), entry]);
+        }
+    }
 
     for (const gram of gramsOf(menuText)) {
         if (gram.length < MIN_TERM_LENGTH) continue;
         const gramSensitive = accentSensitiveKey(gram);
         const gramFolded = accentInsensitiveKey(gram);
 
-        for (const entry of vocabulary.entries) {
-            const canonicalSensitive = accentSensitiveKey(entry.canonical);
-            if (gramSensitive === canonicalSensitive) {
-                // Spelled like a canonical form — but if that form has a valid counterpart,
-                // "matches the vocabulary" is not the same as "right for this dish".
-                if (entry.ambiguous && entry.alternate) {
-                    const dedupe = `${gramSensitive}|${accentSensitiveKey(entry.alternate)}`;
-                    if (!reported.has(dedupe)) {
-                        reported.add(dedupe);
-                        findings.push({
-                            found: gram,
-                            canonical: entry.alternate,
-                            kind: 'ambiguous',
-                            distance: 0,
-                            message: `"${gram}" and "${entry.alternate}" are both valid depending on context — decide from the dish, do not assume either spelling`,
-                        });
-                    }
+        const exact = exactEntries.get(gramSensitive);
+        if (exact) {
+            if (exact.ambiguous && exact.alternate) {
+                const dedupe = `${gramSensitive}|${accentSensitiveKey(exact.alternate)}`;
+                if (!reported.has(dedupe)) {
+                    reported.add(dedupe);
+                    findings.push({
+                        found: gram,
+                        canonical: exact.alternate,
+                        kind: 'ambiguous',
+                        distance: 0,
+                        source: exact.source,
+                        confidence: 'medium',
+                        message: `"${gram}" and "${exact.alternate}" are both valid depending on context — decide from the dish, do not assume either spelling`,
+                    });
                 }
-                break; // already a known form; nothing further to say
             }
+            continue;
+        }
 
-            const knownVariant = entry.variants.some((v) => accentSensitiveKey(v) === gramSensitive);
+        type Candidate = {
+            entry: VocabularyEntry;
+            kind: NearMissFinding['kind'];
+            distance: number;
+            recorded: boolean;
+            rank: number;
+        };
+        const candidates: Candidate[] = [];
+        const budget = gramFolded.length >= 8 ? maxTypoDistance : 1;
+        const candidateEntries = new Set<VocabularyEntry>(variantEntries.get(gramSensitive) || []);
+        for (let length = Math.max(1, gramFolded.length - budget); length <= gramFolded.length + budget; length += 1) {
+            for (const entry of entriesByFoldedLength.get(length) || []) candidateEntries.add(entry);
+        }
+        for (const entry of candidateEntries) {
+            const knownVariant = (variantEntries.get(gramSensitive) || []).includes(entry);
             const accentOnly = differsOnlyByAccent(gram, entry.canonical);
-
-            // A form frequent in approved menus is correct — unless the corpus explicitly
-            // records it as a variant that reviewers correct.
+            if (entry.source === 'approved_corpus' && vocabulary.legitimate.has(gramSensitive)) continue;
             if (!knownVariant && vocabulary.legitimate.has(gramSensitive) && !accentOnly) continue;
 
-            let kind: NearMissFinding['kind'] | null = null;
-            let distance = 0;
-            let recorded = false;
             if (accentOnly) {
-                kind = entry.ambiguous ? 'ambiguous' : 'diacritic';
-            } else if (knownVariant) {
-                kind = entry.ambiguous ? 'ambiguous' : 'typo';
-                recorded = true;
-            } else {
-                if (isContainment(gram, entry.canonical)) continue;
-                if (vocabulary.legitimate.has(gramSensitive)) continue;
-                // Two edits on a short word is noise, not a misspelling: "lone"/"rose" and
-                // "rosato"/"tomato" are both distance 2 and both wrong to flag.
-                const budget = gramFolded.length >= 8 ? maxTypoDistance : 1;
-                const d = editDistanceAtMost(gramFolded, accentInsensitiveKey(entry.canonical), budget);
-                if (d >= 1 && d <= budget) { kind = entry.ambiguous ? 'ambiguous' : 'typo'; distance = d; }
+                candidates.push({
+                    entry,
+                    kind: entry.ambiguous ? 'ambiguous' : 'diacritic',
+                    distance: 0,
+                    recorded: false,
+                    rank: entry.source === 'reviewer_rule' ? 1 : 2,
+                });
+                continue;
             }
-            if (!kind) continue;
+            if (knownVariant) {
+                candidates.push({
+                    entry,
+                    kind: entry.ambiguous ? 'ambiguous' : 'typo',
+                    distance: 0,
+                    recorded: true,
+                    rank: 0,
+                });
+                continue;
+            }
+            if (isContainment(gram, entry.canonical) || vocabulary.legitimate.has(gramSensitive)) continue;
+            if (entry.source === 'approved_corpus' && (gram.includes(' ') || entry.canonical.includes(' '))) continue;
+            if (entry.source === 'approved_corpus' && !/^\p{L}+(?:['’]\p{L}+)?$/u.test(gram)) continue;
+            if (entry.source === 'approved_corpus' && gramFolded.length < 6) continue;
+            if (
+                entry.source === 'approved_corpus'
+                && (
+                    gramFolded[0] !== accentInsensitiveKey(entry.canonical)[0]
+                    || gramFolded.at(-1) !== accentInsensitiveKey(entry.canonical).at(-1)
+                )
+            ) continue;
 
-            const dedupe = `${gramSensitive}|${canonicalSensitive}`;
-            if (reported.has(dedupe)) break;
-            reported.add(dedupe);
-
-            findings.push({
-                found: gram,
-                canonical: entry.canonical,
-                kind,
+            // Two edits on a short word is noise. Adjacent transpositions count
+            // as one edit, so FUGEO can match approved FUEGO without opening the
+            // short-word budget to unrelated pairs such as Lone/Rose.
+            const distance = damerauDistanceAtMost(
+                gramFolded,
+                accentInsensitiveKey(entry.canonical),
+                budget
+            );
+            if (distance < 1 || distance > budget) continue;
+            candidates.push({
+                entry,
+                kind: entry.ambiguous ? 'ambiguous' : 'typo',
                 distance,
-                message: kind === 'ambiguous'
-                    ? `"${gram}" and "${entry.canonical}" are both valid depending on context — decide from the dish, do not assume either spelling`
-                    : kind === 'diacritic'
-                        ? `"${gram}" is missing or misplacing the accent on canonical "${entry.canonical}"`
-                        : recorded
-                            ? `"${gram}" is a recorded misspelling of canonical "${entry.canonical}"`
-                            : `"${gram}" is ${distance} edit(s) from canonical "${entry.canonical}"`,
+                recorded: false,
+                rank: 3 + distance + (entry.source === 'approved_corpus' ? 1 : 0),
             });
-            break;
         }
+
+        candidates.sort((a, b) => (
+            a.rank - b.rank
+            || a.distance - b.distance
+            || (b.entry.occurrences || 0) - (a.entry.occurrences || 0)
+            || a.entry.canonical.localeCompare(b.entry.canonical)
+        ));
+        const best = candidates[0];
+        if (!best) continue;
+        const runnerUp = candidates[1];
+        if (
+            runnerUp
+            && runnerUp.rank === best.rank
+            && runnerUp.distance === best.distance
+            && accentSensitiveKey(runnerUp.entry.canonical) !== accentSensitiveKey(best.entry.canonical)
+        ) {
+            continue;
+        }
+
+        const canonicalSensitive = accentSensitiveKey(best.entry.canonical);
+        const dedupe = `${gramSensitive}|${canonicalSensitive}`;
+        if (reported.has(dedupe)) continue;
+        reported.add(dedupe);
+        findings.push({
+            found: gram,
+            canonical: best.entry.canonical,
+            kind: best.kind,
+            distance: best.distance,
+            source: best.entry.source,
+            confidence: best.entry.source === 'reviewer_rule' && best.kind !== 'ambiguous' ? 'high' : 'medium',
+            message: best.kind === 'ambiguous'
+                ? `"${gram}" and "${best.entry.canonical}" are both valid depending on context — decide from the dish, do not assume either spelling`
+                : best.kind === 'diacritic'
+                    ? `"${gram}" is missing or misplacing the accent on canonical "${best.entry.canonical}"`
+                    : best.recorded
+                        ? `"${gram}" is a recorded misspelling of canonical "${best.entry.canonical}"`
+                        : best.entry.source === 'approved_corpus'
+                            ? `"${gram}" is ${best.distance} edit(s) from approved-menu word "${best.entry.canonical}"`
+                            : `"${gram}" is ${best.distance} edit(s) from canonical "${best.entry.canonical}"`,
+        });
     }
 
     // Ambiguous questions last: corrections are actionable, questions need judgment.
@@ -303,7 +459,64 @@ export function findNearMisses(
 export function renderNearMissBriefing(findings: NearMissFinding[]): string {
     if (!findings.length) return '';
     const lines = ['## Spelling suspicions from the canonical vocabulary', '',
-        'Each line below is a deterministic near-miss against a known-correct term. Verify each against the dish context — apply the correction only when it is right, and ignore it when the menu is legitimately using a different word.', ''];
+        'Each line below is a deterministic near-miss against reviewer-confirmed terminology or words repeatedly used in approved menus. For every non-ambiguous line, use the surrounding menu context to either apply the correction or return a medium-confidence Spelling suggestion. Do not silently ignore a suspected non-word. Ambiguous lines are questions only and must never be auto-corrected.', ''];
     for (const f of findings) lines.push(`- ${f.message}`);
     return lines.join('\n');
+}
+
+type SpellingSuggestionShape = {
+    type?: string;
+    confidence?: string;
+    severity?: string;
+    menuItem?: string;
+    description?: string;
+    recommendation?: string;
+};
+
+function lineContainingToken(menuText: string, token: string): string | null {
+    const wanted = accentSensitiveKey(token);
+    for (const line of `${menuText || ''}`.split('\n')) {
+        const words = line.match(/\p{L}+(?:['’]\p{L}+)?/gu) || [];
+        if (words.some((word) => accentSensitiveKey(word) === wanted)) return line.trim();
+    }
+    return null;
+}
+
+/**
+ * The model gets first chance to use menu context. If it leaves a unique
+ * non-ambiguous corpus near miss untouched and does not mention it, synthesize
+ * a visible normal-severity review item so a suspected typo cannot disappear.
+ */
+export function ensureCanonicalSpellingSuggestions<T extends SpellingSuggestionShape>(
+    correctedMenu: string,
+    suggestions: T[],
+    findings: NearMissFinding[]
+): Array<T | SpellingSuggestionShape> {
+    const output: Array<T | SpellingSuggestionShape> = [...(suggestions || [])];
+    for (const finding of findings || []) {
+        if (finding.kind === 'ambiguous') continue;
+        const menuItem = lineContainingToken(correctedMenu, finding.found);
+        if (!menuItem) continue; // The model or deterministic pass already fixed it.
+
+        const alreadyReported = output.some((suggestion) => {
+            const text = [
+                suggestion.menuItem,
+                suggestion.description,
+                suggestion.recommendation,
+            ].join(' ').toLowerCase();
+            return text.includes(finding.found.toLowerCase())
+                || text.includes(finding.canonical.toLowerCase());
+        });
+        if (alreadyReported) continue;
+
+        output.push({
+            type: finding.kind === 'diacritic' ? 'Diacritics' : 'Spelling',
+            confidence: 'medium',
+            severity: 'normal',
+            menuItem,
+            description: `"${finding.found}" looks misspelled in this menu context; the closest established menu word is "${finding.canonical}".`,
+            recommendation: `Verify the intended term and, if correct, change "${finding.found}" to "${finding.canonical}".`,
+        });
+    }
+    return output;
 }

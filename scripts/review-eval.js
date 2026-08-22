@@ -552,6 +552,9 @@ async function runEval(args, dataset, rulesInfo, libs, baselineConfig) {
     const { normalizeComparable, boundedLevenshteinSimilarity } = libs.textSimilarity;
     const { scoreCorrections, compositeCaseScore } = libs.evalScoring;
     const { runPreAiDeterministicChecks } = libs.preAiRules;
+    const approvedVocabularyTexts = dataset
+        .map((entry) => `${entry.ground_truth || ''}`)
+        .filter(Boolean);
 
     // Re-base the historical human final onto the policy under evaluation: the
     // config's deterministic rules are applied to the ground truth so an
@@ -580,6 +583,7 @@ async function runEval(args, dataset, rulesInfo, libs, baselineConfig) {
                 property: evalCase.context.property,
                 allergens: evalCase.context.allergens,
                 acceptedCorrectionRules: ruleSet,
+                approvedVocabularyTexts,
                 precheckEnabled: args.deterministic,
                 omitSections: extraOpts.omitSections || [],
             }, aiCaller);

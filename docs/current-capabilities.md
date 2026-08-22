@@ -23,7 +23,8 @@ Related docs:
 ## Basic AI Check
 
 - Basic AI Check runs as an async dashboard job. The browser starts a check, polls status, and keeps final submission blocked until the check completes or returns the manual-review fallback.
-- Deterministic pre-AI cleanup handles accepted spelling/diacritic replacements, canonical `mayo`/`mayonnaise` → `aioli` terminology, conservative singular-ingredient forms, allergen-code formatting, raw-item marker placement, learned accepted correction rules, and curated guards before the model call.
+- Deterministic pre-AI cleanup handles accepted spelling/diacritic replacements, bounded reviewer-confirmed food-word typos, canonical `mayo`/`mayonnaise` → `aioli` terminology, conservative singular-ingredient forms, cooked-shrimp-ceviche raw-marker exceptions, allergen-code formatting, learned accepted correction rules, and curated guards before the model call.
+- Contextual spelling compares submitted words with both extracted approved dishes and full human-approved menus. Repeated approved terms can nominate a unique near miss for model review; approved rare terms protect brands and multilingual wording. An unresolved unique finding becomes a normal/yellow spelling suggestion rather than silently passing or blocking the menu as a critical error.
 - Post-AI guards reject unsafe model output that drops submitted lines, loses too many tokens, becomes much shorter than the input, or changes submitted prices.
 - Basic AI Check also raises non-critical, actionable suggestions for known DOCX/redline cleanup artifacts in menu text, such as malformed wine-region terms that should be reviewed before submission.
 - Missing-price and incomplete-dish-name blockers remain critical unless an exemption applies, such as included dishes inside supported set-menu sections.

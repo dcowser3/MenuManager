@@ -21,9 +21,12 @@ jest.mock('fs', () => {
 
 import { promises as fs } from 'fs';
 import {
+    buildApprovedDishVocabularyTerms,
     deriveBrandFromProperty,
     getApprovedDishBrandDetail,
     listApprovedDishBrands,
+    loadApprovedReviewVocabularyTerms,
+    mergeApprovedVocabularyTerms,
     slugifyApprovedDishBrand,
 } from '../lib/approved-dishes';
 
@@ -130,6 +133,43 @@ describe('approved dish browse helpers', () => {
         expect(deriveBrandFromProperty('Toro Toro - InterContinental - Miami')).toBe('Toro Toro');
         expect(deriveBrandFromProperty('Toro Del Mar - Athens')).toBe('Toro Del Mar');
         expect(slugifyApprovedDishBrand('tán')).toBe('tan');
+    });
+
+    test('aggregates frequent approved culinary words without losing accents', () => {
+        const terms = buildApprovedDishVocabularyTerms([
+            { dish_name: 'Fuego Chicken', description: 'tamarind glaze, brûlée onion' },
+            { dish_name: 'Fuego Steak', description: 'tamarind jus, brûlée leek' },
+            { dish_name: 'Fuego Fish', description: 'tamarind sauce, brûlée lime' },
+            { dish_name: 'Rare Dish', description: 'oneoff ingredient' },
+        ]);
+
+        expect(terms).toEqual(expect.arrayContaining([
+            { term: 'fuego', count: 3 },
+            { term: 'tamarind', count: 3 },
+            { term: 'brûlée', count: 3 },
+        ]));
+        expect(terms.some((term) => term.term === 'oneoff')).toBe(false);
+    });
+
+    test('merges approved dish and full-menu vocabulary counts', () => {
+        expect(mergeApprovedVocabularyTerms(
+            [{ term: 'Tamarind', count: 2 }, { term: 'fuego', count: 1 }],
+            [{ term: 'tamarind', count: 3 }, { term: 'brûlée', count: 4 }]
+        )).toEqual([
+            { term: 'tamarind', count: 5 },
+            { term: 'brûlée', count: 4 },
+            { term: 'fuego', count: 1 },
+        ]);
+    });
+
+    test('combines active dish rows with full approved menu text', async () => {
+        const terms = await loadApprovedReviewVocabularyTerms(repoRoot);
+        expect(terms).toEqual(expect.arrayContaining([
+            { term: 'lomo', count: 2 },
+            { term: 'churros', count: 2 },
+            { term: 'tenderloin', count: 2 },
+        ]));
+        expect(terms.some((term) => term.term === 'inactive')).toBe(false);
     });
 
     test('lists brand summaries with location counts from approved dishes', async () => {

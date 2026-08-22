@@ -30,6 +30,7 @@ const price_integrity_guard_1 = require("./price-integrity-guard");
 const menu_footer_1 = require("./menu-footer");
 const qa_prompt_builder_1 = require("./qa-prompt-builder");
 const canonical_vocabulary_provider_1 = require("./canonical-vocabulary-provider");
+const canonical_vocabulary_1 = require("./canonical-vocabulary");
 const tenant_config_1 = require("@menumanager/tenant-config");
 const review_response_contract_1 = require("./review-response-contract");
 const protected_terms_guard_1 = require("./protected-terms-guard");
@@ -610,6 +611,7 @@ function runPostAiPipeline(args) {
         finalSuggestions = enforceAllergenProgramCheck(correctedMenuSanitized, finalSuggestions);
     }
     finalSuggestions = detectKnownTextArtifactSuggestions(correctedMenuSanitized, finalSuggestions);
+    finalSuggestions = (0, canonical_vocabulary_1.ensureCanonicalSpellingSuggestions)(correctedMenuSanitized, finalSuggestions, args.canonicalSpellingFindings || []);
     const hasCriticalErrors = finalSuggestions.some(s => s.severity === 'critical');
     const criticalSuggestions = finalSuggestions.filter(s => s.severity === 'critical');
     return {
@@ -654,9 +656,14 @@ async function runFullReviewPipeline(rawMenuContent, opts, aiCaller) {
         ? { sections: [], issues: [] }
         : (0, embedded_set_menu_guard_1.analyzeEmbeddedSetMenus)(preCheckedReviewBody);
     // Scanned AFTER the deterministic pre-AI pass so already-applied fixes are not
-    // re-flagged. Reuses the rules fetched above — no additional read.
-    const nearMissBriefing = await (0, canonical_vocabulary_provider_1.buildNearMissBriefing)(preCheckedReviewBody, {
+    // re-flagged. Offline callers provide approved vocabulary evidence directly.
+    const nearMissAnalysis = await (0, canonical_vocabulary_provider_1.buildNearMissAnalysis)(preCheckedReviewBody, {
         fetchAcceptedRules: async () => acceptedCorrectionRules || [],
+        fetchApprovedTexts: async () => opts.approvedVocabularyTexts || [],
+        fetchApprovedTerms: async () => opts.approvedVocabularyTerms || [],
+        // Baseline and candidate evals can run in one process with different
+        // rules. Do not let either side reuse the other side's vocabulary.
+        ttlMs: 0,
     });
     const promptInfo = (0, qa_prompt_builder_1.buildFinalPrompt)(opts.basePrompt, {
         menuType: opts.menuType,
@@ -664,7 +671,7 @@ async function runFullReviewPipeline(rawMenuContent, opts, aiCaller) {
         changedOnlyMode: false,
         precheckEnabled,
         embeddedSetMenuAnalysis,
-        nearMissBriefing,
+        nearMissBriefing: nearMissAnalysis.briefing,
     }, { omitSections: opts.omitSections || [] });
     const feedback = await aiCaller(preCheckedReviewBody, promptInfo.prompt);
     const post = runPostAiPipeline({
@@ -676,6 +683,7 @@ async function runFullReviewPipeline(rawMenuContent, opts, aiCaller) {
         effectiveReviewAllergens,
         acceptedCorrectionRules,
         embeddedSetMenuAnalysis,
+        canonicalSpellingFindings: nearMissAnalysis.findings,
         precheckEnabled,
     });
     return {

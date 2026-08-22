@@ -1,18 +1,20 @@
 /**
  * Cached access to the canonical menu vocabulary for the review hot path.
  *
- * Building the vocabulary reads every accepted correction rule, which is far too much work
- * to repeat per submission. The vocabulary changes only when a reviewer accepts a rule, so a
- * short TTL is ample and a stale read costs nothing worse than a missing advisory finding.
+ * Building the vocabulary reads accepted correction rules and aggregated approved-menu terms,
+ * which is far too much work to repeat per submission. A short TTL keeps the review hot path
+ * cheap while still picking up new approvals promptly.
  *
- * Failure is always silent and non-blocking: if the fetch throws, reviews proceed with no
- * briefing rather than erroring. This feature can only ever add a hint to the prompt.
+ * Failure is always silent and non-blocking: if the fetch throws, reviews proceed without
+ * vocabulary findings rather than erroring.
  */
 import {
     buildCanonicalVocabulary,
     findNearMisses,
     renderNearMissBriefing,
     CanonicalVocabulary,
+    NearMissFinding,
+    ApprovedVocabularyTerm,
 } from './canonical-vocabulary';
 import { CONTEXT_DEPENDENT_TERMS } from './improvement-cycle-core';
 
@@ -35,6 +37,7 @@ export function invalidateCanonicalVocabulary(): void {
 export async function getCanonicalVocabulary(params: {
     fetchAcceptedRules: () => Promise<Array<{ original_text?: string | null; corrected_text?: string | null }>>;
     fetchApprovedTexts?: () => Promise<string[]>;
+    fetchApprovedTerms?: () => Promise<ApprovedVocabularyTerm[]>;
     ttlMs?: number;
     now?: () => number;
 }): Promise<CanonicalVocabulary | null> {
@@ -45,13 +48,15 @@ export async function getCanonicalVocabulary(params: {
     const ttl = params.ttlMs ?? DEFAULT_TTL_MS;
     inFlight = (async () => {
         try {
-            const [acceptedRules, approvedTexts] = await Promise.all([
+            const [acceptedRules, approvedTexts, approvedTerms] = await Promise.all([
                 params.fetchAcceptedRules(),
                 params.fetchApprovedTexts ? params.fetchApprovedTexts() : Promise.resolve([]),
+                params.fetchApprovedTerms ? params.fetchApprovedTerms() : Promise.resolve([]),
             ]);
             const vocabulary = buildCanonicalVocabulary({
                 acceptedRules: acceptedRules || [],
                 approvedTexts: approvedTexts || [],
+                approvedTerms: approvedTerms || [],
                 seedAmbiguousTerms: CONTEXT_DEPENDENT_TERMS,
             });
             cached = { vocabulary, expiresAt: (params.now ? params.now() : Date.now()) + ttl };
@@ -75,14 +80,27 @@ export async function buildNearMissBriefing(
     menuText: string,
     params: Parameters<typeof getCanonicalVocabulary>[0] & { env?: NodeJS.ProcessEnv }
 ): Promise<string> {
-    if (!isCanonicalVocabularyEnabled(params.env)) return '';
-    if (!`${menuText || ''}`.trim()) return '';
+    return (await buildNearMissAnalysis(menuText, params)).briefing;
+}
+
+export type CanonicalNearMissAnalysis = {
+    findings: NearMissFinding[];
+    briefing: string;
+};
+
+export async function buildNearMissAnalysis(
+    menuText: string,
+    params: Parameters<typeof getCanonicalVocabulary>[0] & { env?: NodeJS.ProcessEnv }
+): Promise<CanonicalNearMissAnalysis> {
+    if (!isCanonicalVocabularyEnabled(params.env)) return { findings: [], briefing: '' };
+    if (!`${menuText || ''}`.trim()) return { findings: [], briefing: '' };
     const vocabulary = await getCanonicalVocabulary(params);
-    if (!vocabulary) return '';
+    if (!vocabulary) return { findings: [], briefing: '' };
     try {
-        return renderNearMissBriefing(findNearMisses(menuText, vocabulary));
+        const findings = findNearMisses(menuText, vocabulary);
+        return { findings, briefing: renderNearMissBriefing(findings) };
     } catch (err) {
         console.warn(`Near-miss detection failed; continuing without it. (${(err as Error)?.message || err})`);
-        return '';
+        return { findings: [], briefing: '' };
     }
 }

@@ -10,7 +10,7 @@ You MUST respond with EXACTLY this structure:
 - Remaining spelling errors not already fixed by deterministic pre-AI checks
 - Remaining missing or incorrect diacritical marks not already fixed by deterministic pre-AI checks
 - Clear typos
-- Scrambled or misspelled ingredient words: descriptions on professional menus contain many Italian, French, Spanish, and Japanese culinary terms. If a word in a description is NOT a recognized word in English or in culinary vocabulary but is 1-2 letters away from a known ingredient or preparation (transposed, missing, or doubled letters, e.g. "proscuitto" for "prosciutto", "bechamal" for "bechamel"), treat it as a typo: auto-correct when confident, otherwise flag it as a medium-confidence Spelling suggestion. Do NOT skip a word just because it is unfamiliar; unfamiliar non-words next to food words are usually typos.
+- Scrambled or misspelled ingredient words: descriptions on professional menus contain many Italian, French, Spanish, and Japanese culinary terms. If a word in a description is NOT a recognized word in English or in culinary vocabulary but is 1-2 letters away from a known ingredient or preparation (including adjacent transpositions, missing letters, or doubled letters, e.g. "FUGEO" for "FUEGO", "tamrind" for "tamarind", "proscuitto" for "prosciutto"), treat it as a typo. Use the dish and neighboring ingredients as context. Auto-correct a unique, contextually sensible match; if no candidate is sufficiently confident, return a medium-confidence Spelling suggestion naming the suspicious token. NEVER silently preserve a token you believe is not a word merely because you cannot choose its correction.
 - Diacritics discipline: ONLY add accents that are standard for the word in its own language of origin. NEVER invent accents ("Torchon" is correct French and must NOT become "Torchón"; "frites", "crudo", "aioli" take no accents). If the same term appears with and without accents in different places on the menu, standardize EVERY instance to the correct form (e.g., "Bearnaise" and "Béarnaise" on one menu → all "Béarnaise").
 - Raw/undercooked item markers (*) for ambiguous cases not already handled by deterministic pre-AI checks
 - Missing allergen codes when HIGH confidence based on visible ingredients — ONLY when the menu already uses allergen codes on other dishes, ONLY using codes defined in the allergen key, and ONLY as a trailing cluster after the description (never inside or before the price). If NO dish on the menu carries allergen codes, do NOT add any to CORRECTED MENU; report them in SUGGESTIONS per section 1.4.1
@@ -356,6 +356,7 @@ Use this knowledge to identify missing allergen codes based on the document's al
 - Fish/prawn gyoza may need * if fish is undercooked
 - Crispy Rice Salmon (if salmon tartare on top)
 - Sushi rolls with raw fish (Spicy Salmon, Shrimp Roll if raw components)
+- House exception: shrimp ceviche is treated as cooked and does NOT take an asterisk unless the line explicitly says raw, uncooked, or undercooked, or another explicitly raw component independently requires the marker.
 
 **MEAT & POULTRY**
 - Steak Tartare, Carpaccio, Beef Tataki
