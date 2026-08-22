@@ -7,6 +7,7 @@ exports.differsOnlyByAccent = differsOnlyByAccent;
 exports.buildCanonicalVocabulary = buildCanonicalVocabulary;
 exports.findNearMisses = findNearMisses;
 exports.renderNearMissBriefing = renderNearMissBriefing;
+exports.adjudicateCanonicalSpellingFindings = adjudicateCanonicalSpellingFindings;
 exports.ensureCanonicalSpellingSuggestions = ensureCanonicalSpellingSuggestions;
 /**
  * Pairs where BOTH forms are correct and only the dish decides which. These earn a
@@ -370,9 +371,14 @@ function renderNearMissBriefing(findings) {
     if (!findings.length)
         return '';
     const lines = ['## Spelling suspicions from the canonical vocabulary', '',
-        'Each line below is a deterministic near-miss against reviewer-confirmed terminology or words repeatedly used in approved menus. For every non-ambiguous line, use the surrounding menu context to either apply the correction or return a medium-confidence Spelling suggestion. Do not silently ignore a suspected non-word. Ambiguous lines are questions only and must never be auto-corrected.', ''];
-    for (const f of findings)
-        lines.push(`- ${f.message}`);
+        'These are candidate suspicions, not authoritative database corrections. Use the complete dish line and neighboring ingredients to adjudicate EVERY ID below.',
+        'For each ID, do exactly one of the following:',
+        '1. Correct a unique, contextually certain spelling directly in CORRECTED MENU.',
+        '2. If intentional or valid (brand, proper name, multilingual, or culinary term), add an internal JSON disposition with type "Spelling Disposition", spellingFindingId, spellingDisposition "valid_as_written", and sourceToken. This acknowledgement will not be shown to the chef.',
+        '3. If a likely correction exists but is not certain, return a normal medium-confidence Spelling suggestion with spellingFindingId, spellingDisposition "uncertain_candidate", sourceToken, and suggestedReplacement.',
+        '4. If the token is confidently malformed but no safe correction can be inferred, return type "Unrecognized Term", confidence "high", severity "critical", spellingDisposition "unresolved_nonword", spellingFindingId, and sourceToken. Never use this for a term merely because it is absent from the historical menu database.',
+        'Never silently omit an ID. Ambiguous lines must never be auto-corrected without decisive dish context.', ''];
+    findings.forEach((f, index) => lines.push(`- [${findingId(index)}] ${f.message}`));
     return lines.join('\n');
 }
 function lineContainingToken(menuText, token) {
@@ -389,25 +395,119 @@ function lineContainingToken(menuText, token) {
  * non-ambiguous corpus near miss untouched and does not mention it, synthesize
  * a visible normal-severity review item so a suspected typo cannot disappear.
  */
-function ensureCanonicalSpellingSuggestions(correctedMenu, suggestions, findings) {
-    const output = [...(suggestions || [])];
-    for (const finding of findings || []) {
-        if (finding.kind === 'ambiguous')
-            continue;
+function findingId(index) {
+    return `CV-${String(index + 1).padStart(3, '0')}`;
+}
+function normalizeDisposition(value) {
+    const normalized = `${value || ''}`.trim().toLowerCase().replace(/[\s-]+/g, '_');
+    if (normalized === 'corrected'
+        || normalized === 'valid_as_written'
+        || normalized === 'uncertain_candidate'
+        || normalized === 'unresolved_nonword')
+        return normalized;
+    return null;
+}
+function suggestionMentionsFinding(suggestion, finding) {
+    const exactToken = accentSensitiveKey(suggestion.sourceToken || '');
+    if (exactToken && exactToken === accentSensitiveKey(finding.found))
+        return true;
+    const text = [
+        suggestion.menuItem,
+        suggestion.description,
+        suggestion.recommendation,
+    ].join(' ').toLowerCase();
+    return text.includes(finding.found.toLowerCase())
+        || text.includes(finding.canonical.toLowerCase());
+}
+/**
+ * Reconcile deterministic spelling suspicions with the model's explicit
+ * contextual disposition. Approved-corpus evidence is never authoritative:
+ * it can surface a yellow question, but only the model's high-confidence
+ * `unresolved_nonword` decision can create a blocking red issue.
+ */
+function adjudicateCanonicalSpellingFindings(correctedMenu, suggestions, findings) {
+    let output = [...(suggestions || [])];
+    const adjudications = [];
+    for (const [index, finding] of (findings || []).entries()) {
+        const id = findingId(index);
         const menuItem = lineContainingToken(correctedMenu, finding.found);
-        if (!menuItem)
-            continue; // The model or deterministic pass already fixed it.
-        const alreadyReported = output.some((suggestion) => {
-            const text = [
-                suggestion.menuItem,
-                suggestion.description,
-                suggestion.recommendation,
-            ].join(' ').toLowerCase();
-            return text.includes(finding.found.toLowerCase())
-                || text.includes(finding.canonical.toLowerCase());
-        });
-        if (alreadyReported)
+        if (!menuItem) {
+            output = output.filter((suggestion) => `${suggestion.spellingFindingId || ''}` !== id);
+            adjudications.push({
+                findingId: id,
+                found: finding.found,
+                canonical: finding.canonical,
+                disposition: 'corrected',
+                source: finding.source,
+            });
             continue;
+        }
+        const explicitIndex = output.findIndex((suggestion) => (`${suggestion.spellingFindingId || ''}`.trim().toUpperCase() === id
+            || (!!suggestion.spellingDisposition && suggestionMentionsFinding(suggestion, finding))));
+        const explicit = explicitIndex >= 0 ? output[explicitIndex] : null;
+        const disposition = normalizeDisposition(explicit?.spellingDisposition);
+        if (disposition === 'valid_as_written') {
+            output.splice(explicitIndex, 1); // Internal acknowledgement, not a chef-facing warning.
+            adjudications.push({ findingId: id, found: finding.found, canonical: finding.canonical, disposition, source: finding.source });
+            continue;
+        }
+        if (disposition === 'corrected') {
+            // The model claimed it corrected the token, but the submitted form is
+            // still present. Do not leak the internal record into the chef UI or
+            // trust the unsupported claim; turn it into an ordinary verification.
+            output[explicitIndex] = {
+                ...explicit,
+                type: finding.kind === 'diacritic' ? 'Diacritics' : 'Spelling',
+                confidence: 'medium',
+                severity: 'normal',
+                menuItem: explicit?.menuItem || menuItem,
+                description: `The review marked "${finding.found}" corrected, but it remains in the menu; verify whether "${finding.canonical}" was intended.`,
+                recommendation: `Confirm the intended spelling and, if appropriate, change "${finding.found}" to "${finding.canonical}".`,
+                spellingFindingId: id,
+                spellingDisposition: 'not_adjudicated',
+                sourceToken: finding.found,
+                suggestedReplacement: finding.canonical,
+            };
+            adjudications.push({ findingId: id, found: finding.found, canonical: finding.canonical, disposition: 'not_adjudicated', source: finding.source });
+            continue;
+        }
+        if (disposition === 'unresolved_nonword') {
+            output[explicitIndex] = {
+                ...explicit,
+                type: 'Unrecognized Term',
+                confidence: explicit?.confidence === 'high' ? 'high' : 'medium',
+                severity: explicit?.confidence === 'high' ? 'critical' : 'normal',
+                menuItem: explicit?.menuItem || menuItem,
+                description: explicit?.description || `The term "${finding.found}" appears malformed, but the review could not determine a reliable culinary correction.`,
+                recommendation: explicit?.recommendation || `Confirm the spelling of "${finding.found}", correct it manually, or override this issue if it is intentional.`,
+                spellingFindingId: id,
+                spellingDisposition: disposition,
+                sourceToken: finding.found,
+                suggestedReplacement: explicit?.suggestedReplacement || finding.canonical,
+            };
+            adjudications.push({ findingId: id, found: finding.found, canonical: finding.canonical, disposition, source: finding.source });
+            continue;
+        }
+        if (disposition === 'uncertain_candidate') {
+            output[explicitIndex] = {
+                ...explicit,
+                type: 'Spelling',
+                confidence: 'medium',
+                severity: 'normal',
+                menuItem: explicit?.menuItem || menuItem,
+                spellingFindingId: id,
+                spellingDisposition: disposition,
+                sourceToken: finding.found,
+                suggestedReplacement: explicit?.suggestedReplacement || finding.canonical,
+            };
+            adjudications.push({ findingId: id, found: finding.found, canonical: finding.canonical, disposition, source: finding.source });
+            continue;
+        }
+        const alreadyReported = output.some((suggestion) => suggestionMentionsFinding(suggestion, finding));
+        if (alreadyReported) {
+            adjudications.push({ findingId: id, found: finding.found, canonical: finding.canonical, disposition: 'uncertain_candidate', source: finding.source });
+            continue;
+        }
         output.push({
             type: finding.kind === 'diacritic' ? 'Diacritics' : 'Spelling',
             confidence: 'medium',
@@ -415,7 +515,16 @@ function ensureCanonicalSpellingSuggestions(correctedMenu, suggestions, findings
             menuItem,
             description: `"${finding.found}" looks misspelled in this menu context; the closest established menu word is "${finding.canonical}".`,
             recommendation: `Verify the intended term and, if correct, change "${finding.found}" to "${finding.canonical}".`,
+            spellingFindingId: id,
+            spellingDisposition: 'not_adjudicated',
+            sourceToken: finding.found,
+            suggestedReplacement: finding.canonical,
         });
+        adjudications.push({ findingId: id, found: finding.found, canonical: finding.canonical, disposition: 'not_adjudicated', source: finding.source });
     }
-    return output;
+    return { suggestions: output, adjudications };
+}
+/** Backward-compatible wrapper for callers that only need the visible list. */
+function ensureCanonicalSpellingSuggestions(correctedMenu, suggestions, findings) {
+    return adjudicateCanonicalSpellingFindings(correctedMenu, suggestions, findings).suggestions;
 }

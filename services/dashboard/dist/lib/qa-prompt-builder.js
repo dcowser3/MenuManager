@@ -58,8 +58,12 @@ exports.QA_PROMPT_SECTIONS = {
         appliesWhen: 'embedded set-menu sections detected in a non prix-fixe menu',
     },
     canonical_vocabulary_near_misses: {
-        description: 'Lists deterministic near-misses against reviewer-confirmed terminology and the approved-menu vocabulary for contextual adjudication. Confirmed canonical fixes run before the model; unresolved unique corpus matches become visible normal-severity suggestions.',
+        description: 'Lists candidate near-misses with stable IDs and requires an explicit contextual disposition for each. Historical-menu evidence is advisory; only an AI-confirmed high-confidence unresolved nonword becomes a blocking issue.',
         appliesWhen: 'near-miss findings were computed for this menu (CANONICAL_VOCABULARY_ENABLED)',
+    },
+    contextual_spelling_adjudication: {
+        description: 'Requires contextual spelling decisions, permits high-confidence automatic corrections, and makes only confidently malformed terms with no safe correction blocking and overrideable.',
+        appliesWhen: 'always',
     },
 };
 function hasAiReviewFenceContract(prompt) {
@@ -150,6 +154,10 @@ Note: Use ONLY these allergen codes when checking allergen compliance. Do not us
         finalPrompt = `${finalPrompt}\n\nIMPORTANT CORRECTED MENU STRUCTURE RULES:\n- The CORRECTED MENU section must contain every submitted menu line in the same order.\n- Do not summarize, shorten, condense, omit, merge, reorder, or rewrite the menu structure.\n- Do not add section headings or line breaks that were not in the submitted menu.\n- Apply only high-confidence corrections inline and leave all other text unchanged.`;
         finalPrompt = `${finalPrompt}\n- Never delete submitted dishes, beverages, options, headings, or standalone item lines. If a line seems wrong, duplicated, invalid, or not orderable, leave it in CORRECTED MENU and report the issue in SUGGESTIONS.`;
         sections.push('corrected_menu_structure_rules');
+    }
+    if (!omit.has('contextual_spelling_adjudication')) {
+        finalPrompt = `${finalPrompt}\n\nIMPORTANT CONTEXTUAL SPELLING ADJUDICATION:\n- Treat reviewer-confirmed terminology and historical approved-menu words as evidence, not as an authoritative dictionary. The dish line, neighboring ingredients, menu category, language, brands, and culinary usage decide meaning.\n- Auto-correct a unique, contextually certain typo directly in CORRECTED MENU.\n- If a likely correction exists but is uncertain, return a normal medium-confidence Spelling suggestion naming the suspicious token and candidate.\n- If you are HIGHLY confident a token is malformed but cannot infer a safe correction, return type \"Unrecognized Term\", confidence \"high\", severity \"critical\", and recommend that the chef confirm the spelling, correct it, or override the issue.\n- Never use a red Unrecognized Term issue merely because a word is unfamiliar or absent from historical menus. Brands, proper names, regional terms, and multilingual culinary words may be valid.\n- Inspect spelling across the entire menu; do not limit this check to the database-supplied candidates below.`;
+        sections.push('contextual_spelling_adjudication');
     }
     const nearMissBriefing = `${ctx.nearMissBriefing || ''}`.trim();
     if (nearMissBriefing && !omit.has('canonical_vocabulary_near_misses')) {

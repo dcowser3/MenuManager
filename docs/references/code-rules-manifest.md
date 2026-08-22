@@ -228,9 +228,15 @@ Explains detected embedded set-menu sections (package title + total price + choi
 
 ### Prompt section: canonical_vocabulary_near_misses
 
-Lists deterministic near-misses against reviewer-confirmed terminology and the approved-menu vocabulary for contextual adjudication. Confirmed canonical fixes run before the model; unresolved unique corpus matches become visible normal-severity suggestions. Applies when: near-miss findings were computed for this menu (CANONICAL_VOCABULARY_ENABLED).
+Lists candidate near-misses with stable IDs and requires an explicit contextual disposition for each. Historical-menu evidence is advisory; only an AI-confirmed high-confidence unresolved nonword becomes a blocking issue. Applies when: near-miss findings were computed for this menu (CANONICAL_VOCABULARY_ENABLED).
 
 - id: `prompt/canonical_vocabulary_near_misses` · category: prompt · implementation: `services/dashboard/lib/qa-prompt-builder.ts#buildFinalPrompt`
+
+### Prompt section: contextual_spelling_adjudication
+
+Requires contextual spelling decisions, permits high-confidence automatic corrections, and makes only confidently malformed terms with no safe correction blocking and overrideable. Applies when: always.
+
+- id: `prompt/contextual_spelling_adjudication` · category: prompt · implementation: `services/dashboard/lib/qa-prompt-builder.ts#buildFinalPrompt`
 
 ## Layer 3 — Response parsing and severity normalization
 
@@ -294,6 +300,12 @@ AI suggestions whose lowercased type equals "course progression" are always forc
 AI suggestions whose lowercased type equals "pricing structure" are always forced to critical severity.
 
 - id: `parse/forced-critical/pricing-structure` · category: severity · implementation: `services/dashboard/lib/review-pipeline.ts#FORCED_CRITICAL_NORMALIZED_TYPES`
+
+### High-confidence forced critical type: unrecognized term
+
+AI suggestions whose lowercased type equals "unrecognized term" are forced to critical severity only when confidence is high.
+
+- id: `parse/forced-critical/unrecognized-term-high-confidence` · category: severity · implementation: `services/dashboard/lib/review-pipeline.ts#FORCED_CRITICAL_HIGH_CONFIDENCE_TYPES`
 
 ## Layer 4 — Post-AI guards (model output corrections)
 

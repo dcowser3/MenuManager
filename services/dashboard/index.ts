@@ -3793,6 +3793,7 @@ async function handleBasicCheck(req: any, res: any) {
             correctedMenuSanitized,
             reconciliation,
             reconciledSuggestions,
+            spellingAdjudications,
             finalSuggestions,
             hasCriticalErrors,
             criticalSuggestions,
@@ -3811,6 +3812,7 @@ async function handleBasicCheck(req: any, res: any) {
         console.log('Embedded set prices restored:', setMenuGuard.restoredPrices.length);
         console.log('Price integrity guard changes:', priceIntegrityGuard.changes.length);
         console.log('Reconciled suggestions count:', reconciledSuggestions.length);
+        console.log('Spelling adjudications:', spellingAdjudications.length);
         console.log('Has changes:', correctedMenuSanitized !== originalMenuSanitized);
         console.log('===========================');
 
@@ -3887,6 +3889,7 @@ async function handleBasicCheck(req: any, res: any) {
                     changedPriceCount: priceIntegrityGuard.changes.length,
                     changes: priceIntegrityGuard.changes,
                 },
+                spellingAdjudications,
             },
         });
 
@@ -3970,6 +3973,7 @@ async function handleBasicCheck(req: any, res: any) {
                     droppedSuggestions: reconciliation.droppedSuggestions,
                     suggestionsAfterReconciliation: reconciledSuggestions,
                 },
+                spellingAdjudications,
             },
             finalResult: {
                 correctedMenu: finalCorrectedMenu,
@@ -4059,6 +4063,7 @@ async function handleBasicCheck(req: any, res: any) {
                 droppedSuggestions: reconciliation.droppedSuggestions,
                 suggestionsAfterReconciliation: reconciledSuggestions,
             },
+            spellingAdjudications,
             final: {
                 suggestions: finalSuggestions,
                 hasCriticalErrors,

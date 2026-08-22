@@ -24,7 +24,8 @@ import { buildNearMissAnalysis } from './canonical-vocabulary-provider';
 import {
     ApprovedVocabularyTerm,
     NearMissFinding,
-    ensureCanonicalSpellingSuggestions,
+    SpellingAdjudication,
+    adjudicateCanonicalSpellingFindings,
 } from './canonical-vocabulary';
 import { getTenantConfig } from '@menumanager/tenant-config';
 import { AI_REVIEW_FENCES } from './review-response-contract';
@@ -37,6 +38,10 @@ export type ReviewSuggestion = {
     menuItem?: string;
     description?: string;
     recommendation?: string;
+    spellingFindingId?: string;
+    spellingDisposition?: string;
+    sourceToken?: string;
+    suggestedReplacement?: string;
 };
 
 export type ParsedAiResponse = {
@@ -58,6 +63,7 @@ export type ParsedAiResponse = {
 // enumerate them without re-reading the implementation.
 export const FORCED_CRITICAL_EXACT_TYPES = ['Missing Price', 'Incomplete Dish Name'] as const;
 export const FORCED_CRITICAL_NORMALIZED_TYPES = ['set menu item price', 'course progression', 'pricing structure'] as const;
+export const FORCED_CRITICAL_HIGH_CONFIDENCE_TYPES = ['unrecognized term'] as const;
 
 const STRING_SUGGESTION_DEFAULTS = {
     type: 'General Review Note',
@@ -604,6 +610,10 @@ export function parseAIResponse(feedback: string, originalMenu: string): ParsedA
         if (
             (FORCED_CRITICAL_EXACT_TYPES as readonly string[]).includes(s.type) ||
             (FORCED_CRITICAL_NORMALIZED_TYPES as readonly string[]).includes(type) ||
+            (
+                (FORCED_CRITICAL_HIGH_CONFIDENCE_TYPES as readonly string[]).includes(type)
+                && `${s.confidence || ''}`.trim().toLowerCase() === 'high'
+            ) ||
             isPrixFixeTopPriceIssue ||
             isCourseNumberingIssue
         ) {
@@ -718,6 +728,7 @@ export type PostAiPipelineResult = {
     correctedMenuSanitized: string;
     reconciliation: ReturnType<typeof reconcileCriticalSuggestionsAgainstCorrectedMenuWithDiagnostics>;
     reconciledSuggestions: ReviewSuggestion[];
+    spellingAdjudications: SpellingAdjudication[];
     finalSuggestions: ReviewSuggestion[];
     hasCriticalErrors: boolean;
     criticalSuggestions: ReviewSuggestion[];
@@ -792,11 +803,12 @@ export function runPostAiPipeline(args: PostAiPipelineArgs): PostAiPipelineResul
         finalSuggestions = enforceAllergenProgramCheck(correctedMenuSanitized, finalSuggestions);
     }
     finalSuggestions = detectKnownTextArtifactSuggestions(correctedMenuSanitized, finalSuggestions);
-    finalSuggestions = ensureCanonicalSpellingSuggestions(
+    const spellingAdjudication = adjudicateCanonicalSpellingFindings(
         correctedMenuSanitized,
         finalSuggestions,
         args.canonicalSpellingFindings || []
-    ) as ReviewSuggestion[];
+    );
+    finalSuggestions = spellingAdjudication.suggestions as ReviewSuggestion[];
 
     const hasCriticalErrors = finalSuggestions.some(s => s.severity === 'critical');
     const criticalSuggestions = finalSuggestions.filter(s => s.severity === 'critical');
@@ -816,6 +828,7 @@ export function runPostAiPipeline(args: PostAiPipelineArgs): PostAiPipelineResul
         correctedMenuSanitized,
         reconciliation,
         reconciledSuggestions,
+        spellingAdjudications: spellingAdjudication.adjudications,
         finalSuggestions,
         hasCriticalErrors,
         criticalSuggestions,

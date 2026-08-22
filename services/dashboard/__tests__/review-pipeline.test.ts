@@ -17,6 +17,7 @@ jest.mock('@menumanager/tenant-config', () => {
 
 import {
     FORCED_CRITICAL_EXACT_TYPES,
+    FORCED_CRITICAL_HIGH_CONFIDENCE_TYPES,
     FORCED_CRITICAL_NORMALIZED_TYPES,
     detectKnownTextArtifactSuggestions,
     enforceAllergenProgramCheck,
@@ -122,6 +123,39 @@ describe('parseAIResponse (extracted from index.ts)', () => {
     test('exported forced-critical type lists match the implementation contract', () => {
         expect(FORCED_CRITICAL_EXACT_TYPES).toEqual(['Missing Price', 'Incomplete Dish Name']);
         expect(FORCED_CRITICAL_NORMALIZED_TYPES).toEqual(['set menu item price', 'course progression', 'pricing structure']);
+        expect(FORCED_CRITICAL_HIGH_CONFIDENCE_TYPES).toEqual(['unrecognized term']);
+    });
+
+    test('forces a model-discovered unresolved nonword to critical severity', () => {
+        const parsed = parseAIResponse(buildFeedback('Mystery sauce', [{
+            type: 'Unrecognized Term',
+            confidence: 'high',
+            severity: 'normal',
+            menuItem: 'Mystery sauce',
+            description: '"xyqzz" appears malformed and has no reliable contextual correction.',
+            recommendation: 'Confirm or correct "xyqzz".',
+            spellingDisposition: 'unresolved_nonword',
+            sourceToken: 'xyqzz',
+        }]), 'Mystery sauce');
+
+        expect(parsed.suggestions[0]).toMatchObject({
+            type: 'Unrecognized Term',
+            confidence: 'high',
+            severity: 'critical',
+        });
+    });
+
+    test('does not make a medium-confidence unfamiliar term blocking', () => {
+        const parsed = parseAIResponse(buildFeedback('Mystery sauce', [{
+            type: 'Unrecognized Term',
+            confidence: 'medium',
+            severity: 'normal',
+            menuItem: 'Mystery sauce',
+            description: 'The term may be unfamiliar.',
+            recommendation: 'Verify it.',
+        }]), 'Mystery sauce');
+
+        expect(parsed.suggestions[0].severity).toBe('normal');
     });
 });
 
@@ -375,6 +409,75 @@ describe('runPostAiPipeline (full guard chain)', () => {
         expect(result.finalSuggestions).toEqual([]);
         expect(result.hasCriticalErrors).toBe(false);
         expect(result.structureGuard.safe).toBe(true);
+    });
+
+    test('keeps an explicit valid culinary spelling decision out of chef-facing suggestions', () => {
+        const result = runPostAiPipeline({
+            feedback: buildFeedback(menu, [{
+                type: 'Spelling Disposition',
+                spellingFindingId: 'CV-001',
+                spellingDisposition: 'valid_as_written',
+                sourceToken: 'GUACAMOLE',
+                menuItem: 'GUACAMOLE',
+                description: 'Valid culinary term as written.',
+                recommendation: '',
+            }]),
+            preCheckedReviewBody: menu,
+            acceptedCorrectionRules: [],
+            embeddedSetMenuAnalysis: { sections: [], issues: [] },
+            canonicalSpellingFindings: [{
+                found: 'GUACAMOLE',
+                canonical: 'GUACAMOLÉ',
+                kind: 'ambiguous',
+                distance: 0,
+                message: 'context question',
+                source: 'approved_corpus',
+                confidence: 'medium',
+            }],
+            precheckEnabled: false,
+        });
+
+        expect(result.finalSuggestions).toEqual([]);
+        expect(result.spellingAdjudications).toContainEqual(expect.objectContaining({
+            findingId: 'CV-001',
+            disposition: 'valid_as_written',
+        }));
+        expect(result.hasCriticalErrors).toBe(false);
+    });
+
+    test('blocks on a high-confidence unresolved nonword and leaves it overrideable', () => {
+        const result = runPostAiPipeline({
+            feedback: buildFeedback(menu, [{
+                type: 'Unrecognized Term',
+                spellingFindingId: 'CV-001',
+                spellingDisposition: 'unresolved_nonword',
+                sourceToken: 'GUACAMOLE',
+                confidence: 'high',
+                menuItem: 'GUACAMOLE',
+                description: 'The token appears malformed but no safe correction is known.',
+                recommendation: 'Confirm, correct, or override it.',
+            }]),
+            preCheckedReviewBody: menu,
+            acceptedCorrectionRules: [],
+            embeddedSetMenuAnalysis: { sections: [], issues: [] },
+            canonicalSpellingFindings: [{
+                found: 'GUACAMOLE',
+                canonical: 'GUACAMOLÉ',
+                kind: 'typo',
+                distance: 1,
+                message: 'candidate',
+                source: 'approved_corpus',
+                confidence: 'medium',
+            }],
+            precheckEnabled: false,
+        });
+
+        expect(result.hasCriticalErrors).toBe(true);
+        expect(result.criticalSuggestions).toContainEqual(expect.objectContaining({
+            type: 'Unrecognized Term',
+            severity: 'critical',
+            spellingDisposition: 'unresolved_nonword',
+        }));
     });
 
     test('structure guard rejects an AI response that collapses the menu', () => {

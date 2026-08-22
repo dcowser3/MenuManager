@@ -2,6 +2,7 @@ import {
     buildCanonicalVocabulary,
     findNearMisses,
     differsOnlyByAccent,
+    adjudicateCanonicalSpellingFindings,
     ensureCanonicalSpellingSuggestions,
     renderNearMissBriefing,
 } from '../lib/canonical-vocabulary';
@@ -119,6 +120,9 @@ describe('findNearMisses', () => {
         expect(renderNearMissBriefing([])).toBe('');
         const briefing = renderNearMissBriefing(findNearMisses('el tequileno blanco', vocab));
         expect(briefing).toContain('canonical vocabulary');
+        expect(briefing).toContain('[CV-001]');
+        expect(briefing).toContain('valid_as_written');
+        expect(briefing).toContain('unresolved_nonword');
         expect(briefing).toContain('tequileño');
     });
 
@@ -195,13 +199,102 @@ describe('ensureCanonicalSpellingSuggestions', () => {
         expect(ensureCanonicalSpellingSuggestions('Chicken, tamarind glaze 24', [], [finding])).toEqual([]);
     });
 
-    test('never synthesizes a correction for a context-dependent match', () => {
+    test('surfaces a context-dependent match as a question without synthesizing a correction', () => {
         expect(ensureCanonicalSpellingSuggestions('Rose dessert 14', [], [{
             ...finding,
             found: 'Rose',
             canonical: 'rosé',
             kind: 'ambiguous',
-        }])).toEqual([]);
+        }])).toContainEqual(expect.objectContaining({
+            severity: 'normal',
+            confidence: 'medium',
+            spellingDisposition: 'not_adjudicated',
+            sourceToken: 'Rose',
+        }));
+    });
+
+    test('hides an explicit valid-as-written acknowledgement and records the decision', () => {
+        const result = adjudicateCanonicalSpellingFindings(
+            'Chicken, tamrind glaze 24',
+            [{
+                type: 'Spelling Disposition',
+                spellingFindingId: 'CV-001',
+                spellingDisposition: 'valid_as_written',
+                sourceToken: 'tamrind',
+            }],
+            [finding]
+        );
+
+        expect(result.suggestions).toEqual([]);
+        expect(result.adjudications).toContainEqual(expect.objectContaining({
+            findingId: 'CV-001',
+            disposition: 'valid_as_written',
+        }));
+    });
+
+    test('makes only a high-confidence unresolved nonword blocking', () => {
+        const high = adjudicateCanonicalSpellingFindings(
+            'Chicken, tamrind glaze 24',
+            [{
+                spellingFindingId: 'CV-001',
+                spellingDisposition: 'unresolved_nonword',
+                confidence: 'high',
+                sourceToken: 'tamrind',
+            }],
+            [finding]
+        );
+        const medium = adjudicateCanonicalSpellingFindings(
+            'Chicken, tamrind glaze 24',
+            [{
+                spellingFindingId: 'CV-001',
+                spellingDisposition: 'unresolved_nonword',
+                confidence: 'medium',
+                sourceToken: 'tamrind',
+            }],
+            [finding]
+        );
+
+        expect(high.suggestions[0]).toMatchObject({
+            type: 'Unrecognized Term',
+            severity: 'critical',
+            confidence: 'high',
+        });
+        expect(medium.suggestions[0]).toMatchObject({
+            type: 'Unrecognized Term',
+            severity: 'normal',
+            confidence: 'medium',
+        });
+    });
+
+    test('recognizes an inline model correction without requiring a disposition record', () => {
+        const result = adjudicateCanonicalSpellingFindings(
+            'Chicken, tamarind glaze 24',
+            [],
+            [finding]
+        );
+
+        expect(result.suggestions).toEqual([]);
+        expect(result.adjudications[0].disposition).toBe('corrected');
+    });
+
+    test('does not trust a corrected disposition when the typo remains in the menu', () => {
+        const result = adjudicateCanonicalSpellingFindings(
+            'Chicken, tamrind glaze 24',
+            [{
+                type: 'Spelling Disposition',
+                spellingFindingId: 'CV-001',
+                spellingDisposition: 'corrected',
+                sourceToken: 'tamrind',
+            }],
+            [finding]
+        );
+
+        expect(result.suggestions[0]).toMatchObject({
+            type: 'Spelling',
+            severity: 'normal',
+            spellingDisposition: 'not_adjudicated',
+        });
+        expect(result.adjudications[0].disposition).toBe('not_adjudicated');
     });
 });
 

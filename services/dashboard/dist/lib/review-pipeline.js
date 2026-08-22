@@ -4,7 +4,7 @@
 // services/dashboard/index.ts handleBasicCheck so the production route and the
 // offline eval harness run the SAME code.
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.FORCED_CRITICAL_NORMALIZED_TYPES = exports.FORCED_CRITICAL_EXACT_TYPES = void 0;
+exports.FORCED_CRITICAL_HIGH_CONFIDENCE_TYPES = exports.FORCED_CRITICAL_NORMALIZED_TYPES = exports.FORCED_CRITICAL_EXACT_TYPES = void 0;
 exports.stripDiacritics = stripDiacritics;
 exports.normalizeForSuggestionMatch = normalizeForSuggestionMatch;
 exports.looksLikePriceOnLine = looksLikePriceOnLine;
@@ -39,6 +39,7 @@ const protected_terms_guard_1 = require("./protected-terms-guard");
 // enumerate them without re-reading the implementation.
 exports.FORCED_CRITICAL_EXACT_TYPES = ['Missing Price', 'Incomplete Dish Name'];
 exports.FORCED_CRITICAL_NORMALIZED_TYPES = ['set menu item price', 'course progression', 'pricing structure'];
+exports.FORCED_CRITICAL_HIGH_CONFIDENCE_TYPES = ['unrecognized term'];
 const STRING_SUGGESTION_DEFAULTS = {
     type: 'General Review Note',
     confidence: 'medium',
@@ -486,6 +487,8 @@ function parseAIResponse(feedback, originalMenu) {
         // Force critical severity for known critical types (safety net)
         if (exports.FORCED_CRITICAL_EXACT_TYPES.includes(s.type) ||
             exports.FORCED_CRITICAL_NORMALIZED_TYPES.includes(type) ||
+            (exports.FORCED_CRITICAL_HIGH_CONFIDENCE_TYPES.includes(type)
+                && `${s.confidence || ''}`.trim().toLowerCase() === 'high') ||
             isPrixFixeTopPriceIssue ||
             isCourseNumberingIssue) {
             s.severity = 'critical';
@@ -611,7 +614,8 @@ function runPostAiPipeline(args) {
         finalSuggestions = enforceAllergenProgramCheck(correctedMenuSanitized, finalSuggestions);
     }
     finalSuggestions = detectKnownTextArtifactSuggestions(correctedMenuSanitized, finalSuggestions);
-    finalSuggestions = (0, canonical_vocabulary_1.ensureCanonicalSpellingSuggestions)(correctedMenuSanitized, finalSuggestions, args.canonicalSpellingFindings || []);
+    const spellingAdjudication = (0, canonical_vocabulary_1.adjudicateCanonicalSpellingFindings)(correctedMenuSanitized, finalSuggestions, args.canonicalSpellingFindings || []);
+    finalSuggestions = spellingAdjudication.suggestions;
     const hasCriticalErrors = finalSuggestions.some(s => s.severity === 'critical');
     const criticalSuggestions = finalSuggestions.filter(s => s.severity === 'critical');
     return {
@@ -629,6 +633,7 @@ function runPostAiPipeline(args) {
         correctedMenuSanitized,
         reconciliation,
         reconciledSuggestions,
+        spellingAdjudications: spellingAdjudication.adjudications,
         finalSuggestions,
         hasCriticalErrors,
         criticalSuggestions,

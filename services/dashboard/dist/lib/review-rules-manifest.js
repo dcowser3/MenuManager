@@ -360,6 +360,18 @@ function buildReviewRulesManifest(opts = {}) {
             source: 'code_data',
         });
     }
+    for (const type of review_pipeline_1.FORCED_CRITICAL_HIGH_CONFIDENCE_TYPES) {
+        entries.push({
+            id: `parse/forced-critical/${type.replace(/\s+/g, '-')}-high-confidence`,
+            layer: 'parse_normalization',
+            category: 'severity',
+            title: `High-confidence forced critical type: ${type}`,
+            description: `AI suggestions whose lowercased type equals "${type}" are forced to critical severity only when confidence is high.`,
+            implementation: { file: REVIEW_PIPELINE_FILE, exportName: 'FORCED_CRITICAL_HIGH_CONFIDENCE_TYPES' },
+            data: { type, match: 'lowercased', confidence: 'high' },
+            source: 'code_data',
+        });
+    }
     for (const rule of opts.acceptedCorrectionRules || []) {
         entries.push({
             id: `dynamic/correction-rule/${rule.id || `${rule.original_text}->${rule.corrected_text}`}`,

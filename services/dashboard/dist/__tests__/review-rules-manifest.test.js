@@ -86,7 +86,11 @@ describe('review rules manifest', () => {
         const criticalData = manifest.entries
             .filter((entry) => entry.id.startsWith('parse/forced-critical/'))
             .map((entry) => entry.data.type);
-        for (const type of [...review_pipeline_1.FORCED_CRITICAL_EXACT_TYPES, ...review_pipeline_1.FORCED_CRITICAL_NORMALIZED_TYPES]) {
+        for (const type of [
+            ...review_pipeline_1.FORCED_CRITICAL_EXACT_TYPES,
+            ...review_pipeline_1.FORCED_CRITICAL_NORMALIZED_TYPES,
+            ...review_pipeline_1.FORCED_CRITICAL_HIGH_CONFIDENCE_TYPES,
+        ]) {
             expect(criticalData).toContain(type);
         }
     });

@@ -1,11 +1,11 @@
 # Critical Error Blocking
 
 **Status:** Complete (Feb 2026)
-**Last updated:** May 2026
+**Last updated:** August 2026
 
 The AI review enforces "hard stops" for critical issues that block submission.
 
-Spelling uncertainty is deliberately not a hard stop. Reviewer-confirmed unique spelling fixes can be applied deterministically; a unique approved-corpus near miss left unresolved by the model becomes a medium-confidence, normal-severity suggestion. Unfamiliar culinary, brand, and multilingual terms therefore remain reviewable without being mislabeled as critical errors.
+Spelling uncertainty is deliberately not a hard stop. Reviewer-confirmed unique spelling fixes can be applied deterministically; an uncertain or silently omitted approved-corpus near miss becomes a medium-confidence, normal-severity suggestion. Only a token the model explicitly classifies with high confidence as malformed but not safely correctable becomes an overrideable critical `Unrecognized Term`. Mere absence from historical menus is never critical, protecting unfamiliar culinary, brand, and multilingual terms.
 
 ## Critical Error Types
 
@@ -14,6 +14,7 @@ Spelling uncertainty is deliberately not a hard stop. Reviewer-confirmed unique 
 | **Missing Price** | Standard menus only | AI flags it; backend forces `critical` via normalizer | No — left in suggestions only |
 | **Set Menu Item Price** | Embedded set-menu sections inside standard menus | AI can flag it; deterministic guard synthesizes it for bare included-item prices | No — left in suggestions only |
 | **Incomplete Dish Name** | All menus | AI flags it; backend forces `critical` via normalizer | No — left in suggestions only |
+| **Unrecognized Term** | All menus | AI explicitly classifies a token as confidently malformed with no safe contextual correction; backend and spelling adjudicator enforce the blocker | No — chef corrects, confirms, or overrides |
 | **Prix Fixe Top Price Missing** | Prix fixe menus | Deterministic scan of top 5 non-empty lines (`enforcePrixFixeCriticalChecks`) | No |
 | **Course Numbering** | Prix fixe menus | Deterministic check for number line above headings + AI can flag it | No |
 | **Course Progression** | Prix fixe menus | AI flags it; backend forces `critical` via normalizer | No |
@@ -34,6 +35,7 @@ The prompt also tells the model that standalone selection instructions such as `
 ### Layer 2: Severity Normalizer (`services/dashboard/index.ts` → `parseAIResponse`)
 A backend safety net that forces `critical` severity on known types regardless of what the AI returned:
 - Matches by `type` field: `Missing Price`, `Incomplete Dish Name`
+- Matches `Unrecognized Term` only when `confidence` is `high`
 - Matches by `type` field (lowercase): `set menu item price`, `course progression`, `pricing structure`, `course numbering`
 - Matches by regex on description: prix fixe top price issues, course numbering mentions
 - Fallback regex: descriptions mentioning "missing price" or "missing dish name" get reclassified

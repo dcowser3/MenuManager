@@ -3370,7 +3370,7 @@ async function handleBasicCheck(req, res) {
             precheckEnabled: BASIC_AI_PRECHECK_ENABLED,
             checkId: basicCheckId,
         });
-        const { parsed, postAiDeterministic, protectedTerms, titleGuard, structureGuard, guardedCorrectedMenu, allergenGuard, appliedHc, setMenuGuard, priceIntegrityGuard, correctedAfterHighConfidence, correctedMenuSanitized, reconciliation, reconciledSuggestions, finalSuggestions, hasCriticalErrors, criticalSuggestions, } = postPipeline;
+        const { parsed, postAiDeterministic, protectedTerms, titleGuard, structureGuard, guardedCorrectedMenu, allergenGuard, appliedHc, setMenuGuard, priceIntegrityGuard, correctedAfterHighConfidence, correctedMenuSanitized, reconciliation, reconciledSuggestions, spellingAdjudications, finalSuggestions, hasCriticalErrors, criticalSuggestions, } = postPipeline;
         const originalMenuSanitized = sanitizedMenuContent.body;
         console.log('=== PARSED RESPONSE ===');
         console.log('Corrected menu length:', correctedMenuSanitized.length);
@@ -3384,6 +3384,7 @@ async function handleBasicCheck(req, res) {
         console.log('Embedded set prices restored:', setMenuGuard.restoredPrices.length);
         console.log('Price integrity guard changes:', priceIntegrityGuard.changes.length);
         console.log('Reconciled suggestions count:', reconciledSuggestions.length);
+        console.log('Spelling adjudications:', spellingAdjudications.length);
         console.log('Has changes:', correctedMenuSanitized !== originalMenuSanitized);
         console.log('===========================');
         let changedOnlyMergedMenu = menuContent;
@@ -3454,6 +3455,7 @@ async function handleBasicCheck(req, res) {
                     changedPriceCount: priceIntegrityGuard.changes.length,
                     changes: priceIntegrityGuard.changes,
                 },
+                spellingAdjudications,
             },
         });
         await (0, basic_ai_check_audit_1.logBasicAiCheckAudit)(buildBasicCheckAuditEvent('completed', 200, {
@@ -3536,6 +3538,7 @@ async function handleBasicCheck(req, res) {
                     droppedSuggestions: reconciliation.droppedSuggestions,
                     suggestionsAfterReconciliation: reconciledSuggestions,
                 },
+                spellingAdjudications,
             },
             finalResult: {
                 correctedMenu: finalCorrectedMenu,
@@ -3624,6 +3627,7 @@ async function handleBasicCheck(req, res) {
                 droppedSuggestions: reconciliation.droppedSuggestions,
                 suggestionsAfterReconciliation: reconciledSuggestions,
             },
+            spellingAdjudications,
             final: {
                 suggestions: finalSuggestions,
                 hasCriticalErrors,

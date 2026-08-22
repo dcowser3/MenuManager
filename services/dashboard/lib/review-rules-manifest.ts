@@ -10,7 +10,11 @@
 
 import { BUILT_IN_REPLACEMENTS, AcceptedCorrectionRule } from './pre-ai-deterministic-rules';
 import { QA_PROMPT_SECTIONS, QaPromptSectionId } from './qa-prompt-builder';
-import { FORCED_CRITICAL_EXACT_TYPES, FORCED_CRITICAL_NORMALIZED_TYPES } from './review-pipeline';
+import {
+    FORCED_CRITICAL_EXACT_TYPES,
+    FORCED_CRITICAL_HIGH_CONFIDENCE_TYPES,
+    FORCED_CRITICAL_NORMALIZED_TYPES,
+} from './review-pipeline';
 
 export type ManifestLayer =
     | 'pre_ai_deterministic'
@@ -385,6 +389,18 @@ export function buildReviewRulesManifest(opts: { acceptedCorrectionRules?: Accep
             description: `AI suggestions whose lowercased type equals "${type}" are always forced to critical severity.`,
             implementation: { file: REVIEW_PIPELINE_FILE, exportName: 'FORCED_CRITICAL_NORMALIZED_TYPES' },
             data: { type, match: 'lowercased' },
+            source: 'code_data',
+        });
+    }
+    for (const type of FORCED_CRITICAL_HIGH_CONFIDENCE_TYPES) {
+        entries.push({
+            id: `parse/forced-critical/${type.replace(/\s+/g, '-')}-high-confidence`,
+            layer: 'parse_normalization',
+            category: 'severity',
+            title: `High-confidence forced critical type: ${type}`,
+            description: `AI suggestions whose lowercased type equals "${type}" are forced to critical severity only when confidence is high.`,
+            implementation: { file: REVIEW_PIPELINE_FILE, exportName: 'FORCED_CRITICAL_HIGH_CONFIDENCE_TYPES' },
+            data: { type, match: 'lowercased', confidence: 'high' },
             source: 'code_data',
         });
     }

@@ -41,6 +41,7 @@ describe('buildFinalPrompt (extracted from handleBasicCheck)', () => {
         });
         expect(sections).toEqual([
             'corrected_menu_structure_rules',
+            'contextual_spelling_adjudication',
             'footer_rules',
             'add_on_price_rules',
             'standard_item_price_rules',
@@ -48,6 +49,9 @@ describe('buildFinalPrompt (extracted from handleBasicCheck)', () => {
         ]);
         expect(prompt.startsWith(BASE_PROMPT)).toBe(true);
         expect(prompt).toContain('IMPORTANT CORRECTED MENU STRUCTURE RULES:');
+        expect(prompt).toContain('IMPORTANT CONTEXTUAL SPELLING ADJUDICATION:');
+        expect(prompt).toContain('Unrecognized Term');
+        expect(prompt).toContain('confirm the spelling, correct it, or override');
         expect(prompt).toContain('Never delete submitted dishes, beverages, options, headings, or standalone item lines.');
         expect(prompt).toContain(`The canonical foodborne illness warning is: ${menu_footer_1.RAW_NOTICE_TEXT}`);
         expect(prompt).toContain('IMPORTANT ADD-ON PRICE RULES:');
@@ -126,6 +130,7 @@ describe('buildFinalPrompt (extracted from handleBasicCheck)', () => {
         });
         expect(sections).toEqual([
             'corrected_menu_structure_rules',
+            'contextual_spelling_adjudication',
             'pre_ai_deterministic_checks',
             'changed_only_scope',
             'footer_rules',

@@ -2,7 +2,11 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { BUILT_IN_REPLACEMENTS } from '../lib/pre-ai-deterministic-rules';
 import { QA_PROMPT_SECTIONS } from '../lib/qa-prompt-builder';
-import { FORCED_CRITICAL_EXACT_TYPES, FORCED_CRITICAL_NORMALIZED_TYPES } from '../lib/review-pipeline';
+import {
+    FORCED_CRITICAL_EXACT_TYPES,
+    FORCED_CRITICAL_HIGH_CONFIDENCE_TYPES,
+    FORCED_CRITICAL_NORMALIZED_TYPES,
+} from '../lib/review-pipeline';
 import { buildReviewRulesManifest, renderRulesManifestMarkdown } from '../lib/review-rules-manifest';
 
 // Resolve the repo root from either the source layout (__tests__) or the
@@ -64,7 +68,11 @@ describe('review rules manifest', () => {
         const criticalData = manifest.entries
             .filter((entry) => entry.id.startsWith('parse/forced-critical/'))
             .map((entry) => (entry.data as { type: string }).type);
-        for (const type of [...FORCED_CRITICAL_EXACT_TYPES, ...FORCED_CRITICAL_NORMALIZED_TYPES]) {
+        for (const type of [
+            ...FORCED_CRITICAL_EXACT_TYPES,
+            ...FORCED_CRITICAL_NORMALIZED_TYPES,
+            ...FORCED_CRITICAL_HIGH_CONFIDENCE_TYPES,
+        ]) {
             expect(criticalData).toContain(type);
         }
     });

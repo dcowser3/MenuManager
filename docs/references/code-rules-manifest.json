@@ -2269,15 +2269,32 @@
       "layer": "prompt_section",
       "category": "prompt",
       "title": "Prompt section: canonical_vocabulary_near_misses",
-      "description": "Lists deterministic near-misses against reviewer-confirmed terminology and the approved-menu vocabulary for contextual adjudication. Confirmed canonical fixes run before the model; unresolved unique corpus matches become visible normal-severity suggestions. Applies when: near-miss findings were computed for this menu (CANONICAL_VOCABULARY_ENABLED).",
+      "description": "Lists candidate near-misses with stable IDs and requires an explicit contextual disposition for each. Historical-menu evidence is advisory; only an AI-confirmed high-confidence unresolved nonword becomes a blocking issue. Applies when: near-miss findings were computed for this menu (CANONICAL_VOCABULARY_ENABLED).",
       "implementation": {
         "file": "services/dashboard/lib/qa-prompt-builder.ts",
         "exportName": "buildFinalPrompt"
       },
       "data": {
         "sectionId": "canonical_vocabulary_near_misses",
-        "description": "Lists deterministic near-misses against reviewer-confirmed terminology and the approved-menu vocabulary for contextual adjudication. Confirmed canonical fixes run before the model; unresolved unique corpus matches become visible normal-severity suggestions.",
+        "description": "Lists candidate near-misses with stable IDs and requires an explicit contextual disposition for each. Historical-menu evidence is advisory; only an AI-confirmed high-confidence unresolved nonword becomes a blocking issue.",
         "appliesWhen": "near-miss findings were computed for this menu (CANONICAL_VOCABULARY_ENABLED)"
+      },
+      "source": "code_data"
+    },
+    {
+      "id": "prompt/contextual_spelling_adjudication",
+      "layer": "prompt_section",
+      "category": "prompt",
+      "title": "Prompt section: contextual_spelling_adjudication",
+      "description": "Requires contextual spelling decisions, permits high-confidence automatic corrections, and makes only confidently malformed terms with no safe correction blocking and overrideable. Applies when: always.",
+      "implementation": {
+        "file": "services/dashboard/lib/qa-prompt-builder.ts",
+        "exportName": "buildFinalPrompt"
+      },
+      "data": {
+        "sectionId": "contextual_spelling_adjudication",
+        "description": "Requires contextual spelling decisions, permits high-confidence automatic corrections, and makes only confidently malformed terms with no safe correction blocking and overrideable.",
+        "appliesWhen": "always"
       },
       "source": "code_data"
     },
@@ -2358,6 +2375,23 @@
       "data": {
         "type": "pricing structure",
         "match": "lowercased"
+      },
+      "source": "code_data"
+    },
+    {
+      "id": "parse/forced-critical/unrecognized-term-high-confidence",
+      "layer": "parse_normalization",
+      "category": "severity",
+      "title": "High-confidence forced critical type: unrecognized term",
+      "description": "AI suggestions whose lowercased type equals \"unrecognized term\" are forced to critical severity only when confidence is high.",
+      "implementation": {
+        "file": "services/dashboard/lib/review-pipeline.ts",
+        "exportName": "FORCED_CRITICAL_HIGH_CONFIDENCE_TYPES"
+      },
+      "data": {
+        "type": "unrecognized term",
+        "match": "lowercased",
+        "confidence": "high"
       },
       "source": "code_data"
     }
