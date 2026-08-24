@@ -140,6 +140,20 @@ describe('shouldRunCycle gating', () => {
             pendingProposal: { cycle_id: '2026-07-01' },
         });
     });
+    test('pending + changed live baseline: supersedes even with no new corrections', () => {
+        const gate = (0, improvement_cycle_core_1.shouldRunCycle)({
+            unconsumedCorrectionCount: 0,
+            pendingProposal: pending,
+            minNewCorrections: 1,
+            pendingBaselineChanged: true,
+        });
+        expect(gate).toMatchObject({
+            run: true,
+            mode: 'supersede',
+            pendingProposal: { cycle_id: '2026-07-01' },
+        });
+        expect(gate.reason).toContain('baseline changed');
+    });
     test('force with pending: supersede even with zero new corrections', () => {
         const gate = (0, improvement_cycle_core_1.shouldRunCycle)({ unconsumedCorrectionCount: 0, pendingProposal: pending, minNewCorrections: 1, force: true });
         expect(gate.run).toBe(true);
@@ -163,6 +177,53 @@ describe('shouldRunCycle gating', () => {
         expect((0, improvement_cycle_core_1.shouldRunCycle)({ unconsumedCorrectionCount: 1, pendingProposal: null, minNewCorrections: 0 }).run).toBe(true);
     });
 });
+describe('computeReviewBaselineFingerprint', () => {
+    const entry = {
+        id: 'pre-ai/example',
+        layer: 'pre_ai_deterministic',
+        description: 'Example guard',
+        data: { from: 'tamrind', to: 'tamarind', updated_at: '2026-08-20T00:00:00Z' },
+    };
+    test('changes for behavior inputs but ignores volatile rule metadata and entry order', () => {
+        const base = (0, improvement_cycle_core_1.computeReviewBaselineFingerprint)({
+            prompt: 'prompt A',
+            reviewModel: 'gpt-5.6-luna',
+            manifestEntries: [entry, { id: 'z-rule', description: 'Z' }],
+        });
+        const reordered = (0, improvement_cycle_core_1.computeReviewBaselineFingerprint)({
+            prompt: 'prompt A',
+            reviewModel: 'gpt-5.6-luna',
+            manifestEntries: [
+                { id: 'z-rule', description: 'Z' },
+                { ...entry, data: { ...entry.data, updated_at: '2026-08-24T00:00:00Z' } },
+            ],
+        });
+        expect(reordered).toBe(base);
+        expect((0, improvement_cycle_core_1.computeReviewBaselineFingerprint)({
+            prompt: 'prompt B',
+            reviewModel: 'gpt-5.6-luna',
+            manifestEntries: [entry, { id: 'z-rule', description: 'Z' }],
+        })).not.toBe(base);
+        expect((0, improvement_cycle_core_1.computeReviewBaselineFingerprint)({
+            prompt: 'prompt A',
+            reviewModel: 'gpt-5.6-sol',
+            manifestEntries: [entry, { id: 'z-rule', description: 'Z' }],
+        })).not.toBe(base);
+        expect((0, improvement_cycle_core_1.computeReviewBaselineFingerprint)({
+            prompt: 'prompt A',
+            reviewModel: 'gpt-5.6-luna',
+            manifestEntries: [{ ...entry, data: { ...entry.data, to: 'tamarindo' } }, { id: 'z-rule', description: 'Z' }],
+        })).not.toBe(base);
+    });
+});
+describe('needsDistinctCycleId', () => {
+    test('allocates a unique id for same-day automatic supersedes as well as forced runs', () => {
+        expect((0, improvement_cycle_core_1.needsDistinctCycleId)({ existingProposal: { status: 'pending' }, supersedeEligible: true })).toBe(true);
+        expect((0, improvement_cycle_core_1.needsDistinctCycleId)({ existingProposal: { status: 'pending' }, force: true })).toBe(true);
+        expect((0, improvement_cycle_core_1.needsDistinctCycleId)({ existingProposal: { status: 'pending' } })).toBe(false);
+        expect((0, improvement_cycle_core_1.needsDistinctCycleId)({ existingProposal: null, supersedeEligible: true })).toBe(false);
+    });
+});
 describe('assembleSupersedeCorrectionSet', () => {
     test('merges carried-over and unconsumed, dedupes by id, excludes proposal-* rows', () => {
         const carried = [
@@ -177,6 +238,40 @@ describe('assembleSupersedeCorrectionSet', () => {
         expect(combined.map((r) => r.id)).toEqual(['c1', 'c3']);
         expect(carriedCount).toBe(1);
         expect(newCount).toBe(1);
+    });
+});
+describe('correctionsRequiringProposal', () => {
+    test('excludes only replay-proven fixes from proposal analysis', () => {
+        const corrections = [{ id: 'fixed' }, { id: 'missed' }, { id: 'unknown' }];
+        const evidence = [
+            { correction_id: 'fixed', status: 'now_correct' },
+            { correction_id: 'missed', status: 'still_missed' },
+            { correction_id: 'unknown', status: 'replay_unavailable' },
+        ];
+        expect((0, improvement_cycle_core_1.correctionsRequiringProposal)(corrections, evidence).map((entry) => entry.id))
+            .toEqual(['missed', 'unknown']);
+    });
+});
+describe('mergeReplayResolvedCorrectionRouting', () => {
+    test('shows replay-resolved corrections as already correct while preserving unresolved routes', () => {
+        const merged = (0, improvement_cycle_core_1.mergeReplayResolvedCorrectionRouting)([
+            { id: 'fixed', original_text: 'FUGEO', corrected_text: 'FUEGO', rule: 'Correct the typo.' },
+            { id: 'missed', original_text: 'house-made', corrected_text: 'housemade' },
+        ], [
+            { correction_id: 'fixed', status: 'now_correct' },
+            { correction_id: 'missed', status: 'still_missed' },
+        ], [{
+                correction_id: 'missed', lane: 'prompt', target: 'House terminology', note: 'Needs clarification.', replay_status: 'still_missed',
+            }]);
+        expect(merged).toHaveLength(2);
+        expect(merged[0]).toMatchObject({
+            correction_id: 'fixed',
+            lane: 'already_correct',
+            replay_status: 'now_correct',
+            original_text: 'FUGEO',
+            corrected_text: 'FUEGO',
+        });
+        expect(merged[1]).toMatchObject({ correction_id: 'missed', lane: 'prompt' });
     });
 });
 describe('buildReplayUnavailableForCorrections', () => {

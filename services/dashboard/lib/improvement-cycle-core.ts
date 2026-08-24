@@ -5,6 +5,7 @@
 import { getTenantConfig } from '@menumanager/tenant-config';
 import { isReasoningModel as adapterIsReasoningModel } from '@menumanager/llm-adapter';
 import { buildTokenEdits, tokenizeDiffText, tokenizeWords } from '@menumanager/diff-core';
+import { createHash } from 'crypto';
 import { AI_REVIEW_FENCES } from './review-response-contract';
 
 export type CycleGateInput = {
@@ -14,6 +15,8 @@ export type CycleGateInput = {
     minNewCorrections: number;
     /** Manual/on-demand run: supersede pending even with zero new corrections. */
     force?: boolean;
+    /** The live prompt, review model, or code/accepted-rule manifest changed since the pending proposal was generated. */
+    pendingBaselineChanged?: boolean;
 };
 
 export type CycleGateResult =
@@ -48,6 +51,14 @@ export function shouldRunCycle(input: CycleGateInput): CycleGateResult {
                 pendingProposal: pending,
             };
         }
+        if (input.pendingBaselineChanged) {
+            return {
+                run: true,
+                mode: 'supersede',
+                reason: `live review baseline changed; refreshing pending proposal ${pending.cycle_id}`,
+                pendingProposal: pending,
+            };
+        }
         return { run: false, reason: 'a pending proposal is already awaiting review' };
     }
 
@@ -58,6 +69,51 @@ export function shouldRunCycle(input: CycleGateInput): CycleGateResult {
         };
     }
     return { run: true, mode: 'new', reason: `${input.unconsumedCorrectionCount} unconsumed correction(s) ready` };
+}
+
+/** A same-day force/supersede cannot reuse the date-based unique cycle id. */
+export function needsDistinctCycleId(input: {
+    existingProposal?: { status?: string } | null;
+    force?: boolean;
+    supersedeEligible?: boolean;
+}): boolean {
+    return !!input.existingProposal && (!!input.force || !!input.supersedeEligible);
+}
+
+const BASELINE_VOLATILE_KEYS = new Set([
+    'created_at',
+    'updated_at',
+    'consumed_at',
+    'prompt_cycle_id',
+    'occurrences',
+]);
+
+function stableBaselineValue(value: unknown): unknown {
+    if (Array.isArray(value)) return value.map(stableBaselineValue);
+    if (!value || typeof value !== 'object') return value;
+    return Object.fromEntries(
+        Object.entries(value as Record<string, unknown>)
+            .filter(([key]) => !BASELINE_VOLATILE_KEYS.has(key))
+            .sort(([left], [right]) => left.localeCompare(right))
+            .map(([key, entryValue]) => [key, stableBaselineValue(entryValue)])
+    );
+}
+
+/** Fingerprint every live review input that can change correction replay. */
+export function computeReviewBaselineFingerprint(input: {
+    prompt: string;
+    reviewModel: string;
+    manifestEntries: unknown[];
+}): string {
+    const entries = [...(input.manifestEntries || [])]
+        .map((entry) => stableBaselineValue(entry))
+        .sort((left: any, right: any) => `${left?.id || ''}`.localeCompare(`${right?.id || ''}`));
+    const payload = JSON.stringify({
+        prompt: `${input.prompt || ''}`,
+        reviewModel: `${input.reviewModel || ''}`,
+        manifestEntries: entries,
+    });
+    return `sha256:${createHash('sha256').update(payload).digest('hex')}`;
 }
 
 /**
@@ -197,6 +253,19 @@ export function partitionCorrectionIdsByReplayStatus(
         (nowCorrect.has(`${id}`) ? resolvedIds : proposalIds).push(`${id}`);
     }
     return { resolvedIds, proposalIds };
+}
+
+/** Keep replay-resolved rows for audit/retirement, but out of the proposal LLM context. */
+export function correctionsRequiringProposal<T extends CorrectionRuleLike>(
+    corrections: T[],
+    replayEvidence: ReplayEvidenceEntry[]
+): T[] {
+    const resolvedIds = new Set(
+        (replayEvidence || [])
+            .filter((entry) => entry?.status === 'now_correct' && entry.correction_id)
+            .map((entry) => `${entry.correction_id}`)
+    );
+    return (corrections || []).filter((correction) => !resolvedIds.has(`${correction.id}`));
 }
 
 export function replayResolutionMarker(cycleId: string): string {
@@ -434,6 +503,43 @@ export const CORRECTION_ROUTING_LANES = new Set<CorrectionRoutingLane>([
     'dismissed',
     'unrouted',
 ]);
+
+/** Restore replay-resolved rows to the reviewer-facing routing table without exposing them to the proposal LLM. */
+export function mergeReplayResolvedCorrectionRouting(
+    corrections: Array<CorrectionRuleLike & { rule?: string | null }>,
+    replayEvidence: ReplayEvidenceEntry[],
+    proposalRouting: CorrectionRoutingEntry[]
+): CorrectionRoutingEntry[] {
+    const evidenceById = new Map((replayEvidence || []).map((entry) => [`${entry.correction_id}`, entry]));
+    const routingById = new Map((proposalRouting || []).map((entry) => [`${entry.correction_id}`, entry]));
+    const merged: CorrectionRoutingEntry[] = [];
+    const seen = new Set<string>();
+    for (const correction of corrections || []) {
+        const id = `${correction.id || ''}`;
+        if (!id) continue;
+        seen.add(id);
+        const evidence = evidenceById.get(id);
+        if (evidence?.status === 'now_correct') {
+            merged.push({
+                correction_id: id,
+                lane: 'already_correct',
+                target: 'current live review pipeline',
+                note: 'Fresh replay confirmed the reviewer correction is already produced; excluded from proposal generation and retired.',
+                replay_status: 'now_correct',
+                original_text: correction.original_text || null,
+                corrected_text: correction.corrected_text || null,
+                guidance: correction.rule || null,
+            });
+            continue;
+        }
+        const routed = routingById.get(id);
+        if (routed) merged.push(routed);
+    }
+    for (const route of proposalRouting || []) {
+        if (!seen.has(`${route.correction_id}`)) merged.push(route);
+    }
+    return merged;
+}
 
 export type CodeRecommendation = {
     title: string;

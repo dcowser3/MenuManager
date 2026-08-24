@@ -4,8 +4,8 @@
  * Daily Improvement Cycle (automated review-improvement loop, Phase D)
  *
  * Gated, human-approved evolution of the review process:
- *   1. Gate: exit quietly unless there are new annotated reviewer corrections
- *      (>= IMPROVE_MIN_NEW_CORRECTIONS, default 1) and no proposal is pending.
+ *   1. Gate: run for new annotated reviewer corrections, or refresh a pending
+ *      proposal when the live review prompt/model/rule baseline has changed.
  *   2. Context: effective current prompt (latest approved proposal, else
  *      qa_prompt.txt), the full code-rules manifest, the new corrections with
  *      reviewer explanations, before/after document excerpts, and the latest
@@ -635,11 +635,19 @@ async function main() {
     await checkGraphSecretExpiry(supabase, core);
 
     // Idempotency: one proposal per calendar day (cycle_id = YYYY-MM-DD).
-    const [{ count: unconsumedCount }, { data: pendingProposals }, { data: existing }, { data: lastProposals }] = await Promise.all([
+    const [
+        { count: unconsumedCount },
+        { data: pendingProposals },
+        { data: existing },
+        { data: lastProposals },
+        { data: approvedProposalsForBaseline },
+        { data: acceptedRulesForBaseline },
+        filePrompt,
+    ] = await Promise.all([
         supabase.from('correction_rules').select('*', { count: 'exact', head: true })
             .is('prompt_cycle_id', null).in('status', ['accepted', 'pending']),
         supabase.from('prompt_proposals')
-            .select('id, cycle_id, created_at, correction_rule_count, submission_count, eval_status, llm_model')
+            .select('id, cycle_id, created_at, correction_rule_count, submission_count, eval_status, llm_model, eval_summary')
             .eq('status', 'pending')
             .order('created_at', { ascending: true })
             .limit(1),
@@ -652,8 +660,28 @@ async function main() {
             .in('source', ['improvement_cycle', 'consolidation'])
             .order('created_at', { ascending: false })
             .limit(10),
+        supabase.from('prompt_proposals')
+            .select('status, final_prompt, proposed_prompt, reviewed_at')
+            .in('status', ['approved', 'approved_modified'])
+            .order('reviewed_at', { ascending: false })
+            .limit(5),
+        supabase.from('correction_rules')
+            .select('*')
+            .eq('status', 'accepted')
+            .order('id', { ascending: true })
+            .limit(1000),
+        fsp.readFile(path.join(repoRoot, 'sop-processor', 'qa_prompt.txt'), 'utf8'),
     ]);
     const pendingProposal = (pendingProposals || [])[0] || null;
+    const effectiveAtGate = core.pickEffectivePrompt(approvedProposalsForBaseline || [], filePrompt);
+    const manifestAtGate = manifestLib.buildReviewRulesManifest({ acceptedCorrectionRules: acceptedRulesForBaseline || [] });
+    const baselineFingerprint = core.computeReviewBaselineFingerprint({
+        prompt: effectiveAtGate.prompt,
+        reviewModel: executorModel,
+        manifestEntries: manifestAtGate.entries,
+    });
+    const pendingFingerprint = `${pendingProposal?.eval_summary?.baseline_fingerprint || ''}`;
+    const pendingBaselineChanged = !!pendingProposal && pendingFingerprint !== baselineFingerprint;
 
     // Compute the run gate BEFORE cadence: a supersede (pending proposal + new
     // corrections → refresh it) must be able to bypass the cadence clock, so the
@@ -664,6 +692,7 @@ async function main() {
         pendingProposal,
         minNewCorrections,
         force: !!args.force,
+        pendingBaselineChanged,
     });
     const supersedePending = gate.run && gate.mode === 'supersede' ? gate.pendingProposal : null;
 
@@ -690,16 +719,16 @@ async function main() {
         return;
     }
 
-    if (existing && !args.force && existing.status === 'pending') {
+    if (existing && !args.force && existing.status === 'pending' && !supersedeEligible) {
         console.log(`Proposal already exists for ${baseCycleId} (status: pending); exiting.`);
         return;
     }
-    if (existing && args.force) {
+    if (core.needsDistinctCycleId({ existingProposal: existing, force: !!args.force, supersedeEligible })) {
         // cycle_id is NOT NULL UNIQUE, so a forced manual re-run on a day that
-        // already has a proposal (e.g. the on-demand button after the nightly
-        // cron) needs a distinct id to avoid colliding on insert.
+        // already has a proposal—or an automatic same-day supersede—needs a
+        // distinct id to avoid colliding on insert.
         cycleId = `${baseCycleId}-manual-${Date.now()}`;
-        console.log(`Forced re-run; ${baseCycleId} already has a proposal — using cycle id ${cycleId}.`);
+        console.log(`${args.force ? 'Forced re-run' : 'Supersede refresh'}; ${baseCycleId} already has a proposal — using cycle id ${cycleId}.`);
     } else if (existing && ['rejected', 'superseded'].includes(`${existing.status || ''}`) && (gate.run || args.consolidate)) {
         // Rejected/superseded rows still occupy the calendar cycle_id slot.
         cycleId = `${baseCycleId}-manual-${Date.now()}`;
@@ -728,14 +757,7 @@ async function main() {
         await fsp.mkdir(artifactsDir, { recursive: true });
 
         // 1. Effective current prompt (DB approval beats the baked-in file).
-        const filePrompt = await fsp.readFile(path.join(repoRoot, 'sop-processor', 'qa_prompt.txt'), 'utf8');
-        const { data: approvedProposals } = await supabase
-            .from('prompt_proposals')
-            .select('status, final_prompt, proposed_prompt, reviewed_at')
-            .in('status', ['approved', 'approved_modified'])
-            .order('reviewed_at', { ascending: false })
-            .limit(5);
-        const effective = core.pickEffectivePrompt(approvedProposals || [], filePrompt);
+        const effective = effectiveAtGate;
         console.log(`Effective prompt source: ${effective.source} (${effective.prompt.length} chars)`);
         const PROMPT_BUDGET = Number(process.env.IMPROVE_PROMPT_BUDGET_CHARS || 24000);
         if (effective.prompt.length > PROMPT_BUDGET) {
@@ -780,8 +802,7 @@ async function main() {
         }
 
         // 3. Code-rules manifest (code + currently accepted rules).
-        const { data: acceptedRules } = await supabase
-            .from('correction_rules').select('*').eq('status', 'accepted').limit(1000);
+        const acceptedRules = acceptedRulesForBaseline || [];
         const manifest = manifestLib.buildReviewRulesManifest({ acceptedCorrectionRules: acceptedRules || [] });
         const manifestMarkdown = manifestLib.renderRulesManifestMarkdown(manifest, { includeDynamic: true });
 
@@ -869,11 +890,24 @@ async function main() {
         }
         } // end consolidate skip for replay
 
+        // Do not ask the proposal model to re-implement corrections that replay
+        // has already proved the live pipeline now produces. Keep the full
+        // evidence for the proposal page and retirement bookkeeping, but only
+        // unresolved/unavailable guidance enters the improvement prompt.
+        const replayResolvedIds = new Set(
+            replayEvidence.filter((entry) => entry?.status === 'now_correct').map((entry) => `${entry.correction_id}`)
+        );
+        const correctionsForProposal = core.correctionsRequiringProposal(correctionRules, replayEvidence);
+        const proposalReplayEvidence = replayEvidence.filter((entry) => !replayResolvedIds.has(`${entry.correction_id}`));
+        if (!args.consolidate && replayResolvedIds.size) {
+            console.log(`Replay cleanup: ${replayResolvedIds.size} correction(s) already fixed; ${correctionsForProposal.length} still require proposal analysis.`);
+        }
+
         // 4. Document excerpts for the corrections' submissions (Fix 6 / B3: centered windows).
         // Skipped for consolidate (no corrections).
         const pythonBin = resolvePythonBin();
         const correctionsBySid = new Map();
-        for (const r of correctionRules) {
+        for (const r of correctionsForProposal) {
             if (!r.submission_id) continue;
             const list = correctionsBySid.get(r.submission_id) || [];
             list.push({ id: r.id, original_text: r.original_text || '', corrected_text: r.corrected_text || '', submission_id: r.submission_id });
@@ -1017,8 +1051,8 @@ async function main() {
             systemPromptToUse = core.buildConsolidationSystemPrompt({ executorModel });
             console.log(`LLM context size (consolidation): ~${(systemPromptToUse.length + userPrompt.length).toLocaleString()} chars`);
         } else {
-            const replayByCorrId = new Map(replayEvidence.map((e) => [e.correction_id, e]));
-            const correctionLines = correctionRules.map((r, i) => {
+            const replayByCorrId = new Map(proposalReplayEvidence.map((e) => [e.correction_id, e]));
+            const correctionLines = correctionsForProposal.map((r, i) => {
                 const scope = r.is_location_specific
                     ? `Location-specific: ${r.location}${r.other_applicable_locations?.length ? ` (also: ${r.other_applicable_locations.join(', ')})` : ''}`
                     : 'Universal (all properties)';
@@ -1058,7 +1092,7 @@ async function main() {
                 '## Code Rules Manifest (deterministic layers — you cannot edit these, but propose replacement rules and code recommendations against them)',
                 manifestMarkdown,
                 '',
-                `## New Reviewer Corrections (${correctionRules.length})`,
+                `## Corrections Still Requiring Analysis (${correctionsForProposal.length})`,
                 ...correctionLines,
                 '',
                 documentExcerpts.length ? '## Sample Before/After Documents' : '',
@@ -1097,14 +1131,19 @@ async function main() {
             maxRetries,
             validateOpts: {
                 currentPrompt: effective.prompt,
-                replayEvidence: args.consolidate ? [] : replayEvidence,
-                sourceCorrections: args.consolidate ? [] : correctionRules,
+                replayEvidence: args.consolidate ? [] : proposalReplayEvidence,
+                sourceCorrections: args.consolidate ? [] : correctionsForProposal,
                 existingAcceptedRules: args.consolidate ? [] : (acceptedRules || []),
                 consolidation: !!args.consolidate,
             },
             callLlm: postImprovementCompletion,
         });
         const validated = proposalResult.validated;
+        validated.correction_routing = core.mergeReplayResolvedCorrectionRouting(
+            correctionRules,
+            replayEvidence,
+            validated.correction_routing || []
+        );
         const llmResult = { model: proposalResult.model, usage: proposalResult.usage };
         if (proposalResult.attempts.length > 1) {
             console.log(`LLM took ${proposalResult.attempts.length} attempt(s); guard discards: ${proposalResult.discardedPrompts.length}${proposalResult.guardRetriesExhausted ? ' (retries exhausted — rewrite discarded)' : ''}.`);
@@ -1372,6 +1411,12 @@ async function main() {
             }
             console.log(`Eval status: ${evalStatus}${evalSummary?.error ? ` (${evalSummary.error.slice(0, 160)})` : ''}`);
         }
+
+        // Keep the baseline fingerprint in the existing JSON eval column. A
+        // later scheduled run can now distinguish an unchanged pending proposal
+        // from one made stale by a deploy, prompt approval, accepted rule, or
+        // review-model change.
+        evalSummary = { ...(evalSummary || {}), baseline_fingerprint: baselineFingerprint };
 
         // 9. Store the proposal.
         const dates = correctionRules.map((r) => Date.parse(r.created_at)).filter(Number.isFinite);

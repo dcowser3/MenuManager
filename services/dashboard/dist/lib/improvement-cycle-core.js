@@ -5,17 +5,21 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.IDENTICAL_CANDIDATE_EVAL_NOTE = exports.CONTEXT_DEPENDENT_TERMS = exports.CURRENT_PROMPT_END_MARKER = exports.CURRENT_PROMPT_BEGIN_MARKER = exports.PROMPT_UNCHANGED_SENTINEL = exports.CORRECTION_ROUTING_LANES = exports.PROPOSED_RULE_CHANGE_TYPES = void 0;
 exports.shouldRunCycle = shouldRunCycle;
+exports.needsDistinctCycleId = needsDistinctCycleId;
+exports.computeReviewBaselineFingerprint = computeReviewBaselineFingerprint;
 exports.pickCadenceAnchor = pickCadenceAnchor;
 exports.shouldDeferForCadence = shouldDeferForCadence;
 exports.isTransientOpenAiFailure = isTransientOpenAiFailure;
 exports.assembleSupersedeCorrectionSet = assembleSupersedeCorrectionSet;
 exports.partitionCorrectionIdsByReplayStatus = partitionCorrectionIdsByReplayStatus;
+exports.correctionsRequiringProposal = correctionsRequiringProposal;
 exports.replayResolutionMarker = replayResolutionMarker;
 exports.buildReplayUnavailableForCorrections = buildReplayUnavailableForCorrections;
 exports.supersededProposalReviewBlock = supersededProposalReviewBlock;
 exports.promptProposalApprovalBlock = promptProposalApprovalBlock;
 exports.evaluateSecretExpiry = evaluateSecretExpiry;
 exports.pickEffectivePrompt = pickEffectivePrompt;
+exports.mergeReplayResolvedCorrectionRouting = mergeReplayResolvedCorrectionRouting;
 exports.isGuardDiscardReason = isGuardDiscardReason;
 exports.isReasoningModel = isReasoningModel;
 exports.isRequestTooLarge429 = isRequestTooLarge429;
@@ -59,6 +63,7 @@ exports.buildConsolidationSystemPrompt = buildConsolidationSystemPrompt;
 const tenant_config_1 = require("@menumanager/tenant-config");
 const llm_adapter_1 = require("@menumanager/llm-adapter");
 const diff_core_1 = require("@menumanager/diff-core");
+const crypto_1 = require("crypto");
 const review_response_contract_1 = require("./review-response-contract");
 function shouldRunCycle(input) {
     const min = Math.max(1, input.minNewCorrections);
@@ -85,6 +90,14 @@ function shouldRunCycle(input) {
                 pendingProposal: pending,
             };
         }
+        if (input.pendingBaselineChanged) {
+            return {
+                run: true,
+                mode: 'supersede',
+                reason: `live review baseline changed; refreshing pending proposal ${pending.cycle_id}`,
+                pendingProposal: pending,
+            };
+        }
         return { run: false, reason: 'a pending proposal is already awaiting review' };
     }
     if (input.unconsumedCorrectionCount < min) {
@@ -94,6 +107,39 @@ function shouldRunCycle(input) {
         };
     }
     return { run: true, mode: 'new', reason: `${input.unconsumedCorrectionCount} unconsumed correction(s) ready` };
+}
+/** A same-day force/supersede cannot reuse the date-based unique cycle id. */
+function needsDistinctCycleId(input) {
+    return !!input.existingProposal && (!!input.force || !!input.supersedeEligible);
+}
+const BASELINE_VOLATILE_KEYS = new Set([
+    'created_at',
+    'updated_at',
+    'consumed_at',
+    'prompt_cycle_id',
+    'occurrences',
+]);
+function stableBaselineValue(value) {
+    if (Array.isArray(value))
+        return value.map(stableBaselineValue);
+    if (!value || typeof value !== 'object')
+        return value;
+    return Object.fromEntries(Object.entries(value)
+        .filter(([key]) => !BASELINE_VOLATILE_KEYS.has(key))
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, entryValue]) => [key, stableBaselineValue(entryValue)]));
+}
+/** Fingerprint every live review input that can change correction replay. */
+function computeReviewBaselineFingerprint(input) {
+    const entries = [...(input.manifestEntries || [])]
+        .map((entry) => stableBaselineValue(entry))
+        .sort((left, right) => `${left?.id || ''}`.localeCompare(`${right?.id || ''}`));
+    const payload = JSON.stringify({
+        prompt: `${input.prompt || ''}`,
+        reviewModel: `${input.reviewModel || ''}`,
+        manifestEntries: entries,
+    });
+    return `sha256:${(0, crypto_1.createHash)('sha256').update(payload).digest('hex')}`;
 }
 /**
  * Pick the proposal that anchors the cadence clock: the most recent one that
@@ -201,6 +247,13 @@ function partitionCorrectionIdsByReplayStatus(correctionIds, replayEvidence) {
         (nowCorrect.has(`${id}`) ? resolvedIds : proposalIds).push(`${id}`);
     }
     return { resolvedIds, proposalIds };
+}
+/** Keep replay-resolved rows for audit/retirement, but out of the proposal LLM context. */
+function correctionsRequiringProposal(corrections, replayEvidence) {
+    const resolvedIds = new Set((replayEvidence || [])
+        .filter((entry) => entry?.status === 'now_correct' && entry.correction_id)
+        .map((entry) => `${entry.correction_id}`));
+    return (corrections || []).filter((correction) => !resolvedIds.has(`${correction.id}`));
 }
 function replayResolutionMarker(cycleId) {
     return `resolved-by-current-pipeline:${`${cycleId || 'unknown'}`.trim() || 'unknown'}`;
@@ -350,6 +403,41 @@ exports.CORRECTION_ROUTING_LANES = new Set([
     'dismissed',
     'unrouted',
 ]);
+/** Restore replay-resolved rows to the reviewer-facing routing table without exposing them to the proposal LLM. */
+function mergeReplayResolvedCorrectionRouting(corrections, replayEvidence, proposalRouting) {
+    const evidenceById = new Map((replayEvidence || []).map((entry) => [`${entry.correction_id}`, entry]));
+    const routingById = new Map((proposalRouting || []).map((entry) => [`${entry.correction_id}`, entry]));
+    const merged = [];
+    const seen = new Set();
+    for (const correction of corrections || []) {
+        const id = `${correction.id || ''}`;
+        if (!id)
+            continue;
+        seen.add(id);
+        const evidence = evidenceById.get(id);
+        if (evidence?.status === 'now_correct') {
+            merged.push({
+                correction_id: id,
+                lane: 'already_correct',
+                target: 'current live review pipeline',
+                note: 'Fresh replay confirmed the reviewer correction is already produced; excluded from proposal generation and retired.',
+                replay_status: 'now_correct',
+                original_text: correction.original_text || null,
+                corrected_text: correction.corrected_text || null,
+                guidance: correction.rule || null,
+            });
+            continue;
+        }
+        const routed = routingById.get(id);
+        if (routed)
+            merged.push(routed);
+    }
+    for (const route of proposalRouting || []) {
+        if (!seen.has(`${route.correction_id}`))
+            merged.push(route);
+    }
+    return merged;
+}
 // C1: the two promptUnchangedReasons that mean "an automated guard discarded the model's
 // rewrite" — these are recoverable formatting mistakes and warrant a retry-with-feedback.
 // The sentinel/identical reasons are the model deliberately declining to change the prompt.
