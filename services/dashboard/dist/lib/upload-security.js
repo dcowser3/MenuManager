@@ -33,7 +33,8 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.ALLOWED_MENU_IMAGE_EXTENSIONS = exports.ALLOWED_PDF_EXTENSIONS = exports.ALLOWED_DOCX_EXTENSIONS = exports.MAX_UPLOAD_BYTES = exports.MAX_JSON_FIELD_LENGTH = exports.MAX_HTML_FIELD_LENGTH = exports.MAX_LONG_TEXT_LENGTH = exports.MAX_TEXT_FIELD_LENGTH = void 0;
+exports.ALLOWED_MENU_IMAGE_EXTENSIONS = exports.ALLOWED_PDF_EXTENSIONS = exports.ALLOWED_DOCX_EXTENSIONS = exports.UPLOAD_TOO_LARGE_CODE = exports.MAX_UPLOAD_BYTES = exports.MAX_JSON_FIELD_LENGTH = exports.MAX_HTML_FIELD_LENGTH = exports.MAX_LONG_TEXT_LENGTH = exports.MAX_TEXT_FIELD_LENGTH = void 0;
+exports.buildUploadTooLargeMessage = buildUploadTooLargeMessage;
 exports.sanitizePlainTextInput = sanitizePlainTextInput;
 exports.sanitizeRichTextHtml = sanitizeRichTextHtml;
 exports.buildMenuFilename = buildMenuFilename;
@@ -51,9 +52,14 @@ exports.MAX_LONG_TEXT_LENGTH = 50000;
 exports.MAX_HTML_FIELD_LENGTH = 250000;
 exports.MAX_JSON_FIELD_LENGTH = 20000;
 exports.MAX_UPLOAD_BYTES = 15 * 1024 * 1024;
+exports.UPLOAD_TOO_LARGE_CODE = 'REQUEST_ENTITY_TOO_LARGE';
 exports.ALLOWED_DOCX_EXTENSIONS = new Set(['.docx']);
 exports.ALLOWED_PDF_EXTENSIONS = new Set(['.pdf']);
 exports.ALLOWED_MENU_IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.pdf']);
+function buildUploadTooLargeMessage(maxUploadBytes, supportEmail) {
+    const maxUploadMb = Math.round(maxUploadBytes / (1024 * 1024));
+    return `File is too large. The maximum upload size is ${maxUploadMb} MB. Reduce embedded images or email ${supportEmail} if the document must exceed this.`;
+}
 function normalizeLineEndings(value) {
     return `${value || ''}`.replace(/\r\n?/g, '\n');
 }

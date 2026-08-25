@@ -56,6 +56,8 @@ Chef / manager submission
 
 > **Rollout note:** the dashboard's `/form` link serves the new upload-first submission form by default. The original multi-section form remains available at `/form-legacy`, and `/form-new` is kept as a stable alias for the new flow. Set `NEW_SUBMISSION_FORM_DEFAULT=false` only as a temporary rollback (see [docs/environment.md](docs/environment.md)).
 
+DOCX uploads are capped at 15 MB. Both form versions reject larger files before upload with a clear support message, while the production nginx configuration allows enough request headroom for the dashboard to return structured `413` diagnostics.
+
 ## Services
 
 Menu Manager is an npm-workspace monorepo with Express microservices and shared libraries.

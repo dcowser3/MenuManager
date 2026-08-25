@@ -231,7 +231,7 @@ The learning dashboard can delete an individual learned submission through the d
 
 ## Upload Guardrails
 
-- Dashboard uploads are capped at 15 MB per file.
+- Dashboard uploads are capped at 15 MB per file. Both public form versions preflight the size in the browser and log rejected attempts with `status_code=413` plus `details.errorCode=REQUEST_ENTITY_TOO_LARGE`. Dashboard-side Multer rechecks the limit and returns JSON with the same code. Production nginx uses a tracked 20 MB request-body limit so multipart overhead reaches the dashboard instead of being rejected by nginx's 1 MB default.
 - Dashboard chef form JSON bodies and DB submission/raw-payload JSON bodies default to a 5 MB cap so preserved rich HTML and redline previews do not fail at Express's 100 KB default.
 - Dashboard user problem reports use a separate 15 MB JSON cap by default so screenshot data and client state can be saved server-side without raising every form/API endpoint.
 - Modification baseline uploads only accept `.docx`.

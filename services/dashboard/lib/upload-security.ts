@@ -6,9 +6,15 @@ export const MAX_LONG_TEXT_LENGTH = 50000;
 export const MAX_HTML_FIELD_LENGTH = 250000;
 export const MAX_JSON_FIELD_LENGTH = 20000;
 export const MAX_UPLOAD_BYTES = 15 * 1024 * 1024;
+export const UPLOAD_TOO_LARGE_CODE = 'REQUEST_ENTITY_TOO_LARGE';
 export const ALLOWED_DOCX_EXTENSIONS = new Set(['.docx']);
 export const ALLOWED_PDF_EXTENSIONS = new Set(['.pdf']);
 export const ALLOWED_MENU_IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.pdf']);
+
+export function buildUploadTooLargeMessage(maxUploadBytes: number, supportEmail: string): string {
+    const maxUploadMb = Math.round(maxUploadBytes / (1024 * 1024));
+    return `File is too large. The maximum upload size is ${maxUploadMb} MB. Reduce embedded images or email ${supportEmail} if the document must exceed this.`;
+}
 
 function normalizeLineEndings(value: string): string {
     return `${value || ''}`.replace(/\r\n?/g, '\n');

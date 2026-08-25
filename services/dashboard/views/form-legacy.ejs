@@ -2351,6 +2351,8 @@
         let latestBaselineFreshnessIssue = null;
         let formAttemptId = getOrCreateFormAttemptId();
         const DEFAULT_ALLERGEN_KEY = <%- JSON.stringify(defaultAllergenKey || '') %>;
+        const MAX_MENU_UPLOAD_BYTES = <%= maxUploadBytes %>;
+        const MAX_MENU_UPLOAD_MB = Math.round(MAX_MENU_UPLOAD_BYTES / (1024 * 1024));
         const RAW_NOTICE_TEXT = '*consuming raw or undercooked meats, poultry, seafood, shellfish, or eggs may increase your risk of foodborne illness.';
         const RAW_NOTICE_REGEX = /\*?\s*consuming raw or undercooked meats,\s*poultry,\s*seafood(?:,\s*shellfish)?,\s*or eggs may increase your risk of foodborne illness\.?/i;
         const redlinePreview = window.MenuRedlinePreview;
@@ -2421,12 +2423,36 @@
             }
             if (!response.ok) {
                 const serverMessage = data && (data.error || data.message);
-                throw new Error(serverMessage || fallbackMessage || ('Request failed (HTTP ' + response.status + ')'));
+                const proxySizeMessage = response.status === 413
+                    ? `File is too large. The maximum upload size is ${MAX_MENU_UPLOAD_MB} MB. Reduce embedded images or email <%= supportEmail %> if the document must exceed this.`
+                    : '';
+                const error = new Error(serverMessage || proxySizeMessage || fallbackMessage || ('Request failed (HTTP ' + response.status + ')'));
+                error.statusCode = response.status;
+                error.code = (data && data.code) || (response.status === 413 ? 'REQUEST_ENTITY_TOO_LARGE' : 'HTTP_ERROR');
+                throw error;
             }
             if (data === null) {
                 throw new Error(fallbackMessage || 'The server returned an unexpected response. Please try again.');
             }
             return data;
+        }
+
+        function getUploadSizeError(file) {
+            if (!file || file.size <= MAX_MENU_UPLOAD_BYTES) return null;
+            const error = new Error(`File is too large. The maximum upload size is ${MAX_MENU_UPLOAD_MB} MB. Reduce embedded images or email <%= supportEmail %> if the document must exceed this.`);
+            error.statusCode = 413;
+            error.code = 'REQUEST_ENTITY_TOO_LARGE';
+            return error;
+        }
+
+        function getUploadFailureDetails(file, error, extra) {
+            return {
+                fileName: file.name,
+                fileSize: file.size,
+                maxUploadBytes: MAX_MENU_UPLOAD_BYTES,
+                errorCode: error && error.code ? error.code : 'UPLOAD_FAILED',
+                ...(extra || {})
+            };
         }
 
         function getAttemptMetadata(extra) {
@@ -3962,6 +3988,20 @@
                 return null;
             }
 
+            const sizeError = getUploadSizeError(file);
+            if (sizeError) {
+                await logFormAttempt(options.failedEvent, {
+                    route: options.route,
+                    statusCode: sizeError.statusCode,
+                    revisionSource: options.revisionSource || '',
+                    revisionBaselineFileName: options.revisionSource ? file.name : '',
+                    errorMessage: sizeError.message,
+                    details: getUploadFailureDetails(file, sizeError)
+                });
+                showAlert(options.errorAlertPrefix + sizeError.message, 'error');
+                return null;
+            }
+
             const form = new FormData();
             form.append(options.fieldName, file);
 
@@ -3987,10 +4027,11 @@
                 console.error(error);
                 await logFormAttempt(options.failedEvent, {
                     route: options.route,
+                    statusCode: error.statusCode,
                     revisionSource: options.revisionSource || '',
                     revisionBaselineFileName: options.revisionSource ? file.name : '',
                     errorMessage: error.message,
-                    details: { fileName: file.name, fileSize: file.size }
+                    details: getUploadFailureDetails(file, error)
                 });
                 showAlert(options.errorAlertPrefix + error.message, 'error');
                 return null;
@@ -4143,6 +4184,20 @@
                 return;
             }
 
+            const sizeError = getUploadSizeError(file);
+            if (sizeError) {
+                await logFormAttempt('unapproved_upload_failed', {
+                    route: '/api/modification/unapproved-upload',
+                    statusCode: sizeError.statusCode,
+                    revisionSource: 'uploaded_unapproved',
+                    revisionBaselineFileName: file.name,
+                    errorMessage: sizeError.message,
+                    details: getUploadFailureDetails(file, sizeError)
+                });
+                showAlert('Failed to process unapproved DOCX: ' + sizeError.message, 'error');
+                return;
+            }
+
             const form = new FormData();
             form.append('baselineDoc', file);
 
@@ -4216,10 +4271,11 @@
                 console.error(error);
                 await logFormAttempt('unapproved_upload_failed', {
                     route: '/api/modification/unapproved-upload',
+                    statusCode: error.statusCode,
                     revisionSource: 'uploaded_unapproved',
                     revisionBaselineFileName: file.name,
                     errorMessage: error.message,
-                    details: { fileName: file.name, fileSize: file.size }
+                    details: getUploadFailureDetails(file, error)
                 });
                 showAlert('Failed to process unapproved DOCX: ' + error.message, 'error');
             } finally {

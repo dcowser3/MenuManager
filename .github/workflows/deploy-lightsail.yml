@@ -72,6 +72,18 @@ jobs:
           git checkout -B "$DEPLOY_REF" "origin/$DEPLOY_REF"
           git reset --hard "origin/$DEPLOY_REF"
 
+          # nginx defaults to a 1 MB request body, which rejects normal DOCX files
+          # before the dashboard can apply its 15 MB upload limit or return JSON.
+          # Install the tracked override first so production and app limits stay
+          # aligned on every deploy.
+          if command -v nginx >/dev/null 2>&1; then
+            sudo install -m 0644 \
+              deploy/nginx/menumanager-upload-limit.conf \
+              /etc/nginx/conf.d/menumanager-upload-limit.conf
+            sudo nginx -t
+            sudo systemctl reload nginx
+          fi
+
           if docker ps >/dev/null 2>&1; then
             DOCKER=(docker)
           elif sudo -n docker ps >/dev/null 2>&1; then

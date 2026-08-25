@@ -10,7 +10,7 @@ This is the compact product-state reference for Menu Manager. Keep implementatio
 - DOCX uploads can prefill clean project details, allergen legends, raw-item notice state, and menu content.
 - Modification submissions support database baselines, uploaded approved baselines, and uploaded unapproved/redlined DOCX files.
 - Required fields are highlighted inline before submission, including submitter, project details, service period, and approval attestation.
-- Public upload endpoints enforce file-size limits, file-signature checks, and filename/rich-text sanitization while preserving Unicode menu names.
+- Public upload endpoints enforce file-size limits, file-signature checks, and filename/rich-text sanitization while preserving Unicode menu names. The browser blocks files over 15 MB before transfer and records a `REQUEST_ENTITY_TOO_LARGE` attempt failure; the server returns the same stable code when Multer enforces the limit.
 - Submitter confirmation emails include the generated DOCX for deliverable submitter/approver addresses and any configured confirmation CC recipients.
 
 Related docs:

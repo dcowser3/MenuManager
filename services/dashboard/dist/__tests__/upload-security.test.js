@@ -1,6 +1,12 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 const upload_security_1 = require("../lib/upload-security");
+describe('upload size errors', () => {
+    test('uses a stable request-too-large code and a message that matches the configured limit', () => {
+        expect(upload_security_1.UPLOAD_TOO_LARGE_CODE).toBe('REQUEST_ENTITY_TOO_LARGE');
+        expect((0, upload_security_1.buildUploadTooLargeMessage)(upload_security_1.MAX_UPLOAD_BYTES, 'support@example.test')).toBe('File is too large. The maximum upload size is 15 MB. Reduce embedded images or email support@example.test if the document must exceed this.');
+    });
+});
 describe('buildMenuFilename', () => {
     test('names generated menus as restaurant, service period, and date', () => {
         expect((0, upload_security_1.buildMenuFilename)('Seasonal Breakfast Update', 'Aqimero - Ritz-Carlton - Philadelphia', 'Breakfast', '2023-11-06')).toBe('Aqimero_Breakfast_11.6.23.docx');

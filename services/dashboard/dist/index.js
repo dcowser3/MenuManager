@@ -1044,6 +1044,7 @@ async function renderSubmissionForm(req, res, view, title) {
         propertyOptions,
         propertyCatalog,
         supportEmail: PUBLIC_FORM_SUPPORT_EMAIL,
+        maxUploadBytes: upload_security_1.MAX_UPLOAD_BYTES,
         errorReportMaxBodyBytes: ERROR_REPORT_CLIENT_MAX_BODY_BYTES,
         draftSession,
         draftLoadError,
@@ -4701,10 +4702,10 @@ app.use((error, req, res, next) => {
     if (error instanceof multer_1.default.MulterError) {
         const isFileSize = error.code === 'LIMIT_FILE_SIZE';
         const statusCode = isFileSize ? 413 : 400;
-        const maxUploadMb = Math.round(upload_security_1.MAX_UPLOAD_BYTES / (1024 * 1024));
         const clientMessage = isFileSize
-            ? `File is too large. The maximum upload size is ${maxUploadMb} MB. Reduce embedded images or email ${PUBLIC_FORM_SUPPORT_EMAIL} if the document must exceed this.`
+            ? (0, upload_security_1.buildUploadTooLargeMessage)(upload_security_1.MAX_UPLOAD_BYTES, PUBLIC_FORM_SUPPORT_EMAIL)
             : `Upload rejected (${error.code}). Please check the file and try again, or email ${PUBLIC_FORM_SUPPORT_EMAIL}.`;
+        const clientCode = isFileSize ? upload_security_1.UPLOAD_TOO_LARGE_CODE : error.code;
         const attemptEvent = {
             attemptId: req.get('x-menumanager-attempt-id'),
             eventType: 'upload_rejected',
@@ -4717,6 +4718,7 @@ app.use((error, req, res, next) => {
             revisionSource: req.get('x-menumanager-revision-source'),
             details: {
                 multerCode: error.code,
+                errorCode: clientCode,
                 multerField: error.field || null,
                 maxUploadBytes: upload_security_1.MAX_UPLOAD_BYTES,
                 contentLength: req.get('content-length') || null,
@@ -4735,6 +4737,7 @@ app.use((error, req, res, next) => {
                 attemptId: req.get('x-menumanager-attempt-id') || null,
                 route: req.originalUrl || req.url,
                 multerCode: error.code,
+                errorCode: clientCode,
                 contentLength: req.get('content-length') || null,
                 submitterEmail: req.get('x-menumanager-submitter-email') || null,
                 projectName: req.get('x-menumanager-project') || null,
@@ -4744,7 +4747,11 @@ app.use((error, req, res, next) => {
                 maxUploadBytes: upload_security_1.MAX_UPLOAD_BYTES,
             },
         });
-        return res.status(statusCode).json({ error: clientMessage });
+        return res.status(statusCode).json({
+            error: clientMessage,
+            code: clientCode,
+            ...(isFileSize ? { maxUploadBytes: upload_security_1.MAX_UPLOAD_BYTES } : {}),
+        });
     }
     // Any other unhandled error: still answer API/JSON callers with JSON so they get
     // the status and a message instead of an HTML page they cannot parse.

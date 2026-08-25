@@ -94,6 +94,8 @@ The SSH command uses keepalives so long, quiet Docker rebuilds do not drop the G
 
 After containers start, the workflow waits up to 90 seconds for `http://localhost:3005/` to answer before marking the deploy failed.
 
+The workflow also installs `deploy/nginx/menumanager-upload-limit.conf` into `/etc/nginx/conf.d/`, runs `nginx -t`, and reloads nginx. Its 20 MB request-body allowance is intentionally above the dashboard's 15 MB per-file limit so multipart DOCX uploads reach the app and receive structured JSON errors instead of nginx's default HTML 413 response. The deploy user therefore needs passwordless `sudo` for `install`, `nginx -t`, and `systemctl reload nginx` when nginx is installed.
+
 ### Server assumptions
 
 - The app is already cloned on the Lightsail instance.

@@ -239,6 +239,18 @@ The approval editor route remains `/approval/<submissionId>`. In local mode, sub
 
 If the failure is from the **"Report this problem"** button instead of final submit, `/api/form/error-report` uses its own `ERROR_REPORT_JSON_BODY_LIMIT` parser (default `15mb`) before the dashboard-wide 5 MB parser. The client measures UTF-8 bytes, keeps the screenshot when possible, and compacts/minimizes state before dropping the screenshot as a final fallback. A production `error_report_client_failed` event with `status 413` usually means the deployed form is stale, `dist/views/form.ejs` was not rebuilt, `ERROR_REPORT_JSON_BODY_LIMIT` is lower than expected, or the fronting proxy/body limit is below the app limit. Successful reports save full details under `tmp/error-reports/<incidentId>/`; use the incident id from the email to inspect `report.json`, `client-state.json`, and any screenshot.
 
+### 413 On DOCX Upload
+
+Dashboard files are limited to 15 MB. The browser should reject a larger file immediately and log the failed form attempt with HTTP-style status `413` and `REQUEST_ENTITY_TOO_LARGE`; if the request reaches Express, Multer returns the same structured code in JSON.
+
+Production nginx must allow more than 15 MB because multipart requests add framing overhead. The Lightsail deploy installs `deploy/nginx/menumanager-upload-limit.conf`, which sets `client_max_body_size 20m`, validates nginx, and reloads it. If users see nginx's HTML `413 Request Entity Too Large` page or app logs contain no matching upload attempt, verify the live value with:
+
+```bash
+sudo nginx -T | grep client_max_body_size
+```
+
+Expect `20m`. A missing value means nginx is still using its 1 MB default; rerun the deploy or install the tracked override and reload nginx.
+
 If ClickUp approval is updating the `submissions` row but you are not seeing rows in `approved_dishes`, test the extractor directly before debugging webhook delivery:
 
 ```bash

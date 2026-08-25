@@ -1,9 +1,21 @@
 import {
+    MAX_UPLOAD_BYTES,
+    UPLOAD_TOO_LARGE_CODE,
     buildMenuFilename,
+    buildUploadTooLargeMessage,
     sanitizePlainTextInput,
     sanitizeRichTextHtml,
     sanitizeStoredFileName,
 } from '../lib/upload-security';
+
+describe('upload size errors', () => {
+    test('uses a stable request-too-large code and a message that matches the configured limit', () => {
+        expect(UPLOAD_TOO_LARGE_CODE).toBe('REQUEST_ENTITY_TOO_LARGE');
+        expect(buildUploadTooLargeMessage(MAX_UPLOAD_BYTES, 'support@example.test')).toBe(
+            'File is too large. The maximum upload size is 15 MB. Reduce embedded images or email support@example.test if the document must exceed this.'
+        );
+    });
+});
 
 describe('buildMenuFilename', () => {
     test('names generated menus as restaurant, service period, and date', () => {
