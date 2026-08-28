@@ -309,7 +309,7 @@ export function supersededProposalReviewBlock(proposal: {
 
 export type PromptProposalApprovalBlock = {
     error: string;
-    reason: 'eval_regressed' | 'eval_failed' | 'eval_no_effect' | 'eval_skipped' | 'unresolved_misses' | 'trigger_eval_unavailable';
+    reason: 'eval_regressed' | 'eval_failed' | 'eval_no_effect' | 'eval_rule_inactive' | 'eval_skipped' | 'unresolved_misses' | 'trigger_eval_unavailable';
 };
 
 /**
@@ -364,6 +364,12 @@ export function promptProposalApprovalBlock(proposal: {
         return {
             error: 'This prompt-changing proposal cannot be approved because evaluation found no improvement on the corrections that motivated it.',
             reason: 'eval_no_effect',
+        };
+    }
+    if (proposal.disposition === 'rules_only' && evalStatus === 'no_effect') {
+        return {
+            error: 'This rules-only proposal cannot be approved because evaluation did not prove every proposed replacement rule activated. Re-run evaluation with active candidate-rule evidence.',
+            reason: 'eval_rule_inactive',
         };
     }
     if (promptChanged && evalStatus === 'skipped') {
@@ -1812,6 +1818,18 @@ export type ProposalEvalSummary = {
         discarded_prompt_regression_count: number;
         full_suite_cases: number;
     };
+    candidate_rule_activations?: CandidateRuleActivationEvidence[];
+};
+
+export type CandidateRuleActivationEvidence = {
+    rule_index: number;
+    rule_id: string;
+    original_text: string;
+    corrected_text: string;
+    pre_ai_activations: number;
+    post_ai_activations: number;
+    total_activations: number;
+    case_ids: string[];
 };
 
 export type RegressionAttributionCause = 'prompt' | 'rules' | 'both' | 'interaction_or_unstable';
@@ -2112,6 +2130,9 @@ export function buildProposalEvalSummary(
                 confirmed_delta: confirmed,
             };
         }),
+        candidate_rule_activations: Array.isArray(candidateReport?.candidateRuleActivations)
+            ? candidateReport.candidateRuleActivations
+            : [],
     };
 }
 
@@ -2133,9 +2154,14 @@ export function shouldAttemptRulesOnlyFallback(input: {
 
 export function rulesOnlyFallbackPassedFullSuite(report: any): boolean {
     const comparison = report?.baselineComparison;
+    const activations = Array.isArray(report?.candidateRuleActivations)
+        ? report.candidateRuleActivations
+        : [];
     return !!comparison
         && Number(comparison.comparedCases || 0) > 0
-        && Number(comparison.regressed || 0) === 0;
+        && Number(comparison.regressed || 0) === 0
+        && activations.length > 0
+        && activations.every((entry: any) => Number(entry?.total_activations || 0) > 0);
 }
 
 /**
@@ -2273,7 +2299,7 @@ export function buildRegressionAttribution(
 
 export function evalStatusFromSummary(
     summary: ProposalEvalSummary | null,
-    opts: { consolidation?: boolean } = {}
+    opts: { consolidation?: boolean; rulesOnly?: boolean } = {}
 ): 'passed' | 'regressed' | 'skipped' | 'failed' | 'no_effect' {
     if (!summary) return 'skipped';
     if (summary.error) return 'failed';
@@ -2285,6 +2311,14 @@ export function evalStatusFromSummary(
     }
     const triggersImproved = summary.triggers_improved ?? 0;
     if (triggersImproved > 0) return 'passed';
+    if (opts.rulesOnly) {
+        const activations = Array.isArray(summary.candidate_rule_activations)
+            ? summary.candidate_rule_activations
+            : [];
+        if (activations.length > 0 && activations.every((entry) => Number(entry.total_activations || 0) > 0)) {
+            return 'passed';
+        }
+    }
     // No confirmed regressions and no trigger improved: this proposal did not demonstrate
     // forward progress on the cases that motivated it (Fix 1). Label no_effect rather than passed.
     // (Dead opts.promptUnchanged removed per Follow-up 3; semantics focus on trigger evidence.)

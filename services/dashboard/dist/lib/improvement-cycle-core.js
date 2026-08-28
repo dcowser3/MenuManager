@@ -333,6 +333,12 @@ function promptProposalApprovalBlock(proposal) {
             reason: 'eval_no_effect',
         };
     }
+    if (proposal.disposition === 'rules_only' && evalStatus === 'no_effect') {
+        return {
+            error: 'This rules-only proposal cannot be approved because evaluation did not prove every proposed replacement rule activated. Re-run evaluation with active candidate-rule evidence.',
+            reason: 'eval_rule_inactive',
+        };
+    }
     if (promptChanged && evalStatus === 'skipped') {
         return {
             error: 'This prompt-changing proposal cannot be approved because evaluation was skipped.',
@@ -1738,6 +1744,9 @@ function buildProposalEvalSummary(baseline, candidate, candidateReport) {
                 confirmed_delta: confirmed,
             };
         }),
+        candidate_rule_activations: Array.isArray(candidateReport?.candidateRuleActivations)
+            ? candidateReport.candidateRuleActivations
+            : [],
     };
 }
 function shouldAttemptRulesOnlyFallback(input) {
@@ -1757,9 +1766,14 @@ function shouldAttemptRulesOnlyFallback(input) {
 }
 function rulesOnlyFallbackPassedFullSuite(report) {
     const comparison = report?.baselineComparison;
+    const activations = Array.isArray(report?.candidateRuleActivations)
+        ? report.candidateRuleActivations
+        : [];
     return !!comparison
         && Number(comparison.comparedCases || 0) > 0
-        && Number(comparison.regressed || 0) === 0;
+        && Number(comparison.regressed || 0) === 0
+        && activations.length > 0
+        && activations.every((entry) => Number(entry?.total_activations || 0) > 0);
 }
 /**
  * Build trigger progression for a full baseline/candidate pair. The full-suite
@@ -1902,6 +1916,14 @@ function evalStatusFromSummary(summary, opts = {}) {
     const triggersImproved = summary.triggers_improved ?? 0;
     if (triggersImproved > 0)
         return 'passed';
+    if (opts.rulesOnly) {
+        const activations = Array.isArray(summary.candidate_rule_activations)
+            ? summary.candidate_rule_activations
+            : [];
+        if (activations.length > 0 && activations.every((entry) => Number(entry.total_activations || 0) > 0)) {
+            return 'passed';
+        }
+    }
     // No confirmed regressions and no trigger improved: this proposal did not demonstrate
     // forward progress on the cases that motivated it (Fix 1). Label no_effect rather than passed.
     // (Dead opts.promptUnchanged removed per Follow-up 3; semantics focus on trigger evidence.)

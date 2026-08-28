@@ -900,6 +900,31 @@ describe('eval summary + status', () => {
         expect(evalStatusFromSummary(identical)).toBe('no_effect');
     });
 
+    test('passes a rules-only candidate only when every proposed rule activated', () => {
+        const baseline = summarizeEvalReport('baseline', report(0.8), '/tmp/base/report.json');
+        const activeReport = {
+            ...report(0.8, 0),
+            candidateRuleActivations: [
+                { rule_index: 0, rule_id: 'eval-candidate-rule-0', original_text: 'homemade', corrected_text: 'housemade', pre_ai_activations: 1, post_ai_activations: 0, total_activations: 1, case_ids: ['case-1'] },
+                { rule_index: 1, rule_id: 'eval-candidate-rule-1', original_text: 'house -made', corrected_text: 'housemade', pre_ai_activations: 0, post_ai_activations: 1, total_activations: 1, case_ids: ['case-1'] },
+            ],
+        };
+        const candidate = summarizeEvalReport('candidate', activeReport, '/tmp/cand/report.json');
+        const activeSummary = buildProposalEvalSummary(baseline, candidate, activeReport);
+
+        expect(activeSummary.candidate_rule_activations).toHaveLength(2);
+        expect(evalStatusFromSummary(activeSummary, { rulesOnly: true })).toBe('passed');
+
+        const inactiveSummary = {
+            ...activeSummary,
+            candidate_rule_activations: activeSummary.candidate_rule_activations?.map((entry, index) =>
+                index === 1 ? { ...entry, post_ai_activations: 0, total_activations: 0, case_ids: [] } : entry
+            ),
+        };
+        expect(evalStatusFromSummary(inactiveSummary, { rulesOnly: true })).toBe('no_effect');
+        expect(evalStatusFromSummary({ ...activeSummary, candidate_rule_activations: [] }, { rulesOnly: true })).toBe('no_effect');
+    });
+
     test('stores confirmed regression deltas instead of displaying the stale raw comparison', () => {
         const candidateReport = report(0.79, 1);
         candidateReport.baselineComparison.regressions = [{
@@ -979,9 +1004,12 @@ describe('eval summary + status', () => {
     });
 
     test('requires a complete non-empty full-suite rules-only comparison before salvage', () => {
-        expect(rulesOnlyFallbackPassedFullSuite({ baselineComparison: { comparedCases: 196, regressed: 0 } })).toBe(true);
-        expect(rulesOnlyFallbackPassedFullSuite({ baselineComparison: { comparedCases: 196, regressed: 1 } })).toBe(false);
-        expect(rulesOnlyFallbackPassedFullSuite({ baselineComparison: { comparedCases: 0, regressed: 0 } })).toBe(false);
+        const activations = [{ rule_id: 'eval-candidate-rule-0', total_activations: 2 }];
+        expect(rulesOnlyFallbackPassedFullSuite({ baselineComparison: { comparedCases: 196, regressed: 0 }, candidateRuleActivations: activations })).toBe(true);
+        expect(rulesOnlyFallbackPassedFullSuite({ baselineComparison: { comparedCases: 196, regressed: 1 }, candidateRuleActivations: activations })).toBe(false);
+        expect(rulesOnlyFallbackPassedFullSuite({ baselineComparison: { comparedCases: 0, regressed: 0 }, candidateRuleActivations: activations })).toBe(false);
+        expect(rulesOnlyFallbackPassedFullSuite({ baselineComparison: { comparedCases: 196, regressed: 0 }, candidateRuleActivations: [] })).toBe(false);
+        expect(rulesOnlyFallbackPassedFullSuite({ baselineComparison: { comparedCases: 196, regressed: 0 }, candidateRuleActivations: [{ rule_id: 'eval-candidate-rule-0', total_activations: 0 }] })).toBe(false);
     });
 
     test('rebuilds trigger progression from the adopted full-suite fallback reports', () => {
@@ -1463,6 +1491,14 @@ describe('promptProposalApprovalBlock', () => {
             disposition: 'rules_and_prompt',
             correction_rule_count: 1,
         })?.reason).toBe('eval_skipped');
+    });
+
+    test('blocks a rules-only proposal when candidate-rule activation was not proven', () => {
+        expect(promptProposalApprovalBlock({
+            eval_status: 'no_effect',
+            disposition: 'rules_only',
+            correction_rule_count: 5,
+        })?.reason).toBe('eval_rule_inactive');
     });
 
     test('allows a passing scored proposal and does not block rejection-only metadata', () => {

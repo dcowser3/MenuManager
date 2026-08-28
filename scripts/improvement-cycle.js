@@ -489,8 +489,14 @@ async function sendProposalEmail(supabase, { cycleId, evalStatus, evalSummary, c
         const baseUrl = core.resolveDashboardPublicUrl(process.env);
         const tImp = evalSummary?.triggers_improved || 0;
         const tTot = (evalSummary?.triggers || []).length || (evalSummary?.triggers_improved || 0) + (evalSummary?.triggers_unchanged || 0) + (evalSummary?.triggers_regressed || 0);
+        const ruleActivations = Array.isArray(evalSummary?.candidate_rule_activations) ? evalSummary.candidate_rule_activations : [];
+        const activatedRuleCount = ruleActivations.filter((entry) => Number(entry?.total_activations || 0) > 0).length;
         const verdict = evalStatus === 'passed'
-            ? `Eval PASSED: triggers improved ${tImp}/${tTot || '?'}`
+            ? (tImp > 0
+                ? `Eval PASSED: triggers improved ${tImp}/${tTot || '?'}`
+                : (ruleActivations.length
+                    ? `Eval PASSED: candidate rules activated ${activatedRuleCount}/${ruleActivations.length}`
+                    : 'Eval PASSED: no confirmed regressions'))
             : evalStatus === 'regressed'
                 ? `Eval REGRESSED on ${evalSummary?.regressed} case(s) — review carefully`
                 : evalStatus === 'no_effect'
@@ -1360,7 +1366,10 @@ async function main() {
                         evalSummary.triggers_regressed = tr;
                         evalSummary.triggers_unavailable = tna;
                         // Recompute status now that triggers are known
-                        evalStatus = core.evalStatusFromSummary(evalSummary, { consolidation: !!args.consolidate });
+                        evalStatus = core.evalStatusFromSummary(evalSummary, {
+                            consolidation: !!args.consolidate,
+                            rulesOnly: validated.promptUnchanged && validated.proposed_replacement_rules.length > 0,
+                        });
                     } catch (trigErr) {
                         console.warn(`Trigger progression extraction failed: ${trigErr.message}`);
                     }
@@ -1476,7 +1485,7 @@ async function main() {
                                     validated.warnings.push(`Rules-only fallback adopted: discarded the regressed prompt edit after ${discardedPromptRegressionCount} confirmed prompt-only regression(s); full rules-only suite passed ${fallbackSummary.comparedCases} case(s) with zero confirmed regressions.`);
                                     await fsp.writeFile(candidatePromptPath, effective.prompt);
                                     evalSummary = fallbackSummary;
-                                    evalStatus = core.evalStatusFromSummary(evalSummary, { consolidation: false });
+                                    evalStatus = core.evalStatusFromSummary(evalSummary, { consolidation: false, rulesOnly: true });
                                     disposition = core.computeDisposition({
                                         promptUnchanged: true,
                                         promptUnchangedReason: 'identical',
@@ -1484,7 +1493,7 @@ async function main() {
                                         proposedRuleCount: validated.proposed_replacement_rules.length,
                                         codeRecommendationCount: validated.code_recommendations.length,
                                     });
-                                    console.log(`Rules-only fallback ADOPTED: ${fallbackSummary.comparedCases} cases, status ${evalStatus}, disposition ${disposition}.`);
+                                    console.log(`Rules-only fallback ADOPTED: ${fallbackSummary.comparedCases} cases, all candidate rules activated, status ${evalStatus}, disposition ${disposition}.`);
                                 } else {
                                     const fallbackError = rulesOnlyFullRun.ok
                                         ? `${rulesOnlyFullReport?.baselineComparison?.regressed ?? 'unknown'} confirmed regression(s)`

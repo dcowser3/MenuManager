@@ -78,6 +78,8 @@ const defaultOutRoot = path.join(repoRoot, 'tmp', 'review-eval');
 const defaultDatasetPath = path.join(defaultOutRoot, 'dataset.jsonl');
 const cacheDir = path.join(defaultOutRoot, 'cache');
 const {
+    activateCandidateRulesForEval,
+    buildCandidateRuleActivationEvidence,
     classifyMaterialDisagreement,
     summarizeMaterialDisagreements,
     sortMaterialDisagreements,
@@ -217,7 +219,7 @@ async function fetchAcceptedRulesLive() {
 
 async function resolveCorrectionRules(rulesArg) {
     if (rulesArg === 'live') {
-        return { rules: await fetchAcceptedRulesLive(), description: 'live accepted rules' };
+        return { rules: await fetchAcceptedRulesLive(), candidateRules: [], description: 'live accepted rules' };
     }
     const [mode, ...rest] = rulesArg.split(':');
     const filePath = rest.join(':');
@@ -225,12 +227,19 @@ async function resolveCorrectionRules(rulesArg) {
     const parsed = JSON.parse(fs.readFileSync(path.resolve(filePath), 'utf8'));
     const fileRules = Array.isArray(parsed) ? parsed : (parsed.rules || []);
     if (mode === 'snapshot') {
-        return { rules: fileRules, description: `snapshot ${filePath} (${fileRules.length} rules)` };
+        return { rules: fileRules, candidateRules: [], description: `snapshot ${filePath} (${fileRules.length} rules)` };
     }
     if (mode === 'candidate') {
         const live = await fetchAcceptedRulesLive();
+        // Candidate files contain proposal-shaped rules, which intentionally do
+        // not carry a persisted status or database id. The deterministic engine
+        // only executes accepted rules, so activate them transiently for eval.
+        // These synthetic ids also let the report prove which candidate rule
+        // actually fired without mutating the stored proposal payload.
+        const candidateRules = activateCandidateRulesForEval(fileRules);
         return {
-            rules: [...live, ...fileRules],
+            rules: [...live, ...candidateRules],
+            candidateRules,
             description: `live accepted rules + candidate ${filePath} (${fileRules.length} proposed)`,
         };
     }
@@ -642,6 +651,20 @@ async function runEval(args, dataset, rulesInfo, libs, baselineConfig) {
                 criticalSuggestionCount: result.post.criticalSuggestions.length,
                 suggestionCount: result.finalSuggestions.length,
                 deterministicCorrections: result.preAiDeterministic.appliedCorrections.length,
+                deterministicRuleActivations: [
+                    ...result.preAiDeterministic.appliedCorrections.map((correction) => ({
+                        rule_id: correction.ruleId || null,
+                        phase: 'pre_ai',
+                        original_text: correction.original,
+                        corrected_text: correction.corrected,
+                    })),
+                    ...result.post.postAiDeterministic.appliedCorrections.map((correction) => ({
+                        rule_id: correction.ruleId || null,
+                        phase: 'post_ai',
+                        original_text: correction.original,
+                        corrected_text: correction.corrected,
+                    })),
+                ],
             };
         };
     };
@@ -910,7 +933,19 @@ function buildMarkdown(report) {
         '',
     ];
 
-        if (report.baselineComparison) {
+    if ((report.candidateRuleActivations || []).length) {
+        lines.push('## Candidate Rule Activation');
+        lines.push('| Rule | Pre-AI | Post-AI | Total | Cases |');
+        lines.push('|------|-------:|--------:|------:|------:|');
+        for (const entry of report.candidateRuleActivations) {
+            const from = `${entry.original_text || ''}`.replace(/\|/g, '\\|');
+            const to = `${entry.corrected_text || ''}`.replace(/\|/g, '\\|');
+            lines.push(`| \`${from}\` → \`${to}\` | ${entry.pre_ai_activations || 0} | ${entry.post_ai_activations || 0} | ${entry.total_activations || 0} | ${(entry.case_ids || []).length} |`);
+        }
+        lines.push('');
+    }
+
+    if (report.baselineComparison) {
         const b = report.baselineComparison;
         lines.push(
             '## Baseline Comparison',
@@ -1071,6 +1106,7 @@ async function main() {
         }
     }
 
+    const candidateRuleActivations = buildCandidateRuleActivationEvidence(rulesInfo.candidateRules, caseReports);
     const report = {
         generatedAt: new Date().toISOString(),
         model: args.model,  // B5: explicit resolved model (pinned snapshot recommended for eval fidelity)
@@ -1101,6 +1137,7 @@ async function main() {
         },
         summary: aggregate(caseReports),
         usage: usageTotals,
+        candidateRuleActivations,
         baselineComparison,
         cases: caseReports.sort((a, b) => a.label.localeCompare(b.label)),
         errors,

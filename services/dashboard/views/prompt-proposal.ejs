@@ -244,7 +244,7 @@
                 <div class="card" style="border-color:var(--success); background:#f3fbf5;">
                     <strong style="color:var(--success)">Safe rules-only fallback adopted</strong>
                     <div class="small" style="margin-top:.3rem;">
-                        The proposed prompt edit caused <%= rulesOnlyFallback.discarded_prompt_regression_count %> confirmed regression(s), so it was discarded automatically. The replacement rules were re-evaluated across <%= rulesOnlyFallback.full_suite_cases %> cases with zero confirmed regressions.
+                        The proposed prompt edit caused <%= rulesOnlyFallback.discarded_prompt_regression_count %> confirmed regression(s), so it was discarded automatically. The replacement rules were re-evaluated across <%= rulesOnlyFallback.full_suite_cases %> cases with zero confirmed regressions and every candidate rule activated.
                     </div>
                 </div>
             <% } %>
@@ -447,7 +447,7 @@
                                 Trigger progression not measurable — none of the <%= trigs.length %> motivating correction(s) had a replayable source menu to score against (freeform reviewer rules have no menu, so there is nothing to compare). The proposed rules are still safety-checked against historical menus below.
                             </div>
                         <% } else if (trigs.length) { %>
-                            <div class="small" style="margin: .4rem 0 .2rem">Trigger cases (submissions whose corrections motivated this proposal — a "passed" verdict requires at least one improved). Rows that couldn't be scored are hidden:</div>
+                            <div class="small" style="margin: .4rem 0 .2rem">Trigger cases (submissions whose corrections motivated this proposal). Prompt-changing proposals require a material trigger improvement; rules-only proposals can also pass when every candidate rule demonstrably activates. Rows that couldn't be scored are hidden:</div>
                             <table>
                                 <thead><tr><th>Case / Submission</th><th>Baseline</th><th>Candidate</th><th>Confirmed Delta</th><th>Status</th></tr></thead>
                                 <tbody>
@@ -463,6 +463,27 @@
                                 </tbody>
                             </table>
                             <div class="small" style="margin-top:.2rem">Triggers: improved <%= evalSummary.triggers_improved || 0 %>, unchanged <%= evalSummary.triggers_unchanged || 0 %>, regressed <%= evalSummary.triggers_regressed || 0 %>, unavailable <%= evalSummary.triggers_unavailable || 0 %></div>
+                        <% } %>
+                        <% const ruleActivations = Array.isArray(evalSummary.candidate_rule_activations) ? evalSummary.candidate_rule_activations : []; %>
+                        <% if (ruleActivations.length) { %>
+                            <div class="small" style="margin:.8rem 0 .3rem">
+                                Candidate rule activation: <strong><%= ruleActivations.filter((entry) => Number(entry.total_activations || 0) > 0).length %>/<%= ruleActivations.length %></strong> proposed rule(s) fired during evaluation.
+                            </div>
+                            <table>
+                                <thead><tr><th>Rule</th><th>Pre-AI</th><th>Post-AI</th><th>Cases</th><th>Status</th></tr></thead>
+                                <tbody>
+                                <% ruleActivations.forEach((entry) => { %>
+                                    <% const active = Number(entry.total_activations || 0) > 0; %>
+                                    <tr class="<%= active ? '' : 'conflict-row' %>">
+                                        <td><code><%= entry.original_text %></code> → <code><%= entry.corrected_text %></code></td>
+                                        <td><%= entry.pre_ai_activations || 0 %></td>
+                                        <td><%= entry.post_ai_activations || 0 %></td>
+                                        <td><%= Array.isArray(entry.case_ids) ? entry.case_ids.length : 0 %></td>
+                                        <td><span class="badge <%= active ? 'approved' : 'rejected' %>"><%= active ? 'activated' : 'inactive' %></span></td>
+                                    </tr>
+                                <% }) %>
+                                </tbody>
+                            </table>
                         <% } %>
                         <% if ((evalSummary.regressions || []).length) { %>
                             <div class="small" style="margin-bottom:.4rem">Confirmed regressions (reproduced on a fresh-seed re-run, not nondeterminism noise):</div>

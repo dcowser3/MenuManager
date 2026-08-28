@@ -1,9 +1,12 @@
 const {
+    activateCandidateRulesForEval,
+    buildCandidateRuleActivationEvidence,
     classifyMaterialDisagreement,
     summarizeMaterialDisagreements,
     sortMaterialDisagreements,
 } = require('../../../scripts/review-eval-helpers');
 const { AI_REVIEW_FENCES } = require('../lib/review-response-contract');
+const { runPreAiDeterministicChecks } = require('../lib/pre-ai-deterministic-rules');
 const fs = require('fs');
 const path = require('path');
 
@@ -20,6 +23,55 @@ function caseReport({ composite, groundTruthCorrectionCount = 0, falsePositives 
 }
 
 describe('review eval material disagreement helpers', () => {
+    test('transiently activates proposal-shaped candidate rules for deterministic eval', () => {
+        const proposalRules = [{ original_text: 'homemade', corrected_text: 'housemade', change_type: 'terminology' }];
+        const activated = activateCandidateRulesForEval(proposalRules);
+
+        expect(activated).toEqual([expect.objectContaining({
+            id: 'eval-candidate-rule-0',
+            status: 'accepted',
+            original_text: 'homemade',
+            corrected_text: 'housemade',
+        })]);
+        expect(proposalRules[0]).not.toHaveProperty('status');
+
+        const result = runPreAiDeterministicChecks('homemade furikake', {
+            acceptedCorrectionRules: activated,
+        });
+        expect(result.menuText).toBe('housemade furikake');
+        expect(result.learnedRulesConsidered).toBe(1);
+        expect(result.appliedCorrections).toEqual(expect.arrayContaining([
+            expect.objectContaining({ ruleId: 'eval-candidate-rule-0', source: 'accepted_correction_rule' }),
+        ]));
+    });
+
+    test('aggregates pre- and post-AI activation evidence for every candidate rule', () => {
+        const rules = activateCandidateRulesForEval([
+            { original_text: 'homemade', corrected_text: 'housemade' },
+            { original_text: 'house -made', corrected_text: 'housemade' },
+            { original_text: 'unused', corrected_text: 'replacement' },
+        ]);
+        const evidence = buildCandidateRuleActivationEvidence(rules, [
+            {
+                case_id: 'case-1',
+                deterministicRuleActivations: [
+                    { rule_id: 'eval-candidate-rule-0', phase: 'pre_ai' },
+                    { rule_id: 'eval-candidate-rule-1', phase: 'post_ai' },
+                ],
+            },
+            {
+                case_id: 'case-2',
+                deterministicRuleActivations: [
+                    { rule_id: 'eval-candidate-rule-0', phase: 'pre_ai' },
+                ],
+            },
+        ]);
+
+        expect(evidence[0]).toMatchObject({ pre_ai_activations: 2, post_ai_activations: 0, total_activations: 2, case_ids: ['case-1', 'case-2'] });
+        expect(evidence[1]).toMatchObject({ pre_ai_activations: 0, post_ai_activations: 1, total_activations: 1, case_ids: ['case-1'] });
+        expect(evidence[2]).toMatchObject({ total_activations: 0, case_ids: [] });
+    });
+
     test('classifies a clean menu spurious edit when false positives cross zero', () => {
         expect(classifyMaterialDisagreement(
             caseReport({ composite: 1, falsePositives: 0 }),

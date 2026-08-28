@@ -1,4 +1,36 @@
 const NEAR_ZERO_GROUND_TRUTH_CORRECTIONS = 1;
+const EVAL_CANDIDATE_RULE_ID_PREFIX = 'eval-candidate-rule-';
+
+function activateCandidateRulesForEval(fileRules) {
+    return (Array.isArray(fileRules) ? fileRules : []).map((rule, index) => ({
+        ...rule,
+        id: `${EVAL_CANDIDATE_RULE_ID_PREFIX}${index}`,
+        status: 'accepted',
+    }));
+}
+
+function buildCandidateRuleActivationEvidence(candidateRules, caseReports) {
+    const reports = Array.isArray(caseReports) ? caseReports : [];
+    return (Array.isArray(candidateRules) ? candidateRules : []).map((rule, ruleIndex) => {
+        const matches = reports.flatMap((report) =>
+            (Array.isArray(report?.deterministicRuleActivations) ? report.deterministicRuleActivations : [])
+                .filter((activation) => activation?.rule_id === rule.id)
+                .map((activation) => ({ ...activation, case_id: report.case_id }))
+        );
+        const preAiActivations = matches.filter((entry) => entry.phase === 'pre_ai').length;
+        const postAiActivations = matches.filter((entry) => entry.phase === 'post_ai').length;
+        return {
+            rule_index: ruleIndex,
+            rule_id: rule.id,
+            original_text: `${rule.original_text || ''}`,
+            corrected_text: `${rule.corrected_text || ''}`,
+            pre_ai_activations: preAiActivations,
+            post_ai_activations: postAiActivations,
+            total_activations: preAiActivations + postAiActivations,
+            case_ids: [...new Set(matches.map((entry) => entry.case_id).filter(Boolean))],
+        };
+    });
+}
 
 function correctionCount(caseReport) {
     if (Number.isFinite(caseReport?.groundTruthCorrectionCount)) {
@@ -54,6 +86,9 @@ function sortMaterialDisagreements(comparisons) {
 
 module.exports = {
     NEAR_ZERO_GROUND_TRUTH_CORRECTIONS,
+    EVAL_CANDIDATE_RULE_ID_PREFIX,
+    activateCandidateRulesForEval,
+    buildCandidateRuleActivationEvidence,
     classifyMaterialDisagreement,
     summarizeMaterialDisagreements,
     sortMaterialDisagreements,
