@@ -153,7 +153,17 @@
                 when new annotated corrections exist; <code>npm run prompt:rewrite</code> remains the manual fallback.
             </div>
         <% } else { %>
-            <% const proposalApprovalBlock = typeof approvalBlock !== 'undefined' ? approvalBlock : null; %>
+            <%
+                const proposalApprovalBlock = typeof approvalBlock !== 'undefined' ? approvalBlock : null;
+                const proposalReplayEvidence = Array.isArray(proposal.replay_evidence) ? proposal.replay_evidence : [];
+                const enteredCorrectionCount = Number(proposal.correction_rule_count || proposalReplayEvidence.length || 0);
+                const retiredCorrectionCount = proposalReplayEvidence.filter((entry) => entry && entry.status === 'now_correct').length;
+                const actionableCorrectionCount = Math.max(0, enteredCorrectionCount - retiredCorrectionCount);
+                const replayEvidenceById = new Map(proposalReplayEvidence.map((entry) => [String(entry.correction_id || ''), entry]));
+                const rulesOnlyFallback = proposal.eval_summary && proposal.eval_summary.rules_only_fallback && proposal.eval_summary.rules_only_fallback.adopted
+                    ? proposal.eval_summary.rules_only_fallback
+                    : null;
+            %>
             <div class="card">
                 <div class="meta-grid">
                     <div class="meta-item">
@@ -167,11 +177,12 @@
                     <div class="meta-item">
                         <div class="meta-label">Source Corrections</div>
                         <div class="meta-value">
+                            <%= actionableCorrectionCount %> actionable
+                            <% if (retiredCorrectionCount > 0) { %>
+                                <div class="small" style="color:var(--muted);"><%= retiredCorrectionCount %> retired by replay from <%= enteredCorrectionCount %> entered</div>
+                            <% } %>
                             <% if (proposal.supersede_carried_correction_count != null && proposal.supersede_new_correction_count != null) { %>
-                                <%= proposal.correction_rule_count || 0 %>
-                                <span class="small" style="color:var(--muted);">(<%= proposal.supersede_carried_correction_count %> carried + <%= proposal.supersede_new_correction_count %> new)</span>
-                            <% } else { %>
-                                <%= proposal.correction_rule_count || 0 %>
+                                <div class="small" style="color:var(--muted);">lineage: <%= proposal.supersede_carried_correction_count %> carried + <%= proposal.supersede_new_correction_count %> new</div>
                             <% } %>
                         </div>
                     </div>
@@ -229,6 +240,15 @@
                 </div>
             <% } %>
 
+            <% if (rulesOnlyFallback) { %>
+                <div class="card" style="border-color:var(--success); background:#f3fbf5;">
+                    <strong style="color:var(--success)">Safe rules-only fallback adopted</strong>
+                    <div class="small" style="margin-top:.3rem;">
+                        The proposed prompt edit caused <%= rulesOnlyFallback.discarded_prompt_regression_count %> confirmed regression(s), so it was discarded automatically. The replacement rules were re-evaluated across <%= rulesOnlyFallback.full_suite_cases %> cases with zero confirmed regressions.
+                    </div>
+                </div>
+            <% } %>
+
             <%
                 // C2: plain-language headline for the code-computed disposition (what the
                 // proposal actually concluded). Kept in sync with describeDisposition() in core.
@@ -269,7 +289,9 @@
                                 const laneClass = (r.lane === 'unrouted' || r.lane === 'dismissed') ? 'rejected'
                                     : (r.lane === 'already_correct' ? 'no_effect' : 'approved');
                                 const laneLabel = r.lane === 'existing_rule' ? 'existing deterministic rule' : r.lane;
-                                const stillMissedConflict = r.replay_status === 'still_missed' && (r.lane === 'dismissed' || r.lane === 'already_correct' || r.lane === 'existing_rule' || r.lane === 'unrouted');
+                                const replayDetail = replayEvidenceById.get(String(r.correction_id || '')) || {};
+                                const stillMissedConflict = (r.replay_status === 'still_missed' && (r.lane === 'dismissed' || r.lane === 'already_correct' || r.lane === 'existing_rule' || r.lane === 'unrouted'))
+                                    || (r.replay_status === 'partially_correct' && (r.lane === 'already_correct' || r.lane === 'unrouted'));
                             %>
                             <tr<%= stillMissedConflict ? ' style="background:#fff5f5;"' : '' %>>
                                 <td class="small">
@@ -280,14 +302,20 @@
                                     <% } else { %>
                                         <span style="color:var(--muted);">freeform · <%= r.correction_id %></span>
                                     <% } %>
-                                    <% const verifiable = r.replay_status === 'still_missed' || r.replay_status === 'now_correct'; %>
+                                    <% const verifiable = r.replay_status === 'still_missed' || r.replay_status === 'partially_correct' || r.replay_status === 'now_correct'; %>
                                     <% if (r.replay_status === 'not_verifiable') { %>
                                         <span class="badge no_effect" style="margin-left:.3rem;" title="Freeform guidance with no example — cannot be replay-verified.">guidance only</span>
                                     <% } else if (verifiable) { %>
                                         <span class="badge approved" style="margin-left:.3rem;" title="Replay-verifiable against a concrete instance.">verifiable</span>
                                     <% } %>
                                 </td>
-                                <td class="small"><%= r.replay_status || '—' %></td>
+                                <td class="small">
+                                    <%= r.replay_status || '—' %>
+                                    <% if (r.replay_status === 'partially_correct') { %>
+                                        <div style="color:var(--success); margin-top:.2rem;">applied: <%= Array.isArray(replayDetail.applied_changes) ? replayDetail.applied_changes.join(', ') : 'partial correction' %></div>
+                                        <div style="color:var(--danger); margin-top:.1rem;">remaining: <%= Array.isArray(replayDetail.remaining_changes) ? replayDetail.remaining_changes.join(', ') : 'unresolved delta' %></div>
+                                    <% } %>
+                                </td>
                                 <td><span class="badge <%= laneClass %>"><%= laneLabel %></span></td>
                                 <td class="small"><%= r.target || '' %></td>
                                 <td class="small"><%= r.note || '' %></td>
@@ -295,7 +323,7 @@
                         <% }) %>
                         </tbody>
                     </table>
-                    <div class="small" style="margin-top:.4rem; color:var(--muted);">One row per source correction. A still_missed correction routed dismissed/already_correct is highlighted — replay evidence outranks that routing.</div>
+                    <div class="small" style="margin-top:.4rem; color:var(--muted);">One row per source correction. A still_missed correction routed dismissed/already_correct, or a partially_correct correction whose remainder is not routed, is highlighted — replay evidence outranks that routing.</div>
                 </div>
             <% } %>
 
@@ -308,6 +336,12 @@
                             <summary class="small" style="cursor:pointer;">Show the discarded analysis</summary>
                             <div class="analysis-box" style="margin-top:.4rem"><%= proposal.llm_analysis %></div>
                         </details>
+                    </div>
+                <% } else if (rulesOnlyFallback) { %>
+                    <h3 class="section-title">LLM Analysis (prompt rewrite discarded)</h3>
+                    <div class="card" style="border-color:var(--border); background:var(--bg-alt);">
+                        <strong>The prompt-change portion described below is not part of this proposal.</strong>
+                        <div class="analysis-box" style="margin-top:.4rem"><%= proposal.llm_analysis %></div>
                     </div>
                 <% } else { %>
                     <h3 class="section-title">LLM Analysis</h3>
@@ -433,7 +467,7 @@
                         <% if ((evalSummary.regressions || []).length) { %>
                             <div class="small" style="margin-bottom:.4rem">Confirmed regressions (reproduced on a fresh-seed re-run, not nondeterminism noise):</div>
                             <table>
-                                <thead><tr><th>Case</th><th>Composite Delta</th></tr></thead>
+                                <thead><tr><th>Case</th><th><%= (evalSummary.regressions || []).some((r) => r.confirmed_delta != null) ? 'Confirmed Delta' : 'Composite Delta' %></th></tr></thead>
                                 <tbody>
                                 <% evalSummary.regressions.forEach((r) => { %>
                                     <tr><td><%= r.label %></td><td><%= (r.delta * 100).toFixed(3) %> pp</td></tr>

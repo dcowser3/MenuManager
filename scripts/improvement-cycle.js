@@ -505,6 +505,8 @@ async function sendProposalEmail(supabase, { cycleId, evalStatus, evalSummary, c
             : '';
         // C3: compact per-correction routing table so the reviewer sees the conclusion in the email.
         const routing = Array.isArray(correctionRouting) ? correctionRouting : [];
+        const retiredCorrectionCount = routing.filter((r) => r && r.replay_status === 'now_correct').length;
+        const actionableCorrectionCount = Math.max(0, Number(correctionCount || 0) - retiredCorrectionCount);
         const routingTable = routing.length
             ? [
                 `<p><strong>What happened to each correction:</strong></p>`,
@@ -522,7 +524,7 @@ async function sendProposalEmail(supabase, { cycleId, evalStatus, evalSummary, c
                 headline ? `<p style="font-size:15px"><strong>${escapeHtmlLite(headline)}</strong></p>` : '',
                 `<ul>`,
                 supersedeLine,
-                `<li>${correctionCount} reviewer correction(s) analyzed</li>`,
+                `<li>${actionableCorrectionCount} actionable reviewer correction(s) (${retiredCorrectionCount} retired by replay from ${correctionCount} entered)</li>`,
                 `<li>${ruleCount} deterministic replacement rule(s) proposed</li>`,
                 `<li>${recommendationCount} code recommendation(s)</li>`,
                 `<li>${verdict}</li>`,
@@ -875,8 +877,14 @@ async function main() {
                         console.warn(`Replay run failed for submission ${sid}: ${re.message}`);
                     }
                     const signals = replayOut ? extractReplacementSignals(raw, replayOut) : [];
-                    const st = core.decideReplayStatus(o, c, replayOut, signals);
-                    replayEvidence.push({ correction_id: r.id, submission_id: sid, original_text: o, corrected_text: c, status: st });
+                    const replayAnalysis = core.analyzeReplayCorrection(o, c, replayOut, signals);
+                    replayEvidence.push({
+                        correction_id: r.id,
+                        submission_id: sid,
+                        original_text: o,
+                        corrected_text: c,
+                        ...replayAnalysis,
+                    });
                 }
             }
             await fsp.writeFile(path.join(artifactsDir, 'replay_evidence.json'), JSON.stringify(replayEvidence, null, 2));
@@ -1060,6 +1068,11 @@ async function main() {
                 let replayTag = '';
                 if (ev) {
                     if (ev.status === 'still_missed') replayTag = `   REPLAY EVIDENCE: still_missed — the current pipeline reproduces this mistake as of this run.`;
+                    else if (ev.status === 'partially_correct') {
+                        const applied = Array.isArray(ev.applied_changes) && ev.applied_changes.length ? ev.applied_changes.join(', ') : 'part of the expected correction';
+                        const remaining = Array.isArray(ev.remaining_changes) && ev.remaining_changes.length ? ev.remaining_changes.join(', ') : 'an unresolved remainder';
+                        replayTag = `   REPLAY EVIDENCE: partially_correct — replay already applied [${applied}]. Remaining [${remaining}]. Route only the remainder; do not recommend repairing the proven portion.`;
+                    }
                     else if (ev.status === 'now_correct') replayTag = `   REPLAY EVIDENCE: now_correct — the current pipeline already produces the human correction.`;
                     else if (ev.status === 'not_verifiable') replayTag = `   REPLAY EVIDENCE: not_verifiable — freeform guidance, not mechanically checkable.`;
                     else replayTag = `   REPLAY EVIDENCE: ${ev.status} — replay unavailable for this submission.`;
@@ -1161,7 +1174,7 @@ async function main() {
         }
 
         // C2: honest, code-computed disposition — what this proposal actually concluded.
-        const disposition = core.computeDisposition({
+        let disposition = core.computeDisposition({
             promptUnchanged: validated.promptUnchanged,
             promptUnchangedReason: validated.promptUnchangedReason,
             guardRetriesExhausted: proposalResult.guardRetriesExhausted,
@@ -1397,6 +1410,88 @@ async function main() {
                                 error: attributionErrors.length ? attributionErrors.join(' | ') : undefined,
                             });
                             console.log(`Regression attribution: prompt-only ${evalSummary.regression_attribution.promptOnlyRegressions}, rules-only ${evalSummary.regression_attribution.rulesOnlyRegressions}.`);
+
+                            // If every confirmed combined regression is caused by the prompt arm,
+                            // attempt a SAFE fallback rather than forcing another LLM cycle. The
+                            // targeted attribution run is not enough for approval: run current
+                            // prompt + candidate rules across the full dataset, with confirmation,
+                            // and adopt it only when that full rules-only suite has zero confirmed
+                            // regressions and no correction depended solely on the discarded prompt.
+                            if (core.shouldAttemptRulesOnlyFallback({
+                                attribution: evalSummary.regression_attribution,
+                                correctionRouting: validated.correction_routing || [],
+                                unresolvedStillMissed: validated.unresolved_still_missed,
+                            })) {
+                                console.log('All confirmed regressions are prompt-only; running full-suite rules-only fallback...');
+                                let fallbackBaselineRun = baselineRun;
+                                let fallbackBaselineReport = baselineReport;
+                                // A configured eval limit is useful for ordinary cycles but cannot
+                                // prove a fallback safe. Build an uncapped baseline for this gate.
+                                if (limitArgs.length) {
+                                    fallbackBaselineRun = runEvalHarness([
+                                        '--prompt', currentPromptPath, '--rules', 'live',
+                                        '--label', `improve-${cycleId}-rules-fallback-baseline`,
+                                    ]);
+                                    fallbackBaselineReport = fallbackBaselineRun.ok && fallbackBaselineRun.reportPath
+                                        ? JSON.parse(fs.readFileSync(fallbackBaselineRun.reportPath, 'utf8'))
+                                        : null;
+                                }
+                                const rulesOnlyFullRun = fallbackBaselineRun.ok && fallbackBaselineRun.reportPath
+                                    ? runEvalHarness([
+                                        '--prompt', currentPromptPath, '--rules', `candidate:${candidateRulesPath}`,
+                                        '--baseline', fallbackBaselineRun.reportPath,
+                                        '--baseline-prompt', currentPromptPath, '--baseline-rules', 'live',
+                                        '--label', `improve-${cycleId}-rules-fallback-full`,
+                                    ])
+                                    : { ok: false, stderr: 'full fallback baseline failed', stdout: '', reportPath: null };
+                                const rulesOnlyFullReport = rulesOnlyFullRun.ok && rulesOnlyFullRun.reportPath
+                                    ? JSON.parse(fs.readFileSync(rulesOnlyFullRun.reportPath, 'utf8'))
+                                    : null;
+
+                                if (fallbackBaselineReport && core.rulesOnlyFallbackPassedFullSuite(rulesOnlyFullReport)) {
+                                    const discardedPromptRegressionCount = evalSummary.regressed;
+                                    const fallbackSummary = core.buildProposalEvalSummary(
+                                        core.summarizeEvalReport('baseline', fallbackBaselineReport, fallbackBaselineRun.reportPath),
+                                        core.summarizeEvalReport('rules-only fallback', rulesOnlyFullReport, rulesOnlyFullRun.reportPath),
+                                        rulesOnlyFullReport,
+                                    );
+                                    Object.assign(fallbackSummary, core.buildTriggerProgressionFromReports({
+                                        baselineReport: fallbackBaselineReport,
+                                        candidateReport: rulesOnlyFullReport,
+                                        submissionIds,
+                                        caseIdsBySubmission: triggerInfo.caseIdsBySubmission,
+                                    }));
+                                    fallbackSummary.regression_attribution = evalSummary.regression_attribution;
+                                    fallbackSummary.rules_only_fallback = {
+                                        adopted: true,
+                                        reason: 'combined candidate regressed only in the prompt arm; full-suite rules-only candidate had zero confirmed regressions',
+                                        discarded_prompt_regression_count: discardedPromptRegressionCount,
+                                        full_suite_cases: fallbackSummary.comparedCases,
+                                    };
+
+                                    await fsp.writeFile(path.join(artifactsDir, 'discarded_regressed_prompt.txt'), validated.proposed_prompt);
+                                    validated.proposed_prompt = effective.prompt;
+                                    validated.promptUnchanged = true;
+                                    validated.promptUnchangedReason = 'identical';
+                                    validated.warnings.push(`Rules-only fallback adopted: discarded the regressed prompt edit after ${discardedPromptRegressionCount} confirmed prompt-only regression(s); full rules-only suite passed ${fallbackSummary.comparedCases} case(s) with zero confirmed regressions.`);
+                                    await fsp.writeFile(candidatePromptPath, effective.prompt);
+                                    evalSummary = fallbackSummary;
+                                    evalStatus = core.evalStatusFromSummary(evalSummary, { consolidation: false });
+                                    disposition = core.computeDisposition({
+                                        promptUnchanged: true,
+                                        promptUnchangedReason: 'identical',
+                                        guardRetriesExhausted: false,
+                                        proposedRuleCount: validated.proposed_replacement_rules.length,
+                                        codeRecommendationCount: validated.code_recommendations.length,
+                                    });
+                                    console.log(`Rules-only fallback ADOPTED: ${fallbackSummary.comparedCases} cases, status ${evalStatus}, disposition ${disposition}.`);
+                                } else {
+                                    const fallbackError = rulesOnlyFullRun.ok
+                                        ? `${rulesOnlyFullReport?.baselineComparison?.regressed ?? 'unknown'} confirmed regression(s)`
+                                        : (rulesOnlyFullRun.stderr || rulesOnlyFullRun.stdout || 'run failed').slice(-240);
+                                    console.warn(`Rules-only fallback not adopted: ${fallbackError}.`);
+                                }
+                            }
                         } else {
                             evalSummary.regression_attribution = core.buildRegressionAttribution(evalSummary.regressions, {
                                 promptChanged,

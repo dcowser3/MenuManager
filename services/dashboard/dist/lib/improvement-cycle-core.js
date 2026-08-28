@@ -41,11 +41,16 @@ exports.buildFencePreservationNote = buildFencePreservationNote;
 exports.buildGuardRetryMessage = buildGuardRetryMessage;
 exports.runImprovementProposalWithRetry = runImprovementProposalWithRetry;
 exports.fullLineCorrectionApplied = fullLineCorrectionApplied;
+exports.analyzeFullLineCorrectionProgress = analyzeFullLineCorrectionProgress;
+exports.analyzeReplayCorrection = analyzeReplayCorrection;
 exports.decideReplayStatus = decideReplayStatus;
 exports.classifyTriggerFromComparisonEntry = classifyTriggerFromComparisonEntry;
 exports.resolveTriggerEvalCaseId = resolveTriggerEvalCaseId;
 exports.summarizeEvalReport = summarizeEvalReport;
 exports.buildProposalEvalSummary = buildProposalEvalSummary;
+exports.shouldAttemptRulesOnlyFallback = shouldAttemptRulesOnlyFallback;
+exports.rulesOnlyFallbackPassedFullSuite = rulesOnlyFallbackPassedFullSuite;
+exports.buildTriggerProgressionFromReports = buildTriggerProgressionFromReports;
 exports.buildRegressionAttribution = buildRegressionAttribution;
 exports.evalStatusFromSummary = evalStatusFromSummary;
 exports.computeDisposition = computeDisposition;
@@ -702,6 +707,8 @@ function ruleCoversCorrection(rule, correctionOriginal, correctionCorrected) {
  *  - enforces completeness (missing source ids -> synthesized 'unrouted' + warning),
  *  - blocks still_missed corrections from being 'dismissed'/'already_correct' (feeds
  *    unresolved_still_missed),
+ *  - requires partially_correct rows to route the remaining delta, while allowing
+ *    an explicitly unsupported remainder to be dismissed without blaming the proven part,
  *  - allows 'already_correct' only when replay says now_correct,
  *  - cross-checks 'replacement_rule' lanes against the rules that survived validation
  *    (a routing pointing at a dropped rule downgrades to 'unrouted'), and
@@ -776,6 +783,10 @@ function validateCorrectionRouting(rawRouting, opts = {}) {
         const replay = replayById.get(entry.correction_id);
         if (replay === 'still_missed' && (entry.lane === 'dismissed' || entry.lane === 'already_correct' || entry.lane === 'existing_rule')) {
             warnings.push(`correction ${entry.correction_id} is tagged still_missed by replay but routed "${entry.lane}"; replay evidence outranks this — it must result in a concrete change`);
+            unresolvedFromRouting = true;
+        }
+        if (replay === 'partially_correct' && (entry.lane === 'already_correct' || entry.lane === 'unrouted')) {
+            warnings.push(`correction ${entry.correction_id} is only partially_correct by replay but routed "${entry.lane}"; route the remaining delta or explicitly dismiss the unsupported remainder`);
             unresolvedFromRouting = true;
         }
         if (entry.lane === 'already_correct' && replay && replay !== 'now_correct') {
@@ -1515,6 +1526,34 @@ function multisetContains(actual, expected) {
     }
     return true;
 }
+function multisetIntersection(expected, actual) {
+    const counts = new Map();
+    for (const token of actual)
+        counts.set(token, (counts.get(token) || 0) + 1);
+    const matched = [];
+    for (const token of expected) {
+        const count = counts.get(token) || 0;
+        if (!count)
+            continue;
+        matched.push(token);
+        counts.set(token, count - 1);
+    }
+    return matched;
+}
+function multisetDifference(expected, matched) {
+    const counts = new Map();
+    for (const token of matched)
+        counts.set(token, (counts.get(token) || 0) + 1);
+    const remaining = [];
+    for (const token of expected) {
+        const count = counts.get(token) || 0;
+        if (count)
+            counts.set(token, count - 1);
+        else
+            remaining.push(token);
+    }
+    return remaining;
+}
 function replayLineContextOverlap(original, corrected, replayLine) {
     const normWord = (word) => word.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
     const expectedWords = new Set([...(0, diff_core_1.tokenizeWords)(original), ...(0, diff_core_1.tokenizeWords)(corrected)].map(normWord));
@@ -1532,43 +1571,98 @@ function replayLineContextOverlap(original, corrected, replayLine) {
  * matching replay line while allowing unrelated deterministic edits on that line.
  */
 function fullLineCorrectionApplied(originalText, correctedText, replayOutput) {
+    return analyzeFullLineCorrectionProgress(originalText, correctedText, replayOutput).complete;
+}
+function describeTokenChanges(deleted, inserted) {
+    return [
+        ...deleted.map((token) => `remove:${token}`),
+        ...inserted.map((token) => `add:${token}`),
+    ];
+}
+/**
+ * Decompose a compound full-line correction into the expected token changes replay
+ * already applied and those still absent. This prevents a row such as
+ * "macha salsa" -> "salsa macha ... marigold S" from falsely proving that the
+ * already-existing salsa-macha replacement failed merely because replay correctly
+ * refused to invent the unrelated marigold/allergen additions.
+ */
+function analyzeFullLineCorrectionProgress(originalText, correctedText, replayOutput) {
     const original = normalizeReplayLine(originalText);
     const corrected = normalizeReplayLine(correctedText);
+    const empty = {
+        complete: false,
+        partial: false,
+        applied_changes: [],
+        remaining_changes: [],
+    };
     if (!original || !corrected || !replayOutput)
-        return false;
+        return empty;
     const replayLines = `${replayOutput || ''}`.split('\n').map(normalizeReplayLine).filter(Boolean);
-    if (replayLines.includes(corrected))
-        return true;
+    if (replayLines.includes(corrected)) {
+        return { complete: true, partial: false, applied_changes: ['full correction'], remaining_changes: [] };
+    }
     const expectedDeleted = normalizedChangedTokens(original, corrected, 'delete');
     const expectedInserted = normalizedChangedTokens(original, corrected, 'insert');
     if (!expectedDeleted.length && !expectedInserted.length)
-        return false;
-    return replayLines.some((line) => {
+        return empty;
+    let best = {
+        ...empty,
+        remaining_changes: describeTokenChanges(expectedDeleted, expectedInserted),
+    };
+    let bestScore = 0;
+    for (const line of replayLines) {
         if (replayLineContextOverlap(original, corrected, line) < 0.5)
-            return false;
+            continue;
         const actualDeleted = normalizedChangedTokens(original, line, 'delete');
         const actualInserted = normalizedChangedTokens(original, line, 'insert');
-        return multisetContains(actualDeleted, expectedDeleted)
+        const complete = multisetContains(actualDeleted, expectedDeleted)
             && multisetContains(actualInserted, expectedInserted);
-    });
+        if (complete) {
+            return {
+                complete: true,
+                partial: false,
+                applied_changes: describeTokenChanges(expectedDeleted, expectedInserted),
+                remaining_changes: [],
+            };
+        }
+        const matchedDeleted = multisetIntersection(expectedDeleted, actualDeleted);
+        const matchedInserted = multisetIntersection(expectedInserted, actualInserted);
+        const score = matchedDeleted.length + matchedInserted.length;
+        if (score <= bestScore)
+            continue;
+        bestScore = score;
+        best = {
+            complete: false,
+            partial: score > 0,
+            applied_changes: describeTokenChanges(matchedDeleted, matchedInserted),
+            remaining_changes: describeTokenChanges(multisetDifference(expectedDeleted, matchedDeleted), multisetDifference(expectedInserted, matchedInserted)),
+        };
+    }
+    return best;
 }
-/**
- * Pure decision for replay tag of one correction.
- * Follow-up 2: freeform (no original/corrected pair) -> not_verifiable so it never
- * contributes to unresolved_still_missed.
- */
-function decideReplayStatus(originalText, correctedText, replayOutput, signals) {
+/** Return the replay verdict plus partial-progress detail for proposal context/UI. */
+function analyzeReplayCorrection(originalText, correctedText, replayOutput, signals) {
     const o = `${originalText || ''}`.trim();
     const c = `${correctedText || ''}`.trim();
     if (!o && !c)
-        return 'not_verifiable';
+        return { status: 'not_verifiable' };
     if (!replayOutput)
-        return 'replay_unavailable';
+        return { status: 'replay_unavailable' };
     const lineLevel = Math.max((0, diff_core_1.tokenizeWords)(o).length, (0, diff_core_1.tokenizeWords)(c).length) > 2
         || /[,\n]/u.test(o)
         || /[,\n]/u.test(c);
-    if (lineLevel && fullLineCorrectionApplied(o, c, replayOutput))
-        return 'now_correct';
+    if (lineLevel) {
+        const progress = analyzeFullLineCorrectionProgress(o, c, replayOutput);
+        if (progress.complete)
+            return { status: 'now_correct', applied_changes: progress.applied_changes };
+        if (progress.partial) {
+            return {
+                status: 'partially_correct',
+                applied_changes: progress.applied_changes,
+                remaining_changes: progress.remaining_changes,
+            };
+        }
+    }
     // Atomic correction rows still use the learning signal list. Preserve
     // diacritics here: accent-only fixes must not collapse to equal strings.
     const norm = (x) => `${x || ''}`.normalize('NFC').replace(/[’'`]/g, "'").toLowerCase().trim();
@@ -1579,7 +1673,15 @@ function decideReplayStatus(originalText, correctedText, replayOutput, signals) 
         const t = norm(sg.to_norm || sg.to || '');
         return f === wantFrom && t === wantTo;
     });
-    return hit ? 'now_correct' : 'still_missed';
+    return { status: hit ? 'now_correct' : 'still_missed' };
+}
+/**
+ * Pure decision for replay tag of one correction.
+ * Follow-up 2: freeform (no original/corrected pair) -> not_verifiable so it never
+ * contributes to unresolved_still_missed.
+ */
+function decideReplayStatus(originalText, correctedText, replayOutput, signals) {
+    return analyzeReplayCorrection(originalText, correctedText, replayOutput, signals).status;
 }
 /**
  * Classify a trigger using a baselineComparison entry (B0 / Follow-up 1).
@@ -1626,11 +1728,110 @@ function buildProposalEvalSummary(baseline, candidate, candidateReport) {
         flaggedRegressed: comparison?.flaggedRegressed ?? comparison?.regressed ?? 0,
         noiseRegressed: comparison?.noiseRegressed ?? 0,
         same: comparison?.same ?? 0,
-        regressions: (comparison?.regressions || []).slice(0, 20).map((entry) => ({
-            case_id: entry.case_id,
-            label: entry.label,
-            delta: entry.delta,
-        })),
+        regressions: (comparison?.regressions || []).slice(0, 20).map((entry) => {
+            const confirmed = entry.confirmed_delta ?? entry.freshDelta ?? null;
+            return {
+                case_id: entry.case_id,
+                label: entry.label,
+                delta: confirmed ?? entry.delta,
+                raw_delta: entry.delta,
+                confirmed_delta: confirmed,
+            };
+        }),
+    };
+}
+function shouldAttemptRulesOnlyFallback(input) {
+    const attribution = input.attribution;
+    if (!attribution || attribution.status !== 'completed' || !attribution.cases.length)
+        return false;
+    if (input.unresolvedStillMissed)
+        return false;
+    if (attribution.cases.some((entry) => entry.cause !== 'prompt'))
+        return false;
+    const routing = input.correctionRouting || [];
+    // Fail closed when routing is absent/incomplete: a prompt-routed or unrouted
+    // correction could otherwise be silently dropped with the prompt edit.
+    if (!routing.length || routing.some((entry) => entry.lane === 'prompt' || entry.lane === 'unrouted'))
+        return false;
+    return true;
+}
+function rulesOnlyFallbackPassedFullSuite(report) {
+    const comparison = report?.baselineComparison;
+    return !!comparison
+        && Number(comparison.comparedCases || 0) > 0
+        && Number(comparison.regressed || 0) === 0;
+}
+/**
+ * Build trigger progression for a full baseline/candidate pair. The full-suite
+ * rules-only fallback uses this after it proves zero confirmed regressions, so
+ * the salvaged proposal keeps the same progression gate as an ordinary candidate.
+ */
+function buildTriggerProgressionFromReports(input) {
+    const baselineByCase = new Map((input.baselineReport?.cases || []).map((entry) => [`${entry.case_id}`, entry]));
+    const candidateByCase = new Map((input.candidateReport?.cases || []).map((entry) => [`${entry.case_id}`, entry]));
+    const comparisonByCase = new Map();
+    const comparison = input.candidateReport?.baselineComparison;
+    for (const list of [comparison?.improvements || [], comparison?.regressions || [], comparison?.noiseRegressions || []]) {
+        for (const entry of list)
+            if (entry?.case_id)
+                comparisonByCase.set(`${entry.case_id}`, entry);
+    }
+    const findCase = (map, submissionId) => {
+        const expected = resolveTriggerEvalCaseId(submissionId, input.caseIdsBySubmission);
+        if (map.has(expected))
+            return map.get(expected);
+        for (const [caseId, entry] of map.entries()) {
+            if (caseId === `production:${submissionId}` || caseId.endsWith(`:${submissionId}`))
+                return entry;
+        }
+        return null;
+    };
+    const triggers = [];
+    let improved = 0;
+    let unchanged = 0;
+    let regressed = 0;
+    let unavailable = 0;
+    for (const submissionId of [...new Set(input.submissionIds || [])]) {
+        const candidate = findCase(candidateByCase, submissionId);
+        const baseline = findCase(baselineByCase, submissionId);
+        if (!candidate || !baseline) {
+            unavailable += 1;
+            triggers.push({
+                case_id: resolveTriggerEvalCaseId(submissionId, input.caseIdsBySubmission),
+                submission_id: submissionId,
+                baseline_composite: baseline?.composite ?? null,
+                candidate_composite: candidate?.composite ?? null,
+                delta: null,
+                status: 'unavailable',
+            });
+            continue;
+        }
+        const entry = comparisonByCase.get(`${candidate.case_id}`);
+        const rawDelta = entry?.confirmed_delta ?? entry?.freshDelta ?? entry?.delta
+            ?? (Number(candidate.composite) - Number(baseline.composite));
+        const delta = Number.isFinite(Number(rawDelta)) ? Number(Number(rawDelta).toFixed(8)) : null;
+        const status = classifyTriggerFromComparisonEntry(entry || (delta != null ? { delta } : null));
+        if (status === 'improved')
+            improved += 1;
+        else if (status === 'regressed')
+            regressed += 1;
+        else
+            unchanged += 1;
+        triggers.push({
+            case_id: `${candidate.case_id}`,
+            submission_id: submissionId,
+            baseline_composite: Number(baseline.composite),
+            candidate_composite: Number(candidate.composite),
+            delta,
+            status,
+        });
+    }
+    return {
+        triggers,
+        triggers_improved: improved,
+        triggers_unchanged: unchanged,
+        triggers_regressed: regressed,
+        triggers_unavailable: unavailable,
     };
 }
 function confirmedRegressionMap(report) {
@@ -1955,13 +2156,14 @@ Prompt rewrite rules:
 - For location-specific rules, add them in a clearly labeled subsection.
 - Treat every new reviewer correction as evidence that the current first-pass process missed something. Corrections may be annotated with REPLAY EVIDENCE tags from a pre-analysis replay of the current pipeline on the same raw input:
   - still_missed: the current pipeline reproduces the exact mistake on this input. Replay evidence outranks any coverage citation. A valid prompt_quote + still_missed is diagnosis ("present but ignored"); you MUST still propose a concrete change (restructuring/examples or code guard preferred over more abstract text). Claiming "already covered" for a still_missed correction is prohibited.
+  - partially_correct: replay applied part of a compound reviewer correction but not all of it. The evidence lists applied_changes and remaining_changes. Treat the applied portion as proven; route ONLY the remaining delta, and do not recommend repairing a deterministic rule that replay already demonstrated. You may dismiss a remaining addition only when it is unsupported by the source/reviewer explanation, and must say so in correction_routing.
   - now_correct: the current pipeline already produces the human's fix. You MAY leave this unaddressed, but your analysis must cite the replay evidence ("replay shows this is now produced") as the reason.
   - replay_unavailable: no raw input was available for replay.
   - not_verifiable: this correction is freeform guidance (no exact original/corrected text pair) and cannot be mechanically replay-verified; use judgment.
 - When a still_missed correction occurs in a context the prompt already "mentions," prefer adding concrete examples, decision tables, or counter-examples over appending another abstract sentence. If prompt text is fundamentally unreliable for the case, recommend a deterministic code guard instead of more prompt text, and say so.
 - Before routing a still_missed correction to the prompt, search the CURRENT PROMPT for a directly applicable rule and emit a coverage_claim when one exists. If the current prompt already states the same rule explicitly (for example, "Ingredients = SINGULAR") and replay still misses it, do NOT append more examples and call that resolved: route it to a deterministic replacement rule or code_recommendation unless you can identify a genuine contradiction or ambiguity that your rewrite removes.
 - Keep the rewritten prompt at or below the current character count whenever possible. Replace or consolidate existing wording instead of appending duplicate guidance; prompt growth above 5% is automatically flagged for bloat review.
-- Only leave the prompt unchanged when every source correction is fully handled by deterministic replacement rules, code recommendations, or a clearly invalid/out-of-scope reviewer correction — AND no correction is tagged still_missed. A still_missed correction is positive evidence the current process (prompt + code) does not yet produce the human fix; UNCHANGED is prohibited unless that evidence is addressed by a rule or code recommendation you also propose. In the analysis, explain the routing with reference to the replay tags.
+- Only leave the prompt unchanged when every source correction is fully handled by deterministic replacement rules, code recommendations, or a clearly invalid/out-of-scope reviewer correction — AND every still_missed or partially_correct remainder is explicitly routed. A still_missed correction is positive evidence the current process (prompt + code) does not yet produce the human fix; UNCHANGED is prohibited unless that evidence is addressed by a rule or code recommendation you also propose. In the analysis, explain the routing with reference to the replay tags.
 - If your analysis asserts that a correction is already covered by the current prompt, you MUST also emit a "coverage_claims" entry with a verbatim contiguous substring copied from the CURRENT PROMPT (exact characters, not paraphrased). Deterministic rule coverage should be cited via manifest ids in rules or code recs instead. A citation alone does not excuse a still_missed correction; if replay shows the pipeline still misses it, you must still propose a concrete change (restructuring, examples, or code guard).
 - The current prompt is provided between "=== BEGIN CURRENT PROMPT ===" and "=== END CURRENT PROMPT ===" markers. Your proposed_prompt must contain ONLY the rewritten prompt text itself — never the markers, the Code Rules Manifest, the corrections list, or any other context sections from this message.
 - Return the COMPLETE rewritten prompt, not a diff. If no prompt change is warranted, set "proposed_prompt" to exactly "UNCHANGED" instead of echoing the prompt back.
@@ -1983,6 +2185,7 @@ Per-correction routing (REQUIRED):
 - lane is one of: "replacement_rule" (handled by a deterministic rule you propose), "existing_rule" (an accepted deterministic rule already contains the exact fix), "prompt" (handled by your prompt change), "code_recommendation" (needs a code guard you recommend), "already_correct" (the pipeline already produces the fix — ONLY legal when replay says now_correct), "dismissed" (invalid/out-of-scope correction, with a reason).
 - Use "existing_rule" ONLY when the Code Rules Manifest / accepted rules already contain the correction's exact deterministic fix. It is the right lane for manually seeded rules when replay is unavailable; do not propose a duplicate rule. A still_missed replay still outranks this lane because it proves the existing rule is not firing.
 - A correction tagged still_missed by replay may NOT be routed "dismissed", "already_correct", or "existing_rule" — replay proves the pipeline still gets it wrong, so it must be routed to a concrete change.
+- A correction tagged partially_correct may NOT be routed "already_correct" or left unrouted. Route only its remaining_changes. "dismissed" is allowed solely for a remaining addition that cannot be inferred safely from the original text or reviewer explanation; name that unsupported remainder in the note.
 - "target" names the specific rule, prompt section, or recommendation; "note" is a one-line reason.
 
 Respond with ONLY a JSON object in this exact shape:

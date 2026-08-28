@@ -128,7 +128,7 @@ describe('prompt-proposal view', () => {
                 eval_summary: {
                     ...baseProposal.eval_summary,
                     regressed: 1,
-                    regressions: [{ case_id: 'c1', label: 'TORO MALTA MENU', delta: -0.0123 }],
+                    regressions: [{ case_id: 'c1', label: 'TORO MALTA MENU', delta: -0.0123, raw_delta: -0.88, confirmed_delta: -0.0123 }],
                     regression_attribution: {
                         status: 'completed',
                         promptChanged: true,
@@ -148,7 +148,9 @@ describe('prompt-proposal view', () => {
         });
 
         expect(html).toContain('TORO MALTA MENU');
+        expect(html).toContain('Confirmed Delta');
         expect(html).toContain('-1.230 pp');
+        expect(html).not.toContain('-88.000 pp');
         expect(html).toContain('Regression attribution');
         expect(html).toContain('Prompt-only Delta');
         expect(html).toContain('-1.010 pp');
@@ -251,11 +253,65 @@ describe('prompt-proposal view', () => {
                 supersede_carried_correction_count: 4,
                 supersede_new_correction_count: 2,
                 correction_rule_count: 6,
+                replay_evidence: [
+                    { correction_id: 'r1', status: 'now_correct' },
+                    { correction_id: 'r2', status: 'now_correct' },
+                    { correction_id: 'r3', status: 'now_correct' },
+                    { correction_id: 'r4', status: 'now_correct' },
+                    { correction_id: 'r5', status: 'still_missed' },
+                    { correction_id: 'r6', status: 'partially_correct' },
+                ],
             },
         });
         expect(html).toContain('Supersedes');
         expect(html).toContain('2026-07-01');
         expect(html).toContain('4 carried + 2 new');
+        expect(html).toContain('2 actionable');
+        expect(html).toContain('4 retired by replay from 6 entered');
+    });
+
+    test('renders partial replay detail and a rules-only fallback banner', () => {
+        const html = renderProposalView({
+            proposal: {
+                ...baseProposal,
+                disposition: 'rules_only',
+                current_prompt: 'UNCHANGED',
+                proposed_prompt: 'UNCHANGED',
+                replay_evidence: [{
+                    correction_id: 'partial-1',
+                    status: 'partially_correct',
+                    applied_changes: ['remove:macha', 'add:macha'],
+                    remaining_changes: ['add:marigold', 'add:s'],
+                }],
+                correction_rule_count: 1,
+                correction_routing: [{
+                    correction_id: 'partial-1',
+                    lane: 'dismissed',
+                    target: 'unsupported remainder',
+                    note: 'marigold and S cannot be inferred',
+                    replay_status: 'partially_correct',
+                    original_text: 'macha salsa',
+                    corrected_text: 'salsa macha, marigold S',
+                }],
+                eval_summary: {
+                    ...baseProposal.eval_summary,
+                    rules_only_fallback: {
+                        adopted: true,
+                        reason: 'prompt-only regressions',
+                        discarded_prompt_regression_count: 7,
+                        full_suite_cases: 196,
+                    },
+                },
+            },
+        });
+        expect(html).toContain('1 actionable');
+        expect(html).toContain('partially_correct');
+        expect(html).toContain('applied: remove:macha, add:macha');
+        expect(html).toContain('remaining: add:marigold, add:s');
+        expect(html).toContain('Safe rules-only fallback adopted');
+        expect(html).toContain('196 cases');
+        expect(html).toContain('LLM Analysis (prompt rewrite discarded)');
+        expect(html).toContain('prompt-change portion described below is not part of this proposal');
     });
 
     test('C2: renders the disposition headline in plain language', () => {

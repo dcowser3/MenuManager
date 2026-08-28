@@ -4,6 +4,8 @@ import {
     buildProposalEvalSummary,
     buildRegressionAttribution,
     classifyTriggerFromComparisonEntry,
+    analyzeReplayCorrection,
+    analyzeFullLineCorrectionProgress,
     decideReplayStatus,
     fullLineCorrectionApplied,
     partitionCorrectionIdsByReplayStatus,
@@ -53,6 +55,9 @@ import {
     extractAtomicRulesFromCorpus,
     promptProposalApprovalBlock,
     resolveTriggerEvalCaseId,
+    shouldAttemptRulesOnlyFallback,
+    rulesOnlyFallbackPassedFullSuite,
+    buildTriggerProgressionFromReports,
 } from '../lib/improvement-cycle-core';
 import { AI_REVIEW_FENCES } from '../lib/review-response-contract';
 
@@ -895,6 +900,25 @@ describe('eval summary + status', () => {
         expect(evalStatusFromSummary(identical)).toBe('no_effect');
     });
 
+    test('stores confirmed regression deltas instead of displaying the stale raw comparison', () => {
+        const candidateReport = report(0.79, 1);
+        candidateReport.baselineComparison.regressions = [{
+            case_id: 'c1',
+            label: 'Case 1',
+            delta: -0.88,
+            confirmed_delta: -0.048,
+        }] as any;
+        const baseline = summarizeEvalReport('baseline', report(0.8), '/tmp/base/report.json');
+        const candidate = summarizeEvalReport('candidate', candidateReport, '/tmp/cand/report.json');
+        const summary = buildProposalEvalSummary(baseline, candidate, candidateReport);
+
+        expect(summary.regressions[0]).toMatchObject({
+            delta: -0.048,
+            raw_delta: -0.88,
+            confirmed_delta: -0.048,
+        });
+    });
+
     test('attributes combined-candidate regressions to prompt, rules, both, or interaction', () => {
         const regressions = [
             { case_id: 'prompt-case', label: 'Prompt case' },
@@ -930,6 +954,59 @@ describe('eval summary + status', () => {
         const regression = [{ case_id: 'c1', label: 'Case 1' }];
         expect(buildRegressionAttribution(regression, { promptChanged: true, ruleCount: 0 }).cases[0].cause).toBe('prompt');
         expect(buildRegressionAttribution(regression, { promptChanged: false, ruleCount: 2 }).cases[0].cause).toBe('rules');
+    });
+
+    test('attempts rules-only salvage only when every regression is prompt-caused and no correction relies on the prompt', () => {
+        const attribution = buildRegressionAttribution(
+            [{ case_id: 'c1', label: 'Case 1' }],
+            {
+                promptChanged: true,
+                ruleCount: 2,
+                promptOnlyReport: { baselineComparison: { regressions: [{ case_id: 'c1', confirmed_delta: -0.1 }] } },
+                rulesOnlyReport: { baselineComparison: { regressions: [] } },
+            },
+        );
+        expect(shouldAttemptRulesOnlyFallback({
+            attribution,
+            correctionRouting: [{ correction_id: 'r1', lane: 'replacement_rule', target: 'x -> y', note: 'safe' }],
+        })).toBe(true);
+        expect(shouldAttemptRulesOnlyFallback({
+            attribution,
+            correctionRouting: [{ correction_id: 'r1', lane: 'prompt', target: 'section 2', note: 'contextual' }],
+        })).toBe(false);
+        expect(shouldAttemptRulesOnlyFallback({ attribution })).toBe(false);
+        expect(shouldAttemptRulesOnlyFallback({ attribution, unresolvedStillMissed: true })).toBe(false);
+    });
+
+    test('requires a complete non-empty full-suite rules-only comparison before salvage', () => {
+        expect(rulesOnlyFallbackPassedFullSuite({ baselineComparison: { comparedCases: 196, regressed: 0 } })).toBe(true);
+        expect(rulesOnlyFallbackPassedFullSuite({ baselineComparison: { comparedCases: 196, regressed: 1 } })).toBe(false);
+        expect(rulesOnlyFallbackPassedFullSuite({ baselineComparison: { comparedCases: 0, regressed: 0 } })).toBe(false);
+    });
+
+    test('rebuilds trigger progression from the adopted full-suite fallback reports', () => {
+        const baselineReport = {
+            cases: [{ case_id: 'production:legacy-1', composite: 0.5 }],
+        };
+        const candidateReport = {
+            cases: [{ case_id: 'production:legacy-1', composite: 0.8 }],
+            baselineComparison: {
+                improvements: [{ case_id: 'production:legacy-1', delta: 0.3, confirmed_delta: 0.25 }],
+                regressions: [],
+                noiseRegressions: [],
+            },
+        };
+        expect(buildTriggerProgressionFromReports({
+            baselineReport,
+            candidateReport,
+            submissionIds: ['uuid-1'],
+            caseIdsBySubmission: { 'uuid-1': 'production:legacy-1' },
+        })).toMatchObject({
+            triggers_improved: 1,
+            triggers_regressed: 0,
+            triggers_unavailable: 0,
+            triggers: [{ delta: 0.25, status: 'improved' }],
+        });
     });
 });
 
@@ -1113,6 +1190,24 @@ describe('decideReplayStatus (Follow-up 2)', () => {
         )).toBe(false);
     });
 
+    test('marks a compound correction partially_correct when replay applies the safe atomic portion', () => {
+        const original = 'Salmon, sea bass, saffron aguachile, mango relish, macha salsa, crispy sweet potato,';
+        const corrected = 'Salmon, sea bass, saffron aguachile, mango relish, salsa macha, crispy sweet potato, marigold S';
+        const replay = 'Salmon, sea bass, saffron aguachile, mango relish, salsa macha, crispy sweet potato,';
+
+        const progress = analyzeFullLineCorrectionProgress(original, corrected, replay);
+        expect(progress.complete).toBe(false);
+        expect(progress.partial).toBe(true);
+        expect(progress.applied_changes.length).toBeGreaterThan(0);
+        expect(progress.remaining_changes.join(' ')).toMatch(/marigold|S/i);
+
+        const analysis = analyzeReplayCorrection(original, corrected, replay, []);
+        expect(analysis.status).toBe('partially_correct');
+        expect(analysis.applied_changes?.length).toBeGreaterThan(0);
+        expect(analysis.remaining_changes?.join(' ')).toMatch(/marigold|S/i);
+        expect(decideReplayStatus(original, corrected, replay, [])).toBe('partially_correct');
+    });
+
     test('preserves case and diacritics when verifying corrections', () => {
         expect(decideReplayStatus('BRULEE', 'BRÛLÉE', 'AMANCER PUMKIN BRÛLÉE', [sig('BRULEE', 'BRÛLÉE')])).toBe('now_correct');
         expect(decideReplayStatus('BRULEE', 'BRÛLÉE', 'AMANCER PUMKIN BRULEE', [])).toBe('still_missed');
@@ -1124,7 +1219,7 @@ describe('replay-resolved correction lifecycle', () => {
         expect(partitionCorrectionIdsByReplayStatus(['c1', 'c2', 'c3'], [
             { correction_id: 'c1', status: 'now_correct' },
             { correction_id: 'c2', status: 'still_missed' },
-            { correction_id: 'c3', status: 'replay_unavailable' },
+            { correction_id: 'c3', status: 'partially_correct' },
         ])).toEqual({ resolvedIds: ['c1'], proposalIds: ['c2', 'c3'] });
         expect(replayResolutionMarker('2026-08-21-manual-1')).toBe('resolved-by-current-pipeline:2026-08-21-manual-1');
     });
@@ -1664,6 +1759,21 @@ describe('C3 validateCorrectionRouting', () => {
         );
         expect(out.unresolvedFromRouting).toBe(true);
         expect(out.warnings.some((w) => /still_missed by replay but routed "dismissed"/.test(w))).toBe(true);
+    });
+
+    test('partially_correct requires the remainder to be routed but permits an explicitly unsupported remainder to be dismissed', () => {
+        const unrouted = validateCorrectionRouting(
+            [{ correction_id: 'a', lane: 'unrouted', target: '', note: '' }],
+            { sourceCorrections: [sources[0]], replayEvidence: [{ correction_id: 'a', status: 'partially_correct' }] as any },
+        );
+        expect(unrouted.unresolvedFromRouting).toBe(true);
+        expect(unrouted.warnings.some((w) => /only partially_correct/.test(w))).toBe(true);
+
+        const dismissed = validateCorrectionRouting(
+            [{ correction_id: 'a', lane: 'dismissed', target: 'unsupported remainder', note: 'marigold and S are absent from source evidence' }],
+            { sourceCorrections: [sources[0]], replayEvidence: [{ correction_id: 'a', status: 'partially_correct' }] as any },
+        );
+        expect(dismissed.unresolvedFromRouting).toBe(false);
     });
 
     test('already_correct illegal unless replay is now_correct', () => {
