@@ -98,15 +98,18 @@ describe('prompt-proposal view', () => {
                 eval_summary: {
                     ...baseProposal.eval_summary,
                     candidate_rule_activations: [
-                        { rule_index: 0, rule_id: 'eval-candidate-rule-0', original_text: 'homemade', corrected_text: 'housemade', pre_ai_activations: 2, post_ai_activations: 0, total_activations: 2, case_ids: ['case-1'] },
-                        { rule_index: 1, rule_id: 'eval-candidate-rule-1', original_text: 'house -made', corrected_text: 'housemade', pre_ai_activations: 0, post_ai_activations: 0, total_activations: 0, case_ids: [] },
+                        { rule_index: 0, rule_id: 'eval-candidate-rule-0', original_text: 'homemade', corrected_text: 'housemade', pre_ai_activations: 2, post_ai_activations: 0, replay_activations: 0, total_activations: 2, case_ids: ['case-1'] },
+                        { rule_index: 1, rule_id: 'eval-candidate-rule-1', original_text: 'house -made', corrected_text: 'housemade', pre_ai_activations: 0, post_ai_activations: 0, replay_activations: 1, total_activations: 1, case_ids: [], correction_ids: ['correction-1'] },
+                        { rule_index: 2, rule_id: 'eval-candidate-rule-2', original_text: 'unused', corrected_text: 'replacement', pre_ai_activations: 0, post_ai_activations: 0, replay_activations: 0, total_activations: 0, case_ids: [] },
                     ],
                 },
             },
         });
 
         expect(html).toContain('Candidate rule activation:');
-        expect(html).toContain('1/2');
+        expect(html).toContain('2/3');
+        expect(html).toContain('Targeted replay');
+        expect(html).toContain('Full-suite cases');
         expect(html).toContain('homemade');
         expect(html).toContain('house -made');
         expect(html).toContain('activated');

@@ -26,8 +26,63 @@ function buildCandidateRuleActivationEvidence(candidateRules, caseReports) {
             corrected_text: `${rule.corrected_text || ''}`,
             pre_ai_activations: preAiActivations,
             post_ai_activations: postAiActivations,
+            replay_activations: 0,
             total_activations: preAiActivations + postAiActivations,
             case_ids: [...new Set(matches.map((entry) => entry.case_id).filter(Boolean))],
+            correction_ids: [],
+        };
+    });
+}
+
+function buildTargetedReplayRuleActivationEvidence(candidateRules, replayEvidence, runPreAiDeterministicChecks) {
+    const rules = Array.isArray(candidateRules) ? candidateRules : [];
+    const replayRows = (Array.isArray(replayEvidence) ? replayEvidence : [])
+        .filter((entry) => ['still_missed', 'partially_correct'].includes(`${entry?.status || ''}`))
+        .filter((entry) => `${entry?.original_text || ''}`.trim());
+
+    return rules.map((rule, ruleIndex) => {
+        const correctionIds = [];
+        let replayActivations = 0;
+        for (const replay of replayRows) {
+            const result = runPreAiDeterministicChecks(`${replay.original_text}`, {
+                acceptedCorrectionRules: [rule],
+            });
+            const matches = (Array.isArray(result?.appliedCorrections) ? result.appliedCorrections : [])
+                .filter((entry) => entry?.source === 'accepted_correction_rule' && entry?.ruleId === rule.id);
+            if (!matches.length) continue;
+            replayActivations += matches.length;
+            if (replay.correction_id) correctionIds.push(`${replay.correction_id}`);
+        }
+        return {
+            rule_index: ruleIndex,
+            rule_id: rule.id,
+            original_text: `${rule.original_text || ''}`,
+            corrected_text: `${rule.corrected_text || ''}`,
+            replay_activations: replayActivations,
+            correction_ids: [...new Set(correctionIds)],
+        };
+    });
+}
+
+function mergeCandidateRuleActivationEvidence(fullSuiteEvidence, targetedReplayEvidence) {
+    const replayByRuleId = new Map(
+        (Array.isArray(targetedReplayEvidence) ? targetedReplayEvidence : [])
+            .filter((entry) => entry?.rule_id)
+            .map((entry) => [entry.rule_id, entry])
+    );
+    return (Array.isArray(fullSuiteEvidence) ? fullSuiteEvidence : []).map((entry) => {
+        const targeted = replayByRuleId.get(entry.rule_id) || {};
+        const replayActivations = Number(targeted.replay_activations || 0);
+        const preAiActivations = Number(entry.pre_ai_activations || 0);
+        const postAiActivations = Number(entry.post_ai_activations || 0);
+        return {
+            ...entry,
+            replay_activations: replayActivations,
+            total_activations: preAiActivations + postAiActivations + replayActivations,
+            correction_ids: [...new Set([
+                ...(Array.isArray(entry.correction_ids) ? entry.correction_ids : []),
+                ...(Array.isArray(targeted.correction_ids) ? targeted.correction_ids : []),
+            ])],
         };
     });
 }
@@ -89,6 +144,8 @@ module.exports = {
     EVAL_CANDIDATE_RULE_ID_PREFIX,
     activateCandidateRulesForEval,
     buildCandidateRuleActivationEvidence,
+    buildTargetedReplayRuleActivationEvidence,
+    mergeCandidateRuleActivationEvidence,
     classifyMaterialDisagreement,
     summarizeMaterialDisagreements,
     sortMaterialDisagreements,

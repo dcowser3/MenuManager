@@ -922,6 +922,7 @@ describe('eval summary + status', () => {
             ),
         };
         expect(evalStatusFromSummary(inactiveSummary, { rulesOnly: true })).toBe('no_effect');
+        expect(evalStatusFromSummary({ ...inactiveSummary, triggers_improved: 1 }, { rulesOnly: true })).toBe('no_effect');
         expect(evalStatusFromSummary({ ...activeSummary, candidate_rule_activations: [] }, { rulesOnly: true })).toBe('no_effect');
     });
 
@@ -1499,6 +1500,27 @@ describe('promptProposalApprovalBlock', () => {
             disposition: 'rules_only',
             correction_rule_count: 5,
         })?.reason).toBe('eval_rule_inactive');
+        expect(promptProposalApprovalBlock({
+            eval_status: 'passed',
+            disposition: 'rules_only',
+            correction_rule_count: 5,
+            eval_summary: {
+                candidate_rule_activations: [
+                    { rule_index: 0, rule_id: 'eval-candidate-rule-0', original_text: 'a', corrected_text: 'b', pre_ai_activations: 1, post_ai_activations: 0, total_activations: 1, case_ids: [] },
+                    { rule_index: 1, rule_id: 'eval-candidate-rule-1', original_text: 'c', corrected_text: 'd', pre_ai_activations: 0, post_ai_activations: 0, total_activations: 0, case_ids: [] },
+                ],
+            } as any,
+        })?.reason).toBe('eval_rule_inactive');
+        expect(promptProposalApprovalBlock({
+            eval_status: 'passed',
+            disposition: 'rules_only',
+            correction_rule_count: 5,
+            eval_summary: {
+                candidate_rule_activations: [
+                    { rule_index: 0, rule_id: 'eval-candidate-rule-0', original_text: 'a', corrected_text: 'b', pre_ai_activations: 0, post_ai_activations: 0, replay_activations: 1, total_activations: 1, case_ids: [], correction_ids: ['correction-1'] },
+                ],
+            } as any,
+        })).toBeNull();
     });
 
     test('allows a passing scored proposal and does not block rejection-only metadata', () => {

@@ -43,6 +43,7 @@ const repoRoot = path.resolve(__dirname, '..');
 require('dotenv').config({ path: path.join(repoRoot, '.env') });
 
 const { createClient } = require('@supabase/supabase-js');
+const evalHelpers = require('./review-eval-helpers');
 
 const LOCK_PATH = path.join(repoRoot, 'tmp', 'improvement-cycle', '.lock');
 const LOCK_STALE_MS = 6 * 60 * 60 * 1000;
@@ -192,6 +193,24 @@ function runEvalHarness(args) {
         stdout,
         stderr: result.stderr || '',
     };
+}
+
+function attachTargetedReplayRuleActivations(report, proposedRules, replayEvidence, runPreAiDeterministicChecks) {
+    if (!report || !Array.isArray(proposedRules) || !proposedRules.length) return report;
+    const candidateRules = evalHelpers.activateCandidateRulesForEval(proposedRules);
+    const fullSuiteEvidence = Array.isArray(report.candidateRuleActivations)
+        ? report.candidateRuleActivations
+        : evalHelpers.buildCandidateRuleActivationEvidence(candidateRules, report.cases);
+    const targetedReplayEvidence = evalHelpers.buildTargetedReplayRuleActivationEvidence(
+        candidateRules,
+        replayEvidence,
+        runPreAiDeterministicChecks
+    );
+    report.candidateRuleActivations = evalHelpers.mergeCandidateRuleActivationEvidence(
+        fullSuiteEvidence,
+        targetedReplayEvidence
+    );
+    return report;
 }
 
 function findLatestEvalReport() {
@@ -631,6 +650,7 @@ async function main() {
     const args = parseArgs(process.argv.slice(2));
     const core = requireDashboardLib('improvement-cycle-core');
     const manifestLib = requireDashboardLib('review-rules-manifest');
+    const preAiRulesLib = requireDashboardLib('pre-ai-deterministic-rules');
     const executorModel = process.env.AI_REVIEW_MODEL || 'gpt-4o-mini';
     const supabase = getSupabase();
     const baseCycleId = new Date().toISOString().slice(0, 10);
@@ -1245,7 +1265,13 @@ async function main() {
                     evalStatus = 'failed';
                 } else {
                     const baselineReport = JSON.parse(fs.readFileSync(baselineRun.reportPath, 'utf8'));
-                    const candidateReport = JSON.parse(fs.readFileSync(candidateRun.reportPath, 'utf8'));
+                    const candidateReport = attachTargetedReplayRuleActivations(
+                        JSON.parse(fs.readFileSync(candidateRun.reportPath, 'utf8')),
+                        validated.proposed_replacement_rules,
+                        proposalReplayEvidence,
+                        preAiRulesLib.runPreAiDeterministicChecks
+                    );
+                    fs.writeFileSync(candidateRun.reportPath, JSON.stringify(candidateReport, null, 2));
                     evalSummary = core.buildProposalEvalSummary(
                         core.summarizeEvalReport('baseline', baselineReport, baselineRun.reportPath),
                         core.summarizeEvalReport('candidate', candidateReport, candidateRun.reportPath),
@@ -1454,8 +1480,16 @@ async function main() {
                                     ])
                                     : { ok: false, stderr: 'full fallback baseline failed', stdout: '', reportPath: null };
                                 const rulesOnlyFullReport = rulesOnlyFullRun.ok && rulesOnlyFullRun.reportPath
-                                    ? JSON.parse(fs.readFileSync(rulesOnlyFullRun.reportPath, 'utf8'))
+                                    ? attachTargetedReplayRuleActivations(
+                                        JSON.parse(fs.readFileSync(rulesOnlyFullRun.reportPath, 'utf8')),
+                                        validated.proposed_replacement_rules,
+                                        proposalReplayEvidence,
+                                        preAiRulesLib.runPreAiDeterministicChecks
+                                    )
                                     : null;
+                                if (rulesOnlyFullReport) {
+                                    fs.writeFileSync(rulesOnlyFullRun.reportPath, JSON.stringify(rulesOnlyFullReport, null, 2));
+                                }
 
                                 if (fallbackBaselineReport && core.rulesOnlyFallbackPassedFullSuite(rulesOnlyFullReport)) {
                                     const discardedPromptRegressionCount = evalSummary.regressed;

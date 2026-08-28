@@ -333,11 +333,18 @@ function promptProposalApprovalBlock(proposal) {
             reason: 'eval_no_effect',
         };
     }
-    if (proposal.disposition === 'rules_only' && evalStatus === 'no_effect') {
-        return {
-            error: 'This rules-only proposal cannot be approved because evaluation did not prove every proposed replacement rule activated. Re-run evaluation with active candidate-rule evidence.',
-            reason: 'eval_rule_inactive',
-        };
+    if (proposal.disposition === 'rules_only') {
+        const activations = Array.isArray(proposal.eval_summary?.candidate_rule_activations)
+            ? proposal.eval_summary.candidate_rule_activations
+            : [];
+        const completeEvidence = activations.length > 0
+            && activations.every((entry) => Number(entry.total_activations || 0) > 0);
+        if (evalStatus !== 'passed' || !completeEvidence) {
+            return {
+                error: 'This rules-only proposal cannot be approved because evaluation did not prove every proposed replacement rule activated. Re-run evaluation with complete full-suite or targeted-replay evidence.',
+                reason: 'eval_rule_inactive',
+            };
+        }
     }
     if (promptChanged && evalStatus === 'skipped') {
         return {
@@ -1913,17 +1920,20 @@ function evalStatusFromSummary(summary, opts = {}) {
         // Consolidation proposals are not driven by corrections; success = no regressions introduced.
         return 'passed';
     }
-    const triggersImproved = summary.triggers_improved ?? 0;
-    if (triggersImproved > 0)
-        return 'passed';
     if (opts.rulesOnly) {
         const activations = Array.isArray(summary.candidate_rule_activations)
             ? summary.candidate_rule_activations
             : [];
-        if (activations.length > 0 && activations.every((entry) => Number(entry.total_activations || 0) > 0)) {
+        if (Number(summary.comparedCases || 0) > 0
+            && activations.length > 0
+            && activations.every((entry) => Number(entry.total_activations || 0) > 0)) {
             return 'passed';
         }
+        return 'no_effect';
     }
+    const triggersImproved = summary.triggers_improved ?? 0;
+    if (triggersImproved > 0)
+        return 'passed';
     // No confirmed regressions and no trigger improved: this proposal did not demonstrate
     // forward progress on the cases that motivated it (Fix 1). Label no_effect rather than passed.
     // (Dead opts.promptUnchanged removed per Follow-up 3; semantics focus on trigger evidence.)

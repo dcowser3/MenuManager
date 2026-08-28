@@ -1,6 +1,8 @@
 const {
     activateCandidateRulesForEval,
     buildCandidateRuleActivationEvidence,
+    buildTargetedReplayRuleActivationEvidence,
+    mergeCandidateRuleActivationEvidence,
     classifyMaterialDisagreement,
     summarizeMaterialDisagreements,
     sortMaterialDisagreements,
@@ -67,9 +69,40 @@ describe('review eval material disagreement helpers', () => {
             },
         ]);
 
-        expect(evidence[0]).toMatchObject({ pre_ai_activations: 2, post_ai_activations: 0, total_activations: 2, case_ids: ['case-1', 'case-2'] });
-        expect(evidence[1]).toMatchObject({ pre_ai_activations: 0, post_ai_activations: 1, total_activations: 1, case_ids: ['case-1'] });
-        expect(evidence[2]).toMatchObject({ total_activations: 0, case_ids: [] });
+        expect(evidence[0]).toMatchObject({ pre_ai_activations: 2, post_ai_activations: 0, replay_activations: 0, total_activations: 2, case_ids: ['case-1', 'case-2'], correction_ids: [] });
+        expect(evidence[1]).toMatchObject({ pre_ai_activations: 0, post_ai_activations: 1, replay_activations: 0, total_activations: 1, case_ids: ['case-1'] });
+        expect(evidence[2]).toMatchObject({ replay_activations: 0, total_activations: 0, case_ids: [] });
+    });
+
+    test('merges targeted motivating-text replay with full-suite activation evidence', () => {
+        const rules = activateCandidateRulesForEval([
+            { original_text: 'house -made', corrected_text: 'housemade' },
+        ]);
+        const fullSuite = buildCandidateRuleActivationEvidence(rules, []);
+        const targeted = buildTargetedReplayRuleActivationEvidence(rules, [
+            {
+                correction_id: 'correction-rare-form',
+                original_text: 'Tuna, house -made ponzu, sesame',
+                corrected_text: 'Tuna, housemade ponzu, sesame',
+                status: 'still_missed',
+            },
+            {
+                correction_id: 'retired-correction',
+                original_text: 'Tuna, house -made ponzu, sesame',
+                corrected_text: 'Tuna, housemade ponzu, sesame',
+                status: 'now_correct',
+            },
+        ], runPreAiDeterministicChecks);
+        const merged = mergeCandidateRuleActivationEvidence(fullSuite, targeted);
+
+        expect(merged[0]).toMatchObject({
+            pre_ai_activations: 0,
+            post_ai_activations: 0,
+            replay_activations: 1,
+            total_activations: 1,
+            case_ids: [],
+            correction_ids: ['correction-rare-form'],
+        });
     });
 
     test('classifies a clean menu spurious edit when false positives cross zero', () => {

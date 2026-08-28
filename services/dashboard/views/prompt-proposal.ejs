@@ -467,10 +467,10 @@
                         <% const ruleActivations = Array.isArray(evalSummary.candidate_rule_activations) ? evalSummary.candidate_rule_activations : []; %>
                         <% if (ruleActivations.length) { %>
                             <div class="small" style="margin:.8rem 0 .3rem">
-                                Candidate rule activation: <strong><%= ruleActivations.filter((entry) => Number(entry.total_activations || 0) > 0).length %>/<%= ruleActivations.length %></strong> proposed rule(s) fired during evaluation.
+                                Candidate rule activation: <strong><%= ruleActivations.filter((entry) => Number(entry.total_activations || 0) > 0).length %>/<%= ruleActivations.length %></strong> proposed rule(s) fired in the full suite or targeted replay. Targeted replay directly applies each rule to the motivating unresolved correction text.
                             </div>
                             <table>
-                                <thead><tr><th>Rule</th><th>Pre-AI</th><th>Post-AI</th><th>Cases</th><th>Status</th></tr></thead>
+                                <thead><tr><th>Rule</th><th>Pre-AI</th><th>Post-AI</th><th>Targeted replay</th><th>Full-suite cases</th><th>Status</th></tr></thead>
                                 <tbody>
                                 <% ruleActivations.forEach((entry) => { %>
                                     <% const active = Number(entry.total_activations || 0) > 0; %>
@@ -478,6 +478,7 @@
                                         <td><code><%= entry.original_text %></code> → <code><%= entry.corrected_text %></code></td>
                                         <td><%= entry.pre_ai_activations || 0 %></td>
                                         <td><%= entry.post_ai_activations || 0 %></td>
+                                        <td><%= entry.replay_activations || 0 %></td>
                                         <td><%= Array.isArray(entry.case_ids) ? entry.case_ids.length : 0 %></td>
                                         <td><span class="badge <%= active ? 'approved' : 'rejected' %>"><%= active ? 'activated' : 'inactive' %></span></td>
                                     </tr>
