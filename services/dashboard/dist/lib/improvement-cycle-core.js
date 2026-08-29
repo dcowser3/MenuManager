@@ -10,6 +10,8 @@ exports.computeReviewBaselineFingerprint = computeReviewBaselineFingerprint;
 exports.pickCadenceAnchor = pickCadenceAnchor;
 exports.shouldDeferForCadence = shouldDeferForCadence;
 exports.isTransientOpenAiFailure = isTransientOpenAiFailure;
+exports.isCorrectionEligibleForImprovement = isCorrectionEligibleForImprovement;
+exports.correctionsEligibleForImprovement = correctionsEligibleForImprovement;
 exports.assembleSupersedeCorrectionSet = assembleSupersedeCorrectionSet;
 exports.partitionCorrectionIdsByReplayStatus = partitionCorrectionIdsByReplayStatus;
 exports.correctionsRequiringProposal = correctionsRequiringProposal;
@@ -224,6 +226,24 @@ function isTransientOpenAiFailure(input) {
     if (!message)
         return false;
     return /ECONNRESET|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|ECONNREFUSED|socket hang up|network|fetch failed|terminated/i.test(message);
+}
+/**
+ * Only explicit human-reviewed learning evidence may enter the improvement cycle.
+ * Auto-detected system patterns stay on the learning dashboard until a person
+ * annotates them, and menu-only audit decisions are never proposal inputs.
+ */
+function isCorrectionEligibleForImprovement(correction) {
+    if (!correction)
+        return false;
+    const status = `${correction.status || ''}`.trim().toLowerCase();
+    return `${correction.source || ''}`.trim().toLowerCase() === 'human'
+        && ['pending', 'accepted'].includes(status)
+        && !!`${correction.reviewer_name || ''}`.trim()
+        && !!`${correction.rule || ''}`.trim()
+        && `${correction.change_type || ''}`.trim().toLowerCase() !== 'menu_update_only';
+}
+function correctionsEligibleForImprovement(corrections) {
+    return (corrections || []).filter(isCorrectionEligibleForImprovement);
 }
 /** Supersede mode: unconsumed + corrections stamped to the pending proposal's cycle (excludes proposal-* rows). */
 function assembleSupersedeCorrectionSet(unconsumed, carriedOver) {

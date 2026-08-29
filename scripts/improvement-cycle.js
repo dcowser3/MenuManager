@@ -664,7 +664,7 @@ async function main() {
 
     // Idempotency: one proposal per calendar day (cycle_id = YYYY-MM-DD).
     const [
-        { count: unconsumedCount },
+        { data: unconsumedAtGate },
         { data: pendingProposals },
         { data: existing },
         { data: lastProposals },
@@ -672,8 +672,10 @@ async function main() {
         { data: acceptedRulesForBaseline },
         filePrompt,
     ] = await Promise.all([
-        supabase.from('correction_rules').select('*', { count: 'exact', head: true })
-            .is('prompt_cycle_id', null).in('status', ['accepted', 'pending']),
+        supabase.from('correction_rules').select('*')
+            .is('prompt_cycle_id', null)
+            .eq('source', 'human')
+            .in('status', ['accepted', 'pending']),
         supabase.from('prompt_proposals')
             .select('id, cycle_id, created_at, correction_rule_count, submission_count, eval_status, llm_model, eval_summary')
             .eq('status', 'pending')
@@ -700,6 +702,12 @@ async function main() {
             .limit(1000),
         fsp.readFile(path.join(repoRoot, 'sop-processor', 'qa_prompt.txt'), 'utf8'),
     ]);
+    const eligibleUnconsumedAtGate = core.correctionsEligibleForImprovement(unconsumedAtGate || []);
+    const unconsumedCount = eligibleUnconsumedAtGate.length;
+    const excludedUnconsumedCount = (unconsumedAtGate || []).length - unconsumedCount;
+    if (excludedUnconsumedCount > 0) {
+        console.log(`Learning eligibility: excluded ${excludedUnconsumedCount} unconsumed row(s) without explicit human learning evidence.`);
+    }
     const pendingProposal = (pendingProposals || [])[0] || null;
     const effectiveAtGate = core.pickEffectivePrompt(approvedProposalsForBaseline || [], filePrompt);
     const manifestAtGate = manifestLib.buildReviewRulesManifest({ acceptedCorrectionRules: acceptedRulesForBaseline || [] });
@@ -716,7 +724,7 @@ async function main() {
     // gate's decision is an input to the cadence check.
     const minNewCorrections = Number.parseInt(process.env.IMPROVE_MIN_NEW_CORRECTIONS || '1', 10);
     const gate = core.shouldRunCycle({
-        unconsumedCorrectionCount: unconsumedCount || 0,
+        unconsumedCorrectionCount: unconsumedCount,
         pendingProposal,
         minNewCorrections,
         force: !!args.force,
@@ -768,7 +776,7 @@ async function main() {
         if (pendingProposal) {
             await sendPendingProposalReminderEmail(supabase, {
                 proposal: pendingProposal,
-                unconsumedCorrectionCount: unconsumedCount || 0,
+                unconsumedCorrectionCount: unconsumedCount,
             });
         }
         return;
@@ -796,23 +804,27 @@ async function main() {
         let correctionRules = [];
         let supersedeMeta = null;
         if (!args.consolidate) {
-            const { data: unconsumedRules, error: rulesError } = await supabase
+            const { data: unconsumedRuleRows, error: rulesError } = await supabase
                 .from('correction_rules')
                 .select('*')
                 .is('prompt_cycle_id', null)
+                .eq('source', 'human')
                 .in('status', ['accepted', 'pending'])
                 .order('created_at', { ascending: true });
             if (rulesError) throw new Error(`Failed to fetch correction rules: ${rulesError.message}`);
+            const unconsumedRules = core.correctionsEligibleForImprovement(unconsumedRuleRows || []);
 
             if (supersedePending && supersedePending.cycle_id) {
-                const { data: carriedRules, error: carriedErr } = await supabase
+                const { data: carriedRuleRows, error: carriedErr } = await supabase
                     .from('correction_rules')
                     .select('*')
                     .eq('prompt_cycle_id', supersedePending.cycle_id)
+                    .eq('source', 'human')
                     .in('status', ['accepted', 'pending'])
                     .order('created_at', { ascending: true });
                 if (carriedErr) throw new Error(`Failed to fetch carried-over corrections: ${carriedErr.message}`);
-                const assembled = core.assembleSupersedeCorrectionSet(unconsumedRules || [], carriedRules || []);
+                const carriedRules = core.correctionsEligibleForImprovement(carriedRuleRows || []);
+                const assembled = core.assembleSupersedeCorrectionSet(unconsumedRules, carriedRules);
                 correctionRules = assembled.combined;
                 supersedeMeta = {
                     fromCycleId: supersedePending.cycle_id,
@@ -822,7 +834,7 @@ async function main() {
                 };
                 console.log(`Supersede corrections: ${assembled.carriedCount} carried-over + ${assembled.newCount} new (${correctionRules.length} total)`);
             } else {
-                correctionRules = unconsumedRules || [];
+                correctionRules = unconsumedRules;
             }
             console.log(`Corrections to analyze: ${correctionRules.length}`);
         } else {

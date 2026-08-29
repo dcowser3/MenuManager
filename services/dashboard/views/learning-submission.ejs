@@ -88,6 +88,7 @@
         .annotation-field.full-width {
             grid-column: 1 / -1;
         }
+        .annotation-field.disabled { opacity: .55; }
         label { display: block; font-size: .63rem; text-transform: uppercase; letter-spacing: .1em; color: var(--muted); margin-bottom: .25rem; }
         input, textarea, select { width: 100%; border: 1px solid var(--border); padding: .55rem .6rem; font-family: inherit; font-size: .84rem; }
         input:focus, textarea:focus, select:focus { outline: none; border-color: #8b7355; }
@@ -229,8 +230,31 @@
                                 </div>
                                 <div class="annotation-fields">
                                     <div class="annotation-field full-width">
-                                        <label for="rule-<%= idx %>">Correction Explanation *</label>
+                                        <label for="rule-<%= idx %>">Correction Explanation (required for learning)</label>
                                         <textarea id="rule-<%= idx %>" placeholder="e.g., This dish uses tartar sauce; it is not a raw tartare preparation."></textarea>
+                                    </div>
+                                    <div class="annotation-field full-width">
+                                        <div class="location-check">
+                                            <input type="checkbox" id="menu-update-only-<%= idx %>">
+                                            <label for="menu-update-only-<%= idx %>">Menu/content update only — keep for audit, but do not learn from this edit</label>
+                                        </div>
+                                        <div class="annotation-hint" style="margin-top:.3rem;">Use this when an ingredient, allergen, price, or other content changed because of an outside conversation rather than an AI-review mistake.</div>
+                                    </div>
+                                    <div class="annotation-field full-width" id="learning-scope-<%= idx %>">
+                                        <div class="annotation-header" style="margin-bottom:.35rem;">
+                                            <span class="annotation-title">Learn only this exact replacement (optional)</span>
+                                            <span class="annotation-hint">For mixed dish-line edits, enter only the change explained above. Unrelated additions stay out of the learning cycle.</span>
+                                        </div>
+                                        <div class="annotation-fields">
+                                            <div class="annotation-field">
+                                                <label for="learning-from-<%= idx %>">From</label>
+                                                <input id="learning-from-<%= idx %>" placeholder="e.g., macha salsa">
+                                            </div>
+                                            <div class="annotation-field">
+                                                <label for="learning-to-<%= idx %>">To</label>
+                                                <input id="learning-to-<%= idx %>" placeholder="e.g., salsa macha">
+                                            </div>
+                                        </div>
                                     </div>
                                     <div class="annotation-field">
                                         <label for="menu-scope-<%= idx %>">Menu Scope</label>
@@ -351,7 +375,7 @@
                                 <td><%= item.location || '' %><%= item.is_location_specific ? '' : ' (global)' %></td>
                                 <td><%= (item.other_applicable_locations || []).join(', ') %></td>
                                 <td><%= item.change_type || '' %></td>
-                                <td><%= statusLabel(item.status) %></td>
+                                <td><%= item.change_type === 'menu_update_only' ? 'Menu update only' : statusLabel(item.status) %></td>
                             </tr>
                         <% }) %>
                     </tbody>

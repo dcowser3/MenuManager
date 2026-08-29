@@ -55,6 +55,9 @@
         function readEntry(idx) {
             return {
                 rule: `${element(`rule-${idx}`)?.value || ''}`,
+                menuUpdateOnly: !!element(`menu-update-only-${idx}`)?.checked,
+                learningFrom: `${element(`learning-from-${idx}`)?.value || ''}`,
+                learningTo: `${element(`learning-to-${idx}`)?.value || ''}`,
                 menuScope: `${element(`menu-scope-${idx}`)?.value || 'all'}`,
                 changeType: `${element(`change-type-${idx}`)?.value || ''}`,
                 isLocationSpecific: !!element(`loc-specific-${idx}`)?.checked,
@@ -66,12 +69,18 @@
         function writeEntry(idx, entry) {
             if (!entry || savedIndexes.has(idx)) return;
             const rule = element(`rule-${idx}`);
+            const menuUpdateOnly = element(`menu-update-only-${idx}`);
+            const learningFrom = element(`learning-from-${idx}`);
+            const learningTo = element(`learning-to-${idx}`);
             const menuScope = element(`menu-scope-${idx}`);
             const changeType = element(`change-type-${idx}`);
             const locationSpecific = element(`loc-specific-${idx}`);
             const location = element(`location-${idx}`);
             const shared = element(`shared-${idx}`);
             if (rule) rule.value = entry.rule || '';
+            if (menuUpdateOnly) menuUpdateOnly.checked = !!entry.menuUpdateOnly;
+            if (learningFrom) learningFrom.value = entry.learningFrom || '';
+            if (learningTo) learningTo.value = entry.learningTo || '';
             if (menuScope) menuScope.value = entry.menuScope || 'all';
             if (changeType) changeType.value = entry.changeType || '';
             if (locationSpecific) locationSpecific.checked = !!entry.isLocationSpecific;
@@ -82,6 +91,17 @@
             }
             const locationFields = element(`loc-fields-${idx}`);
             if (locationFields) locationFields.classList.toggle('open', !!entry.isLocationSpecific);
+            syncLearningScope(idx);
+        }
+
+        function syncLearningScope(idx) {
+            const menuUpdateOnly = !!element(`menu-update-only-${idx}`)?.checked;
+            const learningFrom = element(`learning-from-${idx}`);
+            const learningTo = element(`learning-to-${idx}`);
+            if (learningFrom) learningFrom.disabled = menuUpdateOnly;
+            if (learningTo) learningTo.disabled = menuUpdateOnly;
+            const scope = element(`learning-scope-${idx}`);
+            if (scope && scope.classList) scope.classList.toggle('disabled', menuUpdateOnly);
         }
 
         function persistDraft() {
@@ -136,8 +156,11 @@
                 correction_id: dish?.correction_id,
                 original_text: dish?.before_line,
                 corrected_text: dish?.after_line,
+                learning_intent: entry.menuUpdateOnly ? 'menu_update_only' : 'review_correction',
+                learning_original_text: entry.menuUpdateOnly ? null : entry.learningFrom.trim() || null,
+                learning_corrected_text: entry.menuUpdateOnly ? null : entry.learningTo.trim() || null,
                 change_type: entry.changeType.trim() || null,
-                rule: entry.rule.trim(),
+                rule: entry.rule.trim() || (entry.menuUpdateOnly ? 'Menu/content update only — excluded from learning.' : ''),
                 applies_to_menu_type: entry.menuScope.trim() || 'all',
                 is_location_specific: entry.isLocationSpecific,
                 project_name: context.projectName,
@@ -152,7 +175,8 @@
             const opts = settings || {};
             const reviewerName = `${element('bulk-reviewer-name')?.value || ''}`.trim();
             const dish = dishes[idx];
-            const rule = `${element(`rule-${idx}`)?.value || ''}`.trim();
+            const entry = readEntry(idx);
+            const rule = entry.rule.trim();
 
             // Snapshot every unfinished card before any validation or request. A missing
             // name or a later network error must never cost text entered elsewhere.
@@ -162,8 +186,12 @@
                 setStatus(idx, 'Correction details are missing.', 'err');
                 return false;
             }
-            if (!rule) {
+            if (!entry.menuUpdateOnly && !rule) {
                 setStatus(idx, 'Explanation is required.', 'err');
+                return false;
+            }
+            if (!entry.menuUpdateOnly && (!!entry.learningFrom.trim() !== !!entry.learningTo.trim())) {
+                setStatus(idx, 'Enter both From and To for an exact learning replacement.', 'err');
                 return false;
             }
             if (!reviewerName) {
@@ -195,7 +223,10 @@
             const reviewerName = `${element('bulk-reviewer-name')?.value || ''}`.trim();
             const candidates = dishes
                 .map((_dish, idx) => idx)
-                .filter((idx) => !savedIndexes.has(idx) && `${element(`rule-${idx}`)?.value || ''}`.trim());
+                .filter((idx) => !savedIndexes.has(idx) && (
+                    `${element(`rule-${idx}`)?.value || ''}`.trim()
+                    || !!element(`menu-update-only-${idx}`)?.checked
+                ));
 
             if (!reviewerName) {
                 setBulkStatus('Reviewer name is required.', 'err');
@@ -251,8 +282,10 @@
 
             const tracked = ['input', 'change'];
             dishes.forEach((_dish, idx) => {
-                [`rule-${idx}`, `menu-scope-${idx}`, `change-type-${idx}`, `loc-specific-${idx}`, `location-${idx}`, `shared-${idx}`]
+                [`rule-${idx}`, `menu-update-only-${idx}`, `learning-from-${idx}`, `learning-to-${idx}`, `menu-scope-${idx}`, `change-type-${idx}`, `loc-specific-${idx}`, `location-${idx}`, `shared-${idx}`]
                     .forEach((id) => tracked.forEach((eventName) => element(id)?.addEventListener(eventName, persistDraft)));
+                element(`menu-update-only-${idx}`)?.addEventListener('change', () => syncLearningScope(idx));
+                syncLearningScope(idx);
             });
             tracked.forEach((eventName) => element('bulk-reviewer-name')?.addEventListener(eventName, persistDraft));
         }

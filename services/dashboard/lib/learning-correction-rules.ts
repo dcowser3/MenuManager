@@ -74,8 +74,16 @@ export function buildCorrectionRuleRecord(payload: any, catalog: Array<{ name?: 
     const propertyNames = getConfiguredPropertyNames(catalog);
     const rawLocation = text(payload.location);
     const isLocationSpecific = !!payload.is_location_specific;
-    const originalText = optionalText(payload.original_text || payload.before_line);
-    const correctedText = optionalText(payload.corrected_text || payload.after_line);
+    const menuUpdateOnly = payload.learning_intent === 'menu_update_only' || payload.menu_update_only === true;
+    const fullOriginalText = optionalText(payload.original_text || payload.before_line);
+    const fullCorrectedText = optionalText(payload.corrected_text || payload.after_line);
+    const scopedOriginalText = optionalText(payload.learning_original_text);
+    const scopedCorrectedText = optionalText(payload.learning_corrected_text);
+    if ((scopedOriginalText && !scopedCorrectedText) || (!scopedOriginalText && scopedCorrectedText)) {
+        throw new CorrectionRuleValidationError('learning_original_text and learning_corrected_text must be provided together');
+    }
+    const originalText = !menuUpdateOnly && scopedOriginalText ? scopedOriginalText : fullOriginalText;
+    const correctedText = !menuUpdateOnly && scopedCorrectedText ? scopedCorrectedText : fullCorrectedText;
     const otherLocations = Array.isArray(payload.other_applicable_locations)
         ? payload.other_applicable_locations.map((s: any) => text(s)).filter(Boolean)
         : [];
@@ -109,8 +117,8 @@ export function buildCorrectionRuleRecord(payload: any, catalog: Array<{ name?: 
         original_text: originalText,
         corrected_text: correctedText,
         force_target_case: payload.force_target_case === true,
-        change_type: text(payload.change_type) || null,
-        rule: text(payload.rule),
+        change_type: menuUpdateOnly ? 'menu_update_only' : (text(payload.change_type) || null),
+        rule: text(payload.rule) || (menuUpdateOnly ? 'Menu/content update only — excluded from learning.' : ''),
         applies_to_menu_type: normalizeMenuRuleScope(payload.applies_to_menu_type),
         is_location_specific: isLocationSpecific,
         project_name: text(payload.project_name) || null,
@@ -128,7 +136,7 @@ export function buildCorrectionRuleRecord(payload: any, catalog: Array<{ name?: 
         // (inserted directly as source 'system') reach the deterministic pre-AI
         // pass, so a context-dependent fix can no longer go live as a blind
         // find/replace the moment it is saved.
-        status: 'pending',
+        status: menuUpdateOnly ? 'rejected' : 'pending',
     };
 
     if (!record.submission_id || !record.correction_id || !record.rule) {

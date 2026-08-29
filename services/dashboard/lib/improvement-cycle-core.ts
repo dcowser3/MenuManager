@@ -204,9 +204,33 @@ export type CorrectionRuleLike = {
     submission_id?: string | null;
     original_text?: string | null;
     corrected_text?: string | null;
+    rule?: string | null;
+    reviewer_name?: string | null;
+    source?: string | null;
+    status?: string | null;
+    change_type?: string | null;
     created_at?: string | null;
     prompt_cycle_id?: string | null;
 };
+
+/**
+ * Only explicit human-reviewed learning evidence may enter the improvement cycle.
+ * Auto-detected system patterns stay on the learning dashboard until a person
+ * annotates them, and menu-only audit decisions are never proposal inputs.
+ */
+export function isCorrectionEligibleForImprovement(correction: CorrectionRuleLike | null | undefined): boolean {
+    if (!correction) return false;
+    const status = `${correction.status || ''}`.trim().toLowerCase();
+    return `${correction.source || ''}`.trim().toLowerCase() === 'human'
+        && ['pending', 'accepted'].includes(status)
+        && !!`${correction.reviewer_name || ''}`.trim()
+        && !!`${correction.rule || ''}`.trim()
+        && `${correction.change_type || ''}`.trim().toLowerCase() !== 'menu_update_only';
+}
+
+export function correctionsEligibleForImprovement<T extends CorrectionRuleLike>(corrections: T[]): T[] {
+    return (corrections || []).filter(isCorrectionEligibleForImprovement) as T[];
+}
 
 /** Supersede mode: unconsumed + corrections stamped to the pending proposal's cycle (excludes proposal-* rows). */
 export function assembleSupersedeCorrectionSet(

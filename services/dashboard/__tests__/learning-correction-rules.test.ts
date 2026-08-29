@@ -120,6 +120,44 @@ describe('buildCorrectionRuleRecord', () => {
         expect(record.status).toBe('pending');
     });
 
+    test('stores only the reviewer-scoped replacement for a mixed dish-line edit', () => {
+        const record = buildCorrectionRuleRecord({
+            ...basePayload,
+            original_text: 'Salmon, macha salsa, crispy potato',
+            corrected_text: 'Salmon, salsa macha, crispy potato, marigold',
+            learning_original_text: 'macha salsa',
+            learning_corrected_text: 'salsa macha',
+            rule: 'Salsa macha is the correct order.',
+        }, catalog);
+
+        expect(record).toMatchObject({
+            original_text: 'macha salsa',
+            corrected_text: 'salsa macha',
+            status: 'pending',
+        });
+    });
+
+    test('requires both fields for an exact mixed-edit learning scope', () => {
+        expect(() => buildCorrectionRuleRecord({
+            ...basePayload,
+            learning_original_text: 'macha salsa',
+        }, catalog)).toThrow('learning_original_text and learning_corrected_text must be provided together');
+    });
+
+    test('saves menu-only updates as rejected audit rows without requiring an explanation', () => {
+        const record = buildCorrectionRuleRecord({
+            ...basePayload,
+            rule: '',
+            learning_intent: 'menu_update_only',
+        }, catalog);
+
+        expect(record).toMatchObject({
+            status: 'rejected',
+            change_type: 'menu_update_only',
+            rule: 'Menu/content update only — excluded from learning.',
+        });
+    });
+
     test('requires optional exact replacement fields to be paired', () => {
         expect(() => buildCorrectionRuleRecord({
             rule: 'Use relish for this preparation.',

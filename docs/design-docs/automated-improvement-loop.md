@@ -308,6 +308,13 @@ Docs updated in same change set; new C1–C4 unit + view tests (112 dashboard co
 - **Actionable correction counts:** proposal metadata and email distinguish corrections entering the cycle from replay-retired corrections and the remaining actionable count. Supersede lineage (`carried + new`) remains visible for audit, but is no longer presented as the active backlog.
 - **Confirmed regression deltas:** compact proposal summaries preserve both the raw historical delta and the fresh back-to-back confirmed delta, and the review page displays the confirmed value when available. The verdict and displayed magnitude now use the same evidence.
 
+## August 29, 2026 reviewer-intent gating
+
+- **Human explanation required at the cycle boundary:** proposal gating and correction assembly now admit only `source: human` rows in `pending`/`accepted` status with a non-empty reviewer name and explanation. Auto-detected system patterns remain dashboard candidates until a reviewer submits explicit learning evidence; blank, rejected, and menu-only rows do not count toward cadence or proposal thresholds and are not consumed.
+- **Menu-only audit decisions:** the correction-explanation page lets a reviewer mark an ingredient, allergen, price, or other outside-discussion change as **Menu/content update only**. The decision is retained as a rejected audit row (`change_type: menu_update_only`) so the card stays resolved, but it cannot enter an improvement cycle.
+- **Mixed-edit scoping:** for a dish line containing both learnable and unrelated edits, the reviewer may enter an optional exact From/To replacement. That scoped pair—not the full corrected line—is saved as learning evidence, preventing unrelated additions such as a newly requested ingredient from reaching replay or proposal generation.
+- **Visible provenance:** the prompt-proposal correction-routing table displays the original reviewer explanation beside every paired correction, rather than showing it only for freeform guidance.
+
 ## August 2, 2026 accepted-rule routing
 
 - Improvement-cycle routing has an `existing_rule` lane for a correction whose deterministic fix is already present in the accepted-rule set. It prevents manually seeded rules with structurally unavailable replay from becoming noisy `unrouted` rows or duplicate proposals. The validator fails closed when that set is absent or does not cover the correction, and `still_missed` replay evidence continues to override the lane.

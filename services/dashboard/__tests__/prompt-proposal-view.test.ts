@@ -372,13 +372,15 @@ describe('prompt-proposal view', () => {
                 ...baseProposal,
                 disposition: 'prompt_change',
                 correction_routing: [
-                    { correction_id: 'a1', lane: 'prompt', target: 'section 4', note: 'sharpened', replay_status: 'still_missed', original_text: 'veggies', corrected_text: 'vegetables' },
+                    { correction_id: 'a1', lane: 'prompt', target: 'section 4', note: 'sharpened', replay_status: 'still_missed', original_text: 'veggies', corrected_text: 'vegetables', guidance: 'Reviewer says vegetables is the house term.' },
                     { correction_id: 'seeded', lane: 'existing_rule', target: 'gruyere -> gruyère', note: 'already accepted', replay_status: 'replay_unavailable', original_text: 'gruyere', corrected_text: 'gruyère' },
                     { correction_id: 'b2', lane: 'dismissed', target: '', note: 'invalid', replay_status: 'not_verifiable', original_text: null, corrected_text: null, guidance: 'LAURENT-PERRIER must always be hyphenated' },
                 ],
             },
         });
         expect(html).toContain('What happened to each correction');
+        expect(html).toContain('Reviewer explanation');
+        expect(html).toContain('Reviewer says vegetables is the house term.');
         expect(html).toContain('section 4');
         // freeform correction shows the human's guidance, not a bare UUID
         expect(html).toContain('LAURENT-PERRIER must always be hyphenated');

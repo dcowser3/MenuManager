@@ -10,6 +10,7 @@ import {
     fullLineCorrectionApplied,
     partitionCorrectionIdsByReplayStatus,
     correctionsRequiringProposal,
+    correctionsEligibleForImprovement,
     mergeReplayResolvedCorrectionRouting,
     replayResolutionMarker,
     evalStatusFromSummary,
@@ -342,6 +343,25 @@ describe('correctionsRequiringProposal', () => {
         ];
         expect(correctionsRequiringProposal(corrections, evidence).map((entry) => entry.id))
             .toEqual(['missed', 'unknown']);
+    });
+});
+
+describe('correctionsEligibleForImprovement', () => {
+    test('admits only explained human learning evidence', () => {
+        const rows = [
+            { id: 'human-ready', source: 'human', status: 'pending', reviewer_name: 'Isa', rule: 'Use salsa macha.' },
+            { id: 'accepted-human', source: 'human', status: 'accepted', reviewer_name: 'Isa', rule: 'Use housemade.' },
+            { id: 'no-explanation', source: 'human', status: 'pending', reviewer_name: 'Isa', rule: '   ' },
+            { id: 'no-reviewer', source: 'human', status: 'pending', reviewer_name: null, rule: 'Generated guess.' },
+            { id: 'system-pattern', source: 'system', status: 'pending', reviewer_name: null, rule: 'Generated pattern.' },
+            { id: 'menu-only', source: 'human', status: 'pending', reviewer_name: 'Isa', rule: 'Outside update.', change_type: 'menu_update_only' },
+            { id: 'rejected', source: 'human', status: 'rejected', reviewer_name: 'Isa', rule: 'Not learning.' },
+        ];
+
+        expect(correctionsEligibleForImprovement(rows).map((row) => row.id)).toEqual([
+            'human-ready',
+            'accepted-human',
+        ]);
     });
 });
 

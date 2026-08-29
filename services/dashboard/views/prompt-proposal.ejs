@@ -281,7 +281,7 @@
                 <div class="card">
                     <table>
                         <thead>
-                            <tr><th>Correction</th><th>Replay</th><th>Lane</th><th>Target</th><th>Note</th></tr>
+                            <tr><th>Correction</th><th>Reviewer explanation</th><th>Replay</th><th>Lane</th><th>Target</th><th>Note</th></tr>
                         </thead>
                         <tbody>
                         <% routing.forEach((r) => { %>
@@ -309,6 +309,7 @@
                                         <span class="badge approved" style="margin-left:.3rem;" title="Replay-verifiable against a concrete instance.">verifiable</span>
                                     <% } %>
                                 </td>
+                                <td class="small"><%= r.guidance || '—' %></td>
                                 <td class="small">
                                     <%= r.replay_status || '—' %>
                                     <% if (r.replay_status === 'partially_correct') { %>

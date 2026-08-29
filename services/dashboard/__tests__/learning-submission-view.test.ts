@@ -50,7 +50,12 @@ describe('learning-submission view', () => {
 
         expect(html).toContain('Project / Menu');
         expect(html).toContain('Explain this correction; the final rule is decided later');
-        expect(html).toContain('Correction Explanation *');
+        expect(html).toContain('Correction Explanation (required for learning)');
+        expect(html).toContain('Menu/content update only');
+        expect(html).toContain('id="menu-update-only-0"');
+        expect(html).toContain('Learn only this exact replacement');
+        expect(html).toContain('id="learning-from-0"');
+        expect(html).toContain('id="learning-to-0"');
         expect(html).toContain('Should this explanation be limited to specific properties?');
         expect(html).toContain('Limit to specific property?');
         expect(html).toContain('Saved Correction Explanations For This Submission');

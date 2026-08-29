@@ -31,6 +31,10 @@ function createFixture(fetchImpl) {
     elements.set('bulk-save-status', createElement());
     for (let idx = 0; idx < 2; idx++) {
         elements.set(`rule-${idx}`, createElement());
+        elements.set(`menu-update-only-${idx}`, createElement());
+        elements.set(`learning-from-${idx}`, createElement());
+        elements.set(`learning-to-${idx}`, createElement());
+        elements.set(`learning-scope-${idx}`, createElement());
         elements.set(`menu-scope-${idx}`, createElement({ value: 'all' }));
         elements.set(`change-type-${idx}`, createElement());
         elements.set(`loc-specific-${idx}`, createElement());
@@ -116,5 +120,48 @@ describe('learning submission explanation controller', () => {
         expect(savedDraft.entries['0']).toBeUndefined();
         expect(savedDraft.entries['1'].rule).toBe('Keep this draft');
         expect(elements.get('bulk-save-status').textContent).toContain('1 failed');
+    });
+
+    test('scopes a mixed line to only the exact replacement explained by the reviewer', () => {
+        const { controller, elements } = createFixture(jest.fn());
+        elements.get('rule-0').value = 'Salsa macha is the correct order.';
+        elements.get('learning-from-0').value = 'macha salsa';
+        elements.get('learning-to-0').value = 'salsa macha';
+
+        expect(controller.buildPayload(0, 'Reviewer A')).toMatchObject({
+            learning_intent: 'review_correction',
+            learning_original_text: 'macha salsa',
+            learning_corrected_text: 'salsa macha',
+            rule: 'Salsa macha is the correct order.',
+        });
+    });
+
+    test('saves a menu-only decision without sending it to learning', async () => {
+        const fetchImpl = jest.fn(async () => ({ ok: true, json: async () => ({ success: true }) }));
+        const { controller, elements } = createFixture(fetchImpl);
+        elements.get('bulk-reviewer-name').value = 'Reviewer A';
+        elements.get('menu-update-only-0').checked = true;
+
+        await expect(controller.saveDishRule(0)).resolves.toBe(true);
+
+        const payload = JSON.parse(fetchImpl.mock.calls[0][1].body);
+        expect(payload).toMatchObject({
+            learning_intent: 'menu_update_only',
+            learning_original_text: null,
+            learning_corrected_text: null,
+            rule: 'Menu/content update only — excluded from learning.',
+        });
+    });
+
+    test('requires both exact replacement fields', async () => {
+        const fetchImpl = jest.fn();
+        const { controller, elements } = createFixture(fetchImpl);
+        elements.get('bulk-reviewer-name').value = 'Reviewer A';
+        elements.get('rule-0').value = 'Salsa order.';
+        elements.get('learning-from-0').value = 'macha salsa';
+
+        await expect(controller.saveDishRule(0)).resolves.toBe(false);
+        expect(fetchImpl).not.toHaveBeenCalled();
+        expect(elements.get('save-status-0').textContent).toContain('both From and To');
     });
 });

@@ -14,7 +14,7 @@ The v1 learning system auto-injects correction rules into the AI prompt after 2 
 ## Design Principles
 
 1. **Never auto-modify the prompt.** The system proposes — humans decide.
-2. **Every correction carries context.** Not just "A → B" but why, where, and how broadly it applies.
+2. **Every learning correction carries explicit human context.** Not just "A → B" but who explained it, why, where, and how broadly it applies. Unreviewed system patterns and menu-only content updates never enter the prompt-improvement cycle.
 3. **Weekly batch optimization.** Accumulate corrections all week, then rewrite the prompt once with full context.
 4. **The base prompt is the single source of truth.** No overlay layer — just one prompt that evolves weekly.
 
@@ -38,6 +38,8 @@ Dashboard shows corrections for annotation
         ↓
 Human annotates each correction:
   - Why was this changed?
+  - Was this an AI-review correction or only a menu/content update?
+  - For a mixed line, which exact from/to replacement does the explanation cover?
   - Which restaurant / location?
   - Location-specific or universal?
   - Other locations this applies to?
@@ -184,6 +186,8 @@ Reviewers can also add an accepted rule directly from `GET /learning` without op
 | Field | Current | New |
 |-------|---------|-----|
 | Explanation | Free text | Labeled **"Correction Explanation"** — reviewer context, not the final canonical rule |
+| Learning intent | Not captured | **Menu/content update only** excludes the edit from learning while retaining an audit row |
+| Mixed-edit scope | Entire corrected line | Optional exact **From / To** pair limits learning to the change the explanation actually covers |
 | Project / menu | Hidden, auto-filled from submission metadata | Visible as project/menu context for the correction |
 | Location | Dropdown | Dropdown + **"Limit to specific property?"** checkbox |
 | Shared locations | Multi-select | Renamed to **"Other applicable locations"** |
@@ -211,7 +215,7 @@ Quick approvals, imports/backfills, AI-only intermediate changes, requests witho
 3. Dashboard shows these in a "Proposed Rules" section with an accept/reject/modify UI
 4. Reviewer can expand examples for a proposed rule. The dashboard reconstructs the matching before/after lines from differ history, showing the AI draft DOCX line beside the final approved DOCX line and linking back to the learned submission.
 5. Human reviews: accepts (optionally adds context), rejects, or modifies the rule text
-6. Accepted exact replacement rules feed into the Basic AI Check deterministic pre-AI pass when their scope matches the submitted property. They can still be considered by the weekly prompt cycle when a broader prompt change is warranted.
+6. Accepted exact replacement rules feed into the Basic AI Check deterministic pre-AI pass when their scope matches the submitted property. Auto-detected system patterns do not enter the prompt-improvement cycle unless they are saved as explicit human-attributed learning evidence.
 
 **Key difference from v1:** System-detected patterns are *proposals*, not auto-injected prompt rules.
 The evidence examples are reconstructed only from eligible human-review final-approval comparisons, so reviewers can verify the exact AI draft line and final approved DOCX line before treating the pattern as an intentional human edit.
