@@ -2785,6 +2785,7 @@
         let draftAutosaveTimer = null;
         let draftAutosaveBlocked = false;
         let draftApplying = false;
+        let draftRequiresFreshSubmitterIdentity = false;
         let preservedManagedFooterText = '';
         let baselineFreshnessOverrideKey = '';
         let baselineFreshnessCheckTimer = null;
@@ -5423,10 +5424,12 @@
             return `${readSubmitterProfile()?.name || ''}`.trim();
         }
 
-        // Fill only fields still empty after a draft restore — draft-saved
-        // Submitter Information (form_state) always takes precedence over the
-        // stored profile. Fields stay editable; edits re-save on the next submit.
+        // A previously saved shared draft requires the person who is actually
+        // submitting it to identify themselves. Do not replace cleared fields
+        // with a profile remembered by this browser, which may belong to a prior
+        // editor on a shared machine.
         function prefillSubmitterProfile() {
+            if (draftRequiresFreshSubmitterIdentity) return;
             const profile = readSubmitterProfile();
             if (!profile) return;
             const fillIfEmpty = (id, value) => {
@@ -8476,6 +8479,18 @@
             toggleFileSizeLimit();
         }
 
+        function clearResumedDraftSubmitterIdentity() {
+            ['submitterName', 'submitterEmail', 'submitterJobTitle'].forEach((id) => {
+                const field = document.getElementById(id);
+                if (field) field.value = '';
+                clearSubmitterFieldError(id);
+            });
+            const dropdown = document.getElementById('submitterDropdown');
+            if (dropdown) dropdown.classList.remove('show');
+            submitterResults = [];
+            submitterHighlightIndex = -1;
+        }
+
         function setDraftReadonly(message) {
             draftAutosaveBlocked = true;
             ['reviewWithAiBtn', 'runCheckBtn', 'runCheckBtnBottom', 'submitBtn', 'editToggleBtn', 'rerunCheckBtn'].forEach((id) => {
@@ -8497,6 +8512,8 @@
             }
             if (!draftSession || !draftSession.token || !draftSession.baseline) return;
 
+            const resumedPriorSave = window.formHelpers.isPreviouslySavedActiveDraft(draftSession);
+            draftRequiresFreshSubmitterIdentity = resumedPriorSave;
             draftApplying = true;
             const tools = document.getElementById('draftTools');
             if (tools) tools.classList.remove('hidden');
@@ -8505,6 +8522,14 @@
 
             applyApprovedBaseline(draftSession.baseline, { silent: true });
             applyDraftFormState(draftSession.form_state || {});
+            if (draftSession.status === 'active') {
+                // Date Needed is read-only and derived from today's date plus
+                // turnaround. A saved value can expire while a draft is idle.
+                setDateNeededMinimumFromTurnaround(true);
+            }
+            if (resumedPriorSave) {
+                clearResumedDraftSubmitterIdentity();
+            }
 
             if (draftSession.menu_content_html) {
                 displayReviewedContent(draftSession.menu_content_html);
@@ -8531,13 +8556,10 @@
 
             // Make resuming explicit: without this, clicking "Edit This Menu" can
             // silently drop the user into someone's existing draft.
-            const resumedPriorSave = draftSession.status === 'active'
-                && draftSession.updated_at && draftSession.created_at
-                && draftSession.updated_at !== draftSession.created_at;
             if (resumedPriorSave) {
                 const savedAt = new Date(draftSession.updated_at).toLocaleString();
                 const savedBy = `${draftSession.last_edited_by || ''}`.trim();
-                showAlert(`You are resuming an in-progress draft last saved ${savedAt}${savedBy ? ` by ${savedBy}` : ''}. Your edits continue from that saved version.`, 'info', { persistent: true });
+                showAlert(`You are resuming an in-progress draft last saved ${savedAt}${savedBy ? ` by ${savedBy}` : ''}. Your edits continue from that saved version. Enter your own Submitter Information before submitting so the final record identifies the right person.`, 'info', { persistent: true });
             }
 
             if (draftSession.status === 'submitted') {

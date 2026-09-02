@@ -45,6 +45,13 @@
         };
     }
 
+    function isPreviouslySavedActiveDraft(session) {
+        if (!session || session.status !== 'active') return false;
+        const createdAt = String(session.created_at || '').trim();
+        const updatedAt = String(session.updated_at || '').trim();
+        return !!createdAt && !!updatedAt && createdAt !== updatedAt;
+    }
+
     function parseExtractedSize(text) {
         const raw = String(text || '').trim();
         if (!raw) return null;
@@ -445,6 +452,7 @@
         findMenuSizeDefault,
         tokenizePropertyHint,
         findCatalogMatchesFromHints,
+        isPreviouslySavedActiveDraft,
         shouldBlockSubmitForStaleAiCheck,
     };
     if (typeof module !== 'undefined' && module.exports) {

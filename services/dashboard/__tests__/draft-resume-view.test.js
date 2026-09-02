@@ -40,6 +40,20 @@ describe('draft session resume behavior (form view)', () => {
         const t = readForm();
         expect(t).toContain('resumedPriorSave');
         expect(t).toContain('You are resuming an in-progress draft last saved');
+        expect(t).toContain('Enter your own Submitter Information before submitting');
+    });
+
+    test('resuming a saved draft clears inherited submitter identity and suppresses remembered-profile prefill', () => {
+        const t = readForm();
+        expect(t).toContain('isPreviouslySavedActiveDraft(draftSession)');
+        expect(t).toContain('clearResumedDraftSubmitterIdentity();');
+        expect(t).toContain('if (draftRequiresFreshSubmitterIdentity) return;');
+        expect(t).toMatch(/clearResumedDraftSubmitterIdentity\(\)[\s\S]*submitterName[\s\S]*submitterEmail[\s\S]*submitterJobTitle/);
+    });
+
+    test('active draft restore refreshes the derived read-only date after applying saved form state', () => {
+        const t = readForm();
+        expect(t).toMatch(/applyDraftFormState\(draftSession\.form_state \|\| \{\}\);[\s\S]*draftSession\.status === 'active'[\s\S]*setDateNeededMinimumFromTurnaround\(true\);/);
     });
 
     test('opening a draft on a non-latest baseline warns at open, not only at continue', () => {

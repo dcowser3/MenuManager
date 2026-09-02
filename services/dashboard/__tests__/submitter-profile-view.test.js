@@ -21,10 +21,11 @@ describe('remembered submitter profile (form view)', () => {
         expect(t).toContain('// Remember this submitter for next time (Phase 4).\n                saveSubmitterProfile();');
     });
 
-    test('prefill runs after draft restore and only fills empty fields (draft form_state wins)', () => {
+    test('prefill runs after draft restore but is suppressed when a saved shared draft requires fresh identity', () => {
         const t = readView('form.ejs');
         // Ordering: applyDraftSession() then prefillSubmitterProfile().
         expect(t).toMatch(/applyDraftSession\(\);[\s\S]*prefillSubmitterProfile\(\);/);
+        expect(t).toContain('if (draftRequiresFreshSubmitterIdentity) return;');
         // fillIfEmpty guards on the field already being non-empty.
         expect(t).toContain('const fillIfEmpty = (id, value) => {');
         expect(t).toContain("if (el && !`${el.value || ''}`.trim() && `${value || ''}`.trim())");

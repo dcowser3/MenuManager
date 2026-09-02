@@ -63,6 +63,7 @@ Drafts have no identity until submit. For the badge and dashboard to say more th
 - The drafts/lineage batch lookups on `/approved-menus` now join on **both** public ids. Drafts store `base_submission_id` via `getPublicSubmissionId` (legacy_id preferred) while the card list keys rows uuid-first; rows with both ids never matched, so the In-progress/Resume card state never rendered and `Edit This Menu` silently resumed an existing draft.
 - Opening a previously saved draft shows an explicit "You are resuming an in-progress draft last saved …" banner (all entry paths, including shared links).
 - Opening an active draft whose baseline is not the latest for its property + service period shows a persistent warning banner at open. The pre-existing confirm dialog still fires at continue/submit; the banner deliberately does not offer "Load Newer Menu" because that would overwrite the draft's saved edits under the old baseline id.
+- **September 2026 resume fix:** a previously saved shared draft no longer carries its prior editor's Submitter Information into the final submission. Name, email, and job title are cleared on resume, remembered-browser profile prefill is suppressed for that load, and the resume banner tells the current person to identify themselves. The read-only Date Needed is recalculated from today's date plus the saved turnaround so an idle draft cannot retain an expired date and dead-end at submit.
 
 ### In-progress dashboard
 

@@ -6,6 +6,7 @@ const {
     findSearchMatchRange,
     findCatalogMatchesFromHints,
     findMenuSizeDefault,
+    isPreviouslySavedActiveDraft,
     isSuggestionAlreadyApplied,
     isValidDateInputValue,
     normalizeSearchText,
@@ -76,6 +77,31 @@ describe('clampExtractedDateNeeded', () => {
         const result = clampExtractedDateNeeded('  2026-04-13  ', '  2026-04-20  ');
         expect(result.value).toBe('2026-04-20');
         expect(result.warning).toBeNull();
+    });
+});
+
+describe('isPreviouslySavedActiveDraft', () => {
+    test('requires fresh submitter identity only for an active draft saved after creation', () => {
+        expect(isPreviouslySavedActiveDraft({
+            status: 'active',
+            created_at: '2026-08-23T19:17:26.000Z',
+            updated_at: '2026-08-23T19:18:00.000Z',
+        })).toBe(true);
+        expect(isPreviouslySavedActiveDraft({
+            status: 'active',
+            created_at: '2026-08-23T19:17:26.000Z',
+            updated_at: '2026-08-23T19:17:26.000Z',
+        })).toBe(false);
+        expect(isPreviouslySavedActiveDraft({
+            status: 'submitted',
+            created_at: '2026-08-23T19:17:26.000Z',
+            updated_at: '2026-08-23T19:18:00.000Z',
+        })).toBe(false);
+    });
+
+    test('does not treat incomplete session metadata as a resumed draft', () => {
+        expect(isPreviouslySavedActiveDraft(null)).toBe(false);
+        expect(isPreviouslySavedActiveDraft({ status: 'active' })).toBe(false);
     });
 });
 
