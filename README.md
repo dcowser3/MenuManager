@@ -18,6 +18,8 @@ Approved-menu edits load the reviewer-approved text and formatting, not the orig
 
 When Basic AI Check or a suggestion updates an editable menu, heading and dish-name formatting is mapped against the live editor text so collapsed whitespace cannot shift bold styling onto neighboring words or lines.
 
+Review formatting preserves corrected line breaks and keeps allergen codes attached to their dishes. Description-less buffet dishes are bolded as complete dish names, separately from the following dish; descriptions and codes remain outside the automatic bold range. See [dish-name formatting and the Toro holiday regression](docs/design-docs/dish-name-formatting.md).
+
 Clean approved-menu extraction also collapses accidental repeated in-line spaces left by accepted tracked changes, keeping the stored text and HTML representations aligned.
 
 After a revision is approved, only a known `revision_base_submission_id` lineage relationship supersedes its parent; unrelated menus in the same property and service period remain editable. When a prior approved DOCX is uploaded as a baseline, the form may suggest a matching approved menu, but it records a lineage link only if the user explicitly confirms it.

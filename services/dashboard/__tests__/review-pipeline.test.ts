@@ -43,6 +43,22 @@ function buildFeedback(correctedMenu: string, suggestions: any[]): string {
 }
 
 describe('parseAIResponse (extracted from index.ts)', () => {
+    test('replays the Toro response without moving allergen suffixes or adding a vegan raw marker', () => {
+        const fixture = require('../__fixtures__/basic-check/toro-holiday.json');
+        const corrected = fixture.modelCorrectedLines.join('\n');
+        const result = runPostAiPipeline({
+            feedback: buildFeedback(corrected, []),
+            preCheckedReviewBody: fixture.originalLines.join('\n'),
+            acceptedCorrectionRules: [],
+            embeddedSetMenuAnalysis: { sections: [], issues: [] },
+            precheckEnabled: true,
+            effectiveReviewAllergens: 'D dairy | G gluten | N nuts | S shellfish | V vegetarian | VG vegan',
+        });
+        expect(result.structureGuard.safe).toBe(true);
+        expect(result.correctedMenuSanitized).toBe(corrected);
+        expect(result.hasCriticalErrors).toBe(false);
+    });
+
     test('extracts corrected menu and suggestions from markers', () => {
         const parsed = parseAIResponse(
             buildFeedback('GUACAMOLE\nfresh avocado 12', [
@@ -680,6 +696,19 @@ describe('enforceAllergenProgramCheck', () => {
     it('does not inject when dishes carry allergen code clusters', () => {
         const result = enforceAllergenProgramCheck(codedMenu, []);
         expect(result.filter((s) => (s.type || '').toLowerCase().includes('allergen'))).toHaveLength(0);
+    });
+
+    it('recognizes trailing codes on description-less and described unpriced buffet dishes', () => {
+        for (const line of ['Snow Crab Claws & Crab Legs S', 'Vegan Tiradito, cucumber, avocado VG']) {
+            expect(enforceAllergenProgramCheck(line, [])).toEqual([]);
+        }
+    });
+
+    it('does not mistake an uncoded dish plus legend for a coded buffet program', () => {
+        const result = enforceAllergenProgramCheck(
+            'Snow Crab Claws & Crab Legs\nS shellfish | VG vegan', []
+        );
+        expect(result).toEqual([expect.objectContaining({ severity: 'critical', menuItem: 'Entire menu' })]);
     });
 
     it('does not duplicate an existing AI allergen suggestion', () => {

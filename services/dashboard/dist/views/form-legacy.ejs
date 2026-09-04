@@ -6102,7 +6102,10 @@
             if (text.length > 48) return false;
             if (/[,:;]/.test(text)) return false;
             if (/\d/.test(text)) return false;
-            return text.split(/\s+/).length <= 6;
+            // Short text alone is not a heading: buffet dishes often have no
+            // description or price. Preserve custom source styling and only
+            // infer common section labels here.
+            return /^(?:(?:cold|hot)\s+)?(?:starters?|appetizers?|entradas?|mains?|entr[eé]es?|desserts?|postres|sides?|tacos?|soups?(?:\s+(?:and|&)\s+salads?)?|salads?|cocktails?|beverages?|drinks?|wines?|beers?|spirits?|bottomless\s+enhancements?|for\s+the\s+table|(?:.+\s+)?menu|(?:.+\s+)?station)$/i.test(text);
         }
 
         function preserveMenuStructure(originalText, correctedText) {
@@ -6139,28 +6142,9 @@
         function applyHeadingFormatting(originalText, displayText) {
             if (!quill) return;
             const editorText = getLiveEditorTextForFormatting(displayText, 'Heading formatting');
-            const originalLines = (originalText || '').split('\n');
-            const displayLines = (displayText || '').split('\n');
             const editorLineRanges = buildDisplayLineRanges(editorText);
-            const headingLineIndexes = [];
-
-            if (originalLines.length === displayLines.length) {
-                for (let i = 0; i < originalLines.length; i++) {
-                    if (isHeadingLike(originalLines[i]) && (displayLines[i] || '').trim()) {
-                        headingLineIndexes.push(i);
-                    }
-                }
-            } else {
-                for (let i = 0; i < displayLines.length; i++) {
-                    if (isHeadingLike(displayLines[i])) {
-                        headingLineIndexes.push(i);
-                    }
-                }
-            }
-
-            const headingSet = new Set(headingLineIndexes);
             editorLineRanges.forEach((line) => {
-                if (headingSet.has(line.index) && line.text.trim()) {
+                if (isHeadingLike(line.text)) {
                     quill.formatText(line.start, line.text.length, { bold: true });
                 }
             });
@@ -6312,6 +6296,12 @@
                 : '';
             if (reviewedHtml && quill && quill.clipboard) {
                 quill.clipboard.dangerouslyPasteHTML(reviewedHtml);
+                const expectedText = String(text || '').replace(/\r\n?/g, '\n').replace(/\n$/, '');
+                const pastedText = String(quill.getText() || '').replace(/\n$/, '');
+                if (pastedText !== expectedText) {
+                    console.warn('Reviewed rich formatting changed menu text; restoring the corrected text.');
+                    quill.setText(text);
+                }
             } else {
                 quill.setText(text);
             }
@@ -7164,8 +7154,9 @@
             // Remove purely-empty paragraphs; these often become visual double-spacing in DOCX.
             html = html.replace(/<p>(?:\s|&nbsp;|<br\s*\/?>)*<\/p>/gi, '');
 
-            // Collapse excessive whitespace between paragraph tags.
-            html = html.replace(/>\s+</g, '><').trim();
+            // Only collapse spacing between paragraphs. A space between inline
+            // tags (bold dish name + highlighted allergen) is menu content.
+            html = html.replace(/<\/p>\s+<p\b/gi, '</p><p').trim();
             return html;
         }
 

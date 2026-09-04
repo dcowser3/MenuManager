@@ -396,7 +396,7 @@
         const revised = String(targetText || '');
 
         if (!sourceText || !sourceIndex.entries || !sourceIndex.entries.length) {
-            return escapeHtml(revised);
+            return escapeHtml(revised).replace(/\r\n?|\n/g, '<br>');
         }
 
         const sourceTokens = tokenizeDiffText(sourceText);
@@ -410,13 +410,27 @@
         let html = '';
         targetTokens.forEach(function (targetToken, targetIndex) {
             const sourceToken = sourceByTargetIndex.get(targetIndex);
-            if (sourceToken) {
+            // LCS deliberately treats spaces and line breaks as equivalent.
+            // It may borrow styles, but must never borrow the source whitespace:
+            // doing so moves new suffixes (e.g. allergens) across dish boundaries.
+            if (targetToken.type === 'whitespace') {
+                const tags = sourceToken && !/[\r\n]/.test(sourceToken.value)
+                    ? sourceIndex.entries[sourceToken.start].tags
+                    : [];
+                html += targetToken.value.split(/\r\n?|\n/).map(function (part) {
+                    return part ? wrapRichTextChunk(part, tags) : '';
+                }).join('<br>');
+            } else if (sourceToken && sourceToken.value === targetToken.value) {
                 html += renderRichTextRange(
                     sourceIndex.entries,
                     sourceToken.start,
                     sourceToken.end,
                     targetToken.value
                 );
+            } else if (sourceToken) {
+                // Equivalent tokens can still differ in spelling of punctuation
+                // or Unicode normalization. The reviewed target owns the text.
+                html += wrapRichTextChunk(targetToken.value, sourceIndex.entries[sourceToken.start].tags);
             } else {
                 html += escapeHtml(targetToken.value);
             }

@@ -998,6 +998,29 @@ describe('approved dish extraction', () => {
 });
 
 describe('dish name formatting anchors', () => {
+    test('keeps description-less buffet dishes separate from the next named dish', () => {
+        const fixture = require('../../dashboard/__fixtures__/basic-check/toro-holiday.json');
+        const menu = fixture.modelCorrectedLines.join('\n');
+        const dishes = previewDishExtraction(menu);
+        expect(dishes.find((dish) => dish.name === 'Snow Crab Claws & Crab Legs')).toMatchObject({
+            description: undefined,
+            allergens: ['S'],
+        });
+        expect(dishes.find((dish) => dish.name === 'Vegan Tiradito')).toMatchObject({
+            description: 'cucumber, avocado, serrano, aguachile',
+            allergens: ['VG'],
+        });
+        expect(buildDishNameFormattingAnchors(menu).map((anchor) => anchor.dishName)).toEqual(fixture.expectedDishNames);
+        expect(buildDishNameFormattingAnchors(menu).find((anchor) => anchor.dishName === 'Snow Crab Claws & Crab Legs'))
+            .toMatchObject({ reason: 'same_line_allergen', end: menu.indexOf('Snow Crab Claws & Crab Legs') + 'Snow Crab Claws & Crab Legs'.length });
+    });
+
+    test('resolves a dish name separately from a raw marker before its description', () => {
+        const menu = 'Tuna Tiradito*, cucumber, avocado, serrano G';
+        const anchors = buildDishNameFormattingAnchors(menu);
+        expect(anchors).toEqual([expect.objectContaining({ dishName: 'Tuna Tiradito', start: 0, end: 13 })]);
+    });
+
     test('returns high-confidence anchors for same-line dish signals', () => {
         const menuText = [
             'STARTERS',

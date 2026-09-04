@@ -1,6 +1,22 @@
 const redlinePreview = require('../public/js/redline-preview');
 
 describe('redline preview helpers', () => {
+    test('the accepted Toro preview retains corrected row boundaries and raw-marker spacing', () => {
+        const fixture = require('../__fixtures__/basic-check/toro-holiday.json');
+        const corrected = fixture.modelCorrectedLines.join('\n');
+        const rendered = redlinePreview.renderPersistentPreview(fixture.originalLines.join('\n'), corrected);
+        expect(redlinePreview.buildRevisionComparisonFromAnnotatedHtml(rendered.html).currentText).toBe(corrected);
+    });
+
+    test('restores source bold by matching text, never by the previous row position', () => {
+        const source = '<p><strong>Soups and salads</strong></p><p><strong>Vegan Tiradito,</strong> cucumber</p>';
+        const target = '<p><br></p><p>Soups and salads</p><p>Snow Crab Claws &amp; Crab Legs S</p><p>Vegan Tiradito, cucumber VG</p>';
+        const result = redlinePreview.restoreLeadingBoldFromSource(source, target);
+        expect(result).toContain('<p><strong>Soups and salads</strong></p>');
+        expect(result).toContain('<p>Snow Crab Claws &amp; Crab Legs S</p>');
+        expect(result).toContain('<strong>Vegan Tiradito,</strong> cucumber VG');
+    });
+
     test('extracts one logical newline per rendered menu row', () => {
         const element = {
             children: [

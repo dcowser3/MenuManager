@@ -5,6 +5,12 @@ import {
 } from '../lib/pre-ai-deterministic-rules';
 
 describe('runPreAiDeterministicChecks', () => {
+    it('does not add a raw-animal marker to the explicitly vegan Toro tiradito', () => {
+        const vegan = 'Vegan Tiradito, cucumber, avocado, serrano, aguachile VG';
+        expect(runPreAiDeterministicChecks(vegan).menuText).toBe(vegan);
+        expect(runPreAiDeterministicChecks('Tuna Tiradito, cucumber, avocado, serrano G').menuText).toContain('*');
+    });
+
     it('applies safe built-in spelling and diacritic replacements before AI review', () => {
         const result = runPreAiDeterministicChecks(
             'Jalapeno Salad, passionfruit, mozarella D, G 18',

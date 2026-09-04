@@ -1,6 +1,29 @@
 const diffCore = require('../src');
 
 describe('diff core', () => {
+    test('keeps newly added Toro allergen suffixes on the exact corrected rows', () => {
+        const fixture = require('../../dashboard/__fixtures__/basic-check/toro-holiday.json');
+        const sourceHtml = fixture.originalLines.map((line) => `<p>${line.replace(/&/g, '&amp;')}</p>`).join('');
+        const target = fixture.modelCorrectedLines.join('\n');
+        const html = diffCore.projectRichTextHtml(sourceHtml, target);
+        // Literal newlines in HTML collapse in the browser: every target row
+        // boundary must be serialized as a break, with no source breaks reused.
+        const displayed = diffCore.createRichTextIndexFromHtml(html.replace(/\n/g, ' ')).plain;
+        expect(displayed).toBe(target);
+        expect(html.match(/<br>/g)).toHaveLength(fixture.modelCorrectedLines.length - 1);
+    });
+
+    test.each([
+        ['<p>First dish</p><p>Second dish</p>', 'First dish S\nSecond dish VG'],
+        ['<p>First dish S</p><p>Second dish VG</p>', 'First dish\nSecond dish'],
+        ['<p>Old dish</p>', 'New dish\n\nAnother dish'],
+        ['', 'New dish\n\nAnother dish'],
+        ['<p><strong>Chef’s Special</strong></p>', "Chef's Special"],
+    ])('projection preserves target text independently of matched source whitespace', (source, target) => {
+        const html = diffCore.projectRichTextHtml(source, target);
+        expect(diffCore.createRichTextIndexFromHtml(html.replace(/\n/g, ' ')).plain).toBe(target);
+    });
+
     test('tokenizes words, separators, punctuation, and whitespace with offsets', () => {
         expect(diffCore.tokenizeDiffText('pickled jalapeño D, G').map((token) => ({
             value: token.value,

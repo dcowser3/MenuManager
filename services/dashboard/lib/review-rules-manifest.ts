@@ -132,8 +132,11 @@ const FUNCTIONAL_ENTRIES: ManifestRuleEntry[] = [
         layer: 'pre_ai_deterministic',
         category: 'raw_markers',
         title: 'Missing raw-marker insertion for strong raw terms',
-        description: 'Adds a missing raw marker to dishes containing strong raw/undercooked terms: tartare, sashimi, ceviche, crudo, tiradito, poke, raw or half-shell oysters, explicit raw tuna/salmon/hamachi/fish/beef, poached egg, sunny-side-up egg, hollandaise, bearnaise/béarnaise, Caesar dressing, tiramisu, cured egg yolk, meringue, and egg white. Cooked shrimp/prawn ceviche is exempt unless another independently raw term appears. Newly added egg-preparation terms are excluded when the same line states braised, slow-roasted, confit, or well-done.',
-        examples: [{ before: 'salmon sashimi, ponzu 19', after: 'salmon sashimi, ponzu* 19' }],
+        description: 'Adds a missing raw marker to dishes containing strong raw/undercooked terms: tartare, sashimi, ceviche, crudo, tiradito, poke, raw or half-shell oysters, explicit raw tuna/salmon/hamachi/fish/beef, poached egg, sunny-side-up egg, hollandaise, bearnaise/béarnaise, Caesar dressing, tiramisu, cured egg yolk, meringue, and egg white. Explicitly vegan dishes are exempt; preparation names alone are not evidence of raw animal ingredients. Cooked shrimp/prawn ceviche is exempt unless another independently raw term appears. Newly added egg-preparation terms are excluded when the same line states braised, slow-roasted, confit, or well-done.',
+        examples: [
+            { before: 'salmon sashimi, ponzu 19', after: 'salmon sashimi, ponzu* 19' },
+            { before: 'Vegan Tiradito, cucumber, avocado VG', after: 'Vegan Tiradito, cucumber, avocado VG' },
+        ],
         implementation: { file: PRE_AI_FILE, exportName: 'shouldAddRawAsterisk' },
         source: 'code_metadata',
     },

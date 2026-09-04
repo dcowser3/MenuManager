@@ -141,8 +141,9 @@ When a dish line has exactly one raw marker, spacing drift is fixed: the marker 
 
 ### Missing raw-marker insertion for strong raw terms
 
-Adds a missing raw marker to dishes containing strong raw/undercooked terms: tartare, sashimi, ceviche, crudo, tiradito, poke, raw or half-shell oysters, explicit raw tuna/salmon/hamachi/fish/beef, poached egg, sunny-side-up egg, hollandaise, bearnaise/béarnaise, Caesar dressing, tiramisu, cured egg yolk, meringue, and egg white. Cooked shrimp/prawn ceviche is exempt unless another independently raw term appears. Newly added egg-preparation terms are excluded when the same line states braised, slow-roasted, confit, or well-done.
+Adds a missing raw marker to dishes containing strong raw/undercooked terms: tartare, sashimi, ceviche, crudo, tiradito, poke, raw or half-shell oysters, explicit raw tuna/salmon/hamachi/fish/beef, poached egg, sunny-side-up egg, hollandaise, bearnaise/béarnaise, Caesar dressing, tiramisu, cured egg yolk, meringue, and egg white. Explicitly vegan dishes are exempt; preparation names alone are not evidence of raw animal ingredients. Cooked shrimp/prawn ceviche is exempt unless another independently raw term appears. Newly added egg-preparation terms are excluded when the same line states braised, slow-roasted, confit, or well-done.
 - `salmon sashimi, ponzu 19` -> `salmon sashimi, ponzu* 19`
+- `Vegan Tiradito, cucumber, avocado VG` -> `Vegan Tiradito, cucumber, avocado VG`
 
 - id: `pre-ai/raw-asterisk-insertion` · category: raw_markers · implementation: `services/dashboard/lib/pre-ai-deterministic-rules.ts#shouldAddRawAsterisk`
 

@@ -428,6 +428,58 @@ describe('dashboard form modification source chooser', () => {
         }));
     });
 
+    test.each(['form.ejs', 'form-legacy.ejs'])('%s does not format description-less dishes or neighboring rows as headings', (viewName) => {
+        const template = readView(viewName);
+        const start = template.indexOf('function isHeadingLike(line)');
+        const end = template.indexOf('function tokenizeDiffText(text)', start);
+        const calls = [];
+        const original = 'Snow Crab Claws & Crab Legs\nSoups and salads\nButternut Squash Soup, Colorado apples, candied pepitas D';
+        const displayed = 'Snow Crab Claws & Crab Legs S\n\nSoups and salads\nButternut Squash Soup, Colorado apples, candied pepitas D';
+        vm.runInNewContext(`${template.slice(start, end)}\napplyHeadingFormatting(original, displayed);`, {
+            original, displayed,
+            quill: {
+                getText: () => `${displayed}\n`,
+                formatText: (start, length, format) => calls.push({ start, length, format }),
+            },
+        });
+        expect(calls).toEqual([{
+            start: displayed.indexOf('Soups and salads'), length: 'Soups and salads'.length, format: { bold: true },
+        }]);
+    });
+
+    test.each(['form.ejs', 'form-legacy.ejs'])('%s restores authoritative corrected text if rich HTML import changes a row boundary', (viewName) => {
+        const template = readView(viewName);
+        const start = template.indexOf('function setQuillReviewedHtmlFromText(text, sourceHtml)');
+        const end = template.indexOf('function computeLineDiff(', start);
+        const expected = 'Snow Crab Claws & Crab Legs S\nVegan Tiradito, cucumber VG';
+        const setText = jest.fn();
+        vm.runInNewContext(`${template.slice(start, end)}\nsetQuillReviewedHtmlFromText(expected, '<p>source</p>');`, {
+            expected,
+            quill: {
+                clipboard: { dangerouslyPasteHTML: jest.fn() },
+                getText: () => 'Snow Crab Claws & Crab Legs\nS Vegan Tiradito, cucumber VG\n',
+                setText,
+            },
+            redlinePreview: {
+                projectRichTextHtml: () => '<p>corrupted</p>',
+                restoreLeadingBoldFromSource: (_source, html) => html,
+            },
+            htmlLinesToParagraphs: (html) => html,
+            console: { warn: jest.fn() },
+        });
+        expect(setText).toHaveBeenCalledWith(expected);
+    });
+
+    test.each(['form.ejs', 'form-legacy.ejs'])('%s preserves the space between bold names and highlighted allergens when submitting', (viewName) => {
+        const template = readView(viewName);
+        const start = template.indexOf('function sanitizeMenuHtmlForSubmission(htmlContent)');
+        const end = template.indexOf('function toggleEditMode()', start);
+        const html = '<p><strong>Snow Crab Claws &amp; Crab Legs</strong> <span style="background-color: green">S</span></p>\n  <p><strong>Vegan Tiradito</strong>, cucumber VG</p>';
+        const sandbox = { html, sanitized: '' };
+        vm.runInNewContext(`${template.slice(start, end)}\nsanitized = sanitizeMenuHtmlForSubmission(html);`, sandbox);
+        expect(sandbox.sanitized).toBe(html.replace('</p>\n  <p>', '</p><p>'));
+    });
+
     test('uses a full-screen decision dialog for existing approved menu conflicts', () => {
         const template = fs.readFileSync(
             path.join(__dirname, '..', 'views', 'form.ejs'),

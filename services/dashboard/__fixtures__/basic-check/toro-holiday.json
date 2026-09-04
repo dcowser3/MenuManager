@@ -1,0 +1,35 @@
+{
+  "provenance": {
+    "submissionId": "f094785a-b62b-4745-9f9c-1c49a236b174",
+    "checkId": "6f49f15f-3419-4c3a-9359-d28b76e597cc",
+    "reviewedAt": "2026-09-01T20:56:01.969332+00:00",
+    "model": "gpt-5.6-luna",
+    "note": "Relevant consecutive rows from the stored Basic AI Check audit. Source HTML is reconstructed for formatting tests; the uploaded DOCX is not available locally."
+  },
+  "originalLines": [
+    "Iced Seafood Display",
+    "Jumbo Shrimp, cocktail sauce, horseradish, lemons S",
+    "Snow Crab Claws & Crab Legs",
+    "Vegan Tiradito, cucumber, avocado, serrano, aguachile",
+    "Ceviche Amarillo, hamachi, leche de tigre, onion, mango, cucumber, plantain chips *",
+    "Oysters, chipotle mignonette *",
+    "Sushi Boat, angry tuna G *, toro california G, S, kappa Avocado roll V, wasabi, ginger, soy sauce G, tamari, ponzu G"
+  ],
+  "modelCorrectedLines": [
+    "Iced Seafood Display",
+    "Jumbo Shrimp, cocktail sauce, horseradish, lemons S",
+    "Snow Crab Claws & Crab Legs S",
+    "Vegan Tiradito, cucumber, avocado, serrano, aguachile VG",
+    "Ceviche Amarillo, hamachi, leche de tigre, onion, mango, cucumber, plantain chips*",
+    "Oysters, chipotle mignonette* S",
+    "Sushi Boat, angry tuna G, toro california G, S, kappa Avocado roll V, wasabi, ginger, soy sauce G, tamari, ponzu* G"
+  ],
+  "expectedDishNames": [
+    "Jumbo Shrimp",
+    "Snow Crab Claws & Crab Legs",
+    "Vegan Tiradito",
+    "Ceviche Amarillo",
+    "Oysters",
+    "Sushi Boat"
+  ]
+}

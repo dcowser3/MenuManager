@@ -425,6 +425,11 @@ function parseTwoLineDish(nameLine: string, descriptionLine?: string, options: P
         return null;
     }
 
+    if (looksLikeNamedDishWithInlineDescription(descriptionLine) &&
+        !(options.beverageContext && looksLikeBeverageDescriptionLine(descriptionLine))) {
+        return null;
+    }
+
     if (!extractPrice(nameLine) && options.beverageContext && extractPrice(descriptionLine) && !looksLikeBeverageDescriptionLine(descriptionLine)) {
         return null;
     }
@@ -528,6 +533,19 @@ function isPotentialDescriptionLine(line: string): boolean {
 
     const allergenPass = extractTrailingAllergens(normalizeAttachedAllergenCodes(cleanLine));
     return /^[a-zà-ÿ]/.test(cleanLine) || /[,/]/.test(cleanLine) || !!extractPrice(cleanLine) || allergenPass.allergens.length > 0;
+}
+
+// A complete name + description row is stronger evidence than the preceding
+// row's missing description. Do not consume it as that row's ingredients.
+// Multiple title words keep sentence-case ingredient continuations such as
+// "Roasted corn, cotija, lime" and beverage ingredient rows eligible.
+function looksLikeNamedDishWithInlineDescription(line: string): boolean {
+    const { name, description } = splitNameAndDescription(line);
+    if (!description) return false;
+    const words = name.replace(/\*+$/, '').trim().split(/\s+/);
+    return words.length >= 2 && words.every((word) =>
+        /^[A-ZÀ-Þ]/.test(word) || /^(?:&|and|of|the|de|la|al)$/i.test(word)
+    ) && /^[a-zà-ÿ]/.test(description);
 }
 
 function joinWrappedDishContinuation(line: string, nextLine?: string): { line: string; consumedLines: number } {
@@ -904,6 +922,7 @@ function parseDishLine(line: string, nextLine?: string, options: ParseDishLineOp
     if (
         !description &&
         nextLine &&
+        (!looksLikeNamedDishWithInlineDescription(nextLine) || nextLineIsBeverageDescription) &&
         !extractPrice(nextLine) &&
         !detectCategory(nextLine) &&
         !isFooterBoundary(nextLine) &&
@@ -1260,6 +1279,7 @@ function stripInlineAllergenCodes(text: string): { cleanedText: string; allergen
 
 function cleanDishNameText(name: string, options: { hadPrice?: boolean } = {}): string {
     let cleanedName = name
+        .replace(/\*+\s*$/, '')
         .replace(/\s*[-–—]\s*[$€£]\s*\d+(?:\.\d{1,2})?(?:\s*[A-Z]{1,3}(?:\s*,\s*[A-Z]{1,3})*)?\s*$/i, '')
         .replace(/\s*\((?:suggested|prix[-\s]*fix(?:e|ed)?\s+price)[^)]*[$€£]\s*\d+(?:\.\d{1,2})?[^)]*\)\s*$/i, '')
         .replace(/\s*\([^)]*\)\s*[$€£]\s*\d+(?:\.\d{1,2})?/gi, '')
@@ -1736,7 +1756,7 @@ function hasExactDishNamePrefix(lineText: string, dishName: string): boolean {
     }
 
     const remainder = trimmedLine.slice(cleanName.length);
-    return !remainder || /^[\s,;:|/)-]|^[-–—]/.test(remainder);
+    return !remainder || /^[\s*,;:|/)-]|^[-–—]/.test(remainder);
 }
 
 function sourceLineHasSameLineAllergen(lineText: string): boolean {
@@ -1763,7 +1783,7 @@ function getDishNameFormattingReason(
         return null;
     }
 
-    const suffix = sourceLine.trim().slice(dishName.length);
+    const suffix = sourceLine.trim().slice(dishName.length).replace(/^\*+/, '');
     const hasInlineDescription = !!dish.input.description && /^\s*(?:[,;:]|[-–—])\s*\S/.test(suffix);
     if (hasInlineDescription) {
         return 'inline_description';

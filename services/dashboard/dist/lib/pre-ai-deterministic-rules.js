@@ -656,6 +656,11 @@ function shouldAddRawAsterisk(line) {
     if (!normalized.trim() || normalized.includes('*') || /consuming raw or undercooked/.test(normalized)) {
         return false;
     }
+    // Preparation names such as tiradito/tartare also describe plant-based
+    // dishes. An explicitly vegan name is not evidence of raw animal food.
+    if (/^\s*vegan\b/i.test(line)) {
+        return false;
+    }
     if (/\bceviche\b/.test(normalized) && /\b(?:poached|cooked)\b/.test(normalized)) {
         return false;
     }

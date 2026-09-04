@@ -2,6 +2,11 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 const pre_ai_deterministic_rules_1 = require("../lib/pre-ai-deterministic-rules");
 describe('runPreAiDeterministicChecks', () => {
+    it('does not add a raw-animal marker to the explicitly vegan Toro tiradito', () => {
+        const vegan = 'Vegan Tiradito, cucumber, avocado, serrano, aguachile VG';
+        expect((0, pre_ai_deterministic_rules_1.runPreAiDeterministicChecks)(vegan).menuText).toBe(vegan);
+        expect((0, pre_ai_deterministic_rules_1.runPreAiDeterministicChecks)('Tuna Tiradito, cucumber, avocado, serrano G').menuText).toContain('*');
+    });
     it('applies safe built-in spelling and diacritic replacements before AI review', () => {
         const result = (0, pre_ai_deterministic_rules_1.runPreAiDeterministicChecks)('Jalapeno Salad, passionfruit, mozarella D, G 18', { allergenLegend: 'D dairy | G gluten | V vegetarian' });
         expect(result.menuText).toBe('Jalapeño Salad, passion fruit, mozzarella D,G 18');

@@ -453,19 +453,14 @@
 
         if (!global.document || !global.document.createElement) {
             const sourceBlocks = stripExistingAnnotationsForEditor(sourceHtml).match(/<p\b[^>]*>[\s\S]*?<\/p>/gi) || [];
-            let targetIndex = 0;
             return String(targetHtml).replace(/<p\b([^>]*)>([\s\S]*?)<\/p>/gi, function (match, attrs, innerHtml) {
-                const sourceBlock = sourceBlocks[targetIndex++] || '';
-                const leadingBold = sourceBlock.match(/<p\b[^>]*>\s*<(?:strong|b)\b[^>]*>([\s\S]*?)<\/(?:strong|b)>/i);
-                if (!leadingBold) return match;
-                const sourceText = leadingBold[1].replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
-                const targetText = innerHtml.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
-                if (!sourceText || !targetText) return match;
-                const commaIndex = targetText.indexOf(',');
-                const boldLength = commaIndex >= 0 ? commaIndex + 1 : Math.min(sourceText.length, targetText.length);
-                const prefix = targetText.slice(0, boldLength);
-                if (!innerHtml.startsWith(prefix)) return match;
-                return `<p${attrs}><strong>${escapeHtml(prefix)}</strong>${innerHtml.slice(prefix.length)}</p>`;
+                const hints = sourceBlocks.map(function (block) {
+                    const leadingBold = block.match(/<p\b[^>]*>\s*<(?:strong|b)\b[^>]*>([\s\S]*?)<\/(?:strong|b)>/i);
+                    return leadingBold ? leadingBold[1] : '';
+                }).filter(function (prefix) { return prefix && innerHtml.startsWith(prefix); });
+                if (hints.length !== 1) return match;
+                const prefix = hints[0];
+                return `<p${attrs}><strong>${prefix}</strong>${innerHtml.slice(prefix.length)}</p>`;
             });
         }
 
@@ -478,19 +473,17 @@
         const targetBlocks = getBlockChildren(targetContainer);
         if (!sourceBlocks.length || !targetBlocks.length) return targetHtml;
 
-        targetBlocks.forEach(function (targetBlock, index) {
-            const hint = getLeadingBoldHint(sourceBlocks[index]);
-            if (!hint) return;
+        const sourceHints = sourceBlocks.map(getLeadingBoldHint).filter(Boolean);
+        targetBlocks.forEach(function (targetBlock) {
             const targetText = normalizeInlineText(targetBlock.textContent);
             if (!targetText) return;
-
-            const targetComma = targetText.indexOf(',');
-            const sourceComma = hint.lineText.indexOf(',');
-            const boldLength = sourceComma >= 0 && targetComma >= 0
-                ? targetComma + 1
-                : Math.min(hint.boldText.length, targetText.length);
-
-            wrapLeadingTextInStrong(targetBlock, boldLength);
+            const hints = sourceHints.filter(function (hint) {
+                return targetText === hint.boldText || (
+                    targetText.startsWith(hint.boldText) &&
+                    (/[,;:]$/.test(hint.boldText) || /^[\s*,;:|/)-]/.test(targetText.slice(hint.boldText.length)))
+                );
+            });
+            if (hints.length === 1) wrapLeadingTextInStrong(targetBlock, hints[0].boldText.length);
         });
 
         return targetContainer.innerHTML;
@@ -1694,7 +1687,7 @@
         }
 
         const remainder = sourceLine.slice(leadingWhitespaceLength + name.length);
-        if (remainder && !/^[\s,;:|/)-]/.test(remainder) && !/^[-–—]/.test(remainder)) {
+        if (remainder && !/^[\s*,;:|/)-]/.test(remainder) && !/^[-–—]/.test(remainder)) {
             return null;
         }
 
@@ -2119,6 +2112,12 @@
             function renderChangedTokenRun(baseStart, baseEnd, revisedStart, revisedEnd) {
                 const deletedTokens = baseTokens.slice(baseStart, baseEnd);
                 const insertedTokens = revisedTokens.slice(revisedStart, revisedEnd);
+                // Whitespace-only corrections have no visible deleted content.
+                // Keeping the old space unannotated would undo corrections such
+                // as "mignonette *" -> "mignonette*" in the submitted preview.
+                if (!tokenSliceText(deletedTokens).trim()) {
+                    return renderInsertedTokens(insertedTokens);
+                }
                 return renderDeletedTokens(deletedTokens) +
                     (needsReplacementSeparator(deletedTokens, insertedTokens) ? ' ' : '') +
                     renderInsertedTokens(insertedTokens);
