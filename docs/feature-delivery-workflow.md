@@ -25,7 +25,7 @@ Important implications:
 1. Change the source files you actually mean to maintain.
 2. Add or update automated tests for the new behavior.
 3. Build every affected workspace.
-4. Restart every affected service from the repo root.
+4. Check stack ownership with `npm run dev:doctor`; restart only affected services owned by this task, or use an isolated Docker fixture stack.
 5. Verify the changed behavior with a live request or browser check.
 6. Update docs in the same change set.
 
@@ -108,6 +108,8 @@ ps eww -p $(lsof -tiTCP:3005 -sTCP:LISTEN)
 Every feature change needs both automated coverage and a live check.
 
 Automated verification examples:
+
+- isolated source tests with no checkout writes or network: `npm run dev:test -- services/dashboard/__tests__/form-stage.test.js`
 
 - route/helper/unit test for new behavior
 - workspace-local test script when available, for example `npm test --workspace=@menumanager/clickup-integration -- --runInBand`

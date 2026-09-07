@@ -19,14 +19,14 @@ RUN apt-get update \
         python3 python3-venv python3-pip python3-dev \
         build-essential \
         ca-certificates \
-        curl \
+        curl git \
     && rm -rf /var/lib/apt/lists/*
 
 # 1. Install workspace deps.
 # Copy only the package manifests + root tsconfig first so the npm-ci layer
 # caches when only source files change. tsconfig.json is needed because every
 # service's tsconfig extends ../../tsconfig.json.
-COPY package.json package-lock.json tsconfig.json jest.config.js ./
+COPY package.json package-lock.json tsconfig.json jest.config.js jest.setup.js ./
 COPY services/internal-auth/package.json ./services/internal-auth/
 COPY services/llm-adapter/package.json ./services/llm-adapter/
 COPY services/supabase-client/package.json ./services/supabase-client/

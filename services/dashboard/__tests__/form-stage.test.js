@@ -1,7 +1,4 @@
 const {
-    STAGES,
-    stageIndex,
-    atLeast,
     nonEmpty,
     hasMenu,
     assetFieldsFilled,
@@ -47,23 +44,6 @@ function filledSubmitter(overrides) {
         submitterJobTitle: 'Executive Chef',
     }, overrides || {});
 }
-
-describe('stage ordering', () => {
-    test('STAGES are in flow order', () => {
-        expect(STAGES).toEqual(['upload', 'menu', 'details', 'approval', 'ai', 'submit']);
-    });
-
-    test('stageIndex defaults unknown to 0', () => {
-        expect(stageIndex('upload')).toBe(0);
-        expect(stageIndex('ai')).toBe(4);
-        expect(stageIndex('nope')).toBe(0);
-    });
-
-    test('atLeast compares by flow position', () => {
-        expect(atLeast('approval', 'menu')).toBe(true);
-        expect(atLeast('menu', 'approval')).toBe(false);
-    });
-});
 
 describe('nonEmpty', () => {
     test('trims strings and coerces truthiness', () => {

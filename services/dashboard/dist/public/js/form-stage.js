@@ -12,19 +12,6 @@
  * both browser-global (window.MenuFormStage) and require()-able in Jest.
  */
 (function (global) {
-    // Ordered stages of the flow. Each later stage is gated on the earlier ones.
-    var STAGES = ['upload', 'menu', 'details', 'approval', 'ai', 'submit'];
-
-    function stageIndex(stage) {
-        var idx = STAGES.indexOf(stage);
-        return idx === -1 ? 0 : idx;
-    }
-
-    // Has the flow reached at least `stage`?
-    function atLeast(current, stage) {
-        return stageIndex(current) >= stageIndex(stage);
-    }
-
     // A value counts as "filled" when it is a non-empty trimmed string (or truthy).
     function nonEmpty(value) {
         return typeof value === 'string' ? value.trim().length > 0 : !!value;
@@ -130,9 +117,6 @@
     }
 
     var api = {
-        STAGES: STAGES,
-        stageIndex: stageIndex,
-        atLeast: atLeast,
         nonEmpty: nonEmpty,
         hasMenu: hasMenu,
         assetFieldsFilled: assetFieldsFilled,

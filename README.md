@@ -104,6 +104,8 @@ cp .env.example .env
 open http://localhost:3005
 ```
 
+Before starting or resetting services, use `npm run dev:doctor` to check which checkout owns the running stack. Run focused tests without touching it with `npm run dev:test -- services/dashboard/__tests__/form-stage.test.js`. See [safe worktree verification](docs/local-dev-troubleshooting.md#focused-tests-without-changing-a-running-stack).
+
 Docker dev mode is the default local workflow. It runs service source with `ts-node-dev`, keeps `node_modules` and the DOCX redliner Python venv inside the image, and bind-mounts source files for hot reload.
 
 Native service startup still exists for deliberate non-Docker work:
@@ -123,6 +125,7 @@ npm test
 npm run test:business
 npm run approval-editor:harness
 npm run test:approval-editor-browser
+npm run benchmark:approved-dishes -- <baseline-git-ref>
 npm run smoke:basic-ai-check
 ```
 

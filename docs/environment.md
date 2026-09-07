@@ -1,6 +1,6 @@
 # Environment Variables
 
-All variables are configured in `.env` at the project root. See `.env.example` for a template.
+Application variables are configured in `.env` at the project root. See `.env.example` for a template.
 
 ## Model provenance and production pinning
 
@@ -282,3 +282,9 @@ Notes:
 - The DB service must be running because the script stores the discovered folders via `PUT /properties/:name/sharepoint-config`; when `INTERNAL_API_TOKEN` is set, the script sends it as the internal auth header.
 - If Supabase is configured, the DB service mirrors the same property metadata to the `properties` table.
 - The repo now seeds route metadata for `Aqimero - Ritz-Carlton - Philadelphia`, `Maya - New York`, `Tamayo - Denver`, `Toro - Hotel Clio - Denver`, `Toro - Fairmont Millennium Park - Chicago`, `Toro - Dania Beach`, and `Toro - Viceroy - Snowmass`; additional properties can be added the same way or refreshed with the sync script.
+
+## Local verification tools
+
+`DEV_TEST_IMAGE` selects the installed Docker image for `npm run dev:test` (default `menumanager/dev:latest`). Set it in the invoking shell, for example `DEV_TEST_IMAGE=menumanager/dev-audit:local npm run dev:test -- services/dashboard/__tests__/form-stage.test.js`; the verification tools intentionally do not load `.env`. The runner pins the image ID and rejects a lockfile mismatch. See [isolated verification](local-dev-troubleshooting.md#focused-tests-without-changing-a-running-stack).
+
+`PLAYWRIGHT_CHROMIUM_CHANNEL` selects the installed browser channel for the approved-dishes benchmark (default `chrome`), also via the shell. The benchmark uses synthetic rows and blocks browser network requests.

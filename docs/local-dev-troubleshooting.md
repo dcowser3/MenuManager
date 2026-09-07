@@ -15,16 +15,11 @@ The dev stack uses Node 24 LTS and keeps Python venv and `node_modules` inside a
 
 ### Docker workflow cheatsheet
 
-**AI agents (and anyone mixing native/Docker runs):** Leftover native processes are the #1 cause of "Ports are not available" / bind errors when starting Docker. Clean first:
+Before starting or resetting services, run `npm run dev:doctor`. It reports which checkout owns the running service mounts, Docker/image availability, and port reachability. A listening port alone does not prove application readiness. Resolve ownership before stopping a container or process.
 
-```bash
-# Free all MenuManager service ports (safe no-op if nothing is listening)
-for p in 3001 3002 3003 3004 3005 3006 3007; do
-  lsof -ti:$p 2>/dev/null | xargs kill -9 2>/dev/null || true
-done
-```
+The default Compose file fixes the `mm-*` container names and ports 3001–3007. A different worktree or Compose project name alone **does not** isolate another stack. Keep another task's services running; use the isolated test command below, or an explicitly separate Compose configuration with its own names, ports, environment and storage. Never blindly kill all port owners.
 
-Then:
+For a stack owned by this checkout:
 
 ```bash
 ./dev-up.sh                # build image (first run) + start all services, follow logs
@@ -37,6 +32,27 @@ Then:
 ```
 
 Compose files: `docker-compose.dev.yml` (this dev setup) vs `docker-compose.yml` (prod-style build, untouched). Image: `docker/Dockerfile.dev`. Service source, `tmp/`, `samples/`, and `.env` are bind-mounted, so edits hot-reload via `ts-node-dev` without rebuilding.
+
+### Focused tests without changing a running stack
+
+```bash
+npm run dev:doctor
+npm run dev:doctor -- --json
+npm run dev:test -- services/dashboard/__tests__/form-stage.test.js services/dashboard/__tests__/approved-dishes-table.test.js
+```
+
+`dev:test` accepts explicit existing source tests, runs Jest serially, and returns its exit status. It copies tracked and untracked, non-ignored source files into a disposable container. It replaces application source baked into the image, so deleted files stay deleted. The checkout is never mounted; tests cannot write back to it. No host environment file, runtime data directories, samples, host dependencies or network access are provided. It does not start, stop or restart services and makes no provider calls. Tests requiring DOCX/PDF samples or external services need a separate fixture-based integration setup.
+
+Before Jest, it rebuilds the four shared TypeScript libraries inside the container so package imports cannot silently exercise stale `dist/`.
+
+The image supplies Node, Git, Jest and installed dependencies. The runner pins the resolved image ID and rejects a dependency lockfile mismatch before testing. Rebuild after changing dependency manifests. To avoid overwriting another task's image:
+
+```bash
+docker build -f docker/Dockerfile.dev -t menumanager/dev-audit:local .
+DEV_TEST_IMAGE=menumanager/dev-audit:local npm run dev:test -- services/dashboard/__tests__/form-stage.test.js
+```
+
+A clean Git worktree starts at a commit and does not contain uncommitted work from another checkout. Treat frozen learning/evaluation candidates as read-only; keep audit fixes in a separate branch until that candidate is released. Isolated unit tests establish code behavior, not live page or submission verification. Follow the [feature workflow](feature-delivery-workflow.md) for those checks.
 
 ### Docker smoke checks
 

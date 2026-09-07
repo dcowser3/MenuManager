@@ -66,15 +66,17 @@
             let sortColumn = 1;
             let sortDirection = 'asc';
 
-            const applyTableState = () => {
+            const applyTableState = (sortRows = false) => {
                 const filters = Array.from(table.querySelectorAll('.dish-column-filter')).map((input) => ({
                     column: Number(input.dataset.column || 0),
                     value: input.value,
                 }));
 
                 const rows = Array.from(tbody.querySelectorAll('tr'));
-                rows.sort((a, b) => compareDishRows(a, b, sortColumn, sortDirection));
-                rows.forEach((row) => tbody.appendChild(row));
+                if (sortRows) {
+                    rows.sort((a, b) => compareDishRows(a, b, sortColumn, sortDirection));
+                    rows.forEach((row) => tbody.appendChild(row));
+                }
 
                 let visibleCount = 0;
                 rows.forEach((row) => {
@@ -96,15 +98,15 @@
                         sortColumn = column;
                         sortDirection = 'asc';
                     }
-                    applyTableState();
+                    applyTableState(true);
                 });
             });
 
             table.querySelectorAll('.dish-column-filter').forEach((input) => {
-                input.addEventListener('input', applyTableState);
+                input.addEventListener('input', () => applyTableState());
             });
 
-            applyTableState();
+            applyTableState(true);
         });
     }
 

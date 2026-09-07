@@ -25,7 +25,10 @@
     "audit:approved-documents": "node scripts/audit-approved-documents.js",
     "sharepoint:sync-property": "node scripts/sync-sharepoint-property.js",
     "reconcile:correction-rules": "node scripts/reconcile-correction-rules.js",
-    "backfill:menus": "node scripts/backfill-menus.js"
+    "backfill:menus": "node scripts/backfill-menus.js",
+    "dev:doctor": "node scripts/dev-doctor.js",
+    "dev:test": "node scripts/dev-test.js",
+    "benchmark:approved-dishes": "node scripts/approved-dishes-benchmark.js"
   },
   "keywords": [],
   "author": "",

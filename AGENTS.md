@@ -60,7 +60,7 @@ These apply to almost every change — keep them in mind without needing a deepe
 
 - **Docker-first local verification (AI agents: follow this strictly):** Use `./dev-up.sh` / `docker-compose.dev.yml` for local service startup, route/API/browser verification, and service-dependent debugging **by default**. Native `npm start --workspace=...`, `node dist/index.js`, and `./start-services.sh` are fallback-only paths for deliberately non-Docker work. AI agents must not start native services unless the user explicitly says "use native mode" or "test host startup".
 - **Docker reset:** If services, tests, or dependency state act strange, prefer `./dev-up.sh --down && ./dev-up.sh -d`; after dependency/shared-library/Python changes use `./dev-up.sh --rebuild`, `./dev-up.sh --reset-venv`, or `./dev-up.sh --nuke` as appropriate.
-- **Port conflicts (common with mixed native + Docker or long agent sessions):** Leftover processes from previous `start-services.sh`, `screen` sessions, or background jobs hold ports. Before `./dev-up.sh`, run: `for p in 3001 3002 3003 3004 3005 3006 3007; do lsof -ti:$p 2>/dev/null | xargs kill -9 2>/dev/null || true; done` (or just `./dev-up.sh --down` first). See the full clean-start guidance in [docs/local-dev-troubleshooting.md](docs/local-dev-troubleshooting.md).
+- **Shared services and worktrees:** Run `npm run dev:doctor` before startup or reset. Confirm the service source mounts belong to this checkout; the default Compose file has fixed `mm-*` container names and ports, so a worktree or `-p` alone does not isolate it. Never kill every port owner or reset another task's stack. Use `npm run dev:test -- <source-test-path> [...]` for isolated focused tests. See [docs/local-dev-troubleshooting.md](docs/local-dev-troubleshooting.md).
 - **Build check:** `npx tsc --noEmit --project services/<name>/tsconfig.json`
 - **Every TS service declares `typescript` locally** in its own `devDependencies` — don't rely on hoisting; a partial install can leave the hoisted `tsc` shim broken.
 - **Python venv:** `services/docx-redliner/venv/bin/python` (try first, fallback to `python3`). In Docker mode the venv lives in the image — reset with `./dev-up.sh --reset-venv`.
@@ -82,7 +82,7 @@ Load these only when the task touches the area.
 ### Running locally / dev environment / startup failures
 → [docs/local-dev-troubleshooting.md](docs/local-dev-troubleshooting.md)
 
-**AI agents:** Always use the Docker workflow described in AGENTS.md (above) and the linked doc. See "Port conflicts" bullet for the common leftover-process case.
+**AI agents:** Always use the Docker workflow described in AGENTS.md (above) and the linked doc. See "Shared services and worktrees" above before resolving port conflicts.
 
 Docker is the default local workflow: `./dev-up.sh` uses [docker-compose.dev.yml](docker-compose.dev.yml) + [docker/Dockerfile.dev](docker/Dockerfile.dev). Native mode (`./start-services.sh`) is documented there only as an intentional fallback. The doc covers Docker smoke checks, OOM kills, EADDRINUSE/port conflicts from native processes, broken tsc shim, corrupted Python venv, missing `INTERNAL_API_TOKEN` — all real failure modes you'll re-derive without it.
 
