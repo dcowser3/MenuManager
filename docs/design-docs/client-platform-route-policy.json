@@ -1,0 +1,399 @@
+{
+  "schemaVersion": 1,
+  "appliesTo": "active v2 only; preserve explicit unactivated legacy lane",
+  "defaultForUnlistedDataRoute": "deny",
+  "staffRoles": [
+    "chef",
+    "reviewer",
+    "designer",
+    "admin"
+  ],
+  "notes": [
+    "Static public JS/CSS/logo/template files contain no client records. Validate template paths.",
+    "All cookie-authenticated mutations need CSRF/origin verification.",
+    "Resource authorization uses the stored property, never requested property/actor fields.",
+    "Lists filter at repository/query boundary; out-of-scope direct IDs return404.",
+    "New login/logout/v1/internal routes must be added to worker policy/acceptance inventory."
+  ],
+  "routes": [
+    {
+      "method": "GET",
+      "path": "/js/diff-core.js",
+      "policy": "public_no_resource_data"
+    },
+    {
+      "method": "GET",
+      "path": "/",
+      "policy": "public_no_resource_data"
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard",
+      "policy": "reviewer_scoped_or_admin"
+    },
+    {
+      "method": "GET",
+      "path": "/review-queue",
+      "policy": "reviewer_scoped_or_admin"
+    },
+    {
+      "method": "GET",
+      "path": "/reviews",
+      "policy": "reviewer_scoped_or_admin"
+    },
+    {
+      "method": "GET",
+      "path": "/submit/:token",
+      "policy": "staff_scoped_draft",
+      "note": "Token is locator only after activation; listing omits raw bearer tokens; retain revision conflict checks."
+    },
+    {
+      "method": "GET",
+      "path": "/form",
+      "policy": "staff_or_public_new_submission",
+      "note": "Public lane only if enabled; reject existing resource IDs/modification mode; scope attempt state and reject writes before authorization."
+    },
+    {
+      "method": "GET",
+      "path": "/form-new",
+      "policy": "staff_or_public_new_submission",
+      "note": "Public lane only if enabled; reject existing resource IDs/modification mode; scope attempt state and reject writes before authorization."
+    },
+    {
+      "method": "GET",
+      "path": "/form-legacy",
+      "policy": "staff_or_public_new_submission",
+      "note": "Public lane only if enabled; reject existing resource IDs/modification mode; scope attempt state and reject writes before authorization."
+    },
+    {
+      "method": "GET",
+      "path": "/design-approval",
+      "policy": "designer_scoped_or_admin",
+      "note": "Source menu/current-version and stage checks; machine comparison is not a staff decision in active v2."
+    },
+    {
+      "method": "GET",
+      "path": "/approved-menus",
+      "policy": "staff_scoped_read"
+    },
+    {
+      "method": "GET",
+      "path": "/drafts",
+      "policy": "staff_scoped_draft",
+      "note": "Token is locator only after activation; listing omits raw bearer tokens; retain revision conflict checks."
+    },
+    {
+      "method": "GET",
+      "path": "/approved-dishes",
+      "policy": "staff_scoped_read"
+    },
+    {
+      "method": "GET",
+      "path": "/approved-dishes/:brandSlug",
+      "policy": "staff_scoped_read"
+    },
+    {
+      "method": "GET",
+      "path": "/approval-dispute/:token",
+      "policy": "narrow_dispute_capability",
+      "note": "Existing negative-confirmation only, rate-limited; POST also CSRF/origin; never approval authority."
+    },
+    {
+      "method": "POST",
+      "path": "/approval-dispute/:token",
+      "policy": "narrow_dispute_capability",
+      "note": "Existing negative-confirmation only, rate-limited; POST also CSRF/origin; never approval authority."
+    },
+    {
+      "method": "GET",
+      "path": "/review/:submissionId",
+      "policy": "reviewer_scoped_or_admin"
+    },
+    {
+      "method": "POST",
+      "path": "/api/submissions/:submissionId/retry-clickup",
+      "policy": "admin_scoped_mutation",
+      "note": "Translate retry into provider-neutral delivery operation; no state spoofing."
+    },
+    {
+      "method": "GET",
+      "path": "/approval/:submissionId",
+      "policy": "reviewer_scoped_or_admin"
+    },
+    {
+      "method": "GET",
+      "path": "/download/original/:submissionId",
+      "policy": "staff_scoped_or_original_receipt_capability",
+      "note": "Public capability permits only this original artifact and expires after24h; hash in storage."
+    },
+    {
+      "method": "GET",
+      "path": "/download/approved/:submissionId",
+      "policy": "staff_scoped_artifact"
+    },
+    {
+      "method": "GET",
+      "path": "/download/approved-clean/:submissionId",
+      "policy": "staff_scoped_artifact"
+    },
+    {
+      "method": "GET",
+      "path": "/internal/review-configuration",
+      "policy": "internal_service_token"
+    },
+    {
+      "method": "POST",
+      "path": "/approve/:submissionId",
+      "policy": "reviewer_stage_and_property_or_admin",
+      "note": "Check before multipart persistence; expected version/idempotency/stage eligibility still required."
+    },
+    {
+      "method": "POST",
+      "path": "/upload/:submissionId",
+      "policy": "reviewer_stage_and_property_or_admin",
+      "note": "Check before multipart persistence; expected version/idempotency/stage eligibility still required."
+    },
+    {
+      "method": "GET",
+      "path": "/api/submission/:submissionId/status",
+      "policy": "staff_scoped_read"
+    },
+    {
+      "method": "GET",
+      "path": "/training",
+      "policy": "admin"
+    },
+    {
+      "method": "POST",
+      "path": "/training/upload-pair",
+      "policy": "admin"
+    },
+    {
+      "method": "GET",
+      "path": "/training/session/:sessionId",
+      "policy": "admin"
+    },
+    {
+      "method": "GET",
+      "path": "/training/download-rules/:sessionId",
+      "policy": "admin"
+    },
+    {
+      "method": "GET",
+      "path": "/training/download-prompt/:sessionId",
+      "policy": "admin"
+    },
+    {
+      "method": "GET",
+      "path": "/learning",
+      "policy": "admin"
+    },
+    {
+      "method": "GET",
+      "path": "/learning/submission/:submissionId",
+      "policy": "reviewer_scoped_explanations_or_admin",
+      "note": "Reviewer saves only pending scoped explanations; cannot accept/approve/rewrite policy or spoof actor."
+    },
+    {
+      "method": "POST",
+      "path": "/api/learning/correction-rules",
+      "policy": "reviewer_scoped_explanations_or_admin",
+      "note": "Reviewer saves only pending scoped explanations; cannot accept/approve/rewrite policy or spoof actor."
+    },
+    {
+      "method": "POST",
+      "path": "/api/learning/run-improvement-cycle",
+      "policy": "admin"
+    },
+    {
+      "method": "GET",
+      "path": "/api/learning/rule-examples",
+      "policy": "admin"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/learning/correction-rules/:id",
+      "policy": "admin"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/learning/submissions/:submissionId",
+      "policy": "admin"
+    },
+    {
+      "method": "GET",
+      "path": "/learning/prompt-proposal",
+      "policy": "admin"
+    },
+    {
+      "method": "GET",
+      "path": "/api/learning/prompt-proposal/:id/verification",
+      "policy": "admin"
+    },
+    {
+      "method": "POST",
+      "path": "/api/learning/prompt-proposal/:id/review",
+      "policy": "admin"
+    },
+    {
+      "method": "GET",
+      "path": "/alerts",
+      "policy": "admin"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/alerts/:id/acknowledge",
+      "policy": "admin"
+    },
+    {
+      "method": "POST",
+      "path": "/api/learning/location-rules",
+      "policy": "admin"
+    },
+    {
+      "method": "GET",
+      "path": "/api/submitter-profiles/search",
+      "policy": "self_profile_or_admin",
+      "note": "Existing profiles lack property scope; ordinary staff may retrieve only their own verified profile, no directory enumeration."
+    },
+    {
+      "method": "GET",
+      "path": "/api/recent-projects",
+      "policy": "staff_scoped_read"
+    },
+    {
+      "method": "GET",
+      "path": "/api/properties",
+      "policy": "public_minimal_or_staff_scoped",
+      "note": "Anonymous minimal metadata only when auth.publicSubmissions is true; otherwise scoped staff. Do not expose provider routing, secrets, staff or unrelated property data."
+    },
+    {
+      "method": "GET",
+      "path": "/api/submissions/search",
+      "policy": "staff_scoped_read"
+    },
+    {
+      "method": "GET",
+      "path": "/api/design-approval/menus",
+      "policy": "staff_scoped_read"
+    },
+    {
+      "method": "GET",
+      "path": "/api/submissions/latest-approved",
+      "policy": "staff_scoped_read"
+    },
+    {
+      "method": "POST",
+      "path": "/api/drafts",
+      "policy": "staff_scoped_draft",
+      "note": "Token is locator only after activation; listing omits raw bearer tokens; retain revision conflict checks."
+    },
+    {
+      "method": "GET",
+      "path": "/api/drafts",
+      "policy": "staff_scoped_draft",
+      "note": "Token is locator only after activation; listing omits raw bearer tokens; retain revision conflict checks."
+    },
+    {
+      "method": "POST",
+      "path": "/api/drafts/:token/discard",
+      "policy": "staff_scoped_draft",
+      "note": "Token is locator only after activation; listing omits raw bearer tokens; retain revision conflict checks."
+    },
+    {
+      "method": "PUT",
+      "path": "/api/drafts/:token",
+      "policy": "staff_scoped_draft",
+      "note": "Token is locator only after activation; listing omits raw bearer tokens; retain revision conflict checks."
+    },
+    {
+      "method": "POST",
+      "path": "/api/modification/baseline-upload",
+      "policy": "staff_scoped_mutation"
+    },
+    {
+      "method": "POST",
+      "path": "/api/form/menu-doc-upload",
+      "policy": "staff_or_public_new_submission",
+      "note": "Public lane only if enabled; reject existing resource IDs/modification mode; scope attempt state and reject writes before authorization."
+    },
+    {
+      "method": "POST",
+      "path": "/api/modification/unapproved-upload",
+      "policy": "staff_or_public_new_submission",
+      "note": "Public lane only if enabled; reject existing resource IDs/modification mode; scope attempt state and reject writes before authorization."
+    },
+    {
+      "method": "POST",
+      "path": "/api/form/attempt-log",
+      "policy": "staff_or_public_new_submission",
+      "note": "Public lane only if enabled; reject existing resource IDs/modification mode; scope attempt state and reject writes before authorization."
+    },
+    {
+      "method": "POST",
+      "path": "/api/form/error-report",
+      "policy": "staff_or_public_new_submission",
+      "note": "Public lane only if enabled; reject existing resource IDs/modification mode; scope attempt state and reject writes before authorization."
+    },
+    {
+      "method": "POST",
+      "path": "/api/form/review-formatting",
+      "policy": "staff_or_public_new_submission",
+      "note": "Public lane only if enabled; reject existing resource IDs/modification mode; scope attempt state and reject writes before authorization."
+    },
+    {
+      "method": "POST",
+      "path": "/api/form/basic-check",
+      "policy": "staff_or_public_new_submission",
+      "note": "Public lane only if enabled; reject existing resource IDs/modification mode; scope attempt state and reject writes before authorization."
+    },
+    {
+      "method": "POST",
+      "path": "/api/form/basic-check/start",
+      "policy": "staff_or_public_new_submission",
+      "note": "Public lane only if enabled; reject existing resource IDs/modification mode; scope attempt state and reject writes before authorization."
+    },
+    {
+      "method": "GET",
+      "path": "/api/form/basic-check/status/:checkId",
+      "policy": "staff_or_attempt_capability",
+      "note": "Check ownership must match staff/attempt; opaque check ID alone is insufficient."
+    },
+    {
+      "method": "POST",
+      "path": "/api/form/menu-image-upload",
+      "policy": "staff_or_public_new_submission",
+      "note": "Public lane only if enabled; reject existing resource IDs/modification mode; scope attempt state and reject writes before authorization."
+    },
+    {
+      "method": "POST",
+      "path": "/api/form/submit",
+      "policy": "staff_or_public_new_submission",
+      "note": "Public lane only if enabled; reject existing resource IDs/modification mode; scope attempt state and reject writes before authorization."
+    },
+    {
+      "method": "POST",
+      "path": "/api/approval/:submissionId/submit",
+      "policy": "reviewer_stage_and_property_or_admin",
+      "note": "Check before multipart persistence; expected version/idempotency/stage eligibility still required."
+    },
+    {
+      "method": "POST",
+      "path": "/api/design-approval/compare",
+      "policy": "designer_scoped_or_admin",
+      "note": "Source menu/current-version and stage checks; machine comparison is not a staff decision in active v2."
+    },
+    {
+      "method": "POST",
+      "path": "/api/design-approval/:submissionId/override",
+      "policy": "admin_scoped_mutation",
+      "note": "Administrator only; nonempty reason, blocked design, current source/version, and immutable audit record required."
+    },
+    {
+      "method": "POST",
+      "path": "/api/design-approval/:submissionId/handoff",
+      "policy": "admin_scoped_mutation",
+      "note": "Translate retry into provider-neutral delivery operation; no state spoofing."
+    }
+  ]
+}

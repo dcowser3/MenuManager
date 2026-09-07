@@ -2,6 +2,8 @@
 
 Date: 2026-09-07. Status: recommendation, not a refactor implementation.
 
+The approved work is specified in [Client platform implementation specification](design-docs/client-platform-implementation-spec.md), including exact boundaries, migration/activation behavior, route permissions, protected learning code and required verification. Implementation is delegated separately; this review does not claim those changes are built.
+
 Reviewed the current checkout, including the uncommitted learning/design work. The completed quality/performance branch was fast-forwarded into `main` at `8320f250` at the user's request. Five overlapping setup/documentation files were reconciled without losing either change; 105 unrelated modified tracked files were byte-checked unchanged, and eight focused suites passed with 111 tests. Existing untracked implementation files were left in place. No shared service restart or deployment was performed.
 
 ## Recommendation
