@@ -1,6 +1,6 @@
 # Code quality, performance and verification audit — 2026-09-07
 
-Implemented on `codex/slop-performance-dx`, based on `8d5be1db`, in a separate worktree. The original checkout has a frozen, uncommitted learning/evaluation candidate. This audit does not alter that checkout, its candidate manifests, prompts, learning modules, services or evaluation harness. Integrate this branch after the frozen candidate is released; a clean worktree does not inherit those uncommitted changes.
+Implemented on `codex/slop-performance-dx`, based on `8d5be1db`, in a separate worktree. Subsequently merged into `main` at `8320f250` at the user's explicit request, preserving existing learning/evaluation work and reconciling five overlapping setup/documentation files. Post-merge verification passed eight focused suites / 111 tests. No shared service restart or deployment was performed. Existing frozen evaluation snapshots were not changed; evidence for those snapshots must not be presented as evidence for the newly merged checkout.
 
 ## Changes
 
