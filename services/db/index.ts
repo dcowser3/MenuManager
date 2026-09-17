@@ -2152,6 +2152,54 @@ app.get('/submissions/pending', async (req, res) => {
     }
 });
 
+// Legacy Isabella direct handoffs that were sent to ClickUp To Do before the
+// direct-handoff approval fix. The clickup-integration repair route uses this
+// narrow internal list to make an idempotent, status-guarded repair.
+// IMPORTANT: Must come BEFORE /submissions/:id
+app.get('/submissions/isabella-direct', async (req, res) => {
+    try {
+        const requestedIds = `${req.query.ids || ''}`
+            .split(',')
+            .map((id) => id.trim())
+            .filter(Boolean);
+        const limit = Math.min(Math.max(parseInt(`${req.query.limit || '200'}`, 10) || 200, 1), 500);
+        const sinceMs = Date.parse(`${req.query.since || ''}`);
+        const matches = (submission: any) => {
+            const status = `${submission?.status || ''}`.trim().toLowerCase();
+            const email = `${submission?.submitter_email || ''}`.trim().toLowerCase();
+            const publicId = `${submission?.id || submission?.legacy_id || ''}`.trim();
+            const timestamp = Date.parse(`${submission?.updated_at || submission?.created_at || ''}`);
+            return status === 'sent_to_marketing' &&
+                email === `${ISABELLA_EMAIL || ''}`.trim().toLowerCase() &&
+                (!requestedIds.length || requestedIds.includes(publicId) || requestedIds.includes(`${submission?.id || ''}`.trim()) || requestedIds.includes(`${submission?.legacy_id || ''}`.trim())) &&
+                (!Number.isFinite(sinceMs) || (Number.isFinite(timestamp) && timestamp >= sinceMs));
+        };
+
+        let rows: any[] = [];
+        if (isSupabaseConfigured()) {
+            const { data, error } = await getSupabaseClient()
+                .from(SUBMISSIONS_TABLE)
+                .select('*')
+                .eq('status', 'sent_to_marketing')
+                .ilike('submitter_email', ISABELLA_EMAIL)
+                .order('updated_at', { ascending: false })
+                .limit(limit);
+            if (error) throw new Error(error.message);
+            rows = data || [];
+        } else {
+            const submissions = JSON.parse(await fs.readFile(SUBMISSIONS_DB, 'utf-8'));
+            rows = Object.values(submissions);
+        }
+
+        res.json(rows.filter(matches).sort((a, b) =>
+            Date.parse(`${b?.updated_at || b?.created_at || ''}`) - Date.parse(`${a?.updated_at || a?.created_at || ''}`)
+        ).slice(0, limit));
+    } catch (error: any) {
+        console.error('Error listing Isabella direct handoffs:', error.message);
+        res.status(500).json({ error: 'Failed to list Isabella direct handoffs' });
+    }
+});
+
 // Endpoint to get recent projects (grouped by project_name)
 // IMPORTANT: Must come BEFORE /submissions/:id
 app.get('/submissions/recent-projects', async (req, res) => {

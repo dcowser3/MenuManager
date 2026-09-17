@@ -133,6 +133,7 @@ describe('browser approval finalize route', () => {
     const createTaskHandler = getRouteHandler('post', '/create-task');
     const finalizeHandler = getRouteHandler('post', '/approval/finalize');
     const webhookHandler = getRouteHandler('post', '/webhook/clickup');
+    const directBackfillHandler = getRouteHandler('post', '/webhook/backfill-isabella-direct');
 
     beforeEach(() => {
         jest.spyOn(console, 'log').mockImplementation(() => {});
@@ -386,6 +387,140 @@ describe('browser approval finalize route', () => {
             clickup_task_id: 'cu_isa',
             status: 'sent_to_marketing',
         });
+    });
+
+    test('marks a direct Isabella upload approved after the DOCX reaches ClickUp To Do', async () => {
+        axios.get.mockImplementation(async (url) => {
+            const urlStr = String(url);
+            if (urlStr.includes('https://api.clickup.com/api/v2/group')) {
+                return {
+                    data: {
+                        groups: [{
+                            id: 'grp_marketing',
+                            name: 'Marketing',
+                            members: [{ user: { id: 201 } }, { user: { id: 202 } }],
+                        }],
+                    },
+                };
+            }
+            return { data: null };
+        });
+        axios.post.mockImplementation(async (url) => {
+            const urlStr = String(url);
+            if (urlStr.includes('https://api.clickup.com/api/v2/list/list_123/task')) {
+                return { data: { id: 'cu_isa_approved' } };
+            }
+            if (urlStr.includes('/attachment')) {
+                return { data: { id: 'att_isa_original' } };
+            }
+            return { data: {} };
+        });
+
+        const response = await invokeJsonHandler(createTaskHandler, {
+            body: {
+                submissionId: 'form-isa-approved',
+                submitterName: 'Isabella Sandoval',
+                submitterEmail: 'isabella@richardsandoval.com',
+                projectName: 'Final Review Menu',
+                property: 'Toro - Chicago',
+                servicePeriod: 'Dinner',
+                menuContent: 'DINNER\nSteak - $42',
+                menuContentHtml: '<p><strong>DINNER</strong></p><p>Steak - $42</p>',
+                docxPath: '/tmp/documents/form-isa-approved.docx',
+                filename: 'Final Review Menu.docx',
+            },
+        });
+
+        expect(response.status).toBe(200);
+        expect(response.body.success).toBe(true);
+        expect(response.body.taskId).toBe('cu_isa_approved');
+
+        const dbUpdateCall = axios.put.mock.calls.find((call) =>
+            String(call[0]).includes('http://localhost:3004/submissions/form-isa-approved')
+        );
+        expect(dbUpdateCall).toBeTruthy();
+        expect(dbUpdateCall[1]).toEqual(expect.objectContaining({
+            status: 'approved',
+            final_path: '/tmp/documents/form-isa-approved.docx',
+            approved_menu_content: 'Clean Menu',
+            clickup_task_id: 'cu_isa_approved',
+        }));
+        expect(axios.post.mock.calls.some((call) =>
+            String(call[0]).includes('http://localhost:3004/assets') &&
+            call[1]?.asset_type === 'approved_docx'
+        )).toBe(true);
+        expect(axios.put.mock.calls.some((call) =>
+            String(call[0]).includes('https://api.clickup.com/api/v2/task/cu_isa_approved') &&
+            call[1]?.status
+        )).toBe(false);
+    });
+
+    test('backfills only direct handoffs still in To Do and with a DOCX attachment', async () => {
+        axios.get.mockImplementation(async (url) => {
+            const urlStr = String(url);
+            if (urlStr.includes('/submissions/isabella-direct')) {
+                return {
+                    data: [{
+                        id: 'form-isa-backfill',
+                        clickup_task_id: 'cu_isa_backfill',
+                        status: 'sent_to_marketing',
+                        submitter_email: 'isabella@richardsandoval.com',
+                        project_name: 'Backfill Menu',
+                        property: 'Toro - Chicago',
+                        service_period: 'Dinner',
+                        filename: 'Backfill Menu.docx',
+                        original_path: '/tmp/documents/form-isa-backfill.docx',
+                        menu_content: 'DINNER\nSteak - $42',
+                    }, {
+                        id: 'form-isa-passive-approved',
+                        clickup_task_id: 'cu_isa_passive_approved',
+                        status: 'sent_to_marketing',
+                        submitter_email: 'isabella@richardsandoval.com',
+                        project_name: 'Passive Approved Menu',
+                        property: 'Toro - Chicago',
+                        service_period: 'Dinner',
+                        filename: 'Passive Approved Menu.docx',
+                        original_path: '/tmp/documents/form-isa-passive-approved.docx',
+                        menu_content: 'DINNER\nSteak - $42',
+                    }],
+                };
+            }
+            if (urlStr.includes('https://api.clickup.com/api/v2/task/cu_isa_backfill')) {
+                return {
+                    data: {
+                        list: { id: 'list_123' },
+                        status: { status: 'to do' },
+                        attachments: [{ title: 'Backfill Menu.docx', extension: 'docx' }],
+                    },
+                };
+            }
+            if (urlStr.includes('https://api.clickup.com/api/v2/task/cu_isa_passive_approved')) {
+                return {
+                    data: {
+                        list: { id: 'list_123' },
+                        status: { status: 'approved' },
+                        attachments: [{ title: 'Passive Approved Menu.docx', extension: 'docx' }],
+                    },
+                };
+            }
+            return { data: null };
+        });
+
+        const response = await invokeJsonHandler(directBackfillHandler, { body: {} });
+
+        expect(response.status).toBe(200);
+        expect(response.body.scanned).toBe(2);
+        expect(response.body.repaired).toBe(1);
+        expect(response.body.skipped).toBe(1);
+        expect(response.body.details[0]).toEqual(expect.objectContaining({
+            submission_id: 'form-isa-backfill',
+            clickup_task_id: 'cu_isa_backfill',
+            status: 'repaired',
+        }));
+        const dbUpdateCall = axios.put.mock.calls.find((call) =>
+            String(call[0]).includes('http://localhost:3004/submissions/form-isa-backfill')
+        );
+        expect(dbUpdateCall[1]).toEqual(expect.objectContaining({ status: 'approved' }));
     });
 
     test('describes modification workflow source with human-readable ClickUp labels', async () => {
