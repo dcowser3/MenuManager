@@ -95,6 +95,7 @@ function postJsonOverHttp(routePath: string, body: any, headers: Record<string, 
 describe('submission update hardening', () => {
     const updateHandler = getRouteHandler('put', '/submissions/:id');
     const pendingHandler = getRouteHandler('get', '/submissions/pending');
+    const directIsabellaHandler = getRouteHandler('get', '/submissions/isabella-direct');
     const approvedListHandler = getRouteHandler('get', '/submissions/approved-list');
     const submissionSearchHandler = getRouteHandler('get', '/submissions/search');
     const submitterProfileSearchHandler = getRouteHandler('get', '/submitter-profiles/search');
@@ -396,6 +397,26 @@ describe('submission update hardening', () => {
         expect(result.rejectedFields).toEqual([]);
         expect(result.allowedFields.status).toBe('sent_to_marketing');
         expect(result.allowedFields.clickup_task_id).toBe('cu_isa');
+    });
+
+    test('prevents a late AI review update from moving a linked Isabella handoff back into review', async () => {
+        const response = await invokeJsonHandler(updateHandler, {
+            params: { id: 'form-isabella-direct' },
+            body: { status: 'pending_human_review' },
+        });
+
+        expect(response.status).toBe(200);
+        expect(response.body.status).toBe('sent_to_marketing');
+        expect(fs.promises.writeFile).toHaveBeenCalledTimes(1);
+    });
+
+    test('lists linked Isabella handoffs even when a late AI update left them pending', async () => {
+        const response = await invokeJsonHandler(directIsabellaHandler);
+
+        expect(response.status).toBe(200);
+        expect(response.body.map((row: any) => row.id)).toEqual(
+            expect.arrayContaining(['form-isabella-direct', 'form-marketing'])
+        );
     });
 
     test('accepts submission create bodies larger than the Express default JSON limit', async () => {

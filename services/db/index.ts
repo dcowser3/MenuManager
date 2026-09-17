@@ -1174,6 +1174,26 @@ function isIsabellaDirectHandoff(submission: any): boolean {
     return !!clickupTaskId;
 }
 
+// AI review runs asynchronously after ClickUp task creation. A direct
+// Isabella handoff can therefore receive a late `pending_human_review` write
+// after the ClickUp task has already been sent to Marketing. Preserve the
+// direct-handoff state at this DB boundary; once approved, never regress it.
+function protectDirectIsabellaApprovalStatus(existingRecord: any, allowedFields: Record<string, any>): void {
+    const requestedStatus = `${allowedFields?.status || ''}`.trim().toLowerCase();
+    if (!['pending_human_review', 'submitted_no_ai_review'].includes(requestedStatus)) return;
+
+    const merged = { ...existingRecord, ...allowedFields };
+    if (!isIsabellaDirectHandoff(merged)) return;
+
+    const currentStatus = `${existingRecord?.status || ''}`.trim().toLowerCase();
+    if (APPROVED_SUBMISSION_STATUSES.includes(currentStatus)) {
+        delete allowedFields.status;
+        return;
+    }
+
+    allowedFields.status = 'sent_to_marketing';
+}
+
 function getSubmissionServicePeriod(submission: any): string {
     return `${submission?.service_period || submission?.raw_payload?.servicePeriod || ''}`.trim();
 }
@@ -2152,6 +2172,56 @@ app.get('/submissions/pending', async (req, res) => {
     }
 });
 
+// Legacy Isabella direct handoffs whose asynchronous AI update may have left
+// them in a review status after ClickUp already reached To Do. The
+// clickup-integration repair route uses this narrow internal list to make an
+// idempotent, status-guarded repair.
+// IMPORTANT: Must come BEFORE /submissions/:id
+app.get('/submissions/isabella-direct', async (req, res) => {
+    try {
+        const requestedIds = `${req.query.ids || ''}`
+            .split(',')
+            .map((id) => id.trim())
+            .filter(Boolean);
+        const limit = Math.min(Math.max(parseInt(`${req.query.limit || '200'}`, 10) || 200, 1), 500);
+        const sinceMs = Date.parse(`${req.query.since || ''}`);
+        const matches = (submission: any) => {
+            const status = `${submission?.status || ''}`.trim().toLowerCase();
+            const email = `${submission?.submitter_email || ''}`.trim().toLowerCase();
+            const publicId = `${submission?.id || submission?.legacy_id || ''}`.trim();
+            const timestamp = Date.parse(`${submission?.updated_at || submission?.created_at || ''}`);
+            return ['sent_to_marketing', 'pending_human_review', 'submitted_no_ai_review'].includes(status) &&
+                email === `${ISABELLA_EMAIL || ''}`.trim().toLowerCase() &&
+                !!(`${submission?.clickup_task_id || getRawPayloadObject(submission).clickup_handoff?.task_id || ''}`.trim()) &&
+                (!requestedIds.length || requestedIds.includes(publicId) || requestedIds.includes(`${submission?.id || ''}`.trim()) || requestedIds.includes(`${submission?.legacy_id || ''}`.trim())) &&
+                (!Number.isFinite(sinceMs) || (Number.isFinite(timestamp) && timestamp >= sinceMs));
+        };
+
+        let rows: any[] = [];
+        if (isSupabaseConfigured()) {
+            const { data, error } = await getSupabaseClient()
+                .from(SUBMISSIONS_TABLE)
+                .select('*')
+                .in('status', ['sent_to_marketing', 'pending_human_review', 'submitted_no_ai_review'])
+                .ilike('submitter_email', ISABELLA_EMAIL)
+                .order('updated_at', { ascending: false })
+                .limit(limit);
+            if (error) throw new Error(error.message);
+            rows = data || [];
+        } else {
+            const submissions = JSON.parse(await fs.readFile(SUBMISSIONS_DB, 'utf-8'));
+            rows = Object.values(submissions);
+        }
+
+        res.json(rows.filter(matches).sort((a, b) =>
+            Date.parse(`${b?.updated_at || b?.created_at || ''}`) - Date.parse(`${a?.updated_at || a?.created_at || ''}`)
+        ).slice(0, limit));
+    } catch (error: any) {
+        console.error('Error listing Isabella direct handoffs:', error.message);
+        res.status(500).json({ error: 'Failed to list Isabella direct handoffs' });
+    }
+});
+
 // Endpoint to get recent projects (grouped by project_name)
 // IMPORTANT: Must come BEFORE /submissions/:id
 app.get('/submissions/recent-projects', async (req, res) => {
@@ -3057,6 +3127,7 @@ app.put('/submissions/:id', async (req, res) => {
                 // Allow UUID/legacy-id updates even when local JSON entry is missing.
                 try {
                     const currentRemote = await getSubmissionRecordById(id);
+                    protectDirectIsabellaApprovalStatus(currentRemote, allowedFields);
                     await injectResolvedMenuIdIfApproving(currentRemote, allowedFields, menuDecision);
                     await mirrorSubmissionUpdateToSupabase(id, allowedFields);
                     const supabase = getSupabaseClient();
@@ -3081,6 +3152,7 @@ app.put('/submissions/:id', async (req, res) => {
             return res.status(404).send('Submission not found.');
         }
 
+        protectDirectIsabellaApprovalStatus(submissions[resolvedId], allowedFields);
         await injectResolvedMenuIdIfApproving(submissions[resolvedId], allowedFields, menuDecision);
 
         const updatedSubmission = { ...submissions[resolvedId], ...allowedFields, updated_at: new Date().toISOString() };
