@@ -1,3 +1,5 @@
+const testRepoRoot = process.cwd();
+
 jest.mock('@menumanager/supabase-client', () => ({
     __esModule: true,
     getSupabaseClient: jest.fn(),
@@ -8,7 +10,7 @@ jest.mock('@menumanager/supabase-client', () => ({
 
 jest.mock('fs', () => {
     const actual = jest.requireActual('fs');
-    const repoRoot = '/Users/deriancowser/Documents/MenuManager';
+    const repoRoot = testRepoRoot;
     return {
         ...actual,
         existsSync: jest.fn((target: string) => {
@@ -285,14 +287,14 @@ describe('submission update hardening', () => {
             params: { id: 'form-123' },
             body: {
                 status: 'approved',
-                final_path: '/Users/deriancowser/Documents/MenuManager/tmp/finals/form-123-final.docx',
+                final_path: `${testRepoRoot}/tmp/finals/form-123-final.docx`,
                 changes_made: true,
             },
         });
 
         expect(response.status).toBe(200);
         expect(response.body.status).toBe('approved');
-        expect(response.body.final_path).toBe('/Users/deriancowser/Documents/MenuManager/tmp/finals/form-123-final.docx');
+        expect(response.body.final_path).toBe(`${testRepoRoot}/tmp/finals/form-123-final.docx`);
         expect(response.body.changes_made).toBe(true);
         expect(response.body.submitter_email).toBe('chef@example.com');
         expect(response.body.updated_at).toBeTruthy();
