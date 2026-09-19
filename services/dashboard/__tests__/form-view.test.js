@@ -91,6 +91,17 @@ describe('dashboard form modification source chooser', () => {
         expect(template).not.toContain('max-height: 600px;');
     });
 
+    test('uses one shared Safari-safe formatting controller for the reviewed menu editor', () => {
+        const template = readView();
+
+        expect(template).toContain('/js/rich-text-editor.js?v=20260918-safari-selection');
+        expect(template).toContain('window.MenuRichTextEditor.createRichTextEditor({');
+        expect(template).toContain("editor: document.getElementById('reviewedContentArea')");
+        expect(template).toContain('reviewedRichTextEditor.setEnabled(true);');
+        expect(template).toContain('reviewedRichTextEditor.setEnabled(false);');
+        expect((template.match(/createRichTextEditor\(\{/g) || [])).toHaveLength(1);
+    });
+
     test('renders AI suggestions above the side-by-side menu boxes after review', () => {
         const template = fs.readFileSync(
             path.join(__dirname, '..', 'views', 'form.ejs'),

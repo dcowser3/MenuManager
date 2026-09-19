@@ -16,6 +16,8 @@ Each submission's approver-copy email includes a private "If you did **not** app
 
 Approved-menu edits load the reviewer-approved text and formatting, not the original submitted HTML. This prevents reviewer corrections from appearing as pending edits or being accidentally reverted in the next revision.
 
+The upload review editor and Approved Menus `Edit This Menu` drafts share the same rich-text editor controller. Its Bold button preserves the selected range before formatting, including in Safari, and the resulting HTML continues through preview, autosave, and submission.
+
 When Basic AI Check or a suggestion updates an editable menu, heading and dish-name formatting is mapped against the live editor text so collapsed whitespace cannot shift bold styling onto neighboring words or lines.
 
 Review formatting preserves corrected line breaks and keeps allergen codes attached to their dishes. Description-less buffet dishes are bolded as complete dish names, separately from the following dish; descriptions and codes remain outside the automatic bold range. See [dish-name formatting and the Toro holiday regression](docs/design-docs/dish-name-formatting.md).
