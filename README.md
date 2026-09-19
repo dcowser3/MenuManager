@@ -16,7 +16,7 @@ Each submission's approver-copy email includes a private "If you did **not** app
 
 Approved-menu edits load the reviewer-approved text and formatting, not the original submitted HTML. This prevents reviewer corrections from appearing as pending edits or being accidentally reverted in the next revision.
 
-The upload review editor and Approved Menus `Edit This Menu` drafts share the same rich-text editor controller. Its Bold button preserves the selected range before formatting, including in Safari, and the resulting HTML continues through preview, autosave, and submission.
+The upload review editor and Approved Menus `Edit This Menu` drafts share the same rich-text editor controller. Its unobtrusive in-editor Bold control and standard **Command-B** shortcut preserve the selected range before formatting, including in Safari, and the resulting HTML continues through preview, autosave, and submission.
 
 When Basic AI Check or a suggestion updates an editable menu, heading and dish-name formatting is mapped against the live editor text so collapsed whitespace cannot shift bold styling onto neighboring words or lines.
 

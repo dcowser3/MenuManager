@@ -916,6 +916,7 @@
             flex: 1;
             display: flex;
             flex-direction: column;
+            position: relative;
             border: 1px solid var(--color-border);
             background: var(--color-background);
             min-height: 400px;
@@ -923,12 +924,15 @@
         }
 
         .rich-text-toolbar {
+            position: absolute;
+            top: 0.4rem;
+            right: 0.55rem;
+            z-index: 2;
             display: flex;
             align-items: center;
-            min-height: 2.4rem;
-            padding: 0.35rem 0.55rem;
-            border-bottom: 1px solid var(--color-border);
-            background: var(--color-background-alt);
+            padding: 0;
+            border: 0;
+            background: transparent;
         }
 
         .rich-text-toolbar[hidden] {
@@ -938,7 +942,7 @@
         .rich-text-toolbar-button {
             width: 2rem;
             height: 2rem;
-            border: 1px solid transparent;
+            border: 0;
             background: transparent;
             color: var(--color-primary);
             cursor: pointer;
@@ -949,7 +953,6 @@
         .rich-text-toolbar-button:hover,
         .rich-text-toolbar-button:focus-visible,
         .rich-text-toolbar-button.active {
-            border-color: var(--color-secondary);
             background: rgba(139, 115, 85, 0.12);
             outline: none;
         }

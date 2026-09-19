@@ -79,6 +79,16 @@ describe('shared rich text editor controller', () => {
         expect(template).not.toContain('function handleReviewedAreaInput() {\n                reviewedRichTextEditor.setEnabled(false);');
     });
 
+    test('keeps the formatting control inside the editor frame without using layout height', () => {
+        const template = fs.readFileSync(
+            path.join(__dirname, '..', 'views', 'form.ejs'),
+            'utf8'
+        );
+
+        expect(template).toContain('.reviewed-content-container {\n            flex: 1;\n            display: flex;\n            flex-direction: column;\n            position: relative;');
+        expect(template).toContain('.rich-text-toolbar {\n            position: absolute;\n            top: 0.4rem;\n            right: 0.55rem;');
+    });
+
     test('restores a saved editor range before applying bold and emits input', () => {
         const documentListeners = new Map();
         const selection = {
@@ -120,6 +130,43 @@ describe('shared rich text editor controller', () => {
         expect(selection.range).toBe(selectedRange);
         expect(inputEvents).toBe(1);
         expect(controller.toolbar.hidden).toBe(false);
+    });
+
+    test('handles Command-B through the same Safari-safe formatting path', () => {
+        const documentListeners = new Map();
+        const selection = {
+            range: null,
+            get rangeCount() { return this.range ? 1 : 0; },
+            getRangeAt: () => selection.range,
+            removeAllRanges: () => { selection.range = null; },
+            addRange: (range) => { selection.range = range; },
+        };
+        const documentRef = {
+            defaultView: { getSelection: () => selection },
+            createElement(tagName) { return createFakeElement(documentRef, tagName); },
+            createEvent: () => ({ initEvent(type) { this.type = type; } }),
+            queryCommandState: jest.fn(() => false),
+            execCommand: jest.fn(() => true),
+            addEventListener(type, listener) { documentListeners.set(type, listener); },
+            removeEventListener(type) { documentListeners.delete(type); },
+        };
+        const parent = createFakeElement(documentRef, 'div');
+        const editor = createFakeElement(documentRef, 'div');
+        const textNode = { nodeType: 3, parentNode: editor };
+        const selectedRange = {
+            commonAncestorContainer: textNode,
+            cloneRange: () => selectedRange,
+        };
+        parent.appendChild(editor);
+        selection.range = selectedRange;
+        const controller = createRichTextEditor({ editor });
+        controller.setEnabled(true);
+        const preventDefault = jest.fn();
+
+        editor.dispatchEvent({ type: 'keydown', key: 'b', metaKey: true, preventDefault });
+
+        expect(preventDefault).toHaveBeenCalled();
+        expect(documentRef.execCommand).toHaveBeenCalledWith('bold', false, null);
     });
 });
 
@@ -171,8 +218,21 @@ describeWebKit('shared rich text editor in WebKit', () => {
             }));
             controller.boldButton.click();
 
+            const shortcutRange = document.createRange();
+            shortcutRange.setStart(textNode, 7);
+            shortcutRange.setEnd(textNode, 11);
+            selection.removeAllRanges();
+            selection.addRange(shortcutRange);
+            editor.dispatchEvent(new KeyboardEvent('keydown', {
+                key: 'b',
+                metaKey: true,
+                bubbles: true,
+                cancelable: true,
+            }));
+
             return {
-                boldText: editor.querySelector('strong, b')?.textContent || '',
+                boldText: editor.querySelectorAll('strong, b')[0]?.textContent || '',
+                shortcutBoldText: editor.querySelectorAll('strong, b')[1]?.textContent || '',
                 inputEvents,
                 toolbarHidden: controller.toolbar.hidden,
             };
@@ -180,7 +240,8 @@ describeWebKit('shared rich text editor in WebKit', () => {
 
         expect(result).toEqual({
             boldText: 'Safari',
-            inputEvents: 1,
+            shortcutBoldText: 'bold',
+            inputEvents: 2,
             toolbarHidden: false,
         });
         await page.close();
