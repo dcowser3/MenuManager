@@ -64,6 +64,21 @@ function createFakeElement(ownerDocument, tagName) {
 }
 
 describe('shared rich text editor controller', () => {
+    test('is enabled and disabled only with the shared form edit-mode toggle', () => {
+        const template = fs.readFileSync(
+            path.join(__dirname, '..', 'views', 'form.ejs'),
+            'utf8'
+        );
+        const toggleStart = template.indexOf('function toggleEditMode()');
+        const toggleEnd = template.indexOf('function getEditorContentForRedline()', toggleStart);
+        const toggleCode = template.slice(toggleStart, toggleEnd);
+
+        expect(toggleCode).toContain("reviewedArea.contentEditable = 'true';\n                if (reviewedRichTextEditor) reviewedRichTextEditor.setEnabled(true);");
+        expect(toggleCode).toContain("reviewedArea.contentEditable = 'false';\n                if (reviewedRichTextEditor) reviewedRichTextEditor.setEnabled(false);");
+        expect(template).not.toContain('const clone = element.cloneNode(true);\n                reviewedRichTextEditor.setEnabled(true);');
+        expect(template).not.toContain('function handleReviewedAreaInput() {\n                reviewedRichTextEditor.setEnabled(false);');
+    });
+
     test('restores a saved editor range before applying bold and emits input', () => {
         const documentListeners = new Map();
         const selection = {

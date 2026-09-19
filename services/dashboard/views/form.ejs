@@ -8530,6 +8530,7 @@
                 reviewedArea.contentEditable = 'false';
                 reviewedArea.classList.remove('editable');
             }
+            if (reviewedRichTextEditor) reviewedRichTextEditor.setEnabled(false);
             if (message) showAlert(message, 'warning', { persistent: true });
         }
 
@@ -8559,7 +8560,6 @@
                 clearResumedDraftSubmitterIdentity();
             }
 
-            if (reviewedRichTextEditor) reviewedRichTextEditor.setEnabled(false);
             if (draftSession.menu_content_html) {
                 displayReviewedContent(draftSession.menu_content_html);
             } else {
@@ -8659,6 +8659,7 @@
                 editNotice.classList.add('show');
                 reviewedArea.classList.add('editable');
                 reviewedArea.contentEditable = 'true';
+                if (reviewedRichTextEditor) reviewedRichTextEditor.setEnabled(true);
 
                 reviewedArea.focus();
                 reviewedArea.addEventListener('input', handleReviewedAreaInput);
@@ -8670,6 +8671,7 @@
                 editNotice.classList.remove('show');
                 reviewedArea.classList.remove('editable');
                 reviewedArea.contentEditable = 'false';
+                if (reviewedRichTextEditor) reviewedRichTextEditor.setEnabled(false);
                 reviewedArea.removeEventListener('input', handleReviewedAreaInput);
 
                 recalculateHighlights();
@@ -8688,7 +8690,6 @@
                 return extractCleanTextFromReviewedArea(element);
             }
             const clone = element.cloneNode(true);
-                reviewedRichTextEditor.setEnabled(true);
             clone.querySelectorAll('.existing-del, .persistent-del, del, s, [style*="line-through"]').forEach((node) => {
                 node.remove();
             });
@@ -8700,7 +8701,6 @@
         }
 
         function handleReviewedAreaInput() {
-                reviewedRichTextEditor.setEnabled(false);
             const reviewedArea = document.getElementById('reviewedContentArea');
             const currentText = extractCleanTextFromReviewedArea(reviewedArea);
             const aiReviewText = extractAiReviewTextFromReviewedArea(reviewedArea);
