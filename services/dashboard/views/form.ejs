@@ -11,6 +11,7 @@
     <link href="https://cdn.quilljs.com/1.3.6/quill.snow.css" rel="stylesheet">
     <script src="https://cdn.quilljs.com/1.3.6/quill.js"></script>
     <script src="/js/form-helpers.js"></script>
+    <script src="/js/rich-text-editor.js?v=20260918-safari-selection"></script>
     <script src="/js/diff-core.js"></script>
     <script src="/js/redline-preview.js?v=20260613-extract-leading-trim"></script>
     <script src="/js/form-stage.js?v=20260616-reorder-highlights"></script>
@@ -919,6 +920,38 @@
             background: var(--color-background);
             min-height: 400px;
             max-height: none;
+        }
+
+        .rich-text-toolbar {
+            display: flex;
+            align-items: center;
+            min-height: 2.4rem;
+            padding: 0.35rem 0.55rem;
+            border-bottom: 1px solid var(--color-border);
+            background: var(--color-background-alt);
+        }
+
+        .rich-text-toolbar[hidden] {
+            display: none;
+        }
+
+        .rich-text-toolbar-button {
+            width: 2rem;
+            height: 2rem;
+            border: 1px solid transparent;
+            background: transparent;
+            color: var(--color-primary);
+            cursor: pointer;
+            font-family: Georgia, serif;
+            font-size: 1rem;
+        }
+
+        .rich-text-toolbar-button:hover,
+        .rich-text-toolbar-button:focus-visible,
+        .rich-text-toolbar-button.active {
+            border-color: var(--color-secondary);
+            background: rgba(139, 115, 85, 0.12);
+            outline: none;
         }
 
         .reviewed-content-area {
@@ -2740,6 +2773,7 @@
         let aiCheckResults = null;
         let quill = null;
         let isEditMode = false;
+        let reviewedRichTextEditor = null;
         let aiChanges = [];
         let originalAiCorrectedText = '';
         let criticalErrorOverrides = {};
@@ -3494,6 +3528,10 @@
             });
 
             // Upload-first layout: only the dropzone shows until a menu is uploaded.
+            reviewedRichTextEditor = window.MenuRichTextEditor.createRichTextEditor({
+                editor: document.getElementById('reviewedContentArea')
+            });
+
             initUploadFirstLayout();
 
             const menuContainer = document.querySelector('.menu-input-container');
@@ -8521,6 +8559,7 @@
                 clearResumedDraftSubmitterIdentity();
             }
 
+            if (reviewedRichTextEditor) reviewedRichTextEditor.setEnabled(false);
             if (draftSession.menu_content_html) {
                 displayReviewedContent(draftSession.menu_content_html);
             } else {
@@ -8649,6 +8688,7 @@
                 return extractCleanTextFromReviewedArea(element);
             }
             const clone = element.cloneNode(true);
+                reviewedRichTextEditor.setEnabled(true);
             clone.querySelectorAll('.existing-del, .persistent-del, del, s, [style*="line-through"]').forEach((node) => {
                 node.remove();
             });
@@ -8660,6 +8700,7 @@
         }
 
         function handleReviewedAreaInput() {
+                reviewedRichTextEditor.setEnabled(false);
             const reviewedArea = document.getElementById('reviewedContentArea');
             const currentText = extractCleanTextFromReviewedArea(reviewedArea);
             const aiReviewText = extractAiReviewTextFromReviewedArea(reviewedArea);
