@@ -155,6 +155,18 @@
             if (enabled) captureSelection();
         }
 
+        function handleBoldShortcut(event) {
+            const key = String(event.key || '').toLowerCase();
+            if (!enabled || event.isComposing || !(event.metaKey || event.ctrlKey) || key !== 'b') return;
+
+            // Safari normally owns Command-B for contenteditable fields. Handling it
+            // here preserves the same selected range and semantic markup as the
+            // visible control, even when WebKit would otherwise lose the range.
+            event.preventDefault();
+            captureSelection();
+            applyBold();
+        }
+
         toolbar.addEventListener('mousedown', preserveSelectionOnToolbarPointer);
         boldButton.addEventListener('click', function (event) {
             event.preventDefault();
@@ -163,6 +175,7 @@
         editor.addEventListener('keyup', captureSelection);
         editor.addEventListener('mouseup', captureSelection);
         editor.addEventListener('touchend', captureSelection);
+        editor.addEventListener('keydown', handleBoldShortcut);
         documentRef.addEventListener('selectionchange', handleSelectionChange);
 
         function setEnabled(nextEnabled) {
@@ -183,6 +196,7 @@
             editor.removeEventListener('keyup', captureSelection);
             editor.removeEventListener('mouseup', captureSelection);
             editor.removeEventListener('touchend', captureSelection);
+            editor.removeEventListener('keydown', handleBoldShortcut);
             toolbar.remove();
         }
 
