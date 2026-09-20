@@ -161,6 +161,9 @@ function freezeTestBundle({ verifierRoot, baselineRoot, candidateRoot, inventory
 function assertOwnerClaim(proposal, metadata) {
     const claim = proposal?.eval_summary?.code_candidate;
     if (!claim || claim.status !== 'running' || claim.attempt_id !== metadata.attempt_id) throw new Error('C2c1 requires the still-running owner claim for this attempt.');
+    for (const field of ['authorization_hash', 'scope_hash', 'c2b_handoff_sha256', 'candidate_source_sha256', 'draft_patch_sha256', 'draft_content_sha256', 'draft_response_sha256']) {
+        if (!isDigest(metadata[field]) || claim[field] !== metadata[field]) throw new Error(`C2c1 requires the owner-bound progressive ${field} identity.`);
+    }
 }
 
 function reportsFromExecutor(value, label, inventory) {
@@ -255,6 +258,8 @@ function revalidatePlan(planPath, plan, metadata, attemptRoot, baselineRoot, can
     if (runtimeVerification.hashCodeImplementation(baselineRoot) !== plan.baseline_source_sha256 || runtimeVerification.hashCodeImplementation(candidateRoot) !== plan.candidate_source_sha256) throw new Error('Baseline or candidate source changed after plan creation.');
     const currentBaselineTests = walkCandidateTests(baselineRoot);
     const currentCandidateInventory = walkCandidateTests(candidateRoot);
+    const missingHistoricalTests = currentBaselineTests.filter((relative) => !currentCandidateInventory.includes(relative));
+    if (missingHistoricalTests.length) throw new Error(`Historical candidate tests are missing from candidate: ${missingHistoricalTests.join(', ')}`);
     const currentHistoricalTests = currentBaselineTests.filter((relative) => currentCandidateInventory.includes(relative));
     const currentCandidateTests = currentCandidateInventory.filter((relative) => !currentHistoricalTests.includes(relative));
     if (JSON.stringify(currentHistoricalTests) !== JSON.stringify(historicalTests) || JSON.stringify(currentCandidateTests) !== JSON.stringify(candidateTests)) throw new Error('Candidate test inventory changed after plan creation.');
@@ -304,7 +309,9 @@ function buildCombinedVerification({ proposal, baselineHash, candidateHash, case
 async function runCodeProposalProof(options = {}) {
     const required = ['attemptRoot', 'trustedRoot', 'metadata', 'proposal', 'baselineRoot', 'candidateRoot', 'executor', 'replayExecutor', 'c2bHandoffFile', 'imageId', 'runtimeId', 'replayPolicyVersion'];
     for (const key of required) if (options[key] === undefined || options[key] === null) throw new Error(`C2c1 requires ${key}.`);
-    const repoRoot = path.resolve(options.repoRoot || path.join(__dirname, '../..'));
+    const trustedRepoRoot = path.resolve(__dirname, '../..');
+    if (options.repoRoot && path.resolve(options.repoRoot) !== trustedRepoRoot) throw new Error('C2c1 repoRoot must be the current trusted repository root.');
+    const repoRoot = trustedRepoRoot;
     const trustedVerification = loadVerificationModule(repoRoot);
     const overrides = options.verificationOverrides || {};
     if (Object.keys(overrides).length && !(process.env.NODE_ENV === 'test' && options.allowTestDouble === true)) throw new Error('C2c1 permits the implementationHasher seam only in an explicit test-only invocation.');
@@ -354,6 +361,8 @@ async function runCodeProposalProof(options = {}) {
     const trustedSuites = trustedVerification.CODE_PROPOSAL_REGRESSION_TESTS || [];
     const baselineCandidateTests = walkCandidateTests(baselineRoot);
     const actualCandidateInventory = walkCandidateTests(candidateRoot);
+    const missingHistoricalTests = baselineCandidateTests.filter((file) => !actualCandidateInventory.includes(file));
+    if (missingHistoricalTests.length) throw new Error(`Historical candidate tests are missing from candidate: ${missingHistoricalTests.join(', ')}`);
     const historicalTests = baselineCandidateTests.filter((file) => actualCandidateInventory.includes(file));
     const candidateTests = actualCandidateInventory.filter((file) => !historicalTests.includes(file));
     const expectedCandidateTests = [...new Set(handoffInfo.handoff.draft.test_files)].sort();

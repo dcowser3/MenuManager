@@ -47,7 +47,7 @@ function setup(overrides = {}) {
     const handoff = { schema_version: 1, attempt_id: 'attempt-one', authorization_hash: HASH('7'), scope_hash: HASH('8'), baseline_source_sha256: baselineHash, candidate_source_sha256: candidateHash, draft: { ...draftBody, patch_sha256: digest(draftBody.patch), content_sha256: digest(JSON.stringify(draftBody)), response_sha256: responseBodyHash }, response: { body_sha256: responseBodyHash } };
     const handoffBytes = `${JSON.stringify(handoff)}\n`; fs.writeFileSync(path.join(attemptRoot, 'c2b-handoff.json'), handoffBytes, { mode: 0o600 });
     const metadata = { attempt_id: 'attempt-one', artifact_directory: attemptRoot, proposal_sha256: proposalHash, baseline_source_sha256: baselineHash, candidate_source_sha256: candidateHash, parent_campaign_sha256: proposal.parent_campaign_sha256, prompt_sha256: promptHash, accepted_rules_sha256: acceptedRulesHash, rules_file_sha256: digest(files['rules.json']), expected_dataset_sha256: datasetHash, expected_case_ids: ['case-1'], behavior_tests_sha256: behaviorHash, c2b_handoff_sha256: digest(handoffBytes), authorization_hash: handoff.authorization_hash, scope_hash: handoff.scope_hash, draft_patch_sha256: handoff.draft.patch_sha256, draft_content_sha256: handoff.draft.content_sha256, draft_response_sha256: handoff.draft.response_sha256, vocabulary_sha256: HASH('7'), expectations_sha256: HASH('8') };
-    Object.assign(proposal.eval_summary.code_candidate, { proposal_sha256: proposalHash, baseline_source_sha256: baselineHash, prompt_sha256: promptHash, accepted_rules_sha256: acceptedRulesHash });
+    Object.assign(proposal.eval_summary.code_candidate, { proposal_sha256: proposalHash, baseline_source_sha256: baselineHash, prompt_sha256: promptHash, accepted_rules_sha256: acceptedRulesHash, authorization_hash: handoff.authorization_hash, scope_hash: handoff.scope_hash, c2b_handoff_sha256: digest(handoffBytes), candidate_source_sha256: candidateHash, draft_patch_sha256: handoff.draft.patch_sha256, draft_content_sha256: handoff.draft.content_sha256, draft_response_sha256: handoff.draft.response_sha256 });
     fs.writeFileSync(path.join(attemptRoot, 'proposal.json'), JSON.stringify(proposal), { mode: 0o600 });
     const corrections = [{ correction_id: 'c1', case_id: 'case-1', test_name: 'fix', original_text: 'Dish, lemons', corrected_text: 'Dish, lemon', recommendation_indexes: [0] }];
     const report = (status, inventory) => ({ numRuntimeErrorTestSuites: 0, numTotalTests: inventory.length, testResults: inventory.map((file) => ({ name: `/app/${file}`, assertionResults: [{ fullName: file === candidateTest ? 'fix' : `${file}:trusted`, status: file === candidateTest ? status : 'passed' }] })) });
@@ -133,9 +133,29 @@ test('historical code-candidate tests stay in the paired inventory while only ne
     } finally { state.cleanup(); }
 });
 
+test('C2c1 refuses a C2b handoff that was not progressively bound to the owner claim', async () => {
+    const state = setup();
+    try {
+        delete state.proposal.eval_summary.code_candidate.c2b_handoff_sha256;
+        await expect(run(state)).rejects.toThrow(/owner-bound progressive c2b_handoff_sha256/);
+    } finally { state.cleanup(); }
+});
+
+test('historical candidate deletion and alternate verifier roots fail closed', async () => {
+    const state = setup();
+    try {
+        const historical = 'services/dashboard/__tests__/code-candidate-history.test.ts';
+        fs.mkdirSync(path.dirname(path.join(state.baselineRoot, historical)), { recursive: true });
+        fs.writeFileSync(path.join(state.baselineRoot, historical), 'test("history", () => {});');
+        await expect(run(state)).rejects.toThrow(/missing from candidate/);
+    } finally { state.cleanup(); }
+    const alternate = setup();
+    try { await expect(run(alternate, { repoRoot: fs.mkdtempSync(path.join(os.tmpdir(), 'fake-verifier-')) })).rejects.toThrow(/trusted repository root/); } finally { alternate.cleanup(); }
+});
+
 test.each([
     ['owner mismatch', { proposal: { ...setup().proposal, eval_summary: { code_candidate: { status: 'running', attempt_id: 'other' } } } }, /owner/],
-    ['candidate hash mismatch', { metadata: { candidate_source_sha256: HASH('9') } }, /differs from the frozen plan/],
+    ['candidate hash mismatch', { metadata: { candidate_source_sha256: HASH('9') } }, /owner-bound progressive candidate_source_sha256/],
     ['baseline and candidate reuse', { candidateRoot: null }, /distinct/],
 ])('rejects %s before execution', async (_label, override, error) => {
     const state = setup();
