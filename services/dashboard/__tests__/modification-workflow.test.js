@@ -990,9 +990,11 @@ describe('Dashboard Modification Workflow (local, mocked externals)', () => {
         expect(delivered.editableSpanBasis).toBe('prechecked_review_body');
         expect(delivered.structureGuard).toEqual(offline.authoritative.structureGuard);
         expect(delivered.reconciliation).toEqual(offline.authoritative.reconciliation);
+        expect(delivered.spellingAdjudications).toEqual(offline.authoritative.spellingAdjudications);
     });
 
     test('actual Basic HTTP handler matches offline coordinator on rejected merge/status', async () => {
+        supabaseClient.isSupabaseConfigured.mockReturnValue(true);
         const payload = {
             menuContent: 'BEVERAGE OPTIONS\nAthletic N/A\nLagunitas N/A',
             baselineMenuContent: '', reviewMode: 'full', allergens: '', menuType: 'standard', templateType: 'beverage',
@@ -1027,6 +1029,17 @@ describe('Dashboard Modification Workflow (local, mocked externals)', () => {
         expect(http.body.reviewStatus).toEqual({ complete: false, transportStatus: 'rejected', reusable: false });
         expect(http.body.basicCheckDiagnostics.delivered.structureGuard).toEqual(offline.authoritative.structureGuard);
         expect(http.body.basicCheckDiagnostics.delivered.suggestions).toEqual(offline.authoritative.suggestions);
+        expect(http.body.basicCheckDiagnostics.delivered.spellingAdjudications).toEqual(offline.authoritative.spellingAdjudications);
+        await flushAsyncJobs();
+        const auditPayload = mockSupabaseInsert.mock.calls
+            .map(([insertPayload]) => insertPayload)
+            .find((insertPayload) => insertPayload && insertPayload.event_type === 'basic_check_completed');
+        expect(auditPayload.details.deliveredReview).toMatchObject({
+            scope: 'delivered_authoritative',
+            reviewStatus: { complete: false, transportStatus: 'rejected', reusable: false },
+            hasCriticalErrors: offline.authoritative.hasCriticalErrors,
+        });
+        expect(auditPayload.details.correctedMenuStructureGuard.scope).toBe('attempt');
     });
 
     test('basic-check writes a durable AI request and response audit row', async () => {

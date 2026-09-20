@@ -75,7 +75,8 @@ test('prepared consumed state is frozen and completion fails closed on post-prep
     prepared.promptInfo = { ...prepared.promptInfo, prompt: 'TAMPERED PROMPT' };
     const result = (0, review_pipeline_1.completePreparedReview)(prepared, fenced('DINNER\nFish G 12'));
     expect(result.finalCorrectedMenu).toBe('DINNER\nFishh G 12');
-    expect(result.finalSuggestions).toEqual([]);
+    expect(result.finalSuggestions.some(suggestion => suggestion.type === 'Missing Price')).toBe(false);
+    expect(result.finalSuggestions.some(suggestion => suggestion.type === 'Spelling')).toBe(true);
     expect(result.post.hasCriticalErrors).toBe(false);
     expect(result.reviewStatus.reusable).toBe(false);
     expect(result.diagnostics[0]).toEqual({ stage: 'integrity', reason: 'prepared_state_drift:prompt' });
@@ -177,8 +178,9 @@ test('Basic/offline adapters match on rejected read-only merge and do not retain
     expect(offlineCalls).toBe(1);
     expect(direct.finalCorrectedMenu).toBe(menu);
     expect(offline.finalCorrectedMenu).toBe(menu);
-    expect(direct.finalSuggestions).toEqual([]);
-    expect(offline.finalSuggestions).toEqual([]);
+    expect(direct.finalSuggestions).toEqual(offline.finalSuggestions);
+    expect(direct.finalSuggestions.some(suggestion => suggestion.type === 'Missing Price')).toBe(false);
+    expect(direct.finalSuggestions.some(suggestion => suggestion.type === 'Spelling')).toBe(true);
     expect(direct.post.hasCriticalErrors).toBe(false);
     expect(offline.post.hasCriticalErrors).toBe(false);
     expect(direct.post.guardedCorrectedMenu).toBe(menu);
@@ -209,6 +211,28 @@ test('rejected delivery drops bogus candidate findings but preserves genuine sou
     ]));
     expect(result.post.hasCriticalErrors).toBe(true);
     expect(result.reviewStatus).toEqual({ complete: false, transportStatus: 'rejected', reusable: false });
+});
+test('rejected delivery rederives spelling warning and adjudication from restored source bytes', async () => {
+    const menu = 'DINNER\nFishh G 12\nSoup D 8';
+    const prepared = await (0, review_pipeline_1.prepareReview)(menu, {
+        basePrompt: 'BASE', acceptedCorrectionRules: [rule], precheckEnabled: false,
+    });
+    expect(prepared.nearMissAnalysis.findings).toEqual(expect.arrayContaining([
+        expect.objectContaining({ found: 'Fishh' }),
+    ]));
+    const feedback = fencedWithSuggestions('DINNER\nFish G 12', [{
+            type: 'Missing Price', severity: 'critical', menuItem: 'candidate-only',
+            description: 'candidate-only', recommendation: 'invent',
+        }]);
+    const result = (0, review_pipeline_1.completePreparedReview)(prepared, feedback, { finishReason: 'stop' });
+    expect(result.finalCorrectedMenu).toBe(menu);
+    expect(result.finalSuggestions.some(suggestion => suggestion.type === 'Missing Price')).toBe(false);
+    expect(result.authoritative.suggestions).toEqual(expect.arrayContaining([
+        expect.objectContaining({ type: 'Spelling', sourceToken: 'Fishh', spellingDisposition: 'not_adjudicated' }),
+    ]));
+    expect(result.authoritative.spellingAdjudications).toEqual(expect.arrayContaining([
+        expect.objectContaining({ disposition: 'not_adjudicated' }),
+    ]));
 });
 test('model failure fallback is source-preserving and still one-call', async () => {
     const menu = 'DINNER\nFishh G 12';

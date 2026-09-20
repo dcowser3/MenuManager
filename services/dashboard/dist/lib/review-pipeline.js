@@ -840,7 +840,7 @@ function deriveDeliveredSourcePost(args) {
         effectiveReviewAllergens: args.effectiveReviewAllergens,
         acceptedCorrectionRules: [],
         embeddedSetMenuAnalysis: args.embeddedSetMenuAnalysis,
-        canonicalSpellingFindings: [],
+        canonicalSpellingFindings: args.canonicalSpellingFindings || [],
         precheckEnabled: false,
         managedRawNoticePresent: args.managedRawNoticePresent,
     });
@@ -901,6 +901,7 @@ function failClosedPreparedReview(prepared, reason) {
         templateType: snapshot.envelope.context.templateType,
         effectiveReviewAllergens: snapshot.effectiveReviewAllergens,
         embeddedSetMenuAnalysis: snapshot.embeddedSetMenuAnalysis,
+        canonicalSpellingFindings: snapshot.nearMissAnalysis.findings,
         managedRawNoticePresent: snapshot.managedRawNoticePresent,
     });
     post.safetyDiagnostics = [reason, ...post.safetyDiagnostics];
@@ -971,6 +972,7 @@ function completePreparedReview(prepared, feedback, completion = {}) {
             templateType: opts.templateType,
             effectiveReviewAllergens: snapshot.effectiveReviewAllergens,
             embeddedSetMenuAnalysis: snapshot.embeddedSetMenuAnalysis,
+            canonicalSpellingFindings: snapshot.nearMissAnalysis.findings,
             managedRawNoticePresent: snapshot.managedRawNoticePresent,
         })
         : null;

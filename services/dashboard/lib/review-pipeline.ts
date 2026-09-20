@@ -1137,6 +1137,7 @@ function deriveDeliveredSourcePost(args: {
     templateType?: string;
     effectiveReviewAllergens?: string;
     embeddedSetMenuAnalysis: EmbeddedSetMenuAnalysis;
+    canonicalSpellingFindings?: NearMissFinding[];
     managedRawNoticePresent?: boolean;
 }): PostAiPipelineResult {
     const sourcePost = runPostAiPipeline({
@@ -1148,7 +1149,7 @@ function deriveDeliveredSourcePost(args: {
         effectiveReviewAllergens: args.effectiveReviewAllergens,
         acceptedCorrectionRules: [],
         embeddedSetMenuAnalysis: args.embeddedSetMenuAnalysis,
-        canonicalSpellingFindings: [],
+        canonicalSpellingFindings: args.canonicalSpellingFindings || [],
         precheckEnabled: false,
         managedRawNoticePresent: args.managedRawNoticePresent,
     });
@@ -1210,6 +1211,7 @@ function failClosedPreparedReview(prepared: PreparedReview, reason: string): Ful
         templateType: snapshot.envelope.context.templateType,
         effectiveReviewAllergens: snapshot.effectiveReviewAllergens,
         embeddedSetMenuAnalysis: snapshot.embeddedSetMenuAnalysis,
+        canonicalSpellingFindings: snapshot.nearMissAnalysis.findings,
         managedRawNoticePresent: snapshot.managedRawNoticePresent,
     });
     post.safetyDiagnostics = [reason, ...post.safetyDiagnostics];
@@ -1286,6 +1288,7 @@ export function completePreparedReview(
             templateType: opts.templateType,
             effectiveReviewAllergens: snapshot.effectiveReviewAllergens,
             embeddedSetMenuAnalysis: snapshot.embeddedSetMenuAnalysis,
+            canonicalSpellingFindings: snapshot.nearMissAnalysis.findings,
             managedRawNoticePresent: snapshot.managedRawNoticePresent,
         })
         : null;

@@ -36,7 +36,7 @@ rejected model mutation cannot leak its candidate state into the result.
 
 Diagnostics are bounded and contain stages, reasons, source positions, hashes,
 and unknown confidence; ordinary logs do not copy menu bodies. Existing Basic
-and unknown confidence; ordinary logs do not copy menu bodies. The HTTP adapter
+response fields and four response markers remain unchanged. The HTTP adapter
 keeps legacy attempt diagnostics but exposes a bounded `delivered` diagnostic
 section and review status sourced from the authoritative delivered state. The
 offline adapter and HTTP handler therefore share exact delivered bytes,
@@ -45,6 +45,13 @@ rejection semantics. Genuine unresolved critical findings are rederived from
 the immutable delivered source after a rejected candidate merge; rejected
 candidate-only findings are discarded. Existing Basic response fields and four
 response markers remain unchanged.
+
+Canonical spelling warnings and adjudications follow the same rule: when a
+candidate merge is rejected, they are rederived from the exact delivered bytes
+using the frozen near-miss findings, so a restored token remains an
+unresolved/advisory warning rather than being marked corrected by the rejected
+candidate. Attempt structure and spelling diagnostics remain separately labeled
+in form-attempt audit details.
 
 Submission-boundary migration, document preparation, B7 active review units,
 B8 receipt reuse, provider/model/settings changes, and deployment are outside
@@ -59,6 +66,7 @@ malformed and overlapping spans, zero-length insertion ambiguity, offset-safe
 length changes, ambiguous whole-block fallback, managed raw/footer context,
 and exactly one model callback per adapter run. HTTP-vs-offline parity covers a
 successful edit, a rejected merge, managed-footer removal, an earlier
-length-changing deterministic precheck, and a later model edit. The Basic
+length-changing deterministic precheck, a later model edit, and delivered
+spelling evidence. The Basic
 route continues to return its existing browser response shape with additive
 status/delivered diagnostics.

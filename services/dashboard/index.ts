@@ -3922,10 +3922,23 @@ async function handleBasicCheck(req: any, res: any) {
                 hasChanges: finalHasChanges,
                 dishNameFormattingAnchorCount: dishNameFormatting.length,
                 correctedMenuStructureGuard: {
+                    scope: 'attempt',
                     safe: structureGuard.safe,
                     reasons: structureGuard.reasons,
                     metrics: structureGuard.metrics,
                 },
+                ...(authoritative ? {
+                    deliveredReview: {
+                        scope: 'delivered_authoritative',
+                        reviewStatus: deliveredReviewStatus,
+                        structureGuard: authoritative.structureGuard,
+                        spellingAdjudications: authoritative.spellingAdjudications,
+                        suggestionsCount: finalSuggestions.length,
+                        criticalSuggestionsCount: criticalSuggestions.length,
+                        hasCriticalErrors,
+                        outputHash: coordinatedResult?.outputHash,
+                    },
+                } : {}),
                 preAiDeterministic: {
                     enabled: BASIC_AI_PRECHECK_ENABLED,
                     appliedCorrectionCount: preAiDeterministic.appliedCorrections.length,
