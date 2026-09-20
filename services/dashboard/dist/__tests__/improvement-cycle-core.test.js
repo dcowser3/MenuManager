@@ -283,7 +283,10 @@ describe('correctionsEligibleForImprovement', () => {
             { id: 'menu-only', source: 'human', status: 'pending', reviewer_name: 'Isa', rule: 'Outside update.', change_type: 'menu_update_only' },
             { id: 'rejected', source: 'human', status: 'rejected', reviewer_name: 'Isa', rule: 'Not learning.' },
         ];
-        expect((0, improvement_cycle_core_1.correctionsEligibleForImprovement)(rows).map((row) => row.id)).toEqual(['human-ready', 'accepted-human']);
+        expect((0, improvement_cycle_core_1.correctionsEligibleForImprovement)(rows).map((row) => row.id)).toEqual([
+            'human-ready',
+            'accepted-human',
+        ]);
     });
     test('learning_intent takes precedence and menu-content updates never enter proposal input', () => {
         const row = { id: 'intent-wins', source: 'human', status: 'accepted', reviewer_name: 'Isa', rule: 'Menu edit only.', change_type: 'terminology', learning_intent: 'menu_content_update' };
@@ -314,19 +317,11 @@ describe('mergeReplayResolvedCorrectionRouting', () => {
         expect(merged[1]).toMatchObject({ correction_id: 'missed', lane: 'prompt' });
     });
     test('downgrades an unverified now_correct route to actionable verification_required', () => {
-        const merged = (0, improvement_cycle_core_1.mergeReplayResolvedCorrectionRouting)(
-            [{ id: 'legacy', original_text: 'x', corrected_text: 'y', rule: 'Explain the correction.' }],
-            [{ correction_id: 'legacy', status: 'now_correct' }],
-            [{ correction_id: 'legacy', lane: 'already_correct', target: 'current live review pipeline', note: 'backend replay passed', replay_status: 'now_correct' }]
-        );
+        const merged = (0, improvement_cycle_core_1.mergeReplayResolvedCorrectionRouting)([{ id: 'legacy', original_text: 'x', corrected_text: 'y', rule: 'Explain the correction.' }], [{ correction_id: 'legacy', status: 'now_correct' }], [{ correction_id: 'legacy', lane: 'already_correct', target: 'current live review pipeline', note: 'backend replay passed', replay_status: 'now_correct' }]);
         expect(merged).toMatchObject([{
-            correction_id: 'legacy', lane: 'unrouted', replay_status: 'verification_required', retirement_verified: false,
-        }]);
-        const actionable = (0, improvement_cycle_core_1.mergeReplayResolvedCorrectionRouting)(
-            [{ id: 'legacy', original_text: 'x', corrected_text: 'y', rule: 'Explain the correction.' }],
-            [{ correction_id: 'legacy', status: 'now_correct' }],
-            [{ correction_id: 'legacy', lane: 'prompt', target: 'section', note: 'backend replay passed', replay_status: 'now_correct' }]
-        );
+                correction_id: 'legacy', lane: 'unrouted', replay_status: 'verification_required', retirement_verified: false,
+            }]);
+        const actionable = (0, improvement_cycle_core_1.mergeReplayResolvedCorrectionRouting)([{ id: 'legacy', original_text: 'x', corrected_text: 'y', rule: 'Explain the correction.' }], [{ correction_id: 'legacy', status: 'now_correct' }], [{ correction_id: 'legacy', lane: 'prompt', target: 'section', note: 'backend replay passed', replay_status: 'now_correct' }]);
         expect(actionable[0]).toMatchObject({ lane: 'prompt', replay_status: 'verification_required', retirement_verified: false });
     });
 });
@@ -749,6 +744,44 @@ describe('eval summary + status', () => {
         const identical = (0, improvement_cycle_core_1.buildProposalEvalSummary)(baseline, candidate, report(0.80, 0));
         expect((0, improvement_cycle_core_1.evalStatusFromSummary)(identical)).toBe('no_effect');
     });
+    test('passes a rules-only candidate only when every proposed rule activated', () => {
+        const baseline = (0, improvement_cycle_core_1.summarizeEvalReport)('baseline', report(0.8), '/tmp/base/report.json');
+        const activeReport = {
+            ...report(0.8, 0),
+            candidateRuleActivations: [
+                { rule_index: 0, rule_id: 'eval-candidate-rule-0', original_text: 'homemade', corrected_text: 'housemade', pre_ai_activations: 1, post_ai_activations: 0, total_activations: 1, case_ids: ['case-1'] },
+                { rule_index: 1, rule_id: 'eval-candidate-rule-1', original_text: 'house -made', corrected_text: 'housemade', pre_ai_activations: 0, post_ai_activations: 1, total_activations: 1, case_ids: ['case-1'] },
+            ],
+        };
+        const candidate = (0, improvement_cycle_core_1.summarizeEvalReport)('candidate', activeReport, '/tmp/cand/report.json');
+        const activeSummary = (0, improvement_cycle_core_1.buildProposalEvalSummary)(baseline, candidate, activeReport);
+        expect(activeSummary.candidate_rule_activations).toHaveLength(2);
+        expect((0, improvement_cycle_core_1.evalStatusFromSummary)(activeSummary, { rulesOnly: true })).toBe('passed');
+        const inactiveSummary = {
+            ...activeSummary,
+            candidate_rule_activations: activeSummary.candidate_rule_activations?.map((entry, index) => index === 1 ? { ...entry, post_ai_activations: 0, total_activations: 0, case_ids: [] } : entry),
+        };
+        expect((0, improvement_cycle_core_1.evalStatusFromSummary)(inactiveSummary, { rulesOnly: true })).toBe('no_effect');
+        expect((0, improvement_cycle_core_1.evalStatusFromSummary)({ ...inactiveSummary, triggers_improved: 1 }, { rulesOnly: true })).toBe('no_effect');
+        expect((0, improvement_cycle_core_1.evalStatusFromSummary)({ ...activeSummary, candidate_rule_activations: [] }, { rulesOnly: true })).toBe('no_effect');
+    });
+    test('stores confirmed regression deltas instead of displaying the stale raw comparison', () => {
+        const candidateReport = report(0.79, 1);
+        candidateReport.baselineComparison.regressions = [{
+                case_id: 'c1',
+                label: 'Case 1',
+                delta: -0.88,
+                confirmed_delta: -0.048,
+            }];
+        const baseline = (0, improvement_cycle_core_1.summarizeEvalReport)('baseline', report(0.8), '/tmp/base/report.json');
+        const candidate = (0, improvement_cycle_core_1.summarizeEvalReport)('candidate', candidateReport, '/tmp/cand/report.json');
+        const summary = (0, improvement_cycle_core_1.buildProposalEvalSummary)(baseline, candidate, candidateReport);
+        expect(summary.regressions[0]).toMatchObject({
+            delta: -0.048,
+            raw_delta: -0.88,
+            confirmed_delta: -0.048,
+        });
+    });
     test('attributes combined-candidate regressions to prompt, rules, both, or interaction', () => {
         const regressions = [
             { case_id: 'prompt-case', label: 'Prompt case' },
@@ -782,6 +815,56 @@ describe('eval summary + status', () => {
         const regression = [{ case_id: 'c1', label: 'Case 1' }];
         expect((0, improvement_cycle_core_1.buildRegressionAttribution)(regression, { promptChanged: true, ruleCount: 0 }).cases[0].cause).toBe('prompt');
         expect((0, improvement_cycle_core_1.buildRegressionAttribution)(regression, { promptChanged: false, ruleCount: 2 }).cases[0].cause).toBe('rules');
+    });
+    test('attempts rules-only salvage only when every regression is prompt-caused and no correction relies on the prompt', () => {
+        const attribution = (0, improvement_cycle_core_1.buildRegressionAttribution)([{ case_id: 'c1', label: 'Case 1' }], {
+            promptChanged: true,
+            ruleCount: 2,
+            promptOnlyReport: { baselineComparison: { regressions: [{ case_id: 'c1', confirmed_delta: -0.1 }] } },
+            rulesOnlyReport: { baselineComparison: { regressions: [] } },
+        });
+        expect((0, improvement_cycle_core_1.shouldAttemptRulesOnlyFallback)({
+            attribution,
+            correctionRouting: [{ correction_id: 'r1', lane: 'replacement_rule', target: 'x -> y', note: 'safe' }],
+        })).toBe(true);
+        expect((0, improvement_cycle_core_1.shouldAttemptRulesOnlyFallback)({
+            attribution,
+            correctionRouting: [{ correction_id: 'r1', lane: 'prompt', target: 'section 2', note: 'contextual' }],
+        })).toBe(false);
+        expect((0, improvement_cycle_core_1.shouldAttemptRulesOnlyFallback)({ attribution })).toBe(false);
+        expect((0, improvement_cycle_core_1.shouldAttemptRulesOnlyFallback)({ attribution, unresolvedStillMissed: true })).toBe(false);
+    });
+    test('requires a complete non-empty full-suite rules-only comparison before salvage', () => {
+        const activations = [{ rule_id: 'eval-candidate-rule-0', total_activations: 2 }];
+        expect((0, improvement_cycle_core_1.rulesOnlyFallbackPassedFullSuite)({ baselineComparison: { comparedCases: 196, regressed: 0 }, candidateRuleActivations: activations })).toBe(true);
+        expect((0, improvement_cycle_core_1.rulesOnlyFallbackPassedFullSuite)({ baselineComparison: { comparedCases: 196, regressed: 1 }, candidateRuleActivations: activations })).toBe(false);
+        expect((0, improvement_cycle_core_1.rulesOnlyFallbackPassedFullSuite)({ baselineComparison: { comparedCases: 0, regressed: 0 }, candidateRuleActivations: activations })).toBe(false);
+        expect((0, improvement_cycle_core_1.rulesOnlyFallbackPassedFullSuite)({ baselineComparison: { comparedCases: 196, regressed: 0 }, candidateRuleActivations: [] })).toBe(false);
+        expect((0, improvement_cycle_core_1.rulesOnlyFallbackPassedFullSuite)({ baselineComparison: { comparedCases: 196, regressed: 0 }, candidateRuleActivations: [{ rule_id: 'eval-candidate-rule-0', total_activations: 0 }] })).toBe(false);
+    });
+    test('rebuilds trigger progression from the adopted full-suite fallback reports', () => {
+        const baselineReport = {
+            cases: [{ case_id: 'production:legacy-1', composite: 0.5 }],
+        };
+        const candidateReport = {
+            cases: [{ case_id: 'production:legacy-1', composite: 0.8 }],
+            baselineComparison: {
+                improvements: [{ case_id: 'production:legacy-1', delta: 0.3, confirmed_delta: 0.25 }],
+                regressions: [],
+                noiseRegressions: [],
+            },
+        };
+        expect((0, improvement_cycle_core_1.buildTriggerProgressionFromReports)({
+            baselineReport,
+            candidateReport,
+            submissionIds: ['uuid-1'],
+            caseIdsBySubmission: { 'uuid-1': 'production:legacy-1' },
+        })).toMatchObject({
+            triggers_improved: 1,
+            triggers_regressed: 0,
+            triggers_unavailable: 0,
+            triggers: [{ delta: 0.25, status: 'improved' }],
+        });
     });
 });
 describe('evaluateSecretExpiry', () => {
@@ -930,6 +1013,21 @@ describe('decideReplayStatus (Follow-up 2)', () => {
         expect((0, improvement_cycle_core_1.fullLineCorrectionApplied)(original, corrected, 'Dish, yellow chili aioli, pickle D, S 75')).toBe(true);
         expect((0, improvement_cycle_core_1.fullLineCorrectionApplied)(original, corrected, 'Dish, yellow chili aioli, cucumber pickle D, S 75')).toBe(false);
     });
+    test('marks a compound correction partially_correct when replay applies the safe atomic portion', () => {
+        const original = 'Salmon, sea bass, saffron aguachile, mango relish, macha salsa, crispy sweet potato,';
+        const corrected = 'Salmon, sea bass, saffron aguachile, mango relish, salsa macha, crispy sweet potato, marigold S';
+        const replay = 'Salmon, sea bass, saffron aguachile, mango relish, salsa macha, crispy sweet potato,';
+        const progress = (0, improvement_cycle_core_1.analyzeFullLineCorrectionProgress)(original, corrected, replay);
+        expect(progress.complete).toBe(false);
+        expect(progress.partial).toBe(true);
+        expect(progress.applied_changes.length).toBeGreaterThan(0);
+        expect(progress.remaining_changes.join(' ')).toMatch(/marigold|S/i);
+        const analysis = (0, improvement_cycle_core_1.analyzeReplayCorrection)(original, corrected, replay, []);
+        expect(analysis.status).toBe('partially_correct');
+        expect(analysis.applied_changes?.length).toBeGreaterThan(0);
+        expect(analysis.remaining_changes?.join(' ')).toMatch(/marigold|S/i);
+        expect((0, improvement_cycle_core_1.decideReplayStatus)(original, corrected, replay, [])).toBe('partially_correct');
+    });
     test('preserves case and diacritics when verifying corrections', () => {
         expect((0, improvement_cycle_core_1.decideReplayStatus)('BRULEE', 'BRÛLÉE', 'AMANCER PUMKIN BRÛLÉE', [sig('BRULEE', 'BRÛLÉE')])).toBe('now_correct');
         expect((0, improvement_cycle_core_1.decideReplayStatus)('BRULEE', 'BRÛLÉE', 'AMANCER PUMKIN BRULEE', [])).toBe('still_missed');
@@ -940,7 +1038,7 @@ describe('replay-resolved correction lifecycle', () => {
         expect((0, improvement_cycle_core_1.partitionCorrectionIdsByReplayStatus)(['c1', 'c2', 'c3'], [
             { correction_id: 'c1', status: 'now_correct', retirement_evidence: verifiedReplayRetirement },
             { correction_id: 'c2', status: 'still_missed' },
-            { correction_id: 'c3', status: 'replay_unavailable' },
+            { correction_id: 'c3', status: 'partially_correct' },
         ])).toEqual({ resolvedIds: ['c1'], proposalIds: ['c2', 'c3'] });
         expect((0, improvement_cycle_core_1.replayResolutionMarker)('2026-08-21-manual-1')).toBe('resolved-by-current-pipeline:2026-08-21-manual-1');
     });
@@ -948,7 +1046,7 @@ describe('replay-resolved correction lifecycle', () => {
         const ids = ['legacy', 'malformed', 'delivery'];
         const evidence = [
             { correction_id: 'legacy', status: 'now_correct' },
-            { correction_id: 'malformed', status: 'now_correct', retirement_evidence: { ...verifiedReplayRetirement, original_response_correct: true } },
+            { correction_id: 'malformed', status: 'now_correct', retirement_evidence: { ...verifiedReplayRetirement, eligible: true, original_response_correct: true } },
             { correction_id: 'delivery', status: 'delivery_mismatch' },
         ];
         expect((0, improvement_cycle_core_1.partitionCorrectionIdsByReplayStatus)(ids, evidence)).toEqual({ resolvedIds: [], proposalIds: ids });
@@ -1169,6 +1267,34 @@ describe('promptProposalApprovalBlock', () => {
             disposition: 'rules_and_prompt',
             correction_rule_count: 1,
         })?.reason).toBe('eval_skipped');
+    });
+    test('blocks a rules-only proposal when candidate-rule activation was not proven', () => {
+        expect((0, improvement_cycle_core_1.promptProposalApprovalBlock)({
+            eval_status: 'no_effect',
+            disposition: 'rules_only',
+            correction_rule_count: 5,
+        })?.reason).toBe('eval_rule_inactive');
+        expect((0, improvement_cycle_core_1.promptProposalApprovalBlock)({
+            eval_status: 'passed',
+            disposition: 'rules_only',
+            correction_rule_count: 5,
+            eval_summary: {
+                candidate_rule_activations: [
+                    { rule_index: 0, rule_id: 'eval-candidate-rule-0', original_text: 'a', corrected_text: 'b', pre_ai_activations: 1, post_ai_activations: 0, total_activations: 1, case_ids: [] },
+                    { rule_index: 1, rule_id: 'eval-candidate-rule-1', original_text: 'c', corrected_text: 'd', pre_ai_activations: 0, post_ai_activations: 0, total_activations: 0, case_ids: [] },
+                ],
+            },
+        })?.reason).toBe('eval_rule_inactive');
+        expect((0, improvement_cycle_core_1.promptProposalApprovalBlock)({
+            eval_status: 'passed',
+            disposition: 'rules_only',
+            correction_rule_count: 5,
+            eval_summary: {
+                candidate_rule_activations: [
+                    { rule_index: 0, rule_id: 'eval-candidate-rule-0', original_text: 'a', corrected_text: 'b', pre_ai_activations: 0, post_ai_activations: 0, replay_activations: 1, total_activations: 1, case_ids: [], correction_ids: ['correction-1'] },
+                ],
+            },
+        })).toBeNull();
     });
     test('allows a passing scored proposal and does not block rejection-only metadata', () => {
         expect((0, improvement_cycle_core_1.promptProposalApprovalBlock)({
@@ -1410,6 +1536,13 @@ describe('C3 validateCorrectionRouting', () => {
         const out = (0, improvement_cycle_core_1.validateCorrectionRouting)([{ correction_id: 'a', lane: 'dismissed', target: '', note: 'nah' }, { correction_id: 'b', lane: 'prompt', target: 's', note: '' }], { sourceCorrections: sources, replayEvidence: [{ correction_id: 'a', status: 'still_missed' }] });
         expect(out.unresolvedFromRouting).toBe(true);
         expect(out.warnings.some((w) => /still_missed by replay but routed "dismissed"/.test(w))).toBe(true);
+    });
+    test('partially_correct requires the remainder to be routed but permits an explicitly unsupported remainder to be dismissed', () => {
+        const unrouted = (0, improvement_cycle_core_1.validateCorrectionRouting)([{ correction_id: 'a', lane: 'unrouted', target: '', note: '' }], { sourceCorrections: [sources[0]], replayEvidence: [{ correction_id: 'a', status: 'partially_correct' }] });
+        expect(unrouted.unresolvedFromRouting).toBe(true);
+        expect(unrouted.warnings.some((w) => /only partially_correct/.test(w))).toBe(true);
+        const dismissed = (0, improvement_cycle_core_1.validateCorrectionRouting)([{ correction_id: 'a', lane: 'dismissed', target: 'unsupported remainder', note: 'marigold and S are absent from source evidence' }], { sourceCorrections: [sources[0]], replayEvidence: [{ correction_id: 'a', status: 'partially_correct' }] });
+        expect(dismissed.unresolvedFromRouting).toBe(false);
     });
     test('already_correct illegal unless replay is now_correct', () => {
         const out = (0, improvement_cycle_core_1.validateCorrectionRouting)([{ correction_id: 'a', lane: 'already_correct', target: '', note: '' }, { correction_id: 'b', lane: 'prompt', target: 's', note: '' }], { sourceCorrections: sources, replayEvidence: [{ correction_id: 'a', status: 'replay_unavailable' }] });

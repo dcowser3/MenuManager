@@ -67,6 +67,9 @@ function requireDashboardLib(relPath) {
     return require(distPath);
 }
 
+const replayAuditBindingLib = requireDashboardLib('replay-audit-binding');
+const replayRetirementLib = requireDashboardLib('replay-retirement');
+
 function requireLlmAdapter() {
     const sourcePath = path.join(repoRoot, 'services', 'llm-adapter', 'src', 'index.ts');
     try {
@@ -888,25 +891,44 @@ async function main() {
             }
             const acceptedForReplay = (acceptedRules || []).filter((r) => r.status === 'accepted');
             const replayOutForSid = new Map();
+            const submissionBySid = new Map();
+            const auditBindingBySid = new Map();
             for (const sid of submissionIds) {
                 let row = null;
                 for (const [cid, c] of dsByCase.entries()) {
                     if (cid === `production:${sid}` || cid.endsWith(`:${sid}`)) { row = c; break; }
                 }
-                if (!row || !row.raw_input) {
-                    // light fallback query
-                    const { data: srows } = await supabase.from('submissions').select('id,legacy_id,menu_content,approved_menu_content,form_attempt_id,property,template_type,menu_type,service_period,allergens:raw_payload->>allergens').or(`id.eq.${sid},legacy_id.eq.${sid}`).limit(1);
-                    const s = (srows || [])[0];
-                    if (s && `${s.approved_menu_content || ''}`.trim()) {
-                        let raw = s.menu_content || '';
-                        if (s.form_attempt_id) {
-                            const { data: auds } = await supabase.from('basic_ai_check_audits').select('menu_content_raw,ai_request').eq('attempt_id', s.form_attempt_id).order('created_at', { ascending: false }).limit(1);
-                            const a = (auds || [])[0];
-                            if (a && a.menu_content_raw) raw = a.menu_content_raw;
-                            else if (a && a.ai_request && a.ai_request.text) raw = a.ai_request.text;
-                        }
-                        row = { raw_input: raw, context: { property: s.property || '', templateType: s.template_type || 'food', menuType: s.menu_type || 'standard', allergens: s.allergens || '' } };
+                // Load the submission and its full audit fields independently of
+                // the dataset row. A dataset case is useful replay input, but it
+                // is not trusted provenance for retirement.
+                const { data: srows } = await supabase.from('submissions')
+                    .select('id,legacy_id,menu_content,approved_menu_content,form_attempt_id,property,template_type,menu_type,service_period,allergens:raw_payload->>allergens')
+                    .or(`id.eq.${sid},legacy_id.eq.${sid}`).limit(1);
+                const submission = (srows || [])[0] || null;
+                submissionBySid.set(sid, submission);
+                let auditBinding = { eligible: false, reason: 'missing_submission_attempt', exact_candidate_count: 0 };
+                if (submission?.form_attempt_id) {
+                    const { data: audits, error: auditError } = await supabase.from('basic_ai_check_audits')
+                        .select('id,attempt_id,created_at,event_type,review_mode,model,ai_request,ai_response,final_result')
+                        .eq('attempt_id', submission.form_attempt_id);
+                    if (!auditError) {
+                        auditBinding = replayAuditBindingLib.bindReplayAudit(audits || [], submission.form_attempt_id);
+                    } else {
+                        auditBinding = { eligible: false, reason: 'malformed_audit', exact_candidate_count: 0 };
                     }
+                }
+                auditBindingBySid.set(sid, auditBinding);
+                if ((!row || !row.raw_input) && submission && `${submission.approved_menu_content || ''}`.trim()) {
+                    const raw = submission.menu_content || '';
+                    row = {
+                        raw_input: raw,
+                        context: {
+                            property: submission.property || '',
+                            templateType: submission.template_type || 'food',
+                            menuType: submission.menu_type || 'standard',
+                            allergens: submission.allergens || '',
+                        },
+                    };
                 }
                 const raw = row && row.raw_input;
                 for (const r of correctionRules) {
@@ -936,18 +958,57 @@ async function main() {
                     const signals = replayOut ? extractReplacementSignals(raw, replayOut) : [];
                     const replayAnalysis = core.analyzeReplayCorrection(o, c, replayOut, signals);
                     const observedStatus = replayAnalysis.status;
-                    replayEvidence.push({
+                    let evidence = {
                         correction_id: r.id,
                         submission_id: sid,
                         original_text: o,
                         corrected_text: c,
                         ...replayAnalysis,
-                        // This cycle has no original-audit producer yet. A
-                        // backend now_correct is therefore an observation,
-                        // never a retirement decision.
-                        status: observedStatus === 'now_correct' ? 'verification_required' : observedStatus,
                         observed_status: observedStatus,
+                    };
+                    const binding = auditBindingBySid.get(sid);
+                    const submission = submissionBySid.get(sid);
+                    const context = (row && row.context) || {};
+                    // The audit request is the frozen original review body;
+                    // never let a dataset/raw fallback replace that bound
+                    // provenance when proving retirement.
+                    const sourceText = binding?.eligible && binding.audit?.ai_request?.text
+                        ? binding.audit.ai_request.text
+                        : (raw || '');
+                    const deterministicReplay = binding?.eligible && binding.audit
+                        ? replayRetirementLib.replayOriginalResponseDeterministically(
+                            binding.audit,
+                            {
+                                property: context.property || '',
+                                templateType: context.templateType || 'food',
+                                menuType: context.menuType || 'standard',
+                                allergens: context.allergens || '',
+                            },
+                            acceptedForReplay
+                        )
+                        : null;
+                    // Always persist the bounded evidence envelope, including
+                    // an explicit ineligible proof when provenance is missing.
+                    // This keeps the cycle auditable without treating a backend
+                    // success as a retirement decision.
+                    const retirement = replayRetirementLib.assessReplayRetirement({
+                        observedStatus,
+                        originalAudit: binding?.eligible ? binding.audit : null,
+                        submissionAttemptId: submission?.form_attempt_id || null,
+                        submittedMenu: submission?.menu_content || null,
+                        deterministicReplay,
+                        correctionApplied: (menu) => core.analyzeReplayCorrection(o, c, menu, extractReplacementSignals(sourceText, menu)).status === 'now_correct',
+                        correctionProgress: (menu) => ({
+                            applied_changes: extractReplacementSignals(sourceText, menu).map((signal) => `${signal.from_norm || signal.from || ''}->${signal.to_norm || signal.to || ''}`),
+                        }),
                     });
+                    evidence = {
+                        ...evidence,
+                        status: retirement.status,
+                        observed_status: retirement.observed_status,
+                        retirement_evidence: retirement.retirement_evidence,
+                    };
+                    replayEvidence.push(evidence);
                 }
             }
             await fsp.writeFile(path.join(artifactsDir, 'replay_evidence.json'), JSON.stringify(replayEvidence, null, 2));
