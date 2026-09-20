@@ -2,8 +2,9 @@
 
 This branch is a narrow accepted safety integration—not the entire final17
 workflow or the whole review-learning project. It integrates only the accepted
-source-bound allergen and canonical raw-notice behavior into clean main
-`81625d1671ac0c75fe0c9aa0b850a484a38f9d06`.
+source-bound allergen and canonical raw-notice behavior onto current
+`origin/main` at `1c1bf4afdd1047a9a7099bb726dd05ca763ad55a`, preserving the
+newer editor behavior already present there.
 The immutable source packet is
 `mm-review-learning-r4-allergen-raw-successor-1789166000026-final17`.
 
@@ -46,6 +47,14 @@ evidence artifacts and are intentionally not shipped as product runtime code.
   hash `fa980f16a94173dd6a474984e6153aa77042df62700d1ff7d3602685e223d4c1`.
 - Generated rule metadata served by source and compiled manifest passed its
   seven-test contract suite.
+- The changed-only route merge uses the final guarded `correctedMenuSanitized`
+  output; a negative-control mutation back to `correctedAfterHighConfidence`
+  fails the realistic trailing-code regression.
+- Destination reconciliation started from `origin/main` and cherry-picked the
+  accepted source branch (`f4f2f1897f6cd46effd5b0f0635dd8da5cb91756`) as a
+  controlled five-commit range. Git reported no conflicts; no newer origin/main
+  behavior was overwritten. `npm run dev:doctor` is not defined in this repo, so
+  that requested read-only check was unavailable.
 - No provider calls, paid runs, shared-stack changes, deployment, activation, or
   production writes were performed.
 
