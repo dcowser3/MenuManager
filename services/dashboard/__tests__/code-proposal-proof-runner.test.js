@@ -3,6 +3,7 @@ const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
 const { runCodeProposalProof } = require('../../../scripts/lib/code-proposal-proof-runner');
+const { loadVerificationModule, recordCodeVerification } = require('../../../scripts/lib/proposal-verification-store');
 
 const digest = (value) => crypto.createHash('sha256').update(value).digest('hex');
 const HASH = (letter) => letter.repeat(64);
@@ -20,49 +21,50 @@ function setup(overrides = {}) {
     fs.writeFileSync(path.join(baselineRoot, 'services/dashboard/lib/rule.ts'), 'export const rule = 1;');
     fs.writeFileSync(path.join(candidateRoot, 'services/dashboard/lib/rule.ts'), 'export const rule = 2;');
     fs.writeFileSync(path.join(candidateRoot, 'services/dashboard/__tests__/code-candidate-fix.test.ts'), 'test("fix", () => {});');
-    const behavior = { schemaVersion: 1, frozenAt: new Date().toISOString(), records: [], tests: [], sha256: HASH('b') };
-    const proposalHash = HASH('a'); const baselineHash = HASH('c'); const candidateHash = HASH('d');
-    const acceptedRulesHash = HASH('2'); const behaviorHash = behavior.sha256;
-    const proposal = { id: 'p1', parent_campaign_sha256: HASH('3'), code_recommendations: [{ title: 'Fix' }], correction_routing: [{ correction_id: 'c1', lane: 'code_recommendation', original_text: 'Dish, lemons', corrected_text: 'Dish, lemon' }], proposed_prompt: 'prompt', eval_summary: { code_candidate: { status: 'running', attempt_id: 'attempt-one', expected_dataset_sha256: null, expected_case_ids: ['case-1'], behavior_tests_sha256: behaviorHash }, behavior_tests: behavior, replay_retirement_policy_version: 1 } };
+    const repoRoot = path.resolve(__dirname, '../../..');
+    const trustedVerification = loadVerificationModule(repoRoot);
+    const behaviorBody = { schemaVersion: 1, frozenAt: new Date().toISOString(), records: [{ correctionId: 'c1', expectationAuthority: 'human_explanation', disposition: 'awaiting_behavior_verification' }], tests: [{ id: 'behavior-1', input: 'behavior input', expected: 'behavior output', context: {} }] };
+    const behavior = { ...behaviorBody, sha256: digest(JSON.stringify(behaviorBody)) };
+    const baselineHash = HASH('c'); const candidateHash = HASH('d');
+    const acceptedRulesHash = trustedVerification.hashAcceptedRules([]); const behaviorHash = behavior.sha256;
+    const proposal = { id: 'p1', status: 'pending', parent_campaign_sha256: HASH('3'), current_prompt: 'baseline prompt', code_recommendations: [{ title: 'Fix' }], correction_routing: [{ correction_id: 'c1', lane: 'code_recommendation', original_text: 'Dish, lemons', corrected_text: 'Dish, lemon' }], proposed_prompt: 'prompt', eval_summary: { code_candidate: { status: 'running', attempt_id: 'attempt-one', expected_dataset_sha256: null, expected_case_ids: ['case-1'], behavior_tests_sha256: behaviorHash }, behavior_tests: behavior, replay_retirement_policy_version: trustedVerification.REPLAY_RETIREMENT_POLICY_VERSION } };
     const dataset = `${JSON.stringify({ case_id: 'case-1', raw_input: 'Dish, lemons', ground_truth: 'Dish, lemon', context: {} })}\n`;
     const files = { 'proposal.json': JSON.stringify(proposal), 'prompt.txt': 'prompt', 'rules.json': JSON.stringify({ rules: [] }), 'behavior-tests.json': JSON.stringify(behavior), 'dataset.jsonl': dataset };
     for (const [name, contents] of Object.entries(files)) fs.writeFileSync(path.join(attemptRoot, name), contents, { mode: 0o600 });
     const datasetHash = digest(dataset); const promptHash = digest('prompt');
     proposal.eval_summary.code_candidate.expected_dataset_sha256 = datasetHash;
-    const metadata = { attempt_id: 'attempt-one', artifact_directory: attemptRoot, proposal_sha256: proposalHash, baseline_source_sha256: baselineHash, candidate_source_sha256: candidateHash, parent_campaign_sha256: proposal.parent_campaign_sha256, prompt_sha256: promptHash, accepted_rules_sha256: acceptedRulesHash, rules_file_sha256: digest(files['rules.json']), expected_dataset_sha256: datasetHash, expected_case_ids: ['case-1'], behavior_tests_sha256: behaviorHash };
-    const trustedSuite = 'services/dashboard/__tests__/trusted.test.ts';
+    fs.writeFileSync(path.join(attemptRoot, 'proposal.json'), JSON.stringify(proposal), { mode: 0o600 });
+    const proposalHash = trustedVerification.codeProposalVerificationFingerprint(proposal);
+    const trustedSuites = trustedVerification.CODE_PROPOSAL_REGRESSION_TESTS;
+    for (const trustedSuite of trustedSuites) {
+        for (const armRoot of [baselineRoot, candidateRoot]) {
+            const target = path.join(armRoot, trustedSuite); fs.mkdirSync(path.dirname(target), { recursive: true, mode: 0o700 }); fs.writeFileSync(target, `test('trusted', () => {});`);
+        }
+    }
+    const candidateTest = 'services/dashboard/__tests__/code-candidate-fix.test.ts';
+    const handoff = { schema_version: 1, attempt_id: 'attempt-one', authorization_hash: HASH('7'), scope_hash: HASH('8'), draft: { patch_sha256: HASH('9'), response_sha256: HASH('a'), test_files: [candidateTest], corrections: [{ correction_id: 'c1', case_id: 'case-1', test_name: 'fix', original_text: 'Dish, lemons', corrected_text: 'Dish, lemon', recommendation_indexes: [0] }] } };
+    const handoffBytes = `${JSON.stringify(handoff)}\n`; fs.writeFileSync(path.join(attemptRoot, 'c2b-handoff.json'), handoffBytes, { mode: 0o600 });
+    const metadata = { attempt_id: 'attempt-one', artifact_directory: attemptRoot, proposal_sha256: proposalHash, baseline_source_sha256: baselineHash, candidate_source_sha256: candidateHash, parent_campaign_sha256: proposal.parent_campaign_sha256, prompt_sha256: promptHash, accepted_rules_sha256: acceptedRulesHash, rules_file_sha256: digest(files['rules.json']), expected_dataset_sha256: datasetHash, expected_case_ids: ['case-1'], behavior_tests_sha256: behaviorHash, c2b_handoff_sha256: digest(handoffBytes) };
+    Object.assign(proposal.eval_summary.code_candidate, { proposal_sha256: proposalHash, baseline_source_sha256: baselineHash, prompt_sha256: promptHash, accepted_rules_sha256: acceptedRulesHash });
+    fs.writeFileSync(path.join(attemptRoot, 'proposal.json'), JSON.stringify(proposal), { mode: 0o600 });
     const corrections = [{ correction_id: 'c1', case_id: 'case-1', test_name: 'fix', original_text: 'Dish, lemons', corrected_text: 'Dish, lemon', recommendation_indexes: [0] }];
-    const report = (status) => ({ numRuntimeErrorTestSuites: 0, numTotalTests: 2, testResults: [
-        { name: `/app/${trustedSuite}`, assertionResults: [{ fullName: 'trusted', status: 'passed' }] },
-        { name: '/app/services/dashboard/__tests__/code-candidate-fix.test.ts', assertionResults: [{ fullName: 'fix', status }] },
-    ] });
-    const verification = {
-        CODE_PROPOSAL_REGRESSION_TESTS: [trustedSuite],
-        codeProposalVerificationFingerprint: () => proposalHash,
-        hashAcceptedRules: () => acceptedRulesHash,
-        hashCodeImplementation: (rootPath) => rootPath === baselineRoot ? baselineHash : candidateHash,
-        codeVerificationCorrectionPresent: (output, correction) => output.split('\n').map((line) => line.trim()).includes(correction.corrected_text),
-        assessCodeVerificationTests: (tests, mapped) => {
-            if (tests.baseline.exit_code !== 1 || tests.candidate.exit_code !== 0) return 'before/after exit contract failed';
-            if (tests.baseline.report.testResults.some((result) => result.assertionResults.some((entry) => entry.status === 'failed' && entry.fullName !== 'fix'))) return 'unrelated baseline failure';
-            if (tests.baseline.report.testResults[1].assertionResults[0].status !== 'failed' || tests.candidate.report.testResults[1].assertionResults[0].status !== 'passed') return 'motivating assertion contract failed';
-            return null;
-        },
-        assessCodeProposalVerificationIntegrity: (candidateProposal) => candidateProposal.eval_summary.code_verification?.status === 'passed' ? null : { error: 'proof missing' },
-    };
-    const behaviorModule = { validateBehaviorArtifact: () => behavior, executeBehaviorTests: async (artifact, evaluator) => ({ artifactHash: artifact.sha256, passed: true, outcomes: [], explanations: [] }) };
+    const report = (status, inventory) => ({ numRuntimeErrorTestSuites: 0, numTotalTests: inventory.length, testResults: inventory.map((file) => ({ name: `/app/${file}`, assertionResults: [{ fullName: file === candidateTest ? 'fix' : `${file}:trusted`, status: file === candidateTest ? status : 'passed' }] })) });
+    const verificationOverrides = { hashCodeImplementation: (rootPath) => rootPath === baselineRoot ? baselineHash : candidateHash };
     const state = {
-        root, trustedRoot, attemptRoot, baselineRoot, candidateRoot, proposal, metadata, corrections, trustedSuite, report, verification, behaviorModule,
-        executor: async ({ arm }) => ({ exit_code: arm === 'baseline' ? 1 : 0, report: report(arm === 'baseline' ? 'failed' : 'passed') }),
+        root, repoRoot, trustedRoot, attemptRoot, baselineRoot, candidateRoot, proposal, metadata, corrections, trustedSuites, candidateTest, handoffFile: path.join(attemptRoot, 'c2b-handoff.json'), c2bHandoffFile: path.join(attemptRoot, 'c2b-handoff.json'), trustedVerification, verificationOverrides, report,
+        executor: async ({ arm, inventory }) => ({ exit_code: arm === 'baseline' ? 1 : 0, report: report(arm === 'baseline' ? 'failed' : 'passed', inventory) }),
         replayExecutor: async ({ arm, seed }) => ({ report_id: `${arm}-${seed}`, output: arm === 'baseline' ? 'Dish, lemons' : 'Dish, lemon', contractComplete: true, fenceMissing: false, composite: arm === 'baseline' ? 0.8 : 0.9, extraEdits: 0 }),
-        behaviorEvaluator: async () => '',
+        behaviorEvaluator: async () => 'behavior output',
         cleanup: () => fs.rmSync(root, { recursive: true, force: true }),
     };
+    const active = { ...proposal.eval_summary.code_candidate };
+    const fakeClient = { from: () => ({ select: () => ({ eq: () => ({ single: async () => ({ data: proposal }) }) }), update: () => { const q = { eq: () => q, is: () => q, select: async () => ({ data: [{ id: proposal.id }] }) }; return q; } }) };
+    state.client = fakeClient; state.originalProposal = proposal; state.store = { recordCodeVerification };
     return Object.assign(state, overrides);
 }
 
 function run(state, overrides = {}) {
-    return runCodeProposalProof({ ...state, imageId: 'sha256:test-image', runtimeId: 'node-test', replayPolicyVersion: 1, ...overrides });
+    return runCodeProposalProof({ ...state, c2bHandoffFile: state.c2bHandoffFile, imageId: HASH('5'), runtimeId: HASH('6'), replayPolicyVersion: state.trustedVerification.REPLAY_RETIREMENT_POLICY_VERSION, vocabularySha256: HASH('7'), expectationsSha256: HASH('8'), ...overrides });
 }
 
 test('runs independent baseline/candidate proof and writes owner-only plan, progress, reports and proof', async () => {
@@ -76,6 +78,17 @@ test('runs independent baseline/candidate proof and writes owner-only plan, prog
         expect(fs.statSync(result.paths.plan).mode & 0o777).toBe(0o600);
         expect(JSON.parse(fs.readFileSync(path.join(state.candidateRoot, 'progress.json'))).state).toBe('verified');
         expect(result.proof.runs).toHaveLength(2);
+    } finally { state.cleanup(); }
+});
+
+test('the complete positive proof passes the real integrity gate and combined drift is rejected', async () => {
+    const state = setup();
+    try {
+        const result = await run(state);
+        const candidate = { ...state.proposal, eval_summary: { ...state.proposal.eval_summary, code_verification: result.proof } };
+        expect(state.trustedVerification.assessCodeProposalVerificationIntegrity(candidate)).toBeNull();
+        candidate.eval_summary.code_verification.combined = null;
+        expect(state.trustedVerification.assessCodeProposalVerificationIntegrity(candidate)).not.toBeNull();
     } finally { state.cleanup(); }
 });
 
@@ -112,9 +125,9 @@ test('baseline unexpected pass, candidate skip/failure, and replay regression fa
 test('unrelated baseline failures are not accepted as the motivating failure', async () => {
     const state = setup();
     try {
-        state.executor = async ({ arm }) => {
-            const report = state.report(arm === 'baseline' ? 'failed' : 'passed');
-            if (arm === 'baseline') report.testResults[0].assertionResults[0].status = 'failed';
+        state.executor = async ({ arm, inventory }) => {
+            const report = state.report(arm === 'baseline' ? 'failed' : 'passed', inventory);
+            if (arm === 'baseline') report.testResults.find((result) => !result.name.includes('code-candidate')).assertionResults[0].status = 'failed';
             return { exit_code: arm === 'baseline' ? 1 : 0, report };
         };
         await expect(run(state)).rejects.toThrow(/unrelated baseline|motivating assertion/);
@@ -154,14 +167,51 @@ test('failed or timed-out injected executors become terminal failed progress wit
     }
 });
 
+test('a genuinely never-resolving executor times out and cannot produce proof', async () => {
+    const state = setup({ client: null, originalProposal: null, store: null, executor: () => new Promise(() => {}), executorTimeoutMs: 10 });
+    try {
+        await expect(run(state)).rejects.toThrow(/timed out/);
+        expect(fs.existsSync(path.join(state.attemptRoot, 'verifier', 'proof.json'))).toBe(false);
+    } finally { state.cleanup(); }
+});
+
+test('no-store runs remain pending with staged non-passing evidence', async () => {
+    const state = setup({ client: null, originalProposal: null, store: null });
+    try {
+        const result = await run(state);
+        expect(result.status).toBe('pending_store');
+        expect(fs.existsSync(result.paths.proof)).toBe(false);
+        expect(fs.existsSync(result.paths.stagedProof)).toBe(true);
+        expect(JSON.parse(fs.readFileSync(path.join(state.candidateRoot, 'progress.json'))).state).toBe('blocked');
+    } finally { state.cleanup(); }
+});
+
+test('trusted test bytes are rechecked between baseline and candidate execution', async () => {
+    const state = setup({ executor: async ({ arm, inventory }) => {
+        if (arm === 'baseline') fs.appendFileSync(path.join(state.candidateRoot, state.trustedSuites[0]), '\nmutated');
+        return { exit_code: arm === 'baseline' ? 1 : 0, report: state.report(arm === 'baseline' ? 'failed' : 'passed', inventory) };
+    } });
+    try { await expect(run(state)).rejects.toThrow(/Test bytes changed/); } finally { state.cleanup(); }
+});
+
+test('failure reasons are redacted before owner-bound progress', async () => {
+    const state = setup({ client: null, originalProposal: null, store: null, secrets: ['token-secret'], executor: async () => { throw new Error('token-secret leaked'); } });
+    try {
+        await expect(run(state)).rejects.toThrow(/token-secret/);
+        const progress = JSON.parse(fs.readFileSync(path.join(state.candidateRoot, 'progress.json')));
+        expect(progress.reason).not.toContain('token-secret');
+        expect(progress.reason).toContain('[REDACTED]');
+    } finally { state.cleanup(); }
+});
+
 test('stale dataset identity and false behavior outcomes fail before attachment', async () => {
     const stale = setup();
     try {
         stale.metadata = { ...stale.metadata, expected_case_ids: ['other-case'] };
         await expect(run(stale)).rejects.toThrow(/Dataset|dataset/);
     } finally { stale.cleanup(); }
-    const behavior = setup({ behaviorModule: { validateBehaviorArtifact: () => {}, executeBehaviorTests: async () => ({ artifactHash: HASH('b'), passed: false, outcomes: [{ passed: false, outputHash: HASH('9'), expectedHash: HASH('8') }] }) } });
-    try { await expect(run(behavior)).rejects.toThrow(/behavior outcomes/); } finally { behavior.cleanup(); }
+    const behavior = setup({ behaviorEvaluator: async () => { throw new Error('behavior outcome failure'); } });
+    try { await expect(run(behavior)).rejects.toThrow(/behavior outcome failure|behavior outcomes/); } finally { behavior.cleanup(); }
 });
 
 test('store rejection leaves a failed owner-bound progress record and no passing proof attachment', async () => {
