@@ -6,6 +6,7 @@ const submission_workflow_1 = require("../lib/submission-workflow");
 // ts-jest lib target for the source-only test harness.
 const { completePreparedReview, prepareReview } = require('../dist/lib/review-pipeline');
 const { policyHash } = require('../dist/lib/canonical-policy');
+const { runSubmissionReviewThroughCoordinator } = require('../dist/index');
 function buildDeps(overrides = {}) {
     const axios = {
         post: jest.fn().mockResolvedValue({ data: {} }),
@@ -140,9 +141,13 @@ describe('submitMenu form attempt linkage', () => {
         expect(res.statusCode).toBe(200);
         expect(recordSubmissionReviewAudit).toHaveBeenCalledWith(expect.objectContaining({
             status: 'rejected',
+            complete: false,
+            transportStatus: 'rejected',
+            artifactProvenance: 'unreviewed_fallback',
             diagnostics: [{ stage: 'submission_adapter', reason: 'coordinator_feedback_missing' }],
         }));
         expect(deps.axios.put).toHaveBeenCalledWith(expect.stringMatching(/\/submissions\/form-/), expect.objectContaining({ status: 'pending_human_review' }));
+        expect(deps.axios.put.mock.calls.some(([, payload]) => payload.ai_draft_path)).toBe(false);
     });
     test('runs the actual prepare/complete coordinator contract once at submission boundary', async () => {
         let modelCalls = 0;
@@ -180,6 +185,74 @@ describe('submitMenu form attempt linkage', () => {
         expect(deps.axios.post).not.toHaveBeenCalledWith('http://ai.test/ai-review', expect.anything(), expect.anything());
         expect(deps.generateDocxFromForm).toHaveBeenCalledTimes(2);
         expect(deps.generateDocxFromForm.mock.calls[1][1].menuContent).toBe('GUACAMOLE\nfresh avocado, lime 12');
+    });
+    test('submit handler invokes the actual dashboard coordinator adapter with mocked transport', async () => {
+        const transport = {
+            post: jest.fn(async (_url, payload) => ({
+                data: {
+                    ...payload,
+                    feedback: `=== CORRECTED MENU ===\n${payload.text}\n=== END CORRECTED MENU ===\n=== SUGGESTIONS ===\n[]\n=== END SUGGESTIONS ===`,
+                    finishReason: 'stop',
+                    model: payload.effectiveExecutionIdentity.model,
+                },
+            })),
+        };
+        const deps = buildDeps({
+            runSubmissionReview: (input) => runSubmissionReviewThroughCoordinator(input, {
+                transport,
+                readPrompt: async () => 'SUBMISSION QA',
+                fetchAcceptedRules: async () => [],
+                loadVocabulary: async () => [],
+            }),
+        });
+        const handlers = (0, submission_workflow_1.createSubmissionWorkflowHandlers)(deps);
+        const req = buildRequest();
+        req.body.skipAiReview = false;
+        const res = buildResponse();
+        await handlers.submitMenu(req, res);
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        expect(res.statusCode).toBe(200);
+        expect(transport.post).toHaveBeenCalledTimes(1);
+        expect(transport.post.mock.calls[0][1].textHash).toBeDefined();
+        expect(transport.post.mock.calls[0][1].promptHash).toBeDefined();
+        expect(transport.post.mock.calls[0][1].requestDigest).toBeDefined();
+        expect(deps.generateDocxFromForm.mock.calls[1][1].menuContent).toBe('GUACAMOLE\nfresh avocado, lime 12');
+    });
+    test('unknown finish reason keeps the actual submission artifact unreviewed', async () => {
+        const transport = {
+            post: jest.fn(async (_url, payload) => ({
+                data: {
+                    ...payload,
+                    feedback: 'malformed but present',
+                    finishReason: 'provider_changed_its_mind',
+                    model: payload.effectiveExecutionIdentity.model,
+                },
+            })),
+        };
+        const audit = jest.fn();
+        const deps = buildDeps({
+            recordSubmissionReviewAudit: audit,
+            runSubmissionReview: (input) => runSubmissionReviewThroughCoordinator(input, {
+                transport,
+                readPrompt: async () => 'SUBMISSION QA',
+                fetchAcceptedRules: async () => [],
+                loadVocabulary: async () => [],
+            }),
+        });
+        const handlers = (0, submission_workflow_1.createSubmissionWorkflowHandlers)(deps);
+        const req = buildRequest();
+        req.body.skipAiReview = false;
+        const res = buildResponse();
+        await handlers.submitMenu(req, res);
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        expect(res.statusCode).toBe(200);
+        expect(audit).toHaveBeenCalledWith(expect.objectContaining({
+            complete: false,
+            transportStatus: 'rejected',
+            artifactProvenance: 'unreviewed_fallback',
+            reason: 'coordinator_finish_reason_unknown',
+        }));
+        expect(deps.generateDocxFromForm).toHaveBeenCalledTimes(1);
     });
     test('stores form_attempt_id from the attempt header and links audits to the submission', async () => {
         const deps = buildDeps();

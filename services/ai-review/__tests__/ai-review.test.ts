@@ -1,4 +1,5 @@
 import http from 'http';
+import { buildCoordinatorRequest, configuredExecutionIdentity } from '@menumanager/review-contract';
 
 function postJson(app: any, path: string, body: unknown): Promise<{ status: number; body: any }> {
     return new Promise((resolve, reject) => {
@@ -118,33 +119,33 @@ describe('AI Review Service', () => {
         } as any));
         global.fetch = fetchMock as any;
 
-        const result = await postJson(app, '/v1/coordinator-review', {
+        const result = await postJson(app, '/v1/coordinator-review', buildCoordinatorRequest({
             schemaVersion: 1,
             engineVersion: 'review-coordinator-v1',
             text: 'TACOS 12',
             prompt: 'Use the menu QA rules.',
-            sourceHash: 'source-hash',
-            precheckedHash: 'prechecked-hash',
-            promptHash: 'prompt-hash',
-            contextHash: 'context-hash',
-            policyHash: 'policy-hash',
-            vocabularySnapshotHash: 'vocab-hash',
-            model: 'gpt-5.6-luna',
-            settings: { temperature: 0 },
-        });
+            callerAttestations: {
+                sourceHash: 'source-hash',
+                contextHash: 'context-hash',
+                policyHash: 'policy-hash',
+                vocabularySnapshotHash: 'vocab-hash',
+            },
+            effectiveExecutionIdentity: configuredExecutionIdentity(process.env),
+            replayIdentity: `test-${Date.now()}`,
+        }));
 
         expect(result.status).toBe(200);
         expect(result.body).toEqual(expect.objectContaining({
             schemaVersion: 1,
             engineVersion: 'review-coordinator-v1',
             feedback: expect.stringContaining('CORRECTED MENU'),
-            sourceHash: 'source-hash',
-            precheckedHash: 'prechecked-hash',
-            promptHash: 'prompt-hash',
-            contextHash: 'context-hash',
-            policyHash: 'policy-hash',
-            vocabularySnapshotHash: 'vocab-hash',
-            finish_reason: 'stop',
+            callerAttestations: {
+                sourceHash: 'source-hash',
+                contextHash: 'context-hash',
+                policyHash: 'policy-hash',
+                vocabularySnapshotHash: 'vocab-hash',
+            },
+            finishReason: 'stop',
         }));
         expect(fetchMock).toHaveBeenCalledTimes(1);
         const request = JSON.parse(fetchMock.mock.calls[0][1].body);
@@ -152,6 +153,43 @@ describe('AI Review Service', () => {
             { role: 'system', content: 'Use the menu QA rules.' },
             { role: 'user', content: 'Here is the menu text to review:\n\n---\n\nTACOS 12' },
         ]);
+    });
+
+    it('rejects malformed, hash, settings, and replay identities before any provider call', async () => {
+        const fetchMock = jest.fn(async () => ({
+            ok: true,
+            status: 200,
+            headers: { get: () => null },
+            text: async () => JSON.stringify({
+                model: 'gpt-5.6-luna',
+                choices: [{ message: { content: 'OK' }, finish_reason: 'stop' }],
+            }),
+        } as any));
+        global.fetch = fetchMock as any;
+        const base = () => buildCoordinatorRequest({
+            schemaVersion: 1,
+            engineVersion: 'review-coordinator-v1',
+            text: 'TACOS 12',
+            prompt: 'Use the menu QA rules.',
+            callerAttestations: { sourceHash: 's', contextHash: 'c', policyHash: 'p', vocabularySnapshotHash: 'v' },
+            effectiveExecutionIdentity: configuredExecutionIdentity(process.env),
+            replayIdentity: `negative-${Math.random()}`,
+        });
+
+        const badVersion = base();
+        badVersion.schemaVersion = 2;
+        expect((await postJson(app, '/v1/coordinator-review', badVersion)).status).toBe(400);
+        const badHash = base();
+        badHash.textHash = 'wrong';
+        expect((await postJson(app, '/v1/coordinator-review', badHash)).status).toBe(400);
+        const badSettings = base();
+        badSettings.effectiveExecutionIdentity = { ...badSettings.effectiveExecutionIdentity, temperature: 0.5 };
+        badSettings.requestDigest = buildCoordinatorRequest({ ...badSettings, requestDigest: undefined } as any).requestDigest;
+        expect((await postJson(app, '/v1/coordinator-review', badSettings)).status).toBe(409);
+        const replay = base();
+        expect((await postJson(app, '/v1/coordinator-review', replay)).status).toBe(200);
+        expect((await postJson(app, '/v1/coordinator-review', replay)).status).toBe(409);
+        expect(fetchMock).toHaveBeenCalledTimes(1);
     });
 
     it('allows an explicitly empty AI_REVIEW_SEED to disable the provider seed', async () => {

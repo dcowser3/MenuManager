@@ -40,6 +40,7 @@ exports.sanitizeStoredFileName = exports.sanitizeRichTextHtml = exports.sanitize
 exports.shouldNotifyFormAttemptFailure = shouldNotifyFormAttemptFailure;
 exports.extractBaselineFromDocx = extractBaselineFromDocx;
 exports.extractUnapprovedFromDocx = extractUnapprovedFromDocx;
+exports.runSubmissionReviewThroughCoordinator = runSubmissionReviewThroughCoordinator;
 const express_1 = __importDefault(require("express"));
 const multer_1 = __importDefault(require("multer"));
 const axios_1 = __importDefault(require("axios"));
@@ -57,6 +58,7 @@ const approval_baseline_1 = require("./lib/approval-baseline");
 const smtp_config_1 = require("./lib/smtp-config");
 const upload_security_1 = require("./lib/upload-security");
 const internal_auth_1 = require("@menumanager/internal-auth");
+const review_contract_1 = require("@menumanager/review-contract");
 const submission_workflow_1 = require("./lib/submission-workflow");
 const submission_confirmation_mail_1 = require("./lib/submission-confirmation-mail");
 const approval_workflow_1 = require("./lib/approval-workflow");
@@ -1536,12 +1538,18 @@ app.get('/download/approved-clean/:submissionId', async (req, res) => {
         res.status(500).send('Error downloading file');
     }
 });
-async function runSubmissionReviewThroughCoordinator(input) {
-    const qaPrompt = await fs_1.promises.readFile(path.join(getRepoRoot(), 'sop-processor', 'qa_prompt.txt'), 'utf8');
-    const acceptedCorrectionRules = await fetchAcceptedCorrectionRulesForPreAi();
+async function runSubmissionReviewThroughCoordinator(input, overrides = {}) {
+    const qaPrompt = overrides.readPrompt
+        ? await overrides.readPrompt()
+        : await fs_1.promises.readFile(path.join(getRepoRoot(), 'sop-processor', 'qa_prompt.txt'), 'utf8');
+    const acceptedCorrectionRules = overrides.fetchAcceptedRules
+        ? await overrides.fetchAcceptedRules()
+        : await fetchAcceptedCorrectionRulesForPreAi();
     let approvedVocabularyTerms = [];
     try {
-        approvedVocabularyTerms = await (0, approved_dishes_1.loadApprovedReviewVocabularyTerms)(getRepoRoot());
+        approvedVocabularyTerms = overrides.loadVocabulary
+            ? await overrides.loadVocabulary()
+            : await (0, approved_dishes_1.loadApprovedReviewVocabularyTerms)(getRepoRoot());
     }
     catch (error) {
         console.warn(`Approved vocabulary unavailable for submission review; continuing without snapshot. (${error?.message || error})`);
@@ -1563,6 +1571,21 @@ async function runSubmissionReviewThroughCoordinator(input) {
     });
     const envelope = prepared.envelope;
     const contextHash = (0, canonical_policy_1.policyHash)(envelope.context);
+    const effectiveExecutionIdentity = (0, review_contract_1.configuredExecutionIdentity)(process.env);
+    const coordinatorRequest = (0, review_contract_1.buildCoordinatorRequest)({
+        schemaVersion: review_contract_1.COORDINATOR_SCHEMA_VERSION,
+        engineVersion: review_contract_1.COORDINATOR_ENGINE_VERSION,
+        text: prepared.preCheckedReviewBody,
+        prompt: prepared.promptInfo.prompt,
+        callerAttestations: {
+            sourceHash: envelope.originalBodyHash,
+            contextHash,
+            policyHash: envelope.acceptedPolicyHash,
+            vocabularySnapshotHash: envelope.vocabularySnapshotHash,
+        },
+        effectiveExecutionIdentity,
+        replayIdentity: `submission:${input.submissionId}`,
+    });
     const baseResult = (reason) => ({
         reviewStatus: { complete: false, transportStatus: 'rejected', reusable: false },
         outputHash: (0, canonical_policy_1.policyHash)(prepared.preCheckedReviewBody),
@@ -1570,46 +1593,39 @@ async function runSubmissionReviewThroughCoordinator(input) {
         contextHash,
         engineVersion: envelope.engineVersion,
         correctedMenu: prepared.preCheckedReviewBody,
+        reason,
         diagnostics: [{ stage: 'submission_adapter', reason }],
     });
     let response;
     try {
-        response = await internalApi.post(`${AI_REVIEW_URL}/v1/coordinator-review`, {
-            schemaVersion: envelope.schemaVersion,
-            engineVersion: envelope.engineVersion,
-            text: prepared.preCheckedReviewBody,
-            prompt: prepared.promptInfo.prompt,
-            seed: AI_REVIEW_SEED ?? null,
-            sourceHash: envelope.originalBodyHash,
-            precheckedHash: envelope.precheckedBodyHash,
-            promptHash: envelope.promptHash,
-            contextHash,
-            policyHash: envelope.acceptedPolicyHash,
-            vocabularySnapshotHash: envelope.vocabularySnapshotHash,
-            model: envelope.model,
-            settings: envelope.settings,
-        }, { timeout: AI_REVIEW_SUBMIT_TIMEOUT_MS });
+        response = await (overrides.transport || internalApi).post(`${AI_REVIEW_URL}/v1/coordinator-review`, coordinatorRequest, { timeout: AI_REVIEW_SUBMIT_TIMEOUT_MS });
     }
     catch (error) {
         return baseResult(`coordinator_transport_failed:${error?.code || error?.response?.status || 'unknown'}`);
     }
     const data = response?.data || {};
-    const expectedHashes = {
-        sourceHash: envelope.originalBodyHash,
-        precheckedHash: envelope.precheckedBodyHash,
-        promptHash: envelope.promptHash,
-        contextHash: (0, canonical_policy_1.policyHash)(envelope.context),
-        policyHash: envelope.acceptedPolicyHash,
-        vocabularySnapshotHash: envelope.vocabularySnapshotHash,
-    };
-    for (const [key, expected] of Object.entries(expectedHashes)) {
-        if (data[key] !== expected)
-            return baseResult(`coordinator_integrity_mismatch:${key}`);
+    const responseValidation = (0, review_contract_1.validateCoordinatorRequest)(data);
+    if (!responseValidation.ok)
+        return baseResult(`coordinator_response_invalid:${responseValidation.reason}`);
+    const responseRequest = responseValidation.request;
+    if (responseRequest.requestDigest !== coordinatorRequest.requestDigest
+        || responseRequest.textHash !== coordinatorRequest.textHash
+        || responseRequest.promptHash !== coordinatorRequest.promptHash
+        || responseRequest.replayIdentity !== coordinatorRequest.replayIdentity
+        || JSON.stringify(responseRequest.callerAttestations) !== JSON.stringify(coordinatorRequest.callerAttestations)
+        || !(0, review_contract_1.sameExecutionIdentity)(responseRequest.effectiveExecutionIdentity, effectiveExecutionIdentity)
+        || data.model !== effectiveExecutionIdentity.model
+        || data.schemaVersion !== review_contract_1.COORDINATOR_SCHEMA_VERSION
+        || data.engineVersion !== review_contract_1.COORDINATOR_ENGINE_VERSION) {
+        return baseResult('coordinator_response_identity_mismatch');
+    }
+    if (!['stop', 'length', 'content_filter', null].includes(data.finishReason)) {
+        return baseResult('coordinator_finish_reason_unknown');
     }
     if (typeof data.feedback !== 'string' || !data.feedback.trim()) {
         return baseResult('coordinator_feedback_missing');
     }
-    const completed = (0, review_pipeline_1.completePreparedReview)(prepared, data.feedback, { finishReason: data.finish_reason });
+    const completed = (0, review_pipeline_1.completePreparedReview)(prepared, data.feedback, { finishReason: data.finishReason });
     return {
         reviewStatus: completed.authoritative.reviewStatus,
         outputHash: completed.outputHash,
@@ -1617,6 +1633,7 @@ async function runSubmissionReviewThroughCoordinator(input) {
         contextHash,
         engineVersion: envelope.engineVersion,
         correctedMenu: completed.authoritative.correctedMenu,
+        reason: completed.reviewStatus.complete ? 'completed' : (completed.post.safetyDiagnostics[0] || 'coordinator_delivery_rejected'),
         diagnostics: completed.diagnostics.slice(0, 50),
     };
 }
@@ -1665,6 +1682,11 @@ const submissionWorkflowHandlers = (0, submission_workflow_1.createSubmissionWor
             details: {
                 submissionId: input.submissionId,
                 status: input.status,
+                complete: input.complete,
+                transportStatus: input.transportStatus,
+                reusable: input.reusable,
+                reason: input.reason,
+                artifactProvenance: input.artifactProvenance,
                 outputHash: input.outputHash,
                 policyHash: input.policyHash,
                 contextHash: input.contextHash,

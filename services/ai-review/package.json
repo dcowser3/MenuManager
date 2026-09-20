@@ -10,6 +10,7 @@
   "dependencies": {
     "@menumanager/internal-auth": "*",
     "@menumanager/llm-adapter": "*",
+    "@menumanager/review-contract": "*",
     "@menumanager/tenant-config": "*",
     "axios": "^1.7.2",
     "diff": "^8.0.2",

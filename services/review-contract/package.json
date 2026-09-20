@@ -1,0 +1,10 @@
+{
+  "name": "@menumanager/review-contract",
+  "version": "1.0.0",
+  "description": "Shared signed identity contract for dashboard to AI review coordinator calls",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": { "build": "tsc" },
+  "dependencies": {},
+  "devDependencies": { "@types/node": "^20.10.0", "typescript": "^5.3.3" }
+}

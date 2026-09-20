@@ -49,6 +49,7 @@ const axios_1 = __importDefault(require("axios"));
 const internal_auth_1 = require("@menumanager/internal-auth");
 const llm_adapter_1 = require("@menumanager/llm-adapter");
 const tenant_config_1 = require("@menumanager/tenant-config");
+const review_contract_1 = require("@menumanager/review-contract");
 // Load .env from project root (works whether running from src or dist)
 const envPath = path.resolve(__dirname, '../../../.env');
 console.log(`Loading .env from: ${envPath}`);
@@ -89,6 +90,7 @@ function resolveAiReviewSeed(env = process.env) {
 }
 const AI_REVIEW_SEED = resolveAiReviewSeed();
 const DOCUMENT_STORAGE_ROOT = process.env.DOCUMENT_STORAGE_ROOT || path.join(__dirname, '..', '..', '..', 'tmp', 'documents');
+const consumedCoordinatorReplayIdentities = new Set();
 exports.app.use(express.json());
 exports.app.use(internal_auth_1.requireInternalServiceAuth);
 function hasConfiguredLlmKey() {
@@ -257,43 +259,40 @@ exports.app.post('/run-qa-check', async (req, res) => {
  * unchanged.
  */
 exports.app.post('/v1/coordinator-review', async (req, res) => {
-    const { schemaVersion, engineVersion, text, prompt, seed, sourceHash, precheckedHash, promptHash, contextHash, policyHash, vocabularySnapshotHash, model, settings, } = req.body || {};
-    if (schemaVersion !== 1 || engineVersion !== 'review-coordinator-v1'
-        || typeof text !== 'string' || !text
-        || typeof prompt !== 'string' || !prompt
-        || typeof sourceHash !== 'string' || typeof precheckedHash !== 'string'
-        || typeof promptHash !== 'string' || typeof contextHash !== 'string'
-        || typeof policyHash !== 'string' || typeof vocabularySnapshotHash !== 'string') {
-        return res.status(400).json({ error: 'Invalid coordinator review envelope' });
+    const validation = (0, review_contract_1.validateCoordinatorRequest)(req.body);
+    if (!validation.ok)
+        return res.status(400).json({ error: 'Invalid coordinator review envelope', reason: validation.reason });
+    const request = validation.request;
+    const effectiveExecutionIdentity = (0, review_contract_1.configuredExecutionIdentity)(process.env);
+    if (!(0, review_contract_1.sameExecutionIdentity)(request.effectiveExecutionIdentity, effectiveExecutionIdentity)) {
+        return res.status(409).json({ error: 'Coordinator execution identity mismatch', reason: 'settings_mismatch' });
     }
     try {
         if (!hasConfiguredLlmKey()) {
             return res.status(503).json({ error: 'LLM API key not configured' });
         }
-        const resolvedSeed = seed === null || (typeof seed === 'string' && seed.trim() === '')
-            ? undefined
-            : parseOptionalNonNegativeInteger(seed) ?? AI_REVIEW_SEED;
-        const qaResponse = await (0, llm_adapter_1.callChat)({ model: typeof model === 'string' && model ? model : AI_REVIEW_MODEL }, [
-            { role: 'system', content: prompt },
-            { role: 'user', content: `Here is the menu text to review:\n\n---\n\n${text}` },
+        if (consumedCoordinatorReplayIdentities.has(request.replayIdentity)) {
+            return res.status(409).json({ error: 'Coordinator replay identity already consumed', reason: 'replay_identity_reused' });
+        }
+        consumedCoordinatorReplayIdentities.add(request.replayIdentity);
+        const resolvedSeed = effectiveExecutionIdentity.seed.value === null ? undefined : effectiveExecutionIdentity.seed.value;
+        const qaResponse = await (0, llm_adapter_1.callChat)({ model: effectiveExecutionIdentity.model }, [
+            { role: 'system', content: request.prompt },
+            { role: 'user', content: `Here is the menu text to review:\n\n---\n\n${request.text}` },
         ], {
-            provider: AI_REVIEW_PROVIDER,
-            temperature: typeof settings?.temperature === 'number' ? settings.temperature : AI_REVIEW_TEMPERATURE,
+            provider: effectiveExecutionIdentity.provider,
+            temperature: effectiveExecutionIdentity.temperature,
             seed: resolvedSeed,
         });
         return res.status(200).json({
-            schemaVersion: 1,
-            engineVersion,
+            ...request,
+            schemaVersion: review_contract_1.COORDINATOR_SCHEMA_VERSION,
+            engineVersion: review_contract_1.COORDINATOR_ENGINE_VERSION,
+            effectiveExecutionIdentity,
             feedback: qaResponse.content || '',
-            model: qaResponse.model || model || AI_REVIEW_MODEL,
+            model: qaResponse.model || effectiveExecutionIdentity.model,
             system_fingerprint: qaResponse.system_fingerprint,
-            finish_reason: qaResponse.finish_reason,
-            sourceHash,
-            precheckedHash,
-            promptHash,
-            contextHash,
-            policyHash,
-            vocabularySnapshotHash,
+            finishReason: qaResponse.finish_reason || null,
         });
     }
     catch (error) {

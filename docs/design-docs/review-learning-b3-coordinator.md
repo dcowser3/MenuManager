@@ -55,18 +55,30 @@ in form-attempt audit details.
 
 ## B3-B submission boundary
 
-New form submissions now use an additive `/v1/coordinator-review` adapter. The
+New form submissions use an additive `/v1/coordinator-review` adapter. The
 dashboard prepares the frozen B3 envelope, sends one model request containing
 only the prechecked body and frozen prompt identities, then completes the
-review through `completePreparedReview`. The legacy `/ai-review` endpoint and
-`/run-qa-check` route remain available for existing clients. Completed and
-rejected coordinator results carry bounded output/policy/context hashes and
-engine identity into submission audit details; incomplete or rejected output
-remains manual review and is never reusable. AI draft generation receives only
-the authoritative delivered menu bytes, while the original submitted document
-is preserved separately.
+review through `completePreparedReview`. The shared
+`@menumanager/review-contract` binds actual text/prompt hashes, schema/engine,
+caller-attested source/context/policy/vocabulary identities, effective
+provider/model/temperature/seed semantics, and a one-run replay identity into
+one canonical digest. AI review recomputes the hashes and digest before any
+provider call and rejects version, replay, hash, or execution-identity
+mismatches. Caller attestations are explicitly bound claims, not independently
+verified facts. The legacy `/ai-review` endpoint and `/run-qa-check` route
+remain available for existing clients.
 
-Submission-boundary migration, document preparation, B7 active review units,
+Completed and rejected coordinator results carry bounded output/policy/context
+hashes, engine identity, complete/transport/reusable status, reason, and
+artifact provenance into the existing form-attempt audit surface. Known
+terminal success is required for a reviewed draft; incomplete, rejected,
+transport-failed, malformed, or mismatched output remains manual review and
+gets an `unreviewed_fallback` provenance with no `ai_draft_path`. Successful
+draft generation receives only authoritative delivered coordinator bytes,
+while the original submitted document is preserved separately.
+
+B3-B submission-boundary migration and document preparation are complete;
+B7 active review units,
 B8 receipt reuse, provider/model/settings changes, and deployment are outside
 this slice.
 
@@ -84,7 +96,12 @@ spelling evidence. The Basic
 route continues to return its existing browser response shape with additive
 status/delivered diagnostics.
 
-B3-B verification adds the actual submission handler/coordinator adapter test,
-legacy `/ai-review` compatibility coverage, versioned envelope response
-round-trip coverage, one-model-call enforcement, and dashboard/ai-review
-typecheck plus build verification.
+B3-B verification: 3 focused suites, 16 tests passed (shared contract,
+ai-review adapter, and actual dashboard submit-handler → exported dashboard
+coordinator → mocked transport). Coverage includes accepted and rejected
+delivery, late/malformed/version/hash/digest/settings/replay negatives,
+known-terminal-status enforcement, one provider call for valid input and zero
+provider calls for invalid envelopes, legacy compatibility, and exact bytes
+passed into draft generation. Dashboard, ai-review, and shared-contract
+typechecks/builds passed; source/dist diffs are included. No live provider or
+production/activation writes were used.

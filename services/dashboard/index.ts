@@ -42,6 +42,14 @@ import {
     sanitizeStoredFileName,
 } from './lib/upload-security';
 import { createInternalApiClient } from '@menumanager/internal-auth';
+import {
+    buildCoordinatorRequest,
+    configuredExecutionIdentity,
+    sameExecutionIdentity,
+    validateCoordinatorRequest,
+    COORDINATOR_ENGINE_VERSION,
+    COORDINATOR_SCHEMA_VERSION,
+} from '@menumanager/review-contract';
 import { createSubmissionWorkflowHandlers } from './lib/submission-workflow';
 import {
     SubmissionConfirmationInput,
@@ -1811,7 +1819,7 @@ app.get('/download/approved-clean/:submissionId', async (req, res) => {
     }
 });
 
-async function runSubmissionReviewThroughCoordinator(input: {
+export async function runSubmissionReviewThroughCoordinator(input: {
     submissionId: string;
     text: string;
     submitterEmail: string;
@@ -1824,12 +1832,23 @@ async function runSubmissionReviewThroughCoordinator(input: {
     allergens: string;
     submissionMode: string;
     revisionSource: string;
-}) {
-    const qaPrompt = await fs.readFile(path.join(getRepoRoot(), 'sop-processor', 'qa_prompt.txt'), 'utf8');
-    const acceptedCorrectionRules = await fetchAcceptedCorrectionRulesForPreAi();
+}, overrides: {
+    transport?: { post: (...args: any[]) => Promise<any> };
+    readPrompt?: () => Promise<string>;
+    fetchAcceptedRules?: () => Promise<AcceptedCorrectionRule[]>;
+    loadVocabulary?: () => Promise<Awaited<ReturnType<typeof loadApprovedReviewVocabularyTerms>>>;
+} = {}) {
+    const qaPrompt = overrides.readPrompt
+        ? await overrides.readPrompt()
+        : await fs.readFile(path.join(getRepoRoot(), 'sop-processor', 'qa_prompt.txt'), 'utf8');
+    const acceptedCorrectionRules = overrides.fetchAcceptedRules
+        ? await overrides.fetchAcceptedRules()
+        : await fetchAcceptedCorrectionRulesForPreAi();
     let approvedVocabularyTerms: Awaited<ReturnType<typeof loadApprovedReviewVocabularyTerms>> = [];
     try {
-        approvedVocabularyTerms = await loadApprovedReviewVocabularyTerms(getRepoRoot());
+        approvedVocabularyTerms = overrides.loadVocabulary
+            ? await overrides.loadVocabulary()
+            : await loadApprovedReviewVocabularyTerms(getRepoRoot());
     } catch (error: any) {
         console.warn(`Approved vocabulary unavailable for submission review; continuing without snapshot. (${error?.message || error})`);
     }
@@ -1851,6 +1870,21 @@ async function runSubmissionReviewThroughCoordinator(input: {
     });
     const envelope = prepared.envelope;
     const contextHash = policyHash(envelope.context);
+    const effectiveExecutionIdentity = configuredExecutionIdentity(process.env);
+    const coordinatorRequest = buildCoordinatorRequest({
+        schemaVersion: COORDINATOR_SCHEMA_VERSION,
+        engineVersion: COORDINATOR_ENGINE_VERSION,
+        text: prepared.preCheckedReviewBody,
+        prompt: prepared.promptInfo.prompt,
+        callerAttestations: {
+            sourceHash: envelope.originalBodyHash,
+            contextHash,
+            policyHash: envelope.acceptedPolicyHash,
+            vocabularySnapshotHash: envelope.vocabularySnapshotHash,
+        },
+        effectiveExecutionIdentity,
+        replayIdentity: `submission:${input.submissionId}`,
+    });
     const baseResult = (reason: string) => ({
         reviewStatus: { complete: false, transportStatus: 'rejected', reusable: false },
         outputHash: policyHash(prepared.preCheckedReviewBody),
@@ -1858,44 +1892,37 @@ async function runSubmissionReviewThroughCoordinator(input: {
         contextHash,
         engineVersion: envelope.engineVersion,
         correctedMenu: prepared.preCheckedReviewBody,
+        reason,
         diagnostics: [{ stage: 'submission_adapter', reason }],
     });
     let response: any;
     try {
-        response = await internalApi.post(`${AI_REVIEW_URL}/v1/coordinator-review`, {
-            schemaVersion: envelope.schemaVersion,
-            engineVersion: envelope.engineVersion,
-            text: prepared.preCheckedReviewBody,
-            prompt: prepared.promptInfo.prompt,
-            seed: AI_REVIEW_SEED ?? null,
-            sourceHash: envelope.originalBodyHash,
-            precheckedHash: envelope.precheckedBodyHash,
-            promptHash: envelope.promptHash,
-            contextHash,
-            policyHash: envelope.acceptedPolicyHash,
-            vocabularySnapshotHash: envelope.vocabularySnapshotHash,
-            model: envelope.model,
-            settings: envelope.settings,
-        }, { timeout: AI_REVIEW_SUBMIT_TIMEOUT_MS });
+        response = await (overrides.transport || internalApi).post(`${AI_REVIEW_URL}/v1/coordinator-review`, coordinatorRequest, { timeout: AI_REVIEW_SUBMIT_TIMEOUT_MS });
     } catch (error: any) {
         return baseResult(`coordinator_transport_failed:${error?.code || error?.response?.status || 'unknown'}`);
     }
     const data = response?.data || {};
-    const expectedHashes = {
-        sourceHash: envelope.originalBodyHash,
-        precheckedHash: envelope.precheckedBodyHash,
-        promptHash: envelope.promptHash,
-        contextHash: policyHash(envelope.context),
-        policyHash: envelope.acceptedPolicyHash,
-        vocabularySnapshotHash: envelope.vocabularySnapshotHash,
-    };
-    for (const [key, expected] of Object.entries(expectedHashes)) {
-        if (data[key] !== expected) return baseResult(`coordinator_integrity_mismatch:${key}`);
+    const responseValidation = validateCoordinatorRequest(data);
+    if (!responseValidation.ok) return baseResult(`coordinator_response_invalid:${responseValidation.reason}`);
+    const responseRequest = responseValidation.request;
+    if (responseRequest.requestDigest !== coordinatorRequest.requestDigest
+        || responseRequest.textHash !== coordinatorRequest.textHash
+        || responseRequest.promptHash !== coordinatorRequest.promptHash
+        || responseRequest.replayIdentity !== coordinatorRequest.replayIdentity
+        || JSON.stringify(responseRequest.callerAttestations) !== JSON.stringify(coordinatorRequest.callerAttestations)
+        || !sameExecutionIdentity(responseRequest.effectiveExecutionIdentity, effectiveExecutionIdentity)
+        || data.model !== effectiveExecutionIdentity.model
+        || data.schemaVersion !== COORDINATOR_SCHEMA_VERSION
+        || data.engineVersion !== COORDINATOR_ENGINE_VERSION) {
+        return baseResult('coordinator_response_identity_mismatch');
+    }
+    if (!['stop', 'length', 'content_filter', null].includes(data.finishReason)) {
+        return baseResult('coordinator_finish_reason_unknown');
     }
     if (typeof data.feedback !== 'string' || !data.feedback.trim()) {
         return baseResult('coordinator_feedback_missing');
     }
-    const completed = completePreparedReview(prepared, data.feedback, { finishReason: data.finish_reason });
+    const completed = completePreparedReview(prepared, data.feedback, { finishReason: data.finishReason });
     return {
         reviewStatus: completed.authoritative.reviewStatus,
         outputHash: completed.outputHash,
@@ -1903,6 +1930,7 @@ async function runSubmissionReviewThroughCoordinator(input: {
         contextHash,
         engineVersion: envelope.engineVersion,
         correctedMenu: completed.authoritative.correctedMenu,
+        reason: completed.reviewStatus.complete ? 'completed' : (completed.post.safetyDiagnostics[0] || 'coordinator_delivery_rejected'),
         diagnostics: completed.diagnostics.slice(0, 50),
     };
 }
@@ -1952,6 +1980,11 @@ const submissionWorkflowHandlers = createSubmissionWorkflowHandlers({
             details: {
                 submissionId: input.submissionId,
                 status: input.status,
+                complete: input.complete,
+                transportStatus: input.transportStatus,
+                reusable: input.reusable,
+                reason: input.reason,
+                artifactProvenance: input.artifactProvenance,
                 outputHash: input.outputHash,
                 policyHash: input.policyHash,
                 contextHash: input.contextHash,
