@@ -7,7 +7,15 @@ import { isReasoningModel as adapterIsReasoningModel } from '@menumanager/llm-ad
 import { buildTokenEdits, tokenizeDiffText, tokenizeWords } from '@menumanager/diff-core';
 import { createHash } from 'crypto';
 import { AI_REVIEW_FENCES } from './review-response-contract';
-import { BackendReplayStatus, ReplayRetirementEvidence, ReplayStatus, isReplayRetirementVerified } from './replay-retirement';
+import {
+    BackendReplayStatus,
+    ReplayRetirementEvidence,
+    ReplayStatus,
+    REPLAY_RETIREMENT_POLICY_VERSION,
+    isReplayRetirementPolicyCurrent,
+    isReplayRetirementVerified,
+    unverifiedReplayResolutionIds,
+} from './replay-retirement';
 export { isReplayRetirementVerified, isReplayRetirementPolicyCurrent, unverifiedReplayResolutionIds, REPLAY_RETIREMENT_POLICY_VERSION } from './replay-retirement';
 
 export { buildBehaviorTestRecord, buildAcceptedPolicyTestFamily, freezeBehaviorTests } from './learning-behavior-tests';
@@ -15,12 +23,21 @@ export { buildBehaviorTestRecord, buildAcceptedPolicyTestFamily, freezeBehaviorT
 export type CycleGateInput = {
     unconsumedCorrectionCount: number;
     /** When set, a pending (non-superseded) proposal exists. */
-    pendingProposal?: { id?: string; cycle_id?: string } | null;
+    pendingProposal?: {
+        id?: string;
+        cycle_id?: string;
+        correction_rule_count?: number | null;
+        eval_summary?: { replay_retirement_policy_version?: unknown; baseline_fingerprint?: unknown } | null;
+        replay_evidence?: Array<{ correction_id?: string; status?: string; retirement_evidence?: ReplayRetirementEvidence }> | null;
+        correction_routing?: Array<{ correction_id?: string; replay_status?: string }> | null;
+    } | null;
     minNewCorrections: number;
     /** Manual/on-demand run: supersede pending even with zero new corrections. */
     force?: boolean;
     /** The live prompt, review model, or code/accepted-rule manifest changed since the pending proposal was generated. */
     pendingBaselineChanged?: boolean;
+    /** Existing replay evidence was written under an old/incomplete retirement policy. */
+    pendingReplayRetirementRefresh?: boolean;
 };
 
 export type CycleGateResult =
@@ -47,6 +64,14 @@ export function shouldRunCycle(input: CycleGateInput): CycleGateResult {
     }
 
     if (pending) {
+        if (input.pendingReplayRetirementRefresh) {
+            return {
+                run: true,
+                mode: 'supersede',
+                reason: `replay-retirement policy refresh required for pending proposal ${pending.cycle_id}`,
+                pendingProposal: pending,
+            };
+        }
         if (input.unconsumedCorrectionCount >= min) {
             return {
                 run: true,
@@ -73,6 +98,34 @@ export function shouldRunCycle(input: CycleGateInput): CycleGateResult {
         };
     }
     return { run: true, mode: 'new', reason: `${input.unconsumedCorrectionCount} unconsumed correction(s) ready` };
+}
+
+/**
+ * A pending proposal is stale when its replay-retirement evidence predates the
+ * current predicate or contains legacy/status-only success claims. Routing is
+ * deliberately included in the check, but never trusted as proof by itself.
+ */
+export function pendingProposalNeedsReplayRetirementRefresh(
+    proposal: CycleGateInput['pendingProposal'] | null | undefined,
+): boolean {
+    if (!proposal) return false;
+    if (!isReplayRetirementPolicyCurrent(proposal.eval_summary || null)) return true;
+    return unverifiedReplayResolutionIds(proposal).length > 0;
+}
+
+/**
+ * Supersede refreshes may carry a pending proposal forward only when the
+ * existing prompt_cycle_id lookup recovered the exact eligible row count that
+ * the pending proposal recorded. Unknown counts fail closed.
+ */
+export function pendingCorrectionsRecoveredExactly(
+    proposal: CycleGateInput['pendingProposal'] | null | undefined,
+    carriedOver: CorrectionRuleLike[] | null | undefined,
+): boolean {
+    if (!proposal || !Number.isInteger(proposal.correction_rule_count) || (proposal.correction_rule_count || 0) < 0) return false;
+    const carried = correctionsEligibleForImprovement(carriedOver || [])
+        .filter((row) => !`${row.submission_id || ''}`.startsWith('proposal-'));
+    return carried.length === proposal.correction_rule_count;
 }
 
 /** A same-day force/supersede cannot reuse the date-based unique cycle id. */
@@ -1849,6 +1902,7 @@ export type EvalRunSummary = {
 };
 
 export type ProposalEvalSummary = {
+    replay_retirement_policy_version?: number;
     baseline: EvalRunSummary | null;
     candidate: EvalRunSummary | null;
     comparedCases: number;
@@ -2175,6 +2229,7 @@ export function buildProposalEvalSummary(
 ): ProposalEvalSummary {
     const comparison = candidateReport?.baselineComparison || null;
     return {
+        replay_retirement_policy_version: REPLAY_RETIREMENT_POLICY_VERSION,
         baseline,
         candidate,
         comparedCases: comparison?.comparedCases ?? 0,
@@ -2197,6 +2252,16 @@ export function buildProposalEvalSummary(
         candidate_rule_activations: Array.isArray(candidateReport?.candidateRuleActivations)
             ? candidateReport.candidateRuleActivations
             : [],
+    };
+}
+
+/** Stamp every stored proposal, including skipped/failed evaluation summaries. */
+export function stampReplayRetirementPolicyVersion(
+    summary: ProposalEvalSummary | null | undefined,
+): ProposalEvalSummary {
+    return {
+        ...(summary || {} as ProposalEvalSummary),
+        replay_retirement_policy_version: REPLAY_RETIREMENT_POLICY_VERSION,
     };
 }
 

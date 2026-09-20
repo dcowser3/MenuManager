@@ -22,4 +22,20 @@ describe('B6-D2 cycle retirement boundary', () => {
         expect(retirementSource).toContain('model_calls: 0');
         expect(retirementSource).toContain('replayOriginalResponseDeterministically');
     });
+
+    test('refreshes stale pending policy evidence and stamps replacement summaries', () => {
+        expect(scriptSource).toContain("eval_summary, replay_evidence, correction_routing");
+        expect(scriptSource).toContain('core.pendingProposalNeedsReplayRetirementRefresh(pendingProposal)');
+        expect(scriptSource).toContain('pendingReplayRetirementRefresh');
+        expect(scriptSource).toContain('core.pendingCorrectionsRecoveredExactly(supersedePending, carriedRuleRows || [])');
+        expect(scriptSource).toContain('pending proposal remains untouched');
+        expect(scriptSource).toContain('core.stampReplayRetirementPolicyVersion');
+        const insertAt = scriptSource.indexOf("supabase.from('prompt_proposals').insert(proposalRow)");
+        const insertFailureAt = scriptSource.indexOf('if (insertError) throw new Error');
+        const supersedeAt = scriptSource.indexOf('.update(supersedePatch)');
+        expect(insertAt).toBeGreaterThan(-1);
+        expect(insertFailureAt).toBeGreaterThan(insertAt);
+        expect(supersedeAt).toBeGreaterThan(insertAt);
+        expect(insertFailureAt).toBeLessThan(supersedeAt);
+    });
 });

@@ -681,7 +681,7 @@ async function main() {
             .eq('source', 'human')
             .in('status', ['accepted', 'pending']),
         supabase.from('prompt_proposals')
-            .select('id, cycle_id, created_at, correction_rule_count, submission_count, eval_status, llm_model, eval_summary')
+            .select('id, cycle_id, created_at, correction_rule_count, submission_count, eval_status, llm_model, eval_summary, replay_evidence, correction_routing')
             .eq('status', 'pending')
             .order('created_at', { ascending: true })
             .limit(1),
@@ -722,6 +722,7 @@ async function main() {
     });
     const pendingFingerprint = `${pendingProposal?.eval_summary?.baseline_fingerprint || ''}`;
     const pendingBaselineChanged = !!pendingProposal && pendingFingerprint !== baselineFingerprint;
+    const pendingReplayRetirementRefresh = core.pendingProposalNeedsReplayRetirementRefresh(pendingProposal);
 
     // Compute the run gate BEFORE cadence: a supersede (pending proposal + new
     // corrections → refresh it) must be able to bypass the cadence clock, so the
@@ -733,6 +734,7 @@ async function main() {
         minNewCorrections,
         force: !!args.force,
         pendingBaselineChanged,
+        pendingReplayRetirementRefresh,
     });
     const supersedePending = gate.run && gate.mode === 'supersede' ? gate.pendingProposal : null;
 
@@ -832,6 +834,12 @@ async function main() {
                     .in('status', ['accepted', 'pending'])
                     .order('created_at', { ascending: true });
                 if (carriedErr) throw new Error(`Failed to fetch carried-over corrections: ${carriedErr.message}`);
+                if (pendingReplayRetirementRefresh
+                    && !core.pendingCorrectionsRecoveredExactly(supersedePending, carriedRuleRows || [])) {
+                    throw new Error(
+                        `Cannot refresh replay-retirement policy for ${supersedePending.cycle_id}: carried human corrections could not be recovered exactly; pending proposal remains untouched.`
+                    );
+                }
                 explanationRows.push(...(carriedRuleRows || []));
                 const carriedRules = core.correctionsEligibleForImprovement(carriedRuleRows || []);
                 const assembled = core.assembleSupersedeCorrectionSet(unconsumedRules, carriedRules);
@@ -1652,7 +1660,10 @@ async function main() {
         // later scheduled run can now distinguish an unchanged pending proposal
         // from one made stale by a deploy, prompt approval, accepted rule, or
         // review-model change.
-        evalSummary = { ...(evalSummary || {}), baseline_fingerprint: baselineFingerprint };
+        evalSummary = core.stampReplayRetirementPolicyVersion({
+            ...(evalSummary || {}),
+            baseline_fingerprint: baselineFingerprint,
+        });
 
         // 9. Store the proposal.
         const dates = correctionRules.map((r) => Date.parse(r.created_at)).filter(Number.isFinite);

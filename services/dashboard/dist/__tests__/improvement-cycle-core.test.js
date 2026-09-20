@@ -167,6 +167,16 @@ describe('shouldRunCycle gating', () => {
         });
         expect(gate.reason).toContain('baseline changed');
     });
+    test('pending + replay policy refresh: supersedes with zero new corrections', () => {
+        const gate = (0, improvement_cycle_core_1.shouldRunCycle)({
+            unconsumedCorrectionCount: 0,
+            pendingProposal: pending,
+            minNewCorrections: 1,
+            pendingReplayRetirementRefresh: true,
+        });
+        expect(gate).toMatchObject({ run: true, mode: 'supersede', pendingProposal: pending });
+        expect(gate.reason).toContain('replay-retirement policy refresh');
+    });
     test('force with pending: supersede even with zero new corrections', () => {
         const gate = (0, improvement_cycle_core_1.shouldRunCycle)({ unconsumedCorrectionCount: 0, pendingProposal: pending, minNewCorrections: 1, force: true });
         expect(gate.run).toBe(true);
@@ -188,6 +198,60 @@ describe('shouldRunCycle gating', () => {
     test('treats minNewCorrections below 1 as 1', () => {
         expect((0, improvement_cycle_core_1.shouldRunCycle)({ unconsumedCorrectionCount: 0, pendingProposal: null, minNewCorrections: 0 }).run).toBe(false);
         expect((0, improvement_cycle_core_1.shouldRunCycle)({ unconsumedCorrectionCount: 1, pendingProposal: null, minNewCorrections: 0 }).run).toBe(true);
+    });
+});
+describe('replay-retirement policy refresh', () => {
+    const current = { replay_retirement_policy_version: 1 };
+    test('current-version clean pending proposal remains awaiting review', () => {
+        expect((0, improvement_cycle_core_1.pendingProposalNeedsReplayRetirementRefresh)({ eval_summary: current })).toBe(false);
+    });
+    test('missing or wrong policy version refreshes with no new corrections', () => {
+        expect((0, improvement_cycle_core_1.pendingProposalNeedsReplayRetirementRefresh)({ eval_summary: {} })).toBe(true);
+        expect((0, improvement_cycle_core_1.pendingProposalNeedsReplayRetirementRefresh)({ eval_summary: { replay_retirement_policy_version: 0 } })).toBe(true);
+    });
+    test('legacy replay evidence and routing-only now_correct each require refresh', () => {
+        expect((0, improvement_cycle_core_1.pendingProposalNeedsReplayRetirementRefresh)({
+            eval_summary: current,
+            replay_evidence: [{ correction_id: 'legacy', status: 'now_correct' }],
+        })).toBe(true);
+        expect((0, improvement_cycle_core_1.pendingProposalNeedsReplayRetirementRefresh)({
+            eval_summary: current,
+            correction_routing: [{ correction_id: 'routing-only', replay_status: 'now_correct' }],
+        })).toBe(true);
+    });
+    test('fully verified current-version retirement does not refresh solely for policy', () => {
+        expect((0, improvement_cycle_core_1.pendingProposalNeedsReplayRetirementRefresh)({
+            eval_summary: current,
+            replay_evidence: [{
+                    correction_id: 'verified',
+                    status: 'now_correct',
+                    retirement_evidence: {
+                        version: 1,
+                        eligible: true,
+                        reason: 'deterministic proof',
+                        original_audit_id: 'audit-1',
+                        original_audit_created_at: '2026-09-01T00:00:00Z',
+                        original_final_correct: false,
+                        submitted_correct: false,
+                        original_response_correct: false,
+                        deterministic_replay_correct: true,
+                        original_response_sha256: 'a'.repeat(64),
+                        model_calls: 0,
+                    },
+                }],
+        })).toBe(false);
+    });
+    test('stamps skipped/failed summaries with the current policy version', () => {
+        expect((0, improvement_cycle_core_1.stampReplayRetirementPolicyVersion)(null)).toMatchObject({ replay_retirement_policy_version: 1 });
+        expect((0, improvement_cycle_core_1.stampReplayRetirementPolicyVersion)({ error: 'failed' })).toMatchObject({ replay_retirement_policy_version: 1, error: 'failed' });
+    });
+    test('requires exact carried human corrections before a stale proposal can be superseded', () => {
+        const pending = { correction_rule_count: 1 };
+        const carried = [{ id: 'c1', source: 'human', status: 'pending', reviewer_name: 'Reviewer', rule: 'Use housemade.', submission_id: 's1' }];
+        expect((0, improvement_cycle_core_1.pendingCorrectionsRecoveredExactly)(pending, carried)).toBe(true);
+        expect((0, improvement_cycle_core_1.pendingCorrectionsRecoveredExactly)(pending, [])).toBe(false);
+        expect((0, improvement_cycle_core_1.pendingCorrectionsRecoveredExactly)({}, carried)).toBe(false);
+        expect((0, improvement_cycle_core_1.pendingCorrectionsRecoveredExactly)({ correction_rule_count: 0 }, [{ ...carried[0], learning_intent: 'menu_update_only' }])).toBe(true);
     });
 });
 describe('computeReviewBaselineFingerprint', () => {
@@ -729,6 +793,7 @@ describe('eval summary + status', () => {
         const baseSummary = (0, improvement_cycle_core_1.buildProposalEvalSummary)(baseline, candidate, report(0.82, 0));
         expect(baseSummary.improved).toBe(3);
         expect(baseSummary.regressed).toBe(0);
+        expect(baseSummary.replay_retirement_policy_version).toBe(1);
         // Without any trigger improvement, zero-regressed proposals are no_effect, not passed.
         expect((0, improvement_cycle_core_1.evalStatusFromSummary)(baseSummary)).toBe('no_effect');
         // A proposal that improves at least one trigger is 'passed' when there are no regressions.

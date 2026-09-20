@@ -5,6 +5,8 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.IDENTICAL_CANDIDATE_EVAL_NOTE = exports.CONTEXT_DEPENDENT_TERMS = exports.CURRENT_PROMPT_END_MARKER = exports.CURRENT_PROMPT_BEGIN_MARKER = exports.PROMPT_UNCHANGED_SENTINEL = exports.CORRECTION_ROUTING_LANES = exports.PROPOSED_RULE_CHANGE_TYPES = exports.freezeBehaviorTests = exports.buildAcceptedPolicyTestFamily = exports.buildBehaviorTestRecord = exports.REPLAY_RETIREMENT_POLICY_VERSION = exports.unverifiedReplayResolutionIds = exports.isReplayRetirementPolicyCurrent = exports.isReplayRetirementVerified = void 0;
 exports.shouldRunCycle = shouldRunCycle;
+exports.pendingProposalNeedsReplayRetirementRefresh = pendingProposalNeedsReplayRetirementRefresh;
+exports.pendingCorrectionsRecoveredExactly = pendingCorrectionsRecoveredExactly;
 exports.needsDistinctCycleId = needsDistinctCycleId;
 exports.computeReviewBaselineFingerprint = computeReviewBaselineFingerprint;
 exports.pickCadenceAnchor = pickCadenceAnchor;
@@ -50,6 +52,7 @@ exports.classifyTriggerFromComparisonEntry = classifyTriggerFromComparisonEntry;
 exports.resolveTriggerEvalCaseId = resolveTriggerEvalCaseId;
 exports.summarizeEvalReport = summarizeEvalReport;
 exports.buildProposalEvalSummary = buildProposalEvalSummary;
+exports.stampReplayRetirementPolicyVersion = stampReplayRetirementPolicyVersion;
 exports.shouldAttemptRulesOnlyFallback = shouldAttemptRulesOnlyFallback;
 exports.rulesOnlyFallbackPassedFullSuite = rulesOnlyFallbackPassedFullSuite;
 exports.buildTriggerProgressionFromReports = buildTriggerProgressionFromReports;
@@ -99,6 +102,14 @@ function shouldRunCycle(input) {
         return { run: true, mode: 'new', reason: 'forced re-run' };
     }
     if (pending) {
+        if (input.pendingReplayRetirementRefresh) {
+            return {
+                run: true,
+                mode: 'supersede',
+                reason: `replay-retirement policy refresh required for pending proposal ${pending.cycle_id}`,
+                pendingProposal: pending,
+            };
+        }
         if (input.unconsumedCorrectionCount >= min) {
             return {
                 run: true,
@@ -124,6 +135,30 @@ function shouldRunCycle(input) {
         };
     }
     return { run: true, mode: 'new', reason: `${input.unconsumedCorrectionCount} unconsumed correction(s) ready` };
+}
+/**
+ * A pending proposal is stale when its replay-retirement evidence predates the
+ * current predicate or contains legacy/status-only success claims. Routing is
+ * deliberately included in the check, but never trusted as proof by itself.
+ */
+function pendingProposalNeedsReplayRetirementRefresh(proposal) {
+    if (!proposal)
+        return false;
+    if (!(0, replay_retirement_1.isReplayRetirementPolicyCurrent)(proposal.eval_summary || null))
+        return true;
+    return (0, replay_retirement_1.unverifiedReplayResolutionIds)(proposal).length > 0;
+}
+/**
+ * Supersede refreshes may carry a pending proposal forward only when the
+ * existing prompt_cycle_id lookup recovered the exact eligible row count that
+ * the pending proposal recorded. Unknown counts fail closed.
+ */
+function pendingCorrectionsRecoveredExactly(proposal, carriedOver) {
+    if (!proposal || !Number.isInteger(proposal.correction_rule_count) || (proposal.correction_rule_count || 0) < 0)
+        return false;
+    const carried = correctionsEligibleForImprovement(carriedOver || [])
+        .filter((row) => !`${row.submission_id || ''}`.startsWith('proposal-'));
+    return carried.length === proposal.correction_rule_count;
 }
 /** A same-day force/supersede cannot reuse the date-based unique cycle id. */
 function needsDistinctCycleId(input) {
@@ -1781,6 +1816,7 @@ function summarizeEvalReport(label, report, reportPath) {
 function buildProposalEvalSummary(baseline, candidate, candidateReport) {
     const comparison = candidateReport?.baselineComparison || null;
     return {
+        replay_retirement_policy_version: replay_retirement_1.REPLAY_RETIREMENT_POLICY_VERSION,
         baseline,
         candidate,
         comparedCases: comparison?.comparedCases ?? 0,
@@ -1803,6 +1839,13 @@ function buildProposalEvalSummary(baseline, candidate, candidateReport) {
         candidate_rule_activations: Array.isArray(candidateReport?.candidateRuleActivations)
             ? candidateReport.candidateRuleActivations
             : [],
+    };
+}
+/** Stamp every stored proposal, including skipped/failed evaluation summaries. */
+function stampReplayRetirementPolicyVersion(summary) {
+    return {
+        ...(summary || {}),
+        replay_retirement_policy_version: replay_retirement_1.REPLAY_RETIREMENT_POLICY_VERSION,
     };
 }
 function shouldAttemptRulesOnlyFallback(input) {
