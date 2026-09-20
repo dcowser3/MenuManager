@@ -55,7 +55,11 @@ describe('parseAIResponse (extracted from index.ts)', () => {
             effectiveReviewAllergens: 'D dairy | G gluten | N nuts | S shellfish | V vegetarian | VG vegan',
         });
         expect(result.structureGuard.safe).toBe(true);
-        expect(result.correctedMenuSanitized).toBe(corrected);
+        expect(result.correctedMenuSanitized).toContain('Jumbo Shrimp, cocktail sauce, horseradish, lemons S');
+        expect(result.correctedMenuSanitized).toContain('Snow Crab Claws & Crab Legs');
+        expect(result.correctedMenuSanitized).not.toContain('Snow Crab Claws & Crab Legs S');
+        expect(result.correctedMenuSanitized).not.toContain('Vegan Tiradito, cucumber, avocado, serrano, aguachile VG');
+        expect(result.correctedMenuSanitized).not.toContain('Oysters, chipotle mignonette* S');
         expect(result.hasCriticalErrors).toBe(false);
     });
 

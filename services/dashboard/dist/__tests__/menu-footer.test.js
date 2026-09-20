@@ -30,7 +30,7 @@ describe('menu-footer (extracted from index.ts)', () => {
     test('raw notice detection matches the canonical warning with and without shellfish', () => {
         expect(menu_footer_1.RAW_NOTICE_PATTERN.test('*consuming raw or undercooked meats, poultry, seafood, shellfish, or eggs may increase your risk of foodborne illness.')).toBe(true);
         expect(menu_footer_1.RAW_NOTICE_PATTERN.test('consuming raw or undercooked meats, poultry, seafood, or eggs may increase your risk of foodborne illness')).toBe(true);
-        expect((0, menu_footer_1.isLikelyRawNoticeLine)('Consuming raw or undercooked items may increase your risk of foodborne illness')).toBe(true);
+        expect((0, menu_footer_1.isLikelyRawNoticeLine)('Consuming raw or undercooked items may increase your risk of foodborne illness')).toBe(false);
         expect((0, menu_footer_1.isLikelyRawNoticeLine)('GUACAMOLE fresh avocado')).toBe(false);
     });
     test('allergen legend detection requires multiple coded segments', () => {

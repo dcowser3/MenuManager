@@ -2,8 +2,36 @@
 // price/welcome boilerplate detection. Extracted verbatim from services/dashboard/index.ts
 // so the offline review pipeline (eval harness) shares the exact production behavior.
 
-export const RAW_NOTICE_TEXT = '*consuming raw or undercooked meats, poultry, seafood, shellfish, or eggs may increase your risk of foodborne illness.';
+import { getTenantConfig } from '@menumanager/tenant-config';
+
+export const DEFAULT_RAW_NOTICE_TEXT = '*consuming raw or undercooked meats, poultry, seafood, shellfish, or eggs may increase your risk of foodborne illness.';
+export const canonicalRawNoticeText = (): string => getTenantConfig().rulebook.rawNoticeText || DEFAULT_RAW_NOTICE_TEXT;
+export const RAW_NOTICE_TEXT = DEFAULT_RAW_NOTICE_TEXT;
 export const RAW_NOTICE_PATTERN = /\*?\s*consuming raw or undercooked meats,\s*poultry,\s*seafood(?:,\s*shellfish)?,\s*or eggs may increase your risk of foodborne illness\.?/i;
+
+const normalizedNotice = (value: string): string => (value || '').replace(/^\s*\*\s*/, '').replace(/[.!?\s]+$/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
+export function isCanonicalRawNoticeLine(line: string): boolean {
+    const observed = normalizedNotice(line);
+    const canonical = normalizedNotice(canonicalRawNoticeText());
+    return !!observed && (observed === canonical || observed === canonical.replace(', shellfish', ''));
+}
+export function containsCanonicalRawNotice(value: string): boolean {
+    return (value || '').split(/[|\n]/).some(segment => isCanonicalRawNoticeLine(segment));
+}
+
+export function isGenericMissingCanonicalRawNoticeFinding(suggestion: { type?: unknown; menuItem?: unknown; description?: unknown; recommendation?: unknown }): boolean {
+    const type = `${suggestion?.type || ''}`.trim().toLowerCase();
+    const item = `${suggestion?.menuItem || ''}`.trim().toLowerCase();
+    const combined = `${type} ${suggestion?.description || ''} ${suggestion?.recommendation || ''}`.trim().toLowerCase();
+    const wholeMenu = !item || /^(entire menu|whole menu|menu|general)$/.test(item);
+    const rawFoodDomain = /\b(raw|undercooked|foodborne|raw[-\s]?food|raw[-\s]?consumption)\b/.test(combined);
+    const genericWarning = /(standard|canonical|required|foodborne|raw or undercooked).*(warning|notice)/.test(combined)
+        || /(warning|notice).*(standard|canonical|required|foodborne|raw or undercooked)/.test(combined);
+    const missing = /\b(missing|absent|add|include)\b/.test(combined);
+    const dishSpecific = /(marker|asterisk|dish|item|steak|tartare|specific)/.test(combined);
+    const quotedOrNegated = /\b(todo|quoted|quote|not missing|already present|do not add|don't add)\b/.test(combined);
+    return wholeMenu && rawFoodDomain && genericWarning && missing && !dishSpecific && !quotedOrNegated;
+}
 
 export type MenuFooterMetadata = {
     body: string;
@@ -26,9 +54,7 @@ export function isLikelyAllergenLegendLine(line: string): boolean {
 }
 
 export function isLikelyRawNoticeLine(line: string): boolean {
-    const normalized = normalizeWhitespace(line).toLowerCase();
-    if (!normalized) return false;
-    return normalized.includes('raw or undercooked') && normalized.includes('foodborne illness');
+    return isCanonicalRawNoticeLine(line);
 }
 
 export function parseParenthesizedAllergenLegend(line: string): string {
@@ -102,7 +128,7 @@ export function normalizeMenuFooter(text: string, fallbackAllergens = ''): MenuF
     for (const line of lines) {
         const allergenLine = extractAllergenLegendLine(line);
         const isHeader = isLikelyAllergenLegendHeader(line);
-        const isRawNotice = isLikelyRawNoticeLine(line);
+        const isRawNotice = isCanonicalRawNoticeLine(line);
         const isPriceFooter = /^all\s+prices\b/i.test(normalizeWhitespace(line));
         const isWelcomeFooter = /^we\s+welcome\s+enquiries\b/i.test(normalizeWhitespace(line));
 

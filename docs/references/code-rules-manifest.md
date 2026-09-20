@@ -349,6 +349,12 @@ Drops AI suggestions asking to alphabetize allergen codes when the corrected men
 
 - id: `post-ai/allergen-suggestion-guard` · category: allergen_codes · implementation: `services/dashboard/lib/allergen-suggestion-guard.ts#guardAllergenAlphabetizationSuggestions`
 
+### Submitted allergen source preservation
+
+Latest submitted/pre-AI allergen codes are authoritative across model and final delivery lanes; candidate-only additions are stripped and ambiguous row attribution fails closed while supported price bytes remain unchanged.
+
+- id: `post-ai/submitted-allergen-preservation` · category: allergen_codes · implementation: `services/dashboard/lib/allergen-source-preservation.ts#preserveSubmittedAllergenCodes`
+
 ### High-confidence suggestion auto-apply
 
 High-confidence spelling/grammar suggestions with an extractable from->to pair are applied directly to the corrected menu and removed from the remaining suggestion list.
@@ -373,7 +379,19 @@ The corrected menu is stripped of managed footer content (allergen legend, raw n
 
 - id: `post-ai/footer-strip` · category: footer · implementation: `services/dashboard/lib/menu-footer.ts#stripManagedFooterText`
 
+### Managed raw-notice finding suppression
+
+Only a canonical tenant raw-food notice may suppress a whole-menu generic missing-notice duplicate; dish-specific, malformed, negated, or unrelated safety findings remain actionable.
+
+- id: `post-ai/managed-raw-notice-suppression` · category: footer · implementation: `services/dashboard/lib/menu-footer.ts#isGenericMissingCanonicalRawNoticeFinding`
+
 ## Layer 5 — Reconciliation and deterministic critical checks
+
+### Allergen delivery claim reconciliation
+
+Model claims about added or retained allergen codes are reconciled against the submitted and delivered row bytes; unverified claims remain advisory and never assert an unapplied change.
+
+- id: `post-ai/allergen-delivery-claim-reconciliation` · category: allergen_codes · implementation: `services/dashboard/lib/allergen-delivery-reconciliation.ts#reconcileAllergenDeliveryClaims`
 
 ### Resolved-critical reconciliation
 

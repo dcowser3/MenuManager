@@ -3780,6 +3780,7 @@ async function handleBasicCheck(req: any, res: any) {
             canonicalSpellingFindings: nearMissAnalysis.findings,
             precheckEnabled: BASIC_AI_PRECHECK_ENABLED,
             checkId: basicCheckId,
+            managedRawNoticePresent: reviewFooterMetadata.hadRawNotice,
         });
         const {
             parsed,

@@ -3370,6 +3370,7 @@ async function handleBasicCheck(req, res) {
             canonicalSpellingFindings: nearMissAnalysis.findings,
             precheckEnabled: BASIC_AI_PRECHECK_ENABLED,
             checkId: basicCheckId,
+            managedRawNoticePresent: reviewFooterMetadata.hadRawNotice,
         });
         const { parsed, postAiDeterministic, protectedTerms, titleGuard, structureGuard, guardedCorrectedMenu, allergenGuard, appliedHc, setMenuGuard, priceIntegrityGuard, correctedAfterHighConfidence, correctedMenuSanitized, reconciliation, reconciledSuggestions, spellingAdjudications, finalSuggestions, hasCriticalErrors, criticalSuggestions, } = postPipeline;
         const originalMenuSanitized = sanitizedMenuContent.body;

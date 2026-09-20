@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.CURATED_CANONICAL_FOOD_WORDS = exports.BUILT_IN_REPLACEMENTS = void 0;
+exports.TRAILING_PRICE_PATTERN = exports.CURATED_CANONICAL_FOOD_WORDS = exports.BUILT_IN_REPLACEMENTS = void 0;
+exports.splitTrailingPrice = splitTrailingPrice;
 exports.normalizeCuratedFoodSpellingsOnLine = normalizeCuratedFoodSpellingsOnLine;
 exports.normalizeSingularIngredientFormsOnLine = normalizeSingularIngredientFormsOnLine;
 exports.ensureCotijaCheeseModifierOnLine = ensureCotijaCheeseModifierOnLine;
@@ -130,7 +131,15 @@ const LEARNED_RULE_CHANGE_TYPES = new Set([
     'terminology',
     'punctuation',
 ]);
-const TRAILING_PRICE_PATTERN = '(?:(?:[$€£]\\s*)?\\d{1,4}(?:,\\d{3})*(?:[.]\\d{1,2})?|MKT|MP|market\\s+price)';
+exports.TRAILING_PRICE_PATTERN = '(?:(?:[$€£]\\s*)?\\d{1,4}(?:,\\d{3})*(?:[.]\\d{1,2})?|MKT|MP|market\\s+price)';
+/** Shared trailing-price grammar for deterministic rules and source-bound delivery. */
+function splitTrailingPrice(line) {
+    const value = `${line || ''}`;
+    const match = value.match(new RegExp(`\\s+(${exports.TRAILING_PRICE_PATTERN}(?:\\s*\\|\\s*${exports.TRAILING_PRICE_PATTERN})?(?:\\s*(?:pp|PP))?)\\s*$`, 'i'));
+    return match && match.index !== undefined
+        ? { body: value.slice(0, match.index).trimEnd(), price: value.slice(match.index) }
+        : { body: value, price: '' };
+}
 function escapeRegExp(s) {
     return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
@@ -472,7 +481,7 @@ function normalizeAllergenClusterOnLine(line, lineIndex, validCodes) {
     if (!original.trim()) {
         return { line: original, corrections: [] };
     }
-    const priceMatch = original.match(new RegExp(`(\\s+${TRAILING_PRICE_PATTERN}(?:\\s*\\|\\s*${TRAILING_PRICE_PATTERN})?(?:\\s*(?:pp|PP))?)\\s*$`, 'i'));
+    const priceMatch = original.match(new RegExp(`(\\s+${exports.TRAILING_PRICE_PATTERN}(?:\\s*\\|\\s*${exports.TRAILING_PRICE_PATTERN})?(?:\\s*(?:pp|PP))?)\\s*$`, 'i'));
     const priceSuffix = priceMatch?.[1] || '';
     const withoutPrice = priceMatch ? original.slice(0, priceMatch.index).trimEnd() : original.trimEnd();
     const clusterMatch = withoutPrice.match(/(\s+\*?\s*)([A-Za-z]{1,3}(?:\s*,\s*[A-Za-z]{1,3})*)\s*$/);
@@ -507,7 +516,7 @@ function ensureTresLechesVegetarianCodeOnLine(line, lineIndex, validCodes) {
     if (!/\btres\s+leches\b/i.test(original)) {
         return { line: original, corrections: [] };
     }
-    const priceMatch = original.match(new RegExp(`(\\s+${TRAILING_PRICE_PATTERN}(?:\\s*\\|\\s*${TRAILING_PRICE_PATTERN})?(?:\\s*(?:pp|PP))?)\\s*$`, 'i'));
+    const priceMatch = original.match(new RegExp(`(\\s+${exports.TRAILING_PRICE_PATTERN}(?:\\s*\\|\\s*${exports.TRAILING_PRICE_PATTERN})?(?:\\s*(?:pp|PP))?)\\s*$`, 'i'));
     const priceSuffix = priceMatch?.[1] || '';
     const withoutPrice = priceMatch ? original.slice(0, priceMatch.index).trimEnd() : original.trimEnd();
     const clusterMatch = withoutPrice.match(/(\s+\*?\s*)([A-Za-z]{1,3}(?:\s*,\s*[A-Za-z]{1,3})*)\s*$/);
@@ -598,7 +607,7 @@ function normalizeRawAsteriskPlacementForLine(line) {
     let working = trimmed.replace(/\*/g, '').replace(/\s{2,}/g, ' ').trim();
     let trailingPrice = '';
     let trailingAllergens = '';
-    const priceMatch = working.match(new RegExp(`\\s+(${TRAILING_PRICE_PATTERN}(?:\\s*\\|\\s*${TRAILING_PRICE_PATTERN})?)\\s*$`, 'i'));
+    const priceMatch = working.match(new RegExp(`\\s+(${exports.TRAILING_PRICE_PATTERN}(?:\\s*\\|\\s*${exports.TRAILING_PRICE_PATTERN})?)\\s*$`, 'i'));
     if (priceMatch) {
         trailingPrice = priceMatch[1];
         working = working.slice(0, priceMatch.index).trim();
@@ -677,7 +686,7 @@ function shouldAddRawAsterisk(line) {
     if (/:/.test(line) && /\b[A-Z]{1,3}\s*,/.test(line)) {
         return false;
     }
-    const hasPrice = new RegExp(`\\s+${TRAILING_PRICE_PATTERN}(?:\\s*(?:pp|PP))?\\s*$`, 'i').test(line);
+    const hasPrice = new RegExp(`\\s+${exports.TRAILING_PRICE_PATTERN}(?:\\s*(?:pp|PP))?\\s*$`, 'i').test(line);
     const hasTrailingAllergenCluster = /\s+[A-Z]{1,3}(?:,[A-Z]{1,3})*\s*$/.test(line.trim());
     const hasDescriptionComma = line.includes(',');
     if (!hasPrice && (!hasTrailingAllergenCluster || !hasDescriptionComma)) {

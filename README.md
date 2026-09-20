@@ -22,6 +22,8 @@ When Basic AI Check or a suggestion updates an editable menu, heading and dish-n
 
 Review formatting preserves corrected line breaks and keeps allergen codes attached to their dishes. Description-less buffet dishes are bolded as complete dish names, separately from the following dish; descriptions and codes remain outside the automatic bold range. See [dish-name formatting and the Toro holiday regression](docs/design-docs/dish-name-formatting.md).
 
+Chef-submitted allergen codes are source-bound through model and final-byte delivery: model-only additions remain advisory, submitted codes are not silently removed, and the latest explicit edit wins over an older review. Supported currency and market-price suffixes are preserved byte-for-byte. See [submitted allergen preservation](docs/design-docs/submitted-allergen-preservation.md).
+
 Clean approved-menu extraction also collapses accidental repeated in-line spaces left by accepted tracked changes, keeping the stored text and HTML representations aligned.
 
 After a revision is approved, only a known `revision_base_submission_id` lineage relationship supersedes its parent; unrelated menus in the same property and service period remain editable. When a prior approved DOCX is uploaded as a baseline, the form may suggest a matching approved menu, but it records a lineage link only if the user explicitly confirms it.

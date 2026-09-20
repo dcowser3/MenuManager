@@ -11,6 +11,8 @@ import {
 import { MenuTitleGuardResult, preserveLeadingMenuTitle } from './menu-title-guard';
 import { CorrectedMenuStructureGuardResult, assessCorrectedMenuStructure } from './corrected-menu-structure-guard';
 import { guardAllergenAlphabetizationSuggestions } from './allergen-suggestion-guard';
+import { reconcileAllergenDeliveryClaims } from './allergen-delivery-reconciliation';
+import { preserveSubmittedAllergenCodes } from './allergen-source-preservation';
 import { applyHighConfidenceSuggestionsToMenu } from './apply-high-confidence-suggestions';
 import {
     EmbeddedSetMenuAnalysis,
@@ -18,7 +20,7 @@ import {
     guardEmbeddedSetMenuPrices,
 } from './embedded-set-menu-guard';
 import { guardCorrectedMenuPrices } from './price-integrity-guard';
-import { RAW_NOTICE_PATTERN, normalizeMenuFooter, stripManagedFooterText } from './menu-footer';
+import { RAW_NOTICE_PATTERN, isGenericMissingCanonicalRawNoticeFinding, normalizeMenuFooter, stripManagedFooterText } from './menu-footer';
 import { QaPromptSectionId, buildFinalPrompt } from './qa-prompt-builder';
 import { buildNearMissAnalysis } from './canonical-vocabulary-provider';
 import {
@@ -711,6 +713,7 @@ export type PostAiPipelineArgs = {
     canonicalSpellingFindings?: NearMissFinding[];
     precheckEnabled: boolean;
     checkId?: string;
+    managedRawNoticePresent?: boolean;
 };
 
 export type PostAiPipelineResult = {
@@ -732,10 +735,14 @@ export type PostAiPipelineResult = {
     finalSuggestions: ReviewSuggestion[];
     hasCriticalErrors: boolean;
     criticalSuggestions: ReviewSuggestion[];
+    safetyDiagnostics: string[];
 };
 
 export function runPostAiPipeline(args: PostAiPipelineArgs): PostAiPipelineResult {
     const parsed = parseAIResponse(args.feedback, args.preCheckedReviewBody);
+    const initialAllergenPreservation = preserveSubmittedAllergenCodes(args.preCheckedReviewBody, parsed.correctedMenu, args.effectiveReviewAllergens || '');
+    parsed.correctedMenu = initialAllergenPreservation.menuText;
+    const safetyDiagnostics = [...initialAllergenPreservation.diagnostics];
     const postAiDeterministic = runPreAiDeterministicChecks(parsed.correctedMenu, {
         enabled: args.precheckEnabled,
         property: args.property,
@@ -784,7 +791,10 @@ export function runPostAiPipeline(args: PostAiPipelineArgs): PostAiPipelineResul
         ])),
     };
 
-    const correctedMenuSanitized = stripManagedFooterText(protectedTermsResult.correctedMenu);
+    let correctedMenuSanitized = stripManagedFooterText(protectedTermsResult.correctedMenu);
+    const finalAllergenPreservation = preserveSubmittedAllergenCodes(args.preCheckedReviewBody, correctedMenuSanitized, args.effectiveReviewAllergens || '');
+    correctedMenuSanitized = finalAllergenPreservation.menuText;
+    safetyDiagnostics.push(...finalAllergenPreservation.diagnostics);
     const reconciliation = reconcileCriticalSuggestionsAgainstCorrectedMenuWithDiagnostics(
         correctedMenuSanitized,
         suggestionsAfterAutoApply
@@ -802,6 +812,9 @@ export function runPostAiPipeline(args: PostAiPipelineArgs): PostAiPipelineResul
     if (args.templateType !== 'beverage') {
         finalSuggestions = enforceAllergenProgramCheck(correctedMenuSanitized, finalSuggestions);
     }
+    if (args.managedRawNoticePresent) {
+        finalSuggestions = finalSuggestions.filter(suggestion => !isGenericMissingCanonicalRawNoticeFinding(suggestion));
+    }
     finalSuggestions = detectKnownTextArtifactSuggestions(correctedMenuSanitized, finalSuggestions);
     const spellingAdjudication = adjudicateCanonicalSpellingFindings(
         correctedMenuSanitized,
@@ -809,6 +822,9 @@ export function runPostAiPipeline(args: PostAiPipelineArgs): PostAiPipelineResul
         args.canonicalSpellingFindings || []
     );
     finalSuggestions = spellingAdjudication.suggestions as ReviewSuggestion[];
+    const allergenDelivery = reconcileAllergenDeliveryClaims(args.preCheckedReviewBody, correctedMenuSanitized, finalSuggestions);
+    finalSuggestions = allergenDelivery.suggestions;
+    safetyDiagnostics.push(...allergenDelivery.diagnostics);
 
     const hasCriticalErrors = finalSuggestions.some(s => s.severity === 'critical');
     const criticalSuggestions = finalSuggestions.filter(s => s.severity === 'critical');
@@ -832,6 +848,7 @@ export function runPostAiPipeline(args: PostAiPipelineArgs): PostAiPipelineResul
         finalSuggestions,
         hasCriticalErrors,
         criticalSuggestions,
+        safetyDiagnostics,
     };
 }
 

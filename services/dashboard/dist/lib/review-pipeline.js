@@ -24,6 +24,8 @@ const pre_ai_deterministic_rules_1 = require("./pre-ai-deterministic-rules");
 const menu_title_guard_1 = require("./menu-title-guard");
 const corrected_menu_structure_guard_1 = require("./corrected-menu-structure-guard");
 const allergen_suggestion_guard_1 = require("./allergen-suggestion-guard");
+const allergen_delivery_reconciliation_1 = require("./allergen-delivery-reconciliation");
+const allergen_source_preservation_1 = require("./allergen-source-preservation");
 const apply_high_confidence_suggestions_1 = require("./apply-high-confidence-suggestions");
 const embedded_set_menu_guard_1 = require("./embedded-set-menu-guard");
 const price_integrity_guard_1 = require("./price-integrity-guard");
@@ -565,6 +567,9 @@ function normalizeRawAsteriskPlacementForLine(line) {
 }
 function runPostAiPipeline(args) {
     const parsed = parseAIResponse(args.feedback, args.preCheckedReviewBody);
+    const initialAllergenPreservation = (0, allergen_source_preservation_1.preserveSubmittedAllergenCodes)(args.preCheckedReviewBody, parsed.correctedMenu, args.effectiveReviewAllergens || '');
+    parsed.correctedMenu = initialAllergenPreservation.menuText;
+    const safetyDiagnostics = [...initialAllergenPreservation.diagnostics];
     const postAiDeterministic = (0, pre_ai_deterministic_rules_1.runPreAiDeterministicChecks)(parsed.correctedMenu, {
         enabled: args.precheckEnabled,
         property: args.property,
@@ -600,7 +605,10 @@ function runPostAiPipeline(args) {
             ...finalProtectedTerms.restoredTerms,
         ])),
     };
-    const correctedMenuSanitized = (0, menu_footer_1.stripManagedFooterText)(protectedTermsResult.correctedMenu);
+    let correctedMenuSanitized = (0, menu_footer_1.stripManagedFooterText)(protectedTermsResult.correctedMenu);
+    const finalAllergenPreservation = (0, allergen_source_preservation_1.preserveSubmittedAllergenCodes)(args.preCheckedReviewBody, correctedMenuSanitized, args.effectiveReviewAllergens || '');
+    correctedMenuSanitized = finalAllergenPreservation.menuText;
+    safetyDiagnostics.push(...finalAllergenPreservation.diagnostics);
     const reconciliation = reconcileCriticalSuggestionsAgainstCorrectedMenuWithDiagnostics(correctedMenuSanitized, suggestionsAfterAutoApply);
     const reconciledSuggestions = reconciliation.suggestions;
     let finalSuggestions = reconciledSuggestions;
@@ -613,9 +621,15 @@ function runPostAiPipeline(args) {
     if (args.templateType !== 'beverage') {
         finalSuggestions = enforceAllergenProgramCheck(correctedMenuSanitized, finalSuggestions);
     }
+    if (args.managedRawNoticePresent) {
+        finalSuggestions = finalSuggestions.filter(suggestion => !(0, menu_footer_1.isGenericMissingCanonicalRawNoticeFinding)(suggestion));
+    }
     finalSuggestions = detectKnownTextArtifactSuggestions(correctedMenuSanitized, finalSuggestions);
     const spellingAdjudication = (0, canonical_vocabulary_1.adjudicateCanonicalSpellingFindings)(correctedMenuSanitized, finalSuggestions, args.canonicalSpellingFindings || []);
     finalSuggestions = spellingAdjudication.suggestions;
+    const allergenDelivery = (0, allergen_delivery_reconciliation_1.reconcileAllergenDeliveryClaims)(args.preCheckedReviewBody, correctedMenuSanitized, finalSuggestions);
+    finalSuggestions = allergenDelivery.suggestions;
+    safetyDiagnostics.push(...allergenDelivery.diagnostics);
     const hasCriticalErrors = finalSuggestions.some(s => s.severity === 'critical');
     const criticalSuggestions = finalSuggestions.filter(s => s.severity === 'critical');
     return {
@@ -637,6 +651,7 @@ function runPostAiPipeline(args) {
         finalSuggestions,
         hasCriticalErrors,
         criticalSuggestions,
+        safetyDiagnostics,
     };
 }
 // Offline-friendly composition of the full-mode Basic AI Check review:

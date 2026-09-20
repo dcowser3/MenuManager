@@ -200,7 +200,16 @@ const LEARNED_RULE_CHANGE_TYPES = new Set([
     'punctuation',
 ]);
 
-const TRAILING_PRICE_PATTERN = '(?:(?:[$€£]\\s*)?\\d{1,4}(?:,\\d{3})*(?:[.]\\d{1,2})?|MKT|MP|market\\s+price)';
+export const TRAILING_PRICE_PATTERN = '(?:(?:[$€£]\\s*)?\\d{1,4}(?:,\\d{3})*(?:[.]\\d{1,2})?|MKT|MP|market\\s+price)';
+
+/** Shared trailing-price grammar for deterministic rules and source-bound delivery. */
+export function splitTrailingPrice(line: string): { body: string; price: string } {
+    const value = `${line || ''}`;
+    const match = value.match(new RegExp(`\\s+(${TRAILING_PRICE_PATTERN}(?:\\s*\\|\\s*${TRAILING_PRICE_PATTERN})?(?:\\s*(?:pp|PP))?)\\s*$`, 'i'));
+    return match && match.index !== undefined
+        ? { body: value.slice(0, match.index).trimEnd(), price: value.slice(match.index) }
+        : { body: value, price: '' };
+}
 
 function escapeRegExp(s: string): string {
     return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
