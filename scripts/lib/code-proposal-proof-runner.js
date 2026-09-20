@@ -14,6 +14,7 @@ const path = require('path');
 const { revalidateAttemptArtifacts, hashImplementation, readDataset } = require('./code-proposal-draft');
 const { loadVerificationModule, recordCodeVerification } = require('./proposal-verification-store');
 const { redact } = require('./model-budget-broker');
+const { createDockerC2c2Executors } = require('./code-proposal-docker-launcher');
 
 const DIGEST = /^[a-f0-9]{64}$/;
 const TEST_PATH = /^services\/dashboard\/__tests__\/code-candidate-[a-z0-9-]+\.test\.(?:ts|js)$/;
@@ -490,4 +491,13 @@ async function runCodeProposalProof(options = {}) {
     }
 }
 
-module.exports = { runCodeProposalProof, runIndependentCodeProposalProof: runCodeProposalProof, validateReplayResult, reportsFromExecutor, walkCandidateTests, makePlan, readC2bHandoff };
+/** Run the accepted C2c1 proof with the fixed C2c2 Docker process boundary. */
+async function runCodeProposalProofWithDocker(options = {}) {
+    if (options.executor || options.replayExecutor || options.deliveryExecutor) throw new Error('C2c2 does not accept caller-supplied host executors.');
+    const outputRoot = path.join(path.resolve(options.attemptRoot), 'docker-output');
+    ensureDirectory(outputRoot, 0o700, 'Docker output root');
+    const executors = createDockerC2c2Executors({ ...options, outputRoot });
+    return runCodeProposalProof({ ...options, ...executors });
+}
+
+module.exports = { runCodeProposalProof, runCodeProposalProofWithDocker, runIndependentCodeProposalProof: runCodeProposalProof, validateReplayResult, reportsFromExecutor, walkCandidateTests, makePlan, readC2bHandoff };
