@@ -13,6 +13,13 @@ export type SourceMutation = {
 
 export type EditableSpan = { id: string; start: number; end: number };
 
+export type AnchorFailureReason =
+    | 'source_anchor_mismatch'
+    | 'overlapping_edits'
+    | 'read_only_or_ambiguous_anchor'
+    | 'malformed_editable_spans'
+    | 'ambiguous_editable_spans';
+
 export function freezeReviewEnvelope<T>(value: T): Readonly<T> {
     const copy = JSON.parse(JSON.stringify(value));
     const freeze = (item: any): any => {
@@ -25,10 +32,46 @@ export function freezeReviewEnvelope<T>(value: T): Readonly<T> {
     return freeze(copy);
 }
 
+function validateEditableSpans(source: string, editable: EditableSpan[]): AnchorFailureReason | null {
+    if (!Array.isArray(editable)) return 'malformed_editable_spans';
+    const ids = new Set<string>();
+    const coordinates = new Set<string>();
+    const spans = editable.map(span => {
+        if (!span || typeof span.id !== 'string' || !span.id.trim()
+            || !Number.isInteger(span.start) || !Number.isInteger(span.end)
+            || span.start < 0 || span.end < span.start || span.end > source.length) {
+            return null;
+        }
+        const coordinateKey = `${span.start}:${span.end}`;
+        if (ids.has(span.id) || coordinates.has(coordinateKey)) return null;
+        ids.add(span.id);
+        coordinates.add(coordinateKey);
+        return span;
+    });
+    if (spans.some(span => span === null)) {
+        const duplicateOrAmbiguous = editable.some((span, index) => spans[index] === null
+            && editable.slice(0, index).some(previous => previous.id === span?.id
+                || (previous.start === span?.start && previous.end === span?.end)));
+        return duplicateOrAmbiguous ? 'ambiguous_editable_spans' : 'malformed_editable_spans';
+    }
+    const valid = spans as EditableSpan[];
+    for (let index = 0; index < valid.length; index++) {
+        for (let other = index + 1; other < valid.length; other++) {
+            if (valid[index].start < valid[other].end && valid[other].start < valid[index].end) {
+                return 'ambiguous_editable_spans';
+            }
+        }
+    }
+    return null;
+}
+
 /** Validate every edit against the same original snapshot before applying any edit. */
 export function applyAnchoredMutations(source: string, mutations: SourceMutation[], editable: EditableSpan[]) {
+    const spanFailure = validateEditableSpans(source, editable);
+    if (spanFailure) return { text: source, reason: spanFailure };
     const ordered = [...mutations].sort((a, b) => a.start - b.start || a.end - b.end);
     let previousEnd = -1;
+    let previousPatch: SourceMutation | undefined;
     for (const patch of ordered) {
         if (!Number.isInteger(patch.start) || !Number.isInteger(patch.end)
             || patch.start < 0 || patch.end < patch.start || patch.end > source.length
@@ -36,9 +79,14 @@ export function applyAnchoredMutations(source: string, mutations: SourceMutation
             return { text: source, reason: 'source_anchor_mismatch' as const };
         }
         if (patch.start < previousEnd) return { text: source, reason: 'overlapping_edits' as const };
+        if (previousPatch && patch.start === patch.end && previousPatch.start === previousPatch.end
+            && patch.start === previousPatch.start) {
+            return { text: source, reason: 'overlapping_edits' as const };
+        }
         const containing = editable.filter(span => patch.start >= span.start && patch.end <= span.end);
         if (containing.length !== 1) return { text: source, reason: 'read_only_or_ambiguous_anchor' as const };
         previousEnd = patch.end;
+        previousPatch = patch;
     }
     let text = source;
     for (const patch of ordered.reverse()) text = text.slice(0, patch.start) + patch.after + text.slice(patch.end);

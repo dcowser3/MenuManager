@@ -3,7 +3,8 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const review_envelope_1 = require("../lib/review-envelope");
 const review_pipeline_1 = require("../lib/review-pipeline");
 const canonical_policy_1 = require("../lib/canonical-policy");
-const fenced = (text) => `=== CORRECTED MENU ===\n${text}\n=== END CORRECTED MENU ===\n=== SUGGESTIONS ===\n[]\n=== END SUGGESTIONS ===`;
+const fencedWithSuggestions = (text, suggestions = []) => `=== CORRECTED MENU ===\n${text}\n=== END CORRECTED MENU ===\n=== SUGGESTIONS ===\n${JSON.stringify(suggestions)}\n=== END SUGGESTIONS ===`;
+const fenced = (text) => fencedWithSuggestions(text);
 const rule = { id: 'term', status: 'accepted', change_type: 'spelling', original_text: 'Fishh', corrected_text: 'Fish' };
 test('validates immutable source anchors before applying offset-changing edits', () => {
     const source = 'Menu\nFishh G 12\nSoupp D 8';
@@ -18,6 +19,14 @@ test('validates immutable source anchors before applying offset-changing edits',
         .toBe('source_anchor_mismatch');
     expect((0, review_envelope_1.applyAnchoredMutations)(source, [{ start: 15, end: 16, before: '\n', after: ' ' }], editable).reason)
         .toBe('read_only_or_ambiguous_anchor');
+    expect((0, review_envelope_1.applyAnchoredMutations)(source, [{ start: 5, end: 5, before: '', after: 'A' }, { start: 5, end: 5, before: '', after: 'B' }], editable).reason)
+        .toBe('overlapping_edits');
+    expect((0, review_envelope_1.applyAnchoredMutations)(source, [{ start: 5, end: 6, before: 'F', after: 'f' }], [{ id: 'x', start: 0, end: 10 }, { id: 'x', start: 11, end: source.length }]).reason)
+        .toBe('ambiguous_editable_spans');
+    expect((0, review_envelope_1.applyAnchoredMutations)(source, [{ start: 5, end: 6, before: 'F', after: 'f' }], [{ id: 'x', start: 0, end: 12 }, { id: 'y', start: 11, end: source.length }]).reason)
+        .toBe('ambiguous_editable_spans');
+    expect((0, review_envelope_1.applyAnchoredMutations)(source, [{ start: 5, end: 6, before: 'F', after: 'f' }], [{ id: '', start: 0, end: 10 }]).reason)
+        .toBe('malformed_editable_spans');
 });
 test('length-changing earlier edits do not shift later anchors', () => {
     const source = 'Fishh G 12\nSoupp D 8';
@@ -48,10 +57,28 @@ test('envelope is frozen and records hashes, context, baseline and editable span
     expect(Object.isFrozen(prepared.envelope)).toBe(true);
     expect(Object.isFrozen(prepared.envelope.context)).toBe(true);
     expect(prepared.envelope.originalBodyHash).toMatch(/^[a-f0-9]{64}$/);
+    expect(prepared.envelope.rawInputSnapshotHash).toBe(prepared.envelope.originalBodyHash);
+    expect(prepared.envelope.precheckedBody).toBe(prepared.preCheckedReviewBody);
+    expect(prepared.envelope.precheckedBodyHash).toMatch(/^[a-f0-9]{64}$/);
+    expect(prepared.envelope.editableSpanBasis).toBe('prechecked_review_body');
     expect(prepared.envelope.promptHash).toMatch(/^[a-f0-9]{64}$/);
     expect(prepared.envelope.baselineProvenance).toEqual({ id: 'approved-1' });
     expect(prepared.envelope.editableSpans).toEqual([{ id: 'row:0', start: 0, end: 6 }, { id: 'row:1', start: 7, end: 17 }]);
     expect(prepared.envelope.context.managedRawNoticePresent).toBe(true);
+});
+test('prepared consumed state is frozen and completion fails closed on post-prepare drift', async () => {
+    const prepared = await (0, review_pipeline_1.prepareReview)('DINNER\nFishh G 12', {
+        basePrompt: 'BASE', property: 'A', acceptedCorrectionRules: [rule], precheckEnabled: false,
+    });
+    expect(Object.isFrozen(prepared.promptInfo)).toBe(true);
+    expect(Object.isFrozen(prepared.nearMissAnalysis.findings)).toBe(true);
+    prepared.promptInfo = { ...prepared.promptInfo, prompt: 'TAMPERED PROMPT' };
+    const result = (0, review_pipeline_1.completePreparedReview)(prepared, fenced('DINNER\nFish G 12'));
+    expect(result.finalCorrectedMenu).toBe('DINNER\nFishh G 12');
+    expect(result.finalSuggestions).toEqual([]);
+    expect(result.post.hasCriticalErrors).toBe(false);
+    expect(result.reviewStatus.reusable).toBe(false);
+    expect(result.diagnostics[0]).toEqual({ stage: 'integrity', reason: 'prepared_state_drift:prompt' });
 });
 test('envelope hashes and immutable fields do not drift when caller inputs mutate', async () => {
     const acceptedRules = [rule];
@@ -90,9 +117,53 @@ test('Basic/offline coordinator adapters produce identical final bytes, guards a
     expect(coordinated.finalCorrectedMenu).toBe(offline.finalCorrectedMenu);
     expect(coordinated.finalSuggestions).toEqual(offline.finalSuggestions);
     expect(coordinated.post.safetyDiagnostics).toEqual(offline.post.safetyDiagnostics);
+    expect(coordinated.post.hasCriticalErrors).toBe(offline.post.hasCriticalErrors);
+    expect(coordinated.post.structureGuard.safe).toBe(offline.post.structureGuard.safe);
+    expect(coordinated.post.guardedCorrectedMenu).toBe(offline.post.guardedCorrectedMenu);
+    expect(coordinated.envelope.acceptedPolicyHash).toBe(offline.envelope.acceptedPolicyHash);
     expect(coordinated.outputHash).toBe(offline.outputHash);
     expect(coordinated.envelope).toEqual(offline.envelope);
     expect(modelCalls).toBe(2);
+});
+test('Basic/offline adapters match on rejected read-only merge and do not retain rejected critical state', async () => {
+    const menu = 'DINNER\nFishh G 12';
+    const options = {
+        basePrompt: 'BASE', acceptedCorrectionRules: [rule], precheckEnabled: false,
+        editableSpans: [{ id: 'dish-only', start: 7, end: menu.length }],
+    };
+    const feedback = fencedWithSuggestions('LUNCH\nFresh fish G 12', [{
+            type: 'Missing Price', severity: 'critical', confidence: 'high', menuItem: 'DINNER',
+            description: 'missing price', recommendation: 'Add a price',
+        }]);
+    let directCalls = 0;
+    const directPrepared = await (0, review_pipeline_1.prepareReview)(menu, options);
+    const directFeedback = await (async () => {
+        directCalls++;
+        return feedback;
+    })();
+    const direct = (0, review_pipeline_1.completePreparedReview)(directPrepared, directFeedback, { finishReason: 'stop' });
+    let offlineCalls = 0;
+    const offline = await (0, review_pipeline_1.runFullReviewPipeline)(menu, options, async () => {
+        offlineCalls++;
+        return { feedback, finishReason: 'stop' };
+    });
+    expect(directCalls).toBe(1);
+    expect(offlineCalls).toBe(1);
+    expect(direct.finalCorrectedMenu).toBe(menu);
+    expect(offline.finalCorrectedMenu).toBe(menu);
+    expect(direct.finalSuggestions).toEqual([]);
+    expect(offline.finalSuggestions).toEqual([]);
+    expect(direct.post.hasCriticalErrors).toBe(false);
+    expect(offline.post.hasCriticalErrors).toBe(false);
+    expect(direct.post.guardedCorrectedMenu).toBe(menu);
+    expect(offline.post.guardedCorrectedMenu).toBe(menu);
+    expect(direct.post.deliveredStructureGuard?.safe).toBe(true);
+    expect(offline.post.deliveredStructureGuard?.safe).toBe(true);
+    expect(direct.post.deliveredReconciliation?.suggestions).toEqual([]);
+    expect(offline.post.deliveredReconciliation?.suggestions).toEqual([]);
+    expect(direct.post.structureGuard.safe).toBe(offline.post.structureGuard.safe);
+    expect(direct.reviewStatus).toEqual(offline.reviewStatus);
+    expect(direct.envelope.acceptedPolicyHash).toBe(offline.envelope.acceptedPolicyHash);
 });
 test('model failure fallback is source-preserving and still one-call', async () => {
     const menu = 'DINNER\nFishh G 12';

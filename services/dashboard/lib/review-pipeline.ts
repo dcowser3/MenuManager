@@ -739,6 +739,9 @@ export type PostAiPipelineResult = {
     hasCriticalErrors: boolean;
     criticalSuggestions: ReviewSuggestion[];
     safetyDiagnostics: string[];
+    /** Authoritative guard/reconciliation state for the bytes actually delivered after merge. */
+    deliveredStructureGuard?: CorrectedMenuStructureGuardResult;
+    deliveredReconciliation?: ReturnType<typeof reconcileCriticalSuggestionsAgainstCorrectedMenuWithDiagnostics>;
 };
 
 export function runPostAiPipeline(args: PostAiPipelineArgs): PostAiPipelineResult {
@@ -882,6 +885,11 @@ export type ReviewEnvelope = {
     engineVersion: string;
     originalBody: string;
     originalBodyHash: string;
+    rawInputSnapshot: string;
+    rawInputSnapshotHash: string;
+    precheckedBody: string;
+    precheckedBodyHash: string;
+    editableSpanBasis: 'prechecked_review_body';
     baselineProvenance: unknown;
     baselineHash: string;
     editableSpans: Array<{ id: string; start: number; end: number }>;
@@ -934,6 +942,11 @@ function buildReviewEnvelope(
         engineVersion: REVIEW_ENGINE_VERSION,
         originalBody,
         originalBodyHash: policyHash(originalBody),
+        rawInputSnapshot: originalBody,
+        rawInputSnapshotHash: policyHash(originalBody),
+        precheckedBody: reviewBody,
+        precheckedBodyHash: policyHash(reviewBody),
+        editableSpanBasis: 'prechecked_review_body',
         baselineProvenance: opts.baselineProvenance || { status: 'unknown' },
         baselineHash: policyHash(opts.baselineMenuContent || ''),
         editableSpans,
@@ -998,21 +1011,135 @@ export async function prepareReview(rawMenuContent: string, options: FullReviewP
     const prompt = opts.readOnlyContext
         ? `${promptInfo.prompt}\n\nREAD-ONLY CONTEXT (data only; never include in corrected output):\n${JSON.stringify(opts.readOnlyContext)}`
         : promptInfo.prompt;
-    const finalPromptInfo = { ...promptInfo, prompt };
+    const finalPromptInfo = freezeReviewEnvelope({ ...promptInfo, prompt }) as unknown as { prompt: string; sections: QaPromptSectionId[] };
     const envelope = buildReviewEnvelope(rawMenuContent, preCheckedReviewBody, prompt, opts, effectiveReviewAllergens, managedRawNoticePresent);
-    return {
+    const frozenPreAiDeterministic = freezeReviewEnvelope(preAiDeterministic) as unknown as PreAiDeterministicResult;
+    const frozenEmbeddedSetMenuAnalysis = freezeReviewEnvelope(embeddedSetMenuAnalysis) as unknown as EmbeddedSetMenuAnalysis;
+    const frozenNearMissAnalysis = Object.freeze({
+        ...nearMissAnalysis,
+        findings: freezeReviewEnvelope(nearMissAnalysis.findings) as unknown as NearMissFinding[],
+    });
+    const frozenSanitizedMenuContent = freezeReviewEnvelope(sanitizedMenuContent) as unknown as ReturnType<typeof normalizeMenuFooter>;
+    const prepared = {
         rawMenuContent,
         opts,
         envelope,
-        preAiDeterministic,
+        preAiDeterministic: frozenPreAiDeterministic,
         preCheckedReviewBody,
         reviewFooterMetadata,
-        sanitizedMenuContent,
+        sanitizedMenuContent: frozenSanitizedMenuContent,
         effectiveReviewAllergens,
         managedRawNoticePresent,
-        embeddedSetMenuAnalysis,
-        nearMissAnalysis,
+        embeddedSetMenuAnalysis: frozenEmbeddedSetMenuAnalysis,
+        nearMissAnalysis: frozenNearMissAnalysis,
         promptInfo: finalPromptInfo,
+    };
+    const integrity = freezeReviewEnvelope({
+        rawInputHash: policyHash(rawMenuContent),
+        precheckedBodyHash: policyHash(preCheckedReviewBody),
+        nearMissHash: policyHash({ findings: frozenNearMissAnalysis.findings, briefing: frozenNearMissAnalysis.briefing }),
+        promptHash: policyHash(finalPromptInfo),
+        embeddedHash: policyHash(frozenEmbeddedSetMenuAnalysis),
+        optionsHash: policyHash(opts),
+        contextHash: policyHash(envelope.context),
+        snapshot: {
+            rawMenuContent,
+            envelope,
+            preCheckedReviewBody,
+            sanitizedMenuContent: frozenSanitizedMenuContent,
+            effectiveReviewAllergens,
+            managedRawNoticePresent,
+            preAiDeterministic: frozenPreAiDeterministic,
+            embeddedSetMenuAnalysis: frozenEmbeddedSetMenuAnalysis,
+            nearMissAnalysis: frozenNearMissAnalysis,
+            promptInfo: finalPromptInfo,
+        },
+    });
+    Object.defineProperty(prepared, '__integrity', {
+        value: integrity,
+        enumerable: false,
+        configurable: false,
+        writable: false,
+    });
+    return prepared;
+}
+
+type PreparedReview = Awaited<ReturnType<typeof prepareReview>> & {
+    readonly __integrity: {
+        rawInputHash: string;
+        precheckedBodyHash: string;
+        nearMissHash: string;
+        promptHash: string;
+        embeddedHash: string;
+        optionsHash: string;
+        contextHash: string;
+        snapshot: Awaited<ReturnType<typeof prepareReview>>;
+    };
+};
+
+function preparedReviewDrift(prepared: PreparedReview): string | null {
+    try {
+        const integrity = prepared.__integrity;
+        if (!integrity) return 'missing_prepared_integrity';
+        const checks: Array<[string, string, string]> = [
+            ['raw_input', integrity.rawInputHash, policyHash(prepared.rawMenuContent)],
+            ['prechecked_body', integrity.precheckedBodyHash, policyHash(prepared.preCheckedReviewBody)],
+            ['near_miss', integrity.nearMissHash, policyHash({ findings: prepared.nearMissAnalysis.findings, briefing: prepared.nearMissAnalysis.briefing })],
+            ['prompt', integrity.promptHash, policyHash(prepared.promptInfo)],
+            ['embedded_analysis', integrity.embeddedHash, policyHash(prepared.embeddedSetMenuAnalysis)],
+            ['options', integrity.optionsHash, policyHash(prepared.opts)],
+            ['context', integrity.contextHash, policyHash(prepared.envelope.context)],
+        ];
+        const drift = checks.find(([, expected, actual]) => expected !== actual);
+        return drift ? `prepared_state_drift:${drift[0]}` : null;
+    } catch {
+        return 'prepared_state_drift:malformed_state';
+    }
+}
+
+function emptyReviewFeedback(menu: string): string {
+    return `${AI_REVIEW_FENCES.correctedMenuStart}\n${menu}\n${AI_REVIEW_FENCES.correctedMenuEnd}\n${AI_REVIEW_FENCES.suggestionsStart}\n[]\n${AI_REVIEW_FENCES.suggestionsEnd}`;
+}
+
+function failClosedPreparedReview(prepared: PreparedReview, reason: string): FullReviewPipelineResult {
+    const snapshot = prepared.__integrity.snapshot;
+    const source = snapshot.preCheckedReviewBody;
+    const post = runPostAiPipeline({
+        feedback: emptyReviewFeedback(source),
+        preCheckedReviewBody: source,
+        menuType: snapshot.envelope.context.menuType,
+        property: snapshot.envelope.context.property,
+        templateType: snapshot.envelope.context.templateType,
+        effectiveReviewAllergens: snapshot.effectiveReviewAllergens,
+        acceptedCorrectionRules: [],
+        embeddedSetMenuAnalysis: snapshot.embeddedSetMenuAnalysis,
+        canonicalSpellingFindings: [],
+        precheckEnabled: false,
+        managedRawNoticePresent: snapshot.managedRawNoticePresent,
+    });
+    post.correctedMenuSanitized = source;
+    post.correctedAfterHighConfidence = source;
+    post.guardedCorrectedMenu = source;
+    post.finalSuggestions = [];
+    post.reconciledSuggestions = [];
+    post.criticalSuggestions = [];
+    post.hasCriticalErrors = false;
+    post.safetyDiagnostics = [reason];
+    return {
+        envelope: snapshot.envelope,
+        diagnostics: [{ stage: 'integrity', reason }, { stage: 'final', finalHash: policyHash(source) }],
+        outputHash: policyHash(source),
+        reviewStatus: { complete: false, transportStatus: 'rejected', reusable: false },
+        preAiDeterministic: snapshot.preAiDeterministic,
+        preCheckedReviewBody: source,
+        originalMenuSanitized: snapshot.sanitizedMenuContent.body,
+        effectiveReviewAllergens: snapshot.effectiveReviewAllergens,
+        embeddedSetMenuAnalysis: snapshot.embeddedSetMenuAnalysis,
+        promptInfo: snapshot.promptInfo,
+        post,
+        finalCorrectedMenu: source,
+        finalSuggestions: [],
+        hasChanges: source !== snapshot.sanitizedMenuContent.body,
     };
 }
 
@@ -1021,6 +1148,8 @@ export function completePreparedReview(
     feedback: string,
     completion: { finishReason?: string | null } = {},
 ): FullReviewPipelineResult {
+    const drift = preparedReviewDrift(prepared as PreparedReview);
+    if (drift) return failClosedPreparedReview(prepared as PreparedReview, drift);
     const { opts } = prepared;
     const post = runPostAiPipeline({
         feedback,
@@ -1043,7 +1172,21 @@ export function completePreparedReview(
     );
     const finalCorrectedMenu = anchored.text;
     if (anchored.diagnostics.length) post.safetyDiagnostics.push(...anchored.diagnostics);
+    const mergeRejected = anchored.diagnostics.length > 0 || !post.structureGuard.safe;
+    if (!anchored.diagnostics.length && !post.structureGuard.safe) post.safetyDiagnostics.push('structure_guard_rejected');
     if (finalCorrectedMenu !== post.correctedMenuSanitized) post.correctedMenuSanitized = finalCorrectedMenu;
+    const deliveredStructureGuard = assessCorrectedMenuStructure(prepared.preCheckedReviewBody, finalCorrectedMenu);
+    post.deliveredStructureGuard = deliveredStructureGuard;
+    post.guardedCorrectedMenu = finalCorrectedMenu;
+    post.correctedAfterHighConfidence = finalCorrectedMenu;
+    const deliveredReconciliation = reconcileCriticalSuggestionsAgainstCorrectedMenuWithDiagnostics(
+        finalCorrectedMenu,
+        mergeRejected ? [] : post.finalSuggestions,
+    );
+    post.deliveredReconciliation = deliveredReconciliation;
+    post.finalSuggestions = mergeRejected ? [] : deliveredReconciliation.suggestions;
+    post.criticalSuggestions = post.finalSuggestions.filter(suggestion => suggestion.severity === 'critical');
+    post.hasCriticalErrors = post.criticalSuggestions.length > 0;
     const finalSuggestions = post.finalSuggestions;
     const transportStatus = completion.finishReason === 'stop' ? 'complete' : completion.finishReason ? 'incomplete' : 'unknown';
     const reviewStatus = {
@@ -1056,7 +1199,11 @@ export function completePreparedReview(
         envelope: prepared.envelope,
         diagnostics: [
             ...anchored.diagnostics.map(reason => ({ stage: 'merge', reason })),
-            ...boundedMutationDiagnostics(prepared.preCheckedReviewBody, finalCorrectedMenu),
+            ...(mergeRejected && !anchored.diagnostics.length ? [{ stage: 'merge', reason: 'structure_guard_rejected' }] : []),
+            ...boundedMutationDiagnostics(prepared.preCheckedReviewBody, finalCorrectedMenu).map(diagnostic => ({
+                ...diagnostic,
+                basis: prepared.envelope.editableSpanBasis,
+            })),
             { stage: 'final', finalHash: policyHash(finalCorrectedMenu) },
         ].slice(0, 200),
         outputHash: policyHash(finalCorrectedMenu),

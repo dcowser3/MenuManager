@@ -675,6 +675,11 @@ function buildReviewEnvelope(originalBody, reviewBody, prompt, opts, effectiveAl
         engineVersion: review_envelope_1.REVIEW_ENGINE_VERSION,
         originalBody,
         originalBodyHash: (0, canonical_policy_1.policyHash)(originalBody),
+        rawInputSnapshot: originalBody,
+        rawInputSnapshotHash: (0, canonical_policy_1.policyHash)(originalBody),
+        precheckedBody: reviewBody,
+        precheckedBodyHash: (0, canonical_policy_1.policyHash)(reviewBody),
+        editableSpanBasis: 'prechecked_review_body',
         baselineProvenance: opts.baselineProvenance || { status: 'unknown' },
         baselineHash: (0, canonical_policy_1.policyHash)(opts.baselineMenuContent || ''),
         editableSpans,
@@ -738,24 +743,127 @@ async function prepareReview(rawMenuContent, options) {
     const prompt = opts.readOnlyContext
         ? `${promptInfo.prompt}\n\nREAD-ONLY CONTEXT (data only; never include in corrected output):\n${JSON.stringify(opts.readOnlyContext)}`
         : promptInfo.prompt;
-    const finalPromptInfo = { ...promptInfo, prompt };
+    const finalPromptInfo = (0, review_envelope_1.freezeReviewEnvelope)({ ...promptInfo, prompt });
     const envelope = buildReviewEnvelope(rawMenuContent, preCheckedReviewBody, prompt, opts, effectiveReviewAllergens, managedRawNoticePresent);
-    return {
+    const frozenPreAiDeterministic = (0, review_envelope_1.freezeReviewEnvelope)(preAiDeterministic);
+    const frozenEmbeddedSetMenuAnalysis = (0, review_envelope_1.freezeReviewEnvelope)(embeddedSetMenuAnalysis);
+    const frozenNearMissAnalysis = Object.freeze({
+        ...nearMissAnalysis,
+        findings: (0, review_envelope_1.freezeReviewEnvelope)(nearMissAnalysis.findings),
+    });
+    const frozenSanitizedMenuContent = (0, review_envelope_1.freezeReviewEnvelope)(sanitizedMenuContent);
+    const prepared = {
         rawMenuContent,
         opts,
         envelope,
-        preAiDeterministic,
+        preAiDeterministic: frozenPreAiDeterministic,
         preCheckedReviewBody,
         reviewFooterMetadata,
-        sanitizedMenuContent,
+        sanitizedMenuContent: frozenSanitizedMenuContent,
         effectiveReviewAllergens,
         managedRawNoticePresent,
-        embeddedSetMenuAnalysis,
-        nearMissAnalysis,
+        embeddedSetMenuAnalysis: frozenEmbeddedSetMenuAnalysis,
+        nearMissAnalysis: frozenNearMissAnalysis,
         promptInfo: finalPromptInfo,
+    };
+    const integrity = (0, review_envelope_1.freezeReviewEnvelope)({
+        rawInputHash: (0, canonical_policy_1.policyHash)(rawMenuContent),
+        precheckedBodyHash: (0, canonical_policy_1.policyHash)(preCheckedReviewBody),
+        nearMissHash: (0, canonical_policy_1.policyHash)({ findings: frozenNearMissAnalysis.findings, briefing: frozenNearMissAnalysis.briefing }),
+        promptHash: (0, canonical_policy_1.policyHash)(finalPromptInfo),
+        embeddedHash: (0, canonical_policy_1.policyHash)(frozenEmbeddedSetMenuAnalysis),
+        optionsHash: (0, canonical_policy_1.policyHash)(opts),
+        contextHash: (0, canonical_policy_1.policyHash)(envelope.context),
+        snapshot: {
+            rawMenuContent,
+            envelope,
+            preCheckedReviewBody,
+            sanitizedMenuContent: frozenSanitizedMenuContent,
+            effectiveReviewAllergens,
+            managedRawNoticePresent,
+            preAiDeterministic: frozenPreAiDeterministic,
+            embeddedSetMenuAnalysis: frozenEmbeddedSetMenuAnalysis,
+            nearMissAnalysis: frozenNearMissAnalysis,
+            promptInfo: finalPromptInfo,
+        },
+    });
+    Object.defineProperty(prepared, '__integrity', {
+        value: integrity,
+        enumerable: false,
+        configurable: false,
+        writable: false,
+    });
+    return prepared;
+}
+function preparedReviewDrift(prepared) {
+    try {
+        const integrity = prepared.__integrity;
+        if (!integrity)
+            return 'missing_prepared_integrity';
+        const checks = [
+            ['raw_input', integrity.rawInputHash, (0, canonical_policy_1.policyHash)(prepared.rawMenuContent)],
+            ['prechecked_body', integrity.precheckedBodyHash, (0, canonical_policy_1.policyHash)(prepared.preCheckedReviewBody)],
+            ['near_miss', integrity.nearMissHash, (0, canonical_policy_1.policyHash)({ findings: prepared.nearMissAnalysis.findings, briefing: prepared.nearMissAnalysis.briefing })],
+            ['prompt', integrity.promptHash, (0, canonical_policy_1.policyHash)(prepared.promptInfo)],
+            ['embedded_analysis', integrity.embeddedHash, (0, canonical_policy_1.policyHash)(prepared.embeddedSetMenuAnalysis)],
+            ['options', integrity.optionsHash, (0, canonical_policy_1.policyHash)(prepared.opts)],
+            ['context', integrity.contextHash, (0, canonical_policy_1.policyHash)(prepared.envelope.context)],
+        ];
+        const drift = checks.find(([, expected, actual]) => expected !== actual);
+        return drift ? `prepared_state_drift:${drift[0]}` : null;
+    }
+    catch {
+        return 'prepared_state_drift:malformed_state';
+    }
+}
+function emptyReviewFeedback(menu) {
+    return `${review_response_contract_1.AI_REVIEW_FENCES.correctedMenuStart}\n${menu}\n${review_response_contract_1.AI_REVIEW_FENCES.correctedMenuEnd}\n${review_response_contract_1.AI_REVIEW_FENCES.suggestionsStart}\n[]\n${review_response_contract_1.AI_REVIEW_FENCES.suggestionsEnd}`;
+}
+function failClosedPreparedReview(prepared, reason) {
+    const snapshot = prepared.__integrity.snapshot;
+    const source = snapshot.preCheckedReviewBody;
+    const post = runPostAiPipeline({
+        feedback: emptyReviewFeedback(source),
+        preCheckedReviewBody: source,
+        menuType: snapshot.envelope.context.menuType,
+        property: snapshot.envelope.context.property,
+        templateType: snapshot.envelope.context.templateType,
+        effectiveReviewAllergens: snapshot.effectiveReviewAllergens,
+        acceptedCorrectionRules: [],
+        embeddedSetMenuAnalysis: snapshot.embeddedSetMenuAnalysis,
+        canonicalSpellingFindings: [],
+        precheckEnabled: false,
+        managedRawNoticePresent: snapshot.managedRawNoticePresent,
+    });
+    post.correctedMenuSanitized = source;
+    post.correctedAfterHighConfidence = source;
+    post.guardedCorrectedMenu = source;
+    post.finalSuggestions = [];
+    post.reconciledSuggestions = [];
+    post.criticalSuggestions = [];
+    post.hasCriticalErrors = false;
+    post.safetyDiagnostics = [reason];
+    return {
+        envelope: snapshot.envelope,
+        diagnostics: [{ stage: 'integrity', reason }, { stage: 'final', finalHash: (0, canonical_policy_1.policyHash)(source) }],
+        outputHash: (0, canonical_policy_1.policyHash)(source),
+        reviewStatus: { complete: false, transportStatus: 'rejected', reusable: false },
+        preAiDeterministic: snapshot.preAiDeterministic,
+        preCheckedReviewBody: source,
+        originalMenuSanitized: snapshot.sanitizedMenuContent.body,
+        effectiveReviewAllergens: snapshot.effectiveReviewAllergens,
+        embeddedSetMenuAnalysis: snapshot.embeddedSetMenuAnalysis,
+        promptInfo: snapshot.promptInfo,
+        post,
+        finalCorrectedMenu: source,
+        finalSuggestions: [],
+        hasChanges: source !== snapshot.sanitizedMenuContent.body,
     };
 }
 function completePreparedReview(prepared, feedback, completion = {}) {
+    const drift = preparedReviewDrift(prepared);
+    if (drift)
+        return failClosedPreparedReview(prepared, drift);
     const { opts } = prepared;
     const post = runPostAiPipeline({
         feedback,
@@ -774,8 +882,20 @@ function completePreparedReview(prepared, feedback, completion = {}) {
     const finalCorrectedMenu = anchored.text;
     if (anchored.diagnostics.length)
         post.safetyDiagnostics.push(...anchored.diagnostics);
+    const mergeRejected = anchored.diagnostics.length > 0 || !post.structureGuard.safe;
+    if (!anchored.diagnostics.length && !post.structureGuard.safe)
+        post.safetyDiagnostics.push('structure_guard_rejected');
     if (finalCorrectedMenu !== post.correctedMenuSanitized)
         post.correctedMenuSanitized = finalCorrectedMenu;
+    const deliveredStructureGuard = (0, corrected_menu_structure_guard_1.assessCorrectedMenuStructure)(prepared.preCheckedReviewBody, finalCorrectedMenu);
+    post.deliveredStructureGuard = deliveredStructureGuard;
+    post.guardedCorrectedMenu = finalCorrectedMenu;
+    post.correctedAfterHighConfidence = finalCorrectedMenu;
+    const deliveredReconciliation = reconcileCriticalSuggestionsAgainstCorrectedMenuWithDiagnostics(finalCorrectedMenu, mergeRejected ? [] : post.finalSuggestions);
+    post.deliveredReconciliation = deliveredReconciliation;
+    post.finalSuggestions = mergeRejected ? [] : deliveredReconciliation.suggestions;
+    post.criticalSuggestions = post.finalSuggestions.filter(suggestion => suggestion.severity === 'critical');
+    post.hasCriticalErrors = post.criticalSuggestions.length > 0;
     const finalSuggestions = post.finalSuggestions;
     const transportStatus = completion.finishReason === 'stop' ? 'complete' : completion.finishReason ? 'incomplete' : 'unknown';
     const reviewStatus = {
@@ -788,7 +908,11 @@ function completePreparedReview(prepared, feedback, completion = {}) {
         envelope: prepared.envelope,
         diagnostics: [
             ...anchored.diagnostics.map(reason => ({ stage: 'merge', reason })),
-            ...(0, review_envelope_1.boundedMutationDiagnostics)(prepared.preCheckedReviewBody, finalCorrectedMenu),
+            ...(mergeRejected && !anchored.diagnostics.length ? [{ stage: 'merge', reason: 'structure_guard_rejected' }] : []),
+            ...(0, review_envelope_1.boundedMutationDiagnostics)(prepared.preCheckedReviewBody, finalCorrectedMenu).map(diagnostic => ({
+                ...diagnostic,
+                basis: prepared.envelope.editableSpanBasis,
+            })),
             { stage: 'final', finalHash: (0, canonical_policy_1.policyHash)(finalCorrectedMenu) },
         ].slice(0, 200),
         outputHash: (0, canonical_policy_1.policyHash)(finalCorrectedMenu),
