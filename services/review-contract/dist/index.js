@@ -10,8 +10,10 @@ exports.configuredExecutionIdentity = configuredExecutionIdentity;
 exports.buildRequestDigest = buildRequestDigest;
 exports.buildCoordinatorRequest = buildCoordinatorRequest;
 exports.validateCoordinatorRequest = validateCoordinatorRequest;
+exports.validateCoordinatorResponse = validateCoordinatorResponse;
 exports.sameExecutionIdentity = sameExecutionIdentity;
 const crypto_1 = require("crypto");
+const llm_adapter_1 = require("@menumanager/llm-adapter");
 exports.COORDINATOR_SCHEMA_VERSION = 1;
 exports.COORDINATOR_ENGINE_VERSION = 'review-coordinator-v1';
 function canonicalize(value) {
@@ -48,11 +50,29 @@ function normalizeConfiguredTemperature(env) {
     return Number.isFinite(parsed) ? parsed : 0;
 }
 function configuredExecutionIdentity(env) {
+    const provider = env.AI_REVIEW_LLM_PROVIDER || env.LLM_PROVIDER || 'openai';
+    const model = env.AI_REVIEW_MODEL || 'gpt-5.6-luna';
+    const temperature = normalizeConfiguredTemperature(env);
+    const seed = normalizeConfiguredSeed(env);
+    const capabilities = (0, llm_adapter_1.getModelCapabilities)(model);
+    const wireSeed = seed.value !== null && capabilities.supportsSeed ? seed.value : null;
+    const wireTemperature = capabilities.supportsTemperature ? temperature : null;
+    const omitted = [];
+    if (wireTemperature === null)
+        omitted.push('temperature');
+    if (wireSeed === null)
+        omitted.push('seed');
     return {
-        provider: env.AI_REVIEW_LLM_PROVIDER || env.LLM_PROVIDER || 'openai',
-        model: env.AI_REVIEW_MODEL || 'gpt-5.6-luna',
-        temperature: normalizeConfiguredTemperature(env),
-        seed: normalizeConfiguredSeed(env),
+        provider,
+        model,
+        temperature,
+        seed,
+        wire: {
+            model: provider === 'openrouter' ? (0, llm_adapter_1.mapOpenRouterModelId)(model) : model,
+            temperature: wireTemperature,
+            seed: wireSeed,
+            omitted,
+        },
     };
 }
 function buildRequestDigest(request) {
@@ -86,18 +106,30 @@ function validateCoordinatorRequest(request) {
     }
     if (typeof candidate.replayIdentity !== 'string' || !candidate.replayIdentity.trim())
         return { ok: false, reason: 'missing_replay_identity' };
+    if (candidate.replayIdentity.length > 160)
+        return { ok: false, reason: 'replay_identity_too_long' };
     const attestations = candidate.callerAttestations;
     if (!attestations || !['sourceHash', 'contextHash', 'policyHash', 'vocabularySnapshotHash'].every((key) => typeof attestations[key] === 'string' && !!attestations[key])) {
         return { ok: false, reason: 'missing_identity' };
     }
     const execution = candidate.effectiveExecutionIdentity;
-    if (!execution || typeof execution.provider !== 'string' || !execution.provider
+    if (!execution || !['openai', 'openrouter'].includes(execution.provider) || typeof execution.provider !== 'string' || !execution.provider
         || typeof execution.model !== 'string' || !execution.model
         || typeof execution.temperature !== 'number' || !Number.isFinite(execution.temperature)
         || !execution.seed || !['default', 'explicit', 'disabled'].includes(execution.seed.state)
         || (execution.seed.state === 'disabled' && execution.seed.value !== null)
         || (execution.seed.state !== 'disabled' && (!Number.isInteger(execution.seed.value) || execution.seed.value < 0))) {
         return { ok: false, reason: 'malformed_execution_identity' };
+    }
+    const expectedExecution = configuredExecutionIdentity({
+        AI_REVIEW_LLM_PROVIDER: execution.provider,
+        LLM_PROVIDER: execution.provider,
+        AI_REVIEW_MODEL: execution.model,
+        AI_REVIEW_TEMPERATURE: `${execution.temperature}`,
+        AI_REVIEW_SEED: execution.seed.state === 'disabled' ? '' : `${execution.seed.value ?? ''}`,
+    });
+    if (!execution.wire || stableJson(execution.wire) !== stableJson(expectedExecution.wire)) {
+        return { ok: false, reason: 'malformed_wire_execution_identity' };
     }
     const expectedTextHash = hashText(candidate.text);
     const expectedPromptHash = hashText(candidate.prompt);
@@ -109,6 +141,20 @@ function validateCoordinatorRequest(request) {
     if (candidate.requestDigest !== expectedDigest)
         return { ok: false, reason: 'request_digest_mismatch' };
     return { ok: true, request: candidate };
+}
+function validateCoordinatorResponse(response) {
+    if (!response || typeof response !== 'object')
+        return { ok: false, reason: 'malformed_response' };
+    const candidate = response;
+    if (candidate.schemaVersion !== exports.COORDINATOR_SCHEMA_VERSION || candidate.engineVersion !== exports.COORDINATOR_ENGINE_VERSION)
+        return { ok: false, reason: 'version_mismatch' };
+    if (![candidate.textHash, candidate.promptHash, candidate.requestDigest, candidate.replayIdentity].every((value) => typeof value === 'string' && !!value))
+        return { ok: false, reason: 'missing_response_identity' };
+    if (typeof candidate.feedback !== 'string' || typeof candidate.requestedModel !== 'string' || typeof candidate.observedModel !== 'string')
+        return { ok: false, reason: 'malformed_response_fields' };
+    if (!candidate.callerAttestations || !candidate.effectiveExecutionIdentity)
+        return { ok: false, reason: 'missing_response_execution_identity' };
+    return { ok: true, response: candidate };
 }
 function sameExecutionIdentity(a, b) {
     return stableJson(a) === stableJson(b);

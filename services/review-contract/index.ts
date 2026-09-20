@@ -1,4 +1,5 @@
 import { createHash } from 'crypto';
+import { getModelCapabilities, mapOpenRouterModelId } from '@menumanager/llm-adapter';
 
 export const COORDINATOR_SCHEMA_VERSION = 1 as const;
 export const COORDINATOR_ENGINE_VERSION = 'review-coordinator-v1' as const;
@@ -13,6 +14,12 @@ export type EffectiveExecutionIdentity = {
     model: string;
     temperature: number;
     seed: SeedSemantics;
+    wire: {
+        model: string;
+        temperature: number | null;
+        seed: number | null;
+        omitted: string[];
+    };
 };
 
 export type CallerAttestations = {
@@ -35,10 +42,19 @@ export type CoordinatorReviewRequest = {
     replayIdentity: string;
 };
 
-export type CoordinatorReviewResponse = CoordinatorReviewRequest & {
+export type CoordinatorReviewResponse = {
+    schemaVersion: number;
+    engineVersion: string;
+    textHash: string;
+    promptHash: string;
+    requestDigest: string;
+    callerAttestations: CallerAttestations;
+    effectiveExecutionIdentity: EffectiveExecutionIdentity;
+    replayIdentity: string;
     feedback: string;
     finishReason: string | null;
-    model: string;
+    requestedModel: string;
+    observedModel: string;
 };
 
 function canonicalize(value: unknown): unknown {
@@ -79,11 +95,27 @@ export function normalizeConfiguredTemperature(env: Record<string, string | unde
 }
 
 export function configuredExecutionIdentity(env: Record<string, string | undefined>): EffectiveExecutionIdentity {
+    const provider = env.AI_REVIEW_LLM_PROVIDER || env.LLM_PROVIDER || 'openai';
+    const model = env.AI_REVIEW_MODEL || 'gpt-5.6-luna';
+    const temperature = normalizeConfiguredTemperature(env);
+    const seed = normalizeConfiguredSeed(env);
+    const capabilities = getModelCapabilities(model);
+    const wireSeed = seed.value !== null && capabilities.supportsSeed ? seed.value : null;
+    const wireTemperature = capabilities.supportsTemperature ? temperature : null;
+    const omitted: string[] = [];
+    if (wireTemperature === null) omitted.push('temperature');
+    if (wireSeed === null) omitted.push('seed');
     return {
-        provider: env.AI_REVIEW_LLM_PROVIDER || env.LLM_PROVIDER || 'openai',
-        model: env.AI_REVIEW_MODEL || 'gpt-5.6-luna',
-        temperature: normalizeConfiguredTemperature(env),
-        seed: normalizeConfiguredSeed(env),
+        provider,
+        model,
+        temperature,
+        seed,
+        wire: {
+            model: provider === 'openrouter' ? mapOpenRouterModelId(model) : model,
+            temperature: wireTemperature,
+            seed: wireSeed,
+            omitted,
+        },
     };
 }
 
@@ -118,18 +150,29 @@ export function validateCoordinatorRequest(request: unknown): { ok: true; reques
         return { ok: false, reason: 'missing_model_input' };
     }
     if (typeof candidate.replayIdentity !== 'string' || !candidate.replayIdentity.trim()) return { ok: false, reason: 'missing_replay_identity' };
+    if (candidate.replayIdentity.length > 160) return { ok: false, reason: 'replay_identity_too_long' };
     const attestations = candidate.callerAttestations;
     if (!attestations || !['sourceHash', 'contextHash', 'policyHash', 'vocabularySnapshotHash'].every((key) => typeof (attestations as any)[key] === 'string' && !!(attestations as any)[key])) {
         return { ok: false, reason: 'missing_identity' };
     }
     const execution = candidate.effectiveExecutionIdentity;
-    if (!execution || typeof execution.provider !== 'string' || !execution.provider
+    if (!execution || !['openai', 'openrouter'].includes(execution.provider) || typeof execution.provider !== 'string' || !execution.provider
         || typeof execution.model !== 'string' || !execution.model
         || typeof execution.temperature !== 'number' || !Number.isFinite(execution.temperature)
         || !execution.seed || !['default', 'explicit', 'disabled'].includes(execution.seed.state)
         || (execution.seed.state === 'disabled' && execution.seed.value !== null)
         || (execution.seed.state !== 'disabled' && (!Number.isInteger(execution.seed.value) || (execution.seed.value as number) < 0))) {
         return { ok: false, reason: 'malformed_execution_identity' };
+    }
+    const expectedExecution = configuredExecutionIdentity({
+        AI_REVIEW_LLM_PROVIDER: execution.provider,
+        LLM_PROVIDER: execution.provider,
+        AI_REVIEW_MODEL: execution.model,
+        AI_REVIEW_TEMPERATURE: `${execution.temperature}`,
+        AI_REVIEW_SEED: execution.seed.state === 'disabled' ? '' : `${execution.seed.value ?? ''}`,
+    });
+    if (!execution.wire || stableJson(execution.wire) !== stableJson(expectedExecution.wire)) {
+        return { ok: false, reason: 'malformed_wire_execution_identity' };
     }
     const expectedTextHash = hashText(candidate.text);
     const expectedPromptHash = hashText(candidate.prompt);
@@ -138,6 +181,16 @@ export function validateCoordinatorRequest(request: unknown): { ok: true; reques
     const expectedDigest = buildRequestDigest({ ...candidate, requestDigest: undefined } as Omit<CoordinatorReviewRequest, 'requestDigest'>);
     if (candidate.requestDigest !== expectedDigest) return { ok: false, reason: 'request_digest_mismatch' };
     return { ok: true, request: candidate };
+}
+
+export function validateCoordinatorResponse(response: unknown): { ok: true; response: CoordinatorReviewResponse } | { ok: false; reason: string } {
+    if (!response || typeof response !== 'object') return { ok: false, reason: 'malformed_response' };
+    const candidate = response as any;
+    if (candidate.schemaVersion !== COORDINATOR_SCHEMA_VERSION || candidate.engineVersion !== COORDINATOR_ENGINE_VERSION) return { ok: false, reason: 'version_mismatch' };
+    if (![candidate.textHash, candidate.promptHash, candidate.requestDigest, candidate.replayIdentity].every((value) => typeof value === 'string' && !!value)) return { ok: false, reason: 'missing_response_identity' };
+    if (typeof candidate.feedback !== 'string' || typeof candidate.requestedModel !== 'string' || typeof candidate.observedModel !== 'string') return { ok: false, reason: 'malformed_response_fields' };
+    if (!candidate.callerAttestations || !candidate.effectiveExecutionIdentity) return { ok: false, reason: 'missing_response_execution_identity' };
+    return { ok: true, response: candidate };
 }
 
 export function sameExecutionIdentity(a: EffectiveExecutionIdentity, b: EffectiveExecutionIdentity): boolean {

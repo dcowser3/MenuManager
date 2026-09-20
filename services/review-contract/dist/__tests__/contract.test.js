@@ -26,3 +26,22 @@ test('preserves absent, explicit, invalid, and empty seed semantics', () => {
     expect((0, index_1.configuredExecutionIdentity)({ AI_REVIEW_SEED: 'bad' }).seed).toEqual({ state: 'default', value: 42 });
     expect((0, index_1.configuredExecutionIdentity)({ AI_REVIEW_SEED: '' }).seed).toEqual({ state: 'disabled', value: null });
 });
+test('records configured and adapter-wire execution identity, including omitted reasoning options', () => {
+    expect((0, index_1.configuredExecutionIdentity)({
+        AI_REVIEW_MODEL: 'gpt-5.6-luna',
+        AI_REVIEW_TEMPERATURE: '0.7',
+        AI_REVIEW_SEED: '',
+    })).toMatchObject({
+        model: 'gpt-5.6-luna',
+        temperature: 0.7,
+        seed: { state: 'disabled', value: null },
+        wire: { model: 'gpt-5.6-luna', temperature: null, seed: null, omitted: ['temperature', 'seed'] },
+    });
+    expect((0, index_1.configuredExecutionIdentity)({
+        AI_REVIEW_MODEL: 'gpt-4o-mini',
+        AI_REVIEW_TEMPERATURE: '0.7',
+        AI_REVIEW_SEED: '7',
+    })).toMatchObject({
+        wire: { model: 'gpt-4o-mini', temperature: 0.7, seed: 7, omitted: [] },
+    });
+});

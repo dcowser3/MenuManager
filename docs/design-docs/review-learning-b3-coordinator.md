@@ -68,6 +68,21 @@ mismatches. Caller attestations are explicitly bound claims, not independently
 verified facts. The legacy `/ai-review` endpoint and `/run-qa-check` route
 remain available for existing clients.
 
+The execution identity is resolved once before preparation and records both the
+configured options and adapter-effective wire options. Reasoning models that
+omit temperature or seed retain those omissions in the bound identity, so
+non-default temperature and disabled-seed settings remain auditable without
+inventing wire values. The coordinator response is intentionally minimal
+(hashes, digest, attestations, effective identity, feedback, requested/observed
+model, and finish reason) and never echoes raw menu text or prompt. Only
+`finish_reason: "stop"` can produce a reviewed draft; null, missing, length,
+content-filter, truncated, or unknown finishes remain incomplete/manual review.
+
+Replay protection is process-local and bounded to 1,024 identities with a
+15-minute expiry; duplicate and capacity claims fail closed. The legacy routes
+are exercised by focused validation tests while the versioned route uses the
+shared contract.
+
 Completed and rejected coordinator results carry bounded output/policy/context
 hashes, engine identity, complete/transport/reusable status, reason, and
 artifact provenance into the existing form-attempt audit surface. Known
@@ -96,12 +111,13 @@ spelling evidence. The Basic
 route continues to return its existing browser response shape with additive
 status/delivered diagnostics.
 
-B3-B verification: 3 focused suites, 16 tests passed (shared contract,
+B3-B verification: 3 focused suites, 26 tests passed (shared contract,
 ai-review adapter, and actual dashboard submit-handler → exported dashboard
 coordinator → mocked transport). Coverage includes accepted and rejected
 delivery, late/malformed/version/hash/digest/settings/replay negatives,
-known-terminal-status enforcement, one provider call for valid input and zero
-provider calls for invalid envelopes, legacy compatibility, and exact bytes
-passed into draft generation. Dashboard, ai-review, and shared-contract
-typechecks/builds passed; source/dist diffs are included. No live provider or
-production/activation writes were used.
+known-terminal-status enforcement for every non-stop finish, one provider call
+for valid input and zero provider calls for invalid envelopes, legacy
+compatibility, exact bytes passed into draft generation, persisted
+original-versus-authoritative-DOCX parity, and bounded replay capacity/expiry.
+Dashboard, ai-review, and shared-contract typechecks/builds passed; source/dist
+diffs are included. No live provider or production/activation writes were used.

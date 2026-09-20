@@ -46,7 +46,7 @@ import {
     buildCoordinatorRequest,
     configuredExecutionIdentity,
     sameExecutionIdentity,
-    validateCoordinatorRequest,
+    validateCoordinatorResponse,
     COORDINATOR_ENGINE_VERSION,
     COORDINATOR_SCHEMA_VERSION,
 } from '@menumanager/review-contract';
@@ -1838,6 +1838,10 @@ export async function runSubmissionReviewThroughCoordinator(input: {
     fetchAcceptedRules?: () => Promise<AcceptedCorrectionRule[]>;
     loadVocabulary?: () => Promise<Awaited<ReturnType<typeof loadApprovedReviewVocabularyTerms>>>;
 } = {}) {
+    // Resolve once per submission before preparation; the same configured and
+    // adapter-wire identity is bound into the request and validated in both
+    // services.
+    const effectiveExecutionIdentity = configuredExecutionIdentity(process.env);
     const qaPrompt = overrides.readPrompt
         ? await overrides.readPrompt()
         : await fs.readFile(path.join(getRepoRoot(), 'sop-processor', 'qa_prompt.txt'), 'utf8');
@@ -1865,12 +1869,11 @@ export async function runSubmissionReviewThroughCoordinator(input: {
         approvedVocabularyTerms,
         precheckEnabled: BASIC_AI_PRECHECK_ENABLED,
         contextProvenance: 'new_submission',
-        model: process.env.AI_REVIEW_MODEL || 'gpt-5.6-luna',
-        settings: { temperature: 0, seed: AI_REVIEW_SEED ?? null },
+        model: effectiveExecutionIdentity.model,
+        settings: { executionIdentity: effectiveExecutionIdentity },
     });
     const envelope = prepared.envelope;
     const contextHash = policyHash(envelope.context);
-    const effectiveExecutionIdentity = configuredExecutionIdentity(process.env);
     const coordinatorRequest = buildCoordinatorRequest({
         schemaVersion: COORDINATOR_SCHEMA_VERSION,
         engineVersion: COORDINATOR_ENGINE_VERSION,
@@ -1902,22 +1905,26 @@ export async function runSubmissionReviewThroughCoordinator(input: {
         return baseResult(`coordinator_transport_failed:${error?.code || error?.response?.status || 'unknown'}`);
     }
     const data = response?.data || {};
-    const responseValidation = validateCoordinatorRequest(data);
+    const responseValidation = validateCoordinatorResponse(data);
     if (!responseValidation.ok) return baseResult(`coordinator_response_invalid:${responseValidation.reason}`);
-    const responseRequest = responseValidation.request;
-    if (responseRequest.requestDigest !== coordinatorRequest.requestDigest
-        || responseRequest.textHash !== coordinatorRequest.textHash
-        || responseRequest.promptHash !== coordinatorRequest.promptHash
-        || responseRequest.replayIdentity !== coordinatorRequest.replayIdentity
-        || JSON.stringify(responseRequest.callerAttestations) !== JSON.stringify(coordinatorRequest.callerAttestations)
-        || !sameExecutionIdentity(responseRequest.effectiveExecutionIdentity, effectiveExecutionIdentity)
-        || data.model !== effectiveExecutionIdentity.model
+    const responseIdentity = responseValidation.response;
+    if (responseIdentity.requestDigest !== coordinatorRequest.requestDigest
+        || responseIdentity.textHash !== coordinatorRequest.textHash
+        || responseIdentity.promptHash !== coordinatorRequest.promptHash
+        || responseIdentity.replayIdentity !== coordinatorRequest.replayIdentity
+        || JSON.stringify(responseIdentity.callerAttestations) !== JSON.stringify(coordinatorRequest.callerAttestations)
+        || !sameExecutionIdentity(responseIdentity.effectiveExecutionIdentity, effectiveExecutionIdentity)
+        || responseIdentity.requestedModel !== effectiveExecutionIdentity.model
+        || responseIdentity.observedModel !== effectiveExecutionIdentity.model
         || data.schemaVersion !== COORDINATOR_SCHEMA_VERSION
         || data.engineVersion !== COORDINATOR_ENGINE_VERSION) {
         return baseResult('coordinator_response_identity_mismatch');
     }
-    if (!['stop', 'length', 'content_filter', null].includes(data.finishReason)) {
-        return baseResult('coordinator_finish_reason_unknown');
+    if (data.finishReason !== 'stop') {
+        const reason = data.finishReason === null || data.finishReason === undefined
+            ? 'coordinator_finish_reason_missing'
+            : `coordinator_finish_reason_${String(data.finishReason).slice(0, 40)}`;
+        return baseResult(reason);
     }
     if (typeof data.feedback !== 'string' || !data.feedback.trim()) {
         return baseResult('coordinator_feedback_missing');

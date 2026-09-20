@@ -5,6 +5,7 @@ import { createSubmissionWorkflowHandlers } from '../lib/submission-workflow';
 const { completePreparedReview, prepareReview } = require('../dist/lib/review-pipeline');
 const { policyHash } = require('../dist/lib/canonical-policy');
 const { runSubmissionReviewThroughCoordinator } = require('../dist/index');
+const nodeFs = require('fs').promises;
 
 function buildDeps(overrides: Record<string, any> = {}) {
     const axios = {
@@ -215,10 +216,18 @@ describe('submitMenu form attempt linkage', () => {
         const transport = {
             post: jest.fn(async (_url: string, payload: any) => ({
                 data: {
-                    ...payload,
+                    schemaVersion: payload.schemaVersion,
+                    engineVersion: payload.engineVersion,
+                    textHash: payload.textHash,
+                    promptHash: payload.promptHash,
+                    requestDigest: payload.requestDigest,
+                    callerAttestations: payload.callerAttestations,
+                    effectiveExecutionIdentity: payload.effectiveExecutionIdentity,
+                    replayIdentity: payload.replayIdentity,
                     feedback: `=== CORRECTED MENU ===\n${payload.text}\n=== END CORRECTED MENU ===\n=== SUGGESTIONS ===\n[]\n=== END SUGGESTIONS ===`,
                     finishReason: 'stop',
-                    model: payload.effectiveExecutionIdentity.model,
+                    requestedModel: payload.effectiveExecutionIdentity.model,
+                    observedModel: payload.effectiveExecutionIdentity.model,
                 },
             })),
         };
@@ -250,10 +259,18 @@ describe('submitMenu form attempt linkage', () => {
         const transport = {
             post: jest.fn(async (_url: string, payload: any) => ({
                 data: {
-                    ...payload,
+                    schemaVersion: payload.schemaVersion,
+                    engineVersion: payload.engineVersion,
+                    textHash: payload.textHash,
+                    promptHash: payload.promptHash,
+                    requestDigest: payload.requestDigest,
+                    callerAttestations: payload.callerAttestations,
+                    effectiveExecutionIdentity: payload.effectiveExecutionIdentity,
+                    replayIdentity: payload.replayIdentity,
                     feedback: 'malformed but present',
                     finishReason: 'provider_changed_its_mind',
-                    model: payload.effectiveExecutionIdentity.model,
+                    requestedModel: payload.effectiveExecutionIdentity.model,
+                    observedModel: payload.effectiveExecutionIdentity.model,
                 },
             })),
         };
@@ -280,9 +297,195 @@ describe('submitMenu form attempt linkage', () => {
             complete: false,
             transportStatus: 'rejected',
             artifactProvenance: 'unreviewed_fallback',
-            reason: 'coordinator_finish_reason_unknown',
+            reason: 'coordinator_finish_reason_provider_changed_its_mind',
         }));
         expect(deps.generateDocxFromForm).toHaveBeenCalledTimes(1);
+    });
+
+    test.each([
+        [null, 'coordinator_finish_reason_missing'],
+        ['length', 'coordinator_finish_reason_length'],
+    ])('null/missing or truncated finish reason is never a completed reviewed draft (%s)', async (finishReason, expectedReason) => {
+        const transport = {
+            post: jest.fn(async (_url: string, payload: any) => ({
+                data: {
+                    schemaVersion: payload.schemaVersion,
+                    engineVersion: payload.engineVersion,
+                    textHash: payload.textHash,
+                    promptHash: payload.promptHash,
+                    requestDigest: payload.requestDigest,
+                    callerAttestations: payload.callerAttestations,
+                    effectiveExecutionIdentity: payload.effectiveExecutionIdentity,
+                    replayIdentity: payload.replayIdentity,
+                    feedback: 'valid-looking feedback',
+                    finishReason,
+                    requestedModel: payload.effectiveExecutionIdentity.model,
+                    observedModel: payload.effectiveExecutionIdentity.model,
+                },
+            })),
+        };
+        const audit = jest.fn();
+        const deps = buildDeps({
+            recordSubmissionReviewAudit: audit,
+            runSubmissionReview: (input: any) => runSubmissionReviewThroughCoordinator(input, {
+                transport,
+                readPrompt: async () => 'SUBMISSION QA',
+                fetchAcceptedRules: async () => [],
+                loadVocabulary: async () => [],
+            }),
+        });
+        const handlers = createSubmissionWorkflowHandlers(deps as any);
+        const req = buildRequest();
+        req.body.skipAiReview = false;
+        const res = buildResponse();
+
+        await handlers.submitMenu(req, res);
+        await new Promise((resolve) => setTimeout(resolve, 20));
+
+        expect(res.statusCode).toBe(200);
+        expect(audit).toHaveBeenCalledWith(expect.objectContaining({
+            complete: false,
+            reusable: false,
+            artifactProvenance: 'unreviewed_fallback',
+            reason: expectedReason,
+        }));
+        expect(deps.generateDocxFromForm).toHaveBeenCalledTimes(1);
+    });
+
+    test('persists authoritative reviewed bytes while preserving the original DOCX', async () => {
+        const root = `/tmp/menumanager-b3b-docx-${Date.now()}`;
+        const generatedPaths: string[] = [];
+        const generateDocxFromForm = jest.fn(async (submissionId: string, formData: any, options: any = {}) => {
+            const outputPath = options.outputPath || `${root}/${submissionId}-original.docx`;
+            await nodeFs.mkdir(require('path').dirname(outputPath), { recursive: true });
+            await nodeFs.writeFile(outputPath, formData.menuContent, 'utf8');
+            generatedPaths.push(outputPath);
+            return outputPath;
+        });
+        const transport = {
+            post: jest.fn(async (_url: string, payload: any) => ({
+                data: {
+                    schemaVersion: payload.schemaVersion,
+                    engineVersion: payload.engineVersion,
+                    textHash: payload.textHash,
+                    promptHash: payload.promptHash,
+                    requestDigest: payload.requestDigest,
+                    callerAttestations: payload.callerAttestations,
+                    effectiveExecutionIdentity: payload.effectiveExecutionIdentity,
+                    replayIdentity: payload.replayIdentity,
+                    feedback: '=== CORRECTED MENU ===\nFish G 12\n=== END CORRECTED MENU ===\n=== SUGGESTIONS ===\n[]\n=== END SUGGESTIONS ===',
+                    finishReason: 'stop',
+                    requestedModel: payload.effectiveExecutionIdentity.model,
+                    observedModel: payload.effectiveExecutionIdentity.model,
+                },
+            })),
+        };
+        const deps = buildDeps({
+            generateDocxFromForm,
+            runSubmissionReview: (input: any) => runSubmissionReviewThroughCoordinator(input, {
+                transport,
+                readPrompt: async () => 'SUBMISSION QA',
+                fetchAcceptedRules: async () => [],
+                loadVocabulary: async () => [],
+            }),
+        });
+        const handlers = createSubmissionWorkflowHandlers(deps as any);
+        const req = buildRequest();
+        req.body.menuContent = 'Fishh G 12';
+        req.body.skipAiReview = false;
+        const res = buildResponse();
+
+        await handlers.submitMenu(req, res);
+        await new Promise((resolve) => setTimeout(resolve, 25));
+
+        expect(res.statusCode).toBe(200);
+        expect(generatedPaths).toHaveLength(2);
+        expect(await nodeFs.readFile(generatedPaths[0], 'utf8')).toContain('Fishh G 12');
+        expect(await nodeFs.readFile(generatedPaths[1], 'utf8')).toContain('Fish G 12');
+        expect(await nodeFs.readFile(generatedPaths[0], 'utf8')).not.toContain('Fish G 12');
+    });
+
+    test('late-anchor rejection preserves delivered spelling and genuine critical state', async () => {
+        const transport = {
+            post: jest.fn(async (_url: string, payload: any) => ({
+                data: {
+                    schemaVersion: payload.schemaVersion,
+                    engineVersion: payload.engineVersion,
+                    textHash: payload.textHash,
+                    promptHash: payload.promptHash,
+                    requestDigest: payload.requestDigest,
+                    callerAttestations: payload.callerAttestations,
+                    effectiveExecutionIdentity: payload.effectiveExecutionIdentity,
+                    replayIdentity: payload.replayIdentity,
+                    feedback: '=== CORRECTED MENU ===\nDINNER\nFish G 12\nFish G 12\n=== END CORRECTED MENU ===\n=== SUGGESTIONS ===\n[{"type":"Missing Price","severity":"critical","confidence":"high","menuItem":"candidate-only","description":"invent","recommendation":"invent"}]\n=== END SUGGESTIONS ===',
+                    finishReason: 'stop',
+                    requestedModel: payload.effectiveExecutionIdentity.model,
+                    observedModel: payload.effectiveExecutionIdentity.model,
+                },
+            })),
+        };
+        const audit = jest.fn();
+        const deps = buildDeps({
+            recordSubmissionReviewAudit: audit,
+            runSubmissionReview: (input: any) => runSubmissionReviewThroughCoordinator(input, {
+                transport,
+                readPrompt: async () => 'SUBMISSION QA',
+                fetchAcceptedRules: async () => [],
+                loadVocabulary: async () => [],
+            }),
+        });
+        const handlers = createSubmissionWorkflowHandlers(deps as any);
+        const req = buildRequest();
+        req.body.menuContent = 'DINNER\nFishh G 12\nFishh G 12';
+        req.body.skipAiReview = false;
+        const res = buildResponse();
+
+        await handlers.submitMenu(req, res);
+        await new Promise((resolve) => setTimeout(resolve, 25));
+
+        expect(res.statusCode).toBe(200);
+        expect(audit).toHaveBeenCalledWith(expect.objectContaining({
+            complete: false,
+            artifactProvenance: 'unreviewed_fallback',
+            diagnostics: expect.arrayContaining([expect.objectContaining({ reason: expect.stringContaining('duplicate_row_fallback') })]),
+        }));
+        expect(deps.generateDocxFromForm).toHaveBeenCalledTimes(1);
+    });
+
+    test.each(['transport', 'response_identity'])('actual submit failure path is manual-only with no legacy fallback (%s)', async (kind) => {
+        const transport = {
+            post: kind === 'transport'
+                ? jest.fn().mockRejectedValue(Object.assign(new Error('offline'), { code: 'ECONNREFUSED' }))
+                : jest.fn(async () => ({ data: { schemaVersion: 1, engineVersion: 'review-coordinator-v1', feedback: 'x' } })),
+        };
+        const audit = jest.fn();
+        const deps = buildDeps({
+            recordSubmissionReviewAudit: audit,
+            runSubmissionReview: (input: any) => runSubmissionReviewThroughCoordinator(input, {
+                transport,
+                readPrompt: async () => 'SUBMISSION QA',
+                fetchAcceptedRules: async () => [],
+                loadVocabulary: async () => [],
+            }),
+        });
+        const handlers = createSubmissionWorkflowHandlers(deps as any);
+        const req = buildRequest();
+        req.body.skipAiReview = false;
+        const res = buildResponse();
+
+        await handlers.submitMenu(req, res);
+        await new Promise((resolve) => setTimeout(resolve, 25));
+
+        expect(res.statusCode).toBe(200);
+        expect(audit).toHaveBeenCalledWith(expect.objectContaining({
+            complete: false,
+            artifactProvenance: 'unreviewed_fallback',
+            reason: kind === 'transport'
+                ? 'coordinator_transport_failed:ECONNREFUSED'
+                : 'coordinator_response_invalid:missing_response_identity',
+        }));
+        expect(deps.generateDocxFromForm).toHaveBeenCalledTimes(1);
+        expect(deps.axios.post).not.toHaveBeenCalledWith('http://ai.test/ai-review', expect.anything(), expect.anything());
     });
 
     test('stores form_attempt_id from the attempt header and links audits to the submission', async () => {

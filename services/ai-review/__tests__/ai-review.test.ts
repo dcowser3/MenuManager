@@ -23,7 +23,9 @@ function postJson(app: any, path: string, body: unknown): Promise<{ status: numb
                 response.on('data', (chunk) => { text += chunk; });
                 response.on('end', () => {
                     server.close();
-                    resolve({ status: response.statusCode || 0, body: JSON.parse(text) });
+                    let body: any = text;
+                    try { body = JSON.parse(text); } catch { /* legacy routes may return plain text */ }
+                    resolve({ status: response.statusCode || 0, body });
                 });
             });
             request.on('error', (error) => {
@@ -145,8 +147,12 @@ describe('AI Review Service', () => {
                 policyHash: 'policy-hash',
                 vocabularySnapshotHash: 'vocab-hash',
             },
+            requestedModel: 'gpt-5.6-luna',
+            observedModel: 'gpt-5.6-luna',
             finishReason: 'stop',
         }));
+        expect(result.body).not.toHaveProperty('text');
+        expect(result.body).not.toHaveProperty('prompt');
         expect(fetchMock).toHaveBeenCalledTimes(1);
         const request = JSON.parse(fetchMock.mock.calls[0][1].body);
         expect(request.messages).toEqual([
@@ -196,6 +202,24 @@ describe('AI Review Service', () => {
         const { resolveAiReviewSeed } = await import('../index');
         expect(resolveAiReviewSeed({ AI_REVIEW_SEED: '' })).toBeUndefined();
         expect(resolveAiReviewSeed({})).toBe(42);
+    });
+
+    it('keeps the legacy /ai-review validation route available', async () => {
+        const result = await postJson(app, '/ai-review', { text: 'legacy body only' });
+        expect(result.status).toBe(400);
+        expect(result.body).toBe('Missing text or submission_id for review.');
+    });
+
+    it('bounds replay identities and expires entries without unbounded growth', async () => {
+        const { claimCoordinatorReplayIdentity, resetCoordinatorReplayRegistryForTests } = await import('../index');
+        resetCoordinatorReplayRegistryForTests();
+        for (let index = 0; index < 1024; index += 1) {
+            expect(claimCoordinatorReplayIdentity(`bounded-${index}`, 0)).toBe('claimed');
+        }
+        expect(claimCoordinatorReplayIdentity('bounded-overflow', 0)).toBe('capacity');
+        expect(claimCoordinatorReplayIdentity('bounded-0', 15 * 60 * 1000)).toBe('claimed');
+        expect(claimCoordinatorReplayIdentity('bounded-0', 15 * 60 * 1000)).toBe('reused');
+        resetCoordinatorReplayRegistryForTests();
     });
 
     it('parses approved dish quality verdicts from model JSON', async () => {

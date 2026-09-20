@@ -60,7 +60,23 @@ export function resolveAiReviewSeed(env: Record<string, string | undefined> = pr
 
 const AI_REVIEW_SEED = resolveAiReviewSeed();
 const DOCUMENT_STORAGE_ROOT = process.env.DOCUMENT_STORAGE_ROOT || path.join(__dirname, '..', '..', '..', 'tmp', 'documents');
-const consumedCoordinatorReplayIdentities = new Set<string>();
+const consumedCoordinatorReplayIdentities = new Map<string, number>();
+const COORDINATOR_REPLAY_TTL_MS = 15 * 60 * 1000;
+const COORDINATOR_REPLAY_MAX = 1024;
+
+export function claimCoordinatorReplayIdentity(identity: string, now = Date.now()): 'claimed' | 'reused' | 'capacity' {
+    for (const [key, timestamp] of consumedCoordinatorReplayIdentities) {
+        if (now - timestamp >= COORDINATOR_REPLAY_TTL_MS) consumedCoordinatorReplayIdentities.delete(key);
+    }
+    if (consumedCoordinatorReplayIdentities.has(identity)) return 'reused';
+    if (consumedCoordinatorReplayIdentities.size >= COORDINATOR_REPLAY_MAX) return 'capacity';
+    consumedCoordinatorReplayIdentities.set(identity, now);
+    return 'claimed';
+}
+
+export function resetCoordinatorReplayRegistryForTests(): void {
+    consumedCoordinatorReplayIdentities.clear();
+}
 
 app.use(express.json());
 app.use(requireInternalServiceAuth);
@@ -293,10 +309,9 @@ app.post('/v1/coordinator-review', async (req, res) => {
         if (!hasConfiguredLlmKey()) {
             return res.status(503).json({ error: 'LLM API key not configured' });
         }
-        if (consumedCoordinatorReplayIdentities.has(request.replayIdentity)) {
-            return res.status(409).json({ error: 'Coordinator replay identity already consumed', reason: 'replay_identity_reused' });
-        }
-        consumedCoordinatorReplayIdentities.add(request.replayIdentity);
+        const replayClaim = claimCoordinatorReplayIdentity(request.replayIdentity);
+        if (replayClaim === 'reused') return res.status(409).json({ error: 'Coordinator replay identity already consumed', reason: 'replay_identity_reused' });
+        if (replayClaim === 'capacity') return res.status(503).json({ error: 'Coordinator replay registry is at capacity', reason: 'replay_registry_capacity' });
         const resolvedSeed = effectiveExecutionIdentity.seed.value === null ? undefined : effectiveExecutionIdentity.seed.value;
         const qaResponse = await callChat({ model: effectiveExecutionIdentity.model }, [
             { role: 'system', content: request.prompt },
@@ -308,13 +323,17 @@ app.post('/v1/coordinator-review', async (req, res) => {
         });
 
         return res.status(200).json({
-            ...request,
             schemaVersion: COORDINATOR_SCHEMA_VERSION,
             engineVersion: COORDINATOR_ENGINE_VERSION,
+            textHash: request.textHash,
+            promptHash: request.promptHash,
+            requestDigest: request.requestDigest,
+            callerAttestations: request.callerAttestations,
+            replayIdentity: request.replayIdentity,
             effectiveExecutionIdentity,
             feedback: qaResponse.content || '',
-            model: qaResponse.model || effectiveExecutionIdentity.model,
-            system_fingerprint: qaResponse.system_fingerprint,
+            requestedModel: effectiveExecutionIdentity.model,
+            observedModel: qaResponse.model || effectiveExecutionIdentity.model,
             finishReason: qaResponse.finish_reason || null,
         });
     } catch (error: any) {

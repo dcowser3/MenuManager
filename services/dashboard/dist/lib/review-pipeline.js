@@ -991,9 +991,13 @@ function completePreparedReview(prepared, feedback, completion = {}) {
     post.criticalSuggestions = post.finalSuggestions.filter(suggestion => suggestion.severity === 'critical');
     post.hasCriticalErrors = post.criticalSuggestions.length > 0;
     const finalSuggestions = post.finalSuggestions;
-    const transportStatus = completion.finishReason === 'stop' ? 'complete' : completion.finishReason ? 'incomplete' : 'unknown';
+    const transportStatus = completion.finishReason === 'stop'
+        ? 'complete'
+        : completion.finishReason === 'length' || completion.finishReason === 'content_filter'
+            ? 'incomplete'
+            : 'unknown';
     const reviewStatus = {
-        complete: !mergeRejected && !post.parsed.fenceMissing && transportStatus !== 'incomplete',
+        complete: !mergeRejected && !post.parsed.fenceMissing && transportStatus === 'complete',
         transportStatus: mergeRejected ? 'rejected' : transportStatus,
         reusable: !mergeRejected && !post.parsed.fenceMissing && transportStatus === 'complete' && post.safetyDiagnostics.length === 0
             && post.structureGuard.safe && !post.hasCriticalErrors && post.finalSuggestions.length === 0,
