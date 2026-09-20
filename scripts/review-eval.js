@@ -37,12 +37,12 @@
  *   --rules live|snapshot:<f>|candidate:<f>   Accepted correction-rules source (default live)
  *   --no-deterministic         Disable the deterministic pre/post passes
  *   --no-ai                    Skip the AI call (echo feedback); deterministic-only eval
- *   --raw-ground-truth         Score against historical finals verbatim instead of
- *                              normalizing them through the run's deterministic rules.
- *                              By default ground truth is re-based onto CURRENT policy
- *                              so intentional rule changes (e.g. a new replacement the
- *                              marketing team added) do not read as regressions on
- *                              menus approved under the old policy.
+ *   --raw-ground-truth         Compatibility flag; raw human expectations are now always the default.
+ *   --mode retrospective|holdout  Clean holdout requires frozen rules, split and vocabulary artifacts.
+ *   --vocabulary-snapshot <f>  Separate frozen vocabulary; held answers never supply vocabulary.
+ *   --split <f>                Frozen full membership, lineage and near-duplicate signatures.
+ *   --expectations <f>         Optional separately versioned reviewer-approved expectations.
+ *   --fresh                    Bypass cached model responses; reports label actual freshness.
  *   --limit <n>                Max cases
  *   --case <id>                Run only the case with this id (repeatable)
  *   --baseline <report.json>   Compare against a previous run's report
@@ -64,6 +64,8 @@
  *                              regressions. Requires --baseline-prompt.
  *   --json                     Print the report JSON to stdout
  */
+
+const { createEvaluationContract, reportFreshness, hash: evidenceHash } = require('./lib/evaluation-contract');
 
 const fs = require('fs');
 const fsp = require('fs/promises');
@@ -131,7 +133,8 @@ function parseArgs(argv) {
         rules: 'live',
         deterministic: true,
         ai: true,
-        normalizeGroundTruth: true,
+        normalizeGroundTruth: false,
+        evaluationMode: 'retrospective', vocabularySnapshot: '', split: '', expectations: '', fresh: false,
         limit: Number.POSITIVE_INFINITY,
         cases: [],
         baseline: '',
@@ -152,7 +155,12 @@ function parseArgs(argv) {
     };
     for (let i = 0; i < argv.length; i += 1) {
         const arg = argv[i];
-        if (arg === '--build-dataset') args.buildDataset = true;
+        if (arg === '--mode') args.evaluationMode = argv[++i];
+        else if (arg === '--vocabulary-snapshot') args.vocabularySnapshot = path.resolve(argv[++i]);
+        else if (arg === '--split') args.split = path.resolve(argv[++i]);
+        else if (arg === '--expectations') args.expectations = path.resolve(argv[++i]);
+        else if (arg === '--fresh') args.fresh = true;
+        else if (arg === '--build-dataset') args.buildDataset = true;
         else if (arg === '--dataset-only') { args.buildDataset = true; args.datasetOnly = true; }
         else if (arg === '--dataset') args.dataset = path.resolve(argv[++i] || args.dataset);
         else if (arg === '--source') args.source = argv[++i] || args.source;
@@ -481,6 +489,16 @@ async function callOpenAi({ model, temperature, seed, prompt, text }) {
         });
 }
 
+// Keep the evaluator on the same context/envelope path as the B3 coordinator.
+// This adapter is deliberately thin: it adds the authenticated review context
+// and delegates all review behavior to the production pipeline.
+async function evaluateCaseThroughAdapter(evalCase, options, aiCaller) {
+    const { reviewContextOptions } = requireLib('dashboard', 'lib/review-context');
+    const { runFullReviewPipeline } = requireLib('dashboard', 'lib/review-pipeline');
+    const context = reviewContextOptions({ ...evalCase.context, menuContent: evalCase.raw_input });
+    return runFullReviewPipeline(evalCase.raw_input, { ...context, ...options }, aiCaller);
+}
+
 function buildEchoFeedback(text) {
     const { AI_REVIEW_FENCES } = requireLib('dashboard', 'lib/review-response-contract');
     return [
@@ -504,7 +522,7 @@ function makeAiCaller(args, usageTotals) {
         if (!args.ai) return buildEchoFeedback(text);
         const key = cacheKey([args.model, `${args.temperature}`, `${args.seed}`, prompt, text]);
         const cachePath = path.join(cacheDir, `${key}.json`);
-        if (fs.existsSync(cachePath)) {
+        if (!args.fresh && fs.existsSync(cachePath)) {
             const cached = JSON.parse(fs.readFileSync(cachePath, 'utf8'));
             usageTotals.cacheHits += 1;
             recordSystemFingerprint(cached.system_fingerprint);
@@ -557,42 +575,22 @@ function selectCases(args, dataset) {
 }
 
 async function runEval(args, dataset, rulesInfo, libs, baselineConfig) {
-    const { runFullReviewPipeline } = libs.reviewPipeline;
     const { normalizeComparable, boundedLevenshteinSimilarity } = libs.textSimilarity;
     const { scoreCorrections, compositeCaseScore } = libs.evalScoring;
-    const { runPreAiDeterministicChecks } = libs.preAiRules;
-    const approvedVocabularyTexts = dataset
-        .map((entry) => `${entry.ground_truth || ''}`)
-        .filter(Boolean);
-
-    // Re-base the historical human final onto the policy under evaluation: the
-    // config's deterministic rules are applied to the ground truth so an
-    // intentional policy change is not scored as a regression on menus approved
-    // under the old policy.
-    const makeResolveScoringTruth = (ruleSet) => (evalCase) => {
-        if (!args.normalizeGroundTruth) return evalCase.ground_truth;
-        return runPreAiDeterministicChecks(evalCase.ground_truth, {
-            enabled: true,
-            property: evalCase.context.property,
-            templateType: evalCase.context.templateType,
-            allergenLegend: evalCase.context.allergens,
-            acceptedCorrectionRules: ruleSet,
-        }).menuText;
-    };
+    const approvedVocabularyTexts = args.evaluationContract.vocabulary.texts || [];
+    const approvedVocabularyTerms = args.evaluationContract.vocabulary.terms || [];
+    const makeResolveScoringTruth = () => evalCase => args.evaluationContract.expectations[evalCase.case_id];
 
     // Build a case evaluator bound to a specific prompt + rule set + AI caller,
     // so the candidate and (for confirmation) the baseline config score the same way.
     const makeEvaluator = (basePrompt, ruleSet, aiCaller, extraOpts = {}) => {
-        const resolveScoringTruth = makeResolveScoringTruth(ruleSet);
+        const resolveScoringTruth = makeResolveScoringTruth();
         return async (evalCase) => {
-            const result = await runFullReviewPipeline(evalCase.raw_input, {
+            const result = await evaluateCaseThroughAdapter(evalCase, {
                 basePrompt,
-                menuType: evalCase.context.menuType,
-                templateType: evalCase.context.templateType,
-                property: evalCase.context.property,
-                allergens: evalCase.context.allergens,
                 acceptedCorrectionRules: ruleSet,
-                approvedVocabularyTexts,
+                approvedVocabularyTexts, approvedVocabularyTerms,
+                model: args.model, settings: { temperature: args.temperature, seed: args.seed },
                 precheckEnabled: args.deterministic,
                 omitSections: extraOpts.omitSections || [],
             }, aiCaller);
@@ -1039,7 +1037,7 @@ function buildMarkdown(report) {
     if (report.config.normalizeGroundTruth) {
         lines.push('- Ground truth was normalized through this run\'s deterministic rules (current policy), so intentional rule changes do not count as regressions on menus approved under older policy. Use --raw-ground-truth to compare against historical finals verbatim.');
     } else {
-        lines.push('- Ground truth was used verbatim (--raw-ground-truth): scores reflect historical finals exactly as approved, including superseded policy.');
+        lines.push('- Ground truth was used verbatim: scores reflect historical finals exactly as approved, including superseded policy.');
     }
     lines.push('');
     return lines.join('\n');
@@ -1049,6 +1047,9 @@ function buildMarkdown(report) {
 async function main() {
     const args = parseArgs(process.argv.slice(2));
 
+    if (args.evaluationMode === 'holdout' && (args.buildDataset || args.rules === 'live' || args.rules.startsWith('candidate:') || (args.baselinePrompt && (args.baselineRules === 'live' || args.baselineRules.startsWith('candidate:'))))) {
+        throw new Error('Holdout forbids dataset building and live rule/DB reads; provide frozen rules snapshots.');
+    }
     let dataset = null;
     if (args.buildDataset) {
         dataset = await buildDataset(args);
@@ -1056,11 +1057,20 @@ async function main() {
     } else {
         dataset = loadDataset(args.dataset);
         if (!dataset) {
+            if (args.evaluationMode === 'holdout') throw new Error('Holdout dataset missing; no live fallback allowed.');
             console.log('No dataset found; building it first (use --source to control sources).');
             dataset = await buildDataset(args);
         }
     }
     if (!dataset.length) throw new Error('Dataset is empty.');
+    const readArtifact = file => file ? JSON.parse(fs.readFileSync(file, 'utf8')) : undefined;
+    args.evaluationContract = createEvaluationContract({
+        mode: args.evaluationMode,
+        dataset,
+        vocabularySnapshot: readArtifact(args.vocabularySnapshot),
+        split: readArtifact(args.split),
+        expectationArtifact: readArtifact(args.expectations),
+    });
 
     const libs = {
         reviewPipeline: requireLib('dashboard', 'lib/review-pipeline'),
@@ -1108,6 +1118,21 @@ async function main() {
 
     const candidateRuleActivations = buildCandidateRuleActivationEvidence(rulesInfo.candidateRules, caseReports);
     const report = {
+        configuration: {
+            promptHash: evidenceHash(fs.readFileSync(args.prompt, 'utf8')),
+            rulesHash: evidenceHash(rulesInfo.rules),
+            sourceHashes: Object.fromEntries([
+                ['dashboardReviewPipeline', path.join(repoRoot, 'services/dashboard/lib/review-pipeline.ts')],
+                ['dashboardReviewEnvelope', path.join(repoRoot, 'services/dashboard/lib/review-envelope.ts')],
+                ['aiReviewEntryPoint', path.join(repoRoot, 'services/ai-review/index.ts')],
+            ].filter(([, file]) => fs.existsSync(file)).map(([name, file]) => [name, evidenceHash(fs.readFileSync(file, 'utf8'))])),
+        },
+        evaluation: {
+            ...args.evaluationContract,
+            expectations: undefined,
+            vocabulary: undefined,
+            freshness: reportFreshness(usageTotals, args.ai),
+        },
         generatedAt: new Date().toISOString(),
         model: args.model,  // B5: explicit resolved model (pinned snapshot recommended for eval fidelity)
         config: {
@@ -1169,7 +1194,11 @@ async function main() {
     }
 }
 
-main().catch((error) => {
-    console.error(error.stack || error.message || error);
-    process.exit(1);
-});
+if (require.main === module) {
+    main().catch((error) => {
+        console.error(error.stack || error.message || error);
+        process.exit(1);
+    });
+}
+
+module.exports = { main, parseArgs, evaluateCaseThroughAdapter };
