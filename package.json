@@ -19,6 +19,7 @@
     "preai:ab-replay": "node scripts/pre-ai-ab-replay.js",
     "review:eval": "node scripts/review-eval.js",
     "review:preflight:source-bound:prepare": "node scripts/prepare-source-bound-preflight-v2.js",
+    "review:preflight:source-bound:run": "node scripts/run-source-bound-preflight-v2.js",
     "review:preflight:human-explanations:prepare": "node scripts/prepare-human-explanation-binding.js",
     "review:preflight:human-explanations:package": "node scripts/package-human-explanation-binding-preparation.js",
     "rules:manifest": "node scripts/generate-rules-manifest.js",

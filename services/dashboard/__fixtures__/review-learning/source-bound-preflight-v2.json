@@ -1,0 +1,182 @@
+{
+  "schemaVersion": 2,
+  "contractVersion": "review-learning-source-bound-preflight-v2",
+  "status": "frozen_synthetic_only",
+  "cases": [
+    {
+      "schemaVersion": 2,
+      "contractVersion": "review-learning-source-bound-preflight-v2",
+      "caseId": "general-spelling-001",
+      "lane": "general_ai_equal_row",
+      "context": { "property": "synthetic-general", "templateType": "food", "menuType": "standard", "allergens": "" },
+      "source": "Dinner Menu\nAheletic N/A\nLagunitas N/A",
+      "sourceSha256": "582a6bb943074bf6321b7754f3619f4c6e41dab392bb34598f88660bae229529",
+      "rawSourceSha256": "582a6bb943074bf6321b7754f3619f4c6e41dab392bb34598f88660bae229529",
+      "precheckedSourceSha256": "582a6bb943074bf6321b7754f3619f4c6e41dab392bb34598f88660bae229529",
+      "sourceRevision": {
+        "id": "SB-RR-2641294db2006c017efcd4b5e1313723",
+        "sourceSha256": "582a6bb943074bf6321b7754f3619f4c6e41dab392bb34598f88660bae229529",
+        "utf16Length": 38,
+        "codePointLength": 38,
+        "utf8ByteLength": 38
+      },
+      "mutations": [
+        {
+          "startUtf16": 12,
+          "endUtf16": 20,
+          "before": "Aheletic",
+          "after": "Athletic",
+          "kind": "spelling",
+          "sourceRevisionId": "SB-RR-2641294db2006c017efcd4b5e1313723",
+          "sourceTokenSha256": "2e5a6c24428ac46d02291722bf7faa0b9467451433f7cd7eb4b7e16f90fcfdbd",
+          "provenance": { "source": "synthetic-explicit-general", "expectationId": "general-spelling-001" }
+        }
+      ],
+      "protectedSpans": [],
+      "readOnlySpans": [],
+      "correctedBlock": "Dinner Menu\nAthletic N/A\nLagunitas N/A",
+      "correctedBlockSha256": "0993c9011cca59a180cb9645b2f04c9bf429c5d6b5520b9ab799239de9aed585",
+      "expectedOutcome": "apply",
+      "simulatedResponse": { "status": 200, "finishReason": "stop" },
+      "registeredOccurrence": null,
+      "provenance": { "source": "synthetic-explicit-general", "expectationId": "general-spelling-001" },
+      "response": "=== CORRECTED MENU ===\nDinner Menu\nAthletic N/A\nLagunitas N/A\n=== END CORRECTED MENU ===\n\n=== SUGGESTIONS ===\n[]\n=== END SUGGESTIONS ===",
+      "responseSha256": "ddb0d7d51a7a57abfb8840d42c9a9932b45589035e9bcdaa4c7af1a17d9e302f"
+    },
+    {
+      "schemaVersion": 2,
+      "contractVersion": "review-learning-source-bound-preflight-v2",
+      "caseId": "scoped-rule-001",
+      "lane": "scoped_deterministic_rule",
+      "context": { "property": "synthetic-scoped", "templateType": "food", "menuType": "standard", "allergens": "" },
+      "source": "DINNER\nHouse-mad rolls G 12\nCake D 7",
+      "sourceSha256": "e34b087bda846fd094c7fe100adf27b97da3914ccd88ad047affaf1c7b00ad48",
+      "rawSourceSha256": "e34b087bda846fd094c7fe100adf27b97da3914ccd88ad047affaf1c7b00ad48",
+      "precheckedSourceSha256": "e34b087bda846fd094c7fe100adf27b97da3914ccd88ad047affaf1c7b00ad48",
+      "sourceRevision": {
+        "id": "SB-RR-b19f1d8e0cbbb53a12f42705a5b09b2b",
+        "sourceSha256": "e34b087bda846fd094c7fe100adf27b97da3914ccd88ad047affaf1c7b00ad48",
+        "utf16Length": 36,
+        "codePointLength": 36,
+        "utf8ByteLength": 36
+      },
+      "mutations": [
+        {
+          "startUtf16": 7,
+          "endUtf16": 16,
+          "before": "House-mad",
+          "after": "House-made",
+          "kind": "terminology",
+          "sourceRevisionId": "SB-RR-b19f1d8e0cbbb53a12f42705a5b09b2b",
+          "sourceTokenSha256": "381bfc203159e3ee93795bd60606886acd4ebb73637caa393ea9f48dcf7fb948",
+          "provenance": { "source": "synthetic-explicit-scoped-rule", "expectationId": "scoped-rule-001" }
+        }
+      ],
+      "protectedSpans": [],
+      "readOnlySpans": [],
+      "correctedBlock": "DINNER\nHouse-made rolls G 12\nCake D 7",
+      "correctedBlockSha256": "b03a8cb5cfbe21b5c5200094d47b4ca15d541130b709602a32af84ddbddbb8f9",
+      "expectedOutcome": "apply",
+      "simulatedResponse": { "status": 200, "finishReason": "stop" },
+      "registeredOccurrence": null,
+      "provenance": { "source": "synthetic-explicit-scoped-rule", "expectationId": "scoped-rule-001" },
+      "response": "=== CORRECTED MENU ===\nDINNER\nHouse-made rolls G 12\nCake D 7\n=== END CORRECTED MENU ===\n\n=== SUGGESTIONS ===\n[]\n=== END SUGGESTIONS ===",
+      "responseSha256": "eec8a6df2bd7600b010444fffb7dd61e1b2f99dd605880d2c30ee2bee9a14d53"
+    },
+    {
+      "schemaVersion": 2,
+      "contractVersion": "review-learning-source-bound-preflight-v2",
+      "caseId": "unicode-utf16-001",
+      "lane": "general_ai_equal_row",
+      "context": { "property": "synthetic-unicode", "templateType": "food", "menuType": "standard", "allergens": "" },
+      "source": "🍽️ Café\nSoupp D 8",
+      "sourceSha256": "e93a91cdc6ca19f013c307dae2be5171c154057ffbebc3af34bff981d7cfadfc",
+      "rawSourceSha256": "e93a91cdc6ca19f013c307dae2be5171c154057ffbebc3af34bff981d7cfadfc",
+      "precheckedSourceSha256": "e93a91cdc6ca19f013c307dae2be5171c154057ffbebc3af34bff981d7cfadfc",
+      "sourceRevision": {
+        "id": "SB-RR-a9c68daeab7429c2cec2f43f01dcadb3",
+        "sourceSha256": "e93a91cdc6ca19f013c307dae2be5171c154057ffbebc3af34bff981d7cfadfc",
+        "utf16Length": 19,
+        "codePointLength": 18,
+        "utf8ByteLength": 24
+      },
+      "mutations": [
+        {
+          "startUtf16": 10,
+          "endUtf16": 15,
+          "before": "Soupp",
+          "after": "Soup",
+          "kind": "spelling",
+          "sourceRevisionId": "SB-RR-a9c68daeab7429c2cec2f43f01dcadb3",
+          "sourceTokenSha256": "6af6d5cdfc988e4f59056b659d7d9ae75563ed4dcfe59aea2fba968caa526a8b",
+          "provenance": { "source": "synthetic-explicit-unicode", "expectationId": "unicode-utf16-001" }
+        }
+      ],
+      "protectedSpans": [],
+      "readOnlySpans": [],
+      "correctedBlock": "🍽️ Café\nSoup D 8",
+      "correctedBlockSha256": "3f2d38a3d1cb5603bb13ac0496ecd9795bb1dd2cb1a42dcd1cc3cc679b81dfe3",
+      "expectedOutcome": "apply",
+      "simulatedResponse": { "status": 200, "finishReason": "stop" },
+      "registeredOccurrence": null,
+      "provenance": { "source": "synthetic-explicit-unicode", "expectationId": "unicode-utf16-001" },
+      "response": "=== CORRECTED MENU ===\n🍽️ Café\nSoup D 8\n=== END CORRECTED MENU ===\n\n=== SUGGESTIONS ===\n[]\n=== END SUGGESTIONS ===",
+      "responseSha256": "0f9941c6e7cc2232481a45bdc4d9f9405290a9ab1ec949de213afe72eccef889"
+    },
+    {
+      "schemaVersion": 2,
+      "contractVersion": "review-learning-source-bound-preflight-v2",
+      "caseId": "registered-contextual-001",
+      "lane": "registered_contextual_near_miss",
+      "context": { "property": "phase0-property-1", "templateType": "beverage", "menuType": "set-menu", "allergens": "" },
+      "source": "soupp sauce D 8",
+      "sourceSha256": "37c381ebef98cff4a2e9ce001314e8d35039638b40af4f77d2f2ab0f81a7e800",
+      "rawSourceSha256": "37c381ebef98cff4a2e9ce001314e8d35039638b40af4f77d2f2ab0f81a7e800",
+      "precheckedSourceSha256": "37c381ebef98cff4a2e9ce001314e8d35039638b40af4f77d2f2ab0f81a7e800",
+      "sourceRevision": {
+        "id": "SB-RR-f5233100689530032ebbe52970a2c68f",
+        "sourceSha256": "37c381ebef98cff4a2e9ce001314e8d35039638b40af4f77d2f2ab0f81a7e800",
+        "utf16Length": 15,
+        "codePointLength": 15,
+        "utf8ByteLength": 15
+      },
+      "mutations": [
+        {
+          "startUtf16": 0,
+          "endUtf16": 5,
+          "before": "soupp",
+          "after": "soup",
+          "kind": "spelling",
+          "occurrenceOrdinal": 0,
+          "sourceRevisionId": "SB-RR-f5233100689530032ebbe52970a2c68f",
+          "sourceTokenSha256": "c2ab2422821ea3a16981bad2a78bb6e5a97d47bef4577c23df80e4bd94a65bed",
+          "provenance": { "source": "registered-phase0-occurrence-matrix-v2", "expectationId": "registered-contextual-001" }
+        }
+      ],
+      "protectedSpans": [],
+      "readOnlySpans": [],
+      "correctedBlock": "soup sauce D 8",
+      "correctedBlockSha256": "815410bbe20e82b7371c895462c443cc7cf78c11d2de277a98eb38f74f943b3f",
+      "expectedOutcome": "apply",
+      "simulatedResponse": { "status": 200, "finishReason": "stop" },
+      "registeredOccurrence": {
+        "sourceOccurrenceId": "SO-a382d6b4cd12b495bd7bd3ff9f7ad62a1e8a897311dd27f7ff9fc3c068530503",
+        "spellingFindingId": "SF-54382b74a7c95188eea36396160522f774693c045cef1dd45a649fb010fc726d",
+        "disposition": "corrected"
+      },
+      "provenance": { "source": "registered-phase0-occurrence-matrix-v2", "expectationId": "registered-contextual-001" },
+      "response": "=== CORRECTED MENU ===\nsoup sauce D 8\n=== END CORRECTED MENU ===\n\n=== SUGGESTIONS ===\n[]\n=== END SUGGESTIONS ===",
+      "responseSha256": "c29ad75e9e769e1a44310724b2f157856c3f42618b60ae875e035a5934fe3d20"
+    }
+  ],
+  "registeredReferences": [
+    {
+      "caseId": "SAE-001",
+      "cohort": "exact_accepted_aliases",
+      "disposition": "corrected",
+      "fixturePath": "services/dashboard/__fixtures__/source-anchored-spelling/phase0-occurrence-matrix-v2.json",
+      "fixtureSha256": "f1b7b2faf27e4dd9135527ee6be029d3cf380e8e62af27d362e4b739d8054ec6",
+      "note": "This reference retains the actual source occurrence ID from the checked-in v2 occurrence matrix."
+    }
+  ]
+}
