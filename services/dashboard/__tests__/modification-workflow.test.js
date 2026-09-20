@@ -995,11 +995,19 @@ describe('Dashboard Modification Workflow (local, mocked externals)', () => {
 
     test('actual Basic HTTP handler matches offline coordinator on rejected merge/status', async () => {
         supabaseClient.isSupabaseConfigured.mockReturnValue(true);
+        const acceptedRule = {
+            id: 'fish-variant', status: 'accepted', change_type: 'spelling',
+            original_text: 'Fisshh', corrected_text: 'Fish',
+        };
+        mockedAxios.get = jest.fn(async (url) => {
+            if (String(url).includes('/correction-rules')) return { data: [acceptedRule] };
+            return { data: [] };
+        });
         const payload = {
-            menuContent: 'BEVERAGE OPTIONS\nAthletic N/A\nLagunitas N/A',
+            menuContent: 'BEVERAGE OPTIONS\nFishh G 12\nFishh G 12',
             baselineMenuContent: '', reviewMode: 'full', allergens: '', menuType: 'standard', templateType: 'beverage',
         };
-        const modelFeedback = (text) => `=== CORRECTED MENU ===\n${text.split('\n').filter((line) => line !== 'Lagunitas N/A').join('\n')}\n=== END CORRECTED MENU ===\n=== SUGGESTIONS ===\n[{"type":"Missing Price","severity":"critical","menuItem":"candidate-only","description":"candidate-only","recommendation":"invent"}]\n=== END SUGGESTIONS ===`;
+        const modelFeedback = (text) => `=== CORRECTED MENU ===\n${text.replace('Fishh G 12', 'Fish G 12')}\n=== END CORRECTED MENU ===\n=== SUGGESTIONS ===\n[{"type":"Missing Price","severity":"critical","menuItem":"candidate-only","description":"candidate-only","recommendation":"invent"}]\n=== END SUGGESTIONS ===`;
         mockedAxios.post = jest.fn(async (url, request) => {
             if (String(url).includes('/run-qa-check')) {
                 return { data: { feedback: modelFeedback(request.text), finish_reason: 'stop' } };
@@ -1015,7 +1023,7 @@ describe('Dashboard Modification Workflow (local, mocked externals)', () => {
         let offlineCalls = 0;
         const offline = await runFullReviewPipeline(payload.menuContent, {
             basePrompt: '', templateType: payload.templateType, menuType: payload.menuType,
-            acceptedCorrectionRules: [], precheckEnabled: true, managedRawNoticePresent: false,
+            acceptedCorrectionRules: [acceptedRule], precheckEnabled: true, managedRawNoticePresent: false,
         }, async (text) => {
             offlineCalls++;
             return { feedback: modelFeedback(text), finishReason: 'stop' };
@@ -1030,6 +1038,9 @@ describe('Dashboard Modification Workflow (local, mocked externals)', () => {
         expect(http.body.basicCheckDiagnostics.delivered.structureGuard).toEqual(offline.authoritative.structureGuard);
         expect(http.body.basicCheckDiagnostics.delivered.suggestions).toEqual(offline.authoritative.suggestions);
         expect(http.body.basicCheckDiagnostics.delivered.spellingAdjudications).toEqual(offline.authoritative.spellingAdjudications);
+        expect(http.body.basicCheckDiagnostics.delivered.spellingAdjudications).toEqual(expect.arrayContaining([
+            expect.objectContaining({ disposition: 'not_adjudicated' }),
+        ]));
         await flushAsyncJobs();
         const auditPayload = mockSupabaseInsert.mock.calls
             .map(([insertPayload]) => insertPayload)

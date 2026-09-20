@@ -213,25 +213,35 @@ test('rejected delivery drops bogus candidate findings but preserves genuine sou
     expect(result.reviewStatus).toEqual({ complete: false, transportStatus: 'rejected', reusable: false });
 });
 test('rejected delivery rederives spelling warning and adjudication from restored source bytes', async () => {
-    const menu = 'DINNER\nFishh G 12\nSoup D 8';
+    const menu = 'DINNER\nFishh G 12\nFishh G 12';
     const prepared = await (0, review_pipeline_1.prepareReview)(menu, {
         basePrompt: 'BASE', acceptedCorrectionRules: [rule], precheckEnabled: false,
     });
     expect(prepared.nearMissAnalysis.findings).toEqual(expect.arrayContaining([
         expect.objectContaining({ found: 'Fishh' }),
     ]));
-    const feedback = fencedWithSuggestions('DINNER\nFish G 12', [{
+    const feedback = fencedWithSuggestions('DINNER\nFish G 12\nFish G 12', [{
             type: 'Missing Price', severity: 'critical', menuItem: 'candidate-only',
             description: 'candidate-only', recommendation: 'invent',
         }]);
     const result = (0, review_pipeline_1.completePreparedReview)(prepared, feedback, { finishReason: 'stop' });
     expect(result.finalCorrectedMenu).toBe(menu);
+    expect(result.diagnostics).toEqual(expect.arrayContaining([
+        expect.objectContaining({ stage: 'merge', reason: 'duplicate_row_fallback:1' }),
+    ]));
     expect(result.finalSuggestions.some(suggestion => suggestion.type === 'Missing Price')).toBe(false);
+    expect(result.authoritative.suggestions.filter(suggestion => suggestion.type === 'Spelling')).toHaveLength(1);
     expect(result.authoritative.suggestions).toEqual(expect.arrayContaining([
         expect.objectContaining({ type: 'Spelling', sourceToken: 'Fishh', spellingDisposition: 'not_adjudicated' }),
     ]));
+    expect(result.post.spellingAdjudications).toEqual(expect.arrayContaining([
+        expect.objectContaining({ disposition: 'corrected' }),
+    ]));
     expect(result.authoritative.spellingAdjudications).toEqual(expect.arrayContaining([
         expect.objectContaining({ disposition: 'not_adjudicated' }),
+    ]));
+    expect(result.authoritative.spellingAdjudications).not.toEqual(expect.arrayContaining([
+        expect.objectContaining({ disposition: 'corrected' }),
     ]));
 });
 test('model failure fallback is source-preserving and still one-call', async () => {

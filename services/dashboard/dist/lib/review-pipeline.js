@@ -1005,7 +1005,7 @@ function completePreparedReview(prepared, feedback, completion = {}) {
         hasCriticalErrors: post.hasCriticalErrors,
         structureGuard: post.deliveredStructureGuard || deliveredStructureGuard,
         reconciliation: post.deliveredReconciliation || deliveredReconciliation,
-        spellingAdjudications: post.spellingAdjudications,
+        spellingAdjudications: deliveredSourcePost?.spellingAdjudications || post.spellingAdjudications,
         reviewStatus,
         safetyDiagnostics: post.safetyDiagnostics.slice(0, 200),
     };
