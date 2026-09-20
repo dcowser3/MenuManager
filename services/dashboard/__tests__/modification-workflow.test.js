@@ -1380,6 +1380,63 @@ describe('Dashboard Modification Workflow (local, mocked externals)', () => {
         });
     });
 
+    test('basic-check caller keeps scoped canonical policy aligned across property and template contexts', async () => {
+        const globalRule = {
+            id: 'rule-global-housemade',
+            status: 'accepted',
+            source: 'human',
+            original_text: 'house-made',
+            corrected_text: 'housemade',
+            change_type: 'terminology',
+        };
+        const localRule = {
+            ...globalRule,
+            id: 'rule-local-housemade',
+            corrected_text: 'house made',
+            is_location_specific: true,
+            location: 'Property A',
+            applies_to_menu_type: 'food',
+        };
+        const run = async ({ property, templateType, rules, expected, expectsFinding = true }) => {
+            mockedAxios.get = jest.fn(async (url) => {
+                if (String(url).includes('/correction-rules')) return { data: rules };
+                if (String(url).includes('/properties')) return { data: { catalog: [{ name: property }] } };
+                return { data: [] };
+            });
+            mockedAxios.post = jest.fn(async (url, payload) => {
+                if (String(url).includes('/run-qa-check')) {
+                    return { data: { feedback: `=== CORRECTED MENU ===\n${payload.text}\n=== END CORRECTED MENU ===\n=== SUGGESTIONS ===\n[]\n=== END SUGGESTIONS ===` } };
+                }
+                return { data: {} };
+            });
+            const response = await invokeJsonHandler(basicCheckHandler, {
+                menuContent: 'Dish, house-made G 12\nOther, house-mad G 13',
+                baselineMenuContent: '',
+                reviewMode: 'full',
+                allergens: '',
+                menuType: 'standard',
+                property,
+                templateType,
+            }, { headers: { 'x-menumanager-debug-basic-check': '1' } });
+            const qaCall = mockedAxios.post.mock.calls.find((call) => String(call[0]).includes('/run-qa-check'));
+            expect(mockedAxios.post.mock.calls.filter((call) => String(call[0]).includes('/run-qa-check'))).toHaveLength(1);
+            expect(response.status).toBe(200);
+            expect(response.body.correctedMenu).toContain(expected);
+            expect(qaCall[1].prompt).toContain('ACCEPTED SCOPED TERM POLICY');
+            if (expectsFinding) expect(qaCall[1].prompt).toContain('Spelling suspicions');
+        };
+
+        await run({ property: 'Property A', templateType: 'food', rules: [globalRule, localRule], expected: 'house made' });
+        await run({ property: 'Property B', templateType: 'food', rules: [globalRule, localRule], expected: 'housemade' });
+        await run({ property: 'Property A', templateType: 'beverage', rules: [globalRule, localRule], expected: 'housemade' });
+        await run({
+            property: 'Property A', templateType: 'food',
+            rules: [localRule, { ...localRule, id: 'rule-local-conflict', corrected_text: 'homemade' }],
+            expected: 'house-made',
+            expectsFinding: false,
+        });
+    });
+
     test.each([
         [
             '503 service error',

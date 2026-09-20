@@ -120,6 +120,7 @@ import {
 } from './lib/menu-footer';
 import { buildFinalPrompt } from './lib/qa-prompt-builder';
 import { buildNearMissAnalysis } from './lib/canonical-vocabulary-provider';
+import { policyHash } from './lib/canonical-policy';
 import {
     parseAIResponse,
     reconcileCriticalSuggestionsAgainstCorrectedMenu,
@@ -3426,13 +3427,28 @@ async function handleBasicCheck(req: any, res: any) {
         // Scanned AFTER the deterministic pre-AI pass so already-applied fixes are not
         // re-flagged. Accepted rules are reused; approved vocabulary is DB-backed and
         // cached by the provider for the review hot path.
+        let approvedVocabularyTerms: Awaited<ReturnType<typeof loadApprovedReviewVocabularyTerms>> = [];
+        try {
+            approvedVocabularyTerms = await loadApprovedReviewVocabularyTerms(getRepoRoot());
+        } catch (error) {
+            console.warn(`Approved vocabulary unavailable; continuing without vocabulary snapshot. (${(error as Error)?.message || error})`);
+        }
         const nearMissAnalysis = await buildNearMissAnalysis(preCheckedReviewBody, {
+            tenantId: policyHash(tenantConfig),
+            property,
+            templateType,
+            menuType,
+            acceptedPolicyFingerprint: policyHash(acceptedCorrectionRules),
+            vocabularySnapshotHash: policyHash({ approvedTerms: approvedVocabularyTerms }),
             fetchAcceptedRules: async () => acceptedCorrectionRules || [],
-            fetchApprovedTerms: async () => loadApprovedReviewVocabularyTerms(getRepoRoot()),
+            fetchApprovedTerms: async () => approvedVocabularyTerms,
         });
 
         const promptInfo = buildFinalPrompt(qaPrompt, {
+            property,
+            templateType,
             menuType,
+            acceptedCorrectionRules,
             effectiveAllergens: effectiveReviewAllergens,
             changedOnlyMode,
             precheckEnabled: BASIC_AI_PRECHECK_ENABLED,

@@ -78,6 +78,7 @@ const basic_ai_check_audit_1 = require("./lib/basic-ai-check-audit");
 const menu_footer_1 = require("./lib/menu-footer");
 const qa_prompt_builder_1 = require("./lib/qa-prompt-builder");
 const canonical_vocabulary_provider_1 = require("./lib/canonical-vocabulary-provider");
+const canonical_policy_1 = require("./lib/canonical-policy");
 const review_pipeline_1 = require("./lib/review-pipeline");
 const improvement_cycle_core_1 = require("./lib/improvement-cycle-core");
 var upload_security_2 = require("./lib/upload-security");
@@ -3033,12 +3034,28 @@ async function handleBasicCheck(req, res) {
         // Scanned AFTER the deterministic pre-AI pass so already-applied fixes are not
         // re-flagged. Accepted rules are reused; approved vocabulary is DB-backed and
         // cached by the provider for the review hot path.
+        let approvedVocabularyTerms = [];
+        try {
+            approvedVocabularyTerms = await (0, approved_dishes_1.loadApprovedReviewVocabularyTerms)(getRepoRoot());
+        }
+        catch (error) {
+            console.warn(`Approved vocabulary unavailable; continuing without vocabulary snapshot. (${error?.message || error})`);
+        }
         const nearMissAnalysis = await (0, canonical_vocabulary_provider_1.buildNearMissAnalysis)(preCheckedReviewBody, {
+            tenantId: (0, canonical_policy_1.policyHash)(tenantConfig),
+            property,
+            templateType,
+            menuType,
+            acceptedPolicyFingerprint: (0, canonical_policy_1.policyHash)(acceptedCorrectionRules),
+            vocabularySnapshotHash: (0, canonical_policy_1.policyHash)({ approvedTerms: approvedVocabularyTerms }),
             fetchAcceptedRules: async () => acceptedCorrectionRules || [],
-            fetchApprovedTerms: async () => (0, approved_dishes_1.loadApprovedReviewVocabularyTerms)(getRepoRoot()),
+            fetchApprovedTerms: async () => approvedVocabularyTerms,
         });
         const promptInfo = (0, qa_prompt_builder_1.buildFinalPrompt)(qaPrompt, {
+            property,
+            templateType,
             menuType,
+            acceptedCorrectionRules,
             effectiveAllergens: effectiveReviewAllergens,
             changedOnlyMode,
             precheckEnabled: BASIC_AI_PRECHECK_ENABLED,

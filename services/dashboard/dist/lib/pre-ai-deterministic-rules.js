@@ -293,10 +293,34 @@ function matchCase(source, target) {
     }
     return target;
 }
-function replacementRegExp(from, separatorVariants = false) {
-    const escaped = separatorVariants
-        ? from.split(/[ \u00a0\-\u2010\u2011]+/).map(escapeRegExp).join('[ \u00a0\u2010\u2011-]*')
-        : escapeRegExp(from);
+function replacementRegExp(from, separatorVariants = false, acceptedTarget = '') {
+    let escaped = escapeRegExp(from);
+    if (separatorVariants) {
+        const separatorPattern = /[ \u00a0\-\u2010\u2011]/;
+        const sourceChars = Array.from(from.replace(/[ \u00a0\-\u2010\u2011]/g, ''));
+        const targetChars = Array.from(acceptedTarget.replace(/[ \u00a0\-\u2010\u2011]/g, ''));
+        const sourceCore = sourceChars.join('').toLocaleLowerCase();
+        const targetCore = targetChars.join('').toLocaleLowerCase();
+        // Expand only when the accepted pair has the same lexical core. The
+        // accepted policy advertises this same predicate, so unsupported pairs
+        // remain exact rather than silently broadening their match surface.
+        if (sourceChars.length > 0 && sourceCore === targetCore) {
+            const boundaries = new Set();
+            const collectBoundaries = (value) => {
+                let position = 0;
+                for (const part of value.split(separatorPattern)) {
+                    position += Array.from(part).length;
+                    if (position < sourceChars.length)
+                        boundaries.add(position);
+                }
+            };
+            collectBoundaries(from);
+            collectBoundaries(acceptedTarget);
+            escaped = sourceChars.map((char, index) => `${escapeRegExp(char)}${index < sourceChars.length - 1 && boundaries.has(index + 1)
+                ? '[ \\u00a0\\u2010\\u2011-]*'
+                : ''}`).join('');
+        }
+    }
     const startsWord = /^[A-Za-z0-9À-ÖØ-öø-ÿ]/.test(from);
     const endsWord = /[A-Za-z0-9À-ÖØ-öø-ÿ]$/.test(from);
     return new RegExp(`${startsWord ? '\\b' : ''}${escaped}${endsWord ? '\\b' : ''}`, 'gi');
@@ -332,7 +356,7 @@ function applyAccentInsensitiveReplacementRule(line, lineIndex, rule, source, me
         return { line, corrections: [] };
     }
     const { normalized, map } = accentInsensitiveIndex(line);
-    const re = replacementRegExp(normalizedFrom, rule.separatorVariants);
+    const re = replacementRegExp(normalizedFrom, rule.separatorVariants, stripDiacritics(rule.to));
     const corrections = [];
     let nextLine = '';
     let lastOriginalIndex = 0;
@@ -374,7 +398,7 @@ function applyAccentInsensitiveReplacementRule(line, lineIndex, rule, source, me
 }
 function applyReplacementRule(line, lineIndex, rule, source, metadata = {}, settings = {}) {
     const corrections = [];
-    const re = replacementRegExp(rule.from, rule.separatorVariants);
+    const re = replacementRegExp(rule.from, rule.separatorVariants, rule.to);
     const nextLine = line.replace(re, (match, offset) => {
         const corrected = rule.forceTargetCase ? rule.to : matchCase(match, rule.to);
         if (match === corrected) {

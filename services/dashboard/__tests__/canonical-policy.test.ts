@@ -2,6 +2,7 @@ import { canonicalizeFinalTerms, runPreAiDeterministicChecks } from '../lib/pre-
 import { policyHash, resolveCanonicalPolicies, renderCanonicalPolicyGuidance } from '../lib/canonical-policy';
 import { buildNearMissAnalysis, invalidateCanonicalVocabulary } from '../lib/canonical-vocabulary-provider';
 import { buildFinalPrompt } from '../lib/qa-prompt-builder';
+import { runFullReviewPipeline } from '../lib/review-pipeline';
 
 const globalRule = { id: 'global', status: 'accepted', change_type: 'terminology', original_text: 'house-made', corrected_text: 'housemade' };
 const localRule = { ...globalRule, id: 'local', corrected_text: 'house made', is_location_specific: true, location: 'A', applies_to_menu_type: 'food' };
@@ -13,6 +14,16 @@ test.each(['house made', 'house -made', 'house- made', 'house-made', 'house\u00a
     const expected = input === input.toUpperCase() ? 'HOUSEMADE' : 'housemade';
     expect(canonicalizeFinalTerms(`Bread, ${input} rolls G 12`, options).menuText).toBe(`Bread, ${expected} rolls G 12`);
     expect(runPreAiDeterministicChecks(`Bread, ${input} rolls G 12`, options).menuText).toBe(`Bread, ${expected} rolls G 12`);
+});
+
+test('reverse separator policy matches one-word, spaced, and hyphenated forms without crossing boundaries', () => {
+    const reverseRule = { ...globalRule, original_text: 'housemade', corrected_text: 'house-made' };
+    for (const input of ['housemade', 'house made', 'house-made', 'house\u00a0made', 'house‐made', 'house‑made']) {
+        expect(runPreAiDeterministicChecks(`Dish, ${input} G 12`, { acceptedCorrectionRules: [reverseRule] }).menuText)
+            .toBe('Dish, house-made G 12');
+    }
+    const adversarial = 'house\nmade\nhouse G made\nhouse 12 made\nhousemate';
+    expect(runPreAiDeterministicChecks(adversarial, { acceptedCorrectionRules: [reverseRule] }).menuText).toBe(adversarial);
 });
 
 test('separator equivalence does not cross boundaries or infer semantic equivalence', () => {
@@ -72,4 +83,32 @@ test('concurrent contexts and changed policy snapshots cannot leak local targets
     const second = await buildNearMissAnalysis('house-mad', { fetchAcceptedRules, acceptedPolicyFingerprint: policyHash(rules) });
     expect(first.findings.length).toBeGreaterThan(0);
     expect(second.findings).toEqual([]);
+});
+
+test('offline caller assembles the same scoped policy for finding, prompt, and final behavior', async () => {
+    const rules = [globalRule, localRule];
+    const aiCaller = async (text: string, prompt: string) => {
+        expect(prompt).toContain('ACCEPTED SCOPED TERM POLICY');
+        return `=== CORRECTED MENU ===\n${text}\n=== END CORRECTED MENU ===\n=== SUGGESTIONS ===\n[]\n=== END SUGGESTIONS ===`;
+    };
+    const cases = [
+        { property: 'A', templateType: 'food', expected: 'house made' },
+        { property: 'B', templateType: 'food', expected: 'housemade' },
+        { property: 'A', templateType: 'beverage', expected: 'housemade' },
+        {
+            property: 'A', templateType: 'food', expected: 'house-made',
+            rules: [localRule, { ...localRule, id: 'conflicting', corrected_text: 'homemade' }],
+        },
+    ];
+    for (const item of cases) {
+        const result = await runFullReviewPipeline('Dish, house-made G 12', {
+            basePrompt: 'BASE QA PROMPT',
+            property: item.property,
+            templateType: item.templateType,
+            menuType: 'standard',
+            acceptedCorrectionRules: item.rules || rules,
+        }, aiCaller);
+        expect(result.finalCorrectedMenu).toContain(item.expected);
+        expect(result.promptInfo.prompt).toContain('ACCEPTED SCOPED TERM POLICY');
+    }
 });

@@ -22,6 +22,15 @@ vocabulary cache is keyed by tenant/property/template/menu plus policy and
 vocabulary snapshot fingerprints, with bounded entries and generation-safe
 invalidation so concurrent contexts cannot leak a local target.
 
+## Live rulebook boundary
+
+The existing live `sop-processor/qa_prompt.txt` still contains the base
+`house-made` example. B2 deliberately does not rewrite that rulebook example.
+Instead, the appended scoped-policy guidance overrides a conflicting term
+example only when the accepted rule is applicable to the submitted
+property/template context. It is not a global rewrite of the live prompt, and
+it does not authorize unrelated or out-of-scope substitutions.
+
 ## Scope boundary
 
 This document covers B2 only. The review coordinator/envelope (B3), active

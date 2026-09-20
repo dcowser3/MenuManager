@@ -30,6 +30,7 @@ import {
     adjudicateCanonicalSpellingFindings,
 } from './canonical-vocabulary';
 import { getTenantConfig } from '@menumanager/tenant-config';
+import { policyHash } from './canonical-policy';
 import { AI_REVIEW_FENCES } from './review-response-contract';
 import { ProtectedTermGuardResult, restoreProtectedTerms } from './protected-terms-guard';
 
@@ -911,6 +912,15 @@ export async function runFullReviewPipeline(
     // Scanned AFTER the deterministic pre-AI pass so already-applied fixes are not
     // re-flagged. Offline callers provide approved vocabulary evidence directly.
     const nearMissAnalysis = await buildNearMissAnalysis(preCheckedReviewBody, {
+        tenantId: policyHash(getTenantConfig()),
+        property: opts.property,
+        templateType: opts.templateType,
+        menuType: opts.menuType,
+        acceptedPolicyFingerprint: policyHash(acceptedCorrectionRules),
+        vocabularySnapshotHash: policyHash({
+            approvedTexts: opts.approvedVocabularyTexts || [],
+            approvedTerms: opts.approvedVocabularyTerms || [],
+        }),
         fetchAcceptedRules: async () => acceptedCorrectionRules || [],
         fetchApprovedTexts: async () => opts.approvedVocabularyTexts || [],
         fetchApprovedTerms: async () => opts.approvedVocabularyTerms || [],
@@ -920,7 +930,10 @@ export async function runFullReviewPipeline(
     });
 
     const promptInfo = buildFinalPrompt(opts.basePrompt, {
+        property: opts.property,
+        templateType: opts.templateType,
         menuType: opts.menuType,
+        acceptedCorrectionRules,
         effectiveAllergens: effectiveReviewAllergens,
         changedOnlyMode: false,
         precheckEnabled,

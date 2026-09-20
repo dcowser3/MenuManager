@@ -34,6 +34,7 @@ const qa_prompt_builder_1 = require("./qa-prompt-builder");
 const canonical_vocabulary_provider_1 = require("./canonical-vocabulary-provider");
 const canonical_vocabulary_1 = require("./canonical-vocabulary");
 const tenant_config_1 = require("@menumanager/tenant-config");
+const canonical_policy_1 = require("./canonical-policy");
 const review_response_contract_1 = require("./review-response-contract");
 const protected_terms_guard_1 = require("./protected-terms-guard");
 // Suggestion types forced to critical severity in parseAIResponse (layer 2 of
@@ -679,6 +680,15 @@ async function runFullReviewPipeline(rawMenuContent, opts, aiCaller) {
     // Scanned AFTER the deterministic pre-AI pass so already-applied fixes are not
     // re-flagged. Offline callers provide approved vocabulary evidence directly.
     const nearMissAnalysis = await (0, canonical_vocabulary_provider_1.buildNearMissAnalysis)(preCheckedReviewBody, {
+        tenantId: (0, canonical_policy_1.policyHash)((0, tenant_config_1.getTenantConfig)()),
+        property: opts.property,
+        templateType: opts.templateType,
+        menuType: opts.menuType,
+        acceptedPolicyFingerprint: (0, canonical_policy_1.policyHash)(acceptedCorrectionRules),
+        vocabularySnapshotHash: (0, canonical_policy_1.policyHash)({
+            approvedTexts: opts.approvedVocabularyTexts || [],
+            approvedTerms: opts.approvedVocabularyTerms || [],
+        }),
         fetchAcceptedRules: async () => acceptedCorrectionRules || [],
         fetchApprovedTexts: async () => opts.approvedVocabularyTexts || [],
         fetchApprovedTerms: async () => opts.approvedVocabularyTerms || [],
@@ -687,7 +697,10 @@ async function runFullReviewPipeline(rawMenuContent, opts, aiCaller) {
         ttlMs: 0,
     });
     const promptInfo = (0, qa_prompt_builder_1.buildFinalPrompt)(opts.basePrompt, {
+        property: opts.property,
+        templateType: opts.templateType,
         menuType: opts.menuType,
+        acceptedCorrectionRules,
         effectiveAllergens: effectiveReviewAllergens,
         changedOnlyMode: false,
         precheckEnabled,
