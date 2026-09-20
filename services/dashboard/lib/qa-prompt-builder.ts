@@ -2,12 +2,15 @@
 // services/dashboard/index.ts handleBasicCheck so the offline review pipeline
 // (eval harness) builds byte-identical prompts to production.
 
+import { AcceptedCorrectionRule } from './pre-ai-deterministic-rules';
+import { PolicyContext, renderCanonicalPolicyGuidance } from './canonical-policy';
 import { RAW_NOTICE_TEXT } from './menu-footer';
 import { buildEmbeddedSetMenuPromptSection } from './embedded-set-menu-guard';
 import { getTenantConfig } from '@menumanager/tenant-config';
 import { AI_REVIEW_FENCES } from './review-response-contract';
 
 export type QaPromptSectionId =
+    | 'accepted_scoped_policy'
     | 'prix_fixe'
     | 'allergens'
     | 'corrected_menu_structure_rules'
@@ -25,6 +28,7 @@ export type QaPromptSectionId =
 // Registry of every runtime prompt section. Consumed by the review-rules
 // manifest so prompt-layer rules are enumerable alongside code rules.
 export const QA_PROMPT_SECTIONS: Record<QaPromptSectionId, { description: string; appliesWhen: string }> = {
+    accepted_scoped_policy: { description: 'Authoritative accepted term pairs from the shared scope and conflict resolver.', appliesWhen: 'applicable accepted policies or conflicts' },
     raw_marker_placement: {
         description: 'Instructs the AI to preserve the author\'s raw-marker (*) placement as house style; missing markers are still flagged but none are moved.',
         appliesWhen: "rulebook.rawMarkerPlacement === 'preserve'",
@@ -79,7 +83,8 @@ export const QA_PROMPT_SECTIONS: Record<QaPromptSectionId, { description: string
     },
 };
 
-export type QaPromptContext = {
+export type QaPromptContext = PolicyContext & {
+    acceptedCorrectionRules?: AcceptedCorrectionRule[];
     menuType?: string;
     effectiveAllergens?: string;
     changedOnlyMode?: boolean;
@@ -235,6 +240,12 @@ Note: Use ONLY these allergen codes when checking allergen compliance. Do not us
     if (ctx.embeddedSetMenuAnalysis.sections.length > 0 && !omit.has('embedded_set_menu_rules')) {
         finalPrompt = `${finalPrompt}\n\n${buildEmbeddedSetMenuPromptSection(ctx.embeddedSetMenuAnalysis as any)}`;
         sections.push('embedded_set_menu_rules');
+    }
+
+    const policyGuidance = renderCanonicalPolicyGuidance(ctx.acceptedCorrectionRules || [], ctx);
+    if (policyGuidance && !omit.has('accepted_scoped_policy')) {
+        finalPrompt += `\n\n${policyGuidance}`;
+        sections.push('accepted_scoped_policy');
     }
 
     return { prompt: finalPrompt, sections };

@@ -1,3 +1,4 @@
+import { resolveCanonicalPolicies, permitsSeparatorVariants } from './canonical-policy';
 import { involvesContextDependentTerm } from './improvement-cycle-core';
 
 export type PreAiCorrectionSource = 'built_in' | 'accepted_correction_rule';
@@ -40,6 +41,7 @@ export type PreAiDeterministicResult = {
     appliedCorrections: PreAiAppliedCorrection[];
     learnedRulesConsidered: number;
     learnedRulesApplied: number;
+    diagnostics?: string[];
 };
 
 export type AcceptedCorrectionRulePreAiEligibility = {
@@ -61,6 +63,7 @@ export type ReplacementRule = {
     to: string;
     type: PreAiAppliedCorrection['type'];
     forceTargetCase?: boolean;
+    separatorVariants?: boolean;
 };
 
 const COMMON_ALLERGEN_CODES = new Set([
@@ -308,7 +311,7 @@ function isGlobalRuleLocation(value: string | undefined): boolean {
     return !normalized || normalized === 'all properties global rule';
 }
 
-function ruleAppliesToProperty(rule: AcceptedCorrectionRule, property: string | undefined): boolean {
+export function ruleAppliesToProperty(rule: AcceptedCorrectionRule, property: string | undefined): boolean {
     if (!rule.is_location_specific || isGlobalRuleLocation(rule.location)) {
         return true;
     }
@@ -340,7 +343,7 @@ function normalizeTemplateScope(value: string | undefined | null): string {
     return normalized;
 }
 
-function ruleAppliesToTemplateType(rule: AcceptedCorrectionRule, templateType: string | undefined): boolean {
+export function ruleAppliesToTemplateType(rule: AcceptedCorrectionRule, templateType: string | undefined): boolean {
     const ruleScope = normalizeTemplateScope(rule.applies_to_menu_type);
     if (ruleScope === 'all') {
         return true;
@@ -388,8 +391,10 @@ function matchCase(source: string, target: string): string {
     return target;
 }
 
-function replacementRegExp(from: string): RegExp {
-    const escaped = escapeRegExp(from);
+function replacementRegExp(from: string, separatorVariants = false): RegExp {
+    const escaped = separatorVariants
+        ? from.split(/[ \u00a0\-\u2010\u2011]+/).map(escapeRegExp).join('[ \u00a0\u2010\u2011-]*')
+        : escapeRegExp(from);
     const startsWord = /^[A-Za-z0-9À-ÖØ-öø-ÿ]/.test(from);
     const endsWord = /[A-Za-z0-9À-ÖØ-öø-ÿ]$/.test(from);
     return new RegExp(`${startsWord ? '\\b' : ''}${escaped}${endsWord ? '\\b' : ''}`, 'gi');
@@ -438,7 +443,7 @@ function applyAccentInsensitiveReplacementRule(
     }
 
     const { normalized, map } = accentInsensitiveIndex(line);
-    const re = replacementRegExp(normalizedFrom);
+    const re = replacementRegExp(normalizedFrom, rule.separatorVariants);
     const corrections: PreAiAppliedCorrection[] = [];
     let nextLine = '';
     let lastOriginalIndex = 0;
@@ -495,7 +500,7 @@ function applyReplacementRule(
     settings: { skipIfAlreadyCorrected?: boolean } = {}
 ): { line: string; corrections: PreAiAppliedCorrection[] } {
     const corrections: PreAiAppliedCorrection[] = [];
-    const re = replacementRegExp(rule.from);
+    const re = replacementRegExp(rule.from, rule.separatorVariants);
     const nextLine = line.replace(re, (match, offset: number) => {
         const corrected = rule.forceTargetCase ? rule.to : matchCase(match, rule.to);
         if (match === corrected) {
@@ -936,7 +941,7 @@ function isSafeLearnedRule(rule: AcceptedCorrectionRule): boolean {
     return getAcceptedCorrectionRulePreAiEligibility(rule).eligible;
 }
 
-function applyAcceptedCorrectionRules(
+function applyAcceptedCorrectionRulesOnce(
     lines: string[],
     options: PreAiDeterministicOptions
 ): {
@@ -959,6 +964,7 @@ function applyAcceptedCorrectionRules(
             to: `${rule.corrected_text || ''}`.trim(),
             type: 'Learned Rule',
             forceTargetCase: rule.force_target_case === true,
+            separatorVariants: permitsSeparatorVariants(rule.original_text || '', rule.corrected_text || ''),
         };
 
         for (let i = 0; i < nextLines.length; i++) {
@@ -986,6 +992,67 @@ function applyAcceptedCorrectionRules(
         learnedRulesConsidered: applicableRules.length,
         learnedRulesApplied: appliedRuleIds.size || appliedCorrections.length,
     };
+}
+
+export type FinalTermCanonicalizationResult = PreAiDeterministicResult & { diagnostics: string[] };
+
+/** Bounded term-only closure. A cycle, competing result, or expanding rule preserves the input row. */
+export function canonicalizeFinalTerms(menuText: string, options: PreAiDeterministicOptions = {}): FinalTermCanonicalizationResult {
+    const rules = (options.acceptedCorrectionRules || []).filter(rule =>
+        ['spelling', 'typo', 'diacritic', 'diacritics', 'terminology', 'capitalization'].includes(`${rule.change_type || ''}`.trim().toLowerCase())
+        && JSON.stringify(`${rule.original_text || ''}`.match(/\d+(?:[.,]\d+)?/g)) === JSON.stringify(`${rule.corrected_text || ''}`.match(/\d+(?:[.,]\d+)?/g))
+    );
+    return resolveAcceptedRules(menuText, { ...options, acceptedCorrectionRules: rules });
+}
+
+function resolveAcceptedRules(menuText: string, options: PreAiDeterministicOptions): FinalTermCanonicalizationResult {
+    const diagnostics: string[] = [];
+    const appliedCorrections: PreAiAppliedCorrection[] = [];
+    const policyView = resolveCanonicalPolicies(options.acceptedCorrectionRules || [], options);
+    const eligibleRules = policyView.rules;
+    diagnostics.push(...policyView.conflicts.map(conflict => `term_policy_conflict:rules:${conflict.ruleIds.join(',')}`));
+    if (options.enabled === false) return { menuText, appliedCorrections, diagnostics, learnedRulesConsidered: 0, learnedRulesApplied: 0 };
+    const lines = menuText.split('\n').map((original, lineIndex) => {
+        const settle = (rules: AcceptedCorrectionRule[]) => {
+            let line = original;
+            const seen = new Set<string>();
+            const corrections: PreAiAppliedCorrection[] = [];
+            for (let pass = 0; pass < 8; pass++) {
+                if (seen.has(line)) return null;
+                seen.add(line);
+                const result = applyAcceptedCorrectionRulesOnce([line], { ...options, acceptedCorrectionRules: rules });
+                if (result.lines[0] === line) return result.appliedCorrections.length ? null : { line, corrections };
+                if (result.lines[0].length > original.length + 1024) return null;
+                line = result.lines[0];
+                corrections.push(...result.appliedCorrections.map(c => ({ ...c, lineIndex })));
+            }
+            return null;
+        };
+        const competingTargets = new Map<string, Set<string>>();
+        for (const rule of eligibleRules) {
+            const key = `${rule.original_text || ''}`.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
+            const targets = competingTargets.get(key) || new Set<string>();
+            targets.add(`${rule.corrected_text || ''}`);
+            competingTargets.set(key, targets);
+        }
+        const competing = eligibleRules.some(rule => competingTargets.get(`${rule.original_text || ''}`.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase())!.size > 1
+            && applyAcceptedCorrectionRulesOnce([original], { ...options, acceptedCorrectionRules: [rule] }).appliedCorrections.length > 0);
+        if (competing) {
+            diagnostics.push(`term_policy_conflict:line:${lineIndex}`);
+            return original;
+        }
+        const forward = settle(eligibleRules);
+        const reverse = settle([...eligibleRules].reverse());
+        if (!forward || !reverse || forward.line !== reverse.line) {
+            diagnostics.push(`term_policy_conflict:line:${lineIndex}`);
+            return original;
+        }
+        appliedCorrections.push(...forward.corrections);
+        return forward.line;
+    });
+    return { menuText: lines.join('\n'), appliedCorrections, diagnostics,
+        learnedRulesConsidered: eligibleRules.length,
+        learnedRulesApplied: new Set(appliedCorrections.map(c => c.ruleId || `${c.original}→${c.corrected}`)).size };
 }
 
 export function runPreAiDeterministicChecks(
@@ -1066,8 +1133,8 @@ export function runPreAiDeterministicChecks(
         return nextLine;
     });
 
-    const learnedResult = applyAcceptedCorrectionRules(lines, options);
-    lines = learnedResult.lines;
+    const learnedResult = resolveAcceptedRules(lines.join('\n'), options);
+    lines = learnedResult.menuText.split('\n');
     appliedCorrections.push(...learnedResult.appliedCorrections);
 
     return {
@@ -1075,5 +1142,6 @@ export function runPreAiDeterministicChecks(
         appliedCorrections,
         learnedRulesConsidered: learnedResult.learnedRulesConsidered,
         learnedRulesApplied: learnedResult.learnedRulesApplied,
+        diagnostics: learnedResult.diagnostics,
     };
 }

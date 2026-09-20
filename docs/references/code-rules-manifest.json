@@ -2118,6 +2118,23 @@
       "source": "code_metadata"
     },
     {
+      "id": "prompt/accepted_scoped_policy",
+      "layer": "prompt_section",
+      "category": "prompt",
+      "title": "Prompt section: accepted_scoped_policy",
+      "description": "Authoritative accepted term pairs from the shared scope and conflict resolver. Applies when: applicable accepted policies or conflicts.",
+      "implementation": {
+        "file": "services/dashboard/lib/qa-prompt-builder.ts",
+        "exportName": "buildFinalPrompt"
+      },
+      "data": {
+        "sectionId": "accepted_scoped_policy",
+        "description": "Authoritative accepted term pairs from the shared scope and conflict resolver.",
+        "appliesWhen": "applicable accepted policies or conflicts"
+      },
+      "source": "code_data"
+    },
+    {
       "id": "prompt/raw_marker_placement",
       "layer": "prompt_section",
       "category": "prompt",

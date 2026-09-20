@@ -3,11 +3,15 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.TRAILING_PRICE_PATTERN = exports.CURATED_CANONICAL_FOOD_WORDS = exports.BUILT_IN_REPLACEMENTS = void 0;
 exports.splitTrailingPrice = splitTrailingPrice;
 exports.normalizeCuratedFoodSpellingsOnLine = normalizeCuratedFoodSpellingsOnLine;
+exports.ruleAppliesToProperty = ruleAppliesToProperty;
+exports.ruleAppliesToTemplateType = ruleAppliesToTemplateType;
 exports.normalizeSingularIngredientFormsOnLine = normalizeSingularIngredientFormsOnLine;
 exports.ensureCotijaCheeseModifierOnLine = ensureCotijaCheeseModifierOnLine;
 exports.normalizeShrimpCevicheRawMarkerOnLine = normalizeShrimpCevicheRawMarkerOnLine;
 exports.getAcceptedCorrectionRulePreAiEligibility = getAcceptedCorrectionRulePreAiEligibility;
+exports.canonicalizeFinalTerms = canonicalizeFinalTerms;
 exports.runPreAiDeterministicChecks = runPreAiDeterministicChecks;
+const canonical_policy_1 = require("./canonical-policy");
 const improvement_cycle_core_1 = require("./improvement-cycle-core");
 const COMMON_ALLERGEN_CODES = new Set([
     'A', 'C', 'CE', 'D', 'DF', 'E', 'ET', 'F', 'G', 'GF', 'L', 'M', 'MO',
@@ -289,8 +293,10 @@ function matchCase(source, target) {
     }
     return target;
 }
-function replacementRegExp(from) {
-    const escaped = escapeRegExp(from);
+function replacementRegExp(from, separatorVariants = false) {
+    const escaped = separatorVariants
+        ? from.split(/[ \u00a0\-\u2010\u2011]+/).map(escapeRegExp).join('[ \u00a0\u2010\u2011-]*')
+        : escapeRegExp(from);
     const startsWord = /^[A-Za-z0-9À-ÖØ-öø-ÿ]/.test(from);
     const endsWord = /[A-Za-z0-9À-ÖØ-öø-ÿ]$/.test(from);
     return new RegExp(`${startsWord ? '\\b' : ''}${escaped}${endsWord ? '\\b' : ''}`, 'gi');
@@ -326,7 +332,7 @@ function applyAccentInsensitiveReplacementRule(line, lineIndex, rule, source, me
         return { line, corrections: [] };
     }
     const { normalized, map } = accentInsensitiveIndex(line);
-    const re = replacementRegExp(normalizedFrom);
+    const re = replacementRegExp(normalizedFrom, rule.separatorVariants);
     const corrections = [];
     let nextLine = '';
     let lastOriginalIndex = 0;
@@ -368,7 +374,7 @@ function applyAccentInsensitiveReplacementRule(line, lineIndex, rule, source, me
 }
 function applyReplacementRule(line, lineIndex, rule, source, metadata = {}, settings = {}) {
     const corrections = [];
-    const re = replacementRegExp(rule.from);
+    const re = replacementRegExp(rule.from, rule.separatorVariants);
     const nextLine = line.replace(re, (match, offset) => {
         const corrected = rule.forceTargetCase ? rule.to : matchCase(match, rule.to);
         if (match === corrected) {
@@ -743,7 +749,7 @@ function getAcceptedCorrectionRulePreAiEligibility(rule) {
 function isSafeLearnedRule(rule) {
     return getAcceptedCorrectionRulePreAiEligibility(rule).eligible;
 }
-function applyAcceptedCorrectionRules(lines, options) {
+function applyAcceptedCorrectionRulesOnce(lines, options) {
     const applicableRules = (options.acceptedCorrectionRules || [])
         .filter(isSafeLearnedRule)
         .filter((rule) => ruleAppliesToProperty(rule, options.property))
@@ -757,6 +763,7 @@ function applyAcceptedCorrectionRules(lines, options) {
             to: `${rule.corrected_text || ''}`.trim(),
             type: 'Learned Rule',
             forceTargetCase: rule.force_target_case === true,
+            separatorVariants: (0, canonical_policy_1.permitsSeparatorVariants)(rule.original_text || '', rule.corrected_text || ''),
         };
         for (let i = 0; i < nextLines.length; i++) {
             const metadata = {
@@ -782,6 +789,65 @@ function applyAcceptedCorrectionRules(lines, options) {
         learnedRulesConsidered: applicableRules.length,
         learnedRulesApplied: appliedRuleIds.size || appliedCorrections.length,
     };
+}
+/** Bounded term-only closure. A cycle, competing result, or expanding rule preserves the input row. */
+function canonicalizeFinalTerms(menuText, options = {}) {
+    const rules = (options.acceptedCorrectionRules || []).filter(rule => ['spelling', 'typo', 'diacritic', 'diacritics', 'terminology', 'capitalization'].includes(`${rule.change_type || ''}`.trim().toLowerCase())
+        && JSON.stringify(`${rule.original_text || ''}`.match(/\d+(?:[.,]\d+)?/g)) === JSON.stringify(`${rule.corrected_text || ''}`.match(/\d+(?:[.,]\d+)?/g)));
+    return resolveAcceptedRules(menuText, { ...options, acceptedCorrectionRules: rules });
+}
+function resolveAcceptedRules(menuText, options) {
+    const diagnostics = [];
+    const appliedCorrections = [];
+    const policyView = (0, canonical_policy_1.resolveCanonicalPolicies)(options.acceptedCorrectionRules || [], options);
+    const eligibleRules = policyView.rules;
+    diagnostics.push(...policyView.conflicts.map(conflict => `term_policy_conflict:rules:${conflict.ruleIds.join(',')}`));
+    if (options.enabled === false)
+        return { menuText, appliedCorrections, diagnostics, learnedRulesConsidered: 0, learnedRulesApplied: 0 };
+    const lines = menuText.split('\n').map((original, lineIndex) => {
+        const settle = (rules) => {
+            let line = original;
+            const seen = new Set();
+            const corrections = [];
+            for (let pass = 0; pass < 8; pass++) {
+                if (seen.has(line))
+                    return null;
+                seen.add(line);
+                const result = applyAcceptedCorrectionRulesOnce([line], { ...options, acceptedCorrectionRules: rules });
+                if (result.lines[0] === line)
+                    return result.appliedCorrections.length ? null : { line, corrections };
+                if (result.lines[0].length > original.length + 1024)
+                    return null;
+                line = result.lines[0];
+                corrections.push(...result.appliedCorrections.map(c => ({ ...c, lineIndex })));
+            }
+            return null;
+        };
+        const competingTargets = new Map();
+        for (const rule of eligibleRules) {
+            const key = `${rule.original_text || ''}`.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
+            const targets = competingTargets.get(key) || new Set();
+            targets.add(`${rule.corrected_text || ''}`);
+            competingTargets.set(key, targets);
+        }
+        const competing = eligibleRules.some(rule => competingTargets.get(`${rule.original_text || ''}`.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase()).size > 1
+            && applyAcceptedCorrectionRulesOnce([original], { ...options, acceptedCorrectionRules: [rule] }).appliedCorrections.length > 0);
+        if (competing) {
+            diagnostics.push(`term_policy_conflict:line:${lineIndex}`);
+            return original;
+        }
+        const forward = settle(eligibleRules);
+        const reverse = settle([...eligibleRules].reverse());
+        if (!forward || !reverse || forward.line !== reverse.line) {
+            diagnostics.push(`term_policy_conflict:line:${lineIndex}`);
+            return original;
+        }
+        appliedCorrections.push(...forward.corrections);
+        return forward.line;
+    });
+    return { menuText: lines.join('\n'), appliedCorrections, diagnostics,
+        learnedRulesConsidered: eligibleRules.length,
+        learnedRulesApplied: new Set(appliedCorrections.map(c => c.ruleId || `${c.original}→${c.corrected}`)).size };
 }
 function runPreAiDeterministicChecks(menuText, options = {}) {
     if (options.enabled === false || !menuText) {
@@ -846,13 +912,14 @@ function runPreAiDeterministicChecks(menuText, options = {}) {
         }
         return nextLine;
     });
-    const learnedResult = applyAcceptedCorrectionRules(lines, options);
-    lines = learnedResult.lines;
+    const learnedResult = resolveAcceptedRules(lines.join('\n'), options);
+    lines = learnedResult.menuText.split('\n');
     appliedCorrections.push(...learnedResult.appliedCorrections);
     return {
         menuText: lines.join('\n'),
         appliedCorrections,
         learnedRulesConsidered: learnedResult.learnedRulesConsidered,
         learnedRulesApplied: learnedResult.learnedRulesApplied,
+        diagnostics: learnedResult.diagnostics,
     };
 }

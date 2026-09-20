@@ -15,6 +15,7 @@ Catalog of design decisions and feature documentation for Menu Manager.
 | [Dish Name Formatting](dish-name-formatting.md) | Implemented | Deterministic dish-name bolding after Basic AI Check with conservative shared-extractor anchors |
 | [Diacritics Policy](diacritics-policy.md) | Implemented | ALL CAPS takes accents like any other case; brand orthography is pinned deterministically per brand (`Patrón` accented, `Jose Cuervo` not) |
 | [Contextual Culinary Spelling](contextual-culinary-spelling.md) | Implemented | Contextual AI adjudication backed by reviewer-confirmed corrections, advisory approved-menu vocabulary, explicit dispositions, and overrideable unresolved-term blockers |
+| [Review-learning B2: Scoped Canonical Policy](review-learning-b2-canonical-policy.md) | Implemented (B2) | Shared property/template policy resolution, bounded separator variants, newline-safe vocabulary, isolated cache keys, and matching prompt guidance |
 | [Revision / Modification Flow](revision-modification-flow.md) | Complete | Dual-path revision workflow with DB search or uploaded approved baseline DOCX |
 | [Submission Form Redesign](submission-form-redesign.md) | Implemented | Upload-first, progressively-revealed `/form`: upload drives the menu side-by-side, auto-filled details, approval, AI button, and a FLIP float-down |
 | [Reviewer Learning Loop](reviewer-learning-loop.md) | Complete (Phase 1) | Auto-learns recurring human reviewer corrections and injects stable rules into QA prompt |

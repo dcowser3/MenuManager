@@ -250,10 +250,12 @@ export function buildCanonicalVocabulary(params: {
 }
 
 function gramsOf(text: string): string[] {
-    const words = `${text || ''}`.normalize('NFC').split(/\s+/).map((w) => w.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '')).filter(Boolean);
-    const grams = [...words];
-    for (let i = 0; i < words.length - 1; i++) grams.push(`${words[i]} ${words[i + 1]}`);
-    return grams;
+    return `${text || ''}`.normalize('NFC').split(/\r?\n/).flatMap(line => {
+        const words = line.split(/[^\S\r\n]+/).map(w => w.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '')).filter(Boolean);
+        const grams = [...words];
+        for (let i = 0; i < words.length - 1; i++) grams.push(`${words[i]} ${words[i + 1]}`);
+        return grams;
+    });
 }
 
 /**
@@ -379,7 +381,12 @@ export function findNearMisses(
                 });
                 continue;
             }
-            if (isContainment(gram, entry.canonical) || vocabulary.legitimate.has(gramSensitive)) continue;
+            const canonicalFolded = accentInsensitiveKey(entry.canonical);
+            const missingLetterCandidate = entry.source === 'reviewer_rule'
+                && gramFolded.length >= 4
+                && canonicalFolded.length >= 4
+                && Math.abs(gramFolded.length - canonicalFolded.length) === 1;
+            if ((!missingLetterCandidate && isContainment(gram, entry.canonical)) || vocabulary.legitimate.has(gramSensitive)) continue;
             if (entry.source === 'approved_corpus' && (gram.includes(' ') || entry.canonical.includes(' '))) continue;
             if (entry.source === 'approved_corpus' && !/^\p{L}+(?:['’]\p{L}+)?$/u.test(gram)) continue;
             if (entry.source === 'approved_corpus' && gramFolded.length < 6) continue;
