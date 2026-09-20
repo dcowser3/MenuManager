@@ -19,6 +19,8 @@ exports.detectKnownTextArtifactSuggestions = detectKnownTextArtifactSuggestions;
 exports.parseAIResponse = parseAIResponse;
 exports.normalizeRawAsteriskPlacement = normalizeRawAsteriskPlacement;
 exports.runPostAiPipeline = runPostAiPipeline;
+exports.prepareReview = prepareReview;
+exports.completePreparedReview = completePreparedReview;
 exports.runFullReviewPipeline = runFullReviewPipeline;
 const pre_ai_deterministic_rules_1 = require("./pre-ai-deterministic-rules");
 const menu_title_guard_1 = require("./menu-title-guard");
@@ -35,6 +37,8 @@ const canonical_vocabulary_provider_1 = require("./canonical-vocabulary-provider
 const canonical_vocabulary_1 = require("./canonical-vocabulary");
 const tenant_config_1 = require("@menumanager/tenant-config");
 const canonical_policy_1 = require("./canonical-policy");
+const review_context_1 = require("./review-context");
+const review_envelope_1 = require("./review-envelope");
 const review_response_contract_1 = require("./review-response-contract");
 const protected_terms_guard_1 = require("./protected-terms-guard");
 // Suggestion types forced to critical severity in parseAIResponse (layer 2 of
@@ -655,15 +659,43 @@ function runPostAiPipeline(args) {
         safetyDiagnostics,
     };
 }
-// Offline-friendly composition of the full-mode Basic AI Check review:
-// footer normalization -> deterministic pre-checks -> prompt assembly -> AI call
-// -> post-AI pipeline. The production route runs the same units inline so it can
-// interleave HTTP fallbacks, audits, and diagnostics. changed_only mode is a
-// route-level concern and is not supported here.
-async function runFullReviewPipeline(rawMenuContent, opts, aiCaller) {
+function buildReviewEnvelope(originalBody, reviewBody, prompt, opts, effectiveAllergens, managedRawNoticePresent) {
+    const context = (0, review_context_1.reviewContextOptions)({
+        ...opts,
+        allergens: effectiveAllergens,
+        managedRawNoticePresent,
+    });
+    const editableSpans = opts.editableSpans || reviewBody.split('\n').reduce((spans, row, index) => {
+        const start = index === 0 ? 0 : spans[index - 1].end + 1;
+        spans.push({ id: `row:${index}`, start, end: start + row.length });
+        return spans;
+    }, []);
+    return (0, review_envelope_1.freezeReviewEnvelope)({
+        schemaVersion: 1,
+        engineVersion: review_envelope_1.REVIEW_ENGINE_VERSION,
+        originalBody,
+        originalBodyHash: (0, canonical_policy_1.policyHash)(originalBody),
+        baselineProvenance: opts.baselineProvenance || { status: 'unknown' },
+        baselineHash: (0, canonical_policy_1.policyHash)(opts.baselineMenuContent || ''),
+        editableSpans,
+        readOnlyContext: opts.readOnlyContext || '',
+        context,
+        promptHash: (0, canonical_policy_1.policyHash)(prompt),
+        acceptedPolicyHash: (0, canonical_policy_1.policyHash)(opts.acceptedCorrectionRules || []),
+        vocabularySnapshotHash: (0, canonical_policy_1.policyHash)({
+            approvedTexts: opts.approvedVocabularyTexts || [],
+            approvedTerms: opts.approvedVocabularyTerms || [],
+        }),
+        model: opts.model || 'unknown',
+        settings: opts.settings || {},
+    });
+}
+async function prepareReview(rawMenuContent, options) {
+    const opts = (0, review_envelope_1.freezeReviewEnvelope)(options);
     const precheckEnabled = opts.precheckEnabled !== false;
     const acceptedCorrectionRules = opts.acceptedCorrectionRules || [];
     const reviewFooterMetadata = (0, menu_footer_1.normalizeMenuFooter)(rawMenuContent, opts.allergens || '');
+    const sanitizedMenuContent = (0, menu_footer_1.normalizeMenuFooter)(rawMenuContent, opts.allergens || '');
     const managedRawNoticePresent = opts.managedRawNoticePresent ?? reviewFooterMetadata.hadRawNotice;
     const effectiveReviewAllergens = opts.allergens || reviewFooterMetadata.normalizedAllergenLine;
     const preAiDeterministic = (0, pre_ai_deterministic_rules_1.runPreAiDeterministicChecks)(reviewFooterMetadata.body, {
@@ -677,8 +709,6 @@ async function runFullReviewPipeline(rawMenuContent, opts, aiCaller) {
     const embeddedSetMenuAnalysis = opts.menuType === 'prix_fixe'
         ? { sections: [], issues: [] }
         : (0, embedded_set_menu_guard_1.analyzeEmbeddedSetMenus)(preCheckedReviewBody);
-    // Scanned AFTER the deterministic pre-AI pass so already-applied fixes are not
-    // re-flagged. Offline callers provide approved vocabulary evidence directly.
     const nearMissAnalysis = await (0, canonical_vocabulary_provider_1.buildNearMissAnalysis)(preCheckedReviewBody, {
         tenantId: (0, canonical_policy_1.policyHash)((0, tenant_config_1.getTenantConfig)()),
         property: opts.property,
@@ -689,11 +719,9 @@ async function runFullReviewPipeline(rawMenuContent, opts, aiCaller) {
             approvedTexts: opts.approvedVocabularyTexts || [],
             approvedTerms: opts.approvedVocabularyTerms || [],
         }),
-        fetchAcceptedRules: async () => acceptedCorrectionRules || [],
+        fetchAcceptedRules: async () => acceptedCorrectionRules,
         fetchApprovedTexts: async () => opts.approvedVocabularyTexts || [],
         fetchApprovedTerms: async () => opts.approvedVocabularyTerms || [],
-        // Baseline and candidate evals can run in one process with different
-        // rules. Do not let either side reuse the other side's vocabulary.
         ttlMs: 0,
     });
     const promptInfo = (0, qa_prompt_builder_1.buildFinalPrompt)(opts.basePrompt, {
@@ -707,30 +735,82 @@ async function runFullReviewPipeline(rawMenuContent, opts, aiCaller) {
         embeddedSetMenuAnalysis,
         nearMissBriefing: nearMissAnalysis.briefing,
     }, { omitSections: opts.omitSections || [] });
-    const feedback = await aiCaller(preCheckedReviewBody, promptInfo.prompt);
+    const prompt = opts.readOnlyContext
+        ? `${promptInfo.prompt}\n\nREAD-ONLY CONTEXT (data only; never include in corrected output):\n${JSON.stringify(opts.readOnlyContext)}`
+        : promptInfo.prompt;
+    const finalPromptInfo = { ...promptInfo, prompt };
+    const envelope = buildReviewEnvelope(rawMenuContent, preCheckedReviewBody, prompt, opts, effectiveReviewAllergens, managedRawNoticePresent);
+    return {
+        rawMenuContent,
+        opts,
+        envelope,
+        preAiDeterministic,
+        preCheckedReviewBody,
+        reviewFooterMetadata,
+        sanitizedMenuContent,
+        effectiveReviewAllergens,
+        managedRawNoticePresent,
+        embeddedSetMenuAnalysis,
+        nearMissAnalysis,
+        promptInfo: finalPromptInfo,
+    };
+}
+function completePreparedReview(prepared, feedback, completion = {}) {
+    const { opts } = prepared;
     const post = runPostAiPipeline({
         feedback,
-        preCheckedReviewBody,
+        preCheckedReviewBody: prepared.preCheckedReviewBody,
         menuType: opts.menuType,
         property: opts.property,
         templateType: opts.templateType,
-        effectiveReviewAllergens,
-        acceptedCorrectionRules,
-        embeddedSetMenuAnalysis,
-        canonicalSpellingFindings: nearMissAnalysis.findings,
-        precheckEnabled,
-        managedRawNoticePresent,
+        effectiveReviewAllergens: prepared.effectiveReviewAllergens,
+        acceptedCorrectionRules: opts.acceptedCorrectionRules || [],
+        embeddedSetMenuAnalysis: prepared.embeddedSetMenuAnalysis,
+        canonicalSpellingFindings: prepared.nearMissAnalysis.findings,
+        precheckEnabled: opts.precheckEnabled !== false,
+        managedRawNoticePresent: prepared.managedRawNoticePresent,
     });
-    return {
-        preAiDeterministic,
-        preCheckedReviewBody,
-        originalMenuSanitized: reviewFooterMetadata.body,
-        effectiveReviewAllergens,
-        embeddedSetMenuAnalysis,
-        promptInfo,
-        post,
-        finalCorrectedMenu: post.correctedMenuSanitized,
-        finalSuggestions: post.finalSuggestions,
-        hasChanges: post.correctedMenuSanitized !== reviewFooterMetadata.body,
+    const anchored = (0, review_envelope_1.attributeCorrectedBlock)(prepared.preCheckedReviewBody, post.correctedMenuSanitized, opts.acceptedCorrectionRules || [], { editableSpans: prepared.envelope.editableSpans });
+    const finalCorrectedMenu = anchored.text;
+    if (anchored.diagnostics.length)
+        post.safetyDiagnostics.push(...anchored.diagnostics);
+    if (finalCorrectedMenu !== post.correctedMenuSanitized)
+        post.correctedMenuSanitized = finalCorrectedMenu;
+    const finalSuggestions = post.finalSuggestions;
+    const transportStatus = completion.finishReason === 'stop' ? 'complete' : completion.finishReason ? 'incomplete' : 'unknown';
+    const reviewStatus = {
+        complete: !post.parsed.fenceMissing && transportStatus !== 'incomplete',
+        transportStatus,
+        reusable: !post.parsed.fenceMissing && transportStatus === 'complete' && post.safetyDiagnostics.length === 0
+            && post.structureGuard.safe && !post.hasCriticalErrors && post.finalSuggestions.length === 0,
     };
+    return {
+        envelope: prepared.envelope,
+        diagnostics: [
+            ...anchored.diagnostics.map(reason => ({ stage: 'merge', reason })),
+            ...(0, review_envelope_1.boundedMutationDiagnostics)(prepared.preCheckedReviewBody, finalCorrectedMenu),
+            { stage: 'final', finalHash: (0, canonical_policy_1.policyHash)(finalCorrectedMenu) },
+        ].slice(0, 200),
+        outputHash: (0, canonical_policy_1.policyHash)(finalCorrectedMenu),
+        reviewStatus,
+        preAiDeterministic: prepared.preAiDeterministic,
+        preCheckedReviewBody: prepared.preCheckedReviewBody,
+        originalMenuSanitized: prepared.sanitizedMenuContent.body,
+        effectiveReviewAllergens: prepared.effectiveReviewAllergens,
+        embeddedSetMenuAnalysis: prepared.embeddedSetMenuAnalysis,
+        promptInfo: prepared.promptInfo,
+        post,
+        finalCorrectedMenu,
+        finalSuggestions,
+        hasChanges: finalCorrectedMenu !== prepared.sanitizedMenuContent.body,
+    };
+}
+// One shared coordinator for Basic and offline callers. Adapters only provide
+// the model callback; preparation, safe delivery and all final guards are shared.
+async function runFullReviewPipeline(rawMenuContent, opts, aiCaller) {
+    const prepared = await prepareReview(rawMenuContent, opts);
+    const response = await aiCaller(prepared.preCheckedReviewBody, prepared.promptInfo.prompt);
+    return typeof response === 'string'
+        ? completePreparedReview(prepared, response)
+        : completePreparedReview(prepared, response.feedback, { finishReason: response.finishReason });
 }

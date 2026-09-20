@@ -123,6 +123,8 @@ import { buildNearMissAnalysis } from './lib/canonical-vocabulary-provider';
 import { policyHash } from './lib/canonical-policy';
 import {
     parseAIResponse,
+    prepareReview,
+    completePreparedReview,
     reconcileCriticalSuggestionsAgainstCorrectedMenu,
     runPostAiPipeline,
 } from './lib/review-pipeline';
@@ -3398,15 +3400,15 @@ async function handleBasicCheck(req: any, res: any) {
         const sanitizedMenuContent = normalizeMenuFooter(menuContent, allergens || '');
         const effectiveReviewAllergens = allergens || reviewFooterMetadata.normalizedAllergenLine;
         const acceptedCorrectionRules = await fetchAcceptedCorrectionRulesForPreAi();
-        const preAiDeterministic = runPreAiDeterministicChecks(reviewFooterMetadata.body, {
+        let preAiDeterministic = runPreAiDeterministicChecks(reviewFooterMetadata.body, {
             enabled: BASIC_AI_PRECHECK_ENABLED,
             property,
             templateType,
             allergenLegend: effectiveReviewAllergens,
             acceptedCorrectionRules,
         });
-        const preCheckedReviewBody = preAiDeterministic.menuText;
-        const embeddedSetMenuAnalysis = menuType === 'prix_fixe'
+        let preCheckedReviewBody = preAiDeterministic.menuText;
+        let embeddedSetMenuAnalysis = menuType === 'prix_fixe'
             ? { sections: [], issues: [] }
             : analyzeEmbeddedSetMenus(preCheckedReviewBody);
         const diagnosticsPromptSections: string[] = [];
@@ -3433,7 +3435,25 @@ async function handleBasicCheck(req: any, res: any) {
         } catch (error) {
             console.warn(`Approved vocabulary unavailable; continuing without vocabulary snapshot. (${(error as Error)?.message || error})`);
         }
-        const nearMissAnalysis = await buildNearMissAnalysis(preCheckedReviewBody, {
+        let coordinatorPreparation: Awaited<ReturnType<typeof prepareReview>> | null = null;
+        if (!changedOnlyMode) {
+            coordinatorPreparation = await prepareReview(menuContent, {
+                basePrompt: qaPrompt,
+                property,
+                templateType,
+                menuType,
+                allergens,
+                acceptedCorrectionRules,
+                approvedVocabularyTerms,
+                precheckEnabled: BASIC_AI_PRECHECK_ENABLED,
+                managedRawNoticePresent: reviewFooterMetadata.hadRawNotice,
+                contextProvenance: 'basic_http',
+            });
+            preAiDeterministic = coordinatorPreparation.preAiDeterministic;
+            preCheckedReviewBody = coordinatorPreparation.preCheckedReviewBody;
+            embeddedSetMenuAnalysis = coordinatorPreparation.embeddedSetMenuAnalysis;
+        }
+        const nearMissAnalysis = coordinatorPreparation?.nearMissAnalysis || await buildNearMissAnalysis(preCheckedReviewBody, {
             tenantId: policyHash(tenantConfig),
             property,
             templateType,
@@ -3444,7 +3464,7 @@ async function handleBasicCheck(req: any, res: any) {
             fetchApprovedTerms: async () => approvedVocabularyTerms,
         });
 
-        const promptInfo = buildFinalPrompt(qaPrompt, {
+        const promptInfo = coordinatorPreparation?.promptInfo || buildFinalPrompt(qaPrompt, {
             property,
             templateType,
             menuType,
@@ -3784,7 +3804,10 @@ async function handleBasicCheck(req: any, res: any) {
 
         // Parse + post-AI pipeline: deterministic cleanup, guard chain, reconciliation,
         // and prix-fixe critical enforcement (shared with the offline eval harness).
-        const postPipeline = runPostAiPipeline({
+        const coordinatedResult = coordinatorPreparation
+            ? completePreparedReview(coordinatorPreparation, feedback, { finishReason: qaResponse?.data?.finish_reason })
+            : null;
+        const postPipeline = coordinatedResult?.post || runPostAiPipeline({
             feedback,
             preCheckedReviewBody,
             menuType,

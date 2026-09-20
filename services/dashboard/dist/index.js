@@ -3008,15 +3008,15 @@ async function handleBasicCheck(req, res) {
         const sanitizedMenuContent = (0, menu_footer_1.normalizeMenuFooter)(menuContent, allergens || '');
         const effectiveReviewAllergens = allergens || reviewFooterMetadata.normalizedAllergenLine;
         const acceptedCorrectionRules = await fetchAcceptedCorrectionRulesForPreAi();
-        const preAiDeterministic = (0, pre_ai_deterministic_rules_1.runPreAiDeterministicChecks)(reviewFooterMetadata.body, {
+        let preAiDeterministic = (0, pre_ai_deterministic_rules_1.runPreAiDeterministicChecks)(reviewFooterMetadata.body, {
             enabled: BASIC_AI_PRECHECK_ENABLED,
             property,
             templateType,
             allergenLegend: effectiveReviewAllergens,
             acceptedCorrectionRules,
         });
-        const preCheckedReviewBody = preAiDeterministic.menuText;
-        const embeddedSetMenuAnalysis = menuType === 'prix_fixe'
+        let preCheckedReviewBody = preAiDeterministic.menuText;
+        let embeddedSetMenuAnalysis = menuType === 'prix_fixe'
             ? { sections: [], issues: [] }
             : (0, embedded_set_menu_guard_1.analyzeEmbeddedSetMenus)(preCheckedReviewBody);
         const diagnosticsPromptSections = [];
@@ -3041,7 +3041,25 @@ async function handleBasicCheck(req, res) {
         catch (error) {
             console.warn(`Approved vocabulary unavailable; continuing without vocabulary snapshot. (${error?.message || error})`);
         }
-        const nearMissAnalysis = await (0, canonical_vocabulary_provider_1.buildNearMissAnalysis)(preCheckedReviewBody, {
+        let coordinatorPreparation = null;
+        if (!changedOnlyMode) {
+            coordinatorPreparation = await (0, review_pipeline_1.prepareReview)(menuContent, {
+                basePrompt: qaPrompt,
+                property,
+                templateType,
+                menuType,
+                allergens,
+                acceptedCorrectionRules,
+                approvedVocabularyTerms,
+                precheckEnabled: BASIC_AI_PRECHECK_ENABLED,
+                managedRawNoticePresent: reviewFooterMetadata.hadRawNotice,
+                contextProvenance: 'basic_http',
+            });
+            preAiDeterministic = coordinatorPreparation.preAiDeterministic;
+            preCheckedReviewBody = coordinatorPreparation.preCheckedReviewBody;
+            embeddedSetMenuAnalysis = coordinatorPreparation.embeddedSetMenuAnalysis;
+        }
+        const nearMissAnalysis = coordinatorPreparation?.nearMissAnalysis || await (0, canonical_vocabulary_provider_1.buildNearMissAnalysis)(preCheckedReviewBody, {
             tenantId: (0, canonical_policy_1.policyHash)(tenantConfig),
             property,
             templateType,
@@ -3051,7 +3069,7 @@ async function handleBasicCheck(req, res) {
             fetchAcceptedRules: async () => acceptedCorrectionRules || [],
             fetchApprovedTerms: async () => approvedVocabularyTerms,
         });
-        const promptInfo = (0, qa_prompt_builder_1.buildFinalPrompt)(qaPrompt, {
+        const promptInfo = coordinatorPreparation?.promptInfo || (0, qa_prompt_builder_1.buildFinalPrompt)(qaPrompt, {
             property,
             templateType,
             menuType,
@@ -3375,7 +3393,10 @@ async function handleBasicCheck(req, res) {
         console.log('=== END RAW FEEDBACK ===');
         // Parse + post-AI pipeline: deterministic cleanup, guard chain, reconciliation,
         // and prix-fixe critical enforcement (shared with the offline eval harness).
-        const postPipeline = (0, review_pipeline_1.runPostAiPipeline)({
+        const coordinatedResult = coordinatorPreparation
+            ? (0, review_pipeline_1.completePreparedReview)(coordinatorPreparation, feedback, { finishReason: qaResponse?.data?.finish_reason })
+            : null;
+        const postPipeline = coordinatedResult?.post || (0, review_pipeline_1.runPostAiPipeline)({
             feedback,
             preCheckedReviewBody,
             menuType,

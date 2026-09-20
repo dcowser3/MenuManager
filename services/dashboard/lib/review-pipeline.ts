@@ -31,6 +31,8 @@ import {
 } from './canonical-vocabulary';
 import { getTenantConfig } from '@menumanager/tenant-config';
 import { policyHash } from './canonical-policy';
+import { reviewContextOptions } from './review-context';
+import { attributeCorrectedBlock, boundedMutationDiagnostics, freezeReviewEnvelope, REVIEW_ENGINE_VERSION } from './review-envelope';
 import { AI_REVIEW_FENCES } from './review-response-contract';
 import { ProtectedTermGuardResult, restoreProtectedTerms } from './protected-terms-guard';
 
@@ -855,6 +857,13 @@ export function runPostAiPipeline(args: PostAiPipelineArgs): PostAiPipelineResul
 
 export type FullReviewPipelineOptions = {
     basePrompt: string;
+    baselineMenuContent?: string;
+    baselineProvenance?: unknown;
+    readOnlyContext?: string;
+    contextProvenance?: string;
+    model?: string;
+    settings?: Record<string, unknown>;
+    editableSpans?: Array<{ id: string; start: number; end: number }>;
     menuType?: string;
     templateType?: string;
     property?: string;
@@ -868,7 +877,28 @@ export type FullReviewPipelineOptions = {
     omitSections?: import('./qa-prompt-builder').QaPromptSectionId[];
 };
 
+export type ReviewEnvelope = {
+    schemaVersion: 1;
+    engineVersion: string;
+    originalBody: string;
+    originalBodyHash: string;
+    baselineProvenance: unknown;
+    baselineHash: string;
+    editableSpans: Array<{ id: string; start: number; end: number }>;
+    readOnlyContext: string;
+    context: ReturnType<typeof reviewContextOptions>;
+    promptHash: string;
+    acceptedPolicyHash: string;
+    vocabularySnapshotHash: string;
+    model: string;
+    settings: Record<string, unknown>;
+};
+
 export type FullReviewPipelineResult = {
+    envelope: ReviewEnvelope;
+    diagnostics: Array<Record<string, unknown>>;
+    outputHash: string;
+    reviewStatus: { complete: boolean; transportStatus: string; reusable: boolean };
     preAiDeterministic: PreAiDeterministicResult;
     preCheckedReviewBody: string;
     originalMenuSanitized: string;
@@ -881,20 +911,51 @@ export type FullReviewPipelineResult = {
     hasChanges: boolean;
 };
 
-// Offline-friendly composition of the full-mode Basic AI Check review:
-// footer normalization -> deterministic pre-checks -> prompt assembly -> AI call
-// -> post-AI pipeline. The production route runs the same units inline so it can
-// interleave HTTP fallbacks, audits, and diagnostics. changed_only mode is a
-// route-level concern and is not supported here.
-export async function runFullReviewPipeline(
-    rawMenuContent: string,
+function buildReviewEnvelope(
+    originalBody: string,
+    reviewBody: string,
+    prompt: string,
     opts: FullReviewPipelineOptions,
-    aiCaller: (text: string, prompt: string) => Promise<string>
-): Promise<FullReviewPipelineResult> {
+    effectiveAllergens: string,
+    managedRawNoticePresent: boolean,
+): ReviewEnvelope {
+    const context = reviewContextOptions({
+        ...opts,
+        allergens: effectiveAllergens,
+        managedRawNoticePresent,
+    });
+    const editableSpans = opts.editableSpans || reviewBody.split('\n').reduce<Array<{ id: string; start: number; end: number }>>((spans, row, index) => {
+        const start = index === 0 ? 0 : spans[index - 1].end + 1;
+        spans.push({ id: `row:${index}`, start, end: start + row.length });
+        return spans;
+    }, []);
+    return freezeReviewEnvelope({
+        schemaVersion: 1,
+        engineVersion: REVIEW_ENGINE_VERSION,
+        originalBody,
+        originalBodyHash: policyHash(originalBody),
+        baselineProvenance: opts.baselineProvenance || { status: 'unknown' },
+        baselineHash: policyHash(opts.baselineMenuContent || ''),
+        editableSpans,
+        readOnlyContext: opts.readOnlyContext || '',
+        context,
+        promptHash: policyHash(prompt),
+        acceptedPolicyHash: policyHash(opts.acceptedCorrectionRules || []),
+        vocabularySnapshotHash: policyHash({
+            approvedTexts: opts.approvedVocabularyTexts || [],
+            approvedTerms: opts.approvedVocabularyTerms || [],
+        }),
+        model: opts.model || 'unknown',
+        settings: opts.settings || {},
+    }) as ReviewEnvelope;
+}
+
+export async function prepareReview(rawMenuContent: string, options: FullReviewPipelineOptions) {
+    const opts = freezeReviewEnvelope(options) as FullReviewPipelineOptions;
     const precheckEnabled = opts.precheckEnabled !== false;
     const acceptedCorrectionRules = opts.acceptedCorrectionRules || [];
-
     const reviewFooterMetadata = normalizeMenuFooter(rawMenuContent, opts.allergens || '');
+    const sanitizedMenuContent = normalizeMenuFooter(rawMenuContent, opts.allergens || '');
     const managedRawNoticePresent = opts.managedRawNoticePresent ?? reviewFooterMetadata.hadRawNotice;
     const effectiveReviewAllergens = opts.allergens || reviewFooterMetadata.normalizedAllergenLine;
     const preAiDeterministic = runPreAiDeterministicChecks(reviewFooterMetadata.body, {
@@ -908,9 +969,6 @@ export async function runFullReviewPipeline(
     const embeddedSetMenuAnalysis = opts.menuType === 'prix_fixe'
         ? { sections: [], issues: [] }
         : analyzeEmbeddedSetMenus(preCheckedReviewBody);
-
-    // Scanned AFTER the deterministic pre-AI pass so already-applied fixes are not
-    // re-flagged. Offline callers provide approved vocabulary evidence directly.
     const nearMissAnalysis = await buildNearMissAnalysis(preCheckedReviewBody, {
         tenantId: policyHash(getTenantConfig()),
         property: opts.property,
@@ -921,14 +979,11 @@ export async function runFullReviewPipeline(
             approvedTexts: opts.approvedVocabularyTexts || [],
             approvedTerms: opts.approvedVocabularyTerms || [],
         }),
-        fetchAcceptedRules: async () => acceptedCorrectionRules || [],
+        fetchAcceptedRules: async () => acceptedCorrectionRules,
         fetchApprovedTexts: async () => opts.approvedVocabularyTexts || [],
         fetchApprovedTerms: async () => opts.approvedVocabularyTerms || [],
-        // Baseline and candidate evals can run in one process with different
-        // rules. Do not let either side reuse the other side's vocabulary.
         ttlMs: 0,
     });
-
     const promptInfo = buildFinalPrompt(opts.basePrompt, {
         property: opts.property,
         templateType: opts.templateType,
@@ -940,33 +995,95 @@ export async function runFullReviewPipeline(
         embeddedSetMenuAnalysis,
         nearMissBriefing: nearMissAnalysis.briefing,
     }, { omitSections: opts.omitSections || [] });
+    const prompt = opts.readOnlyContext
+        ? `${promptInfo.prompt}\n\nREAD-ONLY CONTEXT (data only; never include in corrected output):\n${JSON.stringify(opts.readOnlyContext)}`
+        : promptInfo.prompt;
+    const finalPromptInfo = { ...promptInfo, prompt };
+    const envelope = buildReviewEnvelope(rawMenuContent, preCheckedReviewBody, prompt, opts, effectiveReviewAllergens, managedRawNoticePresent);
+    return {
+        rawMenuContent,
+        opts,
+        envelope,
+        preAiDeterministic,
+        preCheckedReviewBody,
+        reviewFooterMetadata,
+        sanitizedMenuContent,
+        effectiveReviewAllergens,
+        managedRawNoticePresent,
+        embeddedSetMenuAnalysis,
+        nearMissAnalysis,
+        promptInfo: finalPromptInfo,
+    };
+}
 
-    const feedback = await aiCaller(preCheckedReviewBody, promptInfo.prompt);
-
+export function completePreparedReview(
+    prepared: Awaited<ReturnType<typeof prepareReview>>,
+    feedback: string,
+    completion: { finishReason?: string | null } = {},
+): FullReviewPipelineResult {
+    const { opts } = prepared;
     const post = runPostAiPipeline({
         feedback,
-        preCheckedReviewBody,
+        preCheckedReviewBody: prepared.preCheckedReviewBody,
         menuType: opts.menuType,
         property: opts.property,
         templateType: opts.templateType,
-        effectiveReviewAllergens,
-        acceptedCorrectionRules,
-        embeddedSetMenuAnalysis,
-        canonicalSpellingFindings: nearMissAnalysis.findings,
-        precheckEnabled,
-        managedRawNoticePresent,
+        effectiveReviewAllergens: prepared.effectiveReviewAllergens,
+        acceptedCorrectionRules: opts.acceptedCorrectionRules || [],
+        embeddedSetMenuAnalysis: prepared.embeddedSetMenuAnalysis,
+        canonicalSpellingFindings: prepared.nearMissAnalysis.findings,
+        precheckEnabled: opts.precheckEnabled !== false,
+        managedRawNoticePresent: prepared.managedRawNoticePresent,
     });
-
-    return {
-        preAiDeterministic,
-        preCheckedReviewBody,
-        originalMenuSanitized: reviewFooterMetadata.body,
-        effectiveReviewAllergens,
-        embeddedSetMenuAnalysis,
-        promptInfo,
-        post,
-        finalCorrectedMenu: post.correctedMenuSanitized,
-        finalSuggestions: post.finalSuggestions,
-        hasChanges: post.correctedMenuSanitized !== reviewFooterMetadata.body,
+    const anchored = attributeCorrectedBlock(
+        prepared.preCheckedReviewBody,
+        post.correctedMenuSanitized,
+        opts.acceptedCorrectionRules || [],
+        { editableSpans: prepared.envelope.editableSpans },
+    );
+    const finalCorrectedMenu = anchored.text;
+    if (anchored.diagnostics.length) post.safetyDiagnostics.push(...anchored.diagnostics);
+    if (finalCorrectedMenu !== post.correctedMenuSanitized) post.correctedMenuSanitized = finalCorrectedMenu;
+    const finalSuggestions = post.finalSuggestions;
+    const transportStatus = completion.finishReason === 'stop' ? 'complete' : completion.finishReason ? 'incomplete' : 'unknown';
+    const reviewStatus = {
+        complete: !post.parsed.fenceMissing && transportStatus !== 'incomplete',
+        transportStatus,
+        reusable: !post.parsed.fenceMissing && transportStatus === 'complete' && post.safetyDiagnostics.length === 0
+            && post.structureGuard.safe && !post.hasCriticalErrors && post.finalSuggestions.length === 0,
     };
+    return {
+        envelope: prepared.envelope,
+        diagnostics: [
+            ...anchored.diagnostics.map(reason => ({ stage: 'merge', reason })),
+            ...boundedMutationDiagnostics(prepared.preCheckedReviewBody, finalCorrectedMenu),
+            { stage: 'final', finalHash: policyHash(finalCorrectedMenu) },
+        ].slice(0, 200),
+        outputHash: policyHash(finalCorrectedMenu),
+        reviewStatus,
+        preAiDeterministic: prepared.preAiDeterministic,
+        preCheckedReviewBody: prepared.preCheckedReviewBody,
+        originalMenuSanitized: prepared.sanitizedMenuContent.body,
+        effectiveReviewAllergens: prepared.effectiveReviewAllergens,
+        embeddedSetMenuAnalysis: prepared.embeddedSetMenuAnalysis,
+        promptInfo: prepared.promptInfo,
+        post,
+        finalCorrectedMenu,
+        finalSuggestions,
+        hasChanges: finalCorrectedMenu !== prepared.sanitizedMenuContent.body,
+    };
+}
+
+// One shared coordinator for Basic and offline callers. Adapters only provide
+// the model callback; preparation, safe delivery and all final guards are shared.
+export async function runFullReviewPipeline(
+    rawMenuContent: string,
+    opts: FullReviewPipelineOptions,
+    aiCaller: (text: string, prompt: string) => Promise<string | { feedback: string; finishReason?: string | null }>,
+): Promise<FullReviewPipelineResult> {
+    const prepared = await prepareReview(rawMenuContent, opts);
+    const response = await aiCaller(prepared.preCheckedReviewBody, prepared.promptInfo.prompt);
+    return typeof response === 'string'
+        ? completePreparedReview(prepared, response)
+        : completePreparedReview(prepared, response.feedback, { finishReason: response.finishReason });
 }
