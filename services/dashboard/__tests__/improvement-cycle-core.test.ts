@@ -62,6 +62,20 @@ import {
 } from '../lib/improvement-cycle-core';
 import { AI_REVIEW_FENCES } from '../lib/review-response-contract';
 
+const verifiedReplayRetirement = {
+    version: 1 as const,
+    eligible: true,
+    reason: 'Current deterministic guards correct the frozen original failed response with zero model calls; original delivery has no mismatch.',
+    original_audit_id: 'audit-1',
+    original_audit_created_at: '2026-09-01T20:56:01Z',
+    original_final_correct: false,
+    submitted_correct: false,
+    original_response_correct: false,
+    deterministic_replay_correct: true,
+    original_response_sha256: 'fixture-response-digest',
+    model_calls: 0 as const,
+};
+
 describe('shouldDeferForCadence', () => {
     const now = Date.parse('2026-07-25T09:15:00Z');
     const hoursAgo = (h: number) => new Date(now - h * 3_600_000).toISOString();
@@ -337,12 +351,18 @@ describe('correctionsRequiringProposal', () => {
     test('excludes only replay-proven fixes from proposal analysis', () => {
         const corrections = [{ id: 'fixed' }, { id: 'missed' }, { id: 'unknown' }];
         const evidence = [
-            { correction_id: 'fixed', status: 'now_correct' as const },
+            { correction_id: 'fixed', status: 'now_correct' as const, retirement_evidence: verifiedReplayRetirement },
             { correction_id: 'missed', status: 'still_missed' as const },
             { correction_id: 'unknown', status: 'replay_unavailable' as const },
         ];
         expect(correctionsRequiringProposal(corrections, evidence).map((entry) => entry.id))
             .toEqual(['missed', 'unknown']);
+    });
+
+    test('keeps bare now_correct actionable until retirement evidence is verified', () => {
+        expect(correctionsRequiringProposal([{ id: 'legacy' }], [
+            { correction_id: 'legacy', status: 'now_correct' },
+        ])).toEqual([{ id: 'legacy' }]);
     });
 });
 
@@ -382,7 +402,7 @@ describe('mergeReplayResolvedCorrectionRouting', () => {
                 { id: 'missed', original_text: 'house-made', corrected_text: 'housemade' },
             ],
             [
-                { correction_id: 'fixed', status: 'now_correct' },
+                { correction_id: 'fixed', status: 'now_correct', retirement_evidence: verifiedReplayRetirement },
                 { correction_id: 'missed', status: 'still_missed' },
             ],
             [{
@@ -398,6 +418,23 @@ describe('mergeReplayResolvedCorrectionRouting', () => {
             corrected_text: 'FUEGO',
         });
         expect(merged[1]).toMatchObject({ correction_id: 'missed', lane: 'prompt' });
+    });
+
+    test('downgrades an unverified now_correct route to actionable verification_required', () => {
+        const merged = mergeReplayResolvedCorrectionRouting(
+            [{ id: 'legacy', original_text: 'x', corrected_text: 'y', rule: 'Explain the correction.' }],
+            [{ correction_id: 'legacy', status: 'now_correct' }],
+            [{ correction_id: 'legacy', lane: 'already_correct', target: 'current live review pipeline', note: 'backend replay passed', replay_status: 'now_correct' }]
+        );
+        expect(merged).toMatchObject([{
+            correction_id: 'legacy', lane: 'unrouted', replay_status: 'verification_required', retirement_verified: false,
+        }]);
+        const actionable = mergeReplayResolvedCorrectionRouting(
+            [{ id: 'legacy', original_text: 'x', corrected_text: 'y', rule: 'Explain the correction.' }],
+            [{ correction_id: 'legacy', status: 'now_correct' }],
+            [{ correction_id: 'legacy', lane: 'prompt', target: 'section', note: 'backend replay passed', replay_status: 'now_correct' }]
+        );
+        expect(actionable[0]).toMatchObject({ lane: 'prompt', replay_status: 'verification_required', retirement_verified: false });
     });
 });
 
@@ -1275,11 +1312,21 @@ describe('decideReplayStatus (Follow-up 2)', () => {
 describe('replay-resolved correction lifecycle', () => {
     test('separates corrections proven current from corrections that still belong to the proposal', () => {
         expect(partitionCorrectionIdsByReplayStatus(['c1', 'c2', 'c3'], [
-            { correction_id: 'c1', status: 'now_correct' },
+            { correction_id: 'c1', status: 'now_correct', retirement_evidence: verifiedReplayRetirement },
             { correction_id: 'c2', status: 'still_missed' },
             { correction_id: 'c3', status: 'partially_correct' },
         ])).toEqual({ resolvedIds: ['c1'], proposalIds: ['c2', 'c3'] });
         expect(replayResolutionMarker('2026-08-21-manual-1')).toBe('resolved-by-current-pipeline:2026-08-21-manual-1');
+    });
+
+    test('bare now_correct, malformed proof, and delivery mismatch remain actionable', () => {
+        const ids = ['legacy', 'malformed', 'delivery'];
+        const evidence = [
+            { correction_id: 'legacy', status: 'now_correct' as const },
+            { correction_id: 'malformed', status: 'now_correct' as const, retirement_evidence: { ...verifiedReplayRetirement, eligible: true, original_response_correct: true } },
+            { correction_id: 'delivery', status: 'delivery_mismatch' as const },
+        ];
+        expect(partitionCorrectionIdsByReplayStatus(ids, evidence)).toEqual({ resolvedIds: [], proposalIds: ids });
     });
 });
 

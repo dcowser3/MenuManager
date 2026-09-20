@@ -7,6 +7,8 @@ import { isReasoningModel as adapterIsReasoningModel } from '@menumanager/llm-ad
 import { buildTokenEdits, tokenizeDiffText, tokenizeWords } from '@menumanager/diff-core';
 import { createHash } from 'crypto';
 import { AI_REVIEW_FENCES } from './review-response-contract';
+import { BackendReplayStatus, ReplayRetirementEvidence, ReplayStatus, isReplayRetirementVerified } from './replay-retirement';
+export { isReplayRetirementVerified, isReplayRetirementPolicyCurrent, unverifiedReplayResolutionIds, REPLAY_RETIREMENT_POLICY_VERSION } from './replay-retirement';
 
 export { buildBehaviorTestRecord, buildAcceptedPolicyTestFamily, freezeBehaviorTests } from './learning-behavior-tests';
 
@@ -263,7 +265,10 @@ export type ReplayEvidenceEntry = {
     submission_id?: string;
     original_text?: string;
     corrected_text?: string;
-    status: 'still_missed' | 'partially_correct' | 'now_correct' | 'replay_unavailable' | 'not_verifiable';
+    status: ReplayStatus;
+    /** Backend sample result, kept separate from the decision to retire evidence. */
+    observed_status?: BackendReplayStatus;
+    retirement_evidence?: ReplayRetirementEvidence;
     /** Expected token-level changes that replay demonstrably applied (for compound corrections). */
     applied_changes?: string[];
     /** Expected token-level changes still absent after replay. */
@@ -276,7 +281,7 @@ export function partitionCorrectionIdsByReplayStatus(
 ): { resolvedIds: string[]; proposalIds: string[] } {
     const nowCorrect = new Set(
         (replayEvidence || [])
-            .filter((entry) => entry?.status === 'now_correct' && entry.correction_id)
+            .filter((entry) => isReplayRetirementVerified(entry) && entry.correction_id)
             .map((entry) => `${entry.correction_id}`)
     );
     const resolvedIds: string[] = [];
@@ -295,7 +300,7 @@ export function correctionsRequiringProposal<T extends CorrectionRuleLike>(
 ): T[] {
     const resolvedIds = new Set(
         (replayEvidence || [])
-            .filter((entry) => entry?.status === 'now_correct' && entry.correction_id)
+            .filter((entry) => isReplayRetirementVerified(entry) && entry.correction_id)
             .map((entry) => `${entry.correction_id}`)
     );
     return (corrections || []).filter((correction) => !resolvedIds.has(`${correction.id}`));
@@ -533,6 +538,7 @@ export type CorrectionRoutingEntry = {
     note: string;
     /** Replay tag for this correction, copied in for rendering (still_missed/now_correct/…). */
     replay_status?: ReplayEvidenceEntry['status'];
+    retirement_verified?: boolean;
     /** Source correction text, copied in for a readable routing table (null for freeform). */
     original_text?: string | null;
     corrected_text?: string | null;
@@ -565,13 +571,14 @@ export function mergeReplayResolvedCorrectionRouting(
         if (!id) continue;
         seen.add(id);
         const evidence = evidenceById.get(id);
-        if (evidence?.status === 'now_correct') {
+        if (isReplayRetirementVerified(evidence)) {
             merged.push({
                 correction_id: id,
                 lane: 'already_correct',
                 target: 'current live review pipeline',
                 note: 'Fresh replay confirmed the reviewer correction is already produced; excluded from proposal generation and retired.',
                 replay_status: 'now_correct',
+                retirement_verified: true,
                 original_text: correction.original_text || null,
                 corrected_text: correction.corrected_text || null,
                 guidance: correction.rule || null,
@@ -579,7 +586,25 @@ export function mergeReplayResolvedCorrectionRouting(
             continue;
         }
         const routed = routingById.get(id);
-        if (routed) merged.push(routed);
+        if (routed) {
+            const unverified = evidence?.status === 'now_correct' || evidence?.status === 'verification_required' || evidence?.status === 'delivery_mismatch';
+            const normalizedReplayStatus = evidence?.status === 'now_correct' ? 'verification_required' : evidence?.status;
+            merged.push(unverified && routed.lane === 'already_correct'
+                ? { ...routed, lane: 'unrouted', note: 'Retirement is unverified; original failure and delivery require verification.', replay_status: 'verification_required', retirement_verified: false }
+                : { ...routed, ...(unverified ? { replay_status: normalizedReplayStatus, retirement_verified: false } : {}) });
+        } else if (evidence && (evidence.status === 'now_correct' || evidence.status === 'verification_required' || evidence.status === 'delivery_mismatch')) {
+            merged.push({
+                correction_id: id,
+                lane: 'unrouted',
+                target: 'Original failure verification',
+                note: evidence.retirement_evidence?.reason || 'Backend replay alone does not prove a reliable delivered correction.',
+                replay_status: evidence.status === 'now_correct' ? 'verification_required' : evidence.status,
+                retirement_verified: false,
+                original_text: correction.original_text || null,
+                corrected_text: correction.corrected_text || null,
+                guidance: correction.rule || null,
+            });
+        }
     }
     for (const route of proposalRouting || []) {
         if (!seen.has(`${route.correction_id}`)) merged.push(route);
@@ -940,7 +965,8 @@ export function validateCorrectionRouting(
     const sources = (opts.sourceCorrections || []).filter((c) => c && c.id);
     const replayById = new Map<string, ReplayEvidenceEntry['status']>();
     for (const e of opts.replayEvidence || []) {
-        if (e && e.correction_id) replayById.set(String(e.correction_id), e.status);
+        if (e && e.correction_id) replayById.set(String(e.correction_id),
+            e.status === 'now_correct' && !isReplayRetirementVerified(e) ? 'verification_required' : e.status);
     }
     const sourceById = new Map<string, { original_text?: string | null; corrected_text?: string | null; rule?: string | null }>();
     for (const c of sources) sourceById.set(String(c.id), { original_text: c.original_text ?? undefined, corrected_text: c.corrected_text ?? undefined, rule: c.rule ?? undefined });
@@ -2700,7 +2726,9 @@ Prompt rewrite rules:
 - Treat every new reviewer correction as evidence that the current first-pass process missed something. Corrections may be annotated with REPLAY EVIDENCE tags from a pre-analysis replay of the current pipeline on the same raw input:
   - still_missed: the current pipeline reproduces the exact mistake on this input. Replay evidence outranks any coverage citation. A valid prompt_quote + still_missed is diagnosis ("present but ignored"); you MUST still propose a concrete change (restructuring/examples or code guard preferred over more abstract text). Claiming "already covered" for a still_missed correction is prohibited.
   - partially_correct: replay applied part of a compound reviewer correction but not all of it. The evidence lists applied_changes and remaining_changes. Treat the applied portion as proven; route ONLY the remaining delta, and do not recommend repairing a deterministic rule that replay already demonstrated. You may dismiss a remaining addition only when it is unsupported by the source/reviewer explanation, and must say so in correction_routing.
-  - now_correct: the current pipeline already produces the human's fix. You MAY leave this unaddressed, but your analysis must cite the replay evidence ("replay shows this is now produced") as the reason.
+  - now_correct: retirement is permitted only when the original failed response, same-attempt delivery, and zero-model-call deterministic replay are proven by REPLAY RETIREMENT evidence. A bare historical/backend now_correct is only an observation and remains actionable as verification_required.
+  - verification_required: a backend sample passed, but no deterministic repair of the original failed response has been verified. Keep the correction actionable; do not claim it is fixed, dismissed, or already handled.
+  - delivery_mismatch: the original API and submitted text differ after review; attribution is UNKNOWN. A human may have deliberately edited the result. Do not propose a browser/editor fix without edit-history evidence or a reproduced failure without human intervention.
   - replay_unavailable: no raw input was available for replay.
   - not_verifiable: this correction is freeform guidance (no exact original/corrected text pair) and cannot be mechanically replay-verified; use judgment.
 - When a still_missed correction occurs in a context the prompt already "mentions," prefer adding concrete examples, decision tables, or counter-examples over appending another abstract sentence. If prompt text is fundamentally unreliable for the case, recommend a deterministic code guard instead of more prompt text, and say so.

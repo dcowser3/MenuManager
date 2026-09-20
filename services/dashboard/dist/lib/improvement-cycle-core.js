@@ -3,7 +3,7 @@
 // gating, effective-prompt resolution, LLM-output validation, eval summarization,
 // and the mapping from LLM-proposed rules to correction_rules payloads.
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.IDENTICAL_CANDIDATE_EVAL_NOTE = exports.CONTEXT_DEPENDENT_TERMS = exports.CURRENT_PROMPT_END_MARKER = exports.CURRENT_PROMPT_BEGIN_MARKER = exports.PROMPT_UNCHANGED_SENTINEL = exports.CORRECTION_ROUTING_LANES = exports.PROPOSED_RULE_CHANGE_TYPES = exports.freezeBehaviorTests = exports.buildAcceptedPolicyTestFamily = exports.buildBehaviorTestRecord = void 0;
+exports.IDENTICAL_CANDIDATE_EVAL_NOTE = exports.CONTEXT_DEPENDENT_TERMS = exports.CURRENT_PROMPT_END_MARKER = exports.CURRENT_PROMPT_BEGIN_MARKER = exports.PROMPT_UNCHANGED_SENTINEL = exports.CORRECTION_ROUTING_LANES = exports.PROPOSED_RULE_CHANGE_TYPES = exports.freezeBehaviorTests = exports.buildAcceptedPolicyTestFamily = exports.buildBehaviorTestRecord = exports.REPLAY_RETIREMENT_POLICY_VERSION = exports.unverifiedReplayResolutionIds = exports.isReplayRetirementPolicyCurrent = exports.isReplayRetirementVerified = void 0;
 exports.shouldRunCycle = shouldRunCycle;
 exports.needsDistinctCycleId = needsDistinctCycleId;
 exports.computeReviewBaselineFingerprint = computeReviewBaselineFingerprint;
@@ -72,6 +72,12 @@ const llm_adapter_1 = require("@menumanager/llm-adapter");
 const diff_core_1 = require("@menumanager/diff-core");
 const crypto_1 = require("crypto");
 const review_response_contract_1 = require("./review-response-contract");
+const replay_retirement_1 = require("./replay-retirement");
+var replay_retirement_2 = require("./replay-retirement");
+Object.defineProperty(exports, "isReplayRetirementVerified", { enumerable: true, get: function () { return replay_retirement_2.isReplayRetirementVerified; } });
+Object.defineProperty(exports, "isReplayRetirementPolicyCurrent", { enumerable: true, get: function () { return replay_retirement_2.isReplayRetirementPolicyCurrent; } });
+Object.defineProperty(exports, "unverifiedReplayResolutionIds", { enumerable: true, get: function () { return replay_retirement_2.unverifiedReplayResolutionIds; } });
+Object.defineProperty(exports, "REPLAY_RETIREMENT_POLICY_VERSION", { enumerable: true, get: function () { return replay_retirement_2.REPLAY_RETIREMENT_POLICY_VERSION; } });
 var learning_behavior_tests_1 = require("./learning-behavior-tests");
 Object.defineProperty(exports, "buildBehaviorTestRecord", { enumerable: true, get: function () { return learning_behavior_tests_1.buildBehaviorTestRecord; } });
 Object.defineProperty(exports, "buildAcceptedPolicyTestFamily", { enumerable: true, get: function () { return learning_behavior_tests_1.buildAcceptedPolicyTestFamily; } });
@@ -266,7 +272,7 @@ function assembleSupersedeCorrectionSet(unconsumed, carriedOver) {
 }
 function partitionCorrectionIdsByReplayStatus(correctionIds, replayEvidence) {
     const nowCorrect = new Set((replayEvidence || [])
-        .filter((entry) => entry?.status === 'now_correct' && entry.correction_id)
+        .filter((entry) => (0, replay_retirement_1.isReplayRetirementVerified)(entry) && entry.correction_id)
         .map((entry) => `${entry.correction_id}`));
     const resolvedIds = [];
     const proposalIds = [];
@@ -280,7 +286,7 @@ function partitionCorrectionIdsByReplayStatus(correctionIds, replayEvidence) {
 /** Keep replay-resolved rows for audit/retirement, but out of the proposal LLM context. */
 function correctionsRequiringProposal(corrections, replayEvidence) {
     const resolvedIds = new Set((replayEvidence || [])
-        .filter((entry) => entry?.status === 'now_correct' && entry.correction_id)
+        .filter((entry) => (0, replay_retirement_1.isReplayRetirementVerified)(entry) && entry.correction_id)
         .map((entry) => `${entry.correction_id}`));
     return (corrections || []).filter((correction) => !resolvedIds.has(`${correction.id}`));
 }
@@ -457,13 +463,14 @@ function mergeReplayResolvedCorrectionRouting(corrections, replayEvidence, propo
             continue;
         seen.add(id);
         const evidence = evidenceById.get(id);
-        if (evidence?.status === 'now_correct') {
+        if ((0, replay_retirement_1.isReplayRetirementVerified)(evidence)) {
             merged.push({
                 correction_id: id,
                 lane: 'already_correct',
                 target: 'current live review pipeline',
                 note: 'Fresh replay confirmed the reviewer correction is already produced; excluded from proposal generation and retired.',
                 replay_status: 'now_correct',
+                retirement_verified: true,
                 original_text: correction.original_text || null,
                 corrected_text: correction.corrected_text || null,
                 guidance: correction.rule || null,
@@ -471,8 +478,26 @@ function mergeReplayResolvedCorrectionRouting(corrections, replayEvidence, propo
             continue;
         }
         const routed = routingById.get(id);
-        if (routed)
-            merged.push(routed);
+        if (routed) {
+            const unverified = evidence?.status === 'now_correct' || evidence?.status === 'verification_required' || evidence?.status === 'delivery_mismatch';
+            const normalizedReplayStatus = evidence?.status === 'now_correct' ? 'verification_required' : evidence?.status;
+            merged.push(unverified && routed.lane === 'already_correct'
+                ? { ...routed, lane: 'unrouted', note: 'Retirement is unverified; original failure and delivery require verification.', replay_status: 'verification_required', retirement_verified: false }
+                : { ...routed, ...(unverified ? { replay_status: normalizedReplayStatus, retirement_verified: false } : {}) });
+        }
+        else if (evidence && (evidence.status === 'now_correct' || evidence.status === 'verification_required' || evidence.status === 'delivery_mismatch')) {
+            merged.push({
+                correction_id: id,
+                lane: 'unrouted',
+                target: 'Original failure verification',
+                note: evidence.retirement_evidence?.reason || 'Backend replay alone does not prove a reliable delivered correction.',
+                replay_status: evidence.status === 'now_correct' ? 'verification_required' : evidence.status,
+                retirement_verified: false,
+                original_text: correction.original_text || null,
+                corrected_text: correction.corrected_text || null,
+                guidance: correction.rule || null,
+            });
+        }
     }
     for (const route of proposalRouting || []) {
         if (!seen.has(`${route.correction_id}`))
@@ -759,7 +784,7 @@ function validateCorrectionRouting(rawRouting, opts = {}) {
     const replayById = new Map();
     for (const e of opts.replayEvidence || []) {
         if (e && e.correction_id)
-            replayById.set(String(e.correction_id), e.status);
+            replayById.set(String(e.correction_id), e.status === 'now_correct' && !(0, replay_retirement_1.isReplayRetirementVerified)(e) ? 'verification_required' : e.status);
     }
     const sourceById = new Map();
     for (const c of sources)
@@ -2213,7 +2238,9 @@ Prompt rewrite rules:
 - Treat every new reviewer correction as evidence that the current first-pass process missed something. Corrections may be annotated with REPLAY EVIDENCE tags from a pre-analysis replay of the current pipeline on the same raw input:
   - still_missed: the current pipeline reproduces the exact mistake on this input. Replay evidence outranks any coverage citation. A valid prompt_quote + still_missed is diagnosis ("present but ignored"); you MUST still propose a concrete change (restructuring/examples or code guard preferred over more abstract text). Claiming "already covered" for a still_missed correction is prohibited.
   - partially_correct: replay applied part of a compound reviewer correction but not all of it. The evidence lists applied_changes and remaining_changes. Treat the applied portion as proven; route ONLY the remaining delta, and do not recommend repairing a deterministic rule that replay already demonstrated. You may dismiss a remaining addition only when it is unsupported by the source/reviewer explanation, and must say so in correction_routing.
-  - now_correct: the current pipeline already produces the human's fix. You MAY leave this unaddressed, but your analysis must cite the replay evidence ("replay shows this is now produced") as the reason.
+  - now_correct: retirement is permitted only when the original failed response, same-attempt delivery, and zero-model-call deterministic replay are proven by REPLAY RETIREMENT evidence. A bare historical/backend now_correct is only an observation and remains actionable as verification_required.
+  - verification_required: a backend sample passed, but no deterministic repair of the original failed response has been verified. Keep the correction actionable; do not claim it is fixed, dismissed, or already handled.
+  - delivery_mismatch: the original API and submitted text differ after review; attribution is UNKNOWN. A human may have deliberately edited the result. Do not propose a browser/editor fix without edit-history evidence or a reproduced failure without human intervention.
   - replay_unavailable: no raw input was available for replay.
   - not_verifiable: this correction is freeform guidance (no exact original/corrected text pair) and cannot be mechanically replay-verified; use judgment.
 - When a still_missed correction occurs in a context the prompt already "mentions," prefer adding concrete examples, decision tables, or counter-examples over appending another abstract sentence. If prompt text is fundamentally unreliable for the case, recommend a deterministic code guard instead of more prompt text, and say so.

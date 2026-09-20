@@ -531,7 +531,7 @@ async function sendProposalEmail(supabase, { cycleId, evalStatus, evalSummary, c
             : '';
         // C3: compact per-correction routing table so the reviewer sees the conclusion in the email.
         const routing = Array.isArray(correctionRouting) ? correctionRouting : [];
-        const retiredCorrectionCount = routing.filter((r) => r && r.replay_status === 'now_correct').length;
+        const retiredCorrectionCount = routing.filter((r) => r && r.retirement_verified === true).length;
         const actionableCorrectionCount = Math.max(0, Number(correctionCount || 0) - retiredCorrectionCount);
         const routingTable = routing.length
             ? [
@@ -935,12 +935,18 @@ async function main() {
                     }
                     const signals = replayOut ? extractReplacementSignals(raw, replayOut) : [];
                     const replayAnalysis = core.analyzeReplayCorrection(o, c, replayOut, signals);
+                    const observedStatus = replayAnalysis.status;
                     replayEvidence.push({
                         correction_id: r.id,
                         submission_id: sid,
                         original_text: o,
                         corrected_text: c,
                         ...replayAnalysis,
+                        // This cycle has no original-audit producer yet. A
+                        // backend now_correct is therefore an observation,
+                        // never a retirement decision.
+                        status: observedStatus === 'now_correct' ? 'verification_required' : observedStatus,
+                        observed_status: observedStatus,
                     });
                 }
             }
@@ -955,12 +961,11 @@ async function main() {
         }
         } // end consolidate skip for replay
 
-        // Do not ask the proposal model to re-implement corrections that replay
-        // has already proved the live pipeline now produces. Keep the full
-        // evidence for the proposal page and retirement bookkeeping, but only
-        // unresolved/unavailable guidance enters the improvement prompt.
+        // Only fail-closed, original-response retirement proof may omit a
+        // correction from proposal analysis. Current backend replay has no
+        // audit producer, so its now_correct observations remain actionable.
         const replayResolvedIds = new Set(
-            replayEvidence.filter((entry) => entry?.status === 'now_correct').map((entry) => `${entry.correction_id}`)
+            replayEvidence.filter(core.isReplayRetirementVerified).map((entry) => `${entry.correction_id}`)
         );
         const correctionsForProposal = core.correctionsRequiringProposal(correctionRules, replayEvidence);
         const proposalReplayEvidence = replayEvidence.filter((entry) => !replayResolvedIds.has(`${entry.correction_id}`));
@@ -1130,7 +1135,8 @@ async function main() {
                         const remaining = Array.isArray(ev.remaining_changes) && ev.remaining_changes.length ? ev.remaining_changes.join(', ') : 'an unresolved remainder';
                         replayTag = `   REPLAY EVIDENCE: partially_correct — replay already applied [${applied}]. Remaining [${remaining}]. Route only the remainder; do not recommend repairing the proven portion.`;
                     }
-                    else if (ev.status === 'now_correct') replayTag = `   REPLAY EVIDENCE: now_correct — the current pipeline already produces the human correction.`;
+                    else if (ev.status === 'verification_required') replayTag = `   REPLAY EVIDENCE: verification_required — backend replay observed a possible match, but original-response retirement proof is unavailable. Keep this correction actionable.`;
+                    else if (ev.status === 'delivery_mismatch') replayTag = `   REPLAY EVIDENCE: delivery_mismatch — the original API and submitted text differ; attribution is unknown and requires verification.`;
                     else if (ev.status === 'not_verifiable') replayTag = `   REPLAY EVIDENCE: not_verifiable — freeform guidance, not mechanically checkable.`;
                     else replayTag = `   REPLAY EVIDENCE: ${ev.status} — replay unavailable for this submission.`;
                 }
