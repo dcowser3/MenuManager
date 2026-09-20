@@ -8,6 +8,7 @@ const behaviorModule = require('../lib/learning-behavior-tests');
 const { dispatchCodeDraft, loadPreparedDraft, applyValidatedDraft, applyValidatedDraftWithHandoff } = require('../../../scripts/auto-code-proposal');
 const { snapshotBaseline } = require('../../../scripts/lib/code-proposal-draft');
 const { canonicalHash } = require('../../../scripts/lib/code-proposal-broker');
+const { readC2bHandoff } = require('../../../scripts/lib/code-proposal-proof-runner');
 
 const HASH = 'a'.repeat(64);
 const HASH_B = 'b'.repeat(64);
@@ -121,12 +122,16 @@ test('actual C2b apply emits a byte-bound owner-only handoff for C2c1', async ()
             fs.mkdirSync(path.dirname(target), { recursive: true });
             if (fs.existsSync(source)) fs.cpSync(source, target, { recursive: true });
         }
-        const result = await applyValidatedDraftWithHandoff({ baselineRoot: baseline, draft: { summary: 'c2b', patch: patchText, test_files: [testFile], corrections: [] }, response: { bodySha256: digest('response'), requestId: 'r1', model: 'test', finishReason: 'stop' } }, proposal, candidate, { repoRoot: actualRepoRoot, attemptId: 'attempt-one', handoffPath, authorizationHash: HASH, scopeHash: HASH_B });
+        const scope = { attemptId: 'attempt-one', outputRoot: state.attemptRoot };
+        const draft = { summary: 'c2b', patch: patchText, test_files: [testFile], corrections: [{ correction_id: 'c1', case_id: 'case-1', test_name: 'fix', original_text: 'Dish, lemons', corrected_text: 'Dish, lemon', recommendation_indexes: [0] }] };
+        const result = await applyValidatedDraftWithHandoff({ baselineRoot: baseline, draft, checked: { cases: [{ case_id: 'case-1', raw_input: 'Dish, lemons', ground_truth: 'Dish, lemon', context: {} }] }, scope, authorizationHash: HASH, response: { bodySha256: digest('response'), requestId: 'r1', model: 'test', finishReason: 'stop' } }, proposal, candidate, { repoRoot: actualRepoRoot, handoffPath });
         expect(fs.statSync(handoffPath).mode & 0o777).toBe(0o600);
         const handoff = JSON.parse(fs.readFileSync(handoffPath, 'utf8'));
         expect(result.handoff.c2b_handoff_sha256).toBe(digest(fs.readFileSync(handoffPath)));
         expect(handoff.draft.patch_sha256).toBe(digest(patchText));
         expect(handoff.candidate_source_sha256).toMatch(/^[a-f0-9]{64}$/);
         expect(handoff.candidate_source_sha256).not.toBe(handoff.baseline_source_sha256);
+        const preflight = readC2bHandoff(handoffPath, state.attemptRoot, { attempt_id: 'attempt-one', authorization_hash: HASH, scope_hash: canonicalHash(scope), c2b_handoff_sha256: result.handoff.c2b_handoff_sha256, candidate_source_sha256: handoff.candidate_source_sha256, draft_patch_sha256: handoff.draft.patch_sha256, draft_content_sha256: handoff.draft.content_sha256, draft_response_sha256: handoff.draft.response_sha256 });
+        expect(preflight.handoff.candidate_source_sha256).toBe(handoff.candidate_source_sha256);
     } finally { state.cleanup(); }
 });

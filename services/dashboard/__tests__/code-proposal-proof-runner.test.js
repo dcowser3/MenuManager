@@ -66,7 +66,7 @@ function setup(overrides = {}) {
 }
 
 function run(state, overrides = {}) {
-    return runCodeProposalProof({ ...state, c2bHandoffFile: state.c2bHandoffFile, imageId: HASH('5'), runtimeId: HASH('6'), replayPolicyVersion: state.trustedVerification.REPLAY_RETIREMENT_POLICY_VERSION, vocabularySha256: HASH('7'), expectationsSha256: HASH('8'), ...overrides });
+    return runCodeProposalProof({ ...state, allowTestDouble: true, c2bHandoffFile: state.c2bHandoffFile, imageId: HASH('5'), runtimeId: HASH('6'), replayPolicyVersion: state.trustedVerification.REPLAY_RETIREMENT_POLICY_VERSION, vocabularySha256: HASH('7'), expectationsSha256: HASH('8'), ...overrides });
 }
 
 test('runs independent baseline/candidate proof and writes owner-only plan, progress, reports and proof', async () => {
@@ -119,6 +119,20 @@ test('mixed code and replacement-rule proof carries motivating rule activations 
     } finally { state.cleanup(); }
 });
 
+test('historical code-candidate tests stay in the paired inventory while only new tests come from C2b', async () => {
+    const state = setup();
+    try {
+        const historical = 'services/dashboard/__tests__/code-candidate-history.test.ts';
+        fs.mkdirSync(path.dirname(path.join(state.baselineRoot, historical)), { recursive: true });
+        fs.mkdirSync(path.dirname(path.join(state.candidateRoot, historical)), { recursive: true });
+        fs.writeFileSync(path.join(state.baselineRoot, historical), 'test("history", () => {});');
+        fs.writeFileSync(path.join(state.candidateRoot, historical), 'test("history", () => {});');
+        const result = await run(state);
+        expect(result.plan.test_inventory).toContain(historical);
+        expect(result.plan.test_inventory).toContain(state.candidateTest);
+    } finally { state.cleanup(); }
+});
+
 test.each([
     ['owner mismatch', { proposal: { ...setup().proposal, eval_summary: { code_candidate: { status: 'running', attempt_id: 'other' } } } }, /owner/],
     ['candidate hash mismatch', { metadata: { candidate_source_sha256: HASH('9') } }, /differs from the frozen plan/],
@@ -167,9 +181,12 @@ test('reused replay report identities are rejected across repeats', async () => 
 });
 
 test('replay freshness, response contracts, and delivery-required omission are enforced', async () => {
-    const state = setup({ proposal: { ...setup().proposal } });
+    const state = setup();
     try {
         state.proposal.correction_routing[0].replay_status = 'delivery_mismatch';
+        fs.writeFileSync(path.join(state.attemptRoot, 'proposal.json'), JSON.stringify(state.proposal), { mode: 0o600 });
+        state.metadata.proposal_sha256 = state.trustedVerification.codeProposalVerificationFingerprint(state.proposal);
+        state.proposal.eval_summary.code_candidate.proposal_sha256 = state.metadata.proposal_sha256;
         await expect(run(state)).rejects.toThrow(/delivery/);
     } finally { state.cleanup(); }
 });

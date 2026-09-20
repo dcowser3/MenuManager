@@ -235,12 +235,13 @@ async function invokeWithTimeout(fn, input, timeoutMs, label) {
     } finally { if (timer) clearTimeout(timer); }
 }
 
-function revalidatePlan(planPath, plan, metadata, attemptRoot, baselineRoot, candidateRoot, bundle, trustedSuites, candidateTests, runtimeVerification) {
+function revalidatePlan(planPath, plan, metadata, attemptRoot, baselineRoot, candidateRoot, bundle, trustedSuites, historicalTests, candidateTests, runtimeVerification, liveProposal, trustedVerification) {
     const bytes = regularFile(planPath, path.dirname(planPath), 'Verifier plan');
     const stored = JSON.parse(bytes.toString('utf8'));
     const { plan_sha256: storedHash, ...body } = stored;
     if (storedHash !== hashJson(body) || storedHash !== plan.plan_sha256) throw new Error('Verifier plan changed after freezing.');
     if (hashBytes(fs.readFileSync(__filename)) !== plan.runner_sha256) throw new Error('Verifier runner identity changed after freezing.');
+    if (!trustedVerification || trustedVerification.codeProposalVerificationFingerprint(liveProposal) !== plan.proposal_sha256 || plan.accepted_rules_sha256 !== metadata.accepted_rules_sha256) throw new Error('Live proposal or accepted-rule identity changed after plan creation.');
     const behavior = JSON.parse(regularFile(path.join(attemptRoot, 'behavior-tests.json'), attemptRoot, 'Behavior artifact').toString('utf8'));
     const { sha256: behaviorHash, ...behaviorBody } = behavior;
     if (hashBytes(regularFile(path.join(attemptRoot, 'dataset.jsonl'), attemptRoot, 'Frozen dataset')) !== plan.dataset_sha256
@@ -252,9 +253,12 @@ function revalidatePlan(planPath, plan, metadata, attemptRoot, baselineRoot, can
     const handoffInfo = readC2bHandoff(plan.handoff_path, attemptRoot, { ...metadata, authorization_hash: plan.authorization_hash, scope_hash: plan.scope_hash, c2b_handoff_sha256: plan.c2b_handoff_sha256, candidate_source_sha256: plan.candidate_source_sha256, draft_patch_sha256: plan.draft_patch_sha256, draft_content_sha256: plan.draft_content_sha256, draft_response_sha256: plan.draft_response_sha256 });
     if (handoffInfo.handoff.baseline_source_sha256 !== plan.baseline_source_sha256 || handoffInfo.handoff.candidate_source_sha256 !== plan.candidate_source_sha256) throw new Error('C2b handoff source identity changed after plan creation.');
     if (runtimeVerification.hashCodeImplementation(baselineRoot) !== plan.baseline_source_sha256 || runtimeVerification.hashCodeImplementation(candidateRoot) !== plan.candidate_source_sha256) throw new Error('Baseline or candidate source changed after plan creation.');
-    const currentCandidateTests = walkCandidateTests(candidateRoot);
-    if (JSON.stringify(currentCandidateTests) !== JSON.stringify(candidateTests)) throw new Error('Candidate test inventory changed after plan creation.');
-    for (const relative of [...trustedSuites, ...candidateTests]) {
+    const currentBaselineTests = walkCandidateTests(baselineRoot);
+    const currentCandidateInventory = walkCandidateTests(candidateRoot);
+    const currentHistoricalTests = currentBaselineTests.filter((relative) => currentCandidateInventory.includes(relative));
+    const currentCandidateTests = currentCandidateInventory.filter((relative) => !currentHistoricalTests.includes(relative));
+    if (JSON.stringify(currentHistoricalTests) !== JSON.stringify(historicalTests) || JSON.stringify(currentCandidateTests) !== JSON.stringify(candidateTests)) throw new Error('Candidate test inventory changed after plan creation.');
+    for (const relative of [...trustedSuites, ...historicalTests, ...candidateTests]) {
         const candidate = regularFile(path.join(candidateRoot, relative), candidateRoot, `Trusted test ${relative}`, null);
         if (!candidateTests.includes(relative)) {
             const base = regularFile(path.join(baselineRoot, relative), baselineRoot, `Trusted test ${relative}`, null);
@@ -270,7 +274,7 @@ function revalidatePlan(planPath, plan, metadata, attemptRoot, baselineRoot, can
 function makePlan({ attemptRoot, metadata, proposal, baselineHash, candidateHash, parentCampaignSha256, imageId, runtimeId, replayPolicyVersion, caseIds, seeds, inventory, corrections, paths, handoffPath, handoffHash, authorizationHash, scopeHash, draftPatchHash, draftContentHash, draftResponseHash, datasetHash, promptHash, rulesHash, behaviorHash, testBundleHash, runnerHash, testContentHash, model, vocabularyHash, expectationsHash, settings, baselineRules, candidateRules, deliveryDriverHash }) {
     const planBody = {
         schema_version: 1, test_only: true, attempt_id: metadata.attempt_id,
-        proposal_sha256: metadata.proposal_sha256, parent_campaign_sha256: parentCampaignSha256,
+        proposal_sha256: metadata.proposal_sha256, accepted_rules_sha256: metadata.accepted_rules_sha256, parent_campaign_sha256: parentCampaignSha256,
         baseline_source_sha256: baselineHash, candidate_source_sha256: candidateHash,
         image_id: imageId, runtime_id: runtimeId, replay_policy_version: replayPolicyVersion,
         dataset_sha256: datasetHash, prompt_sha256: promptHash, rules_sha256: rulesHash,
@@ -303,7 +307,8 @@ async function runCodeProposalProof(options = {}) {
     const repoRoot = path.resolve(options.repoRoot || path.join(__dirname, '../..'));
     const trustedVerification = loadVerificationModule(repoRoot);
     const overrides = options.verificationOverrides || {};
-    if (Object.keys(overrides).some((key) => key !== 'hashCodeImplementation')) throw new Error('C2c1 permits only the test-only implementationHasher seam.');
+    if (Object.keys(overrides).length && !(process.env.NODE_ENV === 'test' && options.allowTestDouble === true)) throw new Error('C2c1 permits the implementationHasher seam only in an explicit test-only invocation.');
+    if (Object.keys(overrides).some((key) => key !== 'hashCodeImplementation' || typeof overrides[key] !== 'function')) throw new Error('C2c1 permits only the test-only implementationHasher seam.');
     const runtimeVerification = { ...trustedVerification, ...(Object.keys(overrides).length ? { hashCodeImplementation: overrides.hashCodeImplementation } : {}) };
     const behaviorModule = loadBehaviorModule(repoRoot);
     const attemptRoot = path.resolve(options.attemptRoot);
@@ -318,11 +323,12 @@ async function runCodeProposalProof(options = {}) {
     ensureDirectory(baselineRoot, 0o700, 'Baseline root'); ensureDirectory(candidateRoot, 0o700, 'Candidate root');
     const handoffInfo = readC2bHandoff(options.c2bHandoffFile, attemptRoot, metadata);
     const checked = revalidateAttemptArtifacts({ attemptRoot, trustedRoot, metadata, proposal: options.proposal, verification: runtimeVerification, behaviorModule, baselineRoot });
+    const frozenProposal = JSON.parse(JSON.stringify(checked.proposal));
     const baselineHash = runtimeVerification.hashCodeImplementation(baselineRoot);
     const candidateHash = runtimeVerification.hashCodeImplementation(candidateRoot);
     if (!isDigest(baselineHash) || baselineHash !== metadata.baseline_source_sha256 || baselineHash !== handoffInfo.handoff.baseline_source_sha256) throw new Error('Baseline implementation hash is stale or differs from the frozen attempt.');
     if (!isDigest(candidateHash) || candidateHash === baselineHash || candidateHash !== metadata.candidate_source_sha256 || candidateHash !== handoffInfo.handoff.candidate_source_sha256) throw new Error('Candidate implementation hash is missing, unchanged, or differs from the frozen handoff.');
-    const parentCampaignSha256 = options.proposal.parent_campaign_sha256 || options.proposal.eval_summary?.parent_campaign_sha256;
+    const parentCampaignSha256 = frozenProposal.parent_campaign_sha256 || frozenProposal.eval_summary?.parent_campaign_sha256;
     if (!isDigest(parentCampaignSha256) || (metadata.parent_campaign_sha256 && parentCampaignSha256 !== metadata.parent_campaign_sha256) || parentCampaignSha256 !== (options.frozenPlan?.parent_campaign_sha256 || metadata.parent_campaign_sha256 || parentCampaignSha256)) throw new Error('Parent campaign lineage is missing or differs from the frozen plan.');
     if (!isImmutableIdentity(options.imageId) || !isImmutableIdentity(options.runtimeId) || !Number.isInteger(options.replayPolicyVersion)) throw new Error('C2c1 requires a frozen image, runtime, and replay policy identity.');
     if (Number.isInteger(trustedVerification.REPLAY_RETIREMENT_POLICY_VERSION) && trustedVerification.REPLAY_RETIREMENT_POLICY_VERSION !== options.replayPolicyVersion) throw new Error('Replay policy identity is stale.');
@@ -332,10 +338,10 @@ async function runCodeProposalProof(options = {}) {
     if (hashBytes(datasetBytes) !== metadata.expected_dataset_sha256 || JSON.stringify(caseIds) !== JSON.stringify(metadata.expected_case_ids)) throw new Error('Frozen dataset identity is stale.');
     const rulesBytes = regularFile(path.join(attemptRoot, 'rules.json'), attemptRoot, 'Accepted rules');
     if (metadata.rules_file_sha256 && hashBytes(rulesBytes) !== metadata.rules_file_sha256) throw new Error('Accepted-rule file identity is stale.');
-    const codeCorrections = trustedCorrections(options.proposal, handoffInfo.handoff.draft.corrections, new Set(['code_recommendation']));
-    const nonCodeRoutes = (options.proposal.correction_routing || []).filter((route) => ['replacement_rule', 'prompt'].includes(route?.lane));
+    const codeCorrections = trustedCorrections(frozenProposal, handoffInfo.handoff.draft.corrections, new Set(['code_recommendation']));
+    const nonCodeRoutes = (frozenProposal.correction_routing || []).filter((route) => ['replacement_rule', 'prompt'].includes(route?.lane));
     const nonCodeCorrections = nonCodeRoutes.map((route) => {
-        const replay = (options.proposal.replay_evidence || []).find((entry) => entry?.correction_id === route.correction_id);
+        const replay = (frozenProposal.replay_evidence || []).find((entry) => entry?.correction_id === route.correction_id);
         const caseId = route.case_id || replay?.case_id;
         if (!caseId || !caseIds.includes(caseId)) throw new Error(`Frozen ${route.lane} correction ${route.correction_id} lacks an exact dataset case.`);
         const originalText = route.original_text || replay?.original_text, correctedText = route.corrected_text || replay?.corrected_text;
@@ -346,13 +352,19 @@ async function runCodeProposalProof(options = {}) {
     const corrections = codeCorrections;
     if (allCorrections.some((row) => !caseIds.includes(row.case_id))) throw new Error('Correction mapping references a case outside the frozen dataset.');
     const trustedSuites = trustedVerification.CODE_PROPOSAL_REGRESSION_TESTS || [];
-    const candidateTests = [...new Set(handoffInfo.handoff.draft.test_files)].sort();
-    if (!candidateTests.length || candidateTests.some((file) => !TEST_PATH.test(file))) throw new Error('C2b handoff must name explicit supplemental regression tests.');
     const baselineCandidateTests = walkCandidateTests(baselineRoot);
-    if (candidateTests.some((file) => baselineCandidateTests.includes(file))) throw new Error('Supplemental candidate tests must be new versus the baseline snapshot.');
-    const actualCandidateTests = walkCandidateTests(candidateRoot);
-    if (JSON.stringify(actualCandidateTests) !== JSON.stringify(candidateTests)) throw new Error('Candidate test inventory differs from the owner-bound C2b handoff.');
-    const inventory = [...new Set([...trustedSuites, ...candidateTests])].sort();
+    const actualCandidateInventory = walkCandidateTests(candidateRoot);
+    const historicalTests = baselineCandidateTests.filter((file) => actualCandidateInventory.includes(file));
+    const candidateTests = actualCandidateInventory.filter((file) => !historicalTests.includes(file));
+    const expectedCandidateTests = [...new Set(handoffInfo.handoff.draft.test_files)].sort();
+    if (!candidateTests.length || candidateTests.some((file) => !TEST_PATH.test(file))) throw new Error('Candidate must contain an explicit supplemental regression test.');
+    if (JSON.stringify(expectedCandidateTests) !== JSON.stringify(candidateTests)) throw new Error('Candidate test inventory differs from the owner-bound C2b handoff.');
+    for (const file of historicalTests) {
+        const baselineBytes = regularFile(path.join(baselineRoot, file), baselineRoot, `Historical test ${file}`, null);
+        const candidateBytes = regularFile(path.join(candidateRoot, file), candidateRoot, `Historical test ${file}`, null);
+        if (!baselineBytes.equals(candidateBytes)) throw new Error(`Historical candidate test changed between baseline and candidate: ${file}`);
+    }
+    const inventory = [...new Set([...trustedSuites, ...historicalTests, ...candidateTests])].sort();
     const seeds = options.seeds || [17, 7919];
     if (!Array.isArray(seeds) || seeds.length !== 2 || !seeds.every((seed) => Number.isInteger(seed)) || new Set(seeds).size !== 2) throw new Error('C2c1 requires two distinct replay seeds.');
     const verifierRoot = path.join(attemptRoot, 'verifier');
@@ -364,32 +376,32 @@ async function runCodeProposalProof(options = {}) {
     const rulesPayload = JSON.parse(rulesBytes.toString('utf8'));
     const baselineRules = Array.isArray(rulesPayload) ? rulesPayload : rulesPayload.rules;
     if (!Array.isArray(baselineRules) || typeof trustedVerification.mergedVerificationRules !== 'function') throw new Error('Frozen accepted-rule artifact is incomplete.');
-    const candidateRules = trustedVerification.mergedVerificationRules(baselineRules, options.proposal.proposed_rules || []);
+    const candidateRules = trustedVerification.mergedVerificationRules(baselineRules, frozenProposal.proposed_rules || []);
     const model = `${options.model || 'test-only'}`;
     const vocabularyHash = options.vocabularySha256 || metadata.vocabulary_sha256;
     const expectationsHash = options.expectationsSha256 || metadata.expectations_sha256;
     const settings = JSON.parse(JSON.stringify(options.settings || {}));
     if (!isDigest(vocabularyHash) || !isDigest(expectationsHash)) throw new Error('C2c1 requires frozen vocabulary and expectation identities.');
     const deliveryDriverHash = options.deliveryDriverSha256 || null;
-    const plan = makePlan({ attemptRoot, metadata, proposal: options.proposal, baselineHash, candidateHash, parentCampaignSha256, imageId: options.imageId, runtimeId: options.runtimeId, replayPolicyVersion: options.replayPolicyVersion, caseIds, seeds, inventory, corrections: allCorrections, paths: { ...paths, testBundle: bundle.root, testBundleManifest: bundle.manifestPath }, handoffPath: path.resolve(options.c2bHandoffFile), handoffHash: handoffInfo.handoffHash, authorizationHash: handoffInfo.handoff.authorization_hash, scopeHash: handoffInfo.handoff.scope_hash, draftPatchHash: handoffInfo.handoff.draft.patch_sha256, draftContentHash: handoffInfo.handoff.draft.content_sha256, draftResponseHash: handoffInfo.handoff.draft.response_sha256 || handoffInfo.handoff.response_sha256 || handoffInfo.handoff.response.body_sha256, datasetHash: metadata.expected_dataset_sha256, promptHash: metadata.prompt_sha256, rulesHash: metadata.rules_file_sha256 || hashBytes(rulesBytes), behaviorHash: metadata.behavior_tests_sha256, testBundleHash: bundle.sha256, runnerHash, testContentHash: bundle.contentSha256, model, vocabularyHash, expectationsHash, settings, baselineRules, candidateRules, deliveryDriverHash });
+    const plan = makePlan({ attemptRoot, metadata, proposal: frozenProposal, baselineHash, candidateHash, parentCampaignSha256, imageId: options.imageId, runtimeId: options.runtimeId, replayPolicyVersion: options.replayPolicyVersion, caseIds, seeds, inventory, corrections: allCorrections, paths: { ...paths, testBundle: bundle.root, testBundleManifest: bundle.manifestPath }, handoffPath: path.resolve(options.c2bHandoffFile), handoffHash: handoffInfo.handoffHash, authorizationHash: handoffInfo.handoff.authorization_hash, scopeHash: handoffInfo.handoff.scope_hash, draftPatchHash: handoffInfo.handoff.draft.patch_sha256, draftContentHash: handoffInfo.handoff.draft.content_sha256, draftResponseHash: handoffInfo.handoff.draft.response_sha256 || handoffInfo.handoff.response_sha256 || handoffInfo.handoff.response.body_sha256, datasetHash: metadata.expected_dataset_sha256, promptHash: metadata.prompt_sha256, rulesHash: metadata.rules_file_sha256 || hashBytes(rulesBytes), behaviorHash: metadata.behavior_tests_sha256, testBundleHash: bundle.sha256, runnerHash, testContentHash: bundle.contentSha256, model, vocabularyHash, expectationsHash, settings, baselineRules, candidateRules, deliveryDriverHash });
     atomicWrite(paths.plan, `${JSON.stringify(plan, null, 2)}\n`);
     const progress = (phase, state, extra = {}) => writeProgress(attemptRoot, metadata, phase, state, { total: caseIds.length, ...extra }, options.progressWriter);
     let attached = false;
     try {
-        revalidatePlan(paths.plan, plan, metadata, attemptRoot, baselineRoot, candidateRoot, bundle, trustedSuites, candidateTests, runtimeVerification);
+        revalidatePlan(paths.plan, plan, metadata, attemptRoot, baselineRoot, candidateRoot, bundle, trustedSuites, historicalTests, candidateTests, runtimeVerification, options.proposal, trustedVerification);
         progress('unit_tests', 'active', { completed: 0 });
         const timeoutMs = options.executorTimeoutMs || 30000;
         const baselineRaw = await invokeWithTimeout(options.executor, { arm: 'baseline', root: baselineRoot, inventory: [...inventory], testBundleRoot: bundle.root, testBundleSha256: bundle.sha256, plan: { ...plan }, attemptId: metadata.attempt_id }, timeoutMs, 'Baseline executor');
-        revalidatePlan(paths.plan, plan, metadata, attemptRoot, baselineRoot, candidateRoot, bundle, trustedSuites, candidateTests, runtimeVerification);
+        revalidatePlan(paths.plan, plan, metadata, attemptRoot, baselineRoot, candidateRoot, bundle, trustedSuites, historicalTests, candidateTests, runtimeVerification, options.proposal, trustedVerification);
         const candidateRaw = await invokeWithTimeout(options.executor, { arm: 'candidate', root: candidateRoot, inventory: [...inventory], testBundleRoot: bundle.root, testBundleSha256: bundle.sha256, plan: { ...plan }, attemptId: metadata.attempt_id }, timeoutMs, 'Candidate executor');
         const tests = { baseline: reportsFromExecutor(baselineRaw, 'Baseline', inventory), candidate: reportsFromExecutor(candidateRaw, 'Candidate', inventory) };
         atomicWrite(paths.baselineReport, `${JSON.stringify(tests.baseline.report, null, 2)}\n`); atomicWrite(paths.candidateReport, `${JSON.stringify(tests.candidate.report, null, 2)}\n`);
         assertPairedTestReports(tests, corrections, trustedVerification);
-        revalidatePlan(paths.plan, plan, metadata, attemptRoot, baselineRoot, candidateRoot, bundle, trustedSuites, candidateTests, runtimeVerification);
+        revalidatePlan(paths.plan, plan, metadata, attemptRoot, baselineRoot, candidateRoot, bundle, trustedSuites, historicalTests, candidateTests, runtimeVerification, options.proposal, trustedVerification);
         progress('retrospective_replay', 'active', { completed: 0, total: caseIds.length * seeds.length });
         const runs = [];
         const replayIdentities = new Set();
-        const deliveryIds = deliveryRequired(options.proposal, allCorrections);
+        const deliveryIds = deliveryRequired(frozenProposal, allCorrections);
         for (const seed of seeds) {
             const run = { run_id: `${metadata.attempt_id}:replay:${seed}`, seed, baseline_errors: 0, candidate_errors: 0, cases: [], corrections: [] };
             const results = { baseline: new Map(), candidate: new Map() };
@@ -425,19 +437,19 @@ async function runCodeProposalProof(options = {}) {
             run.candidate_report_sha256 = hashJson({ seed, arm: 'candidate', results: [...results.candidate.entries()] });
             runs.push(run);
         }
-        revalidatePlan(paths.plan, plan, metadata, attemptRoot, baselineRoot, candidateRoot, bundle, trustedSuites, candidateTests, runtimeVerification);
+        revalidatePlan(paths.plan, plan, metadata, attemptRoot, baselineRoot, candidateRoot, bundle, trustedSuites, historicalTests, candidateTests, runtimeVerification, options.proposal, trustedVerification);
         progress('holdout', 'active', { completed: caseIds.length * seeds.length, total: caseIds.length * seeds.length });
         const behaviorArtifact = checked.behavior;
         if (!behaviorArtifact || typeof options.behaviorEvaluator !== 'function' || !behaviorModule?.executeBehaviorTests) throw new Error('Independent B6-D1 behavior evaluation requires an injected evaluator.');
         const behaviorCandidate = await invokeWithTimeout(() => behaviorModule.executeBehaviorTests(behaviorArtifact, options.behaviorEvaluator), {}, timeoutMs, 'Behavior executor');
         if (behaviorCandidate.artifactHash !== behaviorArtifact.sha256 || behaviorCandidate.passed !== true || behaviorCandidate.outcomes.some((outcome) => outcome.passed !== true || outcome.outputHash !== outcome.expectedHash)) throw new Error('Candidate behavior outcomes do not match frozen B6-D1 expectations.');
-        const proof = { schema_version: 2, test_only: true, runner: 'verify-code-proposal', status: 'passed', generated_at: new Date().toISOString(), proposal_sha256: trustedVerification.codeProposalVerificationFingerprint(options.proposal), baseline: { source_sha256: baselineHash, root: baselineRoot }, candidate: { source_sha256: candidateHash, root: candidateRoot }, inputs: { dataset_sha256: plan.dataset_sha256, prompt_sha256: plan.prompt_sha256, rules_sha256: plan.rules_sha256, accepted_rules_sha256: metadata.accepted_rules_sha256, tests_sha256: plan.tests_content_sha256, image_id: plan.image_id, model: plan.model, raw_ground_truth: true, case_ids: [...plan.case_ids], ...(deliveryIds.length ? { delivery_driver_sha256: plan.delivery_driver_sha256 } : {}) }, corrections, tests, runs, behavior: { artifact: behaviorArtifact, candidate: behaviorCandidate }, combined: buildCombinedVerification({ proposal: options.proposal, baselineHash: plan.baseline_source_sha256, candidateHash: plan.candidate_source_sha256, cases: plan.case_ids, seeds: plan.seeds, runs, corrections: plan.corrections, trustedVerification, imageId: plan.image_id, runtimeId: plan.runtime_id, datasetHash: plan.dataset_sha256, acceptedRulesHash: plan.accepted_rules_sha256, model: plan.model, baselineRules: plan.baseline_rules, candidateRules: plan.candidate_rules, vocabularyHash: plan.vocabulary_sha256, expectationsHash: plan.expectations_sha256, settings: plan.settings }) };
-        revalidatePlan(paths.plan, plan, metadata, attemptRoot, baselineRoot, candidateRoot, bundle, trustedSuites, candidateTests, runtimeVerification);
+        const proof = { schema_version: 2, test_only: true, runner: 'verify-code-proposal', status: 'passed', generated_at: new Date().toISOString(), proposal_sha256: plan.proposal_sha256, baseline: { source_sha256: plan.baseline_source_sha256, root: baselineRoot }, candidate: { source_sha256: plan.candidate_source_sha256, root: candidateRoot }, inputs: { dataset_sha256: plan.dataset_sha256, prompt_sha256: plan.prompt_sha256, rules_sha256: plan.rules_sha256, accepted_rules_sha256: plan.accepted_rules_sha256, tests_sha256: plan.tests_content_sha256, image_id: plan.image_id, model: plan.model, raw_ground_truth: true, case_ids: [...plan.case_ids], ...(deliveryIds.length ? { delivery_driver_sha256: plan.delivery_driver_sha256 } : {}) }, corrections, tests, runs, behavior: { artifact: behaviorArtifact, candidate: behaviorCandidate }, combined: buildCombinedVerification({ proposal: frozenProposal, baselineHash: plan.baseline_source_sha256, candidateHash: plan.candidate_source_sha256, cases: plan.case_ids, seeds: plan.seeds, runs, corrections: plan.corrections, trustedVerification, imageId: plan.image_id, runtimeId: plan.runtime_id, datasetHash: plan.dataset_sha256, acceptedRulesHash: plan.accepted_rules_sha256, model: plan.model, baselineRules: plan.baseline_rules, candidateRules: plan.candidate_rules, vocabularyHash: plan.vocabulary_sha256, expectationsHash: plan.expectations_sha256, settings: plan.settings }) };
+        revalidatePlan(paths.plan, plan, metadata, attemptRoot, baselineRoot, candidateRoot, bundle, trustedSuites, historicalTests, candidateTests, runtimeVerification, options.proposal, trustedVerification);
         progress('verification', 'active', { completed: caseIds.length * seeds.length, total: caseIds.length * seeds.length });
-        const candidateProposal = { ...options.proposal, eval_summary: { ...(options.proposal.eval_summary || {}), replay_retirement_policy_version: options.replayPolicyVersion, code_candidate: { ...(options.proposal.eval_summary?.code_candidate || {}), expected_dataset_sha256: metadata.expected_dataset_sha256, expected_case_ids: caseIds, behavior_tests_sha256: behaviorArtifact.sha256 }, code_verification: proof } };
+        const candidateProposal = { ...frozenProposal, eval_summary: { ...(frozenProposal.eval_summary || {}), replay_retirement_policy_version: plan.replay_policy_version, code_candidate: { ...(frozenProposal.eval_summary?.code_candidate || {}), expected_dataset_sha256: plan.dataset_sha256, expected_case_ids: [...plan.case_ids], behavior_tests_sha256: plan.behavior_sha256 }, code_verification: proof } };
         const block = trustedVerification.assessCodeProposalVerificationIntegrity(candidateProposal);
         if (block) throw new Error(`Proof integrity rejected: ${block.error}`);
-        revalidatePlan(paths.plan, plan, metadata, attemptRoot, baselineRoot, candidateRoot, bundle, trustedSuites, candidateTests, runtimeVerification);
+        revalidatePlan(paths.plan, plan, metadata, attemptRoot, baselineRoot, candidateRoot, bundle, trustedSuites, historicalTests, candidateTests, runtimeVerification, options.proposal, trustedVerification);
         const attachable = options.client && options.originalProposal && (typeof options.store?.recordCodeVerification === 'function' || typeof recordCodeVerification === 'function');
         if (!attachable) {
             atomicWrite(paths.stagedProof, `${JSON.stringify({ staged_status: 'pending_store', proof }, null, 2)}\n`);
@@ -449,7 +461,7 @@ async function runCodeProposalProof(options = {}) {
             await store.recordCodeVerification(options.client, options.originalProposal, { attempt_id: metadata.attempt_id, code_verification: proof, code_candidate: { ...metadata, status: 'verified', phase: 'verification', completed: caseIds.length * seeds.length, total: caseIds.length * seeds.length } }, trustedVerification);
             attached = true;
         }
-        revalidatePlan(paths.plan, plan, metadata, attemptRoot, baselineRoot, candidateRoot, bundle, trustedSuites, candidateTests, runtimeVerification);
+        revalidatePlan(paths.plan, plan, metadata, attemptRoot, baselineRoot, candidateRoot, bundle, trustedSuites, historicalTests, candidateTests, runtimeVerification, options.proposal, trustedVerification);
         atomicWrite(paths.proof, `${JSON.stringify(proof, null, 2)}\n`);
         progress('verification', 'verified', { completed: caseIds.length * seeds.length, total: caseIds.length * seeds.length, proof_path: paths.proof });
         return { status: 'verified', proof, plan, paths, baselineHash, candidateHash };
@@ -469,4 +481,4 @@ async function runCodeProposalProof(options = {}) {
     }
 }
 
-module.exports = { runCodeProposalProof, runIndependentCodeProposalProof: runCodeProposalProof, validateReplayResult, reportsFromExecutor, walkCandidateTests, makePlan };
+module.exports = { runCodeProposalProof, runIndependentCodeProposalProof: runCodeProposalProof, validateReplayResult, reportsFromExecutor, walkCandidateTests, makePlan, readC2bHandoff };

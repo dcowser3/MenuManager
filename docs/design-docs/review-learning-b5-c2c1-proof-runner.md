@@ -15,7 +15,8 @@ requires it for verified completion, then freezes it.
 
 The plan binds the test-only image/runtime digests, current replay policy,
 ordered dataset cases, two distinct replay seeds, the trusted B5-A regression
-allowlist, supplemental candidate tests (new versus the baseline), exact C2b handoff/response/scope
+allowlist, supplemental candidate tests (new versus the baseline; historical
+candidate tests remain paired only when byte-identical), exact C2b handoff/response/scope
 hashes, frozen test bytes, and verifier output paths. Baseline and candidate
 tests run through an injected executor;
 the runner derives report hashes and recomputes the before/after verdict. It
@@ -32,6 +33,11 @@ fresh report identity, no regression or extra-edit widening, and corrected
 candidate output. Delivery-mismatch corrections require injected form-submit
 evidence. B6-D1 outcomes are recomputed from the frozen artifact and injected
 candidate evaluator output hashes.
+
+The repository verifier is always loaded from the trusted checkout. An
+implementation-hash seam is accepted only from explicit test-mode callers;
+rule, inventory, configuration, and integrity methods cannot be replaced by a
+caller.
 
 Only an integrity-valid schema-v2 `test_only` proof with a real or injected
 B5-B attachment path is eligible for `verified`. Without a store it remains a

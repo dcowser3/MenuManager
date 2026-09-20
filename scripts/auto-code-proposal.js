@@ -97,7 +97,7 @@ async function dispatchCodeDraft(options = {}) {
         const result = await prepared.broker.dispatch({ requestId, endpoint: prepared.broker.authorization.endpoint, body: request, apiKey: options.apiKey, transport: options.transport });
         const validated = validateDraftResponse(result, prepared.broker.authorization);
         const draft = validateDraft(validated.draft, prepared.checked.proposal, prepared.checked.cases, prepared.baselineRoot);
-        return { draft, response: validated.response, baselineRoot: prepared.baselineRoot, attemptRoot: prepared.attemptRoot, scope: prepared.scope, authorizationHash: prepared.broker.authorizationHash };
+        return { draft, response: validated.response, baselineRoot: prepared.baselineRoot, attemptRoot: prepared.attemptRoot, scope: prepared.scope, authorizationHash: prepared.broker.authorizationHash, checked: prepared.checked, cases: prepared.checked.cases };
     } catch (error) {
         throw new Error(redact(error?.message || error, options.secrets || []));
     }
@@ -128,11 +128,21 @@ function atomicOwnerWrite(file, bytes) {
  * accepted as evidence; every identity below is recomputed from local bytes.
  */
 function persistC2bHandoff(result, proposal, candidateRoot, options = {}) {
-    if (!result?.draft || !result?.baselineRoot || !options.handoffPath || !options.attemptId
-        || !options.authorizationHash || !options.scopeHash || !options.repoRoot) {
+    const derivedAttemptId = result?.scope?.attemptId;
+    const derivedAuthorizationHash = result?.authorizationHash;
+    const derivedScopeHash = result?.scope ? canonicalHash(result.scope) : null;
+    if (!result?.draft || !result?.baselineRoot || !result?.scope?.outputRoot || !options.handoffPath || !options.repoRoot
+        || !derivedAttemptId || !DIGEST.test(derivedAuthorizationHash || '') || !DIGEST.test(derivedScopeHash || '')) {
         throw new Error('C2b handoff persistence requires the validated draft, owner scope, and output path.');
     }
-    const verifier = loadVerificationModule(options.repoRoot);
+    const attemptRoot = path.resolve(result.scope.outputRoot);
+    if (path.resolve(options.handoffPath) !== path.join(attemptRoot, 'c2b-handoff.json')) throw new Error('C2b handoff path must be the owner-contained attempt handoff path.');
+    if (options.attemptId && options.attemptId !== derivedAttemptId) throw new Error('C2b attempt identity differs from the completed dispatch scope.');
+    if (options.authorizationHash && options.authorizationHash !== derivedAuthorizationHash) throw new Error('C2b authorization identity differs from the completed dispatch authorization.');
+    if (options.scopeHash && options.scopeHash !== derivedScopeHash) throw new Error('C2b scope identity differs from the completed dispatch scope.');
+    const trustedRepoRoot = path.resolve(__dirname, '..');
+    if (path.resolve(options.repoRoot) !== trustedRepoRoot) throw new Error('C2b verifier root must be the current trusted repository root.');
+    const verifier = loadVerificationModule(trustedRepoRoot);
     const patchBytes = Buffer.from(result.draft.patch);
     const responseSha = result.response?.bodySha256;
     if (!DIGEST.test(responseSha || '')) throw new Error('C2b response identity is missing from the completed transport.');
@@ -147,8 +157,8 @@ function persistC2bHandoff(result, proposal, candidateRoot, options = {}) {
     };
     const draftContentSha = crypto.createHash('sha256').update(JSON.stringify(draftBody)).digest('hex');
     const handoff = {
-        schema_version: 1, attempt_id: `${options.attemptId}`,
-        authorization_hash: options.authorizationHash, scope_hash: options.scopeHash,
+        schema_version: 1, attempt_id: `${derivedAttemptId}`,
+        authorization_hash: derivedAuthorizationHash, scope_hash: derivedScopeHash,
         baseline_source_sha256: baselineSourceSha, candidate_source_sha256: candidateSourceSha,
         draft: {
             ...draftBody,
@@ -165,11 +175,15 @@ function persistC2bHandoff(result, proposal, candidateRoot, options = {}) {
 
 /** Apply the validated C2b patch and atomically emit the owner-only C2b handoff. */
 async function applyValidatedDraftWithHandoff(result, proposal, candidateRoot, options = {}) {
+    if (!result?.checked?.cases && !Array.isArray(result?.cases) && !Array.isArray(options.cases)) throw new Error('C2b apply requires the frozen dataset cases returned by dispatch.');
+    validateDraft(result.draft, proposal, result.checked?.cases || result.cases || options.cases, result.baselineRoot);
     const applied = applyValidatedDraft(result, proposal, candidateRoot, options.command);
     const handoff = persistC2bHandoff(result, proposal, applied, options);
-    if (options.client && options.originalProposal && options.store?.recordCodeVerification) {
+    let ownerBound = false;
+    if (options.client && options.originalProposal) {
+        const store = options.store || { recordCodeVerification };
         const metadata = options.metadata || {};
-        await options.store.recordCodeVerification(options.client, options.originalProposal, {
+        await store.recordCodeVerification(options.client, options.originalProposal, {
             attempt_id: options.attemptId,
             code_candidate: {
                 ...metadata, status: 'running', phase: 'draft',
@@ -181,9 +195,10 @@ async function applyValidatedDraftWithHandoff(result, proposal, candidateRoot, o
                 draft_content_sha256: handoff.draft.content_sha256,
                 draft_response_sha256: handoff.draft.response_sha256,
             },
-        }, loadVerificationModule(options.repoRoot));
+        }, loadVerificationModule(path.resolve(__dirname, '..')));
+        ownerBound = true;
     }
-    return { candidateRoot: applied, handoff };
+    return { status: ownerBound ? 'owner_bound' : 'pending_store', ownerBound, candidateRoot: applied, handoff };
 }
 
 module.exports = { buildDraftRequest, deriveDraftScope, dispatchCodeDraft, applyValidatedDraft, applyValidatedDraftWithHandoff, persistC2bHandoff, loadPreparedDraft, redact, validateDraftResponse };
