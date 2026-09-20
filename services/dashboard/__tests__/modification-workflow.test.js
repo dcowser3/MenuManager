@@ -1397,7 +1397,7 @@ describe('Dashboard Modification Workflow (local, mocked externals)', () => {
             location: 'Property A',
             applies_to_menu_type: 'food',
         };
-        const run = async ({ property, templateType, rules, expected, expectsFinding = true }) => {
+        const run = async ({ property, templateType, rules, target, alternate, expected, expectsFinding = true }) => {
             mockedAxios.get = jest.fn(async (url) => {
                 if (String(url).includes('/correction-rules')) return { data: rules };
                 if (String(url).includes('/properties')) return { data: { catalog: [{ name: property }] } };
@@ -1409,8 +1409,9 @@ describe('Dashboard Modification Workflow (local, mocked externals)', () => {
                 }
                 return { data: {} };
             });
+            const submittedRows = 'Dish, house-made G 12\nOther, house-mad G 13';
             const response = await invokeJsonHandler(basicCheckHandler, {
-                menuContent: 'Dish, house-made G 12\nOther, house-mad G 13',
+                menuContent: submittedRows,
                 baselineMenuContent: '',
                 reviewMode: 'full',
                 allergens: '',
@@ -1421,18 +1422,27 @@ describe('Dashboard Modification Workflow (local, mocked externals)', () => {
             const qaCall = mockedAxios.post.mock.calls.find((call) => String(call[0]).includes('/run-qa-check'));
             expect(mockedAxios.post.mock.calls.filter((call) => String(call[0]).includes('/run-qa-check'))).toHaveLength(1);
             expect(response.status).toBe(200);
-            expect(response.body.correctedMenu).toContain(expected);
+            expect(response.body.correctedMenu).toBe(expected);
             expect(qaCall[1].prompt).toContain('ACCEPTED SCOPED TERM POLICY');
-            if (expectsFinding) expect(qaCall[1].prompt).toContain('Spelling suspicions');
+            if (expectsFinding) {
+                expect(qaCall[1].prompt).toContain(`"preferred":"${target}"`);
+                expect(qaCall[1].prompt).not.toContain(`"preferred":"${alternate}"`);
+                expect(qaCall[1].prompt).toContain('Spelling suspicions');
+            } else {
+                expect(qaCall[1].prompt).not.toContain('"preferred":"house made"');
+                expect(qaCall[1].prompt).not.toContain('"preferred":"homemade"');
+                expect(qaCall[1].prompt).not.toContain('"preferred":"housemade"');
+                expect(qaCall[1].prompt).not.toContain('Spelling suspicions');
+            }
         };
 
-        await run({ property: 'Property A', templateType: 'food', rules: [globalRule, localRule], expected: 'house made' });
-        await run({ property: 'Property B', templateType: 'food', rules: [globalRule, localRule], expected: 'housemade' });
-        await run({ property: 'Property A', templateType: 'beverage', rules: [globalRule, localRule], expected: 'housemade' });
+        await run({ property: 'Property A', templateType: 'food', rules: [globalRule, localRule], target: 'house made', alternate: 'housemade', expected: 'Dish, house made G 12\nOther, house-mad G 13' });
+        await run({ property: 'Property B', templateType: 'food', rules: [globalRule, localRule], target: 'housemade', alternate: 'house made', expected: 'Dish, housemade G 12\nOther, house-mad G 13' });
+        await run({ property: 'Property A', templateType: 'beverage', rules: [globalRule, localRule], target: 'housemade', alternate: 'house made', expected: 'Dish, housemade G 12\nOther, house-mad G 13' });
         await run({
             property: 'Property A', templateType: 'food',
             rules: [localRule, { ...localRule, id: 'rule-local-conflict', corrected_text: 'homemade' }],
-            expected: 'house-made',
+            expected: 'Dish, house-made G 12\nOther, house-mad G 13',
             expectsFinding: false,
         });
     });

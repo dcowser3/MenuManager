@@ -79,28 +79,45 @@ test('concurrent contexts and changed policy snapshots cannot leak local targets
 });
 test('offline caller assembles the same scoped policy for finding, prompt, and final behavior', async () => {
     const rules = [globalRule, localRule];
+    const submittedRows = 'Dish, house-made G 12\nOther, house-mad G 13';
     const aiCaller = async (text, prompt) => {
         expect(prompt).toContain('ACCEPTED SCOPED TERM POLICY');
         return `=== CORRECTED MENU ===\n${text}\n=== END CORRECTED MENU ===\n=== SUGGESTIONS ===\n[]\n=== END SUGGESTIONS ===`;
     };
     const cases = [
-        { property: 'A', templateType: 'food', expected: 'house made' },
-        { property: 'B', templateType: 'food', expected: 'housemade' },
-        { property: 'A', templateType: 'beverage', expected: 'housemade' },
+        { property: 'A', templateType: 'food', target: 'house made', alternate: 'housemade', finding: true, expected: 'Dish, house made G 12\nOther, house-mad G 13' },
+        { property: 'B', templateType: 'food', target: 'housemade', alternate: 'house made', finding: true, expected: 'Dish, housemade G 12\nOther, house-mad G 13' },
+        { property: 'A', templateType: 'beverage', target: 'housemade', alternate: 'house made', finding: true, expected: 'Dish, housemade G 12\nOther, house-mad G 13' },
         {
-            property: 'A', templateType: 'food', expected: 'house-made',
+            property: 'A', templateType: 'food', target: null, alternate: null, finding: false, expected: submittedRows,
             rules: [localRule, { ...localRule, id: 'conflicting', corrected_text: 'homemade' }],
         },
     ];
     for (const item of cases) {
-        const result = await (0, review_pipeline_1.runFullReviewPipeline)('Dish, house-made G 12', {
+        let capturedPrompt = '';
+        const result = await (0, review_pipeline_1.runFullReviewPipeline)(submittedRows, {
             basePrompt: 'BASE QA PROMPT',
             property: item.property,
             templateType: item.templateType,
             menuType: 'standard',
             acceptedCorrectionRules: item.rules || rules,
-        }, aiCaller);
-        expect(result.finalCorrectedMenu).toContain(item.expected);
-        expect(result.promptInfo.prompt).toContain('ACCEPTED SCOPED TERM POLICY');
+        }, async (text, prompt) => {
+            capturedPrompt = prompt;
+            return aiCaller(text, prompt);
+        });
+        expect(result.finalCorrectedMenu).toBe(item.expected);
+        expect(capturedPrompt).toContain('ACCEPTED SCOPED TERM POLICY');
+        if (item.finding && item.target) {
+            expect(capturedPrompt).toContain(`"preferred":"${item.target}"`);
+            expect(capturedPrompt).not.toContain(`"preferred":"${item.alternate}"`);
+            expect(capturedPrompt).toContain('Spelling suspicions');
+        }
+        else {
+            expect(capturedPrompt).not.toContain('"preferred":"house made"');
+            expect(capturedPrompt).not.toContain('"preferred":"homemade"');
+            expect(capturedPrompt).not.toContain('"preferred":"housemade"');
+            expect(capturedPrompt).not.toContain('Spelling suspicions');
+            expect(result.finalCorrectedMenu).toBe(submittedRows);
+        }
     }
 });
