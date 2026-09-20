@@ -2,9 +2,11 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
+const { spawnSync } = require('child_process');
 const { hashAcceptedRules } = require('../lib/code-proposal-verification');
 const behaviorModule = require('../lib/learning-behavior-tests');
-const { dispatchCodeDraft, loadPreparedDraft, applyValidatedDraft } = require('../../../scripts/auto-code-proposal');
+const { dispatchCodeDraft, loadPreparedDraft, applyValidatedDraft, applyValidatedDraftWithHandoff } = require('../../../scripts/auto-code-proposal');
+const { snapshotBaseline } = require('../../../scripts/lib/code-proposal-draft');
 const { canonicalHash } = require('../../../scripts/lib/code-proposal-broker');
 
 const HASH = 'a'.repeat(64);
@@ -98,5 +100,33 @@ test('apply boundary delegates only to C2a and rejects any proof-shaped result',
     const state = setup();
     try {
         expect(() => applyValidatedDraft({ draft, baselineRoot: state.attemptRoot, proof: { status: 'passed' } }, state.proposal, path.join(state.attemptRoot, 'candidate'))).toThrow('cannot apply or carry');
+    } finally { state.cleanup(); }
+});
+
+test('actual C2b apply emits a byte-bound owner-only handoff for C2c1', async () => {
+    if (spawnSync('git', ['--version'], { encoding: 'utf8' }).error) return;
+    const state = setup();
+    const baseline = path.join(state.root, 'actual-baseline');
+    const candidate = path.join(state.root, 'actual-candidate');
+    const handoffPath = path.join(state.attemptRoot, 'c2b-handoff.json');
+    const runtimeFile = 'services/dashboard/lib/c2b-fixture.ts';
+    const testFile = 'services/dashboard/__tests__/code-candidate-c2b.test.ts';
+    const patchText = `diff --git a/${runtimeFile} b/${runtimeFile}\nnew file mode 100644\n--- /dev/null\n+++ b/${runtimeFile}\n@@ -0,0 +1 @@\n+export const c2b = 1;\ndiff --git a/${testFile} b/${testFile}\nnew file mode 100644\n--- /dev/null\n+++ b/${testFile}\n@@ -0,0 +1 @@\n+test('c2b', () => expect(true).toBe(true));\n`;
+    const proposal = { ...state.proposal, correction_routing: [{ correction_id: 'c1', lane: 'code_recommendation', original_text: 'Dish, lemons', corrected_text: 'Dish, lemon' }] };
+    try {
+        const actualRepoRoot = path.resolve(__dirname, '../../..');
+        const scopes = ['services/dashboard/lib', 'services/dashboard/public', 'services/dashboard/views', 'services/dashboard/index.ts', 'services/differ/lib', 'services/llm-adapter/src', 'services/ai-review', 'services/docx-redliner/generate_from_form.py', 'services/tenant-config/src', 'services/supabase-client/src', 'services/internal-auth/src', 'services/diff-core', 'config'];
+        for (const relative of scopes) {
+            const source = path.join(actualRepoRoot, relative), target = path.join(baseline, relative);
+            fs.mkdirSync(path.dirname(target), { recursive: true });
+            if (fs.existsSync(source)) fs.cpSync(source, target, { recursive: true });
+        }
+        const result = await applyValidatedDraftWithHandoff({ baselineRoot: baseline, draft: { summary: 'c2b', patch: patchText, test_files: [testFile], corrections: [] }, response: { bodySha256: digest('response'), requestId: 'r1', model: 'test', finishReason: 'stop' } }, proposal, candidate, { repoRoot: actualRepoRoot, attemptId: 'attempt-one', handoffPath, authorizationHash: HASH, scopeHash: HASH_B });
+        expect(fs.statSync(handoffPath).mode & 0o777).toBe(0o600);
+        const handoff = JSON.parse(fs.readFileSync(handoffPath, 'utf8'));
+        expect(result.handoff.c2b_handoff_sha256).toBe(digest(fs.readFileSync(handoffPath)));
+        expect(handoff.draft.patch_sha256).toBe(digest(patchText));
+        expect(handoff.candidate_source_sha256).toMatch(/^[a-f0-9]{64}$/);
+        expect(handoff.candidate_source_sha256).not.toBe(handoff.baseline_source_sha256);
     } finally { state.cleanup(); }
 });

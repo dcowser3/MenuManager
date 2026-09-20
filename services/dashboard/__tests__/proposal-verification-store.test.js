@@ -12,6 +12,9 @@ const claim = (attempt_id = 'attempt-a', started_at = new Date().toISOString()) 
     attempt_id, status: 'running', proposal_sha256: HASH, baseline_source_sha256: HASH_B,
     expected_dataset_sha256: HASH, behavior_tests_sha256: HASH_B, prompt_sha256: HASH, accepted_rules_sha256: HASH_B,
     expected_case_ids: ['menu-1', 'menu-2'], started_at,
+    authorization_hash: HASH, scope_hash: HASH_B, c2b_handoff_sha256: HASH,
+    candidate_source_sha256: HASH_B, draft_patch_sha256: HASH,
+    draft_content_sha256: HASH_B, draft_response_sha256: HASH,
 });
 const withClaim = (candidate) => ({ ...original, eval_summary: { ...original.eval_summary, code_candidate: candidate } });
 function fakeClient(current = original, updated = [{ id: 'p1' }]) {
@@ -166,6 +169,17 @@ test('candidate ownership status transitions are allowlisted', async () => {
     }
     await expect(recordCodeVerification(fakeClient(), original, { code_candidate: { ...claim(), status: 'verified' } }, verifier))
         .rejects.toThrow('ownership');
+});
+
+test('post-draft identities may be added once to the running owner and are required thereafter', async () => {
+    const initial = claim();
+    for (const field of ['authorization_hash', 'scope_hash', 'c2b_handoff_sha256', 'candidate_source_sha256', 'draft_patch_sha256', 'draft_content_sha256', 'draft_response_sha256']) delete initial[field];
+    const bound = claim();
+    const current = withClaim(initial);
+    const added = await recordCodeVerification(fakeClient(current), original, { code_candidate: bound }, verifier);
+    expect(added.code_candidate.c2b_handoff_sha256).toBe(HASH);
+    await expect(recordCodeVerification(fakeClient(withClaim(bound)), original, { code_candidate: { ...bound, candidate_source_sha256: HASH } }, verifier)).rejects.toThrow(/frozen candidate_source_sha256/);
+    await expect(recordCodeVerification(fakeClient(withClaim(bound)), original, { code_candidate: { ...bound, status: 'verified' } }, verifier)).resolves.toBeTruthy();
 });
 
 test('failed or declaration-only proof is not persisted even when the declared status is not passed', async () => {

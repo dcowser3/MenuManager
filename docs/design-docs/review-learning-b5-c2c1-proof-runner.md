@@ -6,9 +6,16 @@ starts a worker. The runner revalidates the C1/C2a artifact topology and all
 frozen proposal, parent-campaign, source, dataset, prompt, rules, and behavior
 identities before creating a new owner-only verifier plan.
 
+The C2b apply boundary atomically writes an owner-only handoff from the actual
+validated draft and applied candidate bytes. It records recomputed patch,
+draft-content, response, baseline, candidate, authorization, and scope hashes;
+the next phase rejects hash-only or caller-invented handoffs. B5-B permits that
+post-draft identity set to be added once to the still-running owner claim and
+requires it for verified completion, then freezes it.
+
 The plan binds the test-only image/runtime digests, current replay policy,
 ordered dataset cases, two distinct replay seeds, the trusted B5-A regression
-allowlist, supplemental candidate tests, exact C2b handoff/response/scope
+allowlist, supplemental candidate tests (new versus the baseline), exact C2b handoff/response/scope
 hashes, frozen test bytes, and verifier output paths. Baseline and candidate
 tests run through an injected executor;
 the runner derives report hashes and recomputes the before/after verdict. It

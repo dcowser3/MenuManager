@@ -5,6 +5,10 @@ const fs = require('fs');
 const CLAIM_TTL_MS = 6 * 60 * 60 * 1000;
 const DIGEST = /^[a-f0-9]{64}$/;
 const TERMINAL_STATUSES = new Set(['verified', 'failed', 'blocked']);
+const POST_DRAFT_IDENTITY_FIELDS = [
+    'authorization_hash', 'scope_hash', 'c2b_handoff_sha256', 'candidate_source_sha256',
+    'draft_patch_sha256', 'draft_content_sha256', 'draft_response_sha256',
+];
 
 function assertClaimIdentity(candidate) {
     const required = ['proposal_sha256', 'baseline_source_sha256', 'expected_dataset_sha256', 'behavior_tests_sha256', 'prompt_sha256', 'accepted_rules_sha256'];
@@ -27,6 +31,26 @@ function assertFrozenIdentity(previous, incoming) {
     if (JSON.stringify(incoming.expected_case_ids) !== JSON.stringify(previous.expected_case_ids)) {
         throw new Error('Candidate completion differs in the frozen ordered case list.');
     }
+    for (const field of POST_DRAFT_IDENTITY_FIELDS) {
+        if (previous[field] !== undefined && incoming[field] !== previous[field]) {
+            throw new Error(`Candidate completion differs in frozen ${field}.`);
+        }
+        if (incoming[field] !== undefined && (!DIGEST.test(incoming[field]) || typeof incoming[field] !== 'string')) {
+            throw new Error(`Candidate completion requires a valid ${field}.`);
+        }
+    }
+}
+
+function assertPostDraftIdentities(candidate, status) {
+    const supplied = POST_DRAFT_IDENTITY_FIELDS.filter((field) => candidate?.[field] !== undefined);
+    if (supplied.length && supplied.length !== POST_DRAFT_IDENTITY_FIELDS.length) {
+        throw new Error('Post-draft candidate identities must be added as one immutable owner-bound set.');
+    }
+    if (status === 'verified') {
+        for (const field of POST_DRAFT_IDENTITY_FIELDS) {
+            if (!DIGEST.test(candidate?.[field] || '')) throw new Error(`Verified candidate claims require a valid ${field}.`);
+        }
+    }
 }
 
 function runningClaimIsFresh(candidate, now = Date.now()) {
@@ -44,6 +68,7 @@ function assertAttemptOwnership(current, patch) {
         if (incoming.status !== 'running' && !TERMINAL_STATUSES.has(incoming.status)) {
             throw new Error('Code candidate status must be running, verified, failed, or blocked.');
         }
+        assertPostDraftIdentities(incoming, incoming.status);
         if (incoming.status === 'running') {
             assertClaimIdentity(incoming);
             if (!Number.isFinite(Date.parse(incoming.started_at || ''))) throw new Error('A running candidate claim requires a valid start time.');
@@ -67,6 +92,7 @@ function assertAttemptOwnership(current, patch) {
         if (!previous || !patch.attempt_id || previous.attempt_id !== patch.attempt_id || previous.status !== 'running') {
             throw new Error('Proof attachment requires ownership of the current running candidate attempt.');
         }
+        assertPostDraftIdentities(previous, 'verified');
     }
 }
 

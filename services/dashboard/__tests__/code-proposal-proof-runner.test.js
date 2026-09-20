@@ -42,9 +42,11 @@ function setup(overrides = {}) {
         }
     }
     const candidateTest = 'services/dashboard/__tests__/code-candidate-fix.test.ts';
-    const handoff = { schema_version: 1, attempt_id: 'attempt-one', authorization_hash: HASH('7'), scope_hash: HASH('8'), draft: { patch_sha256: HASH('9'), response_sha256: HASH('a'), test_files: [candidateTest], corrections: [{ correction_id: 'c1', case_id: 'case-1', test_name: 'fix', original_text: 'Dish, lemons', corrected_text: 'Dish, lemon', recommendation_indexes: [0] }] } };
+    const draftBody = { summary: 'fixture', patch: 'diff --git a/services/dashboard/lib/rule.ts b/services/dashboard/lib/rule.ts\n', test_files: [candidateTest], corrections: [{ correction_id: 'c1', case_id: 'case-1', test_name: 'fix', original_text: 'Dish, lemons', corrected_text: 'Dish, lemon', recommendation_indexes: [0] }] };
+    const responseBodyHash = digest('fixture response body');
+    const handoff = { schema_version: 1, attempt_id: 'attempt-one', authorization_hash: HASH('7'), scope_hash: HASH('8'), baseline_source_sha256: baselineHash, candidate_source_sha256: candidateHash, draft: { ...draftBody, patch_sha256: digest(draftBody.patch), content_sha256: digest(JSON.stringify(draftBody)), response_sha256: responseBodyHash }, response: { body_sha256: responseBodyHash } };
     const handoffBytes = `${JSON.stringify(handoff)}\n`; fs.writeFileSync(path.join(attemptRoot, 'c2b-handoff.json'), handoffBytes, { mode: 0o600 });
-    const metadata = { attempt_id: 'attempt-one', artifact_directory: attemptRoot, proposal_sha256: proposalHash, baseline_source_sha256: baselineHash, candidate_source_sha256: candidateHash, parent_campaign_sha256: proposal.parent_campaign_sha256, prompt_sha256: promptHash, accepted_rules_sha256: acceptedRulesHash, rules_file_sha256: digest(files['rules.json']), expected_dataset_sha256: datasetHash, expected_case_ids: ['case-1'], behavior_tests_sha256: behaviorHash, c2b_handoff_sha256: digest(handoffBytes) };
+    const metadata = { attempt_id: 'attempt-one', artifact_directory: attemptRoot, proposal_sha256: proposalHash, baseline_source_sha256: baselineHash, candidate_source_sha256: candidateHash, parent_campaign_sha256: proposal.parent_campaign_sha256, prompt_sha256: promptHash, accepted_rules_sha256: acceptedRulesHash, rules_file_sha256: digest(files['rules.json']), expected_dataset_sha256: datasetHash, expected_case_ids: ['case-1'], behavior_tests_sha256: behaviorHash, c2b_handoff_sha256: digest(handoffBytes), authorization_hash: handoff.authorization_hash, scope_hash: handoff.scope_hash, draft_patch_sha256: handoff.draft.patch_sha256, draft_content_sha256: handoff.draft.content_sha256, draft_response_sha256: handoff.draft.response_sha256, vocabulary_sha256: HASH('7'), expectations_sha256: HASH('8') };
     Object.assign(proposal.eval_summary.code_candidate, { proposal_sha256: proposalHash, baseline_source_sha256: baselineHash, prompt_sha256: promptHash, accepted_rules_sha256: acceptedRulesHash });
     fs.writeFileSync(path.join(attemptRoot, 'proposal.json'), JSON.stringify(proposal), { mode: 0o600 });
     const corrections = [{ correction_id: 'c1', case_id: 'case-1', test_name: 'fix', original_text: 'Dish, lemons', corrected_text: 'Dish, lemon', recommendation_indexes: [0] }];
@@ -89,6 +91,31 @@ test('the complete positive proof passes the real integrity gate and combined dr
         expect(state.trustedVerification.assessCodeProposalVerificationIntegrity(candidate)).toBeNull();
         candidate.eval_summary.code_verification.combined = null;
         expect(state.trustedVerification.assessCodeProposalVerificationIntegrity(candidate)).not.toBeNull();
+    } finally { state.cleanup(); }
+});
+
+test('mixed code and replacement-rule proof carries motivating rule activations through the real verifier', async () => {
+    const state = setup();
+    try {
+        state.proposal.proposed_rules = [{ id: 'rule-new', original_text: 'foo', corrected_text: 'bar' }];
+        state.proposal.correction_routing = [...state.proposal.correction_routing, { correction_id: 'r1', lane: 'replacement_rule', case_id: 'case-1', original_text: 'foo', corrected_text: 'bar' }];
+        state.proposal.replay_evidence = [...(state.proposal.replay_evidence || []), { correction_id: 'r1', case_id: 'case-1', original_text: 'foo', corrected_text: 'bar' }];
+        const { sha256: _oldBehaviorHash, ...frozenBehaviorBody } = state.proposal.eval_summary.behavior_tests;
+        const behaviorBody = { ...frozenBehaviorBody, records: [...state.proposal.eval_summary.behavior_tests.records, { correctionId: 'r1', expectationAuthority: 'human_explanation', disposition: 'awaiting_behavior_verification' }] };
+        const behavior = { ...behaviorBody, sha256: digest(JSON.stringify(behaviorBody)) };
+        state.proposal.eval_summary.behavior_tests = behavior;
+        state.metadata.behavior_tests_sha256 = behavior.sha256;
+        state.proposal.eval_summary.code_candidate.behavior_tests_sha256 = behavior.sha256;
+        state.metadata.proposal_sha256 = state.trustedVerification.codeProposalVerificationFingerprint(state.proposal);
+        state.proposal.eval_summary.code_candidate.proposal_sha256 = state.metadata.proposal_sha256;
+        fs.writeFileSync(path.join(state.attemptRoot, 'behavior-tests.json'), JSON.stringify(behavior), { mode: 0o600 });
+        fs.writeFileSync(path.join(state.attemptRoot, 'proposal.json'), JSON.stringify(state.proposal), { mode: 0o600 });
+        state.replayExecutor = async ({ arm, seed }) => ({ report_id: `${arm}-${seed}`, output: arm === 'baseline' ? 'Dish, lemons\nfoo' : 'Dish, lemon\nbar', contractComplete: true, fenceMissing: false, composite: arm === 'baseline' ? 0.8 : 0.9, extraEdits: 0, rule_activations: arm === 'candidate' ? [{ rule_id: 'eval-candidate-rule-0', final_survives: true, total_activations: 1, case_ids: ['case-1'] }] : [] });
+        const result = await run(state);
+        expect(result.proof.combined.corrections.map((row) => row.correction_id)).toEqual(['c1', 'r1']);
+        expect(result.proof.combined.runs.every((run) => run.rule_activations.some((row) => row.rule_id === 'eval-candidate-rule-0'))).toBe(true);
+        const candidate = { ...state.proposal, eval_summary: { ...state.proposal.eval_summary, code_verification: result.proof } };
+        expect(state.trustedVerification.assessCodeProposalVerificationIntegrity(candidate)).toBeNull();
     } finally { state.cleanup(); }
 });
 

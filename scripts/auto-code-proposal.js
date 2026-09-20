@@ -5,6 +5,7 @@ const fs = require('fs');
 const path = require('path');
 const { ModelBudgetBroker, canonicalHash, redact, sha256 } = require('./lib/model-budget-broker');
 const { snapshotBaseline, revalidateAttemptArtifacts, validateDraft, applyDraft } = require('./lib/code-proposal-draft');
+const { loadVerificationModule } = require('./lib/proposal-verification-store');
 
 const DIGEST = /^[a-f0-9]{64}$/;
 const MAX_MESSAGES = 8;
@@ -107,4 +108,82 @@ function applyValidatedDraft(result, proposal, candidateRoot, command) {
     return applyDraft(result.draft.patch, result.baselineRoot, candidateRoot, proposal, command);
 }
 
-module.exports = { buildDraftRequest, deriveDraftScope, dispatchCodeDraft, applyValidatedDraft, loadPreparedDraft, redact, validateDraftResponse };
+function atomicOwnerWrite(file, bytes) {
+    const directory = path.dirname(file);
+    fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
+    fs.chmodSync(directory, 0o700);
+    const temporary = path.join(directory, `.${path.basename(file)}.${crypto.randomBytes(8).toString('hex')}.tmp`);
+    const descriptor = fs.openSync(temporary, 'wx', 0o600);
+    try { fs.writeFileSync(descriptor, bytes); fs.fsyncSync(descriptor); } finally { fs.closeSync(descriptor); }
+    fs.chmodSync(temporary, 0o600);
+    fs.renameSync(temporary, file);
+    fs.chmodSync(file, 0o600);
+    const dirFd = fs.openSync(directory, 'r');
+    try { fs.fsyncSync(dirFd); } finally { fs.closeSync(dirFd); }
+}
+
+/**
+ * Persist the authoritative C2b -> C2c handoff from the bytes that were
+ * actually validated and applied. Hash strings supplied by a caller are never
+ * accepted as evidence; every identity below is recomputed from local bytes.
+ */
+function persistC2bHandoff(result, proposal, candidateRoot, options = {}) {
+    if (!result?.draft || !result?.baselineRoot || !options.handoffPath || !options.attemptId
+        || !options.authorizationHash || !options.scopeHash || !options.repoRoot) {
+        throw new Error('C2b handoff persistence requires the validated draft, owner scope, and output path.');
+    }
+    const verifier = loadVerificationModule(options.repoRoot);
+    const patchBytes = Buffer.from(result.draft.patch);
+    const responseSha = result.response?.bodySha256;
+    if (!DIGEST.test(responseSha || '')) throw new Error('C2b response identity is missing from the completed transport.');
+    const baselineSourceSha = verifier.hashCodeImplementation(result.baselineRoot);
+    const candidateSourceSha = verifier.hashCodeImplementation(candidateRoot);
+    if (!DIGEST.test(baselineSourceSha) || !DIGEST.test(candidateSourceSha) || baselineSourceSha === candidateSourceSha) {
+        throw new Error('C2b applied candidate source identity is invalid or unchanged.');
+    }
+    const draftBody = {
+        summary: result.draft.summary || '', patch: result.draft.patch,
+        test_files: [...(result.draft.test_files || [])], corrections: [...(result.draft.corrections || [])],
+    };
+    const draftContentSha = crypto.createHash('sha256').update(JSON.stringify(draftBody)).digest('hex');
+    const handoff = {
+        schema_version: 1, attempt_id: `${options.attemptId}`,
+        authorization_hash: options.authorizationHash, scope_hash: options.scopeHash,
+        baseline_source_sha256: baselineSourceSha, candidate_source_sha256: candidateSourceSha,
+        draft: {
+            ...draftBody,
+            patch_sha256: crypto.createHash('sha256').update(patchBytes).digest('hex'),
+            content_sha256: draftContentSha, response_sha256: responseSha,
+        },
+        response: { body_sha256: responseSha, request_id: result.response.requestId || null, model: result.response.model || null, finish_reason: result.response.finishReason || null },
+    };
+    if (!DIGEST.test(handoff.authorization_hash) || !DIGEST.test(handoff.scope_hash)) throw new Error('C2b owner authorization/scope identities are invalid.');
+    const bytes = Buffer.from(`${JSON.stringify(handoff, null, 2)}\n`);
+    atomicOwnerWrite(options.handoffPath, bytes);
+    return { ...handoff, c2b_handoff_sha256: crypto.createHash('sha256').update(bytes).digest('hex'), handoff_path: path.resolve(options.handoffPath) };
+}
+
+/** Apply the validated C2b patch and atomically emit the owner-only C2b handoff. */
+async function applyValidatedDraftWithHandoff(result, proposal, candidateRoot, options = {}) {
+    const applied = applyValidatedDraft(result, proposal, candidateRoot, options.command);
+    const handoff = persistC2bHandoff(result, proposal, applied, options);
+    if (options.client && options.originalProposal && options.store?.recordCodeVerification) {
+        const metadata = options.metadata || {};
+        await options.store.recordCodeVerification(options.client, options.originalProposal, {
+            attempt_id: options.attemptId,
+            code_candidate: {
+                ...metadata, status: 'running', phase: 'draft',
+                authorization_hash: handoff.authorization_hash, scope_hash: handoff.scope_hash,
+                c2b_handoff_sha256: handoff.c2b_handoff_sha256,
+                baseline_source_sha256: handoff.baseline_source_sha256,
+                candidate_source_sha256: handoff.candidate_source_sha256,
+                draft_patch_sha256: handoff.draft.patch_sha256,
+                draft_content_sha256: handoff.draft.content_sha256,
+                draft_response_sha256: handoff.draft.response_sha256,
+            },
+        }, loadVerificationModule(options.repoRoot));
+    }
+    return { candidateRoot: applied, handoff };
+}
+
+module.exports = { buildDraftRequest, deriveDraftScope, dispatchCodeDraft, applyValidatedDraft, applyValidatedDraftWithHandoff, persistC2bHandoff, loadPreparedDraft, redact, validateDraftResponse };
