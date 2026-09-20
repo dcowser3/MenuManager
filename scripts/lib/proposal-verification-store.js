@@ -7,7 +7,7 @@ const DIGEST = /^[a-f0-9]{64}$/;
 const TERMINAL_STATUSES = new Set(['verified', 'failed', 'blocked']);
 
 function assertClaimIdentity(candidate) {
-    const required = ['proposal_sha256', 'baseline_source_sha256', 'expected_dataset_sha256', 'behavior_tests_sha256'];
+    const required = ['proposal_sha256', 'baseline_source_sha256', 'expected_dataset_sha256', 'behavior_tests_sha256', 'prompt_sha256', 'accepted_rules_sha256'];
     for (const field of required) {
         if (typeof candidate?.[field] !== 'string' || !DIGEST.test(candidate[field])) {
             throw new Error(`Running code candidate claims require a valid ${field}.`);
@@ -21,7 +21,7 @@ function assertClaimIdentity(candidate) {
 }
 
 function assertFrozenIdentity(previous, incoming) {
-    for (const field of ['proposal_sha256', 'baseline_source_sha256', 'expected_dataset_sha256', 'behavior_tests_sha256']) {
+    for (const field of ['proposal_sha256', 'baseline_source_sha256', 'expected_dataset_sha256', 'behavior_tests_sha256', 'prompt_sha256', 'accepted_rules_sha256']) {
         if (incoming[field] !== previous[field]) throw new Error(`Candidate completion differs in frozen ${field}.`);
     }
     if (JSON.stringify(incoming.expected_case_ids) !== JSON.stringify(previous.expected_case_ids)) {

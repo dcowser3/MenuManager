@@ -10,7 +10,8 @@ const verifier = {
 const original = { id: 'p1', status: 'pending', fingerprint: 'one', code_recommendations: [{}], eval_summary: { replay_retirement_policy_version: 1 } };
 const claim = (attempt_id = 'attempt-a', started_at = new Date().toISOString()) => ({
     attempt_id, status: 'running', proposal_sha256: HASH, baseline_source_sha256: HASH_B,
-    expected_dataset_sha256: HASH, behavior_tests_sha256: HASH_B, expected_case_ids: ['menu-1', 'menu-2'], started_at,
+    expected_dataset_sha256: HASH, behavior_tests_sha256: HASH_B, prompt_sha256: HASH, accepted_rules_sha256: HASH_B,
+    expected_case_ids: ['menu-1', 'menu-2'], started_at,
 });
 const withClaim = (candidate) => ({ ...original, eval_summary: { ...original.eval_summary, code_candidate: candidate } });
 function fakeClient(current = original, updated = [{ id: 'p1' }]) {
