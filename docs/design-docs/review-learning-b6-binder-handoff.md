@@ -25,6 +25,19 @@ Only the source closure, focused tests/fixtures, and canonical design docs are i
 
 The preparer closure is guarded by `services/dashboard/__tests__/source-bound-preflight-closure.test.js`. It asserts that the runner, preparer, helper, and frozen synthetic template are present and that the template remains explicitly synthetic and credential-free.
 
+## Local usage
+
+Run the four entry points with frozen synthetic/public inputs and `--network none`:
+
+```text
+npm run review:preflight:source-bound:prepare -- --out DIR --old-fixture FILE --old-report FILE [--original-plan DIR]
+npm run review:preflight:source-bound:run -- --plan DIR --out DIR
+npm run review:preflight:human-explanations:prepare -- --corrections FILE --dataset FILE --cohorts FILE --source-manifest FILE --out DIR
+npm run review:preflight:human-explanations:package -- --preparation DIR --out DIR --image-id sha256:... --test-command COMMAND --test-log FILE --prep-log FILE --exit-code 0 --prep-exit-code 0 --test-counts binder:N,sourceBound:N,total:N
+```
+
+All outputs are local evidence or immutable handoff files. These commands have no provider, database, runtime, deployment, activation, paid-execution, or production-write authority.
+
 ## Operational limits
 
 The tooling is credential-free and network-isolated. It emits preparation artifacts for later review; it does not perform live Basic→submit→stored-review→DOCX lifecycle verification. Docker daemon/compose availability remains an external prerequisite for that live check.

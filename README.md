@@ -132,6 +132,19 @@ npm run smoke:basic-ai-check
 
 For route, API, UI, or workflow changes, follow [docs/feature-delivery-workflow.md](docs/feature-delivery-workflow.md): build the affected workspace, restart the affected service, and verify the live behavior with a request or browser check.
 
+### Offline review-learning preparation
+
+The B6 human-explanation and source-bound preflight tooling is preparation-only and writes only to the local output directory supplied by the caller. Run it with frozen synthetic/public inputs in network-none Docker:
+
+```bash
+npm run review:preflight:source-bound:prepare -- --out DIR --old-fixture FILE --old-report FILE [--original-plan DIR]
+npm run review:preflight:source-bound:run -- --plan DIR --out DIR
+npm run review:preflight:human-explanations:prepare -- --corrections FILE --dataset FILE --cohorts FILE --source-manifest FILE --out DIR
+npm run review:preflight:human-explanations:package -- --preparation DIR --out DIR --image-id sha256:... --test-command COMMAND --test-log FILE --prep-log FILE --exit-code 0 --prep-exit-code 0 --test-counts binder:N,sourceBound:N,total:N
+```
+
+These commands produce local evidence/packages only. They make no provider or database calls, do not alter runtime review behavior, and do not authorize activation, deployment, paid execution, or production writes. See the [B6 handoff](docs/design-docs/review-learning-b6-binder-handoff.md) and the [human-explanation](docs/design-docs/review-learning-human-explanation-binding.md) and [source-bound preflight](docs/design-docs/review-learning-source-bound-preflight-v2.md) design docs for the input and evidence boundaries.
+
 ## Documentation Rules
 
 - Keep this README limited to orientation, startup, and links.
