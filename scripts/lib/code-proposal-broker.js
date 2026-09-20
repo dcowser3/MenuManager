@@ -63,7 +63,7 @@ function validateAuthorization(raw, options = {}) {
     const now = options.now || Date.now();
     if (!raw || raw.schemaVersion !== 1 || raw.stage !== 'code-candidate' || raw.provider !== 'openai'
         || !safeName(raw.authorizationId) || !safeName(raw.ledgerId) || !safeName(raw.model)
-        || raw.terminal === true || raw.status === 'terminal' || raw.status === 'exhausted') {
+        || raw.terminal === true || !['active', 'authorized'].includes(raw.status)) {
         throw new Error('Code-candidate authorization is missing, terminal, or wrong-stage.');
     }
     if (!['synthetic', 'real'].includes(raw.mode)) throw new Error('Code-candidate authorization mode is invalid.');
@@ -99,8 +99,11 @@ function usageFrom(response) {
     const usage = response?.usage;
     const inputTokens = Number(usage?.prompt_tokens ?? usage?.input_tokens);
     const completionTokens = Number(usage?.completion_tokens ?? usage?.output_tokens);
+    const rawReasoning = usage?.completion_tokens_details?.reasoning_tokens;
+    const reasoningTokens = rawReasoning === undefined ? 0 : Number(rawReasoning);
     return Number.isInteger(inputTokens) && inputTokens >= 0 && Number.isInteger(completionTokens) && completionTokens >= 0
-        ? { inputTokens, completionTokens, reasoningTokens: Number(usage?.completion_tokens_details?.reasoning_tokens || 0) } : null;
+        && Number.isInteger(reasoningTokens) && reasoningTokens >= 0 && reasoningTokens <= completionTokens
+        ? { inputTokens, completionTokens, reasoningTokens } : null;
 }
 
 function charge(inputTokens, completionTokens, pricing = {}) {
@@ -173,16 +176,33 @@ class ModelBudgetBroker {
         if (state.schemaVersion !== 1 || state.authorizationId !== this.authorization.authorizationId || state.authorizationHash !== this.authorizationHash
             || state.scopeHash !== this.scopeHash || !state.requests || !state.totals) throw new Error('Code-candidate ledger identity is invalid.');
         for (const [requestId, request] of Object.entries(state.requests)) {
+            const scheduled = this.authorization.requestSchedule.find((entry) => entry.requestId === requestId);
             if (!request || request.requestId !== requestId || request.authorizationId !== this.authorization.authorizationId || request.authorizationHash !== this.authorizationHash
                 || request.scopeHash !== this.scopeHash || request.stage !== this.authorization.stage || request.provider !== this.authorization.provider || request.model !== this.authorization.model
                 || !['reserved', 'completed', 'ambiguous'].includes(request.status) || !Number.isFinite(request.reservedUsd)
                 || !Number.isInteger(request.reservedInputTokens) || request.reservedInputTokens <= 0 || !Number.isInteger(request.reservedCompletionTokens) || request.reservedCompletionTokens <= 0
-                || !DIGEST.test(request.requestHash || '') || !DIGEST.test(request.bodySha256 || '')) throw new Error(`Code-candidate ledger request identity is invalid: ${requestId}.`);
-            if (request.status === 'completed' && (!Number.isInteger(request.actualInputTokens) || !Number.isInteger(request.actualCompletionTokens) || !Number.isInteger(request.reasoningTokens) || request.reasoningTokens > request.actualCompletionTokens || !Number.isFinite(request.actualUsd))) throw new Error(`Code-candidate ledger completed accounting is invalid: ${requestId}.`);
+                || !DIGEST.test(request.requestHash || '') || !DIGEST.test(request.bodySha256 || '') || !scheduled
+                || request.bodySha256 !== scheduled.bodySha256 || request.reservedInputTokens !== scheduled.inputTokens
+                || request.reservedCompletionTokens !== scheduled.completionTokens
+                || Math.abs(request.reservedUsd - charge(request.reservedInputTokens, request.reservedCompletionTokens, this.authorization.pricing)) > 1e-12) throw new Error(`Code-candidate ledger request identity is invalid: ${requestId}.`);
+            if (request.status === 'completed' && (!Number.isInteger(request.actualInputTokens) || request.actualInputTokens < 0 || request.actualInputTokens > request.reservedInputTokens
+                || !Number.isInteger(request.actualCompletionTokens) || request.actualCompletionTokens < 0 || request.actualCompletionTokens > request.reservedCompletionTokens
+                || !Number.isInteger(request.reasoningTokens) || request.reasoningTokens < 0 || request.reasoningTokens > request.actualCompletionTokens
+                || !Number.isFinite(request.actualUsd) || request.actualUsd < 0
+                || Math.abs(request.actualUsd - charge(request.actualInputTokens, request.actualCompletionTokens, this.authorization.pricing)) > 1e-12)) throw new Error(`Code-candidate ledger completed accounting is invalid: ${requestId}.`);
         }
         const totals = summarize(state);
-        if (Math.abs(totals.usd - Number(state.totals.usd)) > 1e-12 || totals.requests !== state.totals.requests || totals.inputTokens !== state.totals.inputTokens || totals.completionTokens !== state.totals.completionTokens) throw new Error('Code-candidate ledger totals are inconsistent.');
+        if (Math.abs(totals.usd - Number(state.totals.usd)) > 1e-12 || totals.requests !== state.totals.requests || totals.inputTokens !== state.totals.inputTokens || totals.completionTokens !== state.totals.completionTokens
+            || totals.usd < 0 || totals.requests > this.authorization.stageLimits.requests || totals.requests > this.authorization.cumulativeLimits.requests
+            || totals.inputTokens > this.authorization.stageLimits.inputTokens || totals.inputTokens > this.authorization.cumulativeLimits.inputTokens
+            || totals.completionTokens > this.authorization.stageLimits.completionTokens || totals.completionTokens > this.authorization.cumulativeLimits.completionTokens
+            || totals.usd > this.authorization.stageLimits.usd + Number.EPSILON || totals.usd > this.authorization.cumulativeLimits.usd + Number.EPSILON) throw new Error('Code-candidate ledger totals are inconsistent.');
         return state;
+    }
+
+    assertLiveAuthorization() {
+        const now = this.now();
+        if (Date.parse(this.authorization.runDeadline) <= now || Date.parse(this.authorization.expiresAt) <= now) throw new Error('Code-candidate authorization is expired or past its run deadline.');
     }
 
     validateRequest(endpoint, body) {
@@ -200,6 +220,7 @@ class ModelBudgetBroker {
         const validated = this.validateRequest(endpoint, body);
         const schedule = this.authorization.requestSchedule;
         return this.withLock(() => {
+            this.assertLiveAuthorization();
             if (sha256(fs.readFileSync(this.authorizationFile)) !== this.authorizationHash) throw new Error('Reviewed code-candidate authorization changed after broker initialization.');
             const state = this.loadState();
             if (state.requests[requestId]) throw new Error('Draft request identity was already reserved; redispatch is forbidden.');
@@ -236,19 +257,27 @@ class ModelBudgetBroker {
     }
 
     async dispatch({ requestId, endpoint, body, apiKey, transport } = {}) {
+        this.assertLiveAuthorization();
         if (this.authorization.mode === 'real' && !apiKey) throw new Error('Code-candidate model credentials are not configured.');
         if (this.authorization.mode === 'synthetic' && apiKey) throw new Error('Synthetic code-candidate authorization cannot receive provider credentials.');
         const reservation = await this.reserve(requestId, endpoint, body);
         const send = transport || this.transport;
         if (typeof send !== 'function') { this.markAmbiguous(requestId, 'No injectable draft transport was provided.'); throw new Error('No injectable draft transport was provided.'); }
+        const controller = new AbortController();
+        let timer;
         try {
-            const response = await send({ endpoint, body: reservation.body, apiKey, requestId, timeoutMs: this.authorization.requestLimits.timeoutMs });
+            this.assertLiveAuthorization();
+            const timeout = new Promise((_, reject) => {
+                timer = setTimeout(() => { controller.abort(); reject(new Error('Draft transport timed out.')); }, this.authorization.requestLimits.timeoutMs);
+            });
+            const response = await Promise.race([send({ endpoint, body: reservation.body, apiKey, requestId, timeoutMs: this.authorization.requestLimits.timeoutMs, signal: controller.signal }), timeout]);
             const status = Number(response?.status || 0); const raw = typeof response?.body === 'string' ? response.body : JSON.stringify(response?.body);
-            if (typeof raw !== 'string' || raw.length > MAX_RESPONSE) { this.markAmbiguous(requestId, 'Draft response is missing or oversized.'); throw new Error('Draft response is missing or oversized.'); }
+            if (typeof raw !== 'string' || Buffer.byteLength(raw, 'utf8') > MAX_RESPONSE) { this.markAmbiguous(requestId, 'Draft response is missing or oversized.'); throw new Error('Draft response is missing or oversized.'); }
             let parsed; try { parsed = JSON.parse(raw); } catch { parsed = null; }
             const accounting = this.settle(requestId, status >= 200 && status < 300 ? parsed : null);
             return { status, body: raw, parsed, accountingStatus: accounting.status, requestId };
         } catch (error) { if (this.requestStatus(requestId) === 'reserved') this.markAmbiguous(requestId, error); throw error; }
+        finally { if (timer) clearTimeout(timer); }
     }
 
     requestStatus(requestId) { const request = this.loadState().requests[requestId]; return request?.status || null; }

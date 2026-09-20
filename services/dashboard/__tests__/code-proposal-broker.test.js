@@ -9,7 +9,7 @@ const HASH = 'a'.repeat(64);
 function fixture(overrides = {}) {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'b5-c2b-broker-'));
     const scope = { attemptId: 'attempt-one', runId: 'attempt-one', parentCampaignSha256: HASH, proposalSha256: 'b'.repeat(64), promptSha256: 'c'.repeat(64), rulesSha256: 'd'.repeat(64), datasetSha256: 'e'.repeat(64), sourceSha256: 'f'.repeat(64), behaviorSha256: '1'.repeat(64), outputRoot: root };
-    const authorization = { schemaVersion: 1, authorizationId: 'code-auth', ledgerId: 'code-ledger', stage: 'code-candidate', provider: 'openai', mode: 'synthetic', model: 'gpt-5.6-sol', issuedAt: new Date(Date.now() - 1000).toISOString(), runDeadline: new Date(Date.now() + 3600000).toISOString(), expiresAt: new Date(Date.now() + 7200000).toISOString(), runRoot: root, ledgerRelativePath: 'budget-state.json', scope, stageLimits: { usd: 1, requests: 1, inputTokens: 1000, completionTokens: 100 }, cumulativeLimits: { usd: 1, requests: 1, inputTokens: 1000, completionTokens: 100 }, requestLimits: { inputTokens: 1000, completionTokens: 100, timeoutMs: 1000 }, pricing: { inputUsdPerMillion: 4, outputUsdPerMillion: 20 }, requestSchedule: [{ requestId: 'attempt-one:draft:1:transport:1', bodySha256: digest(JSON.stringify(body())), inputTokens: 10, completionTokens: 100 }], ...overrides };
+    const authorization = { schemaVersion: 1, authorizationId: 'code-auth', ledgerId: 'code-ledger', stage: 'code-candidate', status: 'active', provider: 'openai', mode: 'synthetic', model: 'gpt-5.6-sol', issuedAt: new Date(Date.now() - 1000).toISOString(), runDeadline: new Date(Date.now() + 3600000).toISOString(), expiresAt: new Date(Date.now() + 7200000).toISOString(), runRoot: root, ledgerRelativePath: 'budget-state.json', scope, stageLimits: { usd: 1, requests: 1, inputTokens: 1000, completionTokens: 100 }, cumulativeLimits: { usd: 1, requests: 1, inputTokens: 1000, completionTokens: 100 }, requestLimits: { inputTokens: 1000, completionTokens: 100, timeoutMs: 1000 }, pricing: { inputUsdPerMillion: 4, outputUsdPerMillion: 20 }, requestSchedule: [{ requestId: 'attempt-one:draft:1:transport:1', bodySha256: digest(JSON.stringify(body())), inputTokens: 10, completionTokens: 100 }], ...overrides };
     const authFile = path.join(root, 'authorization.json'); const stateFile = path.join(root, 'budget-state.json');
     fs.writeFileSync(authFile, `${JSON.stringify(authorization)}\n`, { mode: 0o600 });
     const authorizationHash = digest(fs.readFileSync(authFile));
@@ -23,6 +23,9 @@ test.each([
     ['terminal authorization', { terminal: true }, /terminal/],
     ['wrong stage', { stage: 'fixed-candidate' }, /wrong-stage/],
     ['expired authorization', { expiresAt: new Date(Date.now() - 1).toISOString() }, /expired/],
+    ['missing status', { status: undefined }, /terminal/],
+    ['revoked status', { status: 'revoked' }, /terminal/],
+    ['completed status', { status: 'completed' }, /terminal/],
 ])('rejects %s before any transport', (_label, override, error) => {
     const state = fixture(override);
     try {
@@ -76,6 +79,15 @@ test('successful injected dispatch settles once and binds exact request identity
     } finally { state.cleanup(); }
 });
 
+test('rechecks authorization deadline after broker construction', async () => {
+    const state = fixture(); let now = Date.now();
+    try {
+        const broker = new ModelBudgetBroker({ authorizationFile: state.authFile, stateFile: state.stateFile, outputRoot: state.root, now: () => now, countInputTokens: () => 10 });
+        now = Date.parse(state.authorization.runDeadline) + 1;
+        await expect(broker.reserve('attempt-one:draft:1:transport:1', broker.authorization.endpoint, body())).rejects.toThrow(/expired/);
+    } finally { state.cleanup(); }
+});
+
 test.each([
     ['transport failure', async () => { throw new Error('secret transport detail'); }, /secret transport detail/],
     ['incomplete usage', async () => ({ status: 200, body: JSON.stringify({ model: 'gpt-5.6-sol', choices: [{ message: { content: '{}' }, finish_reason: 'stop' }] }) }), /incomplete/],
@@ -89,6 +101,52 @@ test.each([
         } else await expect(broker.dispatch({ requestId: 'attempt-one:draft:1:transport:1', endpoint: broker.authorization.endpoint, body: body(), transport })).rejects.toThrow(error);
         expect(broker.requestStatus('attempt-one:draft:1:transport:1')).toBe('ambiguous');
         expect(broker.summary().stage.requests).toBe(1);
+    } finally { state.cleanup(); }
+});
+
+test.each([
+    ['negative reasoning', { completion_tokens_details: { reasoning_tokens: -1 } }],
+    ['non-integer reasoning', { completion_tokens_details: { reasoning_tokens: 'not-a-number' } }],
+])('retains an ambiguous reservation for invalid %s usage', async (_label, usage) => {
+    const state = fixture();
+    try {
+        const broker = new ModelBudgetBroker({ authorizationFile: state.authFile, stateFile: state.stateFile, outputRoot: state.root, countInputTokens: () => 10 });
+        const result = await broker.dispatch({ requestId: 'attempt-one:draft:1:transport:1', endpoint: broker.authorization.endpoint, body: body(), transport: async () => ({ status: 200, body: JSON.stringify({ model: state.authorization.model, choices: [], usage: { prompt_tokens: 10, completion_tokens: 2, ...usage } }) }) });
+        expect(result.accountingStatus).toBe('ambiguous');
+    } finally { state.cleanup(); }
+});
+
+test.each([
+    ['discounted reservation', (request) => { request.reservedUsd = 0; }],
+    ['negative completed usage', (request) => { request.status = 'completed'; request.actualInputTokens = -1; request.actualCompletionTokens = 1; request.reasoningTokens = 0; request.actualUsd = 0; }],
+    ['unscheduled request', (request, state) => { request.requestId = 'not-scheduled'; state.requests['not-scheduled'] = request; delete state.requests['attempt-one:draft:1:transport:1']; }],
+])('rejects tampered ledger %s', async (_label, mutate) => {
+    const state = fixture();
+    try {
+        const broker = new ModelBudgetBroker({ authorizationFile: state.authFile, stateFile: state.stateFile, outputRoot: state.root, countInputTokens: () => 10 });
+        await broker.reserve('attempt-one:draft:1:transport:1', broker.authorization.endpoint, body());
+        const ledger = JSON.parse(fs.readFileSync(state.stateFile, 'utf8'));
+        const request = ledger.requests['attempt-one:draft:1:transport:1']; mutate(request, ledger); fs.writeFileSync(state.stateFile, `${JSON.stringify(ledger)}\n`, { mode: 0o600 });
+        expect(() => new ModelBudgetBroker({ authorizationFile: state.authFile, stateFile: state.stateFile, outputRoot: state.root, countInputTokens: () => 10 })).toThrow(/ledger/);
+    } finally { state.cleanup(); }
+});
+
+test('broker timeout marks an injected hung transport ambiguous', async () => {
+    const state = fixture({ requestLimits: { inputTokens: 1000, completionTokens: 100, timeoutMs: 10 } });
+    try {
+        const broker = new ModelBudgetBroker({ authorizationFile: state.authFile, stateFile: state.stateFile, outputRoot: state.root, countInputTokens: () => 10 });
+        await expect(broker.dispatch({ requestId: 'attempt-one:draft:1:transport:1', endpoint: broker.authorization.endpoint, body: body(), transport: () => new Promise(() => {}) })).rejects.toThrow(/timed out/);
+        expect(broker.requestStatus('attempt-one:draft:1:transport:1')).toBe('ambiguous');
+    } finally { state.cleanup(); }
+});
+
+test('rejects a response whose UTF-8 byte bound exceeds the cap', async () => {
+    const state = fixture();
+    try {
+        const broker = new ModelBudgetBroker({ authorizationFile: state.authFile, stateFile: state.stateFile, outputRoot: state.root, countInputTokens: () => 10 });
+        const oversized = JSON.stringify({ content: 'é'.repeat(110001) });
+        await expect(broker.dispatch({ requestId: 'attempt-one:draft:1:transport:1', endpoint: broker.authorization.endpoint, body: body(), transport: async () => ({ status: 200, body: oversized }) })).rejects.toThrow(/oversized/);
+        expect(broker.requestStatus('attempt-one:draft:1:transport:1')).toBe('ambiguous');
     } finally { state.cleanup(); }
 });
 
