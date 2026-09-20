@@ -673,6 +673,27 @@ describe('runPostAiPipeline (full guard chain)', () => {
         expect(result.correctedMenuSanitized).toBe(original);
         expect(result.correctedMenuSanitized).not.toContain('pickled herbs');
     });
+
+    test('restores submitted allergen after a late high-confidence suggestion removes it', () => {
+        const original = 'Cusco Chicken, marinade S 22\nSteak, fries D 30';
+        const modelRewrite = 'Cusco Chicken, marinade S 22\nSteak, fries D 30';
+        const result = runPostAiPipeline({
+            feedback: buildFeedback(modelRewrite, [{
+                type: 'Spelling', confidence: 'high', menuItem: 'Cusco Chicken',
+                description: 'Remove the trailing code from the dish wording.',
+                recommendation: 'Change "marinade S" to "marinade".',
+            }]),
+            preCheckedReviewBody: original,
+            effectiveReviewAllergens: 'S contains shellfish | D contains dairy',
+            acceptedCorrectionRules: [],
+            embeddedSetMenuAnalysis: { sections: [], issues: [] },
+            precheckEnabled: false,
+        });
+
+        expect(result.correctedAfterHighConfidence).not.toContain('marinade S 22');
+        expect(result.correctedMenuSanitized).toContain('Cusco Chicken, marinade S 22');
+        expect(result.correctedMenuSanitized).toContain('Steak, fries D 30');
+    });
 });
 
 describe('enforceAllergenProgramCheck', () => {

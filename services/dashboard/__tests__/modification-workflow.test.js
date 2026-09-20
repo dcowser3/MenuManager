@@ -1647,8 +1647,8 @@ describe('Dashboard Modification Workflow (local, mocked externals)', () => {
             if (urlStr.includes('/run-qa-check')) {
                 const latestRemoval = !`${payload.text || ''}`.includes(' S 22');
                 return { data: { feedback: latestRemoval
-                    ? '=== CORRECTED MENU ===\nCusco Chicken, marinade N 22\n=== END CORRECTED MENU ===\n=== SUGGESTIONS ===\n[]\n=== END SUGGESTIONS ==='
-                    : '=== CORRECTED MENU ===\nCusco Chicken, marinade N 22\nSteak, fries D 30\n=== END CORRECTED MENU ===\n=== SUGGESTIONS ===\n[]\n=== END SUGGESTIONS ===' } };
+                    ? '=== CORRECTED MENU ===\nCusco Chicken, marinade N 22\n=== END CORRECTED MENU ===\n=== SUGGESTIONS ===\n[{"type":"Spelling","confidence":"high","menuItem":"Cusco Chicken","description":"Remove the trailing code from the dish wording.","recommendation":"Change \\"marinade S\\" to \\"marinade\\"."}]\n=== END SUGGESTIONS ==='
+                    : '=== CORRECTED MENU ===\nCusco Chicken, marinade N 22\nSteak, fries D 30\n=== END CORRECTED MENU ===\n=== SUGGESTIONS ===\n[{"type":"Spelling","confidence":"high","menuItem":"Cusco Chicken","description":"Remove the trailing code from the dish wording.","recommendation":"Change \\"marinade S\\" to \\"marinade\\"."}]\n=== END SUGGESTIONS ===' } };
             }
             return { data: {} };
         });

@@ -33,8 +33,11 @@ evidence artifacts and are intentionally not shipped as product runtime code.
 
 ## Verification
 
-- Docker network-none focused suites: 5 suites, 128 tests, all passed, including
-  the actual changed-only Basic route and no-provider full-pipeline parity.
+- Docker network-none focused suites: 6 suites, 136 tests, all passed, including
+  the actual changed-only Basic route, no-provider full-pipeline parity, and the
+  generated rule-manifest contract. The regression suite covers the exact late
+  high-confidence suggestion that removes `marinade S` after model delivery;
+  final guarded bytes restore S while a later explicit chef removal remains removed.
 - Dashboard build: passed.
 - Tenant-config build: passed.
 - Dashboard source/dist parity: all 40 compiled files; packaged and fresh closure
