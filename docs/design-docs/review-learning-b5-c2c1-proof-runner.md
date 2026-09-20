@@ -18,7 +18,7 @@ ordered dataset cases, two distinct replay seeds, the trusted B5-A regression
 allowlist, supplemental candidate tests (new versus the baseline; historical
 candidate tests remain paired only when byte-identical), exact C2b handoff/response/scope
 hashes, frozen test bytes, and verifier output paths. Baseline and candidate
-tests run through an injected executor;
+tests run through a fixed executor;
 the runner derives report hashes and recomputes the before/after verdict. It
 does not trust caller pass booleans, uploaded hashes, reduced test inventories,
 or candidate reports. Baseline may fail only the named motivating assertions;
@@ -55,9 +55,11 @@ file, container tmpfs output, network-none/no-new-privileges/cap-drop-all/pid
 limits, allowlisted environment, bounded JSON, deadlines, labels, and
 ownership-checked cleanup. Unit workers materialize a fresh arm workspace and
 verify the frozen test-bundle manifest before running the identical inventory
-through the fixed synchronous JavaScript test contract (`module.exports.run`).
-TypeScript/Jest inventory is blocked until the image carries approved
-transformer wiring; it is never silently downgraded.
+through the image-owned Jest runner and pinned `ts-jest` transformer. Trusted
+repository code/config is mounted under `/runner/trusted`; `/app/node_modules`
+remains the immutable image dependency tree. Both JavaScript and TypeScript
+inventories produce real Jest JSON reports; no custom same-process test contract
+or caller-provided transformer is accepted.
 `runCodeProposalProofWithDocker` rejects all caller executors and evaluators;
 the launcher cannot attach proof or self-attest. Replay and delivery currently
 return an explicit blocked protocol result because no fixed repository-owned

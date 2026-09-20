@@ -12,6 +12,7 @@ const requestPath = process.env.C2C2_REQUEST_PATH;
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const { spawnSync } = require('child_process');
 const TEST_PATH = /^services\/dashboard\/__tests__\/code-candidate-[a-z0-9-]+\.test\.(?:ts|js)$/;
 const TRUSTED_TEST_PATHS = new Set([
     'services/dashboard/__tests__/pre-ai-deterministic-rules.test.ts',
@@ -65,32 +66,39 @@ function materializeWorkspace(sourceRoot, request) {
         fs.mkdirSync(path.dirname(target), { recursive: true });
         fs.copyFileSync(path.join('/runner/test-bundle', file.path), target);
     }
+    for (const trusted of ['jest.setup.js', 'tsconfig.json', 'services/dashboard/tsconfig.json']) {
+        const source = path.join('/runner/trusted', trusted);
+        const target = path.join(workspace, trusted);
+        if (fs.existsSync(source) && fs.statSync(source).isFile()) {
+            fs.mkdirSync(path.dirname(target), { recursive: true });
+            fs.copyFileSync(source, target);
+            fs.chmodSync(target, 0o444);
+        }
+    }
     return workspace;
 }
 
-function runFixedJavascriptTests(workspace, inventory) {
-    const testResults = [];
-    let numFailedTests = 0;
-    for (const relative of inventory) {
-        if (!relative.endsWith('.js')) throw new Error('fixed image has no approved TypeScript transformer; unit proof is blocked');
-        const file = path.join(workspace, relative);
-        delete require.cache[require.resolve(file)];
-        const loaded = require(file);
-        if (!loaded || typeof loaded.run !== 'function') throw new Error(`unit test ${relative} does not implement the fixed run contract`);
-        let status = 'passed';
-        let failureMessages = [];
-        try {
-            const result = loaded.run({ root: workspace });
-            if (result && typeof result.then === 'function') throw new Error('fixed run contract does not support asynchronous tests');
-            if (result === false) throw new Error('fixed test returned false');
-        } catch (error) {
-            status = 'failed';
-            failureMessages = [`${error?.stack || error}`.slice(0, 1000)];
-            numFailedTests += 1;
-        }
-        testResults.push({ name: file, assertionResults: [{ status, title: 'fixed-run-contract', failureMessages }] });
+function lockWorkspace(root) {
+    const entries = fs.readdirSync(root, { withFileTypes: true });
+    for (const entry of entries) {
+        const full = path.join(root, entry.name);
+        if (entry.isDirectory()) { lockWorkspace(full); fs.chmodSync(full, 0o555); }
+        else if (entry.isFile()) fs.chmodSync(full, 0o444);
     }
-    return { numTotalTests: testResults.length, numPassedTests: testResults.length - numFailedTests, numFailedTests, testResults };
+}
+
+function runFixedJestTests(workspace, inventory) {
+    const configPath = path.join(workspace, '.c2c2-jest.config.js');
+    fs.writeFileSync(configPath, `module.exports = { rootDir: ${JSON.stringify(workspace)}, testEnvironment: 'node', testRunner: 'jest-circus/runner', roots: [${JSON.stringify(path.join(workspace, 'services'))}], modulePaths: ['/app/node_modules'], moduleDirectories: ['/app/node_modules'], setupFiles: ${JSON.stringify(fs.existsSync(path.join(workspace, 'jest.setup.js')) ? [path.join(workspace, 'jest.setup.js')] : [])}, transform: { '^.+\\\\.tsx?$': ['/app/node_modules/ts-jest', { diagnostics: false, tsconfig: { target: 'es2020', module: 'commonjs', esModuleInterop: true, types: ['jest', 'node'], skipLibCheck: true } }] }, testPathIgnorePatterns: ['/node_modules/', '/dist/'] };\n`, { mode: 0o600 });
+    fs.chmodSync(configPath, 0o444);
+    lockWorkspace(workspace);
+    const reportFile = '/runner/output/jest-result.json';
+    const result = spawnSync('/app/node_modules/.bin/jest', [...inventory, '--config', configPath, '--runInBand', '--json', `--outputFile=${reportFile}`, '--cacheDirectory=/tmp/c2c2-jest-cache'], { cwd: workspace, env: { HOME: '/tmp', NODE_ENV: 'test', NODE_PATH: '/app/node_modules', PATH: '/app/node_modules/.bin:/usr/local/bin:/usr/bin:/bin' }, encoding: 'utf8', timeout: 150000, maxBuffer: 1024 * 1024 });
+    if (result.error?.code === 'ETIMEDOUT') throw new Error('fixed Jest worker timed out');
+    if (!fs.existsSync(reportFile)) throw new Error(`fixed Jest worker emitted no report: status=${result.status} stderr=${String(result.stderr || '').slice(0, 500)}`);
+    const report = JSON.parse(fs.readFileSync(reportFile, 'utf8'));
+    if (!report || !Array.isArray(report.testResults) || !Number.isInteger(report.numTotalTests) || !Number.isInteger(report.numRuntimeErrorTestSuites)) throw new Error('fixed Jest report schema is incomplete');
+    return { exit_code: Number.isInteger(result.status) ? result.status : 1, report };
 }
 
 if (!['unit', 'replay', 'delivery'].includes(phase) || !['baseline', 'candidate', 'paired'].includes(arm)
@@ -103,8 +111,8 @@ if (!['unit', 'replay', 'delivery'].includes(phase) || !['baseline', 'candidate'
             if (!Array.isArray(request.inventory) || request.inventory.some((file) => typeof file !== 'string' || (!TEST_PATH.test(file) && !TRUSTED_TEST_PATHS.has(file)))) throw new Error('invalid frozen unit inventory');
             const root = arm === 'baseline' ? '/runner/baseline' : '/runner/candidate';
             const workspace = materializeWorkspace(root, request);
-            const report = runFixedJavascriptTests(workspace, request.inventory);
-            process.stdout.write(JSON.stringify({ protocol_version: 1, status: 'ok', phase, arm, seed, run_id: runId, runtime_id: runtimeId, image_id: imageId, exit_code: report.numFailedTests ? 1 : 0, report }));
+            const result = runFixedJestTests(workspace, request.inventory);
+            process.stdout.write(JSON.stringify({ protocol_version: 1, status: 'ok', phase, arm, seed, run_id: runId, runtime_id: runtimeId, image_id: imageId, exit_code: result.exit_code, report: result.report }));
         } else if (phase === 'replay') {
             blocked('fixed repository-owned replay driver is not available; proof is blocked');
         } else {

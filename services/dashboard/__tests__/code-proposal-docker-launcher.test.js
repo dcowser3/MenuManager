@@ -31,6 +31,7 @@ test('builds an immutable, isolated, fixed worker invocation', () => {
         expect(value.args).not.toContain('--pid=host');
         expect(value.args).not.toContain('--ipc=host');
         expect(value.mounts.filter((mount) => mount.mode === 'ro')).toHaveLength(4);
+        expect(value.mounts.find((mount) => mount.destination === '/runner/trusted').source).toBe(path.resolve(__dirname, '../../..'));
         expect(value.mounts.find((mount) => mount.destination === '/runner/output')).toBeUndefined();
         expect(value.env).toEqual(expect.objectContaining({ NODE_ENV: 'test', C2C2_PROTOCOL_VERSION: '1', C2C2_RUNTIME_ID: FIXED_RUNTIME_ID, C2C2_IMAGE_ID: HASH }));
         expect(value.args).toEqual(expect.arrayContaining(['--tmpfs', '/runner/output:rw,noexec,nosuid,size=64m,mode=1777']));

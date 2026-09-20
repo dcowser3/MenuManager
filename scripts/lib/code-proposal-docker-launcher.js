@@ -13,14 +13,16 @@ const { spawn, execFile } = require('child_process');
 const DIGEST = /^(?:sha256:)?[a-f0-9]{64}$/;
 const MAX_OUTPUT_BYTES = 2 * 1024 * 1024;
 const MAX_TIMEOUT_MS = 180000;
-const WORKER_SCRIPT = '/runner/scripts/code-proposal-c2c2-worker.js';
+const WORKER_SCRIPT = '/runner/trusted/scripts/code-proposal-c2c2-worker.js';
 const FIXED_COMMAND = Object.freeze(['node', WORKER_SCRIPT]);
 const FIXED_ENV_KEYS = Object.freeze(['NODE_ENV', 'C2C2_PROTOCOL_VERSION', 'C2C2_PHASE', 'C2C2_ARM', 'C2C2_SEED', 'C2C2_RUN_ID', 'C2C2_RUNTIME_ID', 'C2C2_IMAGE_ID', 'C2C2_REQUEST_PATH']);
 
 function deriveRuntimeId() {
     const launcherBytes = fs.readFileSync(__filename);
     const workerBytes = fs.readFileSync(path.resolve(__dirname, '../code-proposal-c2c2-worker.js'));
-    return crypto.createHash('sha256').update(launcherBytes).update(workerBytes).update(JSON.stringify({ command: FIXED_COMMAND, maxOutput: MAX_OUTPUT_BYTES, maxTimeout: MAX_TIMEOUT_MS, network: 'none', capDrop: 'ALL', noNewPrivileges: true, uid: '65532:65532' })).digest('hex');
+    const lockPath = path.resolve(__dirname, '../../package-lock.json');
+    const lockBytes = fs.existsSync(lockPath) ? fs.readFileSync(lockPath) : Buffer.from('no-lockfile');
+    return crypto.createHash('sha256').update(launcherBytes).update(workerBytes).update(lockBytes).update(JSON.stringify({ command: FIXED_COMMAND, maxOutput: MAX_OUTPUT_BYTES, maxTimeout: MAX_TIMEOUT_MS, network: 'none', capDrop: 'ALL', noNewPrivileges: true, uid: '65532:65532', dependenciesMount: '/app/node_modules', workerHome: '/tmp' })).digest('hex');
 }
 
 const FIXED_RUNTIME_ID = deriveRuntimeId();
@@ -73,7 +75,6 @@ function buildDockerInvocation(options = {}) {
     const outputRoot = canonicalDirectory(options.outputRoot || path.join(attemptRoot, 'docker-output'), 'Output root', attemptRoot);
     if ((fs.lstatSync(outputRoot).mode & 0o777) !== 0o700) throw new Error('Output root must be owner-only mode 0700.');
     const trustedRepoRoot = canonicalDirectory(options.repoRoot || path.resolve(__dirname, '../..'), 'Trusted repository root');
-    const scriptsRoot = canonicalDirectory(path.join(trustedRepoRoot, 'scripts'), 'Trusted worker scripts', trustedRepoRoot);
     const image = digest(options.imageId, 'image');
     const runtime = digest(options.runtimeId, 'runtime');
     if (runtime !== FIXED_RUNTIME_ID) throw new Error('C2c2 runtime identity is not derived from the fixed launcher and worker.');
@@ -97,7 +98,7 @@ function buildDockerInvocation(options = {}) {
         { source: baselineRoot, destination: '/runner/baseline', mode: 'ro' },
         { source: candidateRoot, destination: '/runner/candidate', mode: 'ro' },
         { source: testBundleRoot, destination: '/runner/test-bundle', mode: 'ro' },
-        { source: scriptsRoot, destination: '/runner/scripts', mode: 'ro' },
+        { source: trustedRepoRoot, destination: '/runner/trusted', mode: 'ro' },
     ];
     assertNoOverlap(mounts.map((mount) => ({ path: mount.source })));
     assertNoOverlap([...mounts.map((mount) => ({ path: mount.source })), { path: outputRoot }]);
@@ -121,7 +122,7 @@ function parseWorkerOutput(stdout, stderr, spec = null) {
     if (spec) {
         if (typeof value.phase !== 'string' || typeof value.arm !== 'string' || !Number.isInteger(value.seed) || typeof value.run_id !== 'string' || typeof value.runtime_id !== 'string' || typeof value.image_id !== 'string') throw new Error('C2c2 worker protocol identity types are invalid.');
         if (value.phase !== spec.phase || value.arm !== spec.arm || value.seed !== spec.seed || value.run_id !== spec.runId || value.runtime_id !== spec.runtime || value.image_id !== spec.image) throw new Error('C2c2 worker identity does not match its immutable invocation.');
-        const allowed = new Set(['protocol_version', 'status', 'phase', 'arm', 'seed', 'run_id', 'runtime_id', 'image_id', 'error', 'blocked', 'exit_code', 'report', 'report_id', 'output', 'contractComplete', 'fenceMissing', 'composite', 'extraEdits', 'rule_activations', 'driver', 'baseline_submitted_text', 'candidate_submitted_text', 'baseline_submitted_html', 'candidate_submitted_html', 'baseline_submitted_html_text', 'candidate_submitted_html_text', 'baseline_source_hashes', 'candidate_source_hashes', 'baseline_browser_version', 'candidate_browser_version', 'quill_version']);
+        const allowed = new Set(['protocol_version', 'status', 'phase', 'arm', 'seed', 'run_id', 'runtime_id', 'image_id', 'error', 'blocked', 'exit_code', 'report', 'report_id', 'output', 'response', 'contractComplete', 'fenceMissing', 'composite', 'extraEdits', 'rule_activations', 'driver', 'baseline_submitted_text', 'candidate_submitted_text', 'baseline_submitted_html', 'candidate_submitted_html', 'baseline_submitted_html_text', 'candidate_submitted_html_text', 'baseline_source_hashes', 'candidate_source_hashes', 'baseline_browser_version', 'candidate_browser_version', 'quill_version']);
         if (Object.keys(value).some((key) => !allowed.has(key))) throw new Error('C2c2 worker report contains an unallowlisted field.');
         if (value.status === 'failed' && (typeof value.error !== 'string' || (value.blocked !== undefined && typeof value.blocked !== 'boolean'))) throw new Error('C2c2 worker failure protocol is invalid.');
         if (value.status === 'ok' && value.phase === 'unit' && (!Number.isInteger(value.exit_code) || !value.report || typeof value.report !== 'object' || Array.isArray(value.report))) throw new Error('C2c2 unit report protocol is invalid.');
