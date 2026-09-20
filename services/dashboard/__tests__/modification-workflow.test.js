@@ -1647,10 +1647,11 @@ describe('Dashboard Modification Workflow (local, mocked externals)', () => {
             if (urlStr.includes('/run-qa-check')) {
                 const text = `${payload.text || ''}`;
                 const latestRemoval = !text.includes(' S 22');
-                const changedDescription = text.includes(' S 22, lime');
+                const changedDescription = text.includes('citrus marinade S 22');
+                const fullMenu = text.includes('Steak, fries D 30');
                 return { data: { feedback: latestRemoval
-                    ? '=== CORRECTED MENU ===\nCusco Chicken, marinade N 22\n=== END CORRECTED MENU ===\n=== SUGGESTIONS ===\n[{"type":"Spelling","confidence":"high","menuItem":"Cusco Chicken","description":"Remove the trailing code from the dish wording.","recommendation":"Change \\"marinade S\\" to \\"marinade\\"."}]\n=== END SUGGESTIONS ==='
-                    : `=== CORRECTED MENU ===\n${changedDescription ? 'Cusco Chicken, marinade S 22, lime\nSteak, fries D 30' : 'Cusco Chicken, marinade N 22\nSteak, fries D 30'}\n=== END CORRECTED MENU ===\n=== SUGGESTIONS ===\n[{"type":"Spelling","confidence":"high","menuItem":"Cusco Chicken","description":"Remove the trailing code from the dish wording.","recommendation":"Change \\"marinade S\\" to \\"marinade\\"."}]\n=== END SUGGESTIONS ===` } };
+                    ? `=== CORRECTED MENU ===\nCusco Chicken, citrus marinade N 22${fullMenu ? '\\nSteak, fries D 30' : ''}\n=== END CORRECTED MENU ===\n=== SUGGESTIONS ===\n[{"type":"Spelling","confidence":"high","menuItem":"Cusco Chicken","description":"Remove the trailing code from the dish wording.","recommendation":"Change \\"citrus marinade S\\" to \\"citrus marinade\\"."}]\n=== END SUGGESTIONS ===`
+                    : `=== CORRECTED MENU ===\n${changedDescription ? 'Cusco Chicken, citrus marinade S 22' : 'Cusco Chicken, citrus marinade N 22'}${fullMenu ? '\\nSteak, fries D 30' : ''}\n=== END CORRECTED MENU ===\n=== SUGGESTIONS ===\n[{"type":"Spelling","confidence":"high","menuItem":"Cusco Chicken","description":"Remove the trailing code from the dish wording.","recommendation":"Change \\"citrus marinade S\\" to \\"citrus marinade\\"."}]\n=== END SUGGESTIONS ===` } };
             }
             return { data: {} };
         });
@@ -1666,27 +1667,27 @@ describe('Dashboard Modification Workflow (local, mocked externals)', () => {
         expect(submitted.body.correctedMenu).toContain('Steak, fries D 30');
 
         const changedOnly = await invokeJsonHandler(basicCheckHandler, {
-            menuContent: 'Cusco Chicken, marinade S 22, lime\nSteak, fries D 30',
+            menuContent: 'Cusco Chicken, citrus marinade S 22\nSteak, fries D 30',
             baselineMenuContent: 'Cusco Chicken, marinade S 22\nSteak, fries D 30',
             reviewMode: 'changed_only',
             allergens: 'S contains shellfish | D contains dairy | N contains nuts', menuType: 'standard',
         });
         expect(changedOnly.status).toBe(200);
         expect(changedOnly.body.reviewMode).toBe('changed_only');
-        expect(changedOnly.body.correctedMenu).toContain('Cusco Chicken, marinade S 22, lime');
+        expect(changedOnly.body.correctedMenu).toContain('Cusco Chicken, citrus marinade S 22');
         expect(changedOnly.body.correctedMenu).not.toContain('N 22');
         expect(changedOnly.body.correctedMenu).toContain('Steak, fries D 30');
 
         const removal = await invokeJsonHandler(basicCheckHandler, {
-            menuContent: 'Cusco Chicken, marinade 22\nSteak, fries D 30',
+            menuContent: 'Cusco Chicken, citrus marinade 22\nSteak, fries D 30',
             baselineMenuContent: 'Cusco Chicken, marinade S 22\nSteak, fries D 30',
             reviewMode: 'changed_only',
             allergens: 'S contains shellfish | D contains dairy | N contains nuts', menuType: 'standard',
         });
         expect(removal.status).toBe(200);
         expect(removal.body.reviewMode).toBe('changed_only');
-        expect(removal.body.correctedMenu).toContain('Cusco Chicken, marinade 22');
-        expect(removal.body.correctedMenu).not.toContain('Cusco Chicken, marinade S 22');
+        expect(removal.body.correctedMenu).toContain('Cusco Chicken, citrus marinade 22');
+        expect(removal.body.correctedMenu).not.toContain('Cusco Chicken, citrus marinade S 22');
         expect(removal.body.correctedMenu).not.toContain('N 22');
         expect(removal.body.correctedMenu).toContain('Steak, fries D 30');
     });
