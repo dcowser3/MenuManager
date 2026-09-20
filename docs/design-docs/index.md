@@ -33,6 +33,7 @@ Catalog of design decisions and feature documentation for Menu Manager.
 | [Training Pipeline](training-pipeline.md) | Complete (v1) | End-to-end: data capture → rule aggregation → prompt injection → weekly optimization → cloud storage |
 | [Learning Pipeline v2](learning-pipeline-v2.md) | Design | Human-in-the-loop prompt evolution: no auto-injection, rich correction context, weekly LLM prompt rewrite |
 | [Review-learning B5-A trust kernel](review-learning-b5-a-trust-kernel.md) | Implemented, focused verification | Model-free code-proof integrity and backend approval blocking; worker execution remains deferred |
+| [Review-learning B5-B verification store](review-learning-b5-b-verification-store.md) | Implemented, mocked adapter | Ownership-safe pending evidence writes with optimistic concurrency; live DB and worker orchestration remain deferred |
 | [Automated Improvement Loop](automated-improvement-loop.md) | In progress | Daily gated cycle: new corrections → LLM proposal (prompt + rules) → eval against historical menus → human approval |
 | [Schema-Drift Gate](schema-drift-gate.md) | Implemented (warn) | Pre-deploy check comparing `supabase/schema.sql` against the live DB (PostgREST); flags unapplied migrations before they strand writes in the local fallback |
 | [User Error Reports](user-error-reports.md) | Complete | One-click "Report this problem" button that emails support a full-page screenshot + client form-state JSON |

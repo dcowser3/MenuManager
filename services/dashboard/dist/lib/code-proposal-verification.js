@@ -33,7 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.CODE_PROPOSAL_REGRESSION_TESTS = void 0;
+exports.CODE_PROPOSAL_REGRESSION_TESTS = exports.REPLAY_RETIREMENT_POLICY_VERSION = void 0;
 exports.hashAcceptedRules = hashAcceptedRules;
 exports.hashCodeImplementation = hashCodeImplementation;
 exports.codeProposalVerificationFingerprint = codeProposalVerificationFingerprint;
@@ -47,6 +47,8 @@ const crypto_1 = require("crypto");
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const replay_retirement_1 = require("./replay-retirement");
+var replay_retirement_2 = require("./replay-retirement");
+Object.defineProperty(exports, "REPLAY_RETIREMENT_POLICY_VERSION", { enumerable: true, get: function () { return replay_retirement_2.REPLAY_RETIREMENT_POLICY_VERSION; } });
 const canonical = (value) => Array.isArray(value)
     ? value.map(canonical)
     : value && typeof value === 'object'

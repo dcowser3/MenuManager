@@ -2,6 +2,7 @@ import { createHash } from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 import { REPLAY_RETIREMENT_POLICY_VERSION } from './replay-retirement';
+export { REPLAY_RETIREMENT_POLICY_VERSION } from './replay-retirement';
 
 type JsonRecord = Record<string, any>;
 export type CodeVerificationReason = 'code_verification_required' | 'code_verification_failed' | 'code_verification_stale';

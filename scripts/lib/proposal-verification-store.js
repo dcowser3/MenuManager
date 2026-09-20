@@ -1,0 +1,137 @@
+'use strict';
+
+const path = require('path');
+const fs = require('fs');
+const CLAIM_TTL_MS = 6 * 60 * 60 * 1000;
+const DIGEST = /^[a-f0-9]{64}$/;
+const TERMINAL_STATUSES = new Set(['verified', 'failed', 'blocked']);
+
+function assertClaimIdentity(candidate) {
+    const required = ['proposal_sha256', 'baseline_source_sha256', 'expected_dataset_sha256', 'behavior_tests_sha256'];
+    for (const field of required) {
+        if (typeof candidate?.[field] !== 'string' || !DIGEST.test(candidate[field])) {
+            throw new Error(`Running code candidate claims require a valid ${field}.`);
+        }
+    }
+    if (!Array.isArray(candidate.expected_case_ids) || candidate.expected_case_ids.length === 0
+        || candidate.expected_case_ids.some((id) => typeof id !== 'string' || !id.trim())
+        || new Set(candidate.expected_case_ids).size !== candidate.expected_case_ids.length) {
+        throw new Error('Running code candidate claims require a nonempty unique expected_case_ids list.');
+    }
+}
+
+function assertFrozenIdentity(previous, incoming) {
+    for (const field of ['proposal_sha256', 'baseline_source_sha256', 'expected_dataset_sha256', 'behavior_tests_sha256']) {
+        if (incoming[field] !== previous[field]) throw new Error(`Candidate completion differs in frozen ${field}.`);
+    }
+    if (JSON.stringify(incoming.expected_case_ids) !== JSON.stringify(previous.expected_case_ids)) {
+        throw new Error('Candidate completion differs in the frozen ordered case list.');
+    }
+}
+
+function runningClaimIsFresh(candidate, now = Date.now()) {
+    if (candidate?.status !== 'running') return false;
+    const started = Date.parse(candidate.started_at || '');
+    // An invalid timestamp is not proof that another worker's claim expired.
+    return !Number.isFinite(started) || now - started <= CLAIM_TTL_MS;
+}
+
+function assertAttemptOwnership(current, patch) {
+    const previous = current.eval_summary?.code_candidate;
+    const incoming = patch.code_candidate;
+    if (incoming) {
+        if (typeof incoming.attempt_id !== 'string' || !incoming.attempt_id.trim()) throw new Error('Code candidate writes require an attempt_id.');
+        if (incoming.status !== 'running' && !TERMINAL_STATUSES.has(incoming.status)) {
+            throw new Error('Code candidate status must be running, verified, failed, or blocked.');
+        }
+        if (incoming.status === 'running') {
+            assertClaimIdentity(incoming);
+            if (!Number.isFinite(Date.parse(incoming.started_at || ''))) throw new Error('A running candidate claim requires a valid start time.');
+            if (previous?.attempt_id === incoming.attempt_id && previous.status !== 'running') {
+                throw new Error('This candidate attempt has already finished; use a new attempt_id.');
+            }
+            if (previous?.attempt_id === incoming.attempt_id) assertFrozenIdentity(previous, incoming);
+            if (previous?.attempt_id !== incoming.attempt_id && runningClaimIsFresh(previous)) {
+                throw new Error('Another code-proposal attempt is already running.');
+            }
+        } else {
+            if (!previous?.attempt_id || previous.attempt_id !== incoming.attempt_id) {
+                throw new Error('Candidate attempt ownership changed; the old worker cannot overwrite newer evidence.');
+            }
+            if (previous.status !== 'running') throw new Error('This candidate attempt has already finished; its evidence cannot be overwritten.');
+            assertFrozenIdentity(previous, incoming);
+        }
+    } else if (patch.code_verification) {
+        // Standalone proof uploads must not steal an automatic worker's result.
+        // An explicitly identified owning attempt may attach proof while running.
+        if (!previous || !patch.attempt_id || previous.attempt_id !== patch.attempt_id || previous.status !== 'running') {
+            throw new Error('Proof attachment requires ownership of the current running candidate attempt.');
+        }
+    }
+}
+
+function loadVerificationModule(repoRoot = path.resolve(__dirname, '../..')) {
+    const source = path.join(repoRoot, 'services/dashboard/lib/code-proposal-verification.ts');
+    let register;
+    try { register = require.resolve('ts-node/register/transpile-only', { paths: [repoRoot] }); } catch { /* lean runtime */ }
+    if (register && fs.existsSync(source)) {
+        require(register);
+        return require(source); // A broken source module must never fall back to stale compiled proof checks.
+    }
+    return require(path.join(repoRoot, 'services/dashboard/dist/lib/code-proposal-verification.js'));
+}
+
+/** Store only evidence for an unchanged pending proposal; never approve, deploy, or send mail. */
+async function recordCodeVerification(supabase, original, patch, verification = loadVerificationModule()) {
+    const { data: current, error } = await supabase.from('prompt_proposals').select('*').eq('id', original.id).single();
+    if (error) throw new Error(error.message);
+    if (!current || current.status !== 'pending') throw new Error('Proposal is no longer pending.');
+    const fingerprint = verification.codeProposalVerificationFingerprint;
+    if (fingerprint(current) !== fingerprint(original)) throw new Error('Proposal changed while the candidate was being verified.');
+    assertAttemptOwnership(current, patch);
+    const summary = { ...(current.eval_summary || {}) };
+    if (patch.code_candidate) {
+        // A fresh attempt must never display or approve the previous attempt's proof.
+        if (patch.code_candidate.status === 'running'
+            && patch.code_candidate.attempt_id !== summary.code_candidate?.attempt_id) delete summary.code_verification;
+        summary.code_candidate = patch.code_candidate;
+    }
+    if (patch.code_verification) {
+        const candidate = { ...current, eval_summary: { ...summary, code_verification: patch.code_verification } };
+        // Validate the complete proof before persisting it. Synthetic/test-only
+        // evidence is allowed to remain non-approvable, but it must satisfy the
+        // same schema, binding, membership, replay, and regression gates.
+        const integrityCheck = verification.assessCodeProposalVerificationIntegrity || verification.assessCodeProposalVerification;
+        const block = integrityCheck(candidate);
+        if (block) throw new Error(block.error);
+        if (patch.code_verification.proposal_sha256 !== fingerprint(current)) throw new Error('Verification does not belong to this proposal.');
+        summary.code_verification = patch.code_verification;
+    }
+    let query = supabase.from('prompt_proposals').update({ eval_summary: summary })
+        .eq('id', current.id).eq('status', 'pending');
+    query = current.eval_summary == null ? query.is('eval_summary', null)
+        : query.eq('eval_summary', JSON.stringify(current.eval_summary));
+    const result = await query.select('id');
+    if (result.error) throw new Error(result.error.message);
+    if (!result.data?.length) throw new Error('Proposal evaluation changed concurrently; no evidence was overwritten.');
+    return summary;
+}
+
+function shouldDraftCodeProposal(proposal, implementationHash, verification = loadVerificationModule(), force = false) {
+    if (proposal?.status !== 'pending' || !proposal.code_recommendations?.length) return false;
+    // Legacy replay can contain incorrectly retired delivery failures. Regenerate it under
+    // the current policy before drafting a patch against an incomplete correction set.
+    const currentPolicy = verification.REPLAY_RETIREMENT_POLICY_VERSION;
+    if (!Number.isInteger(currentPolicy) || proposal.eval_summary?.replay_retirement_policy_version !== currentPolicy) return false;
+    const previous = proposal.eval_summary?.code_candidate;
+    if (!previous) return true;
+    if (previous.status === 'running') return !runningClaimIsFresh(previous);
+    if (force) return true;
+    const same = previous.proposal_sha256 === verification.codeProposalVerificationFingerprint(proposal)
+        && previous.baseline_source_sha256 === implementationHash;
+    if (!same) return true;
+    // A bounded automatic attempt must not retry expensive failed drafts every poll.
+    return false;
+}
+
+module.exports = { loadVerificationModule, recordCodeVerification, shouldDraftCodeProposal };
