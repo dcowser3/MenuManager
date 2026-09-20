@@ -41,6 +41,7 @@ exports.shouldNotifyFormAttemptFailure = shouldNotifyFormAttemptFailure;
 exports.extractBaselineFromDocx = extractBaselineFromDocx;
 exports.extractUnapprovedFromDocx = extractUnapprovedFromDocx;
 exports.runSubmissionReviewThroughCoordinator = runSubmissionReviewThroughCoordinator;
+exports.generateDocxFromForm = generateDocxFromForm;
 const express_1 = __importDefault(require("express"));
 const multer_1 = __importDefault(require("multer"));
 const axios_1 = __importDefault(require("axios"));
@@ -1640,6 +1641,9 @@ async function runSubmissionReviewThroughCoordinator(input, overrides = {}) {
         contextHash,
         engineVersion: envelope.engineVersion,
         correctedMenu: completed.authoritative.correctedMenu,
+        suggestions: completed.authoritative.suggestions,
+        criticalSuggestions: completed.authoritative.criticalSuggestions,
+        hasCriticalErrors: completed.authoritative.hasCriticalErrors,
         reason: completed.reviewStatus.complete ? 'completed' : (completed.post.safetyDiagnostics[0] || 'coordinator_delivery_rejected'),
         diagnostics: completed.diagnostics.slice(0, 50),
     };

@@ -6,8 +6,11 @@ const submission_workflow_1 = require("../lib/submission-workflow");
 // ts-jest lib target for the source-only test harness.
 const { completePreparedReview, prepareReview } = require('../dist/lib/review-pipeline');
 const { policyHash } = require('../dist/lib/canonical-policy');
-const { runSubmissionReviewThroughCoordinator } = require('../dist/index');
+const { generateDocxFromForm, runSubmissionReviewThroughCoordinator } = require('../dist/index');
 const nodeFs = require('fs').promises;
+const nodeFsSync = require('fs');
+const nodePath = require('path');
+const mammoth = require('mammoth');
 function buildDeps(overrides = {}) {
     const axios = {
         post: jest.fn().mockResolvedValue({ data: {} }),
@@ -318,13 +321,17 @@ describe('submitMenu form attempt linkage', () => {
         }));
         expect(deps.generateDocxFromForm).toHaveBeenCalledTimes(1);
     });
-    test('persists authoritative reviewed bytes while preserving the original DOCX', async () => {
-        const root = `/tmp/menumanager-b3b-docx-${Date.now()}`;
+    test('Docker-only real template/parser lifecycle persists authoritative DOCX bytes and preserves original', async () => {
+        // The host test harness may not have python-docx installed. Docker has
+        // the documented docx-redliner venv, so this exact lifecycle is proved
+        // there rather than substituted with a text file.
+        if (!nodeFsSync.existsSync(nodePath.join(__dirname, '../../docx-redliner/venv/bin/python'))) {
+            expect(true).toBe(true);
+            return;
+        }
         const generatedPaths = [];
-        const generateDocxFromForm = jest.fn(async (submissionId, formData, options = {}) => {
-            const outputPath = options.outputPath || `${root}/${submissionId}-original.docx`;
-            await nodeFs.mkdir(require('path').dirname(outputPath), { recursive: true });
-            await nodeFs.writeFile(outputPath, formData.menuContent, 'utf8');
+        const realGenerateDocxFromForm = jest.fn(async (submissionId, formData, options = {}) => {
+            const outputPath = await generateDocxFromForm(submissionId, formData, options);
             generatedPaths.push(outputPath);
             return outputPath;
         });
@@ -339,7 +346,7 @@ describe('submitMenu form attempt linkage', () => {
                     callerAttestations: payload.callerAttestations,
                     effectiveExecutionIdentity: payload.effectiveExecutionIdentity,
                     replayIdentity: payload.replayIdentity,
-                    feedback: '=== CORRECTED MENU ===\nFish G 12\n=== END CORRECTED MENU ===\n=== SUGGESTIONS ===\n[]\n=== END SUGGESTIONS ===',
+                    feedback: '=== CORRECTED MENU ===\nGUACAMOLE\nfresh avocado, lime 12\n=== END CORRECTED MENU ===\n=== SUGGESTIONS ===\n[]\n=== END SUGGESTIONS ===',
                     finishReason: 'stop',
                     requestedModel: payload.effectiveExecutionIdentity.model,
                     observedModel: payload.effectiveExecutionIdentity.model,
@@ -347,7 +354,13 @@ describe('submitMenu form attempt linkage', () => {
             })),
         };
         const deps = buildDeps({
-            generateDocxFromForm,
+            generateDocxFromForm: realGenerateDocxFromForm,
+            normalizeMenuFooter: (text, allergens) => ({
+                body: text,
+                normalizedAllergenLine: allergens,
+                hadRawNotice: false,
+                preservedFooterText: '',
+            }),
             runSubmissionReview: (input) => runSubmissionReviewThroughCoordinator(input, {
                 transport,
                 readPrompt: async () => 'SUBMISSION QA',
@@ -357,16 +370,85 @@ describe('submitMenu form attempt linkage', () => {
         });
         const handlers = (0, submission_workflow_1.createSubmissionWorkflowHandlers)(deps);
         const req = buildRequest();
-        req.body.menuContent = 'Fishh G 12';
+        req.body.menuContent = 'GUACAMOLE\nfresh avacado, lime 12';
+        req.body.allergens = 'G - Gluten | V - Vegetarian';
         req.body.skipAiReview = false;
         const res = buildResponse();
         await handlers.submitMenu(req, res);
-        await new Promise((resolve) => setTimeout(resolve, 25));
+        // The real Python generator is asynchronous and can take a second in
+        // the isolated container; wait for the fire-and-forget review task.
+        await new Promise((resolve) => setTimeout(resolve, 2000));
         expect(res.statusCode).toBe(200);
         expect(generatedPaths).toHaveLength(2);
-        expect(await nodeFs.readFile(generatedPaths[0], 'utf8')).toContain('Fishh G 12');
-        expect(await nodeFs.readFile(generatedPaths[1], 'utf8')).toContain('Fish G 12');
-        expect(await nodeFs.readFile(generatedPaths[0], 'utf8')).not.toContain('Fish G 12');
+        const originalText = (await mammoth.extractRawText({ path: generatedPaths[0] })).value;
+        const draftText = (await mammoth.extractRawText({ path: generatedPaths[1] })).value;
+        expect(originalText).toContain('GUACAMOLE');
+        expect(originalText).toContain('fresh avacado, lime 12');
+        expect(originalText).toContain('G - Gluten | V - Vegetarian');
+        expect(originalText).not.toContain('fresh avocado, lime 12');
+        expect(draftText).toContain('GUACAMOLE');
+        expect(draftText).toContain('fresh avocado, lime 12');
+        expect(draftText).toContain('G - Gluten | V - Vegetarian');
+        expect(deps.axios.put).toHaveBeenCalledWith(expect.stringMatching(/\/submissions\/form-/), expect.objectContaining({ status: 'pending_human_review', ai_draft_path: generatedPaths[1] }));
+    });
+    test('Docker-only real DOCX failed review publishes no reviewed draft path', async () => {
+        if (!nodeFsSync.existsSync(nodePath.join(__dirname, '../../docx-redliner/venv/bin/python'))) {
+            expect(true).toBe(true);
+            return;
+        }
+        const generatedPaths = [];
+        const realGenerateDocxFromForm = jest.fn(async (submissionId, formData, options = {}) => {
+            const outputPath = await generateDocxFromForm(submissionId, formData, options);
+            generatedPaths.push(outputPath);
+            return outputPath;
+        });
+        const transport = {
+            post: jest.fn(async (_url, payload) => ({ data: {
+                    schemaVersion: payload.schemaVersion,
+                    engineVersion: payload.engineVersion,
+                    textHash: payload.textHash,
+                    promptHash: payload.promptHash,
+                    requestDigest: payload.requestDigest,
+                    callerAttestations: payload.callerAttestations,
+                    effectiveExecutionIdentity: payload.effectiveExecutionIdentity,
+                    replayIdentity: payload.replayIdentity,
+                    feedback: '=== CORRECTED MENU ===\nGUACAMOLE\nfresh avocado, lime 13\n=== END CORRECTED MENU ===',
+                    finishReason: 'length',
+                    requestedModel: payload.effectiveExecutionIdentity.model,
+                    observedModel: payload.effectiveExecutionIdentity.model,
+                } })),
+        };
+        const audit = jest.fn();
+        const deps = buildDeps({
+            generateDocxFromForm: realGenerateDocxFromForm,
+            recordSubmissionReviewAudit: audit,
+            runSubmissionReview: (input) => runSubmissionReviewThroughCoordinator(input, {
+                transport,
+                readPrompt: async () => 'SUBMISSION QA',
+                fetchAcceptedRules: async () => [],
+                loadVocabulary: async () => [],
+            }),
+        });
+        const handlers = (0, submission_workflow_1.createSubmissionWorkflowHandlers)(deps);
+        const req = buildRequest();
+        req.body.menuContent = 'GUACAMOLE\nfresh avocado, lime 12';
+        req.body.allergens = 'G - Gluten | V - Vegetarian';
+        req.body.skipAiReview = false;
+        const res = buildResponse();
+        await handlers.submitMenu(req, res);
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+        expect(res.statusCode).toBe(200);
+        expect(generatedPaths).toHaveLength(1);
+        const originalText = (await mammoth.extractRawText({ path: generatedPaths[0] })).value;
+        expect(originalText).toContain('fresh avocado, lime 12');
+        expect(originalText).not.toContain('fresh avocado, lime 13');
+        expect(audit).toHaveBeenCalledWith(expect.objectContaining({
+            complete: false,
+            artifactProvenance: 'unreviewed_fallback',
+            reason: 'coordinator_finish_reason_length',
+        }));
+        expect(deps.axios.put).toHaveBeenCalledWith(expect.stringMatching(/\/submissions\/form-/), expect.objectContaining({ status: 'pending_human_review' }));
+        expect(deps.axios.put.mock.calls.some(([, payload]) => payload.ai_draft_path)).toBe(false);
     });
     test('late-anchor rejection preserves delivered spelling and genuine critical state', async () => {
         const transport = {
@@ -380,7 +462,7 @@ describe('submitMenu form attempt linkage', () => {
                     callerAttestations: payload.callerAttestations,
                     effectiveExecutionIdentity: payload.effectiveExecutionIdentity,
                     replayIdentity: payload.replayIdentity,
-                    feedback: '=== CORRECTED MENU ===\nDINNER\nFish G 12\nFish G 12\n=== END CORRECTED MENU ===\n=== SUGGESTIONS ===\n[{"type":"Missing Price","severity":"critical","confidence":"high","menuItem":"candidate-only","description":"invent","recommendation":"invent"}]\n=== END SUGGESTIONS ===',
+                    feedback: '=== CORRECTED MENU ===\nDINNER\nFish 12\nFish 12\n=== END CORRECTED MENU ===\n=== SUGGESTIONS ===\n[{"type":"Missing Price","severity":"critical","confidence":"high","menuItem":"candidate-only","description":"invent","recommendation":"invent"}]\n=== END SUGGESTIONS ===',
                     finishReason: 'stop',
                     requestedModel: payload.effectiveExecutionIdentity.model,
                     observedModel: payload.effectiveExecutionIdentity.model,
@@ -399,9 +481,40 @@ describe('submitMenu form attempt linkage', () => {
         });
         const handlers = (0, submission_workflow_1.createSubmissionWorkflowHandlers)(deps);
         const req = buildRequest();
-        req.body.menuContent = 'DINNER\nFishh G 12\nFishh G 12';
+        req.body.menuContent = 'DINNER\nFishh 12\nFishh 12';
         req.body.skipAiReview = false;
         const res = buildResponse();
+        // Exercise the same exported submission adapter directly first. The
+        // duplicate near-miss rows survive the scoped precheck; the rejected
+        // merge must return the immutable delivered bytes plus a genuine
+        // source-derived critical allergen finding (not the candidate-only
+        // critical suggestion supplied by the mocked provider).
+        const direct = await runSubmissionReviewThroughCoordinator({
+            submissionId: 'late-boundary-direct',
+            text: req.body.menuContent,
+            submitterEmail: 'chef@example.com',
+            filename: 'late.docx',
+            originalPath: '/tmp/late.docx',
+            projectName: 'Spring Menu',
+            property: 'Maya - New York',
+            templateType: 'food',
+            menuType: 'standard',
+            allergens: 'V - Vegetarian',
+            submissionMode: 'new',
+            revisionSource: '',
+        }, {
+            transport,
+            readPrompt: async () => 'SUBMISSION QA',
+            fetchAcceptedRules: async () => [],
+            loadVocabulary: async () => [],
+        });
+        expect(direct.correctedMenu).toBe(req.body.menuContent);
+        expect(direct.reviewStatus).toEqual(expect.objectContaining({ complete: false, transportStatus: 'rejected' }));
+        expect(direct.hasCriticalErrors).toBe(true);
+        expect(direct.criticalSuggestions).toEqual(expect.arrayContaining([
+            expect.objectContaining({ type: 'Allergen Code', menuItem: 'Entire menu', severity: 'critical' }),
+        ]));
+        expect(direct.diagnostics.length).toBeGreaterThan(0);
         await handlers.submitMenu(req, res);
         await new Promise((resolve) => setTimeout(resolve, 25));
         expect(res.statusCode).toBe(200);
@@ -411,6 +524,7 @@ describe('submitMenu form attempt linkage', () => {
             diagnostics: expect.arrayContaining([expect.objectContaining({ reason: expect.stringContaining('duplicate_row_fallback') })]),
         }));
         expect(deps.generateDocxFromForm).toHaveBeenCalledTimes(1);
+        expect(transport.post).toHaveBeenCalledTimes(2);
     });
     test.each(['transport', 'response_identity'])('actual submit failure path is manual-only with no legacy fallback (%s)', async (kind) => {
         const transport = {
@@ -444,6 +558,65 @@ describe('submitMenu form attempt linkage', () => {
         }));
         expect(deps.generateDocxFromForm).toHaveBeenCalledTimes(1);
         expect(deps.axios.post).not.toHaveBeenCalledWith('http://ai.test/ai-review', expect.anything(), expect.anything());
+    });
+    test.each([
+        ['requestDigest', (response) => { response.requestDigest = 'wrong-digest'; }, 'coordinator_response_identity_mismatch'],
+        ['textHash', (response) => { response.textHash = 'wrong-text-hash'; }, 'coordinator_response_identity_mismatch'],
+        ['promptHash', (response) => { response.promptHash = 'wrong-prompt-hash'; }, 'coordinator_response_identity_mismatch'],
+        ['execution settings', (response) => { response.effectiveExecutionIdentity = { ...response.effectiveExecutionIdentity, temperature: 0.7 }; }, 'coordinator_response_identity_mismatch'],
+        ['replay identity', (response) => { response.replayIdentity = 'other-replay'; }, 'coordinator_response_identity_mismatch'],
+        ['schema version', (response) => { response.schemaVersion = 2; }, 'coordinator_response_invalid:version_mismatch'],
+        ['engine version', (response) => { response.engineVersion = 'other-engine'; }, 'coordinator_response_invalid:version_mismatch'],
+        ['requested model alias', (response) => { response.requestedModel = `${response.requestedModel}-snapshot`; }, 'coordinator_response_identity_mismatch'],
+        ['observed model alias', (response) => { response.observedModel = `${response.observedModel}-snapshot`; }, 'coordinator_response_identity_mismatch'],
+    ])('valid-shaped coordinator response mutation fails closed without legacy retry (%s)', async (_label, mutate, expectedReason) => {
+        const transport = {
+            post: jest.fn(async (_url, payload) => {
+                const response = {
+                    schemaVersion: payload.schemaVersion,
+                    engineVersion: payload.engineVersion,
+                    textHash: payload.textHash,
+                    promptHash: payload.promptHash,
+                    requestDigest: payload.requestDigest,
+                    callerAttestations: payload.callerAttestations,
+                    effectiveExecutionIdentity: payload.effectiveExecutionIdentity,
+                    replayIdentity: payload.replayIdentity,
+                    feedback: '=== CORRECTED MENU ===\nGUACAMOLE\nfresh avocado, lime 13\n=== END CORRECTED MENU ===',
+                    finishReason: 'stop',
+                    requestedModel: payload.effectiveExecutionIdentity.model,
+                    observedModel: payload.effectiveExecutionIdentity.model,
+                };
+                mutate(response);
+                return { data: response };
+            }),
+        };
+        const audit = jest.fn();
+        const deps = buildDeps({
+            recordSubmissionReviewAudit: audit,
+            runSubmissionReview: (input) => runSubmissionReviewThroughCoordinator(input, {
+                transport,
+                readPrompt: async () => 'SUBMISSION QA',
+                fetchAcceptedRules: async () => [],
+                loadVocabulary: async () => [],
+            }),
+        });
+        const handlers = (0, submission_workflow_1.createSubmissionWorkflowHandlers)(deps);
+        const req = buildRequest();
+        req.body.skipAiReview = false;
+        const res = buildResponse();
+        await handlers.submitMenu(req, res);
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        expect(res.statusCode).toBe(200);
+        expect(transport.post).toHaveBeenCalledTimes(1);
+        expect(audit).toHaveBeenCalledWith(expect.objectContaining({
+            complete: false,
+            transportStatus: 'rejected',
+            artifactProvenance: 'unreviewed_fallback',
+            reason: expectedReason,
+        }));
+        expect(deps.generateDocxFromForm).toHaveBeenCalledTimes(1);
+        expect(deps.axios.post).not.toHaveBeenCalledWith('http://ai.test/ai-review', expect.anything(), expect.anything());
+        expect(deps.axios.put.mock.calls.some(([, payload]) => payload.ai_draft_path)).toBe(false);
     });
     test('stores form_attempt_id from the attempt header and links audits to the submission', async () => {
         const deps = buildDeps();

@@ -80,8 +80,10 @@ content-filter, truncated, or unknown finishes remain incomplete/manual review.
 
 Replay protection is process-local and bounded to 1,024 identities with a
 15-minute expiry; duplicate and capacity claims fail closed. The legacy routes
-are exercised by focused validation tests while the versioned route uses the
-shared contract.
+are exercised by focused validation tests, including a mocked successful
+`/ai-review` call that asserts the configured seed wire, while the versioned
+route uses the shared contract. Requested and observed model identifiers must
+match exactly; snapshot/alias drift is rejected.
 
 Completed and rejected coordinator results carry bounded output/policy/context
 hashes, engine identity, complete/transport/reusable status, reason, and
@@ -111,13 +113,17 @@ spelling evidence. The Basic
 route continues to return its existing browser response shape with additive
 status/delivered diagnostics.
 
-B3-B verification: 3 focused suites, 26 tests passed (shared contract,
+B3-B verification: 4 focused suites, 37 tests passed (shared contract,
 ai-review adapter, and actual dashboard submit-handler → exported dashboard
-coordinator → mocked transport). Coverage includes accepted and rejected
+coordinator → mocked transport, plus the legacy route). Coverage includes accepted and rejected
 delivery, late/malformed/version/hash/digest/settings/replay negatives,
 known-terminal-status enforcement for every non-stop finish, one provider call
 for valid input and zero provider calls for invalid envelopes, legacy
 compatibility, exact bytes passed into draft generation, persisted
-original-versus-authoritative-DOCX parity, and bounded replay capacity/expiry.
+original-versus-authoritative-DOCX parity using the real template/generator and
+Mammoth parser in the isolated Docker venv, failed-review no-draft publication,
+source-derived late-rejection findings, and bounded replay capacity/expiry.
 Dashboard, ai-review, and shared-contract typechecks/builds passed; source/dist
-diffs are included. No live provider or production/activation writes were used.
+diffs are included. The host-only run skips the real-template test when its
+Python DOCX venv is absent. No live provider or production/activation writes
+were used.

@@ -1937,6 +1937,9 @@ export async function runSubmissionReviewThroughCoordinator(input: {
         contextHash,
         engineVersion: envelope.engineVersion,
         correctedMenu: completed.authoritative.correctedMenu,
+        suggestions: completed.authoritative.suggestions,
+        criticalSuggestions: completed.authoritative.criticalSuggestions,
+        hasCriticalErrors: completed.authoritative.hasCriticalErrors,
         reason: completed.reviewStatus.complete ? 'completed' : (completed.post.safetyDiagnostics[0] || 'coordinator_delivery_rejected'),
         diagnostics: completed.diagnostics.slice(0, 50),
     };
@@ -4844,7 +4847,7 @@ function parseFeedbackToSuggestions(feedback: string): Array<{
 /**
  * Helper: Generate Word document from form data using Python
  */
-async function generateDocxFromForm(
+export async function generateDocxFromForm(
     submissionId: string,
     formData: any,
     options?: { outputPath?: string }
