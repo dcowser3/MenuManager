@@ -351,6 +351,8 @@ describe('correctionsEligibleForImprovement', () => {
         const rows = [
             { id: 'human-ready', source: 'human', status: 'pending', reviewer_name: 'Isa', rule: 'Use salsa macha.' },
             { id: 'accepted-human', source: 'human', status: 'accepted', reviewer_name: 'Isa', rule: 'Use housemade.' },
+            { id: 'menu-content-intent', source: 'human', status: 'accepted', reviewer_name: 'Isa', rule: 'Do not learn this menu edit.', learning_intent: 'menu_content_update', change_type: 'terminology' },
+            { id: 'menu-content-type', source: 'human', status: 'accepted', reviewer_name: 'Isa', rule: 'Do not learn this menu edit.', change_type: 'menu_content_update' },
             { id: 'no-explanation', source: 'human', status: 'pending', reviewer_name: 'Isa', rule: '   ' },
             { id: 'no-reviewer', source: 'human', status: 'pending', reviewer_name: null, rule: 'Generated guess.' },
             { id: 'system-pattern', source: 'system', status: 'pending', reviewer_name: null, rule: 'Generated pattern.' },
@@ -362,6 +364,13 @@ describe('correctionsEligibleForImprovement', () => {
             'human-ready',
             'accepted-human',
         ]);
+    });
+
+    test('learning_intent takes precedence and menu-content updates never enter proposal input', () => {
+        const row = { id: 'intent-wins', source: 'human', status: 'accepted', reviewer_name: 'Isa', rule: 'Menu edit only.', change_type: 'terminology', learning_intent: 'menu_content_update' };
+        expect(correctionsEligibleForImprovement([row])).toEqual([]);
+        const learned = { ...row, learning_intent: 'missed_review_correction' };
+        expect(correctionsEligibleForImprovement([learned])).toEqual([learned]);
     });
 });
 

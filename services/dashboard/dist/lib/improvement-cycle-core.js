@@ -3,7 +3,7 @@
 // gating, effective-prompt resolution, LLM-output validation, eval summarization,
 // and the mapping from LLM-proposed rules to correction_rules payloads.
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.IDENTICAL_CANDIDATE_EVAL_NOTE = exports.CONTEXT_DEPENDENT_TERMS = exports.CURRENT_PROMPT_END_MARKER = exports.CURRENT_PROMPT_BEGIN_MARKER = exports.PROMPT_UNCHANGED_SENTINEL = exports.CORRECTION_ROUTING_LANES = exports.PROPOSED_RULE_CHANGE_TYPES = void 0;
+exports.IDENTICAL_CANDIDATE_EVAL_NOTE = exports.CONTEXT_DEPENDENT_TERMS = exports.CURRENT_PROMPT_END_MARKER = exports.CURRENT_PROMPT_BEGIN_MARKER = exports.PROMPT_UNCHANGED_SENTINEL = exports.CORRECTION_ROUTING_LANES = exports.PROPOSED_RULE_CHANGE_TYPES = exports.freezeBehaviorTests = exports.buildAcceptedPolicyTestFamily = exports.buildBehaviorTestRecord = void 0;
 exports.shouldRunCycle = shouldRunCycle;
 exports.needsDistinctCycleId = needsDistinctCycleId;
 exports.computeReviewBaselineFingerprint = computeReviewBaselineFingerprint;
@@ -72,6 +72,10 @@ const llm_adapter_1 = require("@menumanager/llm-adapter");
 const diff_core_1 = require("@menumanager/diff-core");
 const crypto_1 = require("crypto");
 const review_response_contract_1 = require("./review-response-contract");
+var learning_behavior_tests_1 = require("./learning-behavior-tests");
+Object.defineProperty(exports, "buildBehaviorTestRecord", { enumerable: true, get: function () { return learning_behavior_tests_1.buildBehaviorTestRecord; } });
+Object.defineProperty(exports, "buildAcceptedPolicyTestFamily", { enumerable: true, get: function () { return learning_behavior_tests_1.buildAcceptedPolicyTestFamily; } });
+Object.defineProperty(exports, "freezeBehaviorTests", { enumerable: true, get: function () { return learning_behavior_tests_1.freezeBehaviorTests; } });
 function shouldRunCycle(input) {
     const min = Math.max(1, input.minNewCorrections);
     const pending = input.pendingProposal && input.pendingProposal.cycle_id
@@ -240,7 +244,7 @@ function isCorrectionEligibleForImprovement(correction) {
         && ['pending', 'accepted'].includes(status)
         && !!`${correction.reviewer_name || ''}`.trim()
         && !!`${correction.rule || ''}`.trim()
-        && `${correction.change_type || ''}`.trim().toLowerCase() !== 'menu_update_only';
+        && !['menu_update_only', 'menu_content_update'].includes(`${correction.learning_intent || correction.change_type || ''}`.trim().toLowerCase());
 }
 function correctionsEligibleForImprovement(corrections) {
     return (corrections || []).filter(isCorrectionEligibleForImprovement);

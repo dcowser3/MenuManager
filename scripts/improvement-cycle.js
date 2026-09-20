@@ -44,6 +44,7 @@ require('dotenv').config({ path: path.join(repoRoot, '.env') });
 
 const { createClient } = require('@supabase/supabase-js');
 const evalHelpers = require('./review-eval-helpers');
+const behaviorArtifactLib = require('./lib/behavior-artifact');
 
 const LOCK_PATH = path.join(repoRoot, 'tmp', 'improvement-cycle', '.lock');
 const LOCK_STALE_MS = 6 * 60 * 60 * 1000;
@@ -802,6 +803,10 @@ async function main() {
 
         // 2. Unconsumed corrections (skipped entirely in consolidate mode).
         let correctionRules = [];
+        // Keep every already-fetched human explanation as evidence. Eligibility
+        // below excludes menu-content updates from proposal input, but B6-A
+        // must still retain them as explicitly excluded behavior records.
+        let explanationRows = [];
         let supersedeMeta = null;
         if (!args.consolidate) {
             const { data: unconsumedRuleRows, error: rulesError } = await supabase
@@ -812,6 +817,7 @@ async function main() {
                 .in('status', ['accepted', 'pending'])
                 .order('created_at', { ascending: true });
             if (rulesError) throw new Error(`Failed to fetch correction rules: ${rulesError.message}`);
+            explanationRows.push(...(unconsumedRuleRows || []));
             const unconsumedRules = core.correctionsEligibleForImprovement(unconsumedRuleRows || []);
 
             if (supersedePending && supersedePending.cycle_id) {
@@ -823,6 +829,7 @@ async function main() {
                     .in('status', ['accepted', 'pending'])
                     .order('created_at', { ascending: true });
                 if (carriedErr) throw new Error(`Failed to fetch carried-over corrections: ${carriedErr.message}`);
+                explanationRows.push(...(carriedRuleRows || []));
                 const carriedRules = core.correctionsEligibleForImprovement(carriedRuleRows || []);
                 const assembled = core.assembleSupersedeCorrectionSet(unconsumedRules, carriedRules);
                 correctionRules = assembled.combined;
@@ -845,6 +852,18 @@ async function main() {
         const acceptedRules = acceptedRulesForBaseline || [];
         const manifest = manifestLib.buildReviewRulesManifest({ acceptedCorrectionRules: acceptedRules || [] });
         const manifestMarkdown = manifestLib.renderRulesManifestMarkdown(manifest, { includeDynamic: true });
+
+        // B6-A: freeze human explanations and accepted-policy expectations
+        // before assembling or calling the proposal model. Consolidation has
+        // no explanation input and therefore receives an explicit empty
+        // artifact rather than invented expectations from the candidate.
+        const behaviorArtifact = await behaviorArtifactLib.writeFrozenBehaviorArtifact({
+            artifactPath: path.join(artifactsDir, 'behavior-tests.json'),
+            core,
+            explanationRows: args.consolidate ? [] : explanationRows,
+            acceptedRules: args.consolidate ? [] : acceptedRules,
+        });
+        console.log(`Behavior artifact frozen: ${behaviorArtifact.records.length} explanation record(s), ${behaviorArtifact.tests.length} deterministic test(s).`);
 
         // Distinct trigger submissions for this cycle's corrections. Declared BEFORE the
         // Fix 2 replay block (which iterates it) — a later declaration puts the replay loop

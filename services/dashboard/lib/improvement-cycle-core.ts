@@ -8,6 +8,8 @@ import { buildTokenEdits, tokenizeDiffText, tokenizeWords } from '@menumanager/d
 import { createHash } from 'crypto';
 import { AI_REVIEW_FENCES } from './review-response-contract';
 
+export { buildBehaviorTestRecord, buildAcceptedPolicyTestFamily, freezeBehaviorTests } from './learning-behavior-tests';
+
 export type CycleGateInput = {
     unconsumedCorrectionCount: number;
     /** When set, a pending (non-superseded) proposal exists. */
@@ -200,6 +202,7 @@ export function isTransientOpenAiFailure(input: { status?: number | null; error?
 }
 
 export type CorrectionRuleLike = {
+    learning_intent?: string | null;
     id: string;
     submission_id?: string | null;
     original_text?: string | null;
@@ -225,7 +228,9 @@ export function isCorrectionEligibleForImprovement(correction: CorrectionRuleLik
         && ['pending', 'accepted'].includes(status)
         && !!`${correction.reviewer_name || ''}`.trim()
         && !!`${correction.rule || ''}`.trim()
-        && `${correction.change_type || ''}`.trim().toLowerCase() !== 'menu_update_only';
+        && !['menu_update_only', 'menu_content_update'].includes(
+            `${correction.learning_intent || correction.change_type || ''}`.trim().toLowerCase()
+        );
 }
 
 export function correctionsEligibleForImprovement<T extends CorrectionRuleLike>(corrections: T[]): T[] {
