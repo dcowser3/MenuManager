@@ -29,6 +29,33 @@ const inside = (root, target) => {
 };
 const digest = (value, label) => { if (typeof value !== 'string' || !DIGEST.test(value)) throw new Error(`Invalid ${label} hash.`); };
 
+function safeSegment(value, label) {
+    const segment = `${value || ''}`;
+    if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(segment)) throw new Error(`Invalid ${label}.`);
+    return segment;
+}
+
+function assertRegularDirectory(directory, label, mode = null) {
+    const stat = fs.lstatSync(directory);
+    if (stat.isSymbolicLink() || !stat.isDirectory() || (mode !== null && (stat.mode & 0o777) !== mode)) {
+        throw new Error(`${label} must be a regular directory${mode === null ? '' : ` with mode ${mode.toString(8)}`}.`);
+    }
+    return stat;
+}
+
+function assertNoSymlinkComponents(root, target) {
+    const trusted = path.resolve(root);
+    const resolved = path.resolve(target);
+    if (resolved !== trusted && !resolved.startsWith(`${trusted}${path.sep}`)) throw new Error('Path is outside the trusted attempt root.');
+    let cursor = trusted;
+    assertRegularDirectory(cursor, 'Trusted artifact root');
+    for (const part of path.relative(trusted, resolved).split(path.sep).filter(Boolean)) {
+        cursor = path.join(cursor, part);
+        const stat = fs.lstatSync(cursor);
+        if (stat.isSymbolicLink()) throw new Error(`Artifact path traverses a symlink: ${cursor}`);
+    }
+}
+
 function boundedRegular(file, root, mode = 0o600) {
     const target = inside(root, file);
     let cursor = path.resolve(root);
@@ -41,12 +68,20 @@ function boundedRegular(file, root, mode = 0o600) {
     return fs.readFileSync(target);
 }
 
-function rejectSecret(content, file) {
-    if (/-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----|\b(?:sk-(?:proj-|or-v1-)?[A-Za-z0-9_-]{20,}|gh[pousr]_[A-Za-z0-9]{20,})\b/.test(content)) throw new Error(`Credential-like content in ${file}.`);
+function credentialSecrets(env = process.env) {
+    return Object.entries(env || {}).filter(([key, value]) =>
+        /(?:TOKEN|SECRET|PASSWORD|PASSWD|API[_-]?KEY|SERVICE[_-]?.*KEY)/i.test(key)
+        && typeof value === 'string' && value.length >= 4).map(([, value]) => value);
+}
+
+function rejectSecret(content, file, secrets = []) {
+    if (/-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----|\b(?:sk-(?:proj-|or-v1-)?[A-Za-z0-9_-]{20,}|gh[pousr]_[A-Za-z0-9]{20,})\b/.test(content)
+        || [...new Set(secrets)].some((secret) => secret && content.includes(secret))) throw new Error(`Credential-like content in ${file}.`);
 }
 
 function runtimePath(file, proposal) {
     safePath(file);
+    if (/(?:^|\/)__tests__(?:\/|$)|(?:^|\/)fixtures(?:\/|$)|(?:\.test|\.spec)\.[^./]+$/.test(file)) return false;
     if (PROTECTED.test(file)) return false;
     if (DELIVERY.has(file)) {
         const allowed = (proposal.correction_routing || []).some((route) => route.lane === 'code_recommendation'
@@ -57,33 +92,35 @@ function runtimePath(file, proposal) {
         || DELIVERY.has(file);
 }
 
-function collectSource(source, relative = '', files = []) {
+function collectSource(source, relative = '', files = [], secrets = []) {
     const current = path.join(source, relative);
     const stat = fs.lstatSync(current);
     if (stat.isSymbolicLink()) throw new Error(`Source snapshot rejects symlinks: ${relative || '.'}`);
     const name = path.basename(relative);
     if (name.startsWith('.') || EXCLUDED.has(name) || /(?:secret|credential|private[-_]?key)/i.test(name)) return files;
     if (stat.isDirectory()) {
-        for (const child of fs.readdirSync(current).sort()) collectSource(source, path.join(relative, child), files);
+        for (const child of fs.readdirSync(current).sort()) collectSource(source, path.join(relative, child), files, secrets);
     } else if (stat.isFile() && EXTENSIONS.has(path.extname(relative))) {
         if (stat.size > MAX_FILE) throw new Error(`Source file too large: ${relative}`);
         const bytes = fs.readFileSync(current);
-        rejectSecret(bytes.toString('utf8'), relative);
+        rejectSecret(bytes.toString('utf8'), relative, secrets);
         files.push({ relative: relative.split(path.sep).join('/'), bytes });
     }
     return files;
 }
 
-function snapshotBaseline(source, target, verification) {
+function snapshotBaseline(source, target, verification, options = {}) {
     if (fs.existsSync(target)) throw new Error('Baseline snapshot already exists.');
+    const suppliedSecrets = options.secrets || verification?.secrets;
+    const secrets = Array.isArray(suppliedSecrets) ? suppliedSecrets : credentialSecrets(options.env || process.env);
     fs.mkdirSync(target, { recursive: true, mode: 0o700 });
     const files = [];
     for (const entry of ['services', 'config', 'sop-processor', 'package.json', 'package-lock.json', 'tsconfig.json', 'jest.config.js', 'jest.setup.js']) {
         const full = path.join(source, entry);
         if (!fs.existsSync(full)) continue;
         if (fs.lstatSync(full).isSymbolicLink()) throw new Error(`Source snapshot rejects symlinks: ${entry}`);
-        if (fs.lstatSync(full).isDirectory()) collectSource(source, entry, files);
-        else collectSource(source, entry, files);
+        if (fs.lstatSync(full).isDirectory()) collectSource(source, entry, files, secrets);
+        else collectSource(source, entry, files, secrets);
     }
     for (const entry of files) {
         const destination = path.join(target, entry.relative);
@@ -173,12 +210,20 @@ function applyDraft(patch, baseline, candidate, proposal, command = spawnSync) {
     validateDraftPatch(patch, baseline, proposal);
     if (fs.existsSync(candidate)) throw new Error('Candidate directory already exists.');
     fs.cpSync(baseline, candidate, { recursive: true, errorOnExist: true, force: false });
-    const env = { ...process.env, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: os.devNull, GIT_CEILING_DIRECTORIES: path.dirname(candidate) };
+    const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('GIT_')));
+    Object.assign(env, { GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: os.devNull, GIT_CEILING_DIRECTORIES: path.dirname(candidate) });
     const init = command('git', ['-C', candidate, 'init', '--quiet'], { encoding: 'utf8', timeout: 30000, env });
     if (init.error || init.status !== 0) throw new Error(`Candidate git initialization failed: ${init.stderr || init.error?.message || 'unknown error'}`);
     for (const check of [true, false]) {
-        const result = command('git', ['-C', candidate, 'apply', '--recount', '--whitespace=nowarn', ...(check ? ['--check'] : []), '-'], { input: patch, encoding: 'utf8', timeout: 30000, maxBuffer: 1024 * 1024, env: Object.fromEntries(Object.entries(env).filter(([key]) => !key.startsWith('GIT_') || ['GIT_CONFIG_NOSYSTEM', 'GIT_CONFIG_GLOBAL', 'GIT_CEILING_DIRECTORIES'].includes(key))) });
+        const result = command('git', ['-C', candidate, 'apply', '--recount', '--whitespace=nowarn', ...(check ? ['--check'] : []), '-'], { input: patch, encoding: 'utf8', timeout: 30000, maxBuffer: 1024 * 1024, env });
         if (result.error || result.status !== 0) throw new Error(`Candidate patch ${check ? 'check' : 'application'} failed.`);
+    }
+    const changedFiles = validateDraftPatch(patch, baseline, proposal);
+    for (const file of changedFiles) {
+        const target = inside(candidate, path.join(candidate, file));
+        let stat;
+        try { stat = fs.lstatSync(target); } catch { throw new Error(`Applied candidate path is not a regular file: ${file}`); }
+        if (stat.isSymbolicLink() || !stat.isFile()) throw new Error(`Applied candidate path is not a regular file: ${file}`);
     }
     return candidate;
 }
@@ -187,9 +232,18 @@ function revalidateAttemptArtifacts(options = {}) {
     const { attemptRoot, metadata, verification, proposal } = options;
     if (!attemptRoot || !metadata || !verification || !proposal) throw new Error('Draft validation requires attempt metadata and proposal.');
     const root = path.resolve(attemptRoot);
-    const rootStat = fs.lstatSync(root);
-    if (rootStat.isSymbolicLink() || !rootStat.isDirectory()) throw new Error('Attempt root must be a regular directory.');
-    if (metadata.artifact_directory !== root || metadata.attempt_id !== path.basename(root)) throw new Error('Attempt artifact identity does not match metadata.');
+    const trustedRoot = path.resolve(options.trustedRoot || (options.repoRoot ? path.join(options.repoRoot, 'tmp', 'code-proposals') : ''));
+    if (!trustedRoot || trustedRoot === path.resolve('.')) throw new Error('Draft validation requires a trusted artifact root or repo root.');
+    const proposalId = safeSegment(proposal.id, 'proposal id');
+    const attemptId = safeSegment(metadata.attempt_id, 'attempt id');
+    const expectedProposalRoot = path.join(trustedRoot, proposalId);
+    const expectedRoot = path.join(expectedProposalRoot, attemptId);
+    if (root !== expectedRoot || metadata.artifact_directory !== root) throw new Error('Attempt artifact identity does not match trusted topology.');
+    if (!options.baselineRoot) throw new Error('Baseline source snapshot is required for revalidation.');
+    assertNoSymlinkComponents(trustedRoot, expectedRoot);
+    assertRegularDirectory(trustedRoot, 'Trusted artifact root');
+    assertRegularDirectory(expectedProposalRoot, 'Proposal artifact root');
+    assertRegularDirectory(expectedRoot, 'Attempt root', 0o700);
     const proposalBytes = boundedRegular(path.join(root, 'proposal.json'), root);
     const promptBytes = boundedRegular(path.join(root, 'prompt.txt'), root);
     const rulesBytes = boundedRegular(path.join(root, 'rules.json'), root);
@@ -205,13 +259,17 @@ function revalidateAttemptArtifacts(options = {}) {
     const rules = Array.isArray(rulesPayload) ? rulesPayload : rulesPayload.rules;
     if (!Array.isArray(rules) || verification.hashAcceptedRules(rules) !== metadata.accepted_rules_sha256) throw new Error('Accepted-rule artifact hash is stale.');
     if (hash(datasetBytes) !== metadata.expected_dataset_sha256 || JSON.stringify(cases.map((row) => row.case_id)) !== JSON.stringify(metadata.expected_case_ids)) throw new Error('Dataset artifact identity is stale.');
-    const behaviorModule = options.behaviorModule;
-    if (behaviorModule) behaviorModule.validateBehaviorArtifact(behavior);
+    const behaviorModule = options.behaviorModule || (options.repoRoot && (() => {
+        const source = path.join(options.repoRoot, 'services/dashboard/lib/learning-behavior-tests.ts');
+        let hasTsRuntime = false;
+        try { require(require.resolve('ts-node/register/transpile-only', { paths: [options.repoRoot] })); hasTsRuntime = true; } catch { /* use checked-in dist below */ }
+        return hasTsRuntime && fs.existsSync(source) ? require(source) : require(path.join(options.repoRoot, 'services/dashboard/dist/lib/learning-behavior-tests'));
+    })());
+    if (!behaviorModule || typeof behaviorModule.validateBehaviorArtifact !== 'function') throw new Error('Trusted behavior artifact validator is unavailable.');
+    behaviorModule.validateBehaviorArtifact(behavior);
     if (behavior.sha256 !== metadata.behavior_tests_sha256 || behavior.sha256 !== storedProposal.eval_summary?.behavior_tests?.sha256) throw new Error('B6-D1 behavior artifact identity is stale.');
-    if (options.baselineRoot) {
-        const baselineRoot = inside(root, options.baselineRoot);
-        if (verification.hashCodeImplementation(baselineRoot) !== metadata.baseline_source_sha256) throw new Error('Baseline source snapshot hash is stale.');
-    }
+    const baselineRoot = inside(root, options.baselineRoot);
+    if (verification.hashCodeImplementation(baselineRoot) !== metadata.baseline_source_sha256) throw new Error('Baseline source snapshot hash is stale.');
     return { proposal: storedProposal, prompt: promptBytes.toString('utf8'), rules, behavior, cases };
 }
 
