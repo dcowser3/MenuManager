@@ -53,6 +53,7 @@ const supabaseClient = require('@menumanager/supabase-client');
 const { logAlert } = supabaseClient;
 const dashboardModule = require('../index');
 const app = dashboardModule.default;
+const { runFullReviewPipeline } = require('../lib/review-pipeline');
 const { shouldNotifyFormAttemptFailure } = dashboardModule;
 const mockedAxios = axios;
 
@@ -100,7 +101,7 @@ function invokeJsonHandler(handler, body, options = {}) {
     });
 }
 
-function postJsonOverHttp(routePath, body) {
+function postJsonOverHttp(routePath, body, options = {}) {
     return new Promise((resolve, reject) => {
         const server = app.listen(0, async () => {
             try {
@@ -108,7 +109,7 @@ function postJsonOverHttp(routePath, body) {
                 const port = typeof address === 'object' && address ? address.port : 0;
                 const response = await fetch(`http://127.0.0.1:${port}${routePath}`, {
                     method: 'POST',
-                    headers: { 'content-type': 'application/json' },
+                    headers: { 'content-type': 'application/json', ...(options.headers || {}) },
                     body: JSON.stringify(body),
                 });
                 const payload = await response.json();
@@ -936,6 +937,96 @@ describe('Dashboard Modification Workflow (local, mocked externals)', () => {
             'Guacamole',
             'Market Salad',
         ]);
+    });
+
+    test('actual Basic HTTP handler matches offline coordinator on precheck/footer normalization and later model edit', async () => {
+        const rawNotice = '*consuming raw or undercooked meats, poultry, seafood, shellfish, or eggs may increase your risk of foodborne illness.';
+        const payload = {
+            menuContent: [
+                'Esquites, sweet yellow corn, spicy aioli, cotija, bacon* D 17',
+                'Pork Belly, COTIJA CHEESE, pickled chili D,G 18',
+                'Taco, cotija cheese, salsa verde D 15',
+                rawNotice,
+            ].join('\n'),
+            baselineMenuContent: '',
+            reviewMode: 'full',
+            allergens: '',
+            menuType: 'standard',
+            templateType: 'food',
+        };
+        const modelFeedback = (text) => `=== CORRECTED MENU ===\n${text.replace('Taco,', 'Taco Verde,')}\n=== END CORRECTED MENU ===\n=== SUGGESTIONS ===\n[]\n=== END SUGGESTIONS ===`;
+        mockedAxios.post = jest.fn(async (url, request) => {
+            if (String(url).includes('/run-qa-check')) {
+                return { data: { feedback: modelFeedback(request.text), finish_reason: 'stop' } };
+            }
+            return { data: {} };
+        });
+
+        const http = await postJsonOverHttp('/api/form/basic-check', payload, {
+            headers: { 'x-menumanager-debug-basic-check': '1' },
+        });
+        const qaCalls = mockedAxios.post.mock.calls.filter(([url]) => String(url).includes('/run-qa-check'));
+        expect(qaCalls).toHaveLength(1);
+
+        let offlineCalls = 0;
+        const offline = await runFullReviewPipeline(payload.menuContent, {
+            basePrompt: '', property: '', templateType: payload.templateType, menuType: payload.menuType,
+            allergens: payload.allergens, acceptedCorrectionRules: [], approvedVocabularyTerms: [],
+            precheckEnabled: true, managedRawNoticePresent: true,
+        }, async (text) => {
+            offlineCalls++;
+            return { feedback: modelFeedback(text), finishReason: 'stop' };
+        });
+        expect(offlineCalls).toBe(1);
+        expect(http.status).toBe(200);
+        expect(http.body.correctedMenu).toBe(offline.finalCorrectedMenu);
+        expect(http.body.suggestions).toEqual(offline.finalSuggestions);
+        expect(http.body.hasCriticalErrors).toBe(offline.authoritative.hasCriticalErrors);
+        expect(http.body.reviewStatus).toEqual(offline.reviewStatus);
+        const delivered = http.body.basicCheckDiagnostics.delivered;
+        expect(delivered.outputHash).toBe(offline.outputHash);
+        expect(delivered.acceptedPolicyHash).toBe(offline.envelope.acceptedPolicyHash);
+        expect(delivered.managedRawNoticePresent).toBe(offline.envelope.context.managedRawNoticePresent);
+        expect(delivered.editableSpanBasis).toBe('prechecked_review_body');
+        expect(delivered.structureGuard).toEqual(offline.authoritative.structureGuard);
+        expect(delivered.reconciliation).toEqual(offline.authoritative.reconciliation);
+    });
+
+    test('actual Basic HTTP handler matches offline coordinator on rejected merge/status', async () => {
+        const payload = {
+            menuContent: 'BEVERAGE OPTIONS\nAthletic N/A\nLagunitas N/A',
+            baselineMenuContent: '', reviewMode: 'full', allergens: '', menuType: 'standard', templateType: 'beverage',
+        };
+        const modelFeedback = (text) => `=== CORRECTED MENU ===\n${text.split('\n').filter((line) => line !== 'Lagunitas N/A').join('\n')}\n=== END CORRECTED MENU ===\n=== SUGGESTIONS ===\n[{"type":"Missing Price","severity":"critical","menuItem":"candidate-only","description":"candidate-only","recommendation":"invent"}]\n=== END SUGGESTIONS ===`;
+        mockedAxios.post = jest.fn(async (url, request) => {
+            if (String(url).includes('/run-qa-check')) {
+                return { data: { feedback: modelFeedback(request.text), finish_reason: 'stop' } };
+            }
+            return { data: {} };
+        });
+        const http = await postJsonOverHttp('/api/form/basic-check', payload, {
+            headers: { 'x-menumanager-debug-basic-check': '1' },
+        });
+        const qaCalls = mockedAxios.post.mock.calls.filter(([url]) => String(url).includes('/run-qa-check'));
+        expect(qaCalls).toHaveLength(1);
+
+        let offlineCalls = 0;
+        const offline = await runFullReviewPipeline(payload.menuContent, {
+            basePrompt: '', templateType: payload.templateType, menuType: payload.menuType,
+            acceptedCorrectionRules: [], precheckEnabled: true, managedRawNoticePresent: false,
+        }, async (text) => {
+            offlineCalls++;
+            return { feedback: modelFeedback(text), finishReason: 'stop' };
+        });
+        expect(offlineCalls).toBe(1);
+        expect(http.body.correctedMenu).toBe(payload.menuContent);
+        expect(http.body.correctedMenu).toBe(offline.finalCorrectedMenu);
+        expect(http.body.suggestions).toEqual(offline.finalSuggestions);
+        expect(http.body.hasCriticalErrors).toBe(offline.authoritative.hasCriticalErrors);
+        expect(http.body.reviewStatus).toEqual(offline.reviewStatus);
+        expect(http.body.reviewStatus).toEqual({ complete: false, transportStatus: 'rejected', reusable: false });
+        expect(http.body.basicCheckDiagnostics.delivered.structureGuard).toEqual(offline.authoritative.structureGuard);
+        expect(http.body.basicCheckDiagnostics.delivered.suggestions).toEqual(offline.authoritative.suggestions);
     });
 
     test('basic-check writes a durable AI request and response audit row', async () => {

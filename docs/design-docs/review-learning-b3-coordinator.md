@@ -20,6 +20,10 @@ The prepared object fields consumed at completion (prechecked body, scoped
 near-miss findings, prompt, embedded analysis, context, and options) are
 deep-frozen and hash-bound. Completion verifies those bindings and fails closed
 to the immutable source if any field or nested value drifts after preparation.
+Completion consumes the frozen integrity snapshot—not mutable caller-facing
+siblings—and validates the whole envelope plus managed-footer, allergen,
+sanitized-body, and deterministic-precheck identities. Missing or malformed
+integrity metadata is also a rejected review, never an exception path.
 
 Model edits are validated against the immutable prechecked source before any
 replacement is applied. Unknown, duplicate, read-only, overlapping, malformed,
@@ -32,7 +36,15 @@ rejected model mutation cannot leak its candidate state into the result.
 
 Diagnostics are bounded and contain stages, reasons, source positions, hashes,
 and unknown confidence; ordinary logs do not copy menu bodies. Existing Basic
-response fields and four response markers remain unchanged.
+and unknown confidence; ordinary logs do not copy menu bodies. The HTTP adapter
+keeps legacy attempt diagnostics but exposes a bounded `delivered` diagnostic
+section and review status sourced from the authoritative delivered state. The
+offline adapter and HTTP handler therefore share exact delivered bytes,
+suggestions, critical state, guard/reconciliation decisions, footer policy, and
+rejection semantics. Genuine unresolved critical findings are rederived from
+the immutable delivered source after a rejected candidate merge; rejected
+candidate-only findings are discarded. Existing Basic response fields and four
+response markers remain unchanged.
 
 Submission-boundary migration, document preparation, B7 active review units,
 B8 receipt reuse, provider/model/settings changes, and deployment are outside
@@ -45,5 +57,8 @@ frozen envelope/hash identity and prepared-state drift, raw/prechecked
 provenance, source-anchor mismatch, duplicate/unknown/read-only rejection,
 malformed and overlapping spans, zero-length insertion ambiguity, offset-safe
 length changes, ambiguous whole-block fallback, managed raw/footer context,
-and exactly one model callback per adapter run. The Basic route continues to
-return its existing browser response shape.
+and exactly one model callback per adapter run. HTTP-vs-offline parity covers a
+successful edit, a rejected merge, managed-footer removal, an earlier
+length-changing deterministic precheck, and a later model edit. The Basic
+route continues to return its existing browser response shape with additive
+status/delivered diagnostics.

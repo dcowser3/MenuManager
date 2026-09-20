@@ -774,9 +774,15 @@ async function prepareReview(rawMenuContent, options) {
         embeddedHash: (0, canonical_policy_1.policyHash)(frozenEmbeddedSetMenuAnalysis),
         optionsHash: (0, canonical_policy_1.policyHash)(opts),
         contextHash: (0, canonical_policy_1.policyHash)(envelope.context),
+        envelopeHash: (0, canonical_policy_1.policyHash)(envelope),
+        managedRawNoticeHash: (0, canonical_policy_1.policyHash)(managedRawNoticePresent),
+        effectiveAllergensHash: (0, canonical_policy_1.policyHash)(effectiveReviewAllergens),
+        sanitizedMenuHash: (0, canonical_policy_1.policyHash)(frozenSanitizedMenuContent),
+        preAiHash: (0, canonical_policy_1.policyHash)(frozenPreAiDeterministic),
         snapshot: {
             rawMenuContent,
             envelope,
+            opts,
             preCheckedReviewBody,
             sanitizedMenuContent: frozenSanitizedMenuContent,
             effectiveReviewAllergens,
@@ -808,6 +814,11 @@ function preparedReviewDrift(prepared) {
             ['embedded_analysis', integrity.embeddedHash, (0, canonical_policy_1.policyHash)(prepared.embeddedSetMenuAnalysis)],
             ['options', integrity.optionsHash, (0, canonical_policy_1.policyHash)(prepared.opts)],
             ['context', integrity.contextHash, (0, canonical_policy_1.policyHash)(prepared.envelope.context)],
+            ['envelope', integrity.envelopeHash, (0, canonical_policy_1.policyHash)(prepared.envelope)],
+            ['managed_raw_notice', integrity.managedRawNoticeHash, (0, canonical_policy_1.policyHash)(prepared.managedRawNoticePresent)],
+            ['effective_allergens', integrity.effectiveAllergensHash, (0, canonical_policy_1.policyHash)(prepared.effectiveReviewAllergens)],
+            ['sanitized_menu', integrity.sanitizedMenuHash, (0, canonical_policy_1.policyHash)(prepared.sanitizedMenuContent)],
+            ['pre_ai_deterministic', integrity.preAiHash, (0, canonical_policy_1.policyHash)(prepared.preAiDeterministic)],
         ];
         const drift = checks.find(([, expected, actual]) => expected !== actual);
         return drift ? `prepared_state_drift:${drift[0]}` : null;
@@ -819,35 +830,86 @@ function preparedReviewDrift(prepared) {
 function emptyReviewFeedback(menu) {
     return `${review_response_contract_1.AI_REVIEW_FENCES.correctedMenuStart}\n${menu}\n${review_response_contract_1.AI_REVIEW_FENCES.correctedMenuEnd}\n${review_response_contract_1.AI_REVIEW_FENCES.suggestionsStart}\n[]\n${review_response_contract_1.AI_REVIEW_FENCES.suggestionsEnd}`;
 }
+function deriveDeliveredSourcePost(args) {
+    const sourcePost = runPostAiPipeline({
+        feedback: emptyReviewFeedback(args.source),
+        preCheckedReviewBody: args.source,
+        menuType: args.menuType,
+        property: args.property,
+        templateType: args.templateType,
+        effectiveReviewAllergens: args.effectiveReviewAllergens,
+        acceptedCorrectionRules: [],
+        embeddedSetMenuAnalysis: args.embeddedSetMenuAnalysis,
+        canonicalSpellingFindings: [],
+        precheckEnabled: false,
+        managedRawNoticePresent: args.managedRawNoticePresent,
+    });
+    sourcePost.correctedMenuSanitized = args.source;
+    sourcePost.correctedAfterHighConfidence = args.source;
+    sourcePost.guardedCorrectedMenu = args.source;
+    sourcePost.deliveredStructureGuard = (0, corrected_menu_structure_guard_1.assessCorrectedMenuStructure)(args.source, args.source);
+    sourcePost.deliveredReconciliation = sourcePost.reconciliation;
+    return sourcePost;
+}
 function failClosedPreparedReview(prepared, reason) {
-    const snapshot = prepared.__integrity.snapshot;
+    const integrity = prepared?.__integrity;
+    const snapshot = integrity?.snapshot;
+    if (!snapshot || typeof snapshot.preCheckedReviewBody !== 'string') {
+        const candidate = (prepared || {});
+        const source = typeof candidate.preCheckedReviewBody === 'string'
+            ? candidate.preCheckedReviewBody
+            : typeof candidate.rawMenuContent === 'string' ? candidate.rawMenuContent : '';
+        const envelope = candidate.envelope && typeof candidate.envelope.originalBody === 'string'
+            ? candidate.envelope
+            : buildReviewEnvelope(source, source, '', { basePrompt: '' }, '', false);
+        const post = deriveDeliveredSourcePost({ source, embeddedSetMenuAnalysis: { sections: [], issues: [] } });
+        post.safetyDiagnostics = [reason, ...post.safetyDiagnostics];
+        const reviewStatus = { complete: false, transportStatus: 'rejected', reusable: false };
+        return {
+            envelope,
+            diagnostics: [{ stage: 'integrity', reason }, { stage: 'final', finalHash: (0, canonical_policy_1.policyHash)(source) }],
+            outputHash: (0, canonical_policy_1.policyHash)(source),
+            reviewStatus,
+            preAiDeterministic: candidate.preAiDeterministic || (0, pre_ai_deterministic_rules_1.runPreAiDeterministicChecks)(source, { enabled: false }),
+            preCheckedReviewBody: source,
+            originalMenuSanitized: typeof candidate.sanitizedMenuContent?.body === 'string' ? candidate.sanitizedMenuContent.body : source,
+            effectiveReviewAllergens: typeof candidate.effectiveReviewAllergens === 'string' ? candidate.effectiveReviewAllergens : '',
+            embeddedSetMenuAnalysis: { sections: [], issues: [] },
+            promptInfo: { prompt: '', sections: [] },
+            post,
+            authoritative: {
+                correctedMenu: source,
+                suggestions: post.finalSuggestions,
+                criticalSuggestions: post.criticalSuggestions,
+                hasCriticalErrors: post.hasCriticalErrors,
+                structureGuard: post.deliveredStructureGuard || post.structureGuard,
+                reconciliation: post.deliveredReconciliation || post.reconciliation,
+                spellingAdjudications: post.spellingAdjudications,
+                reviewStatus,
+                safetyDiagnostics: post.safetyDiagnostics.slice(0, 200),
+            },
+            finalCorrectedMenu: source,
+            finalSuggestions: post.finalSuggestions,
+            hasChanges: false,
+        };
+    }
     const source = snapshot.preCheckedReviewBody;
-    const post = runPostAiPipeline({
-        feedback: emptyReviewFeedback(source),
-        preCheckedReviewBody: source,
+    const post = deriveDeliveredSourcePost({
+        source,
         menuType: snapshot.envelope.context.menuType,
         property: snapshot.envelope.context.property,
         templateType: snapshot.envelope.context.templateType,
         effectiveReviewAllergens: snapshot.effectiveReviewAllergens,
-        acceptedCorrectionRules: [],
         embeddedSetMenuAnalysis: snapshot.embeddedSetMenuAnalysis,
-        canonicalSpellingFindings: [],
-        precheckEnabled: false,
         managedRawNoticePresent: snapshot.managedRawNoticePresent,
     });
-    post.correctedMenuSanitized = source;
-    post.correctedAfterHighConfidence = source;
-    post.guardedCorrectedMenu = source;
-    post.finalSuggestions = [];
-    post.reconciledSuggestions = [];
-    post.criticalSuggestions = [];
-    post.hasCriticalErrors = false;
-    post.safetyDiagnostics = [reason];
+    post.safetyDiagnostics = [reason, ...post.safetyDiagnostics];
+    const reviewStatus = { complete: false, transportStatus: 'rejected', reusable: false };
     return {
         envelope: snapshot.envelope,
         diagnostics: [{ stage: 'integrity', reason }, { stage: 'final', finalHash: (0, canonical_policy_1.policyHash)(source) }],
         outputHash: (0, canonical_policy_1.policyHash)(source),
-        reviewStatus: { complete: false, transportStatus: 'rejected', reusable: false },
+        reviewStatus,
         preAiDeterministic: snapshot.preAiDeterministic,
         preCheckedReviewBody: source,
         originalMenuSanitized: snapshot.sanitizedMenuContent.body,
@@ -855,30 +917,43 @@ function failClosedPreparedReview(prepared, reason) {
         embeddedSetMenuAnalysis: snapshot.embeddedSetMenuAnalysis,
         promptInfo: snapshot.promptInfo,
         post,
+        authoritative: {
+            correctedMenu: source,
+            suggestions: post.finalSuggestions,
+            criticalSuggestions: post.criticalSuggestions,
+            hasCriticalErrors: post.hasCriticalErrors,
+            structureGuard: post.deliveredStructureGuard || post.structureGuard,
+            reconciliation: post.deliveredReconciliation || post.reconciliation,
+            spellingAdjudications: post.spellingAdjudications,
+            reviewStatus,
+            safetyDiagnostics: post.safetyDiagnostics.slice(0, 200),
+        },
         finalCorrectedMenu: source,
-        finalSuggestions: [],
+        finalSuggestions: post.finalSuggestions,
         hasChanges: source !== snapshot.sanitizedMenuContent.body,
     };
 }
 function completePreparedReview(prepared, feedback, completion = {}) {
-    const drift = preparedReviewDrift(prepared);
+    const preparedWithIntegrity = prepared;
+    const drift = preparedReviewDrift(preparedWithIntegrity);
     if (drift)
-        return failClosedPreparedReview(prepared, drift);
-    const { opts } = prepared;
+        return failClosedPreparedReview(preparedWithIntegrity, drift);
+    const snapshot = preparedWithIntegrity.__integrity.snapshot;
+    const { opts } = snapshot;
     const post = runPostAiPipeline({
         feedback,
-        preCheckedReviewBody: prepared.preCheckedReviewBody,
+        preCheckedReviewBody: snapshot.preCheckedReviewBody,
         menuType: opts.menuType,
         property: opts.property,
         templateType: opts.templateType,
-        effectiveReviewAllergens: prepared.effectiveReviewAllergens,
+        effectiveReviewAllergens: snapshot.effectiveReviewAllergens,
         acceptedCorrectionRules: opts.acceptedCorrectionRules || [],
-        embeddedSetMenuAnalysis: prepared.embeddedSetMenuAnalysis,
-        canonicalSpellingFindings: prepared.nearMissAnalysis.findings,
+        embeddedSetMenuAnalysis: snapshot.embeddedSetMenuAnalysis,
+        canonicalSpellingFindings: snapshot.nearMissAnalysis.findings,
         precheckEnabled: opts.precheckEnabled !== false,
-        managedRawNoticePresent: prepared.managedRawNoticePresent,
+        managedRawNoticePresent: snapshot.managedRawNoticePresent,
     });
-    const anchored = (0, review_envelope_1.attributeCorrectedBlock)(prepared.preCheckedReviewBody, post.correctedMenuSanitized, opts.acceptedCorrectionRules || [], { editableSpans: prepared.envelope.editableSpans });
+    const anchored = (0, review_envelope_1.attributeCorrectedBlock)(snapshot.preCheckedReviewBody, post.correctedMenuSanitized, opts.acceptedCorrectionRules || [], { editableSpans: snapshot.envelope.editableSpans });
     const finalCorrectedMenu = anchored.text;
     if (anchored.diagnostics.length)
         post.safetyDiagnostics.push(...anchored.diagnostics);
@@ -887,46 +962,75 @@ function completePreparedReview(prepared, feedback, completion = {}) {
         post.safetyDiagnostics.push('structure_guard_rejected');
     if (finalCorrectedMenu !== post.correctedMenuSanitized)
         post.correctedMenuSanitized = finalCorrectedMenu;
-    const deliveredStructureGuard = (0, corrected_menu_structure_guard_1.assessCorrectedMenuStructure)(prepared.preCheckedReviewBody, finalCorrectedMenu);
-    post.deliveredStructureGuard = deliveredStructureGuard;
+    const deliveredStructureGuard = (0, corrected_menu_structure_guard_1.assessCorrectedMenuStructure)(snapshot.preCheckedReviewBody, finalCorrectedMenu);
+    const deliveredSourcePost = mergeRejected
+        ? deriveDeliveredSourcePost({
+            source: finalCorrectedMenu,
+            menuType: opts.menuType,
+            property: opts.property,
+            templateType: opts.templateType,
+            effectiveReviewAllergens: snapshot.effectiveReviewAllergens,
+            embeddedSetMenuAnalysis: snapshot.embeddedSetMenuAnalysis,
+            managedRawNoticePresent: snapshot.managedRawNoticePresent,
+        })
+        : null;
+    const deliveredReconciliation = deliveredSourcePost?.reconciliation || reconcileCriticalSuggestionsAgainstCorrectedMenuWithDiagnostics(finalCorrectedMenu, post.finalSuggestions);
+    post.deliveredStructureGuard = deliveredSourcePost?.structureGuard || deliveredStructureGuard;
+    post.deliveredReconciliation = deliveredReconciliation;
     post.guardedCorrectedMenu = finalCorrectedMenu;
     post.correctedAfterHighConfidence = finalCorrectedMenu;
-    const deliveredReconciliation = reconcileCriticalSuggestionsAgainstCorrectedMenuWithDiagnostics(finalCorrectedMenu, mergeRejected ? [] : post.finalSuggestions);
-    post.deliveredReconciliation = deliveredReconciliation;
-    post.finalSuggestions = mergeRejected ? [] : deliveredReconciliation.suggestions;
+    if (deliveredSourcePost) {
+        post.finalSuggestions = deliveredSourcePost.finalSuggestions;
+        post.safetyDiagnostics.push(...deliveredSourcePost.safetyDiagnostics);
+    }
+    else {
+        post.finalSuggestions = deliveredReconciliation.suggestions;
+    }
     post.criticalSuggestions = post.finalSuggestions.filter(suggestion => suggestion.severity === 'critical');
     post.hasCriticalErrors = post.criticalSuggestions.length > 0;
     const finalSuggestions = post.finalSuggestions;
     const transportStatus = completion.finishReason === 'stop' ? 'complete' : completion.finishReason ? 'incomplete' : 'unknown';
     const reviewStatus = {
-        complete: !post.parsed.fenceMissing && transportStatus !== 'incomplete',
-        transportStatus,
-        reusable: !post.parsed.fenceMissing && transportStatus === 'complete' && post.safetyDiagnostics.length === 0
+        complete: !mergeRejected && !post.parsed.fenceMissing && transportStatus !== 'incomplete',
+        transportStatus: mergeRejected ? 'rejected' : transportStatus,
+        reusable: !mergeRejected && !post.parsed.fenceMissing && transportStatus === 'complete' && post.safetyDiagnostics.length === 0
             && post.structureGuard.safe && !post.hasCriticalErrors && post.finalSuggestions.length === 0,
     };
+    const authoritative = {
+        correctedMenu: finalCorrectedMenu,
+        suggestions: finalSuggestions,
+        criticalSuggestions: post.criticalSuggestions,
+        hasCriticalErrors: post.hasCriticalErrors,
+        structureGuard: post.deliveredStructureGuard || deliveredStructureGuard,
+        reconciliation: post.deliveredReconciliation || deliveredReconciliation,
+        spellingAdjudications: post.spellingAdjudications,
+        reviewStatus,
+        safetyDiagnostics: post.safetyDiagnostics.slice(0, 200),
+    };
     return {
-        envelope: prepared.envelope,
+        envelope: snapshot.envelope,
         diagnostics: [
             ...anchored.diagnostics.map(reason => ({ stage: 'merge', reason })),
             ...(mergeRejected && !anchored.diagnostics.length ? [{ stage: 'merge', reason: 'structure_guard_rejected' }] : []),
-            ...(0, review_envelope_1.boundedMutationDiagnostics)(prepared.preCheckedReviewBody, finalCorrectedMenu).map(diagnostic => ({
+            ...(0, review_envelope_1.boundedMutationDiagnostics)(snapshot.preCheckedReviewBody, finalCorrectedMenu).map(diagnostic => ({
                 ...diagnostic,
-                basis: prepared.envelope.editableSpanBasis,
+                basis: snapshot.envelope.editableSpanBasis,
             })),
             { stage: 'final', finalHash: (0, canonical_policy_1.policyHash)(finalCorrectedMenu) },
         ].slice(0, 200),
         outputHash: (0, canonical_policy_1.policyHash)(finalCorrectedMenu),
         reviewStatus,
-        preAiDeterministic: prepared.preAiDeterministic,
-        preCheckedReviewBody: prepared.preCheckedReviewBody,
-        originalMenuSanitized: prepared.sanitizedMenuContent.body,
-        effectiveReviewAllergens: prepared.effectiveReviewAllergens,
-        embeddedSetMenuAnalysis: prepared.embeddedSetMenuAnalysis,
-        promptInfo: prepared.promptInfo,
+        preAiDeterministic: snapshot.preAiDeterministic,
+        preCheckedReviewBody: snapshot.preCheckedReviewBody,
+        originalMenuSanitized: snapshot.sanitizedMenuContent.body,
+        effectiveReviewAllergens: snapshot.effectiveReviewAllergens,
+        embeddedSetMenuAnalysis: snapshot.embeddedSetMenuAnalysis,
+        promptInfo: snapshot.promptInfo,
         post,
+        authoritative,
         finalCorrectedMenu,
         finalSuggestions,
-        hasChanges: finalCorrectedMenu !== prepared.sanitizedMenuContent.body,
+        hasChanges: finalCorrectedMenu !== snapshot.sanitizedMenuContent.body,
     };
 }
 // One shared coordinator for Basic and offline callers. Adapters only provide

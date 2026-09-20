@@ -3837,11 +3837,22 @@ async function handleBasicCheck(req: any, res: any) {
             reconciliation,
             reconciledSuggestions,
             spellingAdjudications,
-            finalSuggestions,
-            hasCriticalErrors,
-            criticalSuggestions,
+            finalSuggestions: attemptFinalSuggestions,
+            hasCriticalErrors: attemptHasCriticalErrors,
+            criticalSuggestions: attemptCriticalSuggestions,
         } = postPipeline;
         const originalMenuSanitized = sanitizedMenuContent.body;
+        const authoritative = coordinatedResult?.authoritative;
+        const finalSuggestions = changedOnlyMode
+            ? attemptFinalSuggestions
+            : authoritative?.suggestions || attemptFinalSuggestions;
+        const hasCriticalErrors = changedOnlyMode
+            ? attemptHasCriticalErrors
+            : authoritative?.hasCriticalErrors ?? attemptHasCriticalErrors;
+        const criticalSuggestions = changedOnlyMode
+            ? attemptCriticalSuggestions
+            : authoritative?.criticalSuggestions || attemptCriticalSuggestions;
+        const deliveredReviewStatus = changedOnlyMode ? undefined : authoritative?.reviewStatus;
 
         console.log('=== PARSED RESPONSE ===');
         console.log('Corrected menu length:', correctedMenuSanitized.length);
@@ -3874,7 +3885,9 @@ async function handleBasicCheck(req: any, res: any) {
             }
         }
 
-        const finalCorrectedMenu = changedOnlyMode ? changedOnlyMergedMenu : correctedMenuSanitized;
+        const finalCorrectedMenu = changedOnlyMode
+            ? changedOnlyMergedMenu
+            : authoritative?.correctedMenu || correctedMenuSanitized;
         const finalHasChanges = changedOnlyMode
             ? changedOnlyMergedMenu !== menuContent
             : correctedMenuSanitized !== originalMenuSanitized;
@@ -4016,6 +4029,18 @@ async function handleBasicCheck(req: any, res: any) {
                     droppedSuggestions: reconciliation.droppedSuggestions,
                     suggestionsAfterReconciliation: reconciledSuggestions,
                 },
+                ...(authoritative ? {
+                    delivered: {
+                        reviewStatus: deliveredReviewStatus,
+                        structureGuard: authoritative.structureGuard,
+                        reconciliation: authoritative.reconciliation,
+                        suggestions: finalSuggestions,
+                        criticalSuggestions,
+                        hasCriticalErrors,
+                        spellingAdjudications: authoritative.spellingAdjudications,
+                        safetyDiagnostics: authoritative.safetyDiagnostics,
+                    },
+                } : {}),
                 spellingAdjudications,
             },
             finalResult: {
@@ -4106,6 +4131,23 @@ async function handleBasicCheck(req: any, res: any) {
                 droppedSuggestions: reconciliation.droppedSuggestions,
                 suggestionsAfterReconciliation: reconciledSuggestions,
             },
+            ...(authoritative ? {
+                delivered: {
+                    reviewStatus: deliveredReviewStatus,
+                    outputHash: coordinatedResult?.outputHash,
+                    acceptedPolicyHash: coordinatedResult?.envelope.acceptedPolicyHash,
+                    managedRawNoticePresent: coordinatedResult?.envelope.context.managedRawNoticePresent,
+                    editableSpanBasis: coordinatedResult?.envelope.editableSpanBasis,
+                    correctedMenuLength: finalCorrectedMenu.length,
+                    suggestions: finalSuggestions,
+                    criticalSuggestions,
+                    hasCriticalErrors,
+                    structureGuard: authoritative.structureGuard,
+                    reconciliation: authoritative.reconciliation,
+                    spellingAdjudications: authoritative.spellingAdjudications,
+                    safetyDiagnostics: authoritative.safetyDiagnostics,
+                },
+            } : {}),
             spellingAdjudications,
             final: {
                 suggestions: finalSuggestions,
@@ -4141,6 +4183,7 @@ async function handleBasicCheck(req: any, res: any) {
             suggestions: finalSuggestions,
             hasChanges: finalHasChanges,
             hasCriticalErrors,
+            ...(deliveredReviewStatus ? { reviewStatus: deliveredReviewStatus } : {}),
             reviewMode: changedOnlyMode ? 'changed_only' : 'full',
             changedLineCount,
             dishNameFormatting,

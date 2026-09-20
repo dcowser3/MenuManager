@@ -90,6 +90,34 @@ test('prepared consumed state is frozen and completion fails closed on post-prep
     expect(result.diagnostics[0]).toEqual({ stage: 'integrity', reason: 'prepared_state_drift:prompt' });
 });
 
+test.each([
+    ['editable spans', (prepared: any) => { prepared.envelope = { ...prepared.envelope, editableSpans: [{ id: 'tampered', start: 0, end: 1 }] }; }],
+    ['managed raw notice', (prepared: any) => { prepared.managedRawNoticePresent = !prepared.managedRawNoticePresent; }],
+    ['effective allergens', (prepared: any) => { prepared.effectiveReviewAllergens = 'TAMPERED'; }],
+    ['sanitized menu', (prepared: any) => { prepared.sanitizedMenuContent = { body: 'TAMPERED' }; }],
+    ['precheck result', (prepared: any) => { prepared.preAiDeterministic = { menuText: 'TAMPERED' }; }],
+])('completion rejects replacement tampering of %s', async (_label, tamper) => {
+    const prepared: any = await prepareReview('DINNER\nFishh G 12', {
+        basePrompt: 'BASE', acceptedCorrectionRules: [rule], precheckEnabled: false,
+    });
+    tamper(prepared);
+    const result = completePreparedReview(prepared, fenced('DINNER\nFish G 12'));
+    expect(result.finalCorrectedMenu).toBe('DINNER\nFishh G 12');
+    expect(result.reviewStatus).toEqual({ complete: false, transportStatus: 'rejected', reusable: false });
+    expect(result.diagnostics[0].stage).toBe('integrity');
+});
+
+test('missing integrity fails closed without dereferencing or throwing', async () => {
+    const prepared: any = await prepareReview('DINNER\nFishh G 12', {
+        basePrompt: 'BASE', acceptedCorrectionRules: [rule], precheckEnabled: false,
+    });
+    const tampered = { ...prepared };
+    const result = completePreparedReview(tampered, fenced('DINNER\nFish G 12'));
+    expect(result.finalCorrectedMenu).toBe('DINNER\nFishh G 12');
+    expect(result.reviewStatus).toEqual({ complete: false, transportStatus: 'rejected', reusable: false });
+    expect(result.diagnostics[0]).toEqual({ stage: 'integrity', reason: 'missing_prepared_integrity' });
+});
+
 test('envelope hashes and immutable fields do not drift when caller inputs mutate', async () => {
     const acceptedRules = [rule];
     const options: any = {
@@ -176,6 +204,26 @@ test('Basic/offline adapters match on rejected read-only merge and do not retain
     expect(direct.post.structureGuard.safe).toBe(offline.post.structureGuard.safe);
     expect(direct.reviewStatus).toEqual(offline.reviewStatus);
     expect(direct.envelope.acceptedPolicyHash).toBe(offline.envelope.acceptedPolicyHash);
+});
+
+test('rejected delivery drops bogus candidate findings but preserves genuine source criticals', async () => {
+    const menu = 'First Course\nsoup\nSecond Course\nfish';
+    const prepared = await prepareReview(menu, {
+        basePrompt: 'BASE', menuType: 'prix_fixe', templateType: 'beverage', precheckEnabled: false,
+        editableSpans: [{ id: 'fish', start: 31, end: menu.length }],
+    });
+    const feedback = fencedWithSuggestions('LUNCH\nsteak\nSecond Course\nfish', [{
+        type: 'Missing Price', severity: 'critical', menuItem: 'candidate-only',
+        description: 'candidate-only missing price', recommendation: 'invent a price',
+    }]);
+    const result = completePreparedReview(prepared, feedback, { finishReason: 'stop' });
+    expect(result.finalCorrectedMenu).toBe(menu);
+    expect(result.finalSuggestions.some(suggestion => suggestion.type === 'Missing Price' && suggestion.menuItem === 'candidate-only')).toBe(false);
+    expect(result.finalSuggestions).toEqual(expect.arrayContaining([
+        expect.objectContaining({ type: 'PRICING STRUCTURE', severity: 'critical' }),
+    ]));
+    expect(result.post.hasCriticalErrors).toBe(true);
+    expect(result.reviewStatus).toEqual({ complete: false, transportStatus: 'rejected', reusable: false });
 });
 
 test('model failure fallback is source-preserving and still one-call', async () => {
