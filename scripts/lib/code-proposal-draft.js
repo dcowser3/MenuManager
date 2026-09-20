@@ -1,0 +1,218 @@
+'use strict';
+
+const crypto = require('crypto');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const { spawnSync } = require('child_process');
+
+const EXCLUDED = new Set(['node_modules', 'dist', 'tmp', 'venv', '__pycache__', 'coverage', 'logs', 'archive']);
+const EXTENSIONS = new Set(['.ts', '.js', '.json', '.py', '.ejs', '.css', '.html', '.txt']);
+const PROTECTED = /(?:^|\/)(?:code-proposal|proposal-approval|contextual-proof|deployment-compatibility|learning-behavior-tests|replay-retirement|improvement-cycle|prompt-proposal|review-eval|internal-auth|request-normalization|code-candidate-progress)/;
+const TEST_PATH = /^services\/dashboard\/__tests__\/code-candidate-[a-z0-9-]+\.test\.ts$/;
+const DELIVERY = new Set(['services/dashboard/views/form.ejs', 'services/dashboard/public/js/redline-preview.js', 'services/diff-core/src/index.js']);
+const DIGEST = /^[a-f0-9]{64}$/;
+const MAX_FILE = 5 * 1024 * 1024;
+const MAX_PATCH = 180000;
+
+const hash = (value) => crypto.createHash('sha256').update(value).digest('hex');
+const nfc = (value) => String(value || '').replace(/\r/g, '').normalize('NFC');
+const safePath = (value) => {
+    if (typeof value !== 'string' || value.length > 220 || value.includes('\\') || value.includes('\0') || value.startsWith('/')
+        || value.split('/').some((part) => !part || part === '.' || part === '..' || part.startsWith('.'))) throw new Error('Unsafe relative path.');
+    return value;
+};
+const inside = (root, target) => {
+    const r = path.resolve(root), t = path.resolve(target);
+    if (t === r || !t.startsWith(`${r}${path.sep}`)) throw new Error('Path is outside the trusted attempt root.');
+    return t;
+};
+const digest = (value, label) => { if (typeof value !== 'string' || !DIGEST.test(value)) throw new Error(`Invalid ${label} hash.`); };
+
+function boundedRegular(file, root, mode = 0o600) {
+    const target = inside(root, file);
+    let cursor = path.resolve(root);
+    for (const part of path.relative(cursor, target).split(path.sep)) {
+        cursor = path.join(cursor, part);
+        if (fs.lstatSync(cursor).isSymbolicLink()) throw new Error(`Artifact path traverses a symlink: ${target}`);
+    }
+    const stat = fs.lstatSync(target);
+    if (stat.isSymbolicLink() || !stat.isFile() || stat.size > MAX_FILE || (stat.mode & 0o777) !== mode) throw new Error(`Unsafe artifact file: ${target}`);
+    return fs.readFileSync(target);
+}
+
+function rejectSecret(content, file) {
+    if (/-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----|\b(?:sk-(?:proj-|or-v1-)?[A-Za-z0-9_-]{20,}|gh[pousr]_[A-Za-z0-9]{20,})\b/.test(content)) throw new Error(`Credential-like content in ${file}.`);
+}
+
+function runtimePath(file, proposal) {
+    safePath(file);
+    if (PROTECTED.test(file)) return false;
+    if (DELIVERY.has(file)) {
+        const allowed = (proposal.correction_routing || []).some((route) => route.lane === 'code_recommendation'
+            && (route.replay_status === 'delivery_mismatch' || (proposal.replay_evidence || []).some((entry) => entry.correction_id === route.correction_id && entry.status === 'delivery_mismatch')));
+        if (!allowed) throw new Error(`Delivery path requires an explicitly routed delivery_mismatch correction: ${file}`);
+    }
+    return /^services\/(?:dashboard|ai-review)\/lib\/[A-Za-z0-9_./-]+\.(?:ts|js)$/.test(file)
+        || DELIVERY.has(file);
+}
+
+function collectSource(source, relative = '', files = []) {
+    const current = path.join(source, relative);
+    const stat = fs.lstatSync(current);
+    if (stat.isSymbolicLink()) throw new Error(`Source snapshot rejects symlinks: ${relative || '.'}`);
+    const name = path.basename(relative);
+    if (name.startsWith('.') || EXCLUDED.has(name) || /(?:secret|credential|private[-_]?key)/i.test(name)) return files;
+    if (stat.isDirectory()) {
+        for (const child of fs.readdirSync(current).sort()) collectSource(source, path.join(relative, child), files);
+    } else if (stat.isFile() && EXTENSIONS.has(path.extname(relative))) {
+        if (stat.size > MAX_FILE) throw new Error(`Source file too large: ${relative}`);
+        const bytes = fs.readFileSync(current);
+        rejectSecret(bytes.toString('utf8'), relative);
+        files.push({ relative: relative.split(path.sep).join('/'), bytes });
+    }
+    return files;
+}
+
+function snapshotBaseline(source, target, verification) {
+    if (fs.existsSync(target)) throw new Error('Baseline snapshot already exists.');
+    fs.mkdirSync(target, { recursive: true, mode: 0o700 });
+    const files = [];
+    for (const entry of ['services', 'config', 'sop-processor', 'package.json', 'package-lock.json', 'tsconfig.json', 'jest.config.js', 'jest.setup.js']) {
+        const full = path.join(source, entry);
+        if (!fs.existsSync(full)) continue;
+        if (fs.lstatSync(full).isSymbolicLink()) throw new Error(`Source snapshot rejects symlinks: ${entry}`);
+        if (fs.lstatSync(full).isDirectory()) collectSource(source, entry, files);
+        else collectSource(source, entry, files);
+    }
+    for (const entry of files) {
+        const destination = path.join(target, entry.relative);
+        fs.mkdirSync(path.dirname(destination), { recursive: true, mode: 0o700 });
+        fs.writeFileSync(destination, entry.bytes, { mode: 0o600 });
+    }
+    return { sha256: hashImplementation(target, verification), files: files.map((entry) => entry.relative) };
+}
+
+function hashImplementation(root, verification) {
+    if (verification?.hashCodeImplementation) return verification.hashCodeImplementation(root);
+    const files = [];
+    for (const entry of ['services', 'config', 'sop-processor']) {
+        if (fs.existsSync(path.join(root, entry))) collectSource(root, entry, files);
+    }
+    if (fs.existsSync(path.join(root, 'services/dashboard/index.ts'))) files.push({ relative: 'services/dashboard/index.ts', bytes: fs.readFileSync(path.join(root, 'services/dashboard/index.ts')) });
+    files.sort((a, b) => a.relative.localeCompare(b.relative));
+    const h = crypto.createHash('sha256');
+    for (const entry of files) h.update(entry.relative).update('\0').update(entry.bytes).update('\0');
+    return h.digest('hex');
+}
+
+function readDataset(bytes) {
+    const rows = bytes.toString('utf8').split(/\r?\n/).filter(Boolean).map((line) => JSON.parse(line));
+    if (!rows.length || rows.some((row) => !row.case_id || !row.raw_input || !row.ground_truth || !row.context)
+        || new Set(rows.map((row) => row.case_id)).size !== rows.length) throw new Error('Frozen dataset is incomplete or has duplicate case ids.');
+    return rows;
+}
+
+function validateDraftPatch(patch, baseline, proposal) {
+    if (typeof patch !== 'string' || patch.length < 30 || patch.length > MAX_PATCH || !patch.startsWith('diff --git ')
+        || patch.includes('\0') || /^(?:GIT binary patch|Binary files|deleted file mode|old mode|new mode|rename from|rename to|copy from|copy to|similarity index|dissimilarity index|run|command|shell|exec)\s*[:]/m.test(patch)) {
+        throw new Error('Draft must be a bounded textual unified diff without deletes, renames, binary, copy, or mode changes.');
+    }
+    rejectSecret(patch, 'draft patch');
+    const sections = patch.split(/(?=^diff --git )/m).filter(Boolean);
+    const files = [];
+    for (const section of sections) {
+        const header = /^diff --git a\/([^\n ]+) b\/([^\n ]+)\n/.exec(section);
+        if (!header || header[1] !== header[2]) throw new Error('Patch headers must name one unchanged relative path.');
+        const file = safePath(header[1]);
+        if (!runtimePath(file, proposal) && !TEST_PATH.test(file)) throw new Error(`Patch path is outside the code-candidate allowlist: ${file}`);
+        if (files.includes(file)) throw new Error('Patch contains duplicate path sections.');
+        const existing = fs.existsSync(path.join(baseline, file));
+        if (TEST_PATH.test(file) && existing) throw new Error('Candidate regression tests must be new files.');
+        const before = /^--- ([^\n]+)$/m.exec(section), after = /^\+\+\+ ([^\n]+)$/m.exec(section);
+        if (!before || !after || before[1] !== (existing ? `a/${file}` : '/dev/null') || after[1] !== `b/${file}`) throw new Error('Patch file headers are invalid.');
+        if ((!existing && !/^new file mode 100644$/m.test(section)) || (existing && /^new file mode/m.test(section))) throw new Error('Patch file mode is invalid.');
+        if (/^index [^\n]+ [0-9]{6}$/m.test(section) && !/^index [^\n]+ 100644$/m.test(section)) throw new Error('Patch index mode is invalid.');
+        if (!/^@@ -\d+(?:,\d+)? \+\d+(?:,\d+)? @@/m.test(section)) throw new Error('Patch is missing a unified-diff hunk.');
+        if (TEST_PATH.test(file) && /^\+.*\b(?:test|it|describe)\s*\.\s*(?:only|skip|todo)\b/m.test(section)) throw new Error('Candidate tests cannot be skipped, pending, or exclusive.');
+        files.push(file);
+    }
+    if (!files.some((file) => runtimePath(file, proposal)) || !files.some((file) => TEST_PATH.test(file))) throw new Error('Draft needs runtime implementation and a new code-candidate test.');
+    return files;
+}
+
+function validateCorrectionMappings(draft, proposal, cases) {
+    const routes = (proposal.correction_routing || []).filter((row) => row.lane === 'code_recommendation');
+    if (!Array.isArray(draft.corrections) || draft.corrections.length !== routes.length) throw new Error('Map every routed code recommendation exactly once.');
+    const seen = new Set(), covered = new Set();
+    for (const entry of draft.corrections) {
+        if (!entry || seen.has(entry.correction_id)) throw new Error('Correction mappings must be unique.');
+        seen.add(entry.correction_id);
+        const route = routes.find((row) => row.correction_id === entry.correction_id);
+        const replay = (proposal.replay_evidence || []).find((row) => row.correction_id === entry.correction_id);
+        if (!route || !cases.some((row) => row.case_id === entry.case_id) || typeof entry.test_name !== 'string' || !entry.test_name.trim()
+            || !Array.isArray(entry.recommendation_indexes) || !entry.recommendation_indexes.length
+            || entry.recommendation_indexes.some((index) => !Number.isInteger(index) || index < 0 || index >= proposal.code_recommendations.length)) throw new Error('Correction mapping has an unknown case, test, or recommendation index.');
+        const original = route.original_text || replay?.original_text, corrected = route.corrected_text || replay?.corrected_text;
+        if (!original || !corrected || nfc(entry.original_text) !== nfc(original) || nfc(entry.corrected_text) !== nfc(corrected)) throw new Error('Correction mapping text differs from frozen source evidence.');
+        entry.recommendation_indexes.forEach((index) => covered.add(index));
+    }
+    if (seen.size !== routes.length || covered.size !== proposal.code_recommendations.length) throw new Error('Every code recommendation needs exactly one mapped correction.');
+}
+
+function validateDraft(draft, proposal, dataset, baseline) {
+    if (!draft || typeof draft !== 'object' || Array.isArray(draft) || Object.keys(draft).some((key) => !['summary', 'patch', 'test_files', 'corrections'].includes(key))) throw new Error('Draft JSON may contain only summary, patch, test_files, and corrections.');
+    const files = validateDraftPatch(draft.patch, baseline, proposal);
+    const tests = files.filter((file) => TEST_PATH.test(file));
+    if (!Array.isArray(draft.test_files) || draft.test_files.length !== tests.length || new Set(draft.test_files).size !== tests.length || draft.test_files.some((file) => !tests.includes(file))) throw new Error('test_files must exactly identify new regression tests.');
+    validateCorrectionMappings(draft, proposal, dataset);
+    return { summary: String(draft.summary || '').slice(0, 3000), patch: draft.patch, test_files: tests, corrections: draft.corrections };
+}
+
+function applyDraft(patch, baseline, candidate, proposal, command = spawnSync) {
+    validateDraftPatch(patch, baseline, proposal);
+    if (fs.existsSync(candidate)) throw new Error('Candidate directory already exists.');
+    fs.cpSync(baseline, candidate, { recursive: true, errorOnExist: true, force: false });
+    const env = { ...process.env, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: os.devNull, GIT_CEILING_DIRECTORIES: path.dirname(candidate) };
+    const init = command('git', ['-C', candidate, 'init', '--quiet'], { encoding: 'utf8', timeout: 30000, env });
+    if (init.error || init.status !== 0) throw new Error(`Candidate git initialization failed: ${init.stderr || init.error?.message || 'unknown error'}`);
+    for (const check of [true, false]) {
+        const result = command('git', ['-C', candidate, 'apply', '--recount', '--whitespace=nowarn', ...(check ? ['--check'] : []), '-'], { input: patch, encoding: 'utf8', timeout: 30000, maxBuffer: 1024 * 1024, env: Object.fromEntries(Object.entries(env).filter(([key]) => !key.startsWith('GIT_') || ['GIT_CONFIG_NOSYSTEM', 'GIT_CONFIG_GLOBAL', 'GIT_CEILING_DIRECTORIES'].includes(key))) });
+        if (result.error || result.status !== 0) throw new Error(`Candidate patch ${check ? 'check' : 'application'} failed.`);
+    }
+    return candidate;
+}
+
+function revalidateAttemptArtifacts(options = {}) {
+    const { attemptRoot, metadata, verification, proposal } = options;
+    if (!attemptRoot || !metadata || !verification || !proposal) throw new Error('Draft validation requires attempt metadata and proposal.');
+    const root = path.resolve(attemptRoot);
+    const rootStat = fs.lstatSync(root);
+    if (rootStat.isSymbolicLink() || !rootStat.isDirectory()) throw new Error('Attempt root must be a regular directory.');
+    if (metadata.artifact_directory !== root || metadata.attempt_id !== path.basename(root)) throw new Error('Attempt artifact identity does not match metadata.');
+    const proposalBytes = boundedRegular(path.join(root, 'proposal.json'), root);
+    const promptBytes = boundedRegular(path.join(root, 'prompt.txt'), root);
+    const rulesBytes = boundedRegular(path.join(root, 'rules.json'), root);
+    const behaviorBytes = boundedRegular(path.join(root, 'behavior-tests.json'), root);
+    const datasetBytes = boundedRegular(path.join(root, 'dataset.jsonl'), root);
+    const storedProposal = JSON.parse(proposalBytes.toString('utf8'));
+    const rulesPayload = JSON.parse(rulesBytes.toString('utf8'));
+    const behavior = JSON.parse(behaviorBytes.toString('utf8'));
+    const cases = readDataset(datasetBytes);
+    digest(metadata.proposal_sha256, 'proposal'); digest(metadata.baseline_source_sha256, 'baseline'); digest(metadata.prompt_sha256, 'prompt'); digest(metadata.accepted_rules_sha256, 'accepted rules'); digest(metadata.expected_dataset_sha256, 'dataset'); digest(metadata.behavior_tests_sha256, 'behavior');
+    if (verification.codeProposalVerificationFingerprint(storedProposal) !== metadata.proposal_sha256 || verification.codeProposalVerificationFingerprint(proposal) !== metadata.proposal_sha256) throw new Error('Proposal fingerprint does not match the claimed attempt.');
+    if (hash(promptBytes) !== metadata.prompt_sha256 || promptBytes.toString('utf8') !== (storedProposal.proposed_prompt || storedProposal.current_prompt || '')) throw new Error('Prompt artifact does not match the claimed proposal.');
+    const rules = Array.isArray(rulesPayload) ? rulesPayload : rulesPayload.rules;
+    if (!Array.isArray(rules) || verification.hashAcceptedRules(rules) !== metadata.accepted_rules_sha256) throw new Error('Accepted-rule artifact hash is stale.');
+    if (hash(datasetBytes) !== metadata.expected_dataset_sha256 || JSON.stringify(cases.map((row) => row.case_id)) !== JSON.stringify(metadata.expected_case_ids)) throw new Error('Dataset artifact identity is stale.');
+    const behaviorModule = options.behaviorModule;
+    if (behaviorModule) behaviorModule.validateBehaviorArtifact(behavior);
+    if (behavior.sha256 !== metadata.behavior_tests_sha256 || behavior.sha256 !== storedProposal.eval_summary?.behavior_tests?.sha256) throw new Error('B6-D1 behavior artifact identity is stale.');
+    if (options.baselineRoot) {
+        const baselineRoot = inside(root, options.baselineRoot);
+        if (verification.hashCodeImplementation(baselineRoot) !== metadata.baseline_source_sha256) throw new Error('Baseline source snapshot hash is stale.');
+    }
+    return { proposal: storedProposal, prompt: promptBytes.toString('utf8'), rules, behavior, cases };
+}
+
+module.exports = { snapshotBaseline, validateDraft, validateDraftPatch, validateCorrectionMappings, applyDraft, revalidateAttemptArtifacts, hashImplementation, readDataset, safePath };
