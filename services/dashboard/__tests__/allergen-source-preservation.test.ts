@@ -53,4 +53,14 @@ describe('submitted allergen source preservation', () => {
         expect(result.finalCorrectedMenu).not.toContain('N 22');
         expect(result.finalCorrectedMenu).toContain('Steak, fries D 30');
     });
+
+    test('offline full pipeline defaults canonical raw-notice provenance like Basic', async () => {
+        const rawNotice = '*consuming raw or undercooked meats, poultry, seafood, shellfish, or eggs may increase your risk of foodborne illness.';
+        const result = await runFullReviewPipeline(
+            `Cusco Chicken, marinade S 22\n${rawNotice}`,
+            { basePrompt: 'RULES', templateType: 'food', allergens: legend, acceptedCorrectionRules: [] },
+            async () => '=== CORRECTED MENU ===\nCusco Chicken, marinade S 22\n=== END CORRECTED MENU ===\n=== SUGGESTIONS ===\n[{"type":"Raw Food Notice","confidence":"high","severity":"normal","menuItem":"Entire menu","description":"The standard raw-food warning is missing.","recommendation":"Add the standard raw-food notice."}]\n=== END SUGGESTIONS ===',
+        );
+        expect(result.finalSuggestions.some(suggestion => suggestion.type === 'Raw Food Notice')).toBe(false);
+    });
 });

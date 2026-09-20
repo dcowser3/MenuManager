@@ -33,15 +33,17 @@ evidence artifacts and are intentionally not shipped as product runtime code.
 
 ## Verification
 
-- Docker network-none focused suites: 6 suites, 136 tests, all passed, including
+- Docker network-none focused suites: 6 suites, 137 tests, all passed, including
   the actual changed-only Basic route, no-provider full-pipeline parity, and the
   generated rule-manifest contract. The regression suite covers the exact late
   high-confidence suggestion that removes `marinade S` after model delivery;
   final guarded bytes restore S while a later explicit chef removal remains removed.
+  It also verifies that the full pipeline defaults canonical raw-notice provenance
+  from the submitted footer when the caller omits an explicit flag.
 - Dashboard build: passed.
 - Tenant-config build: passed.
 - Dashboard source/dist parity: all 40 compiled files; packaged and fresh closure
-  hash `c1c06c00e340cba519fd0291cf90fd9550b873cb6a8eb24f949e3a27acafc908`.
+  hash `fa980f16a94173dd6a474984e6153aa77042df62700d1ff7d3602685e223d4c1`.
 - Generated rule metadata served by source and compiled manifest passed its
   seven-test contract suite.
 - No provider calls, paid runs, shared-stack changes, deployment, activation, or

@@ -894,6 +894,7 @@ export async function runFullReviewPipeline(
     const acceptedCorrectionRules = opts.acceptedCorrectionRules || [];
 
     const reviewFooterMetadata = normalizeMenuFooter(rawMenuContent, opts.allergens || '');
+    const managedRawNoticePresent = opts.managedRawNoticePresent ?? reviewFooterMetadata.hadRawNotice;
     const effectiveReviewAllergens = opts.allergens || reviewFooterMetadata.normalizedAllergenLine;
     const preAiDeterministic = runPreAiDeterministicChecks(reviewFooterMetadata.body, {
         enabled: precheckEnabled,
@@ -940,7 +941,7 @@ export async function runFullReviewPipeline(
         embeddedSetMenuAnalysis,
         canonicalSpellingFindings: nearMissAnalysis.findings,
         precheckEnabled,
-        managedRawNoticePresent: opts.managedRawNoticePresent,
+        managedRawNoticePresent,
     });
 
     return {

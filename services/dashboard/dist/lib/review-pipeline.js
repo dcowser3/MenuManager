@@ -663,6 +663,7 @@ async function runFullReviewPipeline(rawMenuContent, opts, aiCaller) {
     const precheckEnabled = opts.precheckEnabled !== false;
     const acceptedCorrectionRules = opts.acceptedCorrectionRules || [];
     const reviewFooterMetadata = (0, menu_footer_1.normalizeMenuFooter)(rawMenuContent, opts.allergens || '');
+    const managedRawNoticePresent = opts.managedRawNoticePresent ?? reviewFooterMetadata.hadRawNotice;
     const effectiveReviewAllergens = opts.allergens || reviewFooterMetadata.normalizedAllergenLine;
     const preAiDeterministic = (0, pre_ai_deterministic_rules_1.runPreAiDeterministicChecks)(reviewFooterMetadata.body, {
         enabled: precheckEnabled,
@@ -705,7 +706,7 @@ async function runFullReviewPipeline(rawMenuContent, opts, aiCaller) {
         embeddedSetMenuAnalysis,
         canonicalSpellingFindings: nearMissAnalysis.findings,
         precheckEnabled,
-        managedRawNoticePresent: opts.managedRawNoticePresent,
+        managedRawNoticePresent,
     });
     return {
         preAiDeterministic,
