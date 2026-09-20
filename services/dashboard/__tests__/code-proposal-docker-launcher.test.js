@@ -4,7 +4,7 @@ const path = require('path');
 const { EventEmitter } = require('events');
 const {
     buildDockerInvocation, buildContainerName, parseWorkerOutput, runDockerInvocation, cleanupOwnedContainer,
-    FIXED_COMMAND, MAX_OUTPUT_BYTES,
+    FIXED_COMMAND, MAX_OUTPUT_BYTES, FIXED_RUNTIME_ID,
 } = require('../../../scripts/lib/code-proposal-docker-launcher');
 const { runCodeProposalProofWithDocker } = require('../../../scripts/lib/code-proposal-proof-runner');
 
@@ -18,7 +18,7 @@ function setup() {
     return { root, attempt, cleanup: () => fs.rmSync(root, { recursive: true, force: true }) };
 }
 function spec(state, overrides = {}) {
-    return buildDockerInvocation({ attemptRoot: state.attempt, baselineRoot: path.join(state.attempt, 'baseline'), candidateRoot: path.join(state.attempt, 'candidate'), testBundleRoot: path.join(state.attempt, 'test-bundle'), outputRoot: path.join(state.attempt, 'docker-output'), imageId: HASH, runtimeId: 'b'.repeat(64), attemptId: 'attempt-one', phase: 'unit', arm: 'baseline', seed: 17, repoRoot: path.resolve(__dirname, '../../..'), ...overrides });
+    return buildDockerInvocation({ attemptRoot: state.attempt, baselineRoot: path.join(state.attempt, 'baseline'), candidateRoot: path.join(state.attempt, 'candidate'), testBundleRoot: path.join(state.attempt, 'test-bundle'), outputRoot: path.join(state.attempt, 'docker-output'), imageId: HASH, runtimeId: FIXED_RUNTIME_ID, attemptId: 'attempt-one', phase: 'unit', arm: 'baseline', seed: 17, repoRoot: path.resolve(__dirname, '../../..'), request: { phase: 'unit', arm: 'baseline', inventory: [], plan: { image_id: HASH, runtime_id: FIXED_RUNTIME_ID } }, ...overrides });
 }
 
 test('builds an immutable, isolated, fixed worker invocation', () => {
@@ -31,8 +31,10 @@ test('builds an immutable, isolated, fixed worker invocation', () => {
         expect(value.args).not.toContain('--pid=host');
         expect(value.args).not.toContain('--ipc=host');
         expect(value.mounts.filter((mount) => mount.mode === 'ro')).toHaveLength(4);
-        expect(value.mounts.find((mount) => mount.destination === '/runner/output').mode).toBe('rw');
-        expect(value.env).toEqual(expect.objectContaining({ NODE_ENV: 'test', C2C2_PROTOCOL_VERSION: '1', C2C2_RUNTIME_ID: 'b'.repeat(64) }));
+        expect(value.mounts.find((mount) => mount.destination === '/runner/output')).toBeUndefined();
+        expect(value.env).toEqual(expect.objectContaining({ NODE_ENV: 'test', C2C2_PROTOCOL_VERSION: '1', C2C2_RUNTIME_ID: FIXED_RUNTIME_ID, C2C2_IMAGE_ID: HASH }));
+        expect(value.args).toEqual(expect.arrayContaining(['--tmpfs', '/runner/output:rw,noexec,nosuid,size=64m,mode=1777']));
+        expect(value.args.some((arg) => arg.includes('dst=/runner/request.json'))).toBe(true);
     } finally { state.cleanup(); }
 });
 
@@ -47,6 +49,7 @@ test('keeps container names unique and rejects environment injection', () => {
 
 test('the Docker entry point refuses caller-supplied host executors', async () => {
     await expect(runCodeProposalProofWithDocker({ attemptRoot: '/tmp/c2c2-test-only', executor: () => ({}) })).rejects.toThrow(/caller-supplied host executors/);
+    await expect(runCodeProposalProofWithDocker({ attemptRoot: '/tmp/c2c2-test-only', behaviorEvaluator: () => ({ passed: true }) })).rejects.toThrow(/behavior evaluators/);
 });
 
 test.each([
@@ -77,14 +80,53 @@ test('bounds and validates worker JSON output', () => {
     expect(() => parseWorkerOutput(JSON.stringify({ protocol_version: 2, status: 'ok' }), '')).toThrow(/schema/);
 });
 
+test('blocked replay output cannot masquerade as expectation-derived evidence', () => {
+    const state = setup();
+    try {
+        const value = spec(state, { phase: 'replay', arm: 'candidate', runId: 'attempt-one:replay:17:case-1', request: { phase: 'replay', arm: 'candidate', seed: 17, plan: { image_id: HASH, runtime_id: FIXED_RUNTIME_ID } } });
+        const blocked = parseWorkerOutput(JSON.stringify({ protocol_version: 1, status: 'failed', phase: 'replay', arm: 'candidate', seed: 17, run_id: value.runId, runtime_id: value.runtime, image_id: value.image, error: 'fixed repository-owned replay driver unavailable', blocked: true }), '', value);
+        expect(blocked.status).toBe('failed');
+        expect(blocked).not.toHaveProperty('output');
+        expect(blocked).not.toHaveProperty('composite');
+    } finally { state.cleanup(); }
+});
+
+test('per-run request tampering is rejected before Docker launch', async () => {
+    const state = setup();
+    try {
+        const value = spec(state);
+        fs.chmodSync(value.requestPath, 0o644);
+        fs.appendFileSync(value.requestPath, 'tamper');
+        await expect(runDockerInvocation(value, { inspectImage: async () => value.image, spawn: () => { throw new Error('must not launch'); } })).rejects.toThrow(/request file changed/);
+    } finally { state.cleanup(); }
+});
+
+test('actual inspected image drift is rejected before Docker launch', async () => {
+    const state = setup();
+    try {
+        const value = spec(state);
+        await expect(runDockerInvocation(value, { inspectImage: async () => 'sha256:' + 'c'.repeat(64), spawn: () => { throw new Error('must not launch'); } })).rejects.toThrow(/image identity drifted/);
+    } finally { state.cleanup(); }
+});
+
 test('timeout/signal and uncertain cleanup fail closed', async () => {
     const state = setup();
     try {
         const child = new EventEmitter(); child.stdout = new EventEmitter(); child.stderr = new EventEmitter(); child.kill = jest.fn();
         const value = spec(state);
-        await expect(runDockerInvocation(value, { timeoutMs: 5, spawn: () => child, inspect: async () => ({ name: value.name, labels: { 'com.menumanager.c2c2.name': value.name, 'com.menumanager.c2c2.owner': 'attempt-one' } }), remove: async () => true })).rejects.toThrow(/timed out/);
+        await expect(runDockerInvocation(value, { timeoutMs: 5, spawn: () => child, inspectImage: async () => value.image, inspect: async () => ({ name: value.name, labels: { 'com.menumanager.c2c2.name': value.name, 'com.menumanager.c2c2.owner': 'attempt-one' } }), remove: async () => true })).rejects.toThrow(/timed out/);
         expect(child.kill).toHaveBeenCalledWith('SIGKILL');
         await expect(cleanupOwnedContainer(value, { inspect: async () => ({ name: 'other', labels: {} }), remove: async () => true })).rejects.toThrow(/ownership/);
+    } finally { state.cleanup(); }
+});
+
+test('timeout cleanup result wins a close-before-cleanup race', async () => {
+    const state = setup();
+    try {
+        const child = new EventEmitter(); child.stdout = new EventEmitter(); child.stderr = new EventEmitter(); child.kill = jest.fn(() => child.emit('close', null, 'SIGKILL'));
+        const value = spec(state);
+        const pendingCleanup = new Promise((_, reject) => setTimeout(() => reject(new Error('cleanup ownership uncertain')), 10));
+        await expect(runDockerInvocation(value, { timeoutMs: 1, spawn: () => child, inspectImage: async () => value.image, inspect: async () => ({ name: value.name, labels: { 'com.menumanager.c2c2.name': value.name, 'com.menumanager.c2c2.owner': 'attempt-one' } }), remove: async () => pendingCleanup })).rejects.toThrow(/cleanup ownership uncertain/);
     } finally { state.cleanup(); }
 });
 
@@ -93,7 +135,8 @@ test('nonzero, signal, and malformed worker exits fail closed', async () => {
     try {
         for (const event of ['nonzero', 'signal', 'malformed']) {
             const child = new EventEmitter(); child.stdout = new EventEmitter(); child.stderr = new EventEmitter(); child.kill = jest.fn();
-            const promise = runDockerInvocation(spec(state), { timeoutMs: 100, spawn: () => child });
+            const value = spec(state);
+            const promise = runDockerInvocation(value, { timeoutMs: 100, spawn: () => child, inspectImage: async () => value.image });
             if (event === 'malformed') { child.stdout.emit('data', 'bad'); child.emit('close', 0, null); }
             else if (event === 'signal') child.emit('close', null, 'SIGKILL');
             else child.emit('close', 1, null);

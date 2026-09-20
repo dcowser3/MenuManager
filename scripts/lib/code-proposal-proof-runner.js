@@ -493,7 +493,7 @@ async function runCodeProposalProof(options = {}) {
 
 /** Run the accepted C2c1 proof with the fixed C2c2 Docker process boundary. */
 async function runCodeProposalProofWithDocker(options = {}) {
-    if (options.executor || options.replayExecutor || options.deliveryExecutor) throw new Error('C2c2 does not accept caller-supplied host executors.');
+    if (options.executor || options.replayExecutor || options.deliveryExecutor || options.behaviorEvaluator) throw new Error('C2c2 does not accept caller-supplied host executors or behavior evaluators.');
     const outputRoot = path.join(path.resolve(options.attemptRoot), 'docker-output');
     ensureDirectory(outputRoot, 0o700, 'Docker output root');
     const executors = createDockerC2c2Executors({ ...options, outputRoot });

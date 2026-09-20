@@ -48,12 +48,17 @@ progress and removes the passing proof artifact. The runner is credential-free
 and offline-testable.
 
 B5-C2c2 is implemented by `scripts/lib/code-proposal-docker-launcher.js` and
-`scripts/code-proposal-c2c2-worker.js`. The launcher pins the trusted image and
-runtime identities, fixed command, owner-contained read-only source/test mounts,
-owner-only output, network-none/no-new-privileges/cap-drop-all/pid limits,
-allowlisted environment, bounded JSON, deadlines, labels, and ownership-checked
-cleanup. `runCodeProposalProofWithDocker` feeds those structured executors into
-the accepted C2c1 runner; the launcher cannot attach proof or self-attest. The
-checked-in worker implements only the fixed unit, replay, and delivery protocol;
-it fails closed on malformed requests or an unavailable image-specific harness,
-so no arbitrary host command can be smuggled into this boundary.
+`scripts/code-proposal-c2c2-worker.js`. The launcher pins the inspected image
+ID and a runtime identity derived from the checked-in launcher/worker, fixed
+command, owner-contained read-only source/test mounts, per-run immutable request
+file, container tmpfs output, network-none/no-new-privileges/cap-drop-all/pid
+limits, allowlisted environment, bounded JSON, deadlines, labels, and
+ownership-checked cleanup. Unit workers materialize a fresh arm workspace and
+verify the frozen test-bundle manifest before running the identical inventory
+through the fixed synchronous JavaScript test contract (`module.exports.run`).
+TypeScript/Jest inventory is blocked until the image carries approved
+transformer wiring; it is never silently downgraded.
+`runCodeProposalProofWithDocker` rejects all caller executors and evaluators;
+the launcher cannot attach proof or self-attest. Replay and delivery currently
+return an explicit blocked protocol result because no fixed repository-owned
+drivers exist yet; they never copy expected or corrected text into evidence.

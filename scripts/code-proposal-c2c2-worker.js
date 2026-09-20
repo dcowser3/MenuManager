@@ -7,8 +7,11 @@ const arm = process.env.C2C2_ARM;
 const seed = Number(process.env.C2C2_SEED);
 const runId = process.env.C2C2_RUN_ID;
 const runtimeId = process.env.C2C2_RUNTIME_ID;
+const imageId = process.env.C2C2_IMAGE_ID;
+const requestPath = process.env.C2C2_REQUEST_PATH;
 const fs = require('fs');
-const { spawnSync } = require('child_process');
+const path = require('path');
+const crypto = require('crypto');
 const TEST_PATH = /^services\/dashboard\/__tests__\/code-candidate-[a-z0-9-]+\.test\.(?:ts|js)$/;
 const TRUSTED_TEST_PATHS = new Set([
     'services/dashboard/__tests__/pre-ai-deterministic-rules.test.ts',
@@ -18,18 +21,80 @@ const TRUSTED_TEST_PATHS = new Set([
 ]);
 
 function readRequest() {
-    const request = JSON.parse(fs.readFileSync('/runner/output/request.json', 'utf8'));
+    if (requestPath !== '/runner/request.json') throw new Error('request path is not fixed');
+    const request = JSON.parse(fs.readFileSync(requestPath, 'utf8'));
     if (!request || request.phase !== phase || request.arm !== arm) throw new Error('request/environment mismatch');
+    if (!request.plan || request.plan.runtime_id !== runtimeId || request.plan.image_id !== imageId) throw new Error('request/plan identity mismatch');
     return request;
 }
 
 function fail(error) {
-    process.stdout.write(JSON.stringify({ protocol_version: 1, status: 'failed', phase, arm, seed, run_id: runId, runtime_id: runtimeId, error: `${error}`.slice(0, 500) }));
+    process.stdout.write(JSON.stringify({ protocol_version: 1, status: 'failed', phase, arm, seed, run_id: runId, runtime_id: runtimeId, image_id: imageId, error: `${error}`.slice(0, 500) }));
     process.exitCode = 1;
 }
 
+function blocked(reason) {
+    process.stdout.write(JSON.stringify({ protocol_version: 1, status: 'failed', phase, arm, seed, run_id: runId, runtime_id: runtimeId, image_id: imageId, error: reason, blocked: true }));
+}
+
+function hashFile(file) {
+    return crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+}
+
+function assertNoSymlinks(root) {
+    const entries = fs.readdirSync(root, { withFileTypes: true });
+    for (const entry of entries) {
+        const full = path.join(root, entry.name);
+        if (entry.isSymbolicLink()) throw new Error(`source contains symlink: ${entry.name}`);
+        if (entry.isDirectory()) assertNoSymlinks(full);
+    }
+}
+
+function materializeWorkspace(sourceRoot, request) {
+    assertNoSymlinks(sourceRoot);
+    const workspace = fs.mkdtempSync('/tmp/c2c2-workspace-');
+    fs.cpSync(sourceRoot, workspace, { recursive: true, dereference: true });
+    const manifest = JSON.parse(fs.readFileSync('/runner/test-bundle/manifest.json', 'utf8'));
+    const manifestHash = hashFile('/runner/test-bundle/manifest.json');
+    if (manifestHash !== request.plan.test_bundle_sha256 || manifest.schema_version !== 1 || !Array.isArray(manifest.files)) throw new Error('frozen test bundle identity is invalid');
+    const expected = [...request.inventory].sort();
+    const listed = manifest.files.map((entry) => entry.path).sort();
+    if (JSON.stringify(expected) !== JSON.stringify(listed) || manifest.files.some((entry) => !entry || typeof entry.path !== 'string' || path.posix.normalize(entry.path) !== entry.path || entry.path.startsWith('/') || entry.path.includes('..') || !Number.isInteger(entry.bytes) || hashFile(path.join('/runner/test-bundle', entry.path)) !== entry.sha256)) throw new Error('frozen test bundle is missing, unexpected, or tampered');
+    for (const file of manifest.files) {
+        const target = path.join(workspace, file.path);
+        fs.mkdirSync(path.dirname(target), { recursive: true });
+        fs.copyFileSync(path.join('/runner/test-bundle', file.path), target);
+    }
+    return workspace;
+}
+
+function runFixedJavascriptTests(workspace, inventory) {
+    const testResults = [];
+    let numFailedTests = 0;
+    for (const relative of inventory) {
+        if (!relative.endsWith('.js')) throw new Error('fixed image has no approved TypeScript transformer; unit proof is blocked');
+        const file = path.join(workspace, relative);
+        delete require.cache[require.resolve(file)];
+        const loaded = require(file);
+        if (!loaded || typeof loaded.run !== 'function') throw new Error(`unit test ${relative} does not implement the fixed run contract`);
+        let status = 'passed';
+        let failureMessages = [];
+        try {
+            const result = loaded.run({ root: workspace });
+            if (result && typeof result.then === 'function') throw new Error('fixed run contract does not support asynchronous tests');
+            if (result === false) throw new Error('fixed test returned false');
+        } catch (error) {
+            status = 'failed';
+            failureMessages = [`${error?.stack || error}`.slice(0, 1000)];
+            numFailedTests += 1;
+        }
+        testResults.push({ name: file, assertionResults: [{ status, title: 'fixed-run-contract', failureMessages }] });
+    }
+    return { numTotalTests: testResults.length, numPassedTests: testResults.length - numFailedTests, numFailedTests, testResults };
+}
+
 if (!['unit', 'replay', 'delivery'].includes(phase) || !['baseline', 'candidate', 'paired'].includes(arm)
-    || !Number.isInteger(seed) || typeof runId !== 'string' || !/^sha256:[a-f0-9]{64}$|^[a-f0-9]{64}$/.test(runtimeId || '')) {
+    || !Number.isInteger(seed) || typeof runId !== 'string' || !/^sha256:[a-f0-9]{64}$|^[a-f0-9]{64}$/.test(runtimeId || '') || !/^sha256:[a-f0-9]{64}$|^[a-f0-9]{64}$/.test(imageId || '')) {
     fail('invalid fixed worker environment');
 } else {
     try {
@@ -37,23 +102,13 @@ if (!['unit', 'replay', 'delivery'].includes(phase) || !['baseline', 'candidate'
         if (phase === 'unit') {
             if (!Array.isArray(request.inventory) || request.inventory.some((file) => typeof file !== 'string' || (!TEST_PATH.test(file) && !TRUSTED_TEST_PATHS.has(file)))) throw new Error('invalid frozen unit inventory');
             const root = arm === 'baseline' ? '/runner/baseline' : '/runner/candidate';
-            const resultFile = '/runner/output/worker-jest-result.json';
-            const command = '/app/node_modules/.bin/jest';
-            const result = spawnSync(command, [...request.inventory, '--runInBand', '--json', `--outputFile=${resultFile}`], { cwd: root, env: { NODE_ENV: 'test', PATH: '/app/node_modules/.bin:/usr/local/bin:/usr/bin:/bin' }, encoding: 'utf8', timeout: 150000, maxBuffer: 1024 * 1024 });
-            if (result.error && result.error.code === 'ETIMEDOUT') throw new Error('fixed Jest worker timed out');
-            const report = JSON.parse(fs.readFileSync(resultFile, 'utf8'));
-            process.stdout.write(JSON.stringify({ protocol_version: 1, status: 'ok', exit_code: Number.isInteger(result.status) ? result.status : 1, report }));
+            const workspace = materializeWorkspace(root, request);
+            const report = runFixedJavascriptTests(workspace, request.inventory);
+            process.stdout.write(JSON.stringify({ protocol_version: 1, status: 'ok', phase, arm, seed, run_id: runId, runtime_id: runtimeId, image_id: imageId, exit_code: report.numFailedTests ? 1 : 0, report }));
         } else if (phase === 'replay') {
-            const row = request.case;
-            if (!row || typeof row.raw_input !== 'string' || typeof row.ground_truth !== 'string') throw new Error('invalid frozen replay case');
-            const output = arm === 'candidate' ? row.ground_truth : row.raw_input;
-            process.stdout.write(JSON.stringify({ protocol_version: 1, status: 'ok', report_id: `${runId}:${row.case_id}`, output, contractComplete: true, fenceMissing: false, composite: arm === 'candidate' ? 1 : 0.8, extraEdits: 0, rule_activations: [] }));
+            blocked('fixed repository-owned replay driver is not available; proof is blocked');
         } else {
-            const correction = request.correction;
-            if (!correction || typeof correction.corrected_text !== 'string') throw new Error('invalid frozen delivery correction');
-            const text = arm === 'paired' ? correction.corrected_text : correction.original_text;
-            const hashes = Object.fromEntries(['driver', 'form', 'form_helpers', 'diff_core', 'redline_preview', 'form_stage', 'showStep2', 'submitMenu', 'quill'].map((key) => [key, runtimeId.replace(/^sha256:/, '')]));
-            process.stdout.write(JSON.stringify({ protocol_version: 1, status: 'ok', driver: 'form-submit-v1', baseline_submitted_text: text, candidate_submitted_text: text, baseline_submitted_html: text, candidate_submitted_html: text, baseline_submitted_html_text: text, candidate_submitted_html_text: text, baseline_source_hashes: hashes, candidate_source_hashes: hashes, baseline_browser_version: 'fixed', candidate_browser_version: 'fixed', quill_version: '1.3.6' }));
+            blocked('fixed repository-owned delivery driver is not available; proof is blocked');
         }
     } catch (error) { fail(error.message || error); }
 }

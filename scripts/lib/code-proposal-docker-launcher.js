@@ -15,7 +15,15 @@ const MAX_OUTPUT_BYTES = 2 * 1024 * 1024;
 const MAX_TIMEOUT_MS = 180000;
 const WORKER_SCRIPT = '/runner/scripts/code-proposal-c2c2-worker.js';
 const FIXED_COMMAND = Object.freeze(['node', WORKER_SCRIPT]);
-const FIXED_ENV_KEYS = Object.freeze(['NODE_ENV', 'C2C2_PROTOCOL_VERSION', 'C2C2_PHASE', 'C2C2_ARM', 'C2C2_SEED', 'C2C2_RUN_ID', 'C2C2_RUNTIME_ID']);
+const FIXED_ENV_KEYS = Object.freeze(['NODE_ENV', 'C2C2_PROTOCOL_VERSION', 'C2C2_PHASE', 'C2C2_ARM', 'C2C2_SEED', 'C2C2_RUN_ID', 'C2C2_RUNTIME_ID', 'C2C2_IMAGE_ID', 'C2C2_REQUEST_PATH']);
+
+function deriveRuntimeId() {
+    const launcherBytes = fs.readFileSync(__filename);
+    const workerBytes = fs.readFileSync(path.resolve(__dirname, '../code-proposal-c2c2-worker.js'));
+    return crypto.createHash('sha256').update(launcherBytes).update(workerBytes).update(JSON.stringify({ command: FIXED_COMMAND, maxOutput: MAX_OUTPUT_BYTES, maxTimeout: MAX_TIMEOUT_MS, network: 'none', capDrop: 'ALL', noNewPrivileges: true, uid: '65532:65532' })).digest('hex');
+}
+
+const FIXED_RUNTIME_ID = deriveRuntimeId();
 
 function digest(value, label) {
     if (typeof value !== 'string' || !DIGEST.test(value)) throw new Error(`C2c2 requires an immutable ${label} digest.`);
@@ -68,6 +76,7 @@ function buildDockerInvocation(options = {}) {
     const scriptsRoot = canonicalDirectory(path.join(trustedRepoRoot, 'scripts'), 'Trusted worker scripts', trustedRepoRoot);
     const image = digest(options.imageId, 'image');
     const runtime = digest(options.runtimeId, 'runtime');
+    if (runtime !== FIXED_RUNTIME_ID) throw new Error('C2c2 runtime identity is not derived from the fixed launcher and worker.');
     if (options.plan && (options.plan.image_id !== image || options.plan.runtime_id !== runtime)) throw new Error('C2c2 image/runtime identity drifted from the frozen plan.');
     const attemptId = safeId(options.attemptId, 'attempt id');
     const phase = safeId(options.phase, 'phase');
@@ -76,31 +85,47 @@ function buildDockerInvocation(options = {}) {
     if (phase === 'delivery' && arm !== 'paired') throw new Error('Delivery workers must use the paired arm.');
     if (!Number.isInteger(options.seed) || options.seed < 0) throw new Error('C2c2 seed is invalid.');
     const name = buildContainerName(attemptId, options.containerNonce);
+    const requestPath = path.join(outputRoot, `request-${name}.json`);
+    const request = options.request || null;
+    const requestBytes = request ? Buffer.from(`${JSON.stringify(request)}\n`) : null;
+    if (requestBytes && requestBytes.length > MAX_OUTPUT_BYTES) throw new Error('C2c2 worker request exceeded the bounded limit.');
+    if (requestBytes) {
+        fs.writeFileSync(requestPath, requestBytes, { mode: 0o444 });
+        fs.chmodSync(requestPath, 0o444);
+    }
     const mounts = [
         { source: baselineRoot, destination: '/runner/baseline', mode: 'ro' },
         { source: candidateRoot, destination: '/runner/candidate', mode: 'ro' },
         { source: testBundleRoot, destination: '/runner/test-bundle', mode: 'ro' },
-        { source: outputRoot, destination: '/runner/output', mode: 'rw' },
         { source: scriptsRoot, destination: '/runner/scripts', mode: 'ro' },
     ];
     assertNoOverlap(mounts.map((mount) => ({ path: mount.source })));
+    assertNoOverlap([...mounts.map((mount) => ({ path: mount.source })), { path: outputRoot }]);
     const runId = safeId(options.runId || `${attemptId}:${phase}:${arm}:${options.seed}`, 'run id');
     const env = {
-        NODE_ENV: 'test', C2C2_PROTOCOL_VERSION: '1', C2C2_PHASE: phase, C2C2_RUNTIME_ID: runtime,
-        C2C2_ARM: arm, C2C2_SEED: `${options.seed}`, C2C2_RUN_ID: runId,
+        NODE_ENV: 'test', C2C2_PROTOCOL_VERSION: '1', C2C2_PHASE: phase,
+        C2C2_ARM: arm, C2C2_SEED: `${options.seed}`, C2C2_RUN_ID: runId, C2C2_RUNTIME_ID: runtime, C2C2_IMAGE_ID: image, C2C2_REQUEST_PATH: '/runner/request.json',
     };
-    const args = ['run', '--rm', '--name', name, '--label', `com.menumanager.c2c2.owner=${attemptId}`, '--label', `com.menumanager.c2c2.name=${name}`, '--network', 'none', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges:true', '--read-only', '--pids-limit', '128', '--memory', '1g', '--cpus', '1', '--user', '65532:65532', '--tmpfs', '/tmp:rw,noexec,nosuid,size=64m'];
+    const args = ['run', '--rm', '--name', name, '--label', `com.menumanager.c2c2.owner=${attemptId}`, '--label', `com.menumanager.c2c2.name=${name}`, '--network', 'none', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges:true', '--read-only', '--pids-limit', '128', '--memory', '1g', '--cpus', '1', '--user', '65532:65532', '--tmpfs', '/tmp:rw,noexec,nosuid,size=64m', '--tmpfs', '/runner/output:rw,noexec,nosuid,size=64m,mode=1777'];
     for (const mount of mounts) args.push('--mount', `type=bind,src=${mount.source},dst=${mount.destination}${mount.mode === 'ro' ? ',readonly' : ''}`);
-    args.push('--env', 'NODE_ENV=test', '--env', 'C2C2_PROTOCOL_VERSION=1', '--env', 'C2C2_PHASE', '--env', 'C2C2_ARM', '--env', 'C2C2_SEED', '--env', 'C2C2_RUN_ID', '--env', 'C2C2_RUNTIME_ID', image, ...FIXED_COMMAND);
-    return Object.freeze({ command: 'docker', args, name, ownerLabel: `com.menumanager.c2c2.owner=${attemptId}`, image, runtime, attemptRoot, outputRoot, mounts, env, phase, arm, seed: options.seed, runId: env.C2C2_RUN_ID, request: options.request || null });
+    args.push('--mount', `type=bind,src=${requestPath},dst=/runner/request.json,readonly`, '--env', 'NODE_ENV=test', '--env', 'C2C2_PROTOCOL_VERSION=1', '--env', 'C2C2_PHASE', '--env', 'C2C2_ARM', '--env', 'C2C2_SEED', '--env', 'C2C2_RUN_ID', '--env', 'C2C2_RUNTIME_ID', '--env', 'C2C2_IMAGE_ID', '--env', 'C2C2_REQUEST_PATH', image, ...FIXED_COMMAND);
+    return Object.freeze({ command: 'docker', args, name, ownerLabel: `com.menumanager.c2c2.owner=${attemptId}`, image, runtime, attemptRoot, outputRoot, requestPath, requestSha256: requestBytes ? crypto.createHash('sha256').update(requestBytes).digest('hex') : null, mounts, env, phase, arm, seed: options.seed, runId: env.C2C2_RUN_ID, request });
 }
 
-function parseWorkerOutput(stdout, stderr) {
+function parseWorkerOutput(stdout, stderr, spec = null) {
     if (Buffer.byteLength(stdout || '', 'utf8') > MAX_OUTPUT_BYTES || Buffer.byteLength(stderr || '', 'utf8') > MAX_OUTPUT_BYTES) throw new Error('C2c2 worker output exceeded the bounded limit.');
     let value;
     try { value = JSON.parse(stdout); } catch { throw new Error('C2c2 worker output is not valid JSON.'); }
     if (!value || typeof value !== 'object' || Array.isArray(value) || value.protocol_version !== 1 || typeof value.status !== 'string') throw new Error('C2c2 worker report schema is invalid.');
     if (value.status !== 'ok' && value.status !== 'failed') throw new Error('C2c2 worker status is invalid.');
+    if (spec) {
+        if (typeof value.phase !== 'string' || typeof value.arm !== 'string' || !Number.isInteger(value.seed) || typeof value.run_id !== 'string' || typeof value.runtime_id !== 'string' || typeof value.image_id !== 'string') throw new Error('C2c2 worker protocol identity types are invalid.');
+        if (value.phase !== spec.phase || value.arm !== spec.arm || value.seed !== spec.seed || value.run_id !== spec.runId || value.runtime_id !== spec.runtime || value.image_id !== spec.image) throw new Error('C2c2 worker identity does not match its immutable invocation.');
+        const allowed = new Set(['protocol_version', 'status', 'phase', 'arm', 'seed', 'run_id', 'runtime_id', 'image_id', 'error', 'blocked', 'exit_code', 'report', 'report_id', 'output', 'contractComplete', 'fenceMissing', 'composite', 'extraEdits', 'rule_activations', 'driver', 'baseline_submitted_text', 'candidate_submitted_text', 'baseline_submitted_html', 'candidate_submitted_html', 'baseline_submitted_html_text', 'candidate_submitted_html_text', 'baseline_source_hashes', 'candidate_source_hashes', 'baseline_browser_version', 'candidate_browser_version', 'quill_version']);
+        if (Object.keys(value).some((key) => !allowed.has(key))) throw new Error('C2c2 worker report contains an unallowlisted field.');
+        if (value.status === 'failed' && (typeof value.error !== 'string' || (value.blocked !== undefined && typeof value.blocked !== 'boolean'))) throw new Error('C2c2 worker failure protocol is invalid.');
+        if (value.status === 'ok' && value.phase === 'unit' && (!Number.isInteger(value.exit_code) || !value.report || typeof value.report !== 'object' || Array.isArray(value.report))) throw new Error('C2c2 unit report protocol is invalid.');
+    }
     if (value.status === 'ok' && !('exit_code' in value || 'report_id' in value || value.driver === 'form-submit-v1')) throw new Error('C2c2 worker success report is incomplete.');
     return value;
 }
@@ -121,17 +146,16 @@ function cleanupOwnedContainer(spec, options = {}) {
 function runDockerInvocation(spec, options = {}) {
     const timeoutMs = Math.min(Math.max(Number(options.timeoutMs) || 30000, 1), MAX_TIMEOUT_MS);
     const spawnImpl = options.spawn || spawn;
-    if (spec.request) {
-        const requestPath = path.join(spec.outputRoot, 'request.json');
-        const bytes = Buffer.from(`${JSON.stringify(spec.request)}\n`);
-        if (bytes.length > MAX_OUTPUT_BYTES) return Promise.reject(new Error('C2c2 worker request exceeded the bounded limit.'));
-        fs.writeFileSync(requestPath, bytes, { mode: 0o600 });
-        fs.chmodSync(requestPath, 0o600);
-    }
-    return new Promise((resolve, reject) => {
+    if (!spec.request || !spec.requestSha256 || !fs.existsSync(spec.requestPath)) return Promise.reject(new Error('C2c2 requires an immutable per-run request file.'));
+    const requestStat = fs.statSync(spec.requestPath);
+    if (!requestStat.isFile() || (requestStat.mode & 0o777) !== 0o444 || crypto.createHash('sha256').update(fs.readFileSync(spec.requestPath)).digest('hex') !== spec.requestSha256) return Promise.reject(new Error('C2c2 request file changed before launch.'));
+    const inspectImage = options.inspectImage || (() => new Promise((resolve, reject) => execFile('docker', ['image', 'inspect', '--format', '{{.Id}}', spec.image], { timeout: 10000 }, (error, stdout) => error ? reject(error) : resolve(`${stdout}`.trim()))));
+    return Promise.resolve(inspectImage(spec.image)).then((actualImage) => {
+        if (actualImage !== spec.image) throw new Error('C2c2 Docker image identity drifted before launch.');
+        return new Promise((resolve, reject) => {
         let child;
         try { child = spawnImpl(spec.command, spec.args, { env: { ...Object.fromEntries(FIXED_ENV_KEYS.map((key) => [key, spec.env[key]])), PATH: '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin' }, stdio: ['ignore', 'pipe', 'pipe'] }); } catch (error) { reject(error); return; }
-        let stdout = '', stderr = '', settled = false, timer;
+        let stdout = '', stderr = '', settled = false, timedOut = false, timer;
         const finish = (error, value) => { if (settled) return; settled = true; clearTimeout(timer); error ? reject(error) : resolve(value); };
         const append = (target, chunk) => {
             const next = target + chunk;
@@ -141,24 +165,27 @@ function runDockerInvocation(spec, options = {}) {
         child.stderr?.on('data', (chunk) => { stderr = append(stderr, chunk.toString()); });
         child.on('error', (error) => finish(error));
         child.on('close', (code, signal) => {
+            if (timedOut) return;
             if (signal) return finish(new Error(`C2c2 worker terminated by signal ${signal}.`));
-            if (code !== 0) return finish(new Error(`C2c2 worker exited with status ${code}.`));
-            try { finish(null, parseWorkerOutput(stdout, stderr)); } catch (error) { finish(error); }
+            if (code !== 0) return finish(new Error(`C2c2 worker exited with status ${code}: ${(stderr || stdout).slice(0, 500)}`));
+            try { finish(null, parseWorkerOutput(stdout, stderr, spec)); } catch (error) { finish(error); }
         });
         timer = setTimeout(() => {
+            timedOut = true;
             try { child.kill('SIGKILL'); } catch { /* cleanup is verified below */ }
             cleanupOwnedContainer(spec, options).then(() => finish(new Error('C2c2 worker timed out.'))).catch((error) => finish(error));
         }, timeoutMs);
+        });
     });
 }
 
 function createDockerC2c2Executors(options = {}) {
     const frozen = { ...options };
     return Object.freeze({
-        executor: (input) => runDockerInvocation(buildDockerInvocation({ ...frozen, phase: 'unit', arm: input.arm, seed: 0, attemptRoot: frozen.attemptRoot, baselineRoot: frozen.baselineRoot, candidateRoot: frozen.candidateRoot, testBundleRoot: input.testBundleRoot, outputRoot: frozen.outputRoot, plan: input.plan, request: { phase: 'unit', arm: input.arm, inventory: input.inventory, plan: input.plan } }), { timeoutMs: frozen.timeoutMs, spawn: frozen.spawn }),
-        replayExecutor: (input) => runDockerInvocation(buildDockerInvocation({ ...frozen, phase: 'replay', arm: input.arm, seed: input.seed, runId: input.runId, baselineRoot: frozen.baselineRoot, candidateRoot: frozen.candidateRoot, testBundleRoot: input.testBundleRoot, outputRoot: frozen.outputRoot, request: { phase: 'replay', arm: input.arm, seed: input.seed, run_id: input.runId, case: input.case, plan: input.plan } }), { timeoutMs: frozen.timeoutMs, spawn: frozen.spawn }),
-        deliveryExecutor: (input) => runDockerInvocation(buildDockerInvocation({ ...frozen, phase: 'delivery', arm: 'paired', seed: input.seed, runId: input.runId, baselineRoot: frozen.baselineRoot, candidateRoot: frozen.candidateRoot, testBundleRoot: input.plan.paths.testBundle, outputRoot: frozen.outputRoot, request: { phase: 'delivery', arm: 'paired', seed: input.seed, run_id: input.runId, correction: input.correction, plan: input.plan } }), { timeoutMs: frozen.timeoutMs, spawn: frozen.spawn }),
+        executor: (input) => runDockerInvocation(buildDockerInvocation({ ...frozen, phase: 'unit', arm: input.arm, seed: 0, attemptRoot: frozen.attemptRoot, baselineRoot: frozen.baselineRoot, candidateRoot: frozen.candidateRoot, testBundleRoot: input.testBundleRoot, outputRoot: frozen.outputRoot, plan: input.plan, request: { phase: 'unit', arm: input.arm, inventory: input.inventory, plan: input.plan } }), { timeoutMs: frozen.timeoutMs, spawn: frozen.spawn, inspectImage: frozen.inspectImage }),
+        replayExecutor: (input) => runDockerInvocation(buildDockerInvocation({ ...frozen, phase: 'replay', arm: input.arm, seed: input.seed, runId: input.runId, baselineRoot: frozen.baselineRoot, candidateRoot: frozen.candidateRoot, testBundleRoot: input.testBundleRoot, outputRoot: frozen.outputRoot, request: { phase: 'replay', arm: input.arm, seed: input.seed, run_id: input.runId, case: input.case, plan: input.plan } }), { timeoutMs: frozen.timeoutMs, spawn: frozen.spawn, inspectImage: frozen.inspectImage }),
+        deliveryExecutor: (input) => runDockerInvocation(buildDockerInvocation({ ...frozen, phase: 'delivery', arm: 'paired', seed: input.seed, runId: input.runId, baselineRoot: frozen.baselineRoot, candidateRoot: frozen.candidateRoot, testBundleRoot: input.plan.paths.testBundle, outputRoot: frozen.outputRoot, request: { phase: 'delivery', arm: 'paired', seed: input.seed, run_id: input.runId, correction: input.correction, plan: input.plan } }), { timeoutMs: frozen.timeoutMs, spawn: frozen.spawn, inspectImage: frozen.inspectImage }),
     });
 }
 
-module.exports = { buildDockerInvocation, buildContainerName, parseWorkerOutput, runDockerInvocation, cleanupOwnedContainer, createDockerC2c2Executors, FIXED_COMMAND, MAX_OUTPUT_BYTES };
+module.exports = { buildDockerInvocation, buildContainerName, parseWorkerOutput, runDockerInvocation, cleanupOwnedContainer, createDockerC2c2Executors, FIXED_COMMAND, FIXED_RUNTIME_ID, MAX_OUTPUT_BYTES };
