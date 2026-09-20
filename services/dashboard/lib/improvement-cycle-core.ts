@@ -7,6 +7,7 @@ import { isReasoningModel as adapterIsReasoningModel } from '@menumanager/llm-ad
 import { buildTokenEdits, tokenizeDiffText, tokenizeWords } from '@menumanager/diff-core';
 import { createHash } from 'crypto';
 import { AI_REVIEW_FENCES } from './review-response-contract';
+import { assessCodeProposalVerification } from './code-proposal-verification';
 import {
     BackendReplayStatus,
     ReplayRetirementEvidence,
@@ -396,7 +397,8 @@ export function supersededProposalReviewBlock(proposal: {
 
 export type PromptProposalApprovalBlock = {
     error: string;
-    reason: 'eval_regressed' | 'eval_failed' | 'eval_no_effect' | 'eval_rule_inactive' | 'eval_skipped' | 'unresolved_misses' | 'trigger_eval_unavailable';
+    reason: 'eval_regressed' | 'eval_failed' | 'eval_no_effect' | 'eval_rule_inactive' | 'eval_skipped' | 'unresolved_misses' | 'trigger_eval_unavailable'
+        | 'code_verification_required' | 'code_verification_failed' | 'code_verification_stale';
 };
 
 /**
@@ -406,6 +408,7 @@ export type PromptProposalApprovalBlock = {
  * not become the live rulebook.
  */
 export function promptProposalApprovalBlock(proposal: {
+    code_recommendations?: unknown[];
     eval_status?: string | null;
     eval_summary?: ProposalEvalSummary | null;
     unresolved_still_missed?: boolean | null;
@@ -425,6 +428,13 @@ export function promptProposalApprovalBlock(proposal: {
             error: 'This proposal cannot be approved because its evaluation failed. Re-run evaluation before approving any change.',
             reason: 'eval_failed',
         };
+    }
+    // A code recommendation is an engineering change, not an issue description.
+    // Recompute the trust-kernel verdict at both the page and mutation boundary;
+    // stale declarations or synthetic-only evidence must never authorize it.
+    if ((proposal.code_recommendations?.length || proposal.disposition === 'code_recs_only')) {
+        const codeBlock = assessCodeProposalVerification(proposal);
+        if (codeBlock) return codeBlock;
     }
     if (proposal.unresolved_still_missed) {
         return {

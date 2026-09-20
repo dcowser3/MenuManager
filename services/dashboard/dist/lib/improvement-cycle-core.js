@@ -75,6 +75,7 @@ const llm_adapter_1 = require("@menumanager/llm-adapter");
 const diff_core_1 = require("@menumanager/diff-core");
 const crypto_1 = require("crypto");
 const review_response_contract_1 = require("./review-response-contract");
+const code_proposal_verification_1 = require("./code-proposal-verification");
 const replay_retirement_1 = require("./replay-retirement");
 var replay_retirement_2 = require("./replay-retirement");
 Object.defineProperty(exports, "isReplayRetirementVerified", { enumerable: true, get: function () { return replay_retirement_2.isReplayRetirementVerified; } });
@@ -373,6 +374,14 @@ function promptProposalApprovalBlock(proposal) {
             error: 'This proposal cannot be approved because its evaluation failed. Re-run evaluation before approving any change.',
             reason: 'eval_failed',
         };
+    }
+    // A code recommendation is an engineering change, not an issue description.
+    // Recompute the trust-kernel verdict at both the page and mutation boundary;
+    // stale declarations or synthetic-only evidence must never authorize it.
+    if ((proposal.code_recommendations?.length || proposal.disposition === 'code_recs_only')) {
+        const codeBlock = (0, code_proposal_verification_1.assessCodeProposalVerification)(proposal);
+        if (codeBlock)
+            return codeBlock;
     }
     if (proposal.unresolved_still_missed) {
         return {
