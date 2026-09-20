@@ -266,6 +266,74 @@ app.post('/run-qa-check', async (req, res) => {
     }
 });
 
+/**
+ * Versioned coordinator adapter for new submission reviews. The dashboard owns
+ * prepareReview/completePreparedReview and sends this endpoint only the frozen
+ * prompt/input snapshot. Legacy /run-qa-check and /ai-review clients remain
+ * unchanged.
+ */
+app.post('/v1/coordinator-review', async (req, res) => {
+    const {
+        schemaVersion,
+        engineVersion,
+        text,
+        prompt,
+        seed,
+        sourceHash,
+        precheckedHash,
+        promptHash,
+        contextHash,
+        policyHash,
+        vocabularySnapshotHash,
+        model,
+        settings,
+    } = req.body || {};
+
+    if (schemaVersion !== 1 || engineVersion !== 'review-coordinator-v1'
+        || typeof text !== 'string' || !text
+        || typeof prompt !== 'string' || !prompt
+        || typeof sourceHash !== 'string' || typeof precheckedHash !== 'string'
+        || typeof promptHash !== 'string' || typeof contextHash !== 'string'
+        || typeof policyHash !== 'string' || typeof vocabularySnapshotHash !== 'string') {
+        return res.status(400).json({ error: 'Invalid coordinator review envelope' });
+    }
+
+    try {
+        if (!hasConfiguredLlmKey()) {
+            return res.status(503).json({ error: 'LLM API key not configured' });
+        }
+        const resolvedSeed = seed === null || (typeof seed === 'string' && seed.trim() === '')
+            ? undefined
+            : parseOptionalNonNegativeInteger(seed) ?? AI_REVIEW_SEED;
+        const qaResponse = await callChat({ model: typeof model === 'string' && model ? model : AI_REVIEW_MODEL }, [
+            { role: 'system', content: prompt },
+            { role: 'user', content: `Here is the menu text to review:\n\n---\n\n${text}` },
+        ], {
+            provider: AI_REVIEW_PROVIDER,
+            temperature: typeof settings?.temperature === 'number' ? settings.temperature : AI_REVIEW_TEMPERATURE,
+            seed: resolvedSeed,
+        });
+
+        return res.status(200).json({
+            schemaVersion: 1,
+            engineVersion,
+            feedback: qaResponse.content || '',
+            model: qaResponse.model || model || AI_REVIEW_MODEL,
+            system_fingerprint: qaResponse.system_fingerprint,
+            finish_reason: qaResponse.finish_reason,
+            sourceHash,
+            precheckedHash,
+            promptHash,
+            contextHash,
+            policyHash,
+            vocabularySnapshotHash,
+        });
+    } catch (error: any) {
+        console.error('Error during coordinator review:', error);
+        return res.status(500).json({ error: 'Error performing coordinator review', message: error.message });
+    }
+});
+
 app.post('/ai-review', async (req, res) => {
     // We'll now expect more metadata from the parser service
     const { text, submission_id, submitter_email, filename, original_path } = req.body;

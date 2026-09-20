@@ -860,6 +860,8 @@ export function runPostAiPipeline(args: PostAiPipelineArgs): PostAiPipelineResul
 
 export type FullReviewPipelineOptions = {
     basePrompt: string;
+    submissionMode?: string;
+    revisionSource?: string;
     baselineMenuContent?: string;
     baselineProvenance?: unknown;
     readOnlyContext?: string;

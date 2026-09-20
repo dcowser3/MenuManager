@@ -1,4 +1,9 @@
 import { createSubmissionWorkflowHandlers } from '../lib/submission-workflow';
+// Use the built coordinator here so this workflow test exercises the same
+// artifact loaded by the dashboard process without widening the legacy Jest
+// ts-jest lib target for the source-only test harness.
+const { completePreparedReview, prepareReview } = require('../dist/lib/review-pipeline');
+const { policyHash } = require('../dist/lib/canonical-policy');
 
 function buildDeps(overrides: Record<string, any> = {}) {
     const axios = {
@@ -78,6 +83,129 @@ function buildResponse() {
 }
 
 describe('submitMenu form attempt linkage', () => {
+    test('routes a new full review through the injected coordinator and preserves legacy clients', async () => {
+        const runSubmissionReview = jest.fn().mockResolvedValue({
+            reviewStatus: { complete: true, transportStatus: 'complete', reusable: false },
+            outputHash: 'out-hash',
+            policyHash: 'policy-hash',
+            contextHash: 'context-hash',
+            engineVersion: 'review-coordinator-v1',
+            correctedMenu: 'GUACAMOLE\nfresh avocado, lime 12',
+            diagnostics: [],
+        });
+        const recordSubmissionReviewAudit = jest.fn();
+        const deps = buildDeps({
+            runSubmissionReview,
+            recordSubmissionReviewAudit,
+        });
+        const handlers = createSubmissionWorkflowHandlers(deps as any);
+        const req = buildRequest();
+        req.body.skipAiReview = false;
+        const res = buildResponse();
+
+        await handlers.submitMenu(req, res);
+        await new Promise((resolve) => setTimeout(resolve, 10));
+
+        expect(res.statusCode).toBe(200);
+        expect(runSubmissionReview).toHaveBeenCalledTimes(1);
+        expect(runSubmissionReview.mock.calls[0][0]).toEqual(expect.objectContaining({
+            text: 'GUACAMOLE\nfresh avocado, lime 12',
+            property: 'Maya - New York',
+            templateType: 'food',
+        }));
+        expect(deps.axios.post).not.toHaveBeenCalledWith(
+            'http://ai.test/ai-review',
+            expect.anything(),
+            expect.anything()
+        );
+        expect(recordSubmissionReviewAudit).toHaveBeenCalledWith(expect.objectContaining({
+            status: 'complete',
+            outputHash: 'out-hash',
+            policyHash: 'policy-hash',
+            contextHash: 'context-hash',
+            engineVersion: 'review-coordinator-v1',
+        }));
+        expect(deps.axios.put).toHaveBeenCalledWith(
+            expect.stringMatching(/\/submissions\/form-/),
+            expect.objectContaining({ status: 'pending_human_review', ai_draft_path: expect.stringMatching(/-draft\.docx$/) })
+        );
+    });
+
+    test('keeps an incomplete coordinator result fail-closed in manual review', async () => {
+        const runSubmissionReview = jest.fn().mockResolvedValue({
+            reviewStatus: { complete: false, transportStatus: 'rejected', reusable: false },
+            outputHash: 'source-hash',
+            policyHash: 'policy-hash',
+            contextHash: 'context-hash',
+            engineVersion: 'review-coordinator-v1',
+            correctedMenu: 'GUACAMOLE\nfresh avocado, lime 12',
+            diagnostics: [{ stage: 'submission_adapter', reason: 'coordinator_feedback_missing' }],
+        });
+        const recordSubmissionReviewAudit = jest.fn();
+        const deps = buildDeps({ runSubmissionReview, recordSubmissionReviewAudit });
+        const handlers = createSubmissionWorkflowHandlers(deps as any);
+        const req = buildRequest();
+        req.body.skipAiReview = false;
+        const res = buildResponse();
+
+        await handlers.submitMenu(req, res);
+        await new Promise((resolve) => setTimeout(resolve, 10));
+
+        expect(res.statusCode).toBe(200);
+        expect(recordSubmissionReviewAudit).toHaveBeenCalledWith(expect.objectContaining({
+            status: 'rejected',
+            diagnostics: [{ stage: 'submission_adapter', reason: 'coordinator_feedback_missing' }],
+        }));
+        expect(deps.axios.put).toHaveBeenCalledWith(
+            expect.stringMatching(/\/submissions\/form-/),
+            expect.objectContaining({ status: 'pending_human_review' })
+        );
+    });
+
+    test('runs the actual prepare/complete coordinator contract once at submission boundary', async () => {
+        let modelCalls = 0;
+        const runSubmissionReview = async (input: any) => {
+            const prepared = await prepareReview(input.text, {
+                basePrompt: 'SUBMISSION QA',
+                property: input.property,
+                templateType: input.templateType,
+                menuType: input.menuType,
+                allergens: input.allergens,
+                precheckEnabled: false,
+                contextProvenance: 'new_submission',
+            });
+            modelCalls += 1;
+            const completed = completePreparedReview(
+                prepared,
+                `=== CORRECTED MENU ===\n${prepared.preCheckedReviewBody}\n=== END CORRECTED MENU ===\n=== SUGGESTIONS ===\n[]\n=== END SUGGESTIONS ===`,
+                { finishReason: 'stop' }
+            );
+            return {
+                reviewStatus: completed.reviewStatus,
+                outputHash: completed.outputHash,
+                policyHash: prepared.envelope.acceptedPolicyHash,
+                contextHash: policyHash(prepared.envelope.context),
+                engineVersion: prepared.envelope.engineVersion,
+                correctedMenu: completed.authoritative.correctedMenu,
+                diagnostics: completed.diagnostics,
+            };
+        };
+        const deps = buildDeps({ runSubmissionReview });
+        const handlers = createSubmissionWorkflowHandlers(deps as any);
+        const req = buildRequest();
+        req.body.skipAiReview = false;
+        const res = buildResponse();
+
+        await handlers.submitMenu(req, res);
+        await new Promise((resolve) => setTimeout(resolve, 10));
+
+        expect(res.statusCode).toBe(200);
+        expect(modelCalls).toBe(1);
+        expect(deps.axios.post).not.toHaveBeenCalledWith('http://ai.test/ai-review', expect.anything(), expect.anything());
+        expect(deps.generateDocxFromForm).toHaveBeenCalledTimes(2);
+        expect(deps.generateDocxFromForm.mock.calls[1][1].menuContent).toBe('GUACAMOLE\nfresh avocado, lime 12');
+    });
+
     test('stores form_attempt_id from the attempt header and links audits to the submission', async () => {
         const deps = buildDeps();
         const handlers = createSubmissionWorkflowHandlers(deps as any);

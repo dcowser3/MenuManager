@@ -103,6 +103,57 @@ describe('AI Review Service', () => {
         });
     });
 
+    it('serves the versioned coordinator adapter without changing the legacy QA route', async () => {
+        const fetchMock = jest.fn(async (_url: string, init: any) => ({
+            ok: true,
+            status: 200,
+            headers: { get: () => null },
+            text: async () => JSON.stringify({
+                model: 'gpt-5.6-luna',
+                choices: [{
+                    message: { content: '=== CORRECTED MENU ===\nTACOS 12\n=== END CORRECTED MENU ===' },
+                    finish_reason: 'stop',
+                }],
+            }),
+        } as any));
+        global.fetch = fetchMock as any;
+
+        const result = await postJson(app, '/v1/coordinator-review', {
+            schemaVersion: 1,
+            engineVersion: 'review-coordinator-v1',
+            text: 'TACOS 12',
+            prompt: 'Use the menu QA rules.',
+            sourceHash: 'source-hash',
+            precheckedHash: 'prechecked-hash',
+            promptHash: 'prompt-hash',
+            contextHash: 'context-hash',
+            policyHash: 'policy-hash',
+            vocabularySnapshotHash: 'vocab-hash',
+            model: 'gpt-5.6-luna',
+            settings: { temperature: 0 },
+        });
+
+        expect(result.status).toBe(200);
+        expect(result.body).toEqual(expect.objectContaining({
+            schemaVersion: 1,
+            engineVersion: 'review-coordinator-v1',
+            feedback: expect.stringContaining('CORRECTED MENU'),
+            sourceHash: 'source-hash',
+            precheckedHash: 'prechecked-hash',
+            promptHash: 'prompt-hash',
+            contextHash: 'context-hash',
+            policyHash: 'policy-hash',
+            vocabularySnapshotHash: 'vocab-hash',
+            finish_reason: 'stop',
+        }));
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+        const request = JSON.parse(fetchMock.mock.calls[0][1].body);
+        expect(request.messages).toEqual([
+            { role: 'system', content: 'Use the menu QA rules.' },
+            { role: 'user', content: 'Here is the menu text to review:\n\n---\n\nTACOS 12' },
+        ]);
+    });
+
     it('allows an explicitly empty AI_REVIEW_SEED to disable the provider seed', async () => {
         const { resolveAiReviewSeed } = await import('../index');
         expect(resolveAiReviewSeed({ AI_REVIEW_SEED: '' })).toBeUndefined();

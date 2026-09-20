@@ -1,4 +1,4 @@
-# Review-learning B3-A: shared coordinator and immutable envelope
+# Review-learning B3: shared coordinator, immutable envelope, and submission boundary
 
 B3-A consolidates the Basic full-review and offline adapters around one pure
 dashboard coordinator. The adapters supply only the model callback; scope
@@ -53,6 +53,19 @@ unresolved/advisory warning rather than being marked corrected by the rejected
 candidate. Attempt structure and spelling diagnostics remain separately labeled
 in form-attempt audit details.
 
+## B3-B submission boundary
+
+New form submissions now use an additive `/v1/coordinator-review` adapter. The
+dashboard prepares the frozen B3 envelope, sends one model request containing
+only the prechecked body and frozen prompt identities, then completes the
+review through `completePreparedReview`. The legacy `/ai-review` endpoint and
+`/run-qa-check` route remain available for existing clients. Completed and
+rejected coordinator results carry bounded output/policy/context hashes and
+engine identity into submission audit details; incomplete or rejected output
+remains manual review and is never reusable. AI draft generation receives only
+the authoritative delivered menu bytes, while the original submitted document
+is preserved separately.
+
 Submission-boundary migration, document preparation, B7 active review units,
 B8 receipt reuse, provider/model/settings changes, and deployment are outside
 this slice.
@@ -70,3 +83,8 @@ length-changing deterministic precheck, a later model edit, and delivered
 spelling evidence. The Basic
 route continues to return its existing browser response shape with additive
 status/delivered diagnostics.
+
+B3-B verification adds the actual submission handler/coordinator adapter test,
+legacy `/ai-review` compatibility coverage, versioned envelope response
+round-trip coverage, one-model-call enforcement, and dashboard/ai-review
+typecheck plus build verification.

@@ -1536,6 +1536,90 @@ app.get('/download/approved-clean/:submissionId', async (req, res) => {
         res.status(500).send('Error downloading file');
     }
 });
+async function runSubmissionReviewThroughCoordinator(input) {
+    const qaPrompt = await fs_1.promises.readFile(path.join(getRepoRoot(), 'sop-processor', 'qa_prompt.txt'), 'utf8');
+    const acceptedCorrectionRules = await fetchAcceptedCorrectionRulesForPreAi();
+    let approvedVocabularyTerms = [];
+    try {
+        approvedVocabularyTerms = await (0, approved_dishes_1.loadApprovedReviewVocabularyTerms)(getRepoRoot());
+    }
+    catch (error) {
+        console.warn(`Approved vocabulary unavailable for submission review; continuing without snapshot. (${error?.message || error})`);
+    }
+    const prepared = await (0, review_pipeline_1.prepareReview)(input.text, {
+        basePrompt: qaPrompt,
+        property: input.property,
+        templateType: input.templateType,
+        menuType: input.menuType,
+        allergens: input.allergens,
+        submissionMode: input.submissionMode,
+        revisionSource: input.revisionSource,
+        acceptedCorrectionRules,
+        approvedVocabularyTerms,
+        precheckEnabled: BASIC_AI_PRECHECK_ENABLED,
+        contextProvenance: 'new_submission',
+        model: process.env.AI_REVIEW_MODEL || 'gpt-5.6-luna',
+        settings: { temperature: 0, seed: AI_REVIEW_SEED ?? null },
+    });
+    const envelope = prepared.envelope;
+    const contextHash = (0, canonical_policy_1.policyHash)(envelope.context);
+    const baseResult = (reason) => ({
+        reviewStatus: { complete: false, transportStatus: 'rejected', reusable: false },
+        outputHash: (0, canonical_policy_1.policyHash)(prepared.preCheckedReviewBody),
+        policyHash: envelope.acceptedPolicyHash,
+        contextHash,
+        engineVersion: envelope.engineVersion,
+        correctedMenu: prepared.preCheckedReviewBody,
+        diagnostics: [{ stage: 'submission_adapter', reason }],
+    });
+    let response;
+    try {
+        response = await internalApi.post(`${AI_REVIEW_URL}/v1/coordinator-review`, {
+            schemaVersion: envelope.schemaVersion,
+            engineVersion: envelope.engineVersion,
+            text: prepared.preCheckedReviewBody,
+            prompt: prepared.promptInfo.prompt,
+            seed: AI_REVIEW_SEED ?? null,
+            sourceHash: envelope.originalBodyHash,
+            precheckedHash: envelope.precheckedBodyHash,
+            promptHash: envelope.promptHash,
+            contextHash,
+            policyHash: envelope.acceptedPolicyHash,
+            vocabularySnapshotHash: envelope.vocabularySnapshotHash,
+            model: envelope.model,
+            settings: envelope.settings,
+        }, { timeout: AI_REVIEW_SUBMIT_TIMEOUT_MS });
+    }
+    catch (error) {
+        return baseResult(`coordinator_transport_failed:${error?.code || error?.response?.status || 'unknown'}`);
+    }
+    const data = response?.data || {};
+    const expectedHashes = {
+        sourceHash: envelope.originalBodyHash,
+        precheckedHash: envelope.precheckedBodyHash,
+        promptHash: envelope.promptHash,
+        contextHash: (0, canonical_policy_1.policyHash)(envelope.context),
+        policyHash: envelope.acceptedPolicyHash,
+        vocabularySnapshotHash: envelope.vocabularySnapshotHash,
+    };
+    for (const [key, expected] of Object.entries(expectedHashes)) {
+        if (data[key] !== expected)
+            return baseResult(`coordinator_integrity_mismatch:${key}`);
+    }
+    if (typeof data.feedback !== 'string' || !data.feedback.trim()) {
+        return baseResult('coordinator_feedback_missing');
+    }
+    const completed = (0, review_pipeline_1.completePreparedReview)(prepared, data.feedback, { finishReason: data.finish_reason });
+    return {
+        reviewStatus: completed.authoritative.reviewStatus,
+        outputHash: completed.outputHash,
+        policyHash: envelope.acceptedPolicyHash,
+        contextHash,
+        engineVersion: envelope.engineVersion,
+        correctedMenu: completed.authoritative.correctedMenu,
+        diagnostics: completed.diagnostics.slice(0, 50),
+    };
+}
 const submissionWorkflowHandlers = (0, submission_workflow_1.createSubmissionWorkflowHandlers)({
     axios: internalApi,
     fs: fs_1.promises,
@@ -1568,6 +1652,26 @@ const submissionWorkflowHandlers = (0, submission_workflow_1.createSubmissionWor
             submittedSubmissionId,
         }, { timeout: 5000 });
         return response.data;
+    },
+    runSubmissionReview: runSubmissionReviewThroughCoordinator,
+    recordSubmissionReviewAudit: (input) => {
+        void (0, form_attempt_logging_1.logFormAttemptEvent)({
+            eventType: 'submission_review_completed',
+            route: '/api/form/submit',
+            projectName: input.projectName,
+            property: input.property,
+            templateType: input.templateType,
+            statusCode: 200,
+            details: {
+                submissionId: input.submissionId,
+                status: input.status,
+                outputHash: input.outputHash,
+                policyHash: input.policyHash,
+                contextHash: input.contextHash,
+                engineVersion: input.engineVersion,
+                diagnostics: input.diagnostics || [],
+            },
+        });
     },
 });
 const approvalWorkflowHandlers = (0, approval_workflow_1.createApprovalWorkflowHandlers)({
