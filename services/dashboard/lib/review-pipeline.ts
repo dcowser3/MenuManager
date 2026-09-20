@@ -862,6 +862,7 @@ export type FullReviewPipelineOptions = {
     approvedVocabularyTexts?: string[];
     approvedVocabularyTerms?: ApprovedVocabularyTerm[];
     precheckEnabled?: boolean;
+    managedRawNoticePresent?: boolean;
     // F2: when --ablate-sections, omit specific prompt sections for delta measurement.
     omitSections?: import('./qa-prompt-builder').QaPromptSectionId[];
 };
@@ -939,6 +940,7 @@ export async function runFullReviewPipeline(
         embeddedSetMenuAnalysis,
         canonicalSpellingFindings: nearMissAnalysis.findings,
         precheckEnabled,
+        managedRawNoticePresent: opts.managedRawNoticePresent,
     });
 
     return {

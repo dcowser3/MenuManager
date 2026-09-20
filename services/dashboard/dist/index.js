@@ -3391,7 +3391,7 @@ async function handleBasicCheck(req, res) {
         console.log('===========================');
         let changedOnlyMergedMenu = menuContent;
         if (changedOnlyMode) {
-            const mergeResult = mergeChangedLineCorrections(menuContent, baselineMenuContent, correctedAfterHighConfidence);
+            const mergeResult = mergeChangedLineCorrections(menuContent, baselineMenuContent, correctedMenuSanitized);
             changedOnlyMergedMenu = mergeResult.merged;
             if (mergeResult.bailed) {
                 console.warn('changed_only merge bailed: AI corrected line count did not match extracted changed line count; falling back to original menu text');

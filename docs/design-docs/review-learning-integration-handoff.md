@@ -1,7 +1,9 @@
 # Review-learning controlled integration handoff
 
-This branch integrates the accepted final17 source-bound allergen and canonical
-raw-notice behavior into clean main `81625d1671ac0c75fe0c9aa0b850a484a38f9d06`.
+This branch is a narrow accepted safety integration—not the entire final17
+workflow or the whole review-learning project. It integrates only the accepted
+source-bound allergen and canonical raw-notice behavior into clean main
+`81625d1671ac0c75fe0c9aa0b850a484a38f9d06`.
 The immutable source packet is
 `mm-review-learning-r4-allergen-raw-successor-1789166000026-final17`.
 
@@ -31,14 +33,20 @@ evidence artifacts and are intentionally not shipped as product runtime code.
 
 ## Verification
 
-- Docker network-none focused suites: 4 suites, 81 tests, all passed.
+- Docker network-none focused suites: 5 suites, 128 tests, all passed, including
+  the actual changed-only Basic route and no-provider full-pipeline parity.
 - Dashboard build: passed.
 - Tenant-config build: passed.
-- Dashboard source/dist parity: 40/40 files; packaged and fresh closure hash
-  `7639e522c15392ca30dacb65694a71a60d0a764d42751902e841faa64180489f`.
+- Dashboard source/dist parity: all 40 compiled files; packaged and fresh closure
+  hash `c1c06c00e340cba519fd0291cf90fd9550b873cb6a8eb24f949e3a27acafc908`.
+- Generated rule metadata served by source and compiled manifest passed its
+  seven-test contract suite.
 - No provider calls, paid runs, shared-stack changes, deployment, activation, or
   production writes were performed.
 
 The pending approximately 30 explanation groups remain unprocessed. This code
 keeps them processable by the existing review-learning workflow; it does not
 constitute Stage2/data authority or claim that those groups were processed.
+Reusable-learning coordinators, source-anchored spelling lanes, paid-run
+orchestrators, and broader candidate workflow behavior remain explicitly
+unintegrated and tracked separately from this narrow safety commit.

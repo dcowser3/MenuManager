@@ -705,6 +705,7 @@ async function runFullReviewPipeline(rawMenuContent, opts, aiCaller) {
         embeddedSetMenuAnalysis,
         canonicalSpellingFindings: nearMissAnalysis.findings,
         precheckEnabled,
+        managedRawNoticePresent: opts.managedRawNoticePresent,
     });
     return {
         preAiDeterministic,

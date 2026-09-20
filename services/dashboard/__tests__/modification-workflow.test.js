@@ -57,7 +57,8 @@ const { shouldNotifyFormAttemptFailure } = dashboardModule;
 const mockedAxios = axios;
 
 function getRouteHandler(method, routePath) {
-    const layer = app._router.stack.find(
+    const router = app._router || app.router;
+    const layer = router.stack.find(
         (l) =>
             l.route &&
             l.route.path === routePath &&
@@ -1638,6 +1639,42 @@ describe('Dashboard Modification Workflow (local, mocked externals)', () => {
         expect(response.body.correctedMenu).toBe(
             'Guacamole - $12\nMarket Salad, avocado, heirloom tomatoes, halloumi cheese, cucumber, red onion D,V 70'
         );
+    });
+
+    test('changed-only Basic route preserves submitted codes, strips model additions, and honors later chef removal', async () => {
+        mockedAxios.post = jest.fn(async (url, payload) => {
+            const urlStr = String(url);
+            if (urlStr.includes('/run-qa-check')) {
+                const latestRemoval = !`${payload.text || ''}`.includes(' S 22');
+                return { data: { feedback: latestRemoval
+                    ? '=== CORRECTED MENU ===\nCusco Chicken, marinade N 22\n=== END CORRECTED MENU ===\n=== SUGGESTIONS ===\n[]\n=== END SUGGESTIONS ==='
+                    : '=== CORRECTED MENU ===\nCusco Chicken, marinade N 22\nSteak, fries D 30\n=== END CORRECTED MENU ===\n=== SUGGESTIONS ===\n[]\n=== END SUGGESTIONS ===' } };
+            }
+            return { data: {} };
+        });
+
+        const submitted = await invokeJsonHandler(basicCheckHandler, {
+            menuContent: 'Cusco Chicken, marinade S 22\nSteak, fries D 30',
+            baselineMenuContent: '', reviewMode: 'full',
+            allergens: 'S contains shellfish | D contains dairy | N contains nuts', menuType: 'standard',
+        });
+        expect(submitted.status).toBe(200);
+        expect(submitted.body.correctedMenu).toContain('Cusco Chicken, marinade S 22');
+        expect(submitted.body.correctedMenu).not.toContain('N 22');
+        expect(submitted.body.correctedMenu).toContain('Steak, fries D 30');
+
+        const removal = await invokeJsonHandler(basicCheckHandler, {
+            menuContent: 'Cusco Chicken, marinade 22\nSteak, fries D 30',
+            baselineMenuContent: 'Cusco Chicken, marinade S 22\nSteak, fries D 30',
+            reviewMode: 'changed_only',
+            allergens: 'S contains shellfish | D contains dairy | N contains nuts', menuType: 'standard',
+        });
+        expect(removal.status).toBe(200);
+        expect(removal.body.reviewMode).toBe('changed_only');
+        expect(removal.body.correctedMenu).toContain('Cusco Chicken, marinade 22');
+        expect(removal.body.correctedMenu).not.toContain('Cusco Chicken, marinade S 22');
+        expect(removal.body.correctedMenu).not.toContain('N 22');
+        expect(removal.body.correctedMenu).toContain('Steak, fries D 30');
     });
 
     test('basic-check changed_only bails to original menu when AI returns mismatched line count', async () => {

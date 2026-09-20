@@ -1,4 +1,5 @@
 import { preserveSubmittedAllergenCodes } from '../lib/allergen-source-preservation';
+import { runFullReviewPipeline } from '../lib/review-pipeline';
 
 const legend = 'G contains gluten | D contains dairy | S contains shellfish | N contains nuts | V vegetarian';
 
@@ -28,5 +29,28 @@ describe('submitted allergen source preservation', () => {
     test('latest explicit removal is authoritative', () => {
         expect(preserveSubmittedAllergenCodes('Cusco Chicken, marinade 22', 'Cusco Chicken, marinade S 22', legend).menuText)
             .toBe('Cusco Chicken, marinade 22');
+    });
+
+    test('no-provider full pipeline preserves submitted S and rejects model-only N', async () => {
+        const result = await runFullReviewPipeline(
+            'Cusco Chicken, marinade S 22\nSteak, fries D 30',
+            { basePrompt: 'RULES', templateType: 'food', allergens: legend, acceptedCorrectionRules: [] },
+            async () => '=== CORRECTED MENU ===\nCusco Chicken, marinade N 22\nSteak, fries D 30\n=== END CORRECTED MENU ===\n=== SUGGESTIONS ===\n[]\n=== END SUGGESTIONS ===',
+        );
+        expect(result.finalCorrectedMenu).toContain('Cusco Chicken, marinade S 22');
+        expect(result.finalCorrectedMenu).not.toContain('N 22');
+        expect(result.finalCorrectedMenu).toContain('Steak, fries D 30');
+    });
+
+    test('no-provider full pipeline keeps an explicit latest removal removed', async () => {
+        const result = await runFullReviewPipeline(
+            'Cusco Chicken, marinade 22\nSteak, fries D 30',
+            { basePrompt: 'RULES', templateType: 'food', allergens: legend, acceptedCorrectionRules: [] },
+            async () => '=== CORRECTED MENU ===\nCusco Chicken, marinade N 22\nSteak, fries D 30\n=== END CORRECTED MENU ===\n=== SUGGESTIONS ===\n[]\n=== END SUGGESTIONS ===',
+        );
+        expect(result.finalCorrectedMenu).toContain('Cusco Chicken, marinade 22');
+        expect(result.finalCorrectedMenu).not.toContain('Cusco Chicken, marinade S 22');
+        expect(result.finalCorrectedMenu).not.toContain('N 22');
+        expect(result.finalCorrectedMenu).toContain('Steak, fries D 30');
     });
 });

@@ -3825,7 +3825,7 @@ async function handleBasicCheck(req: any, res: any) {
             const mergeResult = mergeChangedLineCorrections(
                 menuContent,
                 baselineMenuContent,
-                correctedAfterHighConfidence
+                correctedMenuSanitized
             );
             changedOnlyMergedMenu = mergeResult.merged;
             if (mergeResult.bailed) {
