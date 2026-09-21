@@ -226,10 +226,13 @@ async function prepareCodeProposalAttempt(options = {}) {
         // complete pending enumeration, and the five bytes actually frozen
         // above. It intentionally excludes owner/attempt/auth identities.
         const pendingEnumeration = options.pendingEnumeration;
-        if (pendingEnumeration?.global_snapshot_sha256) {
-            const snapshot = readImmutablePendingSnapshot(options.outputRoot || path.join(repoRoot, 'tmp', 'code-proposals'), pendingEnumeration.global_snapshot_sha256);
-            if (JSON.stringify(snapshot) !== JSON.stringify({ complete: true, cutoff: pendingEnumeration.cutoff, pages: pendingEnumeration.pages, query: pendingEnumeration.query, row_ids: pendingEnumeration.row_ids, rows_count: pendingEnumeration.rows_count, global_snapshot_sha256: pendingEnumeration.global_snapshot_sha256 })) throw new Error('Pending enumeration metadata differs from its immutable snapshot.');
-        }
+        const lineageSnapshot = options.parentCampaignLineage
+            ? readImmutablePendingSnapshot(options.outputRoot || path.join(repoRoot, 'tmp', 'code-proposals'), options.parentCampaignLineage.pending_enumeration.global_snapshot_sha256)
+            : pendingEnumeration?.global_snapshot_sha256
+                ? readImmutablePendingSnapshot(options.outputRoot || path.join(repoRoot, 'tmp', 'code-proposals'), pendingEnumeration.global_snapshot_sha256)
+                : null;
+        if (lineageSnapshot && options.parentCampaignLineage && !isDeepStrictEqual(canonical(lineageSnapshot), canonical(options.parentCampaignLineage.pending_enumeration))) throw new Error('Supplied parent campaign lineage does not match its immutable snapshot.');
+        if (lineageSnapshot && pendingEnumeration && !options.parentCampaignLineage && !isDeepStrictEqual(canonical(lineageSnapshot), canonical(pendingEnumeration))) throw new Error('Pending enumeration metadata differs from its immutable snapshot.');
         const computedLineage = options.inventory ? buildParentCampaignLineage({
             proposal,
             inventory: options.inventory,
@@ -241,7 +244,7 @@ async function prepareCodeProposalAttempt(options = {}) {
                 prompt_sha256: metadata.prompt_sha256,
                 accepted_rules_sha256: metadata.accepted_rules_sha256,
             },
-            pendingEnumeration: options.parentCampaignLineage?.pending_enumeration || pendingEnumeration || { ...(options.inventory.enumeration || {}), query: options.inventory.query, rows_count: options.inventory.enumeration?.rows_count || options.inventory.enumeration?.count, row_ids: options.inventory.enumeration?.row_ids },
+            pendingEnumeration: lineageSnapshot || pendingEnumeration || { ...(options.inventory.enumeration || {}), query: options.inventory.query, rows_count: options.inventory.enumeration?.rows_count || options.inventory.enumeration?.count, row_ids: options.inventory.enumeration?.row_ids },
         }) : null;
         const lineage = options.parentCampaignLineage ? validateParentCampaignLineage(options.parentCampaignLineage, { proposal }) : computedLineage;
         if (options.parentCampaignLineage && computedLineage && !isDeepStrictEqual(canonical(options.parentCampaignLineage), canonical(computedLineage))) throw new Error('Supplied parent campaign lineage differs from freshly computed artifacts.');

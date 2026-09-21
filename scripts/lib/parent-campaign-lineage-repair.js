@@ -86,7 +86,8 @@ async function repairParentCampaignLineage(options = {}) {
         throw new Error('Lineage repair found a different terminal or active owner.');
     }
     if (current.eval_summary?.parent_campaign_sha256 !== lineage.parent_campaign_sha256) {
-        current = await recordParentCampaignLineage(options.client, current, lineage, verification, { allowClosedOwner: true, expectedAttemptId: options.expectedAttemptId, replaceExistingDigest: !!options.expectedExistingParentCampaignSha256, expectedExistingDigest: options.expectedExistingParentCampaignSha256 });
+        await recordParentCampaignLineage(options.client, current, lineage, verification, { allowClosedOwner: true, expectedAttemptId: options.expectedAttemptId, replaceExistingDigest: !!options.expectedExistingParentCampaignSha256, expectedExistingDigest: options.expectedExistingParentCampaignSha256 });
+        current = await options.readCurrentProposal(options.client, proposal.id);
         assertSubstantive(current);
     }
     current = await options.readCurrentProposal(options.client, proposal.id);
