@@ -3,6 +3,7 @@ import {
     buildBehaviorTestRecord,
     executeBehaviorTests,
     freezeBehaviorTests,
+    hashBehaviorArtifact,
     validateBehaviorArtifact,
 } from '../lib/learning-behavior-tests';
 import { canonicalizeFinalTerms } from '../lib/pre-ai-deterministic-rules';
@@ -29,6 +30,15 @@ function humanCorrection(overrides: Record<string, unknown> = {}) {
         rule: 'Use the accepted housemade spelling.',
         ...overrides,
     };
+}
+
+function reorderObjectKeys<T>(value: T): T {
+    if (Array.isArray(value)) return value.map(reorderObjectKeys) as T;
+    if (value && typeof value === 'object') {
+        const object = value as Record<string, unknown>;
+        return Object.fromEntries(Object.keys(object).reverse().map(key => [key, reorderObjectKeys(object[key])])) as T;
+    }
+    return value;
 }
 
 describe('B6-A behavior artifact core', () => {
@@ -105,6 +115,16 @@ describe('B6-A behavior artifact core', () => {
         expect(artifact.tests.every(test => test.context.property === 'Property A' || test.context.property === '__outside_approved_scope__')).toBe(true);
         expect(artifact.sha256).toMatch(/^[a-f0-9]{64}$/);
         expect(validateBehaviorArtifact(artifact)).toBe(artifact);
+    });
+
+    test('retains artifact identity after JSONB-style recursive key reordering', () => {
+        const rule = { ...acceptedRule, is_location_specific: true, location: 'Property A' };
+        const record = buildBehaviorTestRecord(humanCorrection({ id: rule.id, location: 'Property A' }));
+        const artifact = freezeBehaviorTests([record], [rule], [rule]);
+        const roundTripped = reorderObjectKeys(JSON.parse(JSON.stringify(artifact)));
+        const { sha256, ...body } = roundTripped as typeof artifact;
+        expect(hashBehaviorArtifact(body)).toBe(artifact.sha256);
+        expect(validateBehaviorArtifact(roundTripped)).toBe(roundTripped);
     });
 
     test('executes deterministic variants against the current pre-AI canonicalizer', async () => {

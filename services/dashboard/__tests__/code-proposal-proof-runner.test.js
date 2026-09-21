@@ -4,6 +4,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { runCodeProposalProof, validateReplayResult } = require('../../../scripts/lib/code-proposal-proof-runner');
 const { loadVerificationModule, recordCodeVerification } = require('../../../scripts/lib/proposal-verification-store');
+const { hashBehaviorArtifact } = require('../lib/learning-behavior-tests');
 
 const digest = (value) => crypto.createHash('sha256').update(value).digest('hex');
 const HASH = (letter) => letter.repeat(64);
@@ -24,7 +25,7 @@ function setup(overrides = {}) {
     const repoRoot = path.resolve(__dirname, '../../..');
     const trustedVerification = loadVerificationModule(repoRoot);
     const behaviorBody = { schemaVersion: 1, frozenAt: new Date().toISOString(), records: [{ correctionId: 'c1', expectationAuthority: 'human_explanation', disposition: 'awaiting_behavior_verification' }], tests: [{ id: 'behavior-1', input: 'behavior input', expected: 'behavior output', context: {} }] };
-    const behavior = { ...behaviorBody, sha256: digest(JSON.stringify(behaviorBody)) };
+    const behavior = { ...behaviorBody, sha256: hashBehaviorArtifact(behaviorBody) };
     const baselineHash = HASH('c'); const candidateHash = HASH('d');
     const acceptedRulesHash = trustedVerification.hashAcceptedRules([]); const behaviorHash = behavior.sha256;
     const proposal = { id: 'p1', status: 'pending', parent_campaign_sha256: HASH('3'), current_prompt: 'baseline prompt', code_recommendations: [{ title: 'Fix' }], correction_routing: [{ correction_id: 'c1', lane: 'code_recommendation', original_text: 'Dish, lemons', corrected_text: 'Dish, lemon' }], proposed_prompt: 'prompt', eval_summary: { code_candidate: { status: 'running', attempt_id: 'attempt-one', expected_dataset_sha256: null, expected_case_ids: ['case-1'], behavior_tests_sha256: behaviorHash }, behavior_tests: behavior, replay_retirement_policy_version: trustedVerification.REPLAY_RETIREMENT_POLICY_VERSION } };
@@ -83,6 +84,21 @@ test('runs independent baseline/candidate proof and writes owner-only plan, prog
     } finally { state.cleanup(); }
 });
 
+test('proof identity survives JSONB-style behavior artifact key reordering', async () => {
+    const state = setup();
+    const reorder = (value) => Array.isArray(value)
+        ? value.map(reorder)
+        : value && typeof value === 'object'
+            ? Object.fromEntries(Object.keys(value).reverse().map((key) => [key, reorder(value[key])]))
+            : value;
+    try {
+        const artifactPath = path.join(state.attemptRoot, 'behavior-tests.json');
+        fs.writeFileSync(artifactPath, JSON.stringify(reorder(JSON.parse(fs.readFileSync(artifactPath, 'utf8')))), { mode: 0o600 });
+        const result = await run(state);
+        expect(result.status).toBe('verified');
+    } finally { state.cleanup(); }
+});
+
 test('the complete positive proof passes the real integrity gate and combined drift is rejected', async () => {
     const state = setup();
     try {
@@ -102,7 +118,7 @@ test('mixed code and replacement-rule proof carries motivating rule activations 
         state.proposal.replay_evidence = [...(state.proposal.replay_evidence || []), { correction_id: 'r1', case_id: 'case-1', original_text: 'foo', corrected_text: 'bar' }];
         const { sha256: _oldBehaviorHash, ...frozenBehaviorBody } = state.proposal.eval_summary.behavior_tests;
         const behaviorBody = { ...frozenBehaviorBody, records: [...state.proposal.eval_summary.behavior_tests.records, { correctionId: 'r1', expectationAuthority: 'human_explanation', disposition: 'awaiting_behavior_verification' }] };
-        const behavior = { ...behaviorBody, sha256: digest(JSON.stringify(behaviorBody)) };
+        const behavior = { ...behaviorBody, sha256: hashBehaviorArtifact(behaviorBody) };
         state.proposal.eval_summary.behavior_tests = behavior;
         state.metadata.behavior_tests_sha256 = behavior.sha256;
         state.proposal.eval_summary.code_candidate.behavior_tests_sha256 = behavior.sha256;

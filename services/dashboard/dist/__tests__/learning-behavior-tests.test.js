@@ -24,6 +24,15 @@ function humanCorrection(overrides = {}) {
         ...overrides,
     };
 }
+function reorderObjectKeys(value) {
+    if (Array.isArray(value))
+        return value.map(reorderObjectKeys);
+    if (value && typeof value === 'object') {
+        const object = value;
+        return Object.fromEntries(Object.keys(object).reverse().map(key => [key, reorderObjectKeys(object[key])]));
+    }
+    return value;
+}
 describe('B6-A behavior artifact core', () => {
     test('records human authority and preserves known and unknown four-stage provenance', () => {
         const record = (0, learning_behavior_tests_1.buildBehaviorTestRecord)(humanCorrection(), {
@@ -93,6 +102,15 @@ describe('B6-A behavior artifact core', () => {
         expect(artifact.tests.every(test => test.context.property === 'Property A' || test.context.property === '__outside_approved_scope__')).toBe(true);
         expect(artifact.sha256).toMatch(/^[a-f0-9]{64}$/);
         expect((0, learning_behavior_tests_1.validateBehaviorArtifact)(artifact)).toBe(artifact);
+    });
+    test('retains artifact identity after JSONB-style recursive key reordering', () => {
+        const rule = { ...acceptedRule, is_location_specific: true, location: 'Property A' };
+        const record = (0, learning_behavior_tests_1.buildBehaviorTestRecord)(humanCorrection({ id: rule.id, location: 'Property A' }));
+        const artifact = (0, learning_behavior_tests_1.freezeBehaviorTests)([record], [rule], [rule]);
+        const roundTripped = reorderObjectKeys(JSON.parse(JSON.stringify(artifact)));
+        const { sha256, ...body } = roundTripped;
+        expect((0, learning_behavior_tests_1.hashBehaviorArtifact)(body)).toBe(artifact.sha256);
+        expect((0, learning_behavior_tests_1.validateBehaviorArtifact)(roundTripped)).toBe(roundTripped);
     });
     test('executes deterministic variants against the current pre-AI canonicalizer', async () => {
         const artifact = (0, learning_behavior_tests_1.freezeBehaviorTests)([(0, learning_behavior_tests_1.buildBehaviorTestRecord)(humanCorrection({ id: acceptedRule.id }))], [acceptedRule], [acceptedRule]);

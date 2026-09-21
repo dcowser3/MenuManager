@@ -3,6 +3,7 @@ const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
 const childProcess = require('child_process');
+const { hashBehaviorArtifact } = require('../lib/learning-behavior-tests');
 
 const { runCodeProposalLifecycle } = require('../../../scripts/lib/code-proposal-lifecycle');
 const { FIXED_RUNTIME_ID } = require('../../../scripts/lib/code-proposal-docker-launcher');
@@ -36,7 +37,7 @@ function makeDockerFixture() {
     const dataset = `${JSON.stringify({ case_id: 'case-1', raw_input: 'Dish, lemon', ground_truth: 'Dish, lemon', context: {} })}\n`;
     const rules = JSON.stringify({ rules: [] });
     const behaviorBody = { schemaVersion: 1, frozenAt: new Date().toISOString(), records: [{ correctionId: 'c1', expectationAuthority: 'human_explanation', disposition: 'awaiting_behavior_verification' }], tests: [{ id: 'behavior-1', input: 'Dish, lemons\nDish, lemon', expected: 'Dish, lemons\nDish, lemon', context: {} }] };
-    const behavior = { ...behaviorBody, sha256: digest(JSON.stringify(behaviorBody)) };
+    const behavior = { ...behaviorBody, sha256: hashBehaviorArtifact(behaviorBody) };
     const proposal = { id: 'p-e2e', status: 'pending', parent_campaign_sha256: HASH('parent'), current_prompt: prompt, proposed_prompt: prompt, code_recommendations: [{ title: 'Fix' }], correction_routing: [{ correction_id: 'c1', lane: 'code_recommendation', case_id: 'case-1', original_text: 'Dish, lemons', corrected_text: 'Dish, lemon' }], eval_summary: { code_candidate: { status: 'running', attempt_id: 'attempt-one', expected_dataset_sha256: digest(dataset), expected_case_ids: ['case-1'], behavior_tests_sha256: behavior.sha256 }, behavior_tests: behavior, replay_retirement_policy_version: verification.REPLAY_RETIREMENT_POLICY_VERSION } };
     mkdir(attemptRoot);
     for (const [name, bytes] of Object.entries({ 'proposal.json': JSON.stringify(proposal), 'prompt.txt': prompt, 'rules.json': rules, 'behavior-tests.json': JSON.stringify(behavior), 'dataset.jsonl': dataset })) fs.writeFileSync(path.join(attemptRoot, name), bytes, { mode: 0o600 });

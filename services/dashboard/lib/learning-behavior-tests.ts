@@ -2,7 +2,20 @@ import { createHash } from 'crypto';
 import { permitsSeparatorVariants, resolveCanonicalPolicies } from './canonical-policy';
 import { canonicalizeFinalTerms, getAcceptedCorrectionRulePreAiEligibility, AcceptedCorrectionRule } from './pre-ai-deterministic-rules';
 export type BehaviorClassification = 'missed_review_correction' | 'incorrect_ai_edit' | 'scoped_style_policy' | 'menu_content_update' | 'needs_clarification';
-const hash = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
+export function canonicalizeBehaviorValue(value: unknown): unknown {
+    if (Array.isArray(value)) return value.map(canonicalizeBehaviorValue);
+    if (value && typeof value === 'object') {
+        return Object.fromEntries(Object.keys(value as Record<string, unknown>).sort().map((key) => [key, canonicalizeBehaviorValue((value as Record<string, unknown>)[key])]));
+    }
+    return value;
+}
+
+/** JSONB and other object stores may reorder keys; artifact identity must not. */
+export function hashBehaviorArtifact(value: unknown): string {
+    return createHash('sha256').update(JSON.stringify(canonicalizeBehaviorValue(value))).digest('hex');
+}
+
+const hash = hashBehaviorArtifact;
 export function buildBehaviorTestRecord(correction: Record<string, any>, evidence: Record<string, any> = {}) {
     const input = correction.example_original || correction.original_text || '';
     const expected = correction.example_corrected || correction.corrected_text || '';

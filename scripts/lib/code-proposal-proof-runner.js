@@ -291,7 +291,7 @@ async function invokeWithTimeout(fn, input, timeoutMs, label) {
     } finally { if (timer) clearTimeout(timer); }
 }
 
-function revalidatePlan(planPath, plan, metadata, attemptRoot, baselineRoot, candidateRoot, bundle, trustedSuites, historicalTests, candidateTests, runtimeVerification, liveProposal, trustedVerification) {
+function revalidatePlan(planPath, plan, metadata, attemptRoot, baselineRoot, candidateRoot, bundle, trustedSuites, historicalTests, candidateTests, runtimeVerification, liveProposal, trustedVerification, behaviorModule) {
     const bytes = regularFile(planPath, path.dirname(planPath), 'Verifier plan');
     const stored = JSON.parse(bytes.toString('utf8'));
     const { plan_sha256: storedHash, ...body } = stored;
@@ -304,7 +304,7 @@ function revalidatePlan(planPath, plan, metadata, attemptRoot, baselineRoot, can
     if (hashBytes(regularFile(path.join(attemptRoot, 'dataset.jsonl'), attemptRoot, 'Frozen dataset')) !== plan.dataset_sha256
         || hashBytes(regularFile(path.join(attemptRoot, 'prompt.txt'), attemptRoot, 'Prompt artifact')) !== plan.prompt_sha256
         || hashBytes(regularFile(path.join(attemptRoot, 'rules.json'), attemptRoot, 'Accepted rules')) !== plan.rules_sha256
-        || behaviorHash !== plan.behavior_sha256 || hashBytes(Buffer.from(JSON.stringify(behaviorBody))) !== behaviorHash
+        || behaviorHash !== plan.behavior_sha256 || typeof behaviorModule?.hashBehaviorArtifact !== 'function' || behaviorModule.hashBehaviorArtifact(behaviorBody) !== behaviorHash
         || hashBytes(Buffer.from(plan.baseline_prompt || '')) !== plan.baseline_prompt_sha256
         || hashBytes(Buffer.from(plan.candidate_prompt || '')) !== plan.candidate_prompt_sha256
         || hashBytes(Buffer.from(JSON.stringify(plan.baseline_rules || []))) !== plan.baseline_rules_sha256
@@ -467,16 +467,16 @@ async function runCodeProposalProof(options = {}) {
     const progress = (phase, state, extra = {}) => writeProgress(attemptRoot, metadata, phase, state, { total: caseIds.length, ...extra }, options.progressWriter);
     let attached = false;
     try {
-        revalidatePlan(paths.plan, plan, metadata, attemptRoot, baselineRoot, candidateRoot, bundle, trustedSuites, historicalTests, candidateTests, runtimeVerification, options.proposal, trustedVerification);
+        revalidatePlan(paths.plan, plan, metadata, attemptRoot, baselineRoot, candidateRoot, bundle, trustedSuites, historicalTests, candidateTests, runtimeVerification, options.proposal, trustedVerification, behaviorModule);
         progress('unit_tests', 'active', { completed: 0 });
         const timeoutMs = options.executorTimeoutMs || 30000;
         const baselineRaw = await invokeWithTimeout(options.executor, { arm: 'baseline', root: baselineRoot, inventory: [...inventory], testBundleRoot: bundle.root, testBundleSha256: bundle.sha256, plan: { ...plan }, attemptId: metadata.attempt_id }, timeoutMs, 'Baseline executor');
-        revalidatePlan(paths.plan, plan, metadata, attemptRoot, baselineRoot, candidateRoot, bundle, trustedSuites, historicalTests, candidateTests, runtimeVerification, options.proposal, trustedVerification);
+        revalidatePlan(paths.plan, plan, metadata, attemptRoot, baselineRoot, candidateRoot, bundle, trustedSuites, historicalTests, candidateTests, runtimeVerification, options.proposal, trustedVerification, behaviorModule);
         const candidateRaw = await invokeWithTimeout(options.executor, { arm: 'candidate', root: candidateRoot, inventory: [...inventory], testBundleRoot: bundle.root, testBundleSha256: bundle.sha256, plan: { ...plan }, attemptId: metadata.attempt_id }, timeoutMs, 'Candidate executor');
         const tests = { baseline: reportsFromExecutor(baselineRaw, 'Baseline', inventory), candidate: reportsFromExecutor(candidateRaw, 'Candidate', inventory) };
         atomicWrite(paths.baselineReport, `${JSON.stringify(tests.baseline.report, null, 2)}\n`); atomicWrite(paths.candidateReport, `${JSON.stringify(tests.candidate.report, null, 2)}\n`);
         assertPairedTestReports(tests, corrections, trustedVerification);
-        revalidatePlan(paths.plan, plan, metadata, attemptRoot, baselineRoot, candidateRoot, bundle, trustedSuites, historicalTests, candidateTests, runtimeVerification, options.proposal, trustedVerification);
+        revalidatePlan(paths.plan, plan, metadata, attemptRoot, baselineRoot, candidateRoot, bundle, trustedSuites, historicalTests, candidateTests, runtimeVerification, options.proposal, trustedVerification, behaviorModule);
         progress('retrospective_replay', 'active', { completed: 0, total: caseIds.length * seeds.length });
         const runs = [];
         const replayIdentities = new Set();
@@ -519,7 +519,7 @@ async function runCodeProposalProof(options = {}) {
             run.candidate_report_sha256 = hashJson({ seed, arm: 'candidate', results: [...results.candidate.entries()] });
             runs.push(run);
         }
-        revalidatePlan(paths.plan, plan, metadata, attemptRoot, baselineRoot, candidateRoot, bundle, trustedSuites, historicalTests, candidateTests, runtimeVerification, options.proposal, trustedVerification);
+        revalidatePlan(paths.plan, plan, metadata, attemptRoot, baselineRoot, candidateRoot, bundle, trustedSuites, historicalTests, candidateTests, runtimeVerification, options.proposal, trustedVerification, behaviorModule);
         progress('holdout', 'active', { completed: caseIds.length * seeds.length, total: caseIds.length * seeds.length });
         const behaviorArtifact = checked.behavior;
         if (!behaviorArtifact || !behaviorModule) throw new Error('Independent B6-D1 behavior evaluation requires the frozen artifact.');
@@ -541,12 +541,12 @@ async function runCodeProposalProof(options = {}) {
         }
         if (behaviorCandidate.artifactHash !== behaviorArtifact.sha256 || behaviorCandidate.passed !== true || behaviorCandidate.outcomes.some((outcome) => outcome.passed !== true || outcome.outputHash !== outcome.expectedHash)) throw new Error('Candidate behavior outcomes do not match frozen B6-D1 expectations.');
         const proof = { schema_version: 2, test_only: true, runner: 'verify-code-proposal', status: 'passed', generated_at: new Date().toISOString(), proposal_sha256: plan.proposal_sha256, baseline: { source_sha256: plan.baseline_source_sha256, root: baselineRoot }, candidate: { source_sha256: plan.candidate_source_sha256, root: candidateRoot }, inputs: { dataset_sha256: plan.dataset_sha256, prompt_sha256: plan.prompt_sha256, rules_sha256: plan.rules_sha256, accepted_rules_sha256: plan.accepted_rules_sha256, tests_sha256: plan.tests_content_sha256, image_id: plan.image_id, model: plan.model, raw_ground_truth: true, case_ids: [...plan.case_ids], ...(deliveryIds.length ? { delivery_driver_sha256: plan.delivery_driver_sha256, delivery_identity_sha256: plan.delivery_identity?.identity_sha256, delivery_identity: plan.delivery_identity, delivery_fixture_sha256: plan.delivery_fixture_sha256, delivery_claim: plan.delivery_claim } : {}) }, corrections, tests, runs, behavior: { artifact: behaviorArtifact, candidate: behaviorCandidate }, combined: buildCombinedVerification({ proposal: frozenProposal, baselineHash: plan.baseline_source_sha256, candidateHash: plan.candidate_source_sha256, cases: plan.case_ids, seeds: plan.seeds, runs, corrections: plan.corrections, trustedVerification, imageId: plan.image_id, runtimeId: plan.runtime_id, datasetHash: plan.dataset_sha256, acceptedRulesHash: plan.accepted_rules_sha256, model: plan.model, baselineRules: plan.baseline_rules, candidateRules: plan.candidate_rules, vocabularyHash: plan.vocabulary_sha256, expectationsHash: plan.expectations_sha256, settings: plan.settings }) };
-        revalidatePlan(paths.plan, plan, metadata, attemptRoot, baselineRoot, candidateRoot, bundle, trustedSuites, historicalTests, candidateTests, runtimeVerification, options.proposal, trustedVerification);
+        revalidatePlan(paths.plan, plan, metadata, attemptRoot, baselineRoot, candidateRoot, bundle, trustedSuites, historicalTests, candidateTests, runtimeVerification, options.proposal, trustedVerification, behaviorModule);
         progress('verification', 'active', { completed: caseIds.length * seeds.length, total: caseIds.length * seeds.length });
         const candidateProposal = { ...frozenProposal, eval_summary: { ...(frozenProposal.eval_summary || {}), replay_retirement_policy_version: plan.replay_policy_version, code_candidate: { ...(frozenProposal.eval_summary?.code_candidate || {}), expected_dataset_sha256: plan.dataset_sha256, expected_case_ids: [...plan.case_ids], behavior_tests_sha256: plan.behavior_sha256 }, code_verification: proof } };
         const block = trustedVerification.assessCodeProposalVerificationIntegrity(candidateProposal);
         if (block) throw new Error(`Proof integrity rejected: ${block.error}`);
-        revalidatePlan(paths.plan, plan, metadata, attemptRoot, baselineRoot, candidateRoot, bundle, trustedSuites, historicalTests, candidateTests, runtimeVerification, options.proposal, trustedVerification);
+        revalidatePlan(paths.plan, plan, metadata, attemptRoot, baselineRoot, candidateRoot, bundle, trustedSuites, historicalTests, candidateTests, runtimeVerification, options.proposal, trustedVerification, behaviorModule);
         const attachable = options.client && options.originalProposal && (typeof options.store?.recordCodeVerification === 'function' || typeof recordCodeVerification === 'function');
         if (!attachable) {
             atomicWrite(paths.stagedProof, `${JSON.stringify({ staged_status: 'pending_store', proof }, null, 2)}\n`);
@@ -558,7 +558,7 @@ async function runCodeProposalProof(options = {}) {
             await store.recordCodeVerification(options.client, options.originalProposal, { attempt_id: metadata.attempt_id, code_verification: proof, code_candidate: { ...metadata, status: 'verified', phase: 'verification', completed: caseIds.length * seeds.length, total: caseIds.length * seeds.length } }, trustedVerification);
             attached = true;
         }
-        revalidatePlan(paths.plan, plan, metadata, attemptRoot, baselineRoot, candidateRoot, bundle, trustedSuites, historicalTests, candidateTests, runtimeVerification, options.proposal, trustedVerification);
+        revalidatePlan(paths.plan, plan, metadata, attemptRoot, baselineRoot, candidateRoot, bundle, trustedSuites, historicalTests, candidateTests, runtimeVerification, options.proposal, trustedVerification, behaviorModule);
         atomicWrite(paths.proof, `${JSON.stringify(proof, null, 2)}\n`);
         progress('verification', 'verified', { completed: caseIds.length * seeds.length, total: caseIds.length * seeds.length, proof_path: paths.proof });
         return { status: 'verified', proof, plan, paths, baselineHash, candidateHash };

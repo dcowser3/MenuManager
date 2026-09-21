@@ -49,6 +49,7 @@ const path = __importStar(require("path"));
 const replay_retirement_1 = require("./replay-retirement");
 var replay_retirement_2 = require("./replay-retirement");
 Object.defineProperty(exports, "REPLAY_RETIREMENT_POLICY_VERSION", { enumerable: true, get: function () { return replay_retirement_2.REPLAY_RETIREMENT_POLICY_VERSION; } });
+const learning_behavior_tests_1 = require("./learning-behavior-tests");
 const canonical = (value) => Array.isArray(value)
     ? value.map(canonical)
     : value && typeof value === 'object'
@@ -230,7 +231,7 @@ function assessCodeProposalVerificationInternal(proposal, allowTestOnly) {
         if ((proposal.correction_routing || []).some((route) => !artifact.records?.some((record) => record.correctionId === route.correction_id && record.expectationAuthority === 'human_explanation' && record.disposition !== 'excluded_from_policy_learning')))
             return fail('Every routed explanation requires trusted frozen human evidence.');
         const { sha256: behaviorHash, ...behaviorBody } = artifact;
-        if ((0, crypto_1.createHash)('sha256').update(JSON.stringify(behaviorBody)).digest('hex') !== behaviorHash
+        if ((0, learning_behavior_tests_1.hashBehaviorArtifact)(behaviorBody) !== behaviorHash
             || !Array.isArray(artifact.tests) || !Array.isArray(artifact.records)
             || behavior.candidate?.artifactHash !== behaviorHash || behavior.candidate?.passed !== true
             || !Array.isArray(behavior.candidate?.outcomes)

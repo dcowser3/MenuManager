@@ -232,6 +232,19 @@ test('accepted-rule hash is order independent and changes with rule content', ()
     expect((0, code_proposal_verification_1.hashAcceptedRules)(rules)).toBe((0, code_proposal_verification_1.hashAcceptedRules)([...rules].reverse()));
     expect((0, code_proposal_verification_1.hashAcceptedRules)(rules)).not.toBe((0, code_proposal_verification_1.hashAcceptedRules)([{ ...rules[0], corrected_text: 'citrus' }, rules[1]]));
 });
+test('versioned verification accepts a JSONB-reordered behavior artifact', () => {
+    const proposal = mixedFixture();
+    const reorder = (value) => Array.isArray(value)
+        ? value.map(reorder)
+        : value && typeof value === 'object'
+            ? Object.fromEntries(Object.keys(value).reverse().map(key => [key, reorder(value[key])]))
+            : value;
+    const reordered = reorder(JSON.parse(JSON.stringify(proposal.eval_summary.behavior_tests)));
+    proposal.eval_summary.behavior_tests = reordered;
+    proposal.eval_summary.code_verification.behavior.artifact = reordered;
+    expect((0, code_proposal_verification_1.assessCodeProposalVerificationIntegrity)(proposal)).toBeNull();
+    expect((0, code_proposal_verification_1.assessCodeProposalVerification)(proposal)).toBeNull();
+});
 function mixedFixture() {
     const { verificationConfigurationHash, mergedVerificationRules } = require('../lib/code-proposal-verification');
     const proposal = fixture();

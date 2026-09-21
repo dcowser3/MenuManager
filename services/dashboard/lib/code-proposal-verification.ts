@@ -3,6 +3,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { REPLAY_RETIREMENT_POLICY_VERSION } from './replay-retirement';
 export { REPLAY_RETIREMENT_POLICY_VERSION } from './replay-retirement';
+import { hashBehaviorArtifact } from './learning-behavior-tests';
 
 type JsonRecord = Record<string, any>;
 export type CodeVerificationReason = 'code_verification_required' | 'code_verification_failed' | 'code_verification_stale';
@@ -284,7 +285,7 @@ function assessCodeProposalVerificationInternal(proposal: JsonRecord | null | un
             record.correctionId === route.correction_id && record.expectationAuthority === 'human_explanation' && record.disposition !== 'excluded_from_policy_learning')))
             return fail('Every routed explanation requires trusted frozen human evidence.');
         const { sha256: behaviorHash, ...behaviorBody } = artifact;
-        if (createHash('sha256').update(JSON.stringify(behaviorBody)).digest('hex') !== behaviorHash
+        if (hashBehaviorArtifact(behaviorBody) !== behaviorHash
             || !Array.isArray(artifact.tests) || !Array.isArray(artifact.records)
             || behavior.candidate?.artifactHash !== behaviorHash || behavior.candidate?.passed !== true
             || !Array.isArray(behavior.candidate?.outcomes)

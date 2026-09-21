@@ -7,6 +7,7 @@ const crypto = require('crypto');
 const { prepareCodeProposalAttempt } = require('../../../scripts/lib/code-proposal-preparation');
 const { buildPreparationInventory, prepareCodeProposalQueue } = require('../../../scripts/lib/code-proposal-preparation-queue');
 const { recordCodeVerification } = require('../../../scripts/lib/proposal-verification-store');
+const { hashBehaviorArtifact } = require('../lib/learning-behavior-tests');
 
 const digest = (value) => crypto.createHash('sha256').update(value).digest('hex');
 
@@ -56,7 +57,7 @@ test('durable claim crash before summary converges to blocked zero-dispatch reco
     fs.mkdirSync(path.join(root, 'tmp', 'review-eval'), { recursive: true });
     fs.writeFileSync(path.join(root, 'tmp', 'review-eval', 'dataset.jsonl'), `${JSON.stringify({ case_id: 'base', raw_input: 'Base', ground_truth: 'Base', context: {} })}\n`);
     const behaviorBody = { schemaVersion: 1, frozenAt: new Date().toISOString(), records: [{ correctionId: 'c1', submissionId: 'submission-1', inputSpan: { text: 'before' }, expectedSpan: { text: 'after' }, reason: 'reason', expectationAuthority: 'human_explanation', provenance: { reviewer: 'Reviewer' }, disposition: 'awaiting_behavior_verification' }], tests: [], contextualTests: [] };
-    const behavior = { ...behaviorBody, sha256: digest(JSON.stringify(behaviorBody)) };
+    const behavior = { ...behaviorBody, sha256: hashBehaviorArtifact(behaviorBody) };
     const proposal = { id: 'p-recovery', status: 'pending', cycle_id: 'cycle-recovery', proposed_prompt: 'prompt', correction_routing: [{ correction_id: 'c1', lane: 'code_recommendation', case_id: 'case-1', original_text: 'before', corrected_text: 'after', source: 'human' }], replay_evidence: [{ correction_id: 'c1', submission_id: 'submission-1', case_id: 'case-1', original_text: 'before', corrected_text: 'after', status: 'replay_mismatch' }], eval_summary: { replay_retirement_policy_version: 1, behavior_tests: behavior }, code_recommendations: [{ title: 'fix' }] };
     const { client, state } = clientState();
     const verification = { REPLAY_RETIREMENT_POLICY_VERSION: 1, codeProposalVerificationFingerprint: (value) => digest(JSON.stringify({ id: value.id, cycle_id: value.cycle_id, proposed_prompt: value.proposed_prompt, correction_routing: value.correction_routing, replay_evidence: value.replay_evidence, code_recommendations: value.code_recommendations })), hashCodeImplementation: () => digest('source'), hashAcceptedRules: () => digest('rules') };
@@ -90,7 +91,7 @@ test('a concurrent claim after the no-owner read cannot move or replace the winn
     fs.mkdirSync(path.join(root, 'tmp', 'review-eval'), { recursive: true });
     fs.writeFileSync(path.join(root, 'tmp', 'review-eval', 'dataset.jsonl'), `${JSON.stringify({ case_id: 'base', raw_input: 'Base', ground_truth: 'Base', context: {} })}\n`);
     const behaviorBody = { schemaVersion: 1, frozenAt: new Date().toISOString(), records: [{ correctionId: 'c1', submissionId: 'submission-1', inputSpan: { text: 'before' }, expectedSpan: { text: 'after' }, reason: 'reason', expectationAuthority: 'human_explanation', provenance: { reviewer: 'Reviewer' }, disposition: 'awaiting_behavior_verification' }], tests: [], contextualTests: [] };
-    const behavior = { ...behaviorBody, sha256: digest(JSON.stringify(behaviorBody)) };
+    const behavior = { ...behaviorBody, sha256: hashBehaviorArtifact(behaviorBody) };
     const proposal = { id: 'p-orphan-race', status: 'pending', cycle_id: 'cycle-orphan-race', proposed_prompt: 'prompt', correction_routing: [{ correction_id: 'c1', lane: 'code_recommendation', case_id: 'case-1', original_text: 'before', corrected_text: 'after', source: 'human' }], replay_evidence: [{ correction_id: 'c1', submission_id: 'submission-1', case_id: 'case-1', original_text: 'before', corrected_text: 'after', status: 'replay_mismatch' }], eval_summary: { replay_retirement_policy_version: 1, behavior_tests: behavior }, code_recommendations: [{ title: 'fix' }] };
     const { client, state } = clientState();
     state.proposal = proposal;

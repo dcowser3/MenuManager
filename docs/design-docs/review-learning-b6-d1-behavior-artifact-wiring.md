@@ -15,6 +15,10 @@ replay retirement, worker progress, or the UI.
 - `behavior-tests.json` is frozen after the current accepted-policy snapshot is
   available and before any proposal-model call. It is written owner-only
   (`0600`) and contains the B6-A hash and immutable records/tests.
+- Artifact identity is recomputed with the B6-A canonical hash (recursive
+  object-key ordering, array order preserved) during verifier and proof
+  readback, allowing JSONB persistence to reorder object keys without
+  weakening tamper detection.
 - Four-stage provenance remains unknown when this slice has no stage evidence.
   Menu updates remain records with `excluded_from_policy_learning` and create
   no deterministic policy tests. Consolidation writes a valid empty artifact.

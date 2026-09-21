@@ -13,6 +13,7 @@ jest.mock('../../../scripts/lib/code-proposal-preparation', () => ({
 
 const { prepareCodeProposalAttempt } = require('../../../scripts/lib/code-proposal-preparation');
 const { buildPreparationInventory, finalizePreparationInventory, prepareCodeProposalQueue, preparePendingCodeProposalQueue, enumerateCompletePages, loadPendingProposalRows, inventoryBoundaryHash } = require('../../../scripts/lib/code-proposal-preparation-queue');
+const { hashBehaviorArtifact } = require('../lib/learning-behavior-tests');
 
 const HASH = (value) => crypto.createHash('sha256').update(value).digest('hex');
 const behaviorRecord = (id) => ({ correctionId: id, inputSpan: { text: 'before' }, expectedSpan: { text: 'after' }, reason: 'human reason', expectationAuthority: 'human_explanation', provenance: { reviewer: 'Reviewer' }, disposition: 'awaiting_behavior_verification' });
@@ -24,7 +25,7 @@ function proposal(overrides = {}) {
     ];
     const records = [behaviorRecord('c1'), behaviorRecord('c2')];
     const behavior = { schemaVersion: 1, frozenAt: new Date().toISOString(), records, tests: [], contextualTests: [] };
-    behavior.sha256 = HASH(JSON.stringify({ schemaVersion: behavior.schemaVersion, frozenAt: behavior.frozenAt, records, tests: [], contextualTests: [] }));
+    behavior.sha256 = hashBehaviorArtifact({ schemaVersion: behavior.schemaVersion, frozenAt: behavior.frozenAt, records, tests: [], contextualTests: [] });
     return {
         id: 'proposal-queue', status: 'pending', cycle_id: 'cycle-1', correction_routing: routes,
         replay_evidence: routes.map((route) => ({ correction_id: route.correction_id, submission_id: `submission-${route.correction_id}`, case_id: route.case_id, original_text: route.original_text, corrected_text: route.corrected_text, status: 'replay_mismatch' })),

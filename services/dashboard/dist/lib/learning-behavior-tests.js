@@ -1,5 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.canonicalizeBehaviorValue = canonicalizeBehaviorValue;
+exports.hashBehaviorArtifact = hashBehaviorArtifact;
 exports.buildBehaviorTestRecord = buildBehaviorTestRecord;
 exports.buildAcceptedPolicyTestFamily = buildAcceptedPolicyTestFamily;
 exports.freezeBehaviorTests = freezeBehaviorTests;
@@ -8,7 +10,19 @@ exports.executeBehaviorTests = executeBehaviorTests;
 const crypto_1 = require("crypto");
 const canonical_policy_1 = require("./canonical-policy");
 const pre_ai_deterministic_rules_1 = require("./pre-ai-deterministic-rules");
-const hash = (value) => (0, crypto_1.createHash)('sha256').update(JSON.stringify(value)).digest('hex');
+function canonicalizeBehaviorValue(value) {
+    if (Array.isArray(value))
+        return value.map(canonicalizeBehaviorValue);
+    if (value && typeof value === 'object') {
+        return Object.fromEntries(Object.keys(value).sort().map((key) => [key, canonicalizeBehaviorValue(value[key])]));
+    }
+    return value;
+}
+/** JSONB and other object stores may reorder keys; artifact identity must not. */
+function hashBehaviorArtifact(value) {
+    return (0, crypto_1.createHash)('sha256').update(JSON.stringify(canonicalizeBehaviorValue(value))).digest('hex');
+}
+const hash = hashBehaviorArtifact;
 function buildBehaviorTestRecord(correction, evidence = {}) {
     const input = correction.example_original || correction.original_text || '';
     const expected = correction.example_corrected || correction.corrected_text || '';

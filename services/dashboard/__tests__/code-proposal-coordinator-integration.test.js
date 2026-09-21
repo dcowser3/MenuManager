@@ -12,6 +12,7 @@ const { promptProposalApprovalBlock } = require('../lib/improvement-cycle-core')
 const { runPostHandoffCodeProposalLifecycle } = require('../../../scripts/lib/code-proposal-lifecycle');
 const { recordCodeVerification, loadVerificationModule } = require('../../../scripts/lib/proposal-verification-store');
 const { FIXED_RUNTIME_ID } = require('../../../scripts/lib/code-proposal-docker-launcher');
+const { hashBehaviorArtifact } = require('../lib/learning-behavior-tests');
 
 const HASH = (value) => crypto.createHash('sha256').update(value).digest('hex');
 const canonical = (value) => Array.isArray(value)
@@ -195,7 +196,7 @@ function makeBehavior() {
         }],
         tests: [], contextualTests: [],
     };
-    return { ...body, sha256: HASH(JSON.stringify(body)) };
+    return { ...body, sha256: hashBehaviorArtifact(body) };
 }
 
 function makeCycleBehavior(corrections) {
@@ -214,7 +215,7 @@ function makeCycleBehavior(corrections) {
         })),
         tests: [], contextualTests: [],
     };
-    return { ...body, sha256: HASH(JSON.stringify(body)) };
+    return { ...body, sha256: hashBehaviorArtifact(body) };
 }
 
 function makeCycleProposal({ id, cycleId, createdAt, corrections, supersededFromCycleId = null, code = true }) {
