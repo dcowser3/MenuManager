@@ -1,0 +1,15 @@
+# Rules-only spelling successor plan
+
+`scripts/prepare-spelling-successor.js` is a build-only, zero-model planning
+seam for a narrowly scoped successor to the preserved regressed proposal
+`72c144aa-c33e-4873-85e8-6e48537e799e`. It copies only the exact reviewer
+corrections `chilies → chilis`, `affila → affilla`, and `afila → affilla`,
+retaining each source correction ID, menu scope, replay route, and provenance.
+
+The generated successor is linked to the parent cycle and includes deterministic
+pre-AI activation evidence for positive, casing, boundary, and idempotence
+cases. It records zero model/provider calls. Salmon and the Turkey, Chipotle
+Hummus, Guacamole, and spicy-crab rules remain held in parent evidence and are
+never included in the successor. The script writes private local plan artifacts
+only; production insertion and the normal approval endpoint require a separate
+review and are intentionally not performed by this command.
