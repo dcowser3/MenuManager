@@ -87,7 +87,11 @@ implements 15 of the 17 code recommendations. Seven related suites pass
 typecheck, generated-manifest, whitespace, and independent Astra review also
 passing. The two remaining code recommendations request singular `Dessert`,
 which conflicts with the accepted plural-category policy; they remain explicit
-policy conflicts. The ten replacement rules and separate walnut/pistou rule
-remain pending human approval. Nothing in this handoff auto-approves a rule,
+policy conflicts. The ten replacement rules remain pending human approval. The
+user explicitly approved the separate source-unbound walnut/pistou guidance;
+its live record is accepted as human guidance and cumulative head
+`25b8e75e510c60370abdef07a50848424e5dd524` implements the two exact contextual
+forms. That accepted guidance has no runtime effect until the code is merged
+and deployed. Nothing in this handoff auto-approves the ten proposal rules,
 activates the candidate, deploys code, or establishes paid quality/C2b/C2c
 provenance.
