@@ -22,6 +22,13 @@ audit bindings. Existing `recordCodeVerification` remains
 the optimistic pending-row compare-and-swap boundary; no new database table or
 migration is used.
 
+The pending inventory is cutoff-bound and written under its content hash so
+history is retained rather than overwritten. Resume requires the owner-bound
+inventory digest, exact summary and progress ownership/disposition, zero model
+calls, and all five frozen preparation hashes. A repeated correction across
+pending proposals is rejected unless the newer proposal explicitly names the
+older cycle as its supersession source.
+
 Without a separate active `code-candidate` authorization/ledger, the path
 retains the prepared attempt and writes a resumable blocked state with the
 explicit reason `code_candidate_authorization_required`. It performs zero

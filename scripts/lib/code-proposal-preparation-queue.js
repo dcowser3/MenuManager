@@ -29,15 +29,17 @@ async function enumerateCompletePages(fetchPage, options = {}) {
 }
 
 async function loadPendingProposalRows(client, options = {}) {
-    return (await enumerateCompletePages(async (cursor) => {
+    const cutoff = options.cutoff || new Date().toISOString();
+    const enumeration = await enumerateCompletePages(async (cursor) => {
         const offset = cursor ? Number(cursor) : 0;
         const pageSize = Math.min(Math.max(Number(options.pageSize) || 100, 1), 100);
-        const query = client.from('prompt_proposals').select('*').eq('status', 'pending').order('created_at', { ascending: true }).range(offset, offset + pageSize - 1);
+        const query = client.from('prompt_proposals').select('*').eq('status', 'pending').lte('created_at', cutoff).order('created_at', { ascending: true }).order('id', { ascending: true }).range(offset, offset + pageSize - 1);
         const result = await query;
         if (result?.error) throw new Error(`Pending proposal enumeration failed: ${result.error.message}`);
         const rows = Array.isArray(result?.data) ? result.data : [];
         return { rows, nextCursor: `${offset + rows.length}`, complete: rows.length < pageSize };
-    })).rows;
+    }, { cursor: null });
+    return { ...enumeration, cutoff, rows_count: enumeration.rows.length, row_ids: enumeration.rows.map((row) => row.id), query: { table: 'prompt_proposals', status: 'pending', created_at_lte: cutoff, order: ['created_at', 'id'] } };
 }
 
 function canonical(value) {
@@ -157,6 +159,13 @@ function inventoryBoundaryHash(inventory) {
     return sha256(boundary);
 }
 
+function validateRecoveryArtifacts(summary, progress, stored, existing, artifactDirectory) {
+    if (!summary || summary.schema_version !== 1 || summary.snapshot_sha256 !== stored.snapshot_sha256 || summary.attempt_id !== existing.attempt_id || summary.artifact_directory !== artifactDirectory || summary.provider_calls !== 0 || summary.status !== 'blocked') throw new Error('Preparation summary integrity is invalid.');
+    const expectedGroups = stored.groups.map((group) => ({ correction_id: group.correction_id, lane: group.lane, status: group.status, reason: group.reason }));
+    if (JSON.stringify(summary.groups) !== JSON.stringify(expectedGroups)) throw new Error('Preparation summary group dispositions changed.');
+    if (!progress || progress.schema_version !== 1 || progress.attempt_id !== existing.attempt_id || progress.state !== 'blocked' || progress.reason !== 'code_candidate_authorization_required' || Number(progress.budget?.model_calls || 0) !== 0) throw new Error('Preparation progress integrity is invalid.');
+}
+
 async function readDurableProposal(options, proposal) {
     if (typeof options.readCurrentProposal === 'function') return options.readCurrentProposal(options.client, proposal.id);
     if (options.client?.from) {
@@ -176,12 +185,22 @@ async function acceptedRulesHash(options, verification) {
 }
 
 async function preparePendingCodeProposalQueue(options = {}) {
+    const enumeration = options.enumeration;
+    if (!enumeration || enumeration.complete !== true || !Number.isInteger(enumeration.pages) || enumeration.pages < 1 || enumeration.cutoff == null) throw new Error('Preparation queue requires a complete validated pending-proposal enumeration.');
     const proposals = (options.proposals || []).slice().sort((a, b) => `${a.created_at || ''}\u0000${a.id || ''}`.localeCompare(`${b.created_at || ''}\u0000${b.id || ''}`));
+    if (proposals.length !== enumeration.rows_count || proposals.some((proposal, index) => proposal.id !== enumeration.row_ids[index])) throw new Error('Pending-proposal rows do not match the frozen enumeration.');
     if (!proposals.length) return { status: 'empty', providerCalls: 0, snapshot: { schema_version: 1, rows: [], snapshot_sha256: sha256({ schema_version: 1, rows: [] }) }, results: [] };
     if (proposals.length > MAX_GROUPS) throw new Error('Pending proposal inventory exceeds the bounded size.');
-    const body = { schema_version: 1, source: 'prompt_proposals', query: { table: 'prompt_proposals', status: 'pending', order: ['created_at', 'id'], pagination_complete: true }, enumeration: { complete: true, count: proposals.length, order: 'created_at ascending, id ascending' }, rows: proposals.map((proposal) => ({ id: proposal.id, cycle_id: proposal.cycle_id || null, superseded_from_cycle_id: proposal.superseded_from_cycle_id || null, status: proposal.status, correction_ids: (proposal.correction_routing || []).map((row) => row.correction_id).sort(), proposal_fingerprint: options.verification?.codeProposalVerificationFingerprint ? options.verification.codeProposalVerificationFingerprint(proposal) : null })) };
+    const priorByCorrection = new Map();
+    for (const proposal of proposals) for (const row of proposal.correction_routing || []) {
+        if (!row?.correction_id) continue;
+        const prior = priorByCorrection.get(row.correction_id);
+        if (prior && prior.cycle_id !== proposal.superseded_from_cycle_id && proposal.cycle_id !== prior.superseded_from_cycle_id) throw new Error(`Cross-cycle correction ${row.correction_id} lacks an explicit supersession link.`);
+        priorByCorrection.set(row.correction_id, proposal);
+    }
+    const body = { schema_version: 1, source: 'prompt_proposals', query: { ...enumeration.query, pagination_complete: true }, enumeration: { complete: true, count: proposals.length, pages: enumeration.pages, cutoff: enumeration.cutoff, order: 'created_at ascending, id ascending' }, rows: proposals.map((proposal) => ({ id: proposal.id, cycle_id: proposal.cycle_id || null, superseded_from_cycle_id: proposal.superseded_from_cycle_id || null, status: proposal.status, correction_ids: (proposal.correction_routing || []).map((row) => row.correction_id).sort(), proposal_fingerprint: options.verification?.codeProposalVerificationFingerprint ? options.verification.codeProposalVerificationFingerprint(proposal) : null })) };
     const snapshot = Object.freeze({ ...body, snapshot_sha256: sha256(body) });
-    if (options.inventoryPath) { fs.mkdirSync(path.dirname(options.inventoryPath), { recursive: true, mode: 0o700 }); atomicWrite(options.inventoryPath, Buffer.from(`${JSON.stringify(snapshot, null, 2)}\n`)); }
+    if (options.inventoryDirectory) { fs.mkdirSync(options.inventoryDirectory, { recursive: true, mode: 0o700 }); atomicWrite(path.join(options.inventoryDirectory, `pending-preparation-inventory-${snapshot.snapshot_sha256}.json`), Buffer.from(`${JSON.stringify(snapshot, null, 2)}\n`)); }
     const results = [];
     for (const proposal of proposals) {
         try {
@@ -217,7 +236,8 @@ async function prepareCodeProposalQueue(options = {}) {
         const stored = readBoundedJson(path.join(artifactDirectory, 'preparation-inventory.json'), 'Existing owner inventory');
         if (!stored.frozen_hashes || Object.values(stored.frozen_hashes).some((hash) => !DIGEST.test(hash || ''))) throw new Error('Existing owner inventory frozen hashes are missing or malformed.');
         if (inventoryBoundaryHash(stored) !== inventoryBoundaryHash(inventory)) throw new Error('Existing owner inventory changed.');
-        if (existing.preparation_inventory_sha256 && sha256(Buffer.from(`${JSON.stringify(stored, null, 2)}\n`)) !== existing.preparation_inventory_sha256) throw new Error('Existing owner inventory digest changed.');
+        if (!DIGEST.test(existing.preparation_inventory_sha256 || '')) throw new Error('Existing owner preparation inventory identity is missing.');
+        if (sha256(Buffer.from(`${JSON.stringify(stored, null, 2)}\n`)) !== existing.preparation_inventory_sha256) throw new Error('Existing owner inventory digest changed.');
         const datasetFile = path.join(artifactDirectory, 'dataset.jsonl');
         const dataset = readFrozenDataset(datasetFile);
         if (existing.expected_dataset_sha256 && sha256(dataset.bytes) !== existing.expected_dataset_sha256) throw new Error('Existing owner dataset changed.');
@@ -226,19 +246,22 @@ async function prepareCodeProposalQueue(options = {}) {
             const revalidated = await bindHistoricalDataset(options.client, proposal, options.datasetPath, revalidatedFile);
             if (existing.expected_dataset_sha256 && revalidated.sha256 !== existing.expected_dataset_sha256) throw new Error('Existing owner submission or full-audit binding changed.');
         } finally { try { fs.unlinkSync(revalidatedFile); } catch { /* best effort */ } }
-        const sourceHash = options.verification?.hashCodeImplementation ? options.verification.hashCodeImplementation(options.repoRoot) : null;
+        const sourceHash = verification.hashCodeImplementation(options.repoRoot);
         const promptHash = sha256(Buffer.from(proposal.proposed_prompt || proposal.current_prompt || ''));
-        const rulesHash = await acceptedRulesHash(options, options.verification);
+        const rulesHash = await acceptedRulesHash(options, verification);
         const behaviorHash = proposal.eval_summary?.behavior_tests?.sha256;
         const expectedHashes = { behavior_tests_sha256: behaviorHash, dataset_sha256: existing.expected_dataset_sha256, source_sha256: sourceHash, prompt_sha256: promptHash, accepted_rules_sha256: rulesHash };
         for (const [key, value] of Object.entries(expectedHashes)) if (value !== stored.frozen_hashes[key]) throw new Error(`Existing owner ${key} changed.`);
         const summaryFile = path.join(artifactDirectory, 'preparation-summary.json');
         let summary;
-        try { summary = readBoundedJson(summaryFile, 'Preparation summary'); } catch {
+        if (fs.existsSync(summaryFile)) {
+            summary = readBoundedJson(summaryFile, 'Preparation summary');
+        } else {
             summary = summaryFor(stored, existing.attempt_id, artifactDirectory, stored.groups);
             writeSummary(summaryFile, summary);
         }
-        if (summary.snapshot_sha256 !== stored.snapshot_sha256) throw new Error('Existing owner summary changed.');
+        const progress = readBoundedJson(path.join(artifactDirectory, 'candidate', 'progress.json'), 'Preparation progress');
+        validateRecoveryArtifacts(summary, progress, stored, existing, artifactDirectory);
         return { status: 'blocked', reason: 'code_candidate_authorization_required', providerCalls: 0, inventory: stored, attemptId: existing.attempt_id, artifactDirectory };
     }
     const attemptId = options.attemptId || `proposal-${proposal.id}`;

@@ -136,11 +136,12 @@ async function triggerManualCodeCandidateReview({ supabase, cycleId, proposalRow
         const result = await preparePendingCodeProposalQueue({
             client: supabase,
             store: { recordCodeVerification },
-            proposals: pending,
+            proposals: pending.rows,
+            enumeration: pending,
             repoRoot,
             datasetPath: path.join(repoRoot, 'tmp', 'review-eval', 'dataset.jsonl'),
             outputRoot: path.join(repoRoot, 'tmp', 'code-proposals'),
-            inventoryPath: path.join(repoRoot, 'tmp', 'code-proposals', 'pending-preparation-inventory.json'),
+            inventoryDirectory: path.join(repoRoot, 'tmp', 'code-proposals'),
             // The outer cycle is preparation-only. Authorization and dispatch
             // are intentionally stripped by the coordinator.
         });
@@ -714,7 +715,7 @@ async function main() {
     // Idempotency: one proposal per calendar day (cycle_id = YYYY-MM-DD).
     const [
         { data: unconsumedAtGate },
-        pendingProposals,
+        pendingEnumeration,
         { data: existing },
         { data: lastProposals },
         { data: approvedProposalsForBaseline },
@@ -753,7 +754,8 @@ async function main() {
     if (excludedUnconsumedCount > 0) {
         console.log(`Learning eligibility: excluded ${excludedUnconsumedCount} unconsumed row(s) without explicit human learning evidence.`);
     }
-    const pendingProposal = (pendingProposals || [])[0] || null;
+    const pendingProposals = pendingEnumeration.rows || [];
+    const pendingProposal = pendingProposals[0] || null;
     const effectiveAtGate = core.pickEffectivePrompt(approvedProposalsForBaseline || [], filePrompt);
     const manifestAtGate = manifestLib.buildReviewRulesManifest({ acceptedCorrectionRules: acceptedRulesForBaseline || [] });
     const baselineFingerprint = core.computeReviewBaselineFingerprint({

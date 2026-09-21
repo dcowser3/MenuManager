@@ -75,10 +75,10 @@ test('pagination requires an explicit complete terminal page', async () => {
 
 test('pending proposal retrieval is fully paginated', async () => {
     const client = { from: () => {
-        const q = { select: () => q, eq: () => q, order: () => q, range: (from) => Promise.resolve({ data: from >= 2 ? [] : from ? [{ id: 'p2' }] : [{ id: 'p1' }] }) };
+        const q = { select: () => q, eq: () => q, lte: () => q, order: () => q, range: (from) => Promise.resolve({ data: from >= 2 ? [] : from ? [{ id: 'p2' }] : [{ id: 'p1' }] }) };
         return q;
     } };
-    await expect(loadPendingProposalRows(client, { pageSize: 1 })).resolves.toEqual([{ id: 'p1' }, { id: 'p2' }]);
+    await expect(loadPendingProposalRows(client, { pageSize: 1, cutoff: '2026-01-03' })).resolves.toMatchObject({ rows: [{ id: 'p1' }, { id: 'p2' }], rows_count: 2, row_ids: ['p1', 'p2'], complete: true });
 });
 
 test('multiple groups share one owner-bound attempt and injected authorization cannot dispatch', async () => {
@@ -110,13 +110,17 @@ test('complete multi-proposal consumer preserves ordering and does not abort on 
     });
     try {
         const good = proposal({ id: 'p-good', cycle_id: 'cycle-good', created_at: '2026-01-02' });
-        const bad = proposal({ id: 'p-bad', cycle_id: 'cycle-bad', created_at: '2026-01-01', eval_summary: { ...proposal().eval_summary, behavior_tests: { ...proposal().eval_summary.behavior_tests, records: [] } } });
-        const result = await preparePendingCodeProposalQueue({ proposals: [good, bad], client: state.client, repoRoot: state.root, datasetPath: path.join(state.root, 'tmp/review-eval/dataset.jsonl'), verification, inventoryPath: path.join(state.root, 'tmp/pending.json') });
+        const badBase = proposal({ id: 'p-bad', cycle_id: 'cycle-bad', created_at: '2026-01-01' });
+        const bad = { ...badBase, correction_routing: badBase.correction_routing.map((row, index) => ({ ...row, correction_id: `b${index + 1}`, case_id: `case-b${index + 1}` })), replay_evidence: badBase.replay_evidence.map((row, index) => ({ ...row, correction_id: `b${index + 1}`, case_id: `case-b${index + 1}` })), eval_summary: { ...badBase.eval_summary, behavior_tests: { ...badBase.eval_summary.behavior_tests, records: [] } } };
+        const enumeration = { complete: true, pages: 1, cutoff: '2026-01-03', rows_count: 2, row_ids: ['p-bad', 'p-good'], query: { table: 'prompt_proposals' } };
+        const result = await preparePendingCodeProposalQueue({ proposals: [good, bad], enumeration, client: state.client, repoRoot: state.root, datasetPath: path.join(state.root, 'tmp/review-eval/dataset.jsonl'), verification, inventoryDirectory: path.join(state.root, 'tmp') });
         expect(result.snapshot.rows.map((row) => row.id)).toEqual(['p-bad', 'p-good']);
         expect(result.results[0].reason).toBe('preparation_binding_incomplete');
         expect(result.results[1].reason).toBe('code_candidate_authorization_required');
         expect(prepareCodeProposalAttempt).toHaveBeenCalledTimes(1);
-        expect(JSON.parse(fs.readFileSync(path.join(state.root, 'tmp/pending.json'))).snapshot_sha256).toBe(result.snapshot.snapshot_sha256);
+        const snapshots = fs.readdirSync(path.join(state.root, 'tmp')).filter((name) => name.startsWith('pending-preparation-inventory-'));
+        expect(snapshots).toHaveLength(1);
+        expect(JSON.parse(fs.readFileSync(path.join(state.root, 'tmp', snapshots[0]))).snapshot_sha256).toBe(result.snapshot.snapshot_sha256);
     } finally { state.cleanup(); }
 });
 
@@ -128,6 +132,23 @@ test('missing or non-human binding, cross-cycle duplicate, and mutable status dr
     const state = setup();
     try {
         await expect(prepareCodeProposalQueue({ proposal: proposal({ status: 'approved' }), client: state.client, repoRoot: state.root, datasetPath: path.join(state.root, 'tmp/review-eval/dataset.jsonl'), verification })).rejects.toThrow(/pending/);
+    } finally { state.cleanup(); }
+});
+
+test('explicit supersession permits a cross-cycle correction binding', async () => {
+    const state = setup();
+    prepareCodeProposalAttempt.mockImplementation(async (options) => {
+        const attemptRoot = path.join(state.root, 'tmp', 'code-proposals', options.proposal.id, 'attempt');
+        fs.mkdirSync(path.join(attemptRoot, 'candidate'), { recursive: true });
+        fs.writeFileSync(path.join(attemptRoot, 'candidate', 'progress.json'), JSON.stringify({ state: 'active' }));
+        fs.writeFileSync(path.join(attemptRoot, 'preparation-inventory.json'), `${JSON.stringify(options.inventory, null, 2)}\n`);
+        return { status: 'claimed', attemptId: `attempt-${options.proposal.id}`, artifactDirectory: attemptRoot, metadata: { behavior_tests_sha256: HASH('behavior'), expected_dataset_sha256: HASH('dataset'), baseline_source_sha256: HASH('source'), prompt_sha256: HASH('prompt'), accepted_rules_sha256: HASH('rules') } };
+    });
+    try {
+        const first = proposal({ id: 'p-old', cycle_id: 'cycle-old', created_at: '2026-01-01' });
+        const second = proposal({ id: 'p-new', cycle_id: 'cycle-new', created_at: '2026-01-02', superseded_from_cycle_id: 'cycle-old' });
+        const enumeration = { complete: true, pages: 1, cutoff: '2026-01-03', rows_count: 2, row_ids: ['p-old', 'p-new'], query: { table: 'prompt_proposals' } };
+        await expect(preparePendingCodeProposalQueue({ proposals: [first, second], enumeration, client: state.client, repoRoot: state.root, datasetPath: path.join(state.root, 'tmp/review-eval/dataset.jsonl'), verification })).resolves.toMatchObject({ status: 'completed' });
     } finally { state.cleanup(); }
 });
 
