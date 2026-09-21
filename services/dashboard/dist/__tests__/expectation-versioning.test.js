@@ -78,3 +78,13 @@ test('activation planner requires the exact selected rule to have been written f
     expect(activated?.expectations.find((row) => row.id === 'b-v1')).toEqual(envelope.expectations.find((row) => row.id === 'b-v1'));
     expect((0, expectation_versioning_1.planApprovedExpectationActivation)(envelope, [{ expectation_activation: rule.expectation_activation }], [{ index: 4, ok: true, correctionId: 'r-b', location: 'Restaurant B', menuScope: 'food', isLocationSpecific: true }], [4])).toBeNull();
 });
+test('proposal producer creates only explicit human-evidence supersession envelopes', () => {
+    const rule = { change_type: 'superseding_policy', expectation_activation: {
+            source: 'human_evidence', sourceRevision: 'rev-1', oldExpectationId: 'a-v1', supersedesId: 'a-v1', successorId: 'a-v2',
+            previousPolicyVersion: 'p1', candidatePolicyVersion: 'p2', restaurant: 'Restaurant A', menuScope: 'food', oldInput: 'house-made', oldExpected: 'house-made', candidateExpected: 'housemade',
+        } };
+    const envelope = (0, expectation_versioning_1.buildExpectationEnvelopeFromTrustedProposal)({ proposalId: 'cycle-1', proposedRules: [rule] });
+    expect(envelope?.expectations).toEqual(expect.arrayContaining([expect.objectContaining({ id: 'a-v1', status: 'active' }), expect.objectContaining({ id: 'a-v2', status: 'candidate' })]));
+    expect((0, expectation_versioning_1.buildExpectationEnvelopeFromTrustedProposal)({ proposalId: 'cycle-1', proposedRules: [{ ...rule, change_type: 'terminology' }] })).toBeNull();
+    expect((0, expectation_versioning_1.buildExpectationEnvelopeFromTrustedProposal)({ proposalId: 'cycle-1', proposedRules: [{ ...rule, expectation_activation: { ...rule.expectation_activation, sourceRevision: null } }] })).toBeNull();
+});

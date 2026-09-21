@@ -3687,6 +3687,31 @@ app.put('/prompt-proposals/:id', async (req, res) => {
     }
 });
 
+// Narrow optimistic merge for the expectation envelope. This deliberately
+// cannot replace eval_summary or touch code_candidate/code_verification fields.
+app.put('/prompt-proposals/:id/expectation-envelope', async (req, res) => {
+    try {
+        if (!isSupabaseConfigured()) return res.status(503).json({ error: 'Supabase not configured' });
+        const expectedHash = `${req.body?.expected_eval_summary_hash || ''}`;
+        const envelope = req.body?.expectation_envelope;
+        if (!expectedHash || !envelope) return res.status(400).json({ error: 'expected_eval_summary_hash and expectation_envelope are required' });
+        const supabase = getSupabaseClient();
+        const current = await supabase.from(PROMPT_PROPOSALS_TABLE).select('id,status,eval_summary').eq('id', req.params.id).maybeSingle();
+        if (current.error) throw new Error(current.error.message);
+        if (!current.data) return res.status(404).json({ error: 'Proposal not found' });
+        if (!['approved', 'approved_modified'].includes(`${current.data.status}`)) return res.status(409).json({ error: 'Proposal is not approved' });
+        const currentHash = crypto.createHash('sha256').update(JSON.stringify(current.data.eval_summary || {})).digest('hex');
+        if (currentHash !== expectedHash) return res.status(409).json({ error: 'Proposal evaluation summary changed concurrently' });
+        const merged = { ...(current.data.eval_summary || {}), expectation_envelope: envelope };
+        const updated = await supabase.from(PROMPT_PROPOSALS_TABLE).update({ eval_summary: merged }).eq('id', req.params.id).eq('status', current.data.status).select().single();
+        if (updated.error) throw new Error(updated.error.message);
+        res.json(updated.data);
+    } catch (error: any) {
+        console.error('Error merging expectation envelope:', error.message);
+        res.status(500).json({ error: 'Failed to merge expectation envelope' });
+    }
+});
+
 // Critical Supabase columns whose absence silently routes writes to the local
 // JSON fallback (invisible to the improvement cycle, which reads Supabase). A
 // missing column here means a migration was not applied — surface it loudly

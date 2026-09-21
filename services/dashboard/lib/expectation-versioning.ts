@@ -239,3 +239,31 @@ export function planApprovedExpectationActivation(envelope: ExpectationEnvelope,
         successorId: metadata.successorId,
     });
 }
+
+export function buildExpectationEnvelopeFromTrustedProposal(input: {
+    proposalId: string;
+    proposedRules: any[];
+    unchangedExpectations?: any[];
+}) {
+    const trusted = input.proposedRules.map((rule, index) => ({ rule, index, evidence: rule?.expectation_activation }))
+        .filter((entry) => entry.rule?.change_type === 'superseding_policy' && entry.evidence?.source === 'human_evidence');
+    if (!trusted.length || trusted.some(({ evidence }) => !evidence.oldExpectationId || !evidence.sourceRevision
+        || !evidence.supersedesId || !evidence.successorId || !evidence.previousPolicyVersion || !evidence.candidatePolicyVersion
+        || !evidence.restaurant || !evidence.menuScope || !evidence.oldInput || !evidence.oldExpected
+        || !evidence.candidateExpected)) return null;
+    const policyVersion = trusted[0].evidence.previousPolicyVersion;
+    if (trusted.some(({ evidence }) => evidence.previousPolicyVersion !== policyVersion)) return null;
+    const expectations = [
+        ...trusted.map(({ evidence, index }) => ({ id: evidence.oldExpectationId, version: 1, status: 'active' as const,
+            classification: 'missed_existing_rule' as const, policyRuleId: `proposal-${input.proposalId}-rule-${index}`,
+            policyVersion, restaurant: evidence.restaurant, menuScope: evidence.menuScope, input: evidence.oldInput,
+            expected: evidence.oldExpected, sourceExpectationId: null, approvalState: 'approved' as const })),
+        ...trusted.map(({ evidence, index }) => ({ id: evidence.successorId, version: 2, status: 'candidate' as const,
+            classification: 'explicit_superseding_policy' as const, policyRuleId: `proposal-${input.proposalId}-rule-${index}`,
+            policyVersion: evidence.candidatePolicyVersion, restaurant: evidence.restaurant, menuScope: evidence.menuScope,
+            input: evidence.oldInput, expected: evidence.candidateExpected, sourceExpectationId: evidence.oldExpectationId,
+            approvalState: 'unapproved' as const })),
+        ...(input.unchangedExpectations || []),
+    ];
+    return freezeExpectationEnvelope({ policyVersion, expectations, supersedes: trusted.map(({ evidence }) => ({ priorId: evidence.oldExpectationId, successorId: evidence.successorId })) });
+}

@@ -16,3 +16,10 @@ unrelated cases remain unchanged.
 This slice is intentionally additive: it does not migrate existing datasets,
 change provider behavior, activate production policy, or permit candidate code or
 prompts to edit the frozen artifact.
+
+Improvement-cycle proposals receive an envelope only when the proposed rule
+contains complete, independently recorded human-evidence metadata (source
+revision, old expectation, successor, scope, and policy versions). Missing or
+ambiguous metadata produces no activation record. Approval persists a successor
+through the narrow optimistic envelope merge after the exact accepted correction
+rule has been written.

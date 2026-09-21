@@ -71,6 +71,7 @@ function requireDashboardLib(relPath) {
 
 const replayAuditBindingLib = requireDashboardLib('replay-audit-binding');
 const replayRetirementLib = requireDashboardLib('replay-retirement');
+const expectationVersioningLib = requireDashboardLib('expectation-versioning');
 
 function requireLlmAdapter() {
     const sourcePath = path.join(repoRoot, 'services', 'llm-adapter', 'src', 'index.ts');
@@ -1710,6 +1711,11 @@ async function main() {
             // one group without reconstructing or inventing expectations.
             behavior_tests: behaviorArtifact,
         });
+        const expectationEnvelope = expectationVersioningLib.buildExpectationEnvelopeFromTrustedProposal({
+            proposalId: cycleId,
+            proposedRules: validated.proposed_replacement_rules || [],
+        });
+        if (expectationEnvelope) evalSummary = { ...evalSummary, expectation_envelope: expectationEnvelope };
 
         // 9. Store the proposal.
         const dates = correctionRules.map((r) => Date.parse(r.created_at)).filter(Number.isFinite);

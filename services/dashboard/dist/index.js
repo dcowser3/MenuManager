@@ -2563,8 +2563,10 @@ app.post('/api/learning/prompt-proposal/:id/review', async (req, res) => {
             try {
                 const activatedEnvelope = (0, expectation_versioning_1.planApprovedExpectationActivation)(envelope, acceptedRules, ruleResults, selectedIndexes);
                 if (activatedEnvelope && activatedEnvelope.sha256 !== envelope.sha256) {
-                    await internalApi.put(`${DB_SERVICE_URL}/prompt-proposals/${encodeURIComponent(id)}`, {
-                        eval_summary: { ...proposalRecord.eval_summary, expectation_envelope: activatedEnvelope },
+                    const expectedEvalSummaryHash = crypto_1.default.createHash('sha256').update(JSON.stringify(proposalRecord.eval_summary || {})).digest('hex');
+                    await internalApi.put(`${DB_SERVICE_URL}/prompt-proposals/${encodeURIComponent(id)}/expectation-envelope`, {
+                        expected_eval_summary_hash: expectedEvalSummaryHash,
+                        expectation_envelope: activatedEnvelope,
                     }, { timeout: 5000 });
                 }
             }
