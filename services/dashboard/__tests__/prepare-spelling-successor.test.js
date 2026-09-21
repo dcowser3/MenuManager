@@ -3,6 +3,7 @@ const os = require('os');
 const path = require('path');
 const { execFileSync } = require('child_process');
 const { evalStatusFromSummary, promptProposalApprovalBlock } = require('../dist/lib/improvement-cycle-core');
+const { assertPendingInsertPayload, classifyCreateReadback, prepareSingleApproval, recoverApprovalReadback } = require('../../../scripts/lib/spelling-successor-operational-path');
 
 const script = path.resolve(__dirname, '../../../scripts/prepare-spelling-successor.js');
 const live = path.resolve(__dirname, '../../../tmp/code-proposals/72c144aa-c33e-4873-85e8-6e48537e799e/contextual-descriptor-reconciliation/live-proposal.json');
@@ -10,7 +11,9 @@ const live = path.resolve(__dirname, '../../../tmp/code-proposals/72c144aa-c33e-
 test('constructs only the three safe spelling rules with provenance and deterministic proof', () => {
     if (!fs.existsSync(live)) return;
     const output = fs.mkdtempSync(path.join(os.tmpdir(), 'spelling-successor-'));
-    const result = execFileSync(process.execPath, [script, '--proposal-file', live, '--output-dir', output], { encoding: 'utf8' });
+    const runtimeEvidence = path.resolve(__dirname, '../../../tmp/code-proposals/72c144aa-c33e-4873-85e8-6e48537e799e/contextual-descriptor-reconciliation/accepted-rules-runtime-snapshot.json');
+    if (!fs.existsSync(runtimeEvidence)) return;
+    const result = execFileSync(process.execPath, [script, '--proposal-file', live, '--output-dir', output, '--accepted-rules-file', runtimeEvidence, '--runtime-root', path.resolve(__dirname, '../../..')], { encoding: 'utf8' });
     const summary = JSON.parse(result);
     const plan = JSON.parse(fs.readFileSync(path.join(output, 'plan.json'), 'utf8'));
     expect(summary.model_calls).toBe(0);
@@ -28,10 +31,22 @@ test('constructs only the three safe spelling rules with provenance and determin
     expect(plan.held_originals).toEqual(expect.arrayContaining(['Salmon', 'Turkey 2 ways, Roulade, breast, haricots verts, mashed potatoes, sage giblet gravy, cranberry sauce D']));
     expect(plan.successor.eval_summary.candidate_rule_activations.every((entry) => entry.total_activations > 0)).toBe(true);
     expect(plan.successor.eval_summary.regressions).toEqual([]);
+    expect(plan.successor.eval_summary.baseline_accepted_rules_sha256).toBe(plan.accepted_rules_sha256);
+    expect(plan.successor.current_prompt).toBe(plan.successor.proposed_prompt);
+    expect(assertPendingInsertPayload(plan.successor, plan, { effective_prompt_sha256: plan.effective_prompt_sha256, accepted_rules_sha256: plan.accepted_rules_sha256, accepted_rules: JSON.parse(fs.readFileSync(runtimeEvidence, 'utf8')).accepted_rules, implementation_sha256: plan.implementation_sha256 })).toBe(true);
+    expect(prepareSingleApproval(plan.successor, { effective_prompt_sha256: plan.effective_prompt_sha256, accepted_rules_sha256: plan.accepted_rules_sha256, accepted_rules: JSON.parse(fs.readFileSync(runtimeEvidence, 'utf8')).accepted_rules, implementation_sha256: plan.implementation_sha256 }, [0, 1, 2]).accepted_rule_indexes).toEqual([0, 1, 2]);
 });
 
 test('forged or incomplete evaluation evidence cannot pass the rules-only gate', () => {
     const summary = { candidate: {}, comparedCases: 5, regressed: 0, candidate_rule_activations: [{ total_activations: 0 }] };
     expect(evalStatusFromSummary(summary, { rulesOnly: true })).toBe('no_effect');
     expect(promptProposalApprovalBlock({ eval_status: 'no_effect', disposition: 'rules_only', proposed_rules: [{ original_text: 'x', corrected_text: 'y' }], eval_summary: summary })).toEqual(expect.objectContaining({ reason: 'eval_rule_inactive' }));
+});
+
+test('create/readback recovery is idempotent and rejects mismatched successors', () => {
+    const plan = { successor: { cycle_id: 'cycle-x', status: 'pending', accepted_rules: null }, successor_sha256: 'x' };
+    expect(classifyCreateReadback({ cycle_id: 'cycle-x', status: 'pending', accepted_rules: null }, plan).state).toBe('conflict');
+    expect(recoverApprovalReadback({ cycle_id: 'cycle-x', status: 'pending', accepted_rules: null }, { expected_cycle_id: 'cycle-x' }).state).toBe('retry_allowed');
+    expect(recoverApprovalReadback({ cycle_id: 'cycle-x', status: 'approved_modified', accepted_rules: [{}, {}, {}] }, { expected_cycle_id: 'cycle-x' }).state).toBe('already_approved');
+    expect(recoverApprovalReadback({ cycle_id: 'cycle-y', status: 'approved_modified', accepted_rules: [{}, {}, {}] }, { expected_cycle_id: 'cycle-x' }).state).toBe('conflict');
 });
