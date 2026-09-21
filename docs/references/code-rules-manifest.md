@@ -115,7 +115,7 @@ Reviewer-confirmed food words are matched with bounded Damerau edit distance, in
 
 - id: `pre-ai/curated-canonical-food-spelling` · category: spelling · implementation: `services/dashboard/lib/pre-ai-deterministic-rules.ts#normalizeCuratedFoodSpellingsOnLine`
 
-### Contextual singular ingredient forms
+### Conservative singular ingredient forms
 
 Applies verified contextual singular-ingredient corrections to comma-delimited descriptions, including jalapeños, prawns, pickles, fruit, vegetables, nuts, peppers, potatoes, and croutons; Prawn before either Tequeño or Tequeños; and a standalone Pickle side. Counted/prepared phrases, documented plural exceptions, and dish names are preserved.
 - `Guacamole, jalapeños, avocado 18` -> `Guacamole, jalapeño, avocado 18`

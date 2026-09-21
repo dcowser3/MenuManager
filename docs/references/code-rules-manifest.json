@@ -1673,7 +1673,7 @@
       "id": "pre-ai/cotija-cheese-modifier",
       "layer": "pre_ai_deterministic",
       "category": "terminology",
-      "title": "Cotija requires cheese modifier",
+      "title": "Named cheeses require cheese modifier",
       "description": "Adds \"cheese\" after Cotija, mozzarella, feta, or parmesan when used as an ingredient name, preserving capitalization. Already-correct modifiers and hyphenated adjective forms are left unchanged.",
       "examples": [
         {
