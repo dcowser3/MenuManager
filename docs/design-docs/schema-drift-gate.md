@@ -113,3 +113,13 @@ migrations automatically, tracked in `supabase_migrations.schema_migrations`. Ne
 the DB-connection secret in the pipeline and a one-time baseline of the 21 existing
 hand-applied migrations. At that point drift becomes structurally impossible and this
 gate becomes a belt-and-suspenders check.
+
+### Contextual descriptor reconciliation RPC
+
+`supabase/migrations/20260921_add_contextual_descriptor_reconciliation_rpc.sql`
+defines the restricted `service_role`-only transactional RPC used by the
+reviewed contextual descriptor reconciliation plan. It locks the exact
+`prompt_proposals` row, checks the supplied `xmin` and complete substantive
+snapshot, and updates only `proposed_rules` and `correction_routing`. The
+migration is intentionally unapplied until separately authorized; the plan
+runner fails closed when the RPC is unavailable.

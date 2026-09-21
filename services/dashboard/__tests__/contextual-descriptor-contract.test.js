@@ -78,13 +78,28 @@ test('CAS requires exact pending xmin and readback preserves full evidence/histo
     const proposal = baseProposal();
     const plan = buildContextualDescriptorReconciliationPlan({ proposal, expectedProposalFingerprint: hash(proposal), computeProposalFingerprint: hash, implementationSha256: hash('a'), expectedImplementationSha256: hash('a') });
     const calls = [];
-    const query = { update: (patch) => (calls.push(['update', patch]), query), eq: (field, value) => (calls.push(['eq', field, value]), query), select: async () => ({ data: [baseProposal({ proposed_rules: plan.proposal_patch.proposed_rules, correction_routing: plan.proposal_patch.correction_routing })], error: null }) };
-    const result = await applyContextualDescriptorReconciliation({ from: () => query }, 'proposal', 'old-xmin', plan);
+    const client = { rpc: async (name, args) => { calls.push(['rpc', name, args]); return { data: [baseProposal({ proposed_rules: plan.proposal_patch.proposed_rules, correction_routing: plan.proposal_patch.correction_routing, xmin: 'new-xmin' })], error: null }; } };
+    const result = await applyContextualDescriptorReconciliation(client, 'proposal', 'old-xmin', plan);
     result.xmin = 'new-xmin';
     expect(result.proposed_rules).toHaveLength(2);
-    expect(calls.filter((call) => call[0] === 'eq')).toEqual([['eq', 'id', 'proposal'], ['eq', 'status', 'pending'], ['eq', 'xmin', 'old-xmin']]);
+    expect(calls[0][0]).toBe('rpc');
+    expect(calls[0][1]).toBe('reconcile_contextual_descriptor_proposal');
+    expect(calls[0][2].p_expected_xmin).toBe('old-xmin');
     expect(() => assertContextualDescriptorReadback({ ...result, eval_summary: proposal.eval_summary, replay_evidence: proposal.replay_evidence, status: proposal.status, eval_status: proposal.eval_status, disposition: proposal.disposition }, plan)).not.toThrow();
     expect(() => assertContextualDescriptorReadback({ ...result, proposed_rules: result.proposed_rules.map((row) => row.original_text === 'chilies' ? { ...row, corrected_text: 'changed' } : row), eval_summary: proposal.eval_summary, replay_evidence: proposal.replay_evidence, status: proposal.status, eval_status: proposal.eval_status, disposition: proposal.disposition }, plan)).toThrow(/state\/history/);
-    const race = { from: () => ({ update: () => ({ eq: () => ({ eq: () => ({ eq: () => ({ select: async () => ({ data: [], error: null }) }) }) }) }) }) };
-    await expect(applyContextualDescriptorReconciliation(race, 'proposal', 'stale', plan)).rejects.toThrow(/zero or multiple/);
+    const race = { rpc: async () => ({ data: [], error: { message: 'xmin conflict' } }) };
+    await expect(applyContextualDescriptorReconciliation(race, 'proposal', 'old-xmin', plan)).rejects.toThrow(/xmin conflict/);
+});
+
+test('recovery resolves timeout-after-commit and retries only an exact untouched before-state', async () => {
+    const proposal = baseProposal();
+    const plan = buildContextualDescriptorReconciliationPlan({ proposal, expectedProposalFingerprint: hash(proposal), computeProposalFingerprint: hash, implementationSha256: hash('a'), expectedImplementationSha256: hash('a') });
+    const after = baseProposal({ proposed_rules: plan.proposal_patch.proposed_rules, correction_routing: plan.proposal_patch.correction_routing, xmin: 'new-xmin' });
+    const recovery = require('../../../scripts/lib/contextual-descriptor-reconciliation').resumeContextualDescriptorReconciliation;
+    const recovered = await recovery({ client: { rpc: async () => { throw new Error('must not redispatch'); } }, proposalId: 'proposal', expectedXmin: 'old-xmin', plan, readCurrent: async () => after });
+    expect(recovered.state).toBe('already_applied');
+    const before = baseProposal(); let calls = 0;
+    const retried = await recovery({ client: { rpc: async () => { calls += 1; return { data: [after], error: null }; } }, proposalId: 'proposal', expectedXmin: 'old-xmin', plan, readCurrent: async () => before });
+    expect(retried.state).toBe('applied'); expect(calls).toBe(1);
+    await expect(recovery({ client: { rpc: async () => ({ data: [after], error: null }) }, proposalId: 'proposal', expectedXmin: 'old-xmin', plan, readCurrent: async () => ({ ...before, disposition: 'prompt_only' }) })).rejects.toThrow(/conflicting state/);
 });

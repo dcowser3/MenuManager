@@ -60,6 +60,7 @@ function buildContextualDescriptorReconciliationPlan({ proposal, expectedProposa
         expected_xmin: proposal.xmin == null ? null : `${proposal.xmin}`,
         proposal_before_sha256: hash(proposal), proposal_after_sha256: hash(nextProposal),
         substantive_before_sha256: hash(beforeSubstantive), substantive_after_sha256: hash(afterSubstantive),
+        expected_substantive_snapshot: beforeSubstantive,
         remaining_proposed_rules: remainingRules, remaining_proposed_rules_sha256: hash(remainingRules), salmon_orphan: salmonOrphan,
         preserved: { status: proposal.status, eval_status: proposal.eval_status, disposition: proposal.disposition, terminal_attempt_id: candidate.attempt_id, replay_evidence_sha256: hash(proposal.replay_evidence || []), lane_counts: { code_recommendation: 17, replacement_rule: 7, existing_rule: 3 } },
         proposal_patch: { proposed_rules: nextProposal.proposed_rules, correction_routing: nextProposal.correction_routing },
@@ -75,18 +76,35 @@ function substantive(value) {
 
 function assertContextualDescriptorReconciliationPlan(plan) {
     if (!plan || plan.schema_version !== 1 || plan.phase !== 'planned' || !DIGEST.test(plan.proposal_before_sha256 || '') || !DIGEST.test(plan.proposal_after_sha256 || '') || !DIGEST.test(plan.substantive_before_sha256 || '') || !DIGEST.test(plan.substantive_after_sha256 || '') || plan.target_correction_ids?.join('|') !== TARGETS.map((target) => target.correction_id).join('|')) throw new Error('Invalid contextual descriptor reconciliation plan.');
-    if (!DIGEST.test(plan.contract_sha256 || '') || plan.contract_sha256 !== contractHash() || !DIGEST.test(plan.implementation_sha256 || '') || plan.preserved?.lane_counts?.code_recommendation !== 17 || plan.preserved?.lane_counts?.replacement_rule !== 7 || plan.preserved?.lane_counts?.existing_rule !== 3 || !Array.isArray(plan.remaining_proposed_rules) || plan.remaining_proposed_rules_sha256 !== hash(plan.remaining_proposed_rules)) throw new Error('Contextual descriptor reconciliation plan contract is stale.');
+    if (!DIGEST.test(plan.contract_sha256 || '') || plan.contract_sha256 !== contractHash() || !DIGEST.test(plan.implementation_sha256 || '') || !plan.expected_substantive_snapshot || hash(plan.expected_substantive_snapshot) !== plan.substantive_before_sha256 || plan.preserved?.lane_counts?.code_recommendation !== 17 || plan.preserved?.lane_counts?.replacement_rule !== 7 || plan.preserved?.lane_counts?.existing_rule !== 3 || !Array.isArray(plan.remaining_proposed_rules) || plan.remaining_proposed_rules_sha256 !== hash(plan.remaining_proposed_rules)) throw new Error('Contextual descriptor reconciliation plan contract is stale.');
     return true;
 }
 
 async function applyContextualDescriptorReconciliation(client, proposalId, expectedXmin, plan) {
     assertContextualDescriptorReconciliationPlan(plan);
-    if (!client?.from || !proposalId || expectedXmin == null) throw new Error('Contextual descriptor reconciliation CAS requires client, proposal id, and xmin.');
-    const result = await client.from('prompt_proposals').update(plan.proposal_patch)
-        .eq('id', proposalId).eq('status', 'pending').eq('xmin', expectedXmin).select('*,xmin');
+    if (!client?.rpc || !proposalId || expectedXmin == null) throw new Error('Contextual descriptor reconciliation CAS requires RPC client, proposal id, and xmin.');
+    if (`${plan.expected_xmin}` !== `${expectedXmin}`) throw new Error('Contextual descriptor reconciliation xmin binding mismatch.');
+    const result = await client.rpc('reconcile_contextual_descriptor_proposal', {
+        p_proposal_id: proposalId,
+        p_expected_xmin: `${expectedXmin}`,
+        p_expected_substantive: plan.expected_substantive_snapshot,
+        p_new_proposed_rules: plan.proposal_patch.proposed_rules,
+        p_new_correction_routing: plan.proposal_patch.correction_routing,
+    });
     if (result.error) throw new Error(`Contextual descriptor reconciliation CAS failed: ${result.error.message}`);
     if (!Array.isArray(result.data) || result.data.length !== 1) throw new Error('Contextual descriptor reconciliation CAS affected zero or multiple rows.');
     return result.data[0];
+}
+
+async function resumeContextualDescriptorReconciliation({ client, proposalId, expectedXmin, plan, readCurrent } = {}) {
+    assertContextualDescriptorReconciliationPlan(plan);
+    if (typeof readCurrent !== 'function') throw new Error('Contextual descriptor reconciliation recovery requires a full-row read function.');
+    const current = await readCurrent();
+    const currentSubstantiveHash = hash(substantive(current));
+    if (currentSubstantiveHash === plan.substantive_after_sha256 && `${current.xmin}` !== `${expectedXmin}`) return { state: 'already_applied', row: current };
+    if (currentSubstantiveHash !== plan.substantive_before_sha256 || `${current.xmin}` !== `${expectedXmin}`) throw new Error('Contextual descriptor reconciliation recovery found conflicting state.');
+    const applied = await applyContextualDescriptorReconciliation(client, proposalId, expectedXmin, plan);
+    return { state: 'applied', row: applied };
 }
 
 function assertContextualDescriptorReadback(actual, plan) {
@@ -95,4 +113,4 @@ function assertContextualDescriptorReadback(actual, plan) {
     return true;
 }
 
-module.exports = { TARGETS, CONTRACT_PATH, canonical, hash, contractHash, buildContextualDescriptorReconciliationPlan, assertContextualDescriptorReconciliationPlan, applyContextualDescriptorReconciliation, assertContextualDescriptorReadback };
+module.exports = { TARGETS, CONTRACT_PATH, canonical, hash, contractHash, substantive, buildContextualDescriptorReconciliationPlan, assertContextualDescriptorReconciliationPlan, applyContextualDescriptorReconciliation, resumeContextualDescriptorReconciliation, assertContextualDescriptorReadback };
