@@ -155,7 +155,7 @@ function summaryFor(inventory, attemptId, artifactDirectory, groups, reason = nu
 }
 
 function inventoryBoundaryHash(inventory) {
-    const { snapshot_sha256: _snapshot, frozen_hashes: _hashes, ...boundary } = inventory || {};
+    const boundary = Object.fromEntries(['schema_version', 'source', 'proposal_id', 'cycle_id', 'superseded_from_cycle_id', 'proposal_fingerprint', 'replay_policy_version', 'behavior_tests_sha256', 'groups', 'excluded_groups', 'blocked_groups'].map((key) => [key, inventory?.[key] ?? null]));
     return sha256(boundary);
 }
 
@@ -289,4 +289,4 @@ async function prepareCodeProposalQueue(options = {}) {
     return { status: 'blocked', reason: 'code_candidate_authorization_required', providerCalls: 0, inventory: finalizedInventory, attemptId: prepared.attemptId, artifactDirectory: prepared.artifactDirectory, metadata: prepared.metadata, summary };
 }
 
-module.exports = { buildPreparationInventory, finalizePreparationInventory, prepareCodeProposalQueue, preparePendingCodeProposalQueue, enumerateCompletePages, loadPendingProposalRows, canonical, sha256 };
+module.exports = { buildPreparationInventory, finalizePreparationInventory, prepareCodeProposalQueue, preparePendingCodeProposalQueue, enumerateCompletePages, loadPendingProposalRows, inventoryBoundaryHash, canonical, sha256 };

@@ -7,10 +7,12 @@ const crypto = require('crypto');
 
 jest.mock('../../../scripts/lib/code-proposal-preparation', () => ({
     prepareCodeProposalAttempt: jest.fn(),
+    bindHistoricalDataset: jest.fn(async () => ({ sha256: HASH('dataset') })),
+    readFrozenDataset: jest.fn(() => ({ bytes: Buffer.from('dataset') })),
 }));
 
 const { prepareCodeProposalAttempt } = require('../../../scripts/lib/code-proposal-preparation');
-const { buildPreparationInventory, finalizePreparationInventory, prepareCodeProposalQueue, preparePendingCodeProposalQueue, enumerateCompletePages, loadPendingProposalRows } = require('../../../scripts/lib/code-proposal-preparation-queue');
+const { buildPreparationInventory, finalizePreparationInventory, prepareCodeProposalQueue, preparePendingCodeProposalQueue, enumerateCompletePages, loadPendingProposalRows, inventoryBoundaryHash } = require('../../../scripts/lib/code-proposal-preparation-queue');
 
 const HASH = (value) => crypto.createHash('sha256').update(value).digest('hex');
 const behaviorRecord = (id) => ({ correctionId: id, inputSpan: { text: 'before' }, expectedSpan: { text: 'after' }, reason: 'human reason', expectationAuthority: 'human_explanation', provenance: { reviewer: 'Reviewer' }, disposition: 'awaiting_behavior_verification' });
@@ -42,7 +44,7 @@ function setup() {
     return { root, client, cleanup: () => fs.rmSync(root, { recursive: true, force: true }) };
 }
 
-const verification = { codeProposalVerificationFingerprint: (value) => HASH(JSON.stringify(value)), hashCodeImplementation: () => HASH('source'), hashAcceptedRules: () => HASH('rules') };
+const verification = { codeProposalVerificationFingerprint: (value) => HASH(JSON.stringify({ ...value, eval_summary: { ...(value.eval_summary || {}), code_candidate: undefined } })), hashCodeImplementation: () => HASH('source'), hashAcceptedRules: () => HASH('rules') };
 
 beforeEach(() => { prepareCodeProposalAttempt.mockReset(); });
 
@@ -139,6 +141,34 @@ test('production-style consumer resolves its verifier when no verifier is inject
         const result = await preparePendingCodeProposalQueue({ proposals: [item], enumeration, client: state.client, repoRoot: process.cwd(), datasetPath: path.join(state.root, 'tmp/review-eval/dataset.jsonl'), inventoryDirectory: path.join(state.root, 'tmp') });
         expect(result.snapshot.rows[0].proposal_fingerprint).toMatch(/^[a-f0-9]{64}$/);
         expect(result.results[0].reason).toBe('code_candidate_authorization_required');
+    } finally { state.cleanup(); }
+});
+
+test('same owner reconciles across outer cutoff/snapshot refresh without dispatch', async () => {
+    const state = setup();
+    const base = proposal({ id: 'p-resume', cycle_id: 'cycle-resume' });
+    const firstInventory = finalizePreparationInventory(buildPreparationInventory(base, { proposalFingerprint: verification.codeProposalVerificationFingerprint(base), query: { cutoff: 'old' }, enumeration: { complete: true, order: 'old' }, advisoryCursor: 'old' }), { behavior_tests_sha256: base.eval_summary.behavior_tests.sha256, dataset_sha256: HASH('dataset'), source_sha256: HASH('source'), prompt_sha256: HASH(''), accepted_rules_sha256: HASH('rules') });
+    const attemptRoot = path.join(state.root, 'attempt-resume');
+    fs.mkdirSync(path.join(attemptRoot, 'candidate'), { recursive: true });
+    fs.writeFileSync(path.join(attemptRoot, 'preparation-inventory.json'), `${JSON.stringify(firstInventory, null, 2)}\n`);
+    fs.writeFileSync(path.join(attemptRoot, 'dataset.jsonl'), 'dataset');
+    const summary = { schema_version: 1, snapshot_sha256: firstInventory.snapshot_sha256, proposal_id: firstInventory.proposal_id, cycle_id: firstInventory.cycle_id, attempt_id: 'attempt-resume', artifact_directory: attemptRoot, provider_calls: 0, advisory_cursor: firstInventory.advisory_cursor, groups: firstInventory.groups.map((g) => ({ correction_id: g.correction_id, lane: g.lane, status: g.status, reason: g.reason })), status: 'blocked', reason: 'code_candidate_authorization_required' };
+    fs.writeFileSync(path.join(attemptRoot, 'preparation-summary.json'), `${JSON.stringify(summary, null, 2)}\n`);
+    fs.writeFileSync(path.join(attemptRoot, 'candidate/progress.json'), `${JSON.stringify({ schema_version: 1, attempt_id: 'attempt-resume', state: 'blocked', reason: 'code_candidate_authorization_required', deadline_at: '2099-01-01T00:00:00.000Z', budget: { model_calls: 0 } })}\n`);
+    const owner = { status: 'running', attempt_id: 'attempt-resume', started_at: new Date().toISOString(), deadline_at: '2099-01-01T00:00:00.000Z', artifact_directory: attemptRoot, preparation_inventory_sha256: HASH(JSON.stringify(firstInventory, null, 2) + '\n'), expected_dataset_sha256: HASH('dataset') };
+    const current = { ...base, eval_summary: { ...base.eval_summary, code_candidate: owner } };
+    try {
+        const refreshed = { ...current };
+        const result = await prepareCodeProposalQueue({ proposal: refreshed, client: state.client, repoRoot: state.root, datasetPath: path.join(state.root, 'tmp/review-eval/dataset.jsonl'), verification, readCurrentProposal: async () => current });
+        expect(result.attemptId).toBe('attempt-resume');
+        expect(result.reason).toBe('code_candidate_authorization_required');
+        expect(prepareCodeProposalAttempt).not.toHaveBeenCalled();
+        expect(inventoryBoundaryHash(result.inventory)).toBe(inventoryBoundaryHash(firstInventory));
+        fs.writeFileSync(path.join(attemptRoot, 'preparation-summary.json'), `${JSON.stringify({ ...summary, reason: 'tampered' })}\n`);
+        await expect(prepareCodeProposalQueue({ proposal: refreshed, client: state.client, repoRoot: state.root, datasetPath: path.join(state.root, 'tmp/review-eval/dataset.jsonl'), verification, readCurrentProposal: async () => current })).rejects.toThrow(/summary integrity/);
+        fs.writeFileSync(path.join(attemptRoot, 'preparation-summary.json'), `${JSON.stringify(summary)}\n`);
+        fs.writeFileSync(path.join(attemptRoot, 'candidate/progress.json'), `${JSON.stringify({ schema_version: 1, attempt_id: 'attempt-resume', state: 'blocked', reason: 'code_candidate_authorization_required', deadline_at: '2099-01-01T00:00:00.000Z', budget: {} })}\n`);
+        await expect(prepareCodeProposalQueue({ proposal: refreshed, client: state.client, repoRoot: state.root, datasetPath: path.join(state.root, 'tmp/review-eval/dataset.jsonl'), verification, readCurrentProposal: async () => current })).rejects.toThrow(/progress integrity/);
     } finally { state.cleanup(); }
 });
 
