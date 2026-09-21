@@ -1,5 +1,8 @@
 'use strict';
-const { buildManualRuleRewritePlan, assertPlan, OLD_IDS, NEW_ID, RULE } = require('../../../scripts/lib/manual-rule-rewrite');
+const { buildManualRuleRewritePlan, assertPlan, writeRecoveryMarker, advanceRewriteMarker, OLD_IDS, NEW_ID, RULE, hash } = require('../../../scripts/lib/manual-rule-rewrite');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 
 const proposal = () => {
     const ids = [...OLD_IDS, ...Array.from({ length: 27 }, (_, i) => `keep-${i}`)];
@@ -34,4 +37,15 @@ test('requires all three exact correction rule rows and remains resumable by sta
     const retry = buildManualRuleRewritePlan({ correctionRules, proposal: proposal(), expectedProposalFingerprint: 'f'.repeat(64) });
     expect(retry.new_id).toBe(plan.new_id);
     expect(() => buildManualRuleRewritePlan({ correctionRules: correctionRules.slice(1), proposal: proposal(), expectedProposalFingerprint: 'f'.repeat(64) })).toThrow(/one exact/);
+});
+
+test('advances a private recovery marker only from the expected phase snapshot', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'manual-rule-rewrite-'));
+    const marker = path.join(dir, 'recovery.json');
+    const plan = buildManualRuleRewritePlan({ correctionRules, proposal: proposal(), expectedProposalFingerprint: 'f'.repeat(64) });
+    await writeRecoveryMarker(marker, plan);
+    const next = await advanceRewriteMarker(marker, hash(plan), 'rules_reconciled');
+    expect(next.phase).toBe('rules_reconciled');
+    await expect(advanceRewriteMarker(marker, hash(plan), 'proposal_reconciled')).rejects.toThrow(/changed concurrently/);
+    expect(fs.statSync(marker).mode & 0o777).toBe(0o600);
 });

@@ -1,7 +1,6 @@
 'use strict';
 
 const crypto = require('crypto');
-const fs = require('fs');
 const fsp = require('fs/promises');
 
 const OLD_IDS = Object.freeze([
@@ -94,4 +93,14 @@ async function writeRecoveryMarker(markerPath, plan) {
     await fsp.chmod(markerPath, 0o600);
 }
 
-module.exports = { OLD_IDS, NEW_ID, NEW_SUBMISSION_ID, RULE, stripOldMembership, buildNewManualRule, buildManualRuleRewritePlan, assertPlan, writeRecoveryMarker, hash };
+async function advanceRewriteMarker(markerPath, expectedPlanSha256, phase) {
+    const allowed = new Set(['planned', 'rules_reconciled', 'proposal_reconciled', 'verified']);
+    if (!allowed.has(phase)) throw new Error('Unknown manual-rule rewrite phase.');
+    const current = JSON.parse(await fsp.readFile(markerPath, 'utf8'));
+    if (hash(current) !== expectedPlanSha256) throw new Error('Rewrite marker changed concurrently.');
+    const next = { ...current, phase, previous_phase: current.phase };
+    await writeRecoveryMarker(markerPath, next);
+    return next;
+}
+
+module.exports = { OLD_IDS, NEW_ID, NEW_SUBMISSION_ID, RULE, stripOldMembership, buildNewManualRule, buildManualRuleRewritePlan, assertPlan, writeRecoveryMarker, advanceRewriteMarker, hash };
