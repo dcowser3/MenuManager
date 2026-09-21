@@ -234,6 +234,47 @@ function mixedFixture(): any {
             cases: proof.inputs.case_ids.map((case_id: string) => ({ case_id, baseline_extra_edits: 0, candidate_extra_edits: 0 })) })) };
     return proposal;
 }
+
+function deliveryV2Fixture(): any {
+    const proposal = mixedFixture();
+    const proof = proposal.eval_summary.code_verification;
+    proposal.correction_routing[0].replay_status = 'delivery_mismatch';
+    proof.corrections[0].delivery_assertion = true;
+    const driver = digest('delivery driver');
+    const source = digest('delivery source manifest');
+    const fixtureHash = digest('delivery fixture');
+    const identityBody = {
+        browser_version: '148.0.7778.0',
+        delivery_driver_sha256: driver,
+        delivery_fixture_sha256: fixtureHash,
+        delivery_image_id: digest('delivery image'),
+        delivery_runtime_id: digest('delivery runtime'),
+        delivery_source_sha256: source,
+        quill_version: '1.3.6',
+    };
+    const identitySha = digest(JSON.stringify(Object.fromEntries(Object.keys(identityBody).sort().map((key) => [key, (identityBody as any)[key]]))));
+    proof.inputs.delivery_driver_sha256 = driver;
+    proof.inputs.delivery_fixture_sha256 = fixtureHash;
+    proof.inputs.delivery_identity_sha256 = identitySha;
+    proof.inputs.delivery_identity = { ...identityBody, identity_sha256: identitySha };
+    const sourceHashes = Object.fromEntries(['form', 'form_helpers', 'form_submission', 'diff_core', 'redline_preview', 'form_stage', 'showStep2', 'submitMenu', 'quill'].map((key) => [key, digest(key)]));
+    sourceHashes.driver = driver;
+    for (const run of proof.runs) run.delivery = [{
+        correction_id: 'c1', driver: 'form-submit-v1', driver_sha256: driver,
+        chromium_sandbox_enabled: false, isolation_boundary: 'container',
+        controls: { uid: 65532, gid: 65532, supplementary_groups: [], capabilities: { CapInh: '0000000000000000', CapPrm: '0000000000000000', CapEff: '0000000000000000', CapAmb: '0000000000000000' }, no_new_privs: '1', seccomp: '2', root_mount_read_only: true, network_interfaces: ['lo'] },
+        image_id: identityBody.delivery_image_id, runtime_id: identityBody.delivery_runtime_id,
+        delivery_fixture_sha256: fixtureHash, source_manifest_sha256: source,
+        baseline_submitted_text: 'Dish, lemons', candidate_submitted_text: 'Dish, lemon',
+        baseline_submitted_html: '<p>Dish, lemons</p>', candidate_submitted_html: '<p>Dish, lemon</p>',
+        baseline_submitted_html_text: 'Dish, lemons', candidate_submitted_html_text: 'Dish, lemon',
+        baseline_source_hashes: sourceHashes, candidate_source_hashes: sourceHashes,
+        baseline_browser_version: identityBody.browser_version, candidate_browser_version: identityBody.browser_version,
+        quill_version: identityBody.quill_version,
+    }];
+    return proposal;
+}
+
 describe('version 2 combined verification', () => {
     test('accepts complete code and separate rule evidence', () => expect(assessCodeProposalVerification(mixedFixture())).toBeNull());
     test.each([
@@ -249,6 +290,21 @@ describe('version 2 combined verification', () => {
         const proposal = mixedFixture();
         (mutate as any)(proposal.eval_summary.code_verification);
         expect(assessCodeProposalVerification(proposal)).not.toBeNull();
+    });
+    test('accepts only exact non-root sandboxed browser delivery bindings', () => {
+        expect(assessCodeProposalVerification(deliveryV2Fixture())).toBeNull();
+        for (const mutate of [
+            (delivery: any) => { delivery.controls.uid = 0; },
+            (delivery: any) => { delivery.chromium_sandbox_enabled = true; },
+            (delivery: any) => { delivery.image_id = digest('other image'); },
+            (delivery: any) => { delivery.delivery_fixture_sha256 = digest('other fixture'); },
+            (delivery: any) => { delivery.source_manifest_sha256 = digest('other source'); },
+            (delivery: any) => { delivery.driver_sha256 = digest('other driver'); },
+        ]) {
+            const proposal = deliveryV2Fixture();
+            mutate(proposal.eval_summary.code_verification.runs[0].delivery[0]);
+            expect(assessCodeProposalVerification(proposal)).not.toBeNull();
+        }
     });
 });
 

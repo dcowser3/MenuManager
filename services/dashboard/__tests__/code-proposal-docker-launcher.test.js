@@ -45,6 +45,16 @@ test('builds an immutable, isolated, fixed worker invocation', () => {
     } finally { state.cleanup(); }
 });
 
+test('delivery runs directly as non-root without setuid capabilities', () => {
+    const state = setup();
+    try {
+        const identity = { delivery_image_id: HASH, delivery_runtime_id: FIXED_RUNTIME_ID, delivery_driver_sha256: HASH, delivery_source_sha256: HASH, delivery_fixture_sha256: HASH, browser_version: '148.0.7778.0', quill_version: '1.3.6' };
+        const value = spec(state, { phase: 'delivery', arm: 'paired', plan: { image_id: HASH, runtime_id: FIXED_RUNTIME_ID, delivery_identity: identity }, request: { phase: 'delivery', arm: 'paired', inventory: [], plan: { image_id: HASH, runtime_id: FIXED_RUNTIME_ID, delivery_identity: identity } } });
+        expect(value.args).toEqual(expect.arrayContaining(['--user', '65532:65532', '--cap-drop', 'ALL']));
+        expect(value.args).not.toEqual(expect.arrayContaining(['--cap-add', 'SETUID', '--cap-add', 'SETGID']));
+    } finally { state.cleanup(); }
+});
+
 test('keeps container names unique and rejects environment injection', () => {
     const first = buildContainerName('a'.repeat(128), 'nonce-one');
     const second = buildContainerName('a'.repeat(128), 'nonce-two');

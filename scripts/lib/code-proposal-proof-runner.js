@@ -243,8 +243,14 @@ function deliveryRequired(proposal, corrections) {
 
 function validateDelivery(value, correction, driverHash, deliveryIdentity, expectedImage, expectedRuntime, expectedFixtureHash) {
     if (!value || value.driver !== 'form-submit-v1' || !isDigest(driverHash)
+        || value.chromium_sandbox_enabled !== false || value.isolation_boundary !== 'container'
+        || value.controls?.uid !== 65532 || value.controls?.gid !== 65532 || !Array.isArray(value.controls?.supplementary_groups) || value.controls.supplementary_groups.length
+        || !value.controls?.capabilities || Object.values(value.controls.capabilities).some((entry) => entry !== '0000000000000000')
+        || value.controls.no_new_privs !== '1' || value.controls.seccomp !== '2' || value.controls.root_mount_read_only !== true
+        || JSON.stringify(value.controls.network_interfaces) !== JSON.stringify(['lo'])
         || !deliveryIdentity || driverHash !== deliveryIdentity.delivery_driver_sha256
         || value.driver_sha256 !== driverHash
+        || value.effective_uid !== 65532 || value.sandbox_enabled !== true
         || value.image_id !== expectedImage || value.runtime_id !== expectedRuntime
         || value.delivery_fixture_sha256 !== expectedFixtureHash
         || !isDigest(value.baseline_source_hashes?.driver) || !isDigest(value.candidate_source_hashes?.driver)

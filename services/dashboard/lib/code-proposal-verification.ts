@@ -141,11 +141,16 @@ export interface CodeProposalVerification {
         }>;
         delivery?: Array<{
             correction_id: string;
+            effective_uid?: number;
+            sandbox_enabled?: boolean;
             image_id?: string;
             runtime_id?: string;
             delivery_fixture_sha256?: string;
             driver_sha256?: string;
             source_manifest_sha256?: string;
+            chromium_sandbox_enabled?: boolean;
+            isolation_boundary?: string;
+            controls?: JsonRecord;
             driver: 'form-submit-v1';
             baseline_submitted_text: string;
             candidate_submitted_text: string;
@@ -357,6 +362,12 @@ function assessCodeProposalVerificationInternal(proposal: JsonRecord | null | un
             if (deliveryIds.has(correction.correction_id)) {
                 const delivery = (run.delivery || []).find((entry) => entry.correction_id === correction.correction_id);
                 if (!delivery || delivery.driver !== 'form-submit-v1'
+                    || (deliveryBindingsRequired && (delivery.chromium_sandbox_enabled !== false || delivery.isolation_boundary !== 'container'
+                        || delivery.controls?.uid !== 65532 || delivery.controls?.gid !== 65532
+                        || !Array.isArray(delivery.controls?.supplementary_groups) || delivery.controls.supplementary_groups.length
+                        || !delivery.controls?.capabilities || Object.values(delivery.controls.capabilities).some((entry) => entry !== '0000000000000000')
+                        || delivery.controls?.no_new_privs !== '1' || delivery.controls?.seccomp !== '2' || delivery.controls?.root_mount_read_only !== true
+                        || JSON.stringify(delivery.controls?.network_interfaces) !== JSON.stringify(['lo'])))
                     || (deliveryBindingsRequired && delivery.image_id !== deliveryIdentity?.delivery_image_id)
                     || (deliveryBindingsRequired && delivery.runtime_id !== deliveryIdentity?.delivery_runtime_id)
                     || (deliveryBindingsRequired && delivery.delivery_fixture_sha256 !== input.delivery_fixture_sha256)

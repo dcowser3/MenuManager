@@ -22,11 +22,12 @@ Playwright 1.60.0 / Chromium revision 1223 (Chrome for Testing
 on `linux/arm64`.
 
 The launch contract is fixed: network `none`, read-only root, a root staging
-process that materializes the workspaces followed by a dedicated non-root
-browser child at uid 65532,
-65532, `no-new-privileges`, all capabilities dropped, bounded tmpfs for
+process that materializes the workspaces followed by a direct delivery process
+at uid 65532,
+`no-new-privileges`, all capabilities dropped, bounded tmpfs for
 `/tmp` and the worker profile, no host browser/profile/credential mounts, and
-no sandbox-disabling Chromium flags. The worker must capture the browser
+Chromium sandbox disabled inside the container boundary (`chromiumSandbox:false`).
+The worker must capture the browser
 version, Quill version, serialized form body, submitted text, and submitted
 HTML before the request boundary; it must never send the request or accept
 caller JavaScript, callbacks, expected metrics, or ground truth.
@@ -41,6 +42,11 @@ Schema-v2 delivery proof also binds the worker response to the frozen delivery
 image, runtime, driver, source-manifest, browser/Quill, and fixture identities.
 Missing, stale, or tampered bindings fail closed; legacy schema-v1 evidence is
 retained only for compatibility and does not establish the new binding.
+
+The delivery report attests the observed UID/GID, empty supplementary groups,
+zero capability masks, `NoNewPrivs=1`, `Seccomp=2`, read-only root mount, and
+loopback-only network. Residual risk is limited to this offline frozen-local
+delivery check; it is not equivalent to an inner Chromium sandbox.
 
 The opt-in network-none causal proof passes with the baseline serializer
 omitting `TARGET` from both payload forms while the candidate preserves it;

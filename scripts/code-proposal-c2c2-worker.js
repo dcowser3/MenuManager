@@ -53,13 +53,27 @@ function hashText(value) {
     return crypto.createHash('sha256').update(value).digest('hex');
 }
 
-async function runFixedDeliveryChild(request) {
+function deliveryControls() {
+    const status = fs.readFileSync('/proc/self/status', 'utf8');
+    const field = (name) => (status.match(new RegExp(`^${name}:\\s*(.+)$`, 'm')) || [])[1]?.trim() || '';
+    const caps = ['CapInh', 'CapPrm', 'CapEff', 'CapAmb'];
+    const groups = field('Groups').split(/\s+/).filter(Boolean);
+    const interfaces = fs.readdirSync('/sys/class/net').sort();
+    const mounts = fs.readFileSync('/proc/mounts', 'utf8').split('\n');
+    const root = mounts.find((line) => line.split(' ')[1] === '/');
+    const controls = { uid: process.getuid(), gid: process.getgid(), supplementary_groups: groups.length > 1 ? groups.slice(1) : [], capabilities: Object.fromEntries(caps.map((name) => [name, field(name)])), no_new_privs: field('NoNewPrivs'), seccomp: field('Seccomp'), root_mount_read_only: !!root && root.split(' ')[3].split(',').includes('ro'), network_interfaces: interfaces };
+    if (controls.uid !== 65532 || controls.gid !== 65532 || controls.supplementary_groups.length || caps.some((name) => controls.capabilities[name] !== '0000000000000000') || controls.no_new_privs !== '1' || controls.seccomp !== '2' || !controls.root_mount_read_only || JSON.stringify(interfaces) !== JSON.stringify(['lo'])) throw new Error('delivery runtime controls are not isolated');
+    return controls;
+}
+
+async function runFixedDelivery(request) {
     if (!request.delivery_fixture || typeof request.delivery_fixture.text !== 'string') throw new Error('delivery fixture is missing');
+    const controls = deliveryControls();
     const { chromium } = require('playwright');
     const deliveryRequest = { ...request, inventory: request.inventory || request.plan.test_inventory || [] };
     const baselineWorkspace = materializeWorkspace('/runner/baseline', deliveryRequest);
     const candidateWorkspace = materializeWorkspace('/runner/candidate', deliveryRequest);
-    const browser = await chromium.launch({ headless: true });
+    const browser = await chromium.launch({ headless: true, chromiumSandbox: false });
     try {
         const captureArm = async (workspace) => {
             const page = await browser.newPage();
@@ -104,20 +118,8 @@ async function runFixedDeliveryChild(request) {
         const driverHash = hashFile(__filename);
         baselineSourceHashes.driver = driverHash;
         candidateSourceHashes.driver = driverHash;
-        return { effective_uid: process.getuid(), sandbox_enabled: true, image_id: imageId, runtime_id: runtimeId, delivery_fixture_sha256: hashValue(request.delivery_fixture), driver_sha256: driverHash, driver: 'form-submit-v1', baseline_source_hashes: baselineSourceHashes, candidate_source_hashes: candidateSourceHashes, source_manifest_sha256: sourceManifest, baseline_browser_version: baseline.browserVersion, candidate_browser_version: candidate.browserVersion, quill_version: candidate.quillVersion, baseline_submitted_text: baseline.capture.text, candidate_submitted_text: candidate.capture.text, baseline_submitted_html: baseline.capture.html, candidate_submitted_html: candidate.capture.html, baseline_submitted_html_text: baseline.capture.htmlText, candidate_submitted_html_text: candidate.capture.htmlText };
+        return { controls, chromium_sandbox_enabled: false, isolation_boundary: 'container', image_id: imageId, runtime_id: runtimeId, delivery_fixture_sha256: hashValue(request.delivery_fixture), driver_sha256: driverHash, driver: 'form-submit-v1', baseline_source_hashes: baselineSourceHashes, candidate_source_hashes: candidateSourceHashes, source_manifest_sha256: sourceManifest, baseline_browser_version: baseline.browserVersion, candidate_browser_version: candidate.browserVersion, quill_version: candidate.quillVersion, baseline_submitted_text: baseline.capture.text, candidate_submitted_text: candidate.capture.text, baseline_submitted_html: baseline.capture.html, candidate_submitted_html: candidate.capture.html, baseline_submitted_html_text: baseline.capture.htmlText, candidate_submitted_html_text: candidate.capture.htmlText };
     } finally { await browser.close(); }
-}
-
-async function runFixedDelivery(request) {
-    if (process.env.C2C2_DELIVERY_CHILD === '1') return runFixedDeliveryChild(request);
-    const childPath = '/runner/output/delivery-child-request.json';
-    fs.writeFileSync(childPath, `${JSON.stringify(request)}\n`, { mode: 0o444 });
-    const child = spawnSync('/usr/bin/setpriv', ['--reuid=65532', '--regid=65532', '--clear-groups', '--', '/usr/local/bin/node', '/runner/worker.js'], { env: { ...process.env, HOME: '/tmp', NODE_PATH: '/app/node_modules', PATH: '/app/node_modules/.bin:/usr/local/bin:/usr/bin:/bin', C2C2_DELIVERY_CHILD: '1', C2C2_DELIVERY_REQUEST: childPath }, encoding: 'utf8', maxBuffer: 2 * 1024 * 1024 });
-    try { fs.unlinkSync(childPath); } catch { /* bounded cleanup */ }
-    if (child.status !== 0) throw new Error(`delivery child exited with status ${child.status}: ${(child.stderr || child.stdout || '').slice(0, 500)}`);
-    const result = JSON.parse(child.stdout);
-    if (result.effective_uid !== 65532 || result.sandbox_enabled !== true) throw new Error('delivery browser child did not prove non-root sandbox execution');
-    return result;
 }
 
 function verifySupportBundle(request) {

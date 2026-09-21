@@ -43,4 +43,3 @@ test.each(['form.ejs', 'form-legacy.ejs'])('%s uses the shared capture and reque
     expect(source).toContain('MenuSubmission.sendPreparedMenuSubmission(preparedSubmission)');
     expect(source).not.toContain("fetch('/api/form/submit'");
 });
-
