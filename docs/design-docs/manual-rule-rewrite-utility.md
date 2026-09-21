@@ -25,6 +25,10 @@ every retry revalidates the marker and live state, and a verified retry still
 performs final readback. The live proposal CAS uses PostgreSQL's compact `xmin`
 row version plus pending status and proposal ID, avoiding oversized JSONB
 filter URLs while still rejecting every concurrent row update.
+The replacement insert retains the repository's established legacy-schema
+fallback: when the live schema cache lacks nullable `source_binding`, the
+unbound manual row is retried without that unsupported column (equivalent to
+the intended null binding).
 
 If the three old rows are already absent while the proposal is still the exact
 unowned 30-member snapshot, the CLI enters a forward-reconciliation mode. Its

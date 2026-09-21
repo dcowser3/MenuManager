@@ -340,7 +340,11 @@ function createSupabaseRewriteAdapter(client, proposalId) {
                 if (full.error || hash(replacementProjection(full.data)) !== hash(replacementProjection(row))) throw new Error('Existing stable replacement conflicts with planned row.');
                 return full.data;
             }
-            const result = await client.from('correction_rules').insert(row).select('correction_id');
+            let result = await client.from('correction_rules').insert(row).select('correction_id');
+            if (result.error && /source_binding/i.test(result.error.message || '')) {
+                const { source_binding: _unsupportedSourceBinding, ...legacyCompatible } = row;
+                result = await client.from('correction_rules').insert(legacyCompatible).select('correction_id');
+            }
             if (result.error) throw new Error(`Replacement insert failed: ${result.error.message}`);
             if (!Array.isArray(result.data) || result.data.length !== 1) throw new Error('Replacement insert affected unexpected rows.');
             return result.data[0];
