@@ -1,5 +1,6 @@
 import { resolveCanonicalPolicies, permitsSeparatorVariants } from './canonical-policy';
 import { involvesContextDependentTerm } from './improvement-cycle-core';
+import { CONTEXTUAL_COMPOUND_DESCRIPTOR_CONTRACT } from './contextual-compound-descriptor-contract';
 
 export type PreAiCorrectionSource = 'built_in' | 'accepted_correction_rule';
 
@@ -662,20 +663,10 @@ export function normalizeSingularIngredientFormsOnLine(
  * contextual guards rather than global replacements: the three motivating
  * proposal rows remain human evidence and are not executable rules themselves.
  */
-const ESTABLISHED_GRILLED_MODIFIERS = new Set([
-    'achiote', 'applewood', 'charcoal', 'chipotle', 'coffee', 'harissa',
-    'hickory', 'mesquite', 'miso', 'smoked', 'wood-fired', 'woodfired',
-]);
-const NON_FOOD_CAST_IRON_NOUNS = new Set(['iron', 'pan', 'pans', 'skillet', 'skillets', 'griddle', 'griddles', 'pot', 'pots', 'plate', 'plates', 'cookware']);
-const BRULEE_INGREDIENTS = new Set([
-    'apple', 'apples', 'apricot', 'apricots', 'banana', 'bananas', 'berry', 'berries',
-    'carrot', 'carrots', 'cherry', 'cherries', 'fig', 'figs', 'ham', 'hams',
-    'mango', 'mangos', 'mangoes', 'nectarine', 'nectarines', 'orange', 'oranges',
-    'peach', 'peaches', 'pear', 'pears', 'pineapple', 'pineapples', 'plum', 'plums',
-    'rhubarb', 'strawberry', 'strawberries', 'tomato', 'tomatoes', 'turnip', 'turnips',
-    'yam', 'yams', 'zucchini',
-]);
-const BRULEE_LEXICAL_DESSERTS = new Set(['cake', 'cakes', 'cheesecake', 'cheesecakes', 'custard', 'custards', 'dessert', 'desserts', 'mousse', 'parfait', 'parfaits', 'tart', 'tarts']);
+const ESTABLISHED_GRILLED_MODIFIERS = new Set(CONTEXTUAL_COMPOUND_DESCRIPTOR_CONTRACT.guards.grilled_modifier.modifiers);
+const NON_FOOD_CAST_IRON_NOUNS = new Set(CONTEXTUAL_COMPOUND_DESCRIPTOR_CONTRACT.guards.cast_iron.excluded_nouns);
+const BRULEE_INGREDIENTS = new Set(CONTEXTUAL_COMPOUND_DESCRIPTOR_CONTRACT.guards.brulee_participle.ingredients);
+const BRULEE_LEXICAL_DESSERTS = new Set(CONTEXTUAL_COMPOUND_DESCRIPTOR_CONTRACT.guards.brulee_participle.excluded_lexical_desserts);
 
 function preserveDescriptorCase(source: string, target: string): string {
     return matchCase(source, target);

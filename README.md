@@ -86,6 +86,8 @@ The `/learning` dashboard separates auto-scanned detected patterns from active P
 
 Basic AI Check combines reviewer-confirmed deterministic corrections with contextual spelling evidence from approved dishes and full human-approved menus. Tight, unique matches to confirmed food words can auto-correct unseen variants; database matches are advisory and require an explicit contextual AI disposition. Uncertain or silently omitted candidates remain yellow, valid terms are acknowledged without a card, and only a token the model is highly confident is malformed but cannot safely correct becomes an overrideable red `Unrecognized Term` issue. See [Contextual Culinary Spelling](docs/design-docs/contextual-culinary-spelling.md).
 
+The deterministic pre-AI pass also applies the reviewed contextual compound-descriptor contract: confident attributive `Achiote-Grilled`/`Cast-Iron` forms and recognized ingredient forms such as `brûléed pineapple` are normalized while material, standalone, lexical-dessert, punctuation, and ambiguous uses remain unchanged. Prices, allergen suffixes, casing, and repeated-pass output are preserved. The contract and stable hash are recorded in [the code-rules manifest](docs/references/code-rules-manifest.md).
+
 After a browser approval, the reviewer is taken directly to its correction-explanations page once comparison details are ready. That page supports one reviewer name plus **Save All Explanations**, keeps unfinished entries as browser-local drafts, and does not erase other explanations after an individual save or validation error.
 
 ## Quick Start

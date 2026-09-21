@@ -9,6 +9,7 @@
 // A jest test fails when the committed markdown is stale.
 
 import { BUILT_IN_REPLACEMENTS, AcceptedCorrectionRule } from './pre-ai-deterministic-rules';
+import { CONTEXTUAL_COMPOUND_DESCRIPTOR_CONTRACT_SHA256, CONTEXTUAL_COMPOUND_DESCRIPTOR_VERSION } from './contextual-compound-descriptor-contract';
 import { QA_PROMPT_SECTIONS, QaPromptSectionId } from './qa-prompt-builder';
 import {
     FORCED_CRITICAL_EXACT_TYPES,
@@ -121,7 +122,8 @@ const FUNCTIONAL_ENTRIES: ManifestRuleEntry[] = [
         ],
         implementation: { file: PRE_AI_FILE, exportName: 'normalizeContextualCompoundDescriptorsOnLine' },
         data: {
-            version: 'contextual-compound-descriptors-v1',
+            version: CONTEXTUAL_COMPOUND_DESCRIPTOR_VERSION,
+            contract_sha256: CONTEXTUAL_COMPOUND_DESCRIPTOR_CONTRACT_SHA256,
             motivatingEvidence: [
                 { original: 'Achiote Grilled', corrected: 'Achiote-Grilled' },
                 { original: 'Cast Iron Pancakes', corrected: 'Cast-Iron Pancakes' },
