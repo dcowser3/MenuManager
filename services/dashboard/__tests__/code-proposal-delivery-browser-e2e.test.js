@@ -8,7 +8,7 @@ const { buildDockerInvocation, runDockerInvocation, FIXED_RUNTIME_ID } = require
 const { validateDeliveryIdentity } = require('../../../scripts/lib/code-proposal-delivery-identity');
 
 const IMAGE = 'sha256:a064dc4f63d6782682254cdf3a8546bed06d50007c3ea530a718d5b67c97b41d';
-const required = ['services/dashboard/public/vendor/quill-1.3.6/quill.js', 'services/diff-core/src/index.js', 'services/dashboard/public/js/redline-preview.js', 'services/dashboard/public/js/form-submission.js', 'services/dashboard/public/js/form-helpers.js', 'services/dashboard/public/js/form-stage.js', 'services/dashboard/views/form.ejs'];
+const required = ['services/dashboard/public/vendor/quill-1.3.6/quill.js', 'services/diff-core/src/index.js', 'services/dashboard/public/js/redline-preview.js', 'services/dashboard/public/js/form-submission.js'];
 const hash = (bytes) => crypto.createHash('sha256').update(bytes).digest('hex');
 const hashJson = (value) => hash(Buffer.from(JSON.stringify(value)));
 const repo = path.resolve(__dirname, '../../..');

@@ -240,6 +240,7 @@ function deliveryV2Fixture(): any {
     const proof = proposal.eval_summary.code_verification;
     proposal.correction_routing[0].replay_status = 'delivery_mismatch';
     proof.corrections[0].delivery_assertion = true;
+    proof.corrections[0].delivery_evidence_scope = 'serializer_request_boundary_v1';
     const driver = digest('delivery driver');
     const sourceHashesForFixture: any = { quill: digest('quill'), diff_core: digest('diff_core'), redline_preview: digest('redline_preview'), form_submission: digest('form_submission') };
     const source = digest(JSON.stringify({ baseline: sourceHashesForFixture, candidate: sourceHashesForFixture }));
@@ -295,17 +296,22 @@ describe('version 2 combined verification', () => {
         expect(assessCodeProposalVerification(proposal)).not.toBeNull();
     });
     test('accepts only exact non-root container-isolated browser delivery bindings', () => {
-        expect(assessCodeProposalVerification(deliveryV2Fixture())).not.toBeNull();
+        expect(assessCodeProposalVerification(deliveryV2Fixture())).toBeNull();
         for (const mutate of [
+            (_delivery: any, proof: any) => { delete proof.corrections[0].delivery_evidence_scope; },
             (delivery: any) => { delivery.controls.uid = 0; },
             (delivery: any) => { delivery.chromium_sandbox_enabled = true; },
+            (delivery: any) => { delete delivery.controls.capabilities.CapEff; },
+            (delivery: any) => { delivery.controls.raw_groups = ['777']; },
+            (delivery: any) => { delivery.baseline_browser_version = 'wrong-browser'; },
+            (delivery: any) => { delivery.baseline_source_hashes.form_submission = digest('changed source'); },
             (delivery: any) => { delivery.image_id = digest('other image'); },
             (delivery: any) => { delivery.delivery_fixture_sha256 = digest('other fixture'); },
             (delivery: any) => { delivery.source_manifest_sha256 = digest('other source'); },
             (delivery: any) => { delivery.driver_sha256 = digest('other driver'); },
         ]) {
             const proposal = deliveryV2Fixture();
-            mutate(proposal.eval_summary.code_verification.runs[0].delivery[0]);
+            mutate(proposal.eval_summary.code_verification.runs[0].delivery[0], proposal.eval_summary.code_verification);
             expect(assessCodeProposalVerification(proposal)).not.toBeNull();
         }
     });

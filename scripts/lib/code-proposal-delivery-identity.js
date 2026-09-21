@@ -1,7 +1,9 @@
 'use strict';
 const crypto = require('crypto');
 const DIGEST = /^(?:sha256:)?[a-f0-9]{64}$/;
-function hash(value) { return crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex'); }
+const canonical = (value) => Array.isArray(value) ? value.map(canonical)
+    : value && typeof value === 'object' ? Object.fromEntries(Object.keys(value).sort().map((key) => [key, canonical(value[key])])) : value;
+function hash(value) { return crypto.createHash('sha256').update(JSON.stringify(canonical(value))).digest('hex'); }
 function validateDeliveryIdentity(identity) {
     if (!identity || !DIGEST.test(`${identity.delivery_image_id || ''}`) || !DIGEST.test(`${identity.delivery_runtime_id || ''}`)
         || !DIGEST.test(`${identity.delivery_driver_sha256 || ''}`) || !DIGEST.test(`${identity.delivery_source_sha256 || ''}`)

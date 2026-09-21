@@ -115,7 +115,7 @@ function trustedCorrections(proposal, corrections, lanes = new Set(['code_recomm
         if (!row || typeof row.case_id !== 'string' || (isCode && typeof row.test_name !== 'string') || (isCode && !Array.isArray(row.recommendation_indexes))
             || (isCode && !row.recommendation_indexes.length) || row.original_text !== route.original_text || row.corrected_text !== route.corrected_text
             || (isCode && !row.recommendation_indexes.every((index) => Number.isInteger(index) && index >= 0 && index < (proposal.code_recommendations || []).length))) throw new Error(`Frozen correction mapping is invalid: ${route.correction_id}.`);
-        return { correction_id: row.correction_id, case_id: row.case_id, test_name: row.test_name || '', original_text: row.original_text, corrected_text: row.corrected_text, recommendation_indexes: [...(row.recommendation_indexes || [])], delivery_assertion: row.delivery_assertion === true };
+        return { correction_id: row.correction_id, case_id: row.case_id, test_name: row.test_name || '', original_text: row.original_text, corrected_text: row.corrected_text, recommendation_indexes: [...(row.recommendation_indexes || [])], delivery_assertion: row.delivery_assertion === true, delivery_evidence_scope: row.delivery_evidence_scope || null };
     });
 }
 
@@ -245,6 +245,7 @@ function deliveryRequired(proposal, corrections) {
 
 function validateDelivery(value, correction, driverHash, deliveryIdentity, expectedImage, expectedRuntime, expectedFixtureHash) {
     if (!value || value.driver !== 'form-submit-v1' || !isDigest(driverHash)
+        || correction.delivery_evidence_scope !== 'serializer_request_boundary_v1'
         || value.chromium_sandbox_enabled !== false || value.isolation_boundary !== 'container'
         || value.controls?.uid !== 65532 || value.controls?.gid !== 65532 || !Array.isArray(value.controls?.raw_groups) || value.controls.raw_groups.some((group) => group !== '65532') || !Array.isArray(value.controls?.supplementary_groups) || value.controls.supplementary_groups.length
         || !value.controls?.capabilities || JSON.stringify(Object.keys(value.controls.capabilities).sort()) !== JSON.stringify(['CapAmb', 'CapEff', 'CapInh', 'CapPrm']) || Object.values(value.controls.capabilities).some((entry) => entry !== '0000000000000000')
@@ -257,7 +258,7 @@ function validateDelivery(value, correction, driverHash, deliveryIdentity, expec
         || value.delivery_fixture_sha256 !== expectedFixtureHash
         || !isDigest(value.baseline_source_hashes?.driver) || !isDigest(value.candidate_source_hashes?.driver)
         || value.baseline_source_hashes.driver !== driverHash || value.candidate_source_hashes.driver !== driverHash
-        || !['form', 'form_helpers', 'form_submission', 'diff_core', 'redline_preview', 'form_stage', 'showStep2', 'submitMenu', 'quill'].every((key) => isDigest(value.baseline_source_hashes?.[key]) && isDigest(value.candidate_source_hashes?.[key]))
+        || !DELIVERY_SOURCE_KEYS.every((key) => isDigest(value.baseline_source_hashes?.[key]) && isDigest(value.candidate_source_hashes?.[key]))
         || !value.baseline_browser_version || !value.candidate_browser_version || value.quill_version !== '1.3.6'
         || typeof value.baseline_submitted_text !== 'string' || typeof value.candidate_submitted_text !== 'string'
         || typeof value.baseline_submitted_html !== 'string' || typeof value.candidate_submitted_html !== 'string'
@@ -473,6 +474,7 @@ async function runCodeProposalProof(options = {}) {
         const runs = [];
         const replayIdentities = new Set();
         const deliveryIds = deliveryRequired(frozenProposal, allCorrections);
+        if (allCorrections.some((correction) => deliveryIds.includes(correction.correction_id) && correction.delivery_evidence_scope !== 'serializer_request_boundary_v1')) throw new Error('delivery evidence is limited to the frozen serializer request-boundary scope.');
         if (deliveryIds.length && !plan.delivery_identity) throw new Error('Delivery evidence requires a separate frozen delivery identity.');
         for (const seed of seeds) {
             const run = { run_id: `${metadata.attempt_id}:replay:${seed}`, seed, baseline_errors: 0, candidate_errors: 0, cases: [], corrections: [] };

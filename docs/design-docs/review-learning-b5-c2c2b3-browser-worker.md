@@ -38,6 +38,13 @@ serialization, captures baseline/candidate text and HTML-derived text before
 the request boundary, and fails if any request is attempted. Generic
 unit/replay/behavior images are never used as a delivery fallback.
 
+This evidence is deliberately limited to the shared
+`serializer_request_boundary_v1` path: Quill, diff-core, redline-preview, and
+`form-submission.js`. It does not certify reviewed-state selection, the full
+`form.ejs`/`form-legacy.ejs` assembly path, or other editor behavior. Each
+schema-v2 correction must carry this exact frozen delivery-evidence scope;
+missing or broader claims fail closed.
+
 Schema-v2 delivery proof also binds the worker response to the frozen delivery
 image, runtime, driver, source-manifest, browser/Quill, and fixture identities.
 Missing, stale, or tampered bindings fail closed; legacy schema-v1 evidence is

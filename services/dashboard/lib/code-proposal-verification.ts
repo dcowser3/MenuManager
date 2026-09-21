@@ -84,6 +84,7 @@ export interface CodeVerificationCorrection {
     original_text: string;
     corrected_text: string;
     delivery_assertion?: boolean;
+    delivery_evidence_scope?: 'serializer_request_boundary_v1';
 }
 export interface CodeProposalVerification {
     schema_version: 1 | 2;
@@ -322,7 +323,9 @@ function assessCodeProposalVerificationInternal(proposal: JsonRecord | null | un
         correction.recommendation_indexes.forEach((index) => covered.add(index));
     }
     const deliveryIdentity = input.delivery_identity;
-    if (deliveryIds.size > 0 && corrections.some((correction) => deliveryIds.has(correction.correction_id) && correction.delivery_assertion !== true)) {
+    if (deliveryIds.size > 0 && proof.schema_version >= 2 && corrections.some((correction) => deliveryIds.has(correction.correction_id) && correction.delivery_evidence_scope !== 'serializer_request_boundary_v1')) return fail('delivery evidence is limited to the frozen serializer request-boundary scope.');
+    if (deliveryIds.size > 0 && corrections.some((correction) => deliveryIds.has(correction.correction_id)
+        && (correction.delivery_assertion !== true || (proof.schema_version >= 2 && correction.delivery_evidence_scope !== 'serializer_request_boundary_v1')))) {
         return fail('Correction delivery evidence requires a browser delivery/save assertion.');
     }
     const deliveryBindingsRequired = proof.schema_version >= 2;
@@ -388,8 +391,8 @@ function assessCodeProposalVerificationInternal(proposal: JsonRecord | null | un
                     || (deliveryBindingsRequired && delivery.driver_sha256 !== input.delivery_driver_sha256)
                     || delivery.baseline_source_hashes?.driver !== input.delivery_driver_sha256
                     || delivery.candidate_source_hashes?.driver !== input.delivery_driver_sha256
-                    || !['form', 'form_helpers', 'form_submission', 'diff_core', 'redline_preview', 'form_stage', 'showStep2', 'submitMenu', 'quill'].every((key) => digest(delivery.baseline_source_hashes?.[key]) && digest(delivery.candidate_source_hashes?.[key]))
-                    || !delivery.baseline_browser_version || !delivery.candidate_browser_version || delivery.quill_version !== '1.3.6'
+                    || !DELIVERY_SOURCE_KEYS.every((key) => digest(delivery.baseline_source_hashes?.[key]) && digest(delivery.candidate_source_hashes?.[key]))
+                    || typeof delivery.baseline_browser_version !== 'string' || !delivery.baseline_browser_version.trim() || typeof delivery.candidate_browser_version !== 'string' || !delivery.candidate_browser_version.trim() || typeof deliveryIdentity?.browser_version !== 'string' || !deliveryIdentity.browser_version.trim() || delivery.baseline_browser_version !== deliveryIdentity.browser_version || delivery.candidate_browser_version !== deliveryIdentity.browser_version || typeof delivery.quill_version !== 'string' || !delivery.quill_version.trim() || delivery.quill_version !== deliveryIdentity.quill_version
                     || typeof delivery.baseline_submitted_text !== 'string' || typeof delivery.baseline_submitted_html !== 'string'
                     || typeof delivery.candidate_submitted_html !== 'string' || !delivery.candidate_submitted_html.trim()
                     || typeof delivery.candidate_submitted_text !== 'string'
