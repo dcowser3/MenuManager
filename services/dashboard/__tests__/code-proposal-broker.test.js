@@ -215,7 +215,7 @@ test('crash after response capture resumes without transport or redispatch', asy
         const first = new ModelBudgetBroker({ authorizationFile: state.authFile, stateFile: state.stateFile, outputRoot: state.root, countInputTokens: () => 10, afterResponseArtifact: () => { throw new Error('injected crash'); } });
         await expect(first.dispatch({ requestId: 'attempt-one:draft:1:transport:1', endpoint: first.authorization.endpoint, body: body(), transport: async () => ({ status: 200, body: JSON.stringify({ model: first.authorization.model, choices: [], usage: { prompt_tokens: 10, completion_tokens: 1 } }) }) })).rejects.toThrow('injected crash');
         expect(first.requestStatus('attempt-one:draft:1:transport:1')).toBe('reserved');
-        const second = new ModelBudgetBroker({ authorizationFile: state.authFile, stateFile: state.stateFile, outputRoot: state.root });
+        const second = new ModelBudgetBroker({ authorizationFile: state.authFile, stateFile: state.stateFile, outputRoot: state.root, countInputTokens: () => 10 });
         const resumed = await second.dispatch({ requestId: 'attempt-one:draft:1:transport:1', endpoint: second.authorization.endpoint, body: body(), transport: () => { throw new Error('must not transport'); } });
         expect(resumed.accountingStatus).toBe('completed'); expect(second.requestStatus(resumed.requestId)).toBe('completed');
     } finally { state.cleanup(); }
@@ -226,7 +226,7 @@ test('crash after settlement resumes from the completed response artifact', asyn
     try {
         const first = new ModelBudgetBroker({ authorizationFile: state.authFile, stateFile: state.stateFile, outputRoot: state.root, countInputTokens: () => 10, afterSettlement: () => { throw new Error('injected crash'); } });
         await expect(first.dispatch({ requestId: 'attempt-one:draft:1:transport:1', endpoint: first.authorization.endpoint, body: body(), transport: async () => ({ status: 200, body: JSON.stringify({ model: first.authorization.model, choices: [], usage: { prompt_tokens: 10, completion_tokens: 1 } }) }) })).rejects.toThrow('injected crash');
-        const second = new ModelBudgetBroker({ authorizationFile: state.authFile, stateFile: state.stateFile, outputRoot: state.root });
+        const second = new ModelBudgetBroker({ authorizationFile: state.authFile, stateFile: state.stateFile, outputRoot: state.root, countInputTokens: () => 10 });
         const resumed = await second.dispatch({ requestId: 'attempt-one:draft:1:transport:1', endpoint: second.authorization.endpoint, body: body(), transport: () => { throw new Error('must not transport'); } });
         expect(resumed.accountingStatus).toBe('completed');
     } finally { state.cleanup(); }
@@ -251,5 +251,44 @@ test('progress reconciliation derives one provider call from completed ledger wi
         const reconciled = reconcileProviderProgress(progress, broker, 'attempt-one:draft:1:transport:1');
         expect(reconciled).toMatchObject({ phase: 'draft', state: 'blocked', reason: 'response_captured', provider_calls: 1, budget: { model_calls: 1 } });
         expect(progress.budget.model_calls).toBe(0);
+    } finally { state.cleanup(); }
+});
+
+test('completed resume revalidates every current request identity field', async () => {
+    const state = fixture();
+    try {
+        const broker = new ModelBudgetBroker({ authorizationFile: state.authFile, stateFile: state.stateFile, outputRoot: state.root, countInputTokens: () => 10 });
+        const transport = async () => ({ status: 200, body: JSON.stringify({ model: broker.authorization.model, choices: [], usage: { prompt_tokens: 10, completion_tokens: 1 } }) });
+        await broker.dispatch({ requestId: 'attempt-one:draft:1:transport:1', endpoint: broker.authorization.endpoint, body: body(), transport });
+        for (const changed of [{ ...body(), model: 'gpt-5.6-luna' }, { ...body(), messages: [{ role: 'user', content: 'changed' }] }, { ...body(), reasoning_effort: 'high' }, { ...body(), max_completion_tokens: 99 }]) {
+            await expect(broker.dispatch({ requestId: 'attempt-one:draft:1:transport:1', endpoint: broker.authorization.endpoint, body: changed, transport })).rejects.toThrow(/authorization|request|schedule|bounded/);
+        }
+        await expect(broker.dispatch({ requestId: 'attempt-one:draft:1:transport:1', endpoint: 'https://example.invalid', body: body(), transport })).rejects.toThrow(/authorization|request|model/);
+    } finally { state.cleanup(); }
+});
+
+test('authorization mutation and conflicting fresh artifact fail before transport', async () => {
+    const state = fixture();
+    try {
+        const broker = new ModelBudgetBroker({ authorizationFile: state.authFile, stateFile: state.stateFile, outputRoot: state.root, countInputTokens: () => 10 });
+        const original = fs.readFileSync(state.authFile); fs.writeFileSync(state.authFile, Buffer.concat([original, Buffer.from('x')]), { mode: 0o600 });
+        await expect(broker.dispatch({ requestId: 'attempt-one:draft:1:transport:1', endpoint: broker.authorization.endpoint, body: body(), transport: () => { throw new Error('must not transport'); } })).rejects.toThrow(/authorization changed/);
+    } finally { state.cleanup(); }
+    const fresh = fixture();
+    try {
+        const broker = new ModelBudgetBroker({ authorizationFile: fresh.authFile, stateFile: fresh.stateFile, outputRoot: fresh.root, countInputTokens: () => 10 });
+        const file = broker.responsePath('attempt-one:draft:1:transport:1'); fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 }); fs.writeFileSync(file, 'conflict', { mode: 0o600 });
+        await expect(broker.dispatch({ requestId: 'attempt-one:draft:1:transport:1', endpoint: broker.authorization.endpoint, body: body(), transport: () => { throw new Error('must not transport'); } })).rejects.toThrow(/Conflicting response artifact/);
+    } finally { fresh.cleanup(); }
+});
+
+test('reserved response artifact with cross-ledger identity cannot resume', async () => {
+    const state = fixture();
+    try {
+        const first = new ModelBudgetBroker({ authorizationFile: state.authFile, stateFile: state.stateFile, outputRoot: state.root, countInputTokens: () => 10, afterResponseArtifact: () => { throw new Error('injected crash'); } });
+        await expect(first.dispatch({ requestId: 'attempt-one:draft:1:transport:1', endpoint: first.authorization.endpoint, body: body(), transport: async () => ({ status: 200, body: JSON.stringify({ model: first.authorization.model, choices: [], usage: { prompt_tokens: 10, completion_tokens: 1 } }) }) })).rejects.toThrow('injected crash');
+        const file = first.responsePath('attempt-one:draft:1:transport:1'); const artifact = JSON.parse(fs.readFileSync(file)); artifact.ledgerId = 'other-ledger'; fs.writeFileSync(file, JSON.stringify(artifact), { mode: 0o600 });
+        const second = new ModelBudgetBroker({ authorizationFile: state.authFile, stateFile: state.stateFile, outputRoot: state.root, countInputTokens: () => 10 });
+        await expect(second.dispatch({ requestId: 'attempt-one:draft:1:transport:1', endpoint: second.authorization.endpoint, body: body(), transport: () => { throw new Error('must not transport'); } })).rejects.toThrow(/artifact identity/);
     } finally { state.cleanup(); }
 });

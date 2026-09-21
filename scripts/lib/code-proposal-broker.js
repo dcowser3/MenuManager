@@ -216,7 +216,15 @@ class ModelBudgetBroker {
         return state;
     }
 
-    responsePath(requestId) { return inside(this.outputRoot, path.join(this.outputRoot, 'responses', `${requestId}.json`)); }
+    responsePath(requestId) { return inside(this.outputRoot, path.join(this.outputRoot, 'responses', this.authorizationHash, `${requestId}.json`)); }
+
+    assertAuthorizationCurrent() {
+        const bytes = fs.readFileSync(this.authorizationFile);
+        if (sha256(bytes) !== this.authorizationHash) throw new Error('Reviewed code-candidate authorization changed after broker initialization.');
+        const current = validateAuthorization(JSON.parse(bytes), { env: this.env, now: this.now() });
+        if (current.authorizationId !== this.authorization.authorizationId || current.ledgerId !== this.authorization.ledgerId || canonicalHash(current.scope) !== this.scopeHash) throw new Error('Reviewed code-candidate authorization identity changed.');
+        this.assertLiveAuthorization();
+    }
 
     readResponseArtifact(request) {
         if (!request.responseArtifactRelativePath || !DIGEST.test(request.responseArtifactSha256 || '') || !DIGEST.test(request.responseBodySha256 || '')) throw new Error(`Completed code-candidate response artifact identity is missing: ${request.requestId}.`);
@@ -226,15 +234,19 @@ class ModelBudgetBroker {
         const bytes = fs.readFileSync(file);
         if (sha256(bytes) !== request.responseArtifactSha256) throw new Error(`Completed code-candidate response artifact changed: ${request.requestId}.`);
         let artifact; try { artifact = JSON.parse(bytes); } catch { throw new Error(`Completed code-candidate response artifact is invalid: ${request.requestId}.`); }
-        if (!artifact || artifact.requestId !== request.requestId || artifact.requestHash !== request.requestHash || artifact.bodySha256 !== request.responseBodySha256 || typeof artifact.body !== 'string' || sha256(Buffer.from(artifact.body)) !== artifact.bodySha256 || Number(artifact.status) < 100) throw new Error(`Completed code-candidate response artifact identity is invalid: ${request.requestId}.`);
+        const expectedRelative = path.join('responses', this.authorizationHash, `${request.requestId}.json`);
+        const scheduled = this.authorization.requestSchedule.find((entry) => entry.requestId === request.requestId);
+        if (!artifact || !scheduled || artifact.authorizationId !== this.authorization.authorizationId || artifact.authorizationHash !== this.authorizationHash || artifact.ledgerId !== this.authorization.ledgerId || artifact.scopeHash !== this.scopeHash || request.responseArtifactRelativePath !== expectedRelative || artifact.requestId !== request.requestId || artifact.requestHash !== request.requestHash || artifact.scheduledBodySha256 !== scheduled.bodySha256 || artifact.scheduledInputTokens !== scheduled.inputTokens || artifact.scheduledCompletionTokens !== scheduled.completionTokens || artifact.bodySha256 !== request.responseBodySha256 || typeof artifact.body !== 'string' || sha256(Buffer.from(artifact.body)) !== artifact.bodySha256 || Number(artifact.status) < 100) throw new Error(`Completed code-candidate response artifact identity is invalid: ${request.requestId}.`);
         return artifact;
     }
 
     persistResponseArtifact(requestId, status, raw, requestHash) {
         const bodySha256 = sha256(Buffer.from(raw));
-        const relative = path.join('responses', `${requestId}.json`);
+        const scheduled = this.authorization.requestSchedule.find((entry) => entry.requestId === requestId);
+        if (!scheduled) throw new Error(`Draft request identity is not explicitly authorized: ${requestId}.`);
+        const relative = path.join('responses', this.authorizationHash, `${requestId}.json`);
         const file = inside(this.outputRoot, path.join(this.outputRoot, relative));
-        const bytes = Buffer.from(JSON.stringify({ schemaVersion: 1, requestId, requestHash, status, bodySha256, body: raw }));
+        const bytes = Buffer.from(JSON.stringify({ schemaVersion: 1, authorizationId: this.authorization.authorizationId, authorizationHash: this.authorizationHash, ledgerId: this.authorization.ledgerId, scopeHash: this.scopeHash, requestId, requestHash, scheduledBodySha256: scheduled.bodySha256, scheduledInputTokens: scheduled.inputTokens, scheduledCompletionTokens: scheduled.completionTokens, status, bodySha256, body: raw }));
         if (bytes.length > MAX_RESPONSE + 4096) throw new Error('Draft response artifact exceeds the bounded limit.');
         atomicWriteBytes(file, bytes);
         return { relative, sha256: sha256(bytes), bodySha256 };
@@ -255,17 +267,27 @@ class ModelBudgetBroker {
         return { body, inputTokens, bodySha256: sha256(Buffer.from(JSON.stringify(body))) };
     }
 
-    async reserve(requestId, endpoint, body) {
+    validateDispatchIdentity(requestId, endpoint, body) {
         if (!safeName(requestId)) throw new Error('Draft request identity is invalid.');
+        this.assertAuthorizationCurrent();
         const validated = this.validateRequest(endpoint, body);
+        const scheduled = this.authorization.requestSchedule.find((entry) => entry.requestId === requestId);
+        if (!scheduled) throw new Error('Draft request identity is not explicitly authorized.');
+        if (scheduled.bodySha256 !== validated.bodySha256 || scheduled.inputTokens !== validated.inputTokens || scheduled.completionTokens !== this.authorization.requestLimits.completionTokens) throw new Error('Draft request body or schedule identity differs from authorization.');
+        return { ...validated, scheduled, requestHash: canonicalHash({ endpoint, body }) };
+    }
+
+    async reserve(requestId, endpoint, body) {
+        const identity = this.validateDispatchIdentity(requestId, endpoint, body);
+        const validated = identity;
         const schedule = this.authorization.requestSchedule;
         return this.withLock(() => {
             this.assertLiveAuthorization();
             if (sha256(fs.readFileSync(this.authorizationFile)) !== this.authorizationHash) throw new Error('Reviewed code-candidate authorization changed after broker initialization.');
             const state = this.loadState();
             if (state.requests[requestId]) throw new Error('Draft request identity was already reserved; redispatch is forbidden.');
-            const scheduled = schedule.find((entry) => entry.requestId === requestId);
-            if (!scheduled) throw new Error('Draft request identity is not explicitly authorized.');
+            const scheduled = identity.scheduled;
+            if (fs.existsSync(this.responsePath(requestId))) throw new Error('Conflicting response artifact exists before fresh reservation.');
             if (scheduled.bodySha256 !== validated.bodySha256 || scheduled.inputTokens !== validated.inputTokens || scheduled.completionTokens !== this.authorization.requestLimits.completionTokens) throw new Error('Draft request body or sizing differs from its scheduled identity.');
             const addition = { usd: charge(validated.inputTokens, this.authorization.requestLimits.completionTokens, this.authorization.pricing), inputTokens: validated.inputTokens, completionTokens: this.authorization.requestLimits.completionTokens };
             const current = summarize(state);
@@ -301,10 +323,11 @@ class ModelBudgetBroker {
     }
 
     async dispatch({ requestId, endpoint, body, apiKey, transport } = {}) {
-        this.assertLiveAuthorization();
+        const identity = this.validateDispatchIdentity(requestId, endpoint, body);
         if (this.authorization.mode === 'real' && !apiKey) throw new Error('Code-candidate model credentials are not configured.');
         if (this.authorization.mode === 'synthetic' && apiKey) throw new Error('Synthetic code-candidate authorization cannot receive provider credentials.');
         const existing = this.loadState().requests[requestId];
+        if (existing && (existing.requestHash !== identity.requestHash || existing.bodySha256 !== identity.bodySha256)) throw new Error('Existing request identity differs from the current authorized request.');
         if (existing?.status === 'completed') { const artifact = this.readResponseArtifact(existing); return { status: artifact.status, body: artifact.body, parsed: (() => { try { return JSON.parse(artifact.body); } catch { return null; } })(), accountingStatus: 'completed', requestId }; }
         if (existing?.status === 'reserved') {
             const file = this.responsePath(requestId);

@@ -36,7 +36,10 @@ response-body hash. A restart may validate and return a completed artifact (or
 finish settlement after a crash between capture and settlement), but a missing
 or changed artifact fails closed and cannot redispatch the request. Real
 `gpt-5.6-sol` authorizations pin `reasoning_effort: "medium"`, which is included
-in the request body hash.
+in the request body hash. Response artifacts are namespaced by the immutable
+authorization hash and their envelopes bind authorization, ledger, scope,
+request, schedule, and body identities; every resume path revalidates the
+current authorization bytes and complete request body before reading one.
 
 B5-C2c remains responsible for the independent fresh baseline/candidate test
 runner, behavior/replay/holdout proof, proof integrity, and bounded evidence
