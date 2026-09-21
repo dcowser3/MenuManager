@@ -3,7 +3,7 @@ const os = require('os');
 const path = require('path');
 const { execFileSync } = require('child_process');
 const { evalStatusFromSummary, promptProposalApprovalBlock } = require('../dist/lib/improvement-cycle-core');
-const { assertPendingInsertPayload, classifyCreateReadback, persistedSchemaFingerprint, prepareSingleApproval, recoverApprovalReadback } = require('../../../scripts/lib/spelling-successor-operational-path');
+const { assertFrozenRuntime, assertPendingInsertPayload, classifyCreateReadback, persistedSchemaFingerprint, prepareSingleApproval, recoverApprovalReadback } = require('../../../scripts/lib/spelling-successor-operational-path');
 
 const script = path.resolve(__dirname, '../../../scripts/prepare-spelling-successor.js');
 const live = path.resolve(__dirname, '../../../tmp/code-proposals/72c144aa-c33e-4873-85e8-6e48537e799e/contextual-descriptor-reconciliation/live-proposal.json');
@@ -35,6 +35,8 @@ test('constructs only the three safe spelling rules with provenance and determin
     expect(plan.successor.current_prompt).toBe(plan.successor.proposed_prompt);
     expect(assertPendingInsertPayload(plan.successor, plan, { effective_prompt_sha256: plan.effective_prompt_sha256, accepted_rules_sha256: plan.accepted_rules_sha256, accepted_rules: JSON.parse(fs.readFileSync(runtimeEvidence, 'utf8')).accepted_rules, implementation_sha256: plan.implementation_sha256 })).toBe(true);
     expect(prepareSingleApproval(plan.successor, { effective_prompt_sha256: plan.effective_prompt_sha256, accepted_rules_sha256: plan.accepted_rules_sha256, accepted_rules: JSON.parse(fs.readFileSync(runtimeEvidence, 'utf8')).accepted_rules, implementation_sha256: plan.implementation_sha256 }, [0, 1, 2]).accepted_rule_indexes).toEqual([0, 1, 2]);
+    expect(() => assertFrozenRuntime(plan.successor, { effective_prompt_sha256: plan.effective_prompt_sha256, accepted_rules_sha256: plan.accepted_rules_sha256, accepted_rules: JSON.parse(fs.readFileSync(runtimeEvidence, 'utf8')).accepted_rules, implementation_sha256: 'forged' })).toThrow(/implementation identity/);
+    expect(() => assertPendingInsertPayload({ ...plan.successor, proposed_rules: plan.successor.proposed_rules.map((rule, index) => index === 0 ? { ...rule, corrected_text: 'forged' } : rule) }, plan, { effective_prompt_sha256: plan.effective_prompt_sha256, accepted_rules_sha256: plan.accepted_rules_sha256, accepted_rules: JSON.parse(fs.readFileSync(runtimeEvidence, 'utf8')).accepted_rules, implementation_sha256: plan.implementation_sha256 })).toThrow(/frozen plan hashes|rules or routing/);
 });
 
 test('forged or incomplete evaluation evidence cannot pass the rules-only gate', () => {
