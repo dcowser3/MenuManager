@@ -34,3 +34,8 @@ delivery identity. It uses the checked-in form boundary and vendored Quill
 serialization, captures baseline/candidate text and HTML-derived text before
 the request boundary, and fails if any request is attempted. Generic
 unit/replay/behavior images are never used as a delivery fallback.
+
+Schema-v2 delivery proof also binds the worker response to the frozen delivery
+image, runtime, driver, source-manifest, browser/Quill, and fixture identities.
+Missing, stale, or tampered bindings fail closed; legacy schema-v1 evidence is
+retained only for compatibility and does not establish the new binding.

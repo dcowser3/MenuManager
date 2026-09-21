@@ -98,7 +98,7 @@ async function runFixedDelivery(request) {
         const sourceManifest = hashValue({ baseline: baselineSourceHashes, candidate: candidateSourceHashes });
         baselineSourceHashes.driver = sourceManifest;
         candidateSourceHashes.driver = sourceManifest;
-        return { driver: 'form-submit-v1', baseline_source_hashes: baselineSourceHashes, candidate_source_hashes: candidateSourceHashes, source_manifest_sha256: sourceManifest, baseline_browser_version: baseline.browserVersion, candidate_browser_version: candidate.browserVersion, quill_version: candidate.quillVersion, baseline_submitted_text: baseline.capture.text, candidate_submitted_text: candidate.capture.text, baseline_submitted_html: baseline.capture.html, candidate_submitted_html: candidate.capture.html, baseline_submitted_html_text: baseline.capture.htmlText, candidate_submitted_html_text: candidate.capture.htmlText };
+        return { image_id: imageId, runtime_id: runtimeId, delivery_fixture_sha256: hashValue(request.delivery_fixture), driver: 'form-submit-v1', baseline_source_hashes: baselineSourceHashes, candidate_source_hashes: candidateSourceHashes, source_manifest_sha256: sourceManifest, baseline_browser_version: baseline.browserVersion, candidate_browser_version: candidate.browserVersion, quill_version: candidate.quillVersion, baseline_submitted_text: baseline.capture.text, candidate_submitted_text: candidate.capture.text, baseline_submitted_html: baseline.capture.html, candidate_submitted_html: candidate.capture.html, baseline_submitted_html_text: baseline.capture.htmlText, candidate_submitted_html_text: candidate.capture.htmlText };
     } finally { await browser.close(); }
 }
 
