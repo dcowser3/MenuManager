@@ -4,7 +4,7 @@ const path = require('path');
 const crypto = require('crypto');
 const childProcess = require('child_process');
 
-const { runCodeProposalProofWithDocker } = require('../../../scripts/lib/code-proposal-proof-runner');
+const { runCodeProposalLifecycle } = require('../../../scripts/lib/code-proposal-lifecycle');
 const { FIXED_RUNTIME_ID } = require('../../../scripts/lib/code-proposal-docker-launcher');
 const { loadVerificationModule } = require('../../../scripts/lib/proposal-verification-store');
 
@@ -50,7 +50,7 @@ function makeDockerFixture() {
     fs.writeFileSync(handoffFile, handoffBytes, { mode: 0o600 });
     Object.assign(proposal.eval_summary.code_candidate, { proposal_sha256: proposalHash, baseline_source_sha256: baselineHash, prompt_sha256: digest(prompt), accepted_rules_sha256: acceptedRulesHash, authorization_hash: handoff.authorization_hash, scope_hash: handoff.scope_hash, c2b_handoff_sha256: digest(handoffBytes), candidate_source_sha256: candidateHash, draft_patch_sha256: handoff.draft.patch_sha256, draft_content_sha256: handoff.draft.content_sha256, draft_response_sha256: responseBodyHash });
     fs.writeFileSync(path.join(attemptRoot, 'proposal.json'), JSON.stringify(proposal), { mode: 0o600 });
-    const metadata = { attempt_id: 'attempt-one', artifact_directory: attemptRoot, proposal_sha256: proposalHash, baseline_source_sha256: baselineHash, candidate_source_sha256: candidateHash, parent_campaign_sha256: proposal.parent_campaign_sha256, prompt_sha256: digest(prompt), accepted_rules_sha256: acceptedRulesHash, rules_file_sha256: digest(rules), expected_dataset_sha256: digest(dataset), expected_case_ids: ['case-1'], behavior_tests_sha256: behavior.sha256, c2b_handoff_sha256: digest(handoffBytes), authorization_hash: handoff.authorization_hash, scope_hash: handoff.scope_hash, draft_patch_sha256: handoff.draft.patch_sha256, draft_content_sha256: handoff.draft.content_sha256, draft_response_sha256: responseBodyHash, vocabulary_sha256: HASH('vocab'), expectations_sha256: HASH('expect') };
+    const metadata = { attempt_id: 'attempt-one', artifact_directory: attemptRoot, deadline_at: new Date(Date.now() + 300000).toISOString(), proposal_sha256: proposalHash, baseline_source_sha256: baselineHash, candidate_source_sha256: candidateHash, parent_campaign_sha256: proposal.parent_campaign_sha256, prompt_sha256: digest(prompt), accepted_rules_sha256: acceptedRulesHash, rules_file_sha256: digest(rules), expected_dataset_sha256: digest(dataset), expected_case_ids: ['case-1'], behavior_tests_sha256: behavior.sha256, c2b_handoff_sha256: digest(handoffBytes), authorization_hash: handoff.authorization_hash, scope_hash: handoff.scope_hash, draft_patch_sha256: handoff.draft.patch_sha256, draft_content_sha256: handoff.draft.content_sha256, draft_response_sha256: responseBodyHash, vocabulary_sha256: HASH('vocab'), expectations_sha256: HASH('expect') };
     return { root, trustedRoot, attemptRoot, baselineRoot, candidateRoot, handoffFile, metadata, proposal, verification };
 }
 
@@ -60,13 +60,20 @@ dockerE2e('runs the real Docker proof to pending_store using metadata attempt id
     const fixture = makeDockerFixture();
     try {
         const imageId = childProcess.execFileSync('docker', ['image', 'inspect', 'menumanager/dev:latest', '--format', '{{.Id}}'], { encoding: 'utf8' }).trim();
-        const result = await runCodeProposalProofWithDocker({ ...fixture, c2bHandoffFile: fixture.handoffFile, imageId, runtimeId: FIXED_RUNTIME_ID, replayPolicyVersion: fixture.verification.REPLAY_RETIREMENT_POLICY_VERSION, vocabularySha256: HASH('vocab'), expectationsSha256: HASH('expect'), model: 'test-only', client: null, originalProposal: null, store: null, executorTimeoutMs: 150000 });
-        expect(result.status).toBe('pending_store');
-        expect(result.plan.seeds).toHaveLength(2);
+        const stored = [];
+        let storedProposal = fixture.proposal;
+        const store = { recordCodeVerification: async (...args) => { stored.push(args); storedProposal = { ...storedProposal, eval_summary: { ...storedProposal.eval_summary, code_candidate: { ...storedProposal.eval_summary.code_candidate, ...args[2].code_candidate, status: 'verified' }, code_verification: args[2].code_verification } }; }, readCurrentProposal: async () => storedProposal };
+        const result = await runCodeProposalLifecycle({ ...fixture, progressRoot: fixture.root, readCurrentProposal: store.readCurrentProposal, c2bHandoffFile: fixture.handoffFile, imageId, runtimeId: FIXED_RUNTIME_ID, replayPolicyVersion: fixture.verification.REPLAY_RETIREMENT_POLICY_VERSION, vocabularySha256: HASH('vocab'), expectationsSha256: HASH('expect'), model: 'test-only', client: {}, originalProposal: fixture.proposal, store, executorTimeoutMs: 150000 });
+        expect(result.status).toBe('verified');
         expect(result.proof.runs).toHaveLength(2);
         expect(result.proof.behavior.candidate.passed).toBe(true);
         expect(result.proof.tests.baseline.exit_code).toBe(1);
         expect(result.proof.tests.candidate.exit_code).toBe(0);
-        expect(fs.existsSync(result.paths.stagedProof)).toBe(true);
+        expect(stored).toHaveLength(1);
+        const resumed = await runCodeProposalLifecycle({ ...fixture, progressRoot: fixture.root, readCurrentProposal: store.readCurrentProposal, c2bHandoffFile: fixture.handoffFile, imageId, runtimeId: FIXED_RUNTIME_ID, replayPolicyVersion: fixture.verification.REPLAY_RETIREMENT_POLICY_VERSION, vocabularySha256: HASH('vocab'), expectationsSha256: HASH('expect'), model: 'test-only', client: {}, originalProposal: fixture.proposal, store: { ...store, recordCodeVerification: async () => { throw new Error('must not attach twice'); } }, resume: true });
+        expect(resumed.status).toBe('verified');
+        const progress = require('../../../services/dashboard/dist/lib/code-candidate-progress').readCodeCandidateProgress({ attempt_id: fixture.metadata.attempt_id, artifact_directory: fixture.attemptRoot }, fixture.root);
+        expect(progress.state).toBe('verified');
+        expect(progress.attemptId).toBe(fixture.metadata.attempt_id);
     } finally { fs.rmSync(fixture.root, { recursive: true, force: true }); }
 }, 180000);

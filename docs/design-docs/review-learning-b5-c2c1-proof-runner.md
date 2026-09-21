@@ -81,3 +81,16 @@ repository-owned review-pipeline driver; delivery still returns an explicit
 blocked protocol result because no fixed repository-owned delivery driver
 exists. Support manifests reject unexpected files and the runtime identity is
 re-derived before every invocation.
+
+The owner-bound lifecycle coordinator is `scripts/lib/code-proposal-lifecycle.js`.
+Its post-handoff phase revalidates the live owner/frozen identities, uses the
+accepted B6-C progress reader, runs `runCodeProposalProofWithDocker`, and calls
+B5-B storage before writing verified progress. `runPreparedCodeProposalLifecycle`
+is the offline composition seam for an already validated C2a draft: it applies
+the draft, persists the C2b handoff, then enters the same proof/attachment
+phase. Resume accepts only an exact owner-bound verified proof or staged proof;
+store rejection, deadline, delivery-driver absence, stale ownership, malformed
+progress, and proof-integrity failures remain blocked/failed and cannot be
+silently retried as verified. C1 preparation and model drafting remain an
+upstream accepted component; this slice's default path begins at the validated
+draft/handoff boundary and never invokes the model broker.
