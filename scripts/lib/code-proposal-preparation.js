@@ -189,6 +189,19 @@ async function prepareCodeProposalAttempt(options = {}) {
         metadata.expected_dataset_sha256 = prepared.sha256;
         metadata.expected_case_ids = prepared.rows.map((row) => row.case_id);
         metadata.behavior_tests_sha256 = behavior.sha256;
+        if (options.inventory) {
+            const queue = require('./code-proposal-preparation-queue');
+            const finalized = queue.finalizePreparationInventory(options.inventory, {
+                behavior_tests_sha256: metadata.behavior_tests_sha256,
+                dataset_sha256: metadata.expected_dataset_sha256,
+                source_sha256: metadata.baseline_source_sha256,
+                prompt_sha256: metadata.prompt_sha256,
+                accepted_rules_sha256: metadata.accepted_rules_sha256,
+            });
+            const inventoryBytes = Buffer.from(`${JSON.stringify(finalized, null, 2)}\n`);
+            atomicWrite(path.join(attemptRoot, 'preparation-inventory.json'), inventoryBytes);
+            metadata.preparation_inventory_sha256 = hashBytes(inventoryBytes);
+        }
         for (const field of ['proposal_sha256', 'baseline_source_sha256', 'expected_dataset_sha256', 'behavior_tests_sha256', 'prompt_sha256', 'accepted_rules_sha256']) {
             if (!DIGEST.test(metadata[field])) throw new Error(`Prepared claim hash ${field} is missing or malformed.`);
         }

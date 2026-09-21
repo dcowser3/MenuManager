@@ -45,7 +45,7 @@ require('dotenv').config({ path: path.join(repoRoot, '.env') });
 const { createClient } = require('@supabase/supabase-js');
 const evalHelpers = require('./review-eval-helpers');
 const behaviorArtifactLib = require('./lib/behavior-artifact');
-const { prepareManualCodeProposalReview } = require('./lib/manual-code-proposal-review');
+const { prepareCodeProposalQueue, loadPendingProposalRows } = require('./lib/code-proposal-preparation-queue');
 const { recordCodeVerification } = require('./lib/proposal-verification-store');
 const { appendExpectationArtifactArgs } = require('./lib/improvement-cycle-wiring');
 
@@ -138,7 +138,7 @@ async function triggerManualCodeCandidateReview({ supabase, cycleId, proposalRow
         if (lookup.error) throw new Error(`stored proposal lookup failed: ${lookup.error.message}`);
         const storedProposal = lookup.data?.[0];
         if (!storedProposal?.id) throw new Error('stored proposal lookup returned no id');
-        const result = await prepareManualCodeProposalReview({
+        const result = await prepareCodeProposalQueue({
             client: supabase,
             store: { recordCodeVerification },
             proposal: storedProposal,
@@ -146,8 +146,8 @@ async function triggerManualCodeCandidateReview({ supabase, cycleId, proposalRow
             datasetPath: path.join(repoRoot, 'tmp', 'review-eval', 'dataset.jsonl'),
             outputRoot: path.join(repoRoot, 'tmp', 'code-proposals'),
             attemptId: `cycle-${cycleId}`,
-            // Real dispatch is intentionally impossible without an explicit
-            // owner-bound authorization/ledger supplied for this run.
+            // The outer cycle is preparation-only. Authorization and dispatch
+            // are intentionally stripped by the coordinator.
         });
         const summary = {
             ...base,
@@ -155,14 +155,21 @@ async function triggerManualCodeCandidateReview({ supabase, cycleId, proposalRow
             reason: result.reason || null,
             provider_calls: result.providerCalls || 0,
             attempt_id: result.attemptId || null,
-            delivery_holds: (result.deliveryHolds || []).map((hold) => ({ correction_id: hold.correction_id, status: hold.status })),
-            progress: result.progress ? { phase: result.progress.phase, state: result.progress.state, reason: result.progress.reason || null } : null,
+            delivery_holds: (result.inventory?.groups || []).filter((group) => group.reason === 'delivery_verification_required').map((group) => ({ correction_id: group.correction_id, status: group.reason })),
+            snapshot_sha256: result.inventory?.snapshot_sha256 || null,
+            groups: (result.inventory?.groups || []).map((group) => ({ correction_id: group.correction_id, lane: group.lane, status: group.status, reason: group.reason })),
         };
-        await fsp.writeFile(artifactPath, `${JSON.stringify(summary, null, 2)}\n`, { mode: 0o600 });
+        const temporary = `${artifactPath}.${process.pid}.tmp`;
+        await fsp.writeFile(temporary, `${JSON.stringify(summary, null, 2)}\n`, { mode: 0o600 });
+        await fsp.rename(temporary, artifactPath);
+        await fsp.chmod(artifactPath, 0o600);
         return summary;
     } catch (error) {
         const summary = { ...base, provider_calls: error.providerCallAttempted ? 1 : 0, reason: 'manual_preparation_failed', error: `${error.message || error}`.slice(0, 500) };
-        await fsp.writeFile(artifactPath, `${JSON.stringify(summary, null, 2)}\n`, { mode: 0o600 });
+        const temporary = `${artifactPath}.${process.pid}.tmp`;
+        await fsp.writeFile(temporary, `${JSON.stringify(summary, null, 2)}\n`, { mode: 0o600 });
+        await fsp.rename(temporary, artifactPath);
+        await fsp.chmod(artifactPath, 0o600);
         console.warn(`Manual code-candidate review was not started: ${summary.error}`);
         return summary;
     }
@@ -725,11 +732,7 @@ async function main() {
             .is('prompt_cycle_id', null)
             .eq('source', 'human')
             .in('status', ['accepted', 'pending']),
-        supabase.from('prompt_proposals')
-            .select('id, cycle_id, created_at, correction_rule_count, submission_count, eval_status, llm_model, eval_summary, replay_evidence, correction_routing')
-            .eq('status', 'pending')
-            .order('created_at', { ascending: true })
-            .limit(1),
+        loadPendingProposalRows(supabase),
         supabase.from('prompt_proposals')
             .select('id, status')
             .eq('cycle_id', baseCycleId)

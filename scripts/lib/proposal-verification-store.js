@@ -25,9 +25,10 @@ function assertClaimIdentity(candidate) {
 }
 
 function assertFrozenIdentity(previous, incoming) {
-    for (const field of ['proposal_sha256', 'baseline_source_sha256', 'expected_dataset_sha256', 'behavior_tests_sha256', 'prompt_sha256', 'accepted_rules_sha256']) {
+    for (const field of ['proposal_sha256', 'baseline_source_sha256', 'expected_dataset_sha256', 'behavior_tests_sha256', 'prompt_sha256', 'accepted_rules_sha256', 'preparation_inventory_sha256']) {
         if (incoming[field] !== previous[field]) throw new Error(`Candidate completion differs in frozen ${field}.`);
     }
+    if (incoming.preparation_inventory_sha256 !== undefined && !DIGEST.test(incoming.preparation_inventory_sha256)) throw new Error('Candidate preparation inventory identity is invalid.');
     if (JSON.stringify(incoming.expected_case_ids) !== JSON.stringify(previous.expected_case_ids)) {
         throw new Error('Candidate completion differs in the frozen ordered case list.');
     }
@@ -160,4 +161,4 @@ function shouldDraftCodeProposal(proposal, implementationHash, verification = lo
     return false;
 }
 
-module.exports = { loadVerificationModule, recordCodeVerification, shouldDraftCodeProposal };
+module.exports = { loadVerificationModule, recordCodeVerification, shouldDraftCodeProposal, runningClaimIsFresh };
