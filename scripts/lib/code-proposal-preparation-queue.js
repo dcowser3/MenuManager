@@ -266,7 +266,7 @@ async function preparePendingCodeProposalQueue(options = {}) {
     const results = [];
     for (const proposal of proposals) {
         try {
-            results.push(await prepareCodeProposalQueue({ ...options, proposal, query: snapshot.query, enumeration: { ...snapshot.enumeration, global_snapshot_sha256: snapshot.snapshot_sha256 } }));
+            results.push(await prepareCodeProposalQueue({ ...options, proposal, manualExclusionArtifact: options.manualExclusionArtifacts?.[proposal.id], query: snapshot.query, enumeration: { ...snapshot.enumeration, global_snapshot_sha256: snapshot.snapshot_sha256 } }));
         } catch (error) {
             results.push({ status: 'blocked', reason: `${error.message || error}`.slice(0, 500), providerCalls: 0, proposal_id: proposal.id });
         }

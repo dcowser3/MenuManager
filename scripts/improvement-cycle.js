@@ -140,13 +140,13 @@ async function triggerManualCodeCandidateReview({ supabase, cycleId, proposalRow
             manualExclusionArtifact = JSON.parse(fs.readFileSync(manualExclusionArtifactPath, 'utf8'));
         }
         const pending = await loadPendingProposalRows(supabase);
-        const selected = proposalId ? pending.rows.filter((row) => row.id === proposalId) : pending.rows;
-        if (proposalId && selected.length !== 1) throw new Error(`Requested proposal ${proposalId} was not found in the pending inventory.`);
+        if (proposalId && !pending.rows.some((row) => row.id === proposalId)) throw new Error(`Requested proposal ${proposalId} was not found in the pending inventory.`);
         const result = await preparePendingCodeProposalQueue({
             client: supabase,
             store: { recordCodeVerification },
-            proposals: selected,
-            enumeration: proposalId ? { ...pending, rows_count: 1, row_ids: [proposalId] } : pending,
+            proposals: pending.rows,
+            enumeration: pending,
+            manualExclusionArtifacts: proposalId && manualExclusionArtifact ? { [proposalId]: manualExclusionArtifact } : undefined,
             repoRoot,
             datasetPath: path.join(repoRoot, 'tmp', 'review-eval', 'dataset.jsonl'),
             outputRoot: path.join(repoRoot, 'tmp', 'code-proposals'),
