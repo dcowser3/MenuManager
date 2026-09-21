@@ -83,7 +83,7 @@ test('producer attaches only exact approved artifact activation metadata', () =>
             { id: 'a-v1', version: 1, status: 'active', classification: 'missed_existing_rule', policyRuleId: 'r-a', restaurant: 'Restaurant A', menuScope: 'food', input: 'house-made', expected: 'house-made', approvalState: 'approved' },
             { id: 'a-v2', version: 2, status: 'candidate', classification: 'explicit_superseding_policy', policyRuleId: 'r-a', restaurant: 'Restaurant A', menuScope: 'food', input: 'house-made', expected: 'housemade', sourceExpectationId: 'a-v1', approvalState: 'unapproved' },
         ], supersedes: [{ priorId: 'a-v1', successorId: 'a-v2' }] });
-    const attached = (0, expectation_versioning_1.attachApprovedActivationMetadata)([{ change_type: 'superseding_policy', original_text: 'house-made', corrected_text: 'housemade', is_location_specific: true, location: 'Restaurant A', applies_to_menu_type: 'food' }], envelope)[0];
+    const attached = (0, expectation_versioning_1.attachApprovedActivationMetadata)([{ change_type: 'terminology', original_text: 'house-made', corrected_text: 'housemade', is_location_specific: true, location: 'Restaurant A', applies_to_menu_type: 'food' }], envelope)[0];
     expect(attached.expectation_activation).toMatchObject({ source: 'approved_expectation_artifact', successorId: 'a-v2', artifactHash: envelope.sha256 });
     expect((0, expectation_versioning_1.attachApprovedActivationMetadata)([{ change_type: 'terminology', original_text: 'house-made', corrected_text: 'housemade' }], envelope)[0].expectation_activation).toBeUndefined();
 });

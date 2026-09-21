@@ -35,3 +35,11 @@ test('stale summary fails before update', async () => {
     expect(result.status).toBe(409);
     expect(update).not.toHaveBeenCalled();
 });
+
+test('between-read-and-update CAS conflict returns 409 without overwrite', async () => {
+    const update = jest.fn().mockReturnValue({ eq: () => ({ eq: () => ({ eq: () => ({ select: () => ({ single: async () => ({ data: null, error: null }) }) }) }) }) });
+    (getSupabaseClient as jest.Mock).mockReturnValue({ from: () => ({ select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: { id: 'p1', status: 'approved', eval_summary: summary }, error: null }) }) }), update }) });
+    const result = await invoke({ expected_eval_summary_hash: hash, expectation_envelope: { sha256: 'new' } });
+    expect(result.status).toBe(409);
+    expect(update).toHaveBeenCalled();
+});

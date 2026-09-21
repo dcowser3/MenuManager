@@ -28,6 +28,7 @@ export interface ExpectationEnvelope {
     expectations: ExpectationVersion[];
     supersedes: Array<{ priorId: string; successorId: string }>;
     sha256: string;
+    parentArtifactHash?: string | null;
 }
 
 const hash = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -247,7 +248,7 @@ export function attachApprovedActivationMetadata(proposedRules: any[], envelope:
             && expectation.input === rule.original_text && expectation.expected === rule.corrected_text
             && expectation.restaurant === (rule.is_location_specific ? rule.location : null)
             && expectation.menuScope === (rule.applies_to_menu_type || null)
-            && rule.change_type === 'superseding_policy'
+            && ['spelling', 'diacritic', 'terminology', 'grammar', 'punctuation', 'capitalization'].includes(rule.change_type)
             && envelope.supersedes.some((link) => link.successorId === expectation.id && link.priorId === expectation.sourceExpectationId));
         if (!match) return rule;
         const prior = envelope.expectations.find((expectation) => expectation.id === match.sourceExpectationId);
@@ -256,4 +257,32 @@ export function attachApprovedActivationMetadata(proposedRules: any[], envelope:
             restaurant: match.restaurant, menuScope: match.menuScope, isLocationSpecific: !!rule.is_location_specific,
             artifactHash: envelope.sha256, sourceRevision: prior?.version } };
     });
+}
+
+export function deriveProposalBoundEnvelope(proposedRules: any[], authority: ExpectationEnvelope, proposalId: string) {
+    validateExpectationEnvelope(authority);
+    const matches = proposedRules.map((rule, index) => ({ rule, index, expectation: authority.expectations.find((row) => row.status === 'candidate'
+        && row.input === rule.original_text && row.expected === rule.corrected_text
+        && row.restaurant === (rule.is_location_specific ? rule.location : null)
+        && row.menuScope === (rule.applies_to_menu_type || null)) }))
+        .filter((entry) => entry.expectation);
+    if (!matches.length) return { rules: proposedRules, envelope: null };
+    const successorIds = new Set<string>();
+    const rules = proposedRules.map((rule, index) => {
+        const match = matches.find((entry) => entry.index === index);
+        if (!match || successorIds.has(match.expectation!.id)) return rule;
+        successorIds.add(match.expectation!.id);
+        const policyRuleId = `proposal-${proposalId}-rule-${index}`;
+        return { ...rule, expectation_activation: { source: 'approved_expectation_artifact', ruleId: policyRuleId,
+            supersedesId: match.expectation!.sourceExpectationId, successorId: match.expectation!.id,
+            policyVersion: authority.activePolicyVersion, restaurant: match.expectation!.restaurant,
+            menuScope: match.expectation!.menuScope, isLocationSpecific: !!rule.is_location_specific,
+            artifactHash: authority.sha256, sourceRevision: match.expectation!.version } };
+    });
+    const expectations = authority.expectations.map((row) => row.status === 'candidate' && successorIds.has(row.id)
+        ? { ...row, policyRuleId: `proposal-${proposalId}-rule-${matches.find((entry) => entry.expectation!.id === row.id)!.index}` } : row);
+    const body = { schemaVersion: 1 as const, activePolicyVersion: authority.activePolicyVersion,
+        candidatePolicyVersion: authority.candidatePolicyVersion || authority.activePolicyVersion, expectations,
+        supersedes: authority.supersedes, parentArtifactHash: authority.sha256 };
+    return { rules, envelope: { ...body, sha256: hash(body) } };
 }

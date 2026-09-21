@@ -1717,8 +1717,9 @@ async function main() {
             try {
                 approvedExpectationEnvelope = JSON.parse(fs.readFileSync(approvedExpectationPath, 'utf8'));
                 expectationVersioningLib.validateExpectationEnvelope(approvedExpectationEnvelope);
-                validated.proposed_replacement_rules = expectationVersioningLib.attachApprovedActivationMetadata(validated.proposed_replacement_rules || [], approvedExpectationEnvelope);
-                evalSummary = { ...evalSummary, expectation_envelope: approvedExpectationEnvelope };
+                const derived = expectationVersioningLib.deriveProposalBoundEnvelope(validated.proposed_replacement_rules || [], approvedExpectationEnvelope, cycleId);
+                validated.proposed_replacement_rules = derived.rules;
+                if (derived.envelope) evalSummary = { ...evalSummary, expectation_envelope: derived.envelope };
             } catch (error) {
                 validated.warnings.push(`Approved expectation artifact rejected; no activation metadata attached: ${error.message}`);
             }
