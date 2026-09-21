@@ -3,7 +3,7 @@ const os = require('os');
 const path = require('path');
 const { execFileSync } = require('child_process');
 const { evalStatusFromSummary, promptProposalApprovalBlock } = require('../dist/lib/improvement-cycle-core');
-const { assertPendingInsertPayload, classifyCreateReadback, prepareSingleApproval, recoverApprovalReadback } = require('../../../scripts/lib/spelling-successor-operational-path');
+const { assertPendingInsertPayload, classifyCreateReadback, persistedSchemaFingerprint, prepareSingleApproval, recoverApprovalReadback } = require('../../../scripts/lib/spelling-successor-operational-path');
 
 const script = path.resolve(__dirname, '../../../scripts/prepare-spelling-successor.js');
 const live = path.resolve(__dirname, '../../../tmp/code-proposals/72c144aa-c33e-4873-85e8-6e48537e799e/contextual-descriptor-reconciliation/live-proposal.json');
@@ -44,9 +44,14 @@ test('forged or incomplete evaluation evidence cannot pass the rules-only gate',
 });
 
 test('create/readback recovery is idempotent and rejects mismatched successors', () => {
-    const plan = { successor: { cycle_id: 'cycle-x', status: 'pending', accepted_rules: null }, successor_sha256: 'x' };
-    expect(classifyCreateReadback({ cycle_id: 'cycle-x', status: 'pending', accepted_rules: null }, plan).state).toBe('conflict');
+    const successor = { cycle_id: 'cycle-x', status: 'pending', accepted_rules: null, current_prompt: 'p', proposed_prompt: 'p', proposed_rules: [], correction_routing: [] };
+    const plan = { successor, successor_sha256: persistedSchemaFingerprint(successor) };
+    expect(classifyCreateReadback({ ...successor, id: 'db-id', created_at: 'now' }, plan).state).toBe('already_created');
+    expect(classifyCreateReadback({ ...successor, proposed_prompt: 'forged', id: 'db-id' }, plan).state).toBe('conflict');
     expect(recoverApprovalReadback({ cycle_id: 'cycle-x', status: 'pending', accepted_rules: null }, { expected_cycle_id: 'cycle-x' }).state).toBe('retry_allowed');
-    expect(recoverApprovalReadback({ cycle_id: 'cycle-x', status: 'approved_modified', accepted_rules: [{}, {}, {}] }, { expected_cycle_id: 'cycle-x' }).state).toBe('already_approved');
+    const accepted = [{ correction_id: 'a', original_text: 'a', corrected_text: 'b', applies_to_menu_type: 'all' }, { correction_id: 'b', original_text: 'c', corrected_text: 'd', applies_to_menu_type: 'food' }, { correction_id: 'c', original_text: 'e', corrected_text: 'f', applies_to_menu_type: 'food' }];
+    const persistent = accepted.map((row, index) => ({ ...row, correction_id: `proposal-cycle-x-rule-${index}`, status: 'accepted' }));
+    expect(recoverApprovalReadback({ cycle_id: 'cycle-x', status: 'approved_modified', accepted_rules: accepted }, { expected_cycle_id: 'cycle-x', expected_accepted_rules: accepted, expected_persistent_correction_rules: persistent, persistentCorrectionRules: persistent }).state).toBe('already_approved');
+    expect(recoverApprovalReadback({ cycle_id: 'cycle-x', status: 'approved_modified', accepted_rules: [{}, {}, {}] }, { expected_cycle_id: 'cycle-x', expected_accepted_rules: accepted, expected_persistent_correction_rules: persistent, persistentCorrectionRules: [{}, {}, {}] }).state).toBe('conflict');
     expect(recoverApprovalReadback({ cycle_id: 'cycle-y', status: 'approved_modified', accepted_rules: [{}, {}, {}] }, { expected_cycle_id: 'cycle-x' }).state).toBe('conflict');
 });
