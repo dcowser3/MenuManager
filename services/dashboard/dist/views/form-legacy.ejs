@@ -6924,7 +6924,8 @@
                 await uploadMenuImageIfNeeded();
                 formData.menuImagePath = uploadedMenuImagePath || '';
                 formData.menuImageFileName = uploadedMenuImageFileName || '';
-                const submitBody = JSON.stringify(formData);
+                const preparedSubmission = MenuSubmission.prepareMenuSubmissionRequest(formData, getAttemptHeaders());
+                const submitBody = preparedSubmission.init.body;
                 const submitBodyLength = byteLength(submitBody);
                 await logFormAttempt('submit_started', {
                     route: '/api/form/submit',
@@ -6945,11 +6946,7 @@
                     }
                 });
 
-                const response = await fetch('/api/form/submit', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', ...getAttemptHeaders() },
-                    body: submitBody
-                });
+                const response = await MenuSubmission.sendPreparedMenuSubmission(preparedSubmission);
 
                 const responseText = await response.text();
                 let data = {};

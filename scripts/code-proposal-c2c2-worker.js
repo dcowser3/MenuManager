@@ -73,11 +73,15 @@ async function runFixedDelivery(request) {
         const html = `<div id="editor"></div><form id="menu-form"><input name="menuContent"><input name="menuContentHtml"></form><script>${quillSource}</script><script>${diffCoreSource}</script><script>${redlineSource}</script><script>${submissionSource}</script>`;
             await page.setContent(html, { waitUntil: 'load' });
             await page.evaluate(() => { window.deliveryQuill = new Quill('#editor', { theme: 'snow' }); });
-            const capture = await page.evaluate((value) => {
+            const capture = await page.evaluate(async (value) => {
             const q = window.deliveryQuill;
             q.setText(value);
             const captured = window.MenuSubmission.captureMenuSubmission({ html: q.root.innerHTML, text: q.getText().trim() });
-            return { text: captured.menuContent, html: captured.menuContentHtml, htmlText: q.root.innerText.trim() };
+            let calls = 0; let seen = null;
+            const request = window.MenuSubmission.prepareMenuSubmissionRequest({ menuContent: captured.menuContent, menuContentHtml: captured.menuContentHtml }, {});
+            const response = await window.MenuSubmission.sendPreparedMenuSubmission(request, async (url, init) => { calls += 1; seen = { url, init }; return { status: 200, text: async () => JSON.stringify({ ok: true }) }; });
+            if (calls !== 1 || !seen || seen.url !== '/api/form/submit' || seen.init.method !== 'POST' || JSON.parse(seen.init.body).menuContent !== captured.menuContent) throw new Error('submission boundary capture mismatch');
+            return { text: captured.menuContent, html: captured.menuContentHtml, htmlText: q.root.innerText.trim(), request: seen };
             }, fixtureText);
             const browserVersion = await browser.version();
             const quillVersion = await page.evaluate(() => Quill.version);
