@@ -3,6 +3,7 @@ const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
 const { ModelBudgetBroker, canonicalHash, redact, validateAuthorization } = require('../../../scripts/lib/code-proposal-broker');
+const { reconcileProviderProgress } = require('../../../scripts/lib/code-candidate-progress-reconciliation');
 
 const digest = (value) => crypto.createHash('sha256').update(value).digest('hex');
 const HASH = 'a'.repeat(64);
@@ -33,6 +34,16 @@ test.each([
         if (override.authorizationFile === null) expect(() => new ModelBudgetBroker({ authorizationFile: null, stateFile: state.stateFile, outputRoot: state.root, transport: () => { calls += 1; } })).toThrow(error);
         else expect(() => new ModelBudgetBroker({ authorizationFile: state.authFile, stateFile: state.stateFile, outputRoot: state.root, transport: () => { calls += 1; } })).toThrow(error);
         expect(calls).toBe(0);
+    } finally { state.cleanup(); }
+});
+
+test.each([undefined, 'high'])('request reasoning effort %s is rejected when medium is authorized', (effort) => {
+    const state = fixture();
+    try {
+        const broker = new ModelBudgetBroker({ authorizationFile: state.authFile, stateFile: state.stateFile, outputRoot: state.root, countInputTokens: () => 10 });
+        broker.authorization = { ...broker.authorization, reasoningEffort: 'medium' };
+        const request = { ...body(), ...(effort ? { reasoning_effort: effort } : {}) };
+        expect(() => broker.validateRequest(broker.authorization.endpoint, request)).toThrow(/bounded contract/);
     } finally { state.cleanup(); }
 });
 
@@ -75,7 +86,8 @@ test('successful injected dispatch settles once and binds exact request identity
         const broker = new ModelBudgetBroker({ authorizationFile: state.authFile, stateFile: state.stateFile, outputRoot: state.root, countInputTokens: () => 10, transport: async (request) => { calls += 1; expect(request.requestId).toBe('attempt-one:draft:1:transport:1'); return { status: 200, body: JSON.stringify({ model: state.authorization.model, choices: [{ message: { content: '{}' }, finish_reason: 'stop' }], usage: { prompt_tokens: 10, completion_tokens: 2 } }) }; } });
         const result = await broker.dispatch({ requestId: 'attempt-one:draft:1:transport:1', endpoint: broker.authorization.endpoint, body: body() });
         expect(result.accountingStatus).toBe('completed'); expect(calls).toBe(1); expect(broker.requestStatus(result.requestId)).toBe('completed');
-        await expect(broker.dispatch({ requestId: result.requestId, endpoint: broker.authorization.endpoint, body: body() })).rejects.toThrow(/redispatch/);
+        const resumed = await broker.dispatch({ requestId: result.requestId, endpoint: broker.authorization.endpoint, body: body(), transport: async () => { calls += 1; throw new Error('must not transport on completed resume'); } });
+        expect(resumed.accountingStatus).toBe('completed'); expect(calls).toBe(1);
     } finally { state.cleanup(); }
 });
 
@@ -172,7 +184,7 @@ test('real authorization has an isolated selector and pinned pricing floor', () 
     try {
         const real = { ...state.authorization, mode: 'real', pricing: { inputUsdPerMillion: 0.001, cacheWriteInputUsdPerMillion: 0.001, inputReservationUsdPerMillion: 0.001, outputUsdPerMillion: 0.001 } };
         expect(() => validateAuthorization(real, { env: { CODE_CANDIDATE_AUTHORIZATION_ID: real.authorizationId } })).toThrow(/pricing/);
-        const valid = { ...real, pricing: { inputUsdPerMillion: 4, cacheWriteInputUsdPerMillion: 5, inputReservationUsdPerMillion: 5, outputUsdPerMillion: 20 } };
+        const valid = { ...real, reasoningEffort: 'medium', pricing: { inputUsdPerMillion: 4, cacheWriteInputUsdPerMillion: 5, inputReservationUsdPerMillion: 5, outputUsdPerMillion: 20 } };
         expect(() => validateAuthorization(valid, { env: { REVIEW_EVAL_AUTHORIZATION_ID: valid.authorizationId } })).toThrow(/selected/);
     } finally { state.cleanup(); }
 });
@@ -183,5 +195,61 @@ test('synthetic authorization rejects provider credentials before reservation', 
         const broker = new ModelBudgetBroker({ authorizationFile: state.authFile, stateFile: state.stateFile, outputRoot: state.root, countInputTokens: () => 10, transport: async () => ({ status: 200 }) });
         await expect(broker.dispatch({ requestId: 'attempt-one:draft:1:transport:1', endpoint: broker.authorization.endpoint, body: body(), apiKey: 'must-not-be-used' })).rejects.toThrow(/cannot receive provider credentials/);
         expect(broker.summary().stage.requests).toBe(0);
+    } finally { state.cleanup(); }
+});
+
+test.each([
+    ['missing effort', undefined],
+    ['wrong effort', 'high'],
+])('real gpt-5.6-sol rejects %s', (_label, effort) => {
+    const state = fixture();
+    try {
+        const real = { ...state.authorization, mode: 'real', reasoningEffort: effort, pricing: { inputUsdPerMillion: 4, cacheWriteInputUsdPerMillion: 5, inputReservationUsdPerMillion: 5, outputUsdPerMillion: 20 } };
+        expect(() => validateAuthorization(real, { env: { CODE_CANDIDATE_AUTHORIZATION_ID: real.authorizationId } })).toThrow(/reasoning effort/);
+    } finally { state.cleanup(); }
+});
+
+test('crash after response capture resumes without transport or redispatch', async () => {
+    const state = fixture();
+    try {
+        const first = new ModelBudgetBroker({ authorizationFile: state.authFile, stateFile: state.stateFile, outputRoot: state.root, countInputTokens: () => 10, afterResponseArtifact: () => { throw new Error('injected crash'); } });
+        await expect(first.dispatch({ requestId: 'attempt-one:draft:1:transport:1', endpoint: first.authorization.endpoint, body: body(), transport: async () => ({ status: 200, body: JSON.stringify({ model: first.authorization.model, choices: [], usage: { prompt_tokens: 10, completion_tokens: 1 } }) }) })).rejects.toThrow('injected crash');
+        expect(first.requestStatus('attempt-one:draft:1:transport:1')).toBe('reserved');
+        const second = new ModelBudgetBroker({ authorizationFile: state.authFile, stateFile: state.stateFile, outputRoot: state.root });
+        const resumed = await second.dispatch({ requestId: 'attempt-one:draft:1:transport:1', endpoint: second.authorization.endpoint, body: body(), transport: () => { throw new Error('must not transport'); } });
+        expect(resumed.accountingStatus).toBe('completed'); expect(second.requestStatus(resumed.requestId)).toBe('completed');
+    } finally { state.cleanup(); }
+});
+
+test('crash after settlement resumes from the completed response artifact', async () => {
+    const state = fixture();
+    try {
+        const first = new ModelBudgetBroker({ authorizationFile: state.authFile, stateFile: state.stateFile, outputRoot: state.root, countInputTokens: () => 10, afterSettlement: () => { throw new Error('injected crash'); } });
+        await expect(first.dispatch({ requestId: 'attempt-one:draft:1:transport:1', endpoint: first.authorization.endpoint, body: body(), transport: async () => ({ status: 200, body: JSON.stringify({ model: first.authorization.model, choices: [], usage: { prompt_tokens: 10, completion_tokens: 1 } }) }) })).rejects.toThrow('injected crash');
+        const second = new ModelBudgetBroker({ authorizationFile: state.authFile, stateFile: state.stateFile, outputRoot: state.root });
+        const resumed = await second.dispatch({ requestId: 'attempt-one:draft:1:transport:1', endpoint: second.authorization.endpoint, body: body(), transport: () => { throw new Error('must not transport'); } });
+        expect(resumed.accountingStatus).toBe('completed');
+    } finally { state.cleanup(); }
+});
+
+test('completed request with missing response artifact fails closed without transport', async () => {
+    const state = fixture();
+    try {
+        const broker = new ModelBudgetBroker({ authorizationFile: state.authFile, stateFile: state.stateFile, outputRoot: state.root, countInputTokens: () => 10 });
+        await broker.dispatch({ requestId: 'attempt-one:draft:1:transport:1', endpoint: broker.authorization.endpoint, body: body(), transport: async () => ({ status: 200, body: JSON.stringify({ model: broker.authorization.model, choices: [], usage: { prompt_tokens: 10, completion_tokens: 1 } }) }) });
+        const ledger = JSON.parse(fs.readFileSync(state.stateFile, 'utf8')); const request = ledger.requests['attempt-one:draft:1:transport:1']; fs.unlinkSync(path.join(state.root, request.responseArtifactRelativePath));
+        expect(() => new ModelBudgetBroker({ authorizationFile: state.authFile, stateFile: state.stateFile, outputRoot: state.root })).toThrow(/response artifact/);
+    } finally { state.cleanup(); }
+});
+
+test('progress reconciliation derives one provider call from completed ledger without mutating it', async () => {
+    const state = fixture();
+    try {
+        const broker = new ModelBudgetBroker({ authorizationFile: state.authFile, stateFile: state.stateFile, outputRoot: state.root, countInputTokens: () => 10 });
+        await broker.dispatch({ requestId: 'attempt-one:draft:1:transport:1', endpoint: broker.authorization.endpoint, body: body(), transport: async () => ({ status: 200, body: JSON.stringify({ model: broker.authorization.model, choices: [], usage: { prompt_tokens: 10, completion_tokens: 1 } }) }) });
+        const progress = { attempt_id: 'attempt-one', phase: 'analysis', state: 'blocked', budget: { model_calls: 0 } };
+        const reconciled = reconcileProviderProgress(progress, broker, 'attempt-one:draft:1:transport:1');
+        expect(reconciled).toMatchObject({ phase: 'draft', state: 'blocked', reason: 'response_captured', provider_calls: 1, budget: { model_calls: 1 } });
+        expect(progress.budget.model_calls).toBe(0);
     } finally { state.cleanup(); }
 });

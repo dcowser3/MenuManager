@@ -29,6 +29,15 @@ accounting. Returned drafts can only be passed to C2a validation/application;
 the boundary never runs tests or a verifier, writes `code_verification`, marks
 a claim complete, approves, deploys, or activates.
 
+Response capture is durable and one-way: a bounded provider response is written
+as a private mode-0600 artifact under the exact attempt before completed ledger
+settlement. The completed ledger binds that artifact path, artifact hash, and
+response-body hash. A restart may validate and return a completed artifact (or
+finish settlement after a crash between capture and settlement), but a missing
+or changed artifact fails closed and cannot redispatch the request. Real
+`gpt-5.6-sol` authorizations pin `reasoning_effort: "medium"`, which is included
+in the request body hash.
+
 B5-C2c remains responsible for the independent fresh baseline/candidate test
 runner, behavior/replay/holdout proof, proof integrity, and bounded evidence
 attachment. C2b has no provider/model activity in its credential-free tests.

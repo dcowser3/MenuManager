@@ -49,7 +49,9 @@ function validateMessages(messages) {
 
 function buildDraftRequest(authorization, messages) {
     if (!authorization || authorization.stage !== 'code-candidate') throw new Error('Draft request requires a code-candidate authorization.');
-    return { model: authorization.model, messages: validateMessages(messages), response_format: { type: 'json_object' }, max_completion_tokens: authorization.requestLimits.completionTokens };
+    const request = { model: authorization.model, messages: validateMessages(messages), response_format: { type: 'json_object' }, max_completion_tokens: authorization.requestLimits.completionTokens };
+    if (authorization.reasoningEffort) request.reasoning_effort = authorization.reasoningEffort;
+    return request;
 }
 
 function responseUsage(body) {

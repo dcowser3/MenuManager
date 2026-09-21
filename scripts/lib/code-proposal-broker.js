@@ -89,6 +89,7 @@ function validateAuthorization(raw, options = {}) {
     });
     if (schedule.length > cumulativeLimits.requests) throw new Error('Request schedule exceeds the cumulative request cap.');
     const pricing = validatePricing(raw, raw.model, raw.mode);
+    if (raw.mode === 'real' && raw.model === 'gpt-5.6-sol' && raw.reasoningEffort !== 'medium') throw new Error('Real gpt-5.6-sol authorization must pin reasoning effort medium.');
     if (raw.mode === 'real' && options.env?.[CODE_AUTH_ENV] !== raw.authorizationId) throw new Error('Real code-candidate authorization is not selected by the code-candidate environment.');
     return Object.freeze({ ...raw, scope: Object.freeze({ ...scope }), stageLimits, cumulativeLimits,
         requestLimits: { inputTokens: requestLimits.inputTokens, completionTokens: requestLimits.completionTokens, timeoutMs: requestLimits.timeoutMs }, pricing,
@@ -130,6 +131,18 @@ function atomicWrite(file, value) {
     try { fs.fsyncSync(directory); } finally { fs.closeSync(directory); }
 }
 
+function atomicWriteBytes(file, bytes) {
+    fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+    fs.chmodSync(path.dirname(file), 0o700);
+    const temp = `${file}.${process.pid}.${crypto.randomUUID()}.tmp`;
+    const descriptor = fs.openSync(temp, 'wx', 0o600);
+    try { fs.writeFileSync(descriptor, bytes); fs.fsyncSync(descriptor); }
+    finally { fs.closeSync(descriptor); }
+    fs.chmodSync(temp, 0o600); fs.renameSync(temp, file); fs.chmodSync(file, 0o600);
+    const directory = fs.openSync(path.dirname(file), 'r');
+    try { fs.fsyncSync(directory); } finally { fs.closeSync(directory); }
+}
+
 class ModelBudgetBroker {
     constructor(options = {}) {
         if (!options.authorizationFile || !options.stateFile || !options.outputRoot) throw new Error('Explicit code-candidate authorization, ledger, and output root are required.');
@@ -148,6 +161,8 @@ class ModelBudgetBroker {
         if (this.authorization.scope.attemptId !== this.authorization.scope.runId && this.authorization.scope.runId !== undefined) throw new Error('Authorization run and attempt identities differ.');
         this.scopeHash = canonicalHash(this.authorization.scope);
         this.transport = options.transport;
+        this.afterResponseArtifact = options.afterResponseArtifact;
+        this.afterSettlement = options.afterSettlement;
         this.countInputTokens = options.countInputTokens || ((body) => Buffer.byteLength(JSON.stringify(body), 'utf8') + 64);
         this.lockFile = `${this.stateFile}.lock`;
         this.loadState();
@@ -190,6 +205,7 @@ class ModelBudgetBroker {
                 || !Number.isInteger(request.reasoningTokens) || request.reasoningTokens < 0 || request.reasoningTokens > request.actualCompletionTokens
                 || !Number.isFinite(request.actualUsd) || request.actualUsd < 0
                 || Math.abs(request.actualUsd - charge(request.actualInputTokens, request.actualCompletionTokens, this.authorization.pricing)) > 1e-12)) throw new Error(`Code-candidate ledger completed accounting is invalid: ${requestId}.`);
+            if (request.status === 'completed') this.readResponseArtifact(request);
         }
         const totals = summarize(state);
         if (Math.abs(totals.usd - Number(state.totals.usd)) > 1e-12 || totals.requests !== state.totals.requests || totals.inputTokens !== state.totals.inputTokens || totals.completionTokens !== state.totals.completionTokens
@@ -200,6 +216,30 @@ class ModelBudgetBroker {
         return state;
     }
 
+    responsePath(requestId) { return inside(this.outputRoot, path.join(this.outputRoot, 'responses', `${requestId}.json`)); }
+
+    readResponseArtifact(request) {
+        if (!request.responseArtifactRelativePath || !DIGEST.test(request.responseArtifactSha256 || '') || !DIGEST.test(request.responseBodySha256 || '')) throw new Error(`Completed code-candidate response artifact identity is missing: ${request.requestId}.`);
+        const file = inside(this.outputRoot, path.join(this.outputRoot, request.responseArtifactRelativePath));
+        let stat; try { stat = fs.lstatSync(file); } catch (error) { if (error.code === 'ENOENT') throw new Error(`Completed code-candidate response artifact is missing: ${request.requestId}.`); throw error; }
+        if (stat.isSymbolicLink() || !stat.isFile() || (stat.mode & 0o777) !== 0o600 || stat.size > MAX_RESPONSE + 4096) throw new Error(`Completed code-candidate response artifact is unsafe: ${request.requestId}.`);
+        const bytes = fs.readFileSync(file);
+        if (sha256(bytes) !== request.responseArtifactSha256) throw new Error(`Completed code-candidate response artifact changed: ${request.requestId}.`);
+        let artifact; try { artifact = JSON.parse(bytes); } catch { throw new Error(`Completed code-candidate response artifact is invalid: ${request.requestId}.`); }
+        if (!artifact || artifact.requestId !== request.requestId || artifact.requestHash !== request.requestHash || artifact.bodySha256 !== request.responseBodySha256 || typeof artifact.body !== 'string' || sha256(Buffer.from(artifact.body)) !== artifact.bodySha256 || Number(artifact.status) < 100) throw new Error(`Completed code-candidate response artifact identity is invalid: ${request.requestId}.`);
+        return artifact;
+    }
+
+    persistResponseArtifact(requestId, status, raw, requestHash) {
+        const bodySha256 = sha256(Buffer.from(raw));
+        const relative = path.join('responses', `${requestId}.json`);
+        const file = inside(this.outputRoot, path.join(this.outputRoot, relative));
+        const bytes = Buffer.from(JSON.stringify({ schemaVersion: 1, requestId, requestHash, status, bodySha256, body: raw }));
+        if (bytes.length > MAX_RESPONSE + 4096) throw new Error('Draft response artifact exceeds the bounded limit.');
+        atomicWriteBytes(file, bytes);
+        return { relative, sha256: sha256(bytes), bodySha256 };
+    }
+
     assertLiveAuthorization() {
         const now = this.now();
         if (Date.parse(this.authorization.runDeadline) <= now || Date.parse(this.authorization.expiresAt) <= now) throw new Error('Code-candidate authorization is expired or past its run deadline.');
@@ -207,8 +247,8 @@ class ModelBudgetBroker {
 
     validateRequest(endpoint, body) {
         if (endpoint !== this.authorization.endpoint || !body || body.model !== this.authorization.model || body.stream === true) throw new Error('Model request differs from the reviewed code-candidate authorization.');
-        const allowed = new Set(['model', 'messages', 'response_format', 'max_completion_tokens']);
-        if (Object.keys(body).some((key) => !allowed.has(key)) || !Array.isArray(body.messages) || body.messages.length < 1 || body.messages.length > 8 || !body.response_format || body.response_format.type !== 'json_object' || body.max_completion_tokens !== this.authorization.requestLimits.completionTokens) throw new Error('Draft request body is outside the bounded contract.');
+        const allowed = new Set(['model', 'messages', 'response_format', 'max_completion_tokens', 'reasoning_effort']);
+        if (Object.keys(body).some((key) => !allowed.has(key)) || !Array.isArray(body.messages) || body.messages.length < 1 || body.messages.length > 8 || !body.response_format || body.response_format.type !== 'json_object' || body.max_completion_tokens !== this.authorization.requestLimits.completionTokens || (this.authorization.reasoningEffort && body.reasoning_effort !== this.authorization.reasoningEffort)) throw new Error('Draft request body is outside the bounded contract.');
         const bytes = Buffer.byteLength(JSON.stringify(body), 'utf8');
         const inputTokens = Math.ceil(Number(this.countInputTokens(body)));
         if (bytes > MAX_BODY || !Number.isInteger(inputTokens) || inputTokens <= 0 || inputTokens > this.authorization.requestLimits.inputTokens) throw new Error('Draft request exceeds its authorized input bound.');
@@ -237,14 +277,18 @@ class ModelBudgetBroker {
         });
     }
 
-    settle(requestId, responseBody) {
+    settle(requestId, responseBody, responseArtifact = null) {
         return this.withLock(() => {
             const state = this.loadState(); const request = state.requests[requestId];
             if (!request || request.status !== 'reserved') throw new Error('Only a reserved draft request can settle.');
             const usage = usageFrom(responseBody);
             if (!usage || usage.reasoningTokens > usage.completionTokens || usage.inputTokens > request.reservedInputTokens || usage.completionTokens > request.reservedCompletionTokens) {
                 request.status = 'ambiguous'; request.error = 'Provider usage was incomplete, inconsistent, or exceeded its reservation; full reservation retained.';
-            } else { request.status = 'completed'; request.actualInputTokens = usage.inputTokens; request.actualCompletionTokens = usage.completionTokens; request.reasoningTokens = usage.reasoningTokens; request.actualUsd = charge(usage.inputTokens, usage.completionTokens, this.authorization.pricing); }
+            } else {
+                if (!responseArtifact?.relative || !DIGEST.test(responseArtifact.sha256 || '') || !DIGEST.test(responseArtifact.bodySha256 || '')) throw new Error('Completed draft response requires a persisted response artifact.');
+                request.status = 'completed'; request.actualInputTokens = usage.inputTokens; request.actualCompletionTokens = usage.completionTokens; request.reasoningTokens = usage.reasoningTokens; request.actualUsd = charge(usage.inputTokens, usage.completionTokens, this.authorization.pricing);
+                request.responseArtifactRelativePath = responseArtifact.relative; request.responseArtifactSha256 = responseArtifact.sha256; request.responseBodySha256 = responseArtifact.bodySha256;
+            }
             request.settledAt = new Date(this.now()).toISOString(); state.totals = summarize(state); atomicWrite(this.stateFile, state); return request;
         });
     }
@@ -260,6 +304,20 @@ class ModelBudgetBroker {
         this.assertLiveAuthorization();
         if (this.authorization.mode === 'real' && !apiKey) throw new Error('Code-candidate model credentials are not configured.');
         if (this.authorization.mode === 'synthetic' && apiKey) throw new Error('Synthetic code-candidate authorization cannot receive provider credentials.');
+        const existing = this.loadState().requests[requestId];
+        if (existing?.status === 'completed') { const artifact = this.readResponseArtifact(existing); return { status: artifact.status, body: artifact.body, parsed: (() => { try { return JSON.parse(artifact.body); } catch { return null; } })(), accountingStatus: 'completed', requestId }; }
+        if (existing?.status === 'reserved') {
+            const file = this.responsePath(requestId);
+            if (fs.existsSync(file)) {
+                const bytes = fs.readFileSync(file); let artifact;
+                try { artifact = JSON.parse(bytes); } catch { throw new Error(`Reserved response artifact is invalid: ${requestId}.`); }
+                const bound = { ...existing, responseArtifactRelativePath: path.relative(this.outputRoot, file), responseArtifactSha256: sha256(bytes), responseBodySha256: artifact.bodySha256 };
+                const checked = this.readResponseArtifact(bound);
+                const parsed = (() => { try { return JSON.parse(checked.body); } catch { return null; } })();
+                const accounting = this.settle(requestId, checked.status >= 200 && checked.status < 300 ? parsed : null, { relative: bound.responseArtifactRelativePath, sha256: bound.responseArtifactSha256, bodySha256: bound.responseBodySha256 });
+                return { status: checked.status, body: checked.body, parsed, accountingStatus: accounting.status, requestId };
+            }
+        }
         const reservation = await this.reserve(requestId, endpoint, body);
         const send = transport || this.transport;
         if (typeof send !== 'function') { this.markAmbiguous(requestId, 'No injectable draft transport was provided.'); throw new Error('No injectable draft transport was provided.'); }
@@ -274,9 +332,12 @@ class ModelBudgetBroker {
             const status = Number(response?.status || 0); const raw = typeof response?.body === 'string' ? response.body : JSON.stringify(response?.body);
             if (typeof raw !== 'string' || Buffer.byteLength(raw, 'utf8') > MAX_RESPONSE) { this.markAmbiguous(requestId, 'Draft response is missing or oversized.'); throw new Error('Draft response is missing or oversized.'); }
             let parsed; try { parsed = JSON.parse(raw); } catch { parsed = null; }
-            const accounting = this.settle(requestId, status >= 200 && status < 300 ? parsed : null);
+            const artifact = this.persistResponseArtifact(requestId, status, raw, canonicalHash({ endpoint, body }));
+            if (typeof this.afterResponseArtifact === 'function') this.afterResponseArtifact({ requestId, artifact });
+            const accounting = this.settle(requestId, status >= 200 && status < 300 ? parsed : null, artifact);
+            if (typeof this.afterSettlement === 'function') this.afterSettlement({ requestId, accounting });
             return { status, body: raw, parsed, accountingStatus: accounting.status, requestId };
-        } catch (error) { if (this.requestStatus(requestId) === 'reserved') this.markAmbiguous(requestId, error); throw error; }
+        } catch (error) { if (this.requestStatus(requestId) === 'reserved' && !fs.existsSync(this.responsePath(requestId))) this.markAmbiguous(requestId, error); throw error; }
         finally { if (timer) clearTimeout(timer); }
     }
 
