@@ -1,37 +1,14 @@
-import { createHash } from 'crypto';
-
-export type ExpectationClassification =
-    | 'missed_existing_rule'
-    | 'explicit_superseding_policy'
-    | 'ambiguous';
-
-export type ExpectationStatus = 'active' | 'candidate' | 'superseded';
-
-export interface ExpectationVersion {
-    id: string;
-    version: number;
-    status: ExpectationStatus;
-    classification: ExpectationClassification;
-    policyRuleId: string | null;
-    policyVersion: string;
-    restaurant: string | null;
-    menuScope: string | null;
-    input: string;
-    expected: string;
-    sourceExpectationId: string | null;
-    approvalState: 'approved' | 'unapproved';
-}
-export interface ExpectationEnvelope {
-    schemaVersion: 1;
-    activePolicyVersion: string;
-    expectations: ExpectationVersion[];
-    supersedes: Array<{ priorId: string; successorId: string }>;
-    sha256: string;
-}
-
-const hash = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
-
-export function classifyExpectation(correction: Record<string, any>): ExpectationClassification {
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.classifyExpectation = classifyExpectation;
+exports.freezeExpectationEnvelope = freezeExpectationEnvelope;
+exports.validateExpectationEnvelope = validateExpectationEnvelope;
+exports.evaluateAgainstFrozenExpectations = evaluateAgainstFrozenExpectations;
+exports.evaluateExpectationArms = evaluateExpectationArms;
+exports.activateApprovedSuccessor = activateApprovedSuccessor;
+const crypto_1 = require("crypto");
+const hash = (value) => (0, crypto_1.createHash)('sha256').update(JSON.stringify(value)).digest('hex');
+function classifyExpectation(correction) {
     if (correction.learning_intent === 'missed_review_correction' || correction.change_type === 'missed_review_correction') {
         return 'missed_existing_rule';
     }
@@ -40,30 +17,12 @@ export function classifyExpectation(correction: Record<string, any>): Expectatio
     }
     return 'ambiguous';
 }
-
-function versionId(input: Omit<ExpectationVersion, 'id'>) {
+function versionId(input) {
     return hash(input).slice(0, 24);
 }
-
-export function freezeExpectationEnvelope(input: {
-    policyVersion: string;
-    expectations: Array<{
-        id?: string;
-        version?: number;
-        classification: ExpectationClassification;
-        policyRuleId?: string | null;
-        restaurant?: string | null;
-        menuScope?: string | null;
-        input: string;
-        expected: string;
-        sourceExpectationId?: string | null;
-        approvalState: 'approved' | 'unapproved';
-        status?: ExpectationStatus;
-    }>;
-    supersedes?: Array<{ priorId: string; successorId: string }>;
-}): ExpectationEnvelope {
+function freezeExpectationEnvelope(input) {
     const expectations = input.expectations.map((row) => {
-        const body: Omit<ExpectationVersion, 'id'> = {
+        const body = {
             version: row.version || 1,
             status: row.status || (row.approvalState === 'approved' ? 'active' : 'candidate'),
             classification: row.classification,
@@ -79,23 +38,24 @@ export function freezeExpectationEnvelope(input: {
         return { ...body, id: row.id || versionId(body) };
     });
     const body = {
-        schemaVersion: 1 as const,
+        schemaVersion: 1,
         activePolicyVersion: input.policyVersion,
         expectations,
         supersedes: [...(input.supersedes || [])],
     };
     return { ...body, sha256: hash(body) };
 }
-
-export function validateExpectationEnvelope(envelope: ExpectationEnvelope): ExpectationEnvelope {
+function validateExpectationEnvelope(envelope) {
     if (!envelope || envelope.schemaVersion !== 1 || !Array.isArray(envelope.expectations)) {
         throw new Error('Missing expectation version envelope.');
     }
     const { sha256, ...body } = envelope;
-    if (hash(body) !== sha256) throw new Error('Expectation version envelope changed after freezing.');
-    const ids = new Set<string>();
+    if (hash(body) !== sha256)
+        throw new Error('Expectation version envelope changed after freezing.');
+    const ids = new Set();
     for (const expectation of envelope.expectations) {
-        if (ids.has(expectation.id)) throw new Error('Duplicate expectation version id.');
+        if (ids.has(expectation.id))
+            throw new Error('Duplicate expectation version id.');
         ids.add(expectation.id);
         if (expectation.approvalState === 'unapproved' && expectation.status === 'active') {
             throw new Error('Unapproved expectation cannot be active.');
@@ -103,12 +63,7 @@ export function validateExpectationEnvelope(envelope: ExpectationEnvelope): Expe
     }
     return envelope;
 }
-
-export function evaluateAgainstFrozenExpectations(
-    envelope: ExpectationEnvelope,
-    outputs: Record<string, string>,
-    candidateLabel: string,
-) {
+function evaluateAgainstFrozenExpectations(envelope, outputs, candidateLabel) {
     validateExpectationEnvelope(envelope);
     return envelope.expectations.map((expectation) => {
         const output = outputs[expectation.id];
@@ -128,14 +83,7 @@ export function evaluateAgainstFrozenExpectations(
         };
     });
 }
-
-export function evaluateExpectationArms(input: {
-    envelope: ExpectationEnvelope;
-    baselineOutputs: Record<string, string | undefined>;
-    candidateOutputs: Record<string, string | undefined>;
-    baselineRunId: string;
-    candidateRunId: string;
-}) {
+function evaluateExpectationArms(input) {
     validateExpectationEnvelope(input.envelope);
     return input.envelope.expectations.map((expectation) => {
         const baseline = input.baselineOutputs[expectation.id];
@@ -145,11 +93,16 @@ export function evaluateExpectationArms(input: {
         const baselinePassed = baselinePresent && baseline === expectation.expected;
         const candidatePassed = candidatePresent && candidate === expectation.expected;
         let classification = 'uncertainty';
-        if (!baselinePresent || !candidatePresent) classification = 'uncertainty';
-        else if (!baselinePassed && !candidatePassed) classification = 'existing_failure';
-        else if (baselinePassed && !candidatePassed) classification = 'genuine_regression';
-        else if (baselinePassed && candidatePassed) classification = 'already_passing/no_change_needed';
-        else if (!baselinePassed && candidatePassed) classification = expectation.approvalState === 'approved' ? 'expected_policy_gap' : 'expected_policy_gap';
+        if (!baselinePresent || !candidatePresent)
+            classification = 'uncertainty';
+        else if (!baselinePassed && !candidatePassed)
+            classification = 'existing_failure';
+        else if (baselinePassed && !candidatePassed)
+            classification = 'genuine_regression';
+        else if (baselinePassed && candidatePassed)
+            classification = 'already_passing/no_change_needed';
+        else if (!baselinePassed && candidatePassed)
+            classification = expectation.approvalState === 'approved' ? 'expected_policy_gap' : 'expected_policy_gap';
         return {
             expectationId: expectation.id,
             policyVersion: expectation.policyVersion,
@@ -164,28 +117,21 @@ export function evaluateExpectationArms(input: {
         };
     });
 }
-
-export function activateApprovedSuccessor(envelope: ExpectationEnvelope, approval: {
-    ruleId: string;
-    restaurant: string | null;
-    menuScope: string | null;
-    policyVersion: string;
-    status: 'accepted';
-    supersedesId: string;
-    successorId: string;
-}) {
+function activateApprovedSuccessor(envelope, approval) {
     validateExpectationEnvelope(envelope);
-    if (approval.status !== 'accepted' || approval.policyVersion !== envelope.activePolicyVersion) return envelope;
+    if (approval.status !== 'accepted' || approval.policyVersion !== envelope.activePolicyVersion)
+        return envelope;
     const prior = envelope.expectations.find((row) => row.id === approval.supersedesId);
     const successor = envelope.expectations.find((row) => row.id === approval.successorId);
     if (!prior || !successor || successor.sourceExpectationId !== prior.id
         || successor.policyRuleId !== approval.ruleId || successor.restaurant !== approval.restaurant
-        || successor.menuScope !== approval.menuScope || successor.approvalState !== 'unapproved') return envelope;
+        || successor.menuScope !== approval.menuScope || successor.approvalState !== 'unapproved')
+        return envelope;
     const expectations = envelope.expectations.map((row) => row.id === prior.id
-        ? { ...row, status: 'superseded' as const }
-        : row.id === successor.id ? { ...row, status: 'active' as const, approvalState: 'approved' as const } : row);
+        ? { ...row, status: 'superseded' }
+        : row.id === successor.id ? { ...row, status: 'active', approvalState: 'approved' } : row);
     const supersedes = envelope.supersedes.some((row) => row.priorId === prior.id && row.successorId === successor.id)
         ? envelope.supersedes : [...envelope.supersedes, { priorId: prior.id, successorId: successor.id }];
-    const body = { schemaVersion: 1 as const, activePolicyVersion: envelope.activePolicyVersion, expectations, supersedes };
+    const body = { schemaVersion: 1, activePolicyVersion: envelope.activePolicyVersion, expectations, supersedes };
     return { ...body, sha256: hash(body) };
 }

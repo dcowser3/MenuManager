@@ -575,6 +575,7 @@ function selectCases(args, dataset) {
 }
 
 async function runEval(args, dataset, rulesInfo, libs, baselineConfig) {
+    libs.expectationVersioning.validateExpectationEnvelope(args.expectationEnvelope);
     const { normalizeComparable, boundedLevenshteinSimilarity } = libs.textSimilarity;
     const { scoreCorrections, compositeCaseScore } = libs.evalScoring;
     const approvedVocabularyTexts = args.evaluationContract.vocabulary.texts || [];
@@ -644,6 +645,7 @@ async function runEval(args, dataset, rulesInfo, libs, baselineConfig) {
                 },
                 composite: round(composite),
                 exactMatch: !fenceMissing && candidateStrict === truthStrict,
+                candidateOutput: candidate,
                 fenceMissing,
                 groundTruthCorrectionCount: corrections.truePositives + corrections.falseNegatives,
                 criticalSuggestionCount: result.post.criticalSuggestions.length,
@@ -1078,9 +1080,18 @@ async function main() {
         evalScoring: requireLib('differ', 'lib/eval-scoring'),
         preAiRules: requireLib('dashboard', 'lib/pre-ai-deterministic-rules'),
         improvementCore: requireLib('dashboard', 'lib/improvement-cycle-core'),
+        expectationVersioning: requireLib('dashboard', 'lib/expectation-versioning'),
     };
     args.baselineModel = libs.improvementCore.resolveEvalBaselineModel(args.model, args.baselineModel);
     const rulesInfo = await resolveCorrectionRules(args.rules);
+    const policyVersion = evidenceHash(JSON.stringify(rulesInfo.rules));
+    const expectationEnvelope = libs.expectationVersioning.freezeExpectationEnvelope({
+        policyVersion,
+        expectations: dataset.map((row) => ({ id: row.case_id, classification: 'missed_existing_rule', policyRuleId: null,
+            restaurant: row.context?.property || row.restaurant || null, menuScope: row.context?.templateType || null,
+            input: row.raw_input, expected: row.ground_truth, approvalState: 'approved', status: 'active' })),
+    });
+    args.expectationEnvelope = expectationEnvelope;
 
     // Baseline config for back-to-back regression confirmation (optional). Needs
     // the baseline prompt; without it, flagged regressions can't be re-confirmed
@@ -1104,11 +1115,22 @@ async function main() {
     await fsp.mkdir(outDir, { recursive: true });
 
     let baselineComparison = null;
+    let expectationArmComparison = null;
     if (args.baseline) {
         const baselinePath = fs.statSync(args.baseline).isDirectory()
             ? path.join(args.baseline, 'report.json')
             : args.baseline;
         baselineComparison = compareWithBaseline(JSON.parse(fs.readFileSync(baselinePath, 'utf8')), caseReports, args.noiseEpsilon);
+        const baselineReport = JSON.parse(fs.readFileSync(baselinePath, 'utf8'));
+        const baselineOutputs = Object.fromEntries((baselineReport.cases || []).map((row) => [row.case_id, row.candidateOutput]));
+        const candidateOutputs = Object.fromEntries(caseReports.map((row) => [row.case_id, row.candidateOutput]));
+        expectationArmComparison = libs.expectationVersioning.evaluateExpectationArms({
+            envelope: expectationEnvelope,
+            baselineOutputs,
+            candidateOutputs,
+            baselineRunId: baselineReport.generatedAt || baselinePath,
+            candidateRunId: timestamp,
+        });
         if (baselineConfig && baselineComparison.flaggedRegressed > 0) {
             await confirmRegressions(baselineComparison, rerunBaselineCase, rerunCandidateCase, libs);
         } else {
@@ -1129,6 +1151,10 @@ async function main() {
         },
         evaluation: {
             ...args.evaluationContract,
+            policyVersion: expectationEnvelope.activePolicyVersion,
+            expectationEnvelopeHash: expectationEnvelope.sha256,
+            expectationCount: expectationEnvelope.expectations.length,
+            expectationArmComparison,
             expectations: undefined,
             vocabulary: undefined,
             freshness: reportFreshness(usageTotals, args.ai),
