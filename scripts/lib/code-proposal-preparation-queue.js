@@ -96,12 +96,19 @@ function routeRows(proposal) {
 
 const USER_MANUAL_UNRESOLVED = new Set(['ce9e56a4-12c4-46aa-a12e-606df66b6b43', '3f338cf9-483e-4d66-afde-d9c46fb285b2', 'fc08d1d2-2145-4cf8-b44b-55ea830d6e07']);
 function validateManualExclusionArtifact(proposal, artifact, proposalFingerprint) {
-    if (!artifact || artifact.source !== 'user_owned_manual_exclusion' || typeof artifact.user_instruction_ref !== 'string' || !artifact.user_instruction_ref || artifact.proposal_id !== proposal.id || artifact.cycle_id !== (proposal.cycle_id || null) || !proposalFingerprint || artifact.proposal_fingerprint !== proposalFingerprint) throw new Error('Manual exclusion artifact is missing or stale.');
+    if (!artifact || artifact.schema_version !== 1 || artifact.source !== 'user_owned_manual_exclusion' || typeof artifact.user_instruction_ref !== 'string' || !artifact.user_instruction_ref || artifact.proposal_id !== proposal.id || artifact.cycle_id !== (proposal.cycle_id || null) || !proposalFingerprint || artifact.proposal_fingerprint !== proposalFingerprint || !/^[a-f0-9]{64}$/.test(artifact.artifact_sha256 || '')) throw new Error('Manual exclusion artifact is missing or stale.');
     const rows = Array.isArray(artifact.exclusions) ? artifact.exclusions : [];
     const ids = rows.map((row) => `${row?.correction_id || ''}`);
-    if (new Set(ids).size !== ids.length || ids.some((id) => !USER_MANUAL_UNRESOLVED.has(id)) || ids.length !== USER_MANUAL_UNRESOLVED.size || [...USER_MANUAL_UNRESOLVED].some((id) => !ids.includes(id)) || rows.some((row) => row.reason !== 'user_owned_manual_unresolved' || typeof artifact.group_binding_hashes?.[row.correction_id] !== 'string')) throw new Error('Manual exclusion artifact has missing, extra, duplicate, or ambiguous exclusions.');
+    if (new Set(ids).size !== ids.length || ids.some((id) => !USER_MANUAL_UNRESOLVED.has(id)) || ids.length !== USER_MANUAL_UNRESOLVED.size || [...USER_MANUAL_UNRESOLVED].some((id) => !ids.includes(id)) || rows.some((row) => row.reason !== 'user_owned_manual_unresolved' || !/^[a-f0-9]{64}$/.test(artifact.group_binding_hashes?.[row.correction_id] || ''))) throw new Error('Manual exclusion artifact has missing, extra, duplicate, or ambiguous exclusions.');
+    for (const id of ids) {
+        const route = (proposal.correction_routing || []).find((row) => row.correction_id === id);
+        const replay = (proposal.replay_evidence || []).find((row) => row.correction_id === id);
+        const behavior = (proposal.eval_summary?.behavior_tests?.records || []).find((row) => row.correctionId === id);
+        const sourceBinding = { submission_id: replay?.submission_id || null, case_id: replay?.case_id || route?.case_id || null, audit_id: replay?.audit_id || null, attempt_id: replay?.attempt_id || null };
+        if (!route || !replay || !behavior || sha256({ route: canonical(route), replay: canonical(replay), behavior: canonical(behavior), source_binding: sourceBinding }) !== artifact.group_binding_hashes[id]) throw new Error(`Manual exclusion binding hash is stale for ${id}.`);
+    }
     const body = { schema_version: 1, source: artifact.source, user_instruction_ref: artifact.user_instruction_ref, proposal_id: artifact.proposal_id, cycle_id: artifact.cycle_id, proposal_fingerprint: artifact.proposal_fingerprint, group_binding_hashes: Object.fromEntries(ids.sort().map((id) => [id, artifact.group_binding_hashes[id]])), exclusions: rows.map((row) => ({ correction_id: row.correction_id, reason: row.reason })) };
-    if (artifact.artifact_sha256 && artifact.artifact_sha256 !== sha256(body)) throw new Error('Manual exclusion artifact hash changed.');
+    if (artifact.artifact_sha256 !== sha256(body)) throw new Error('Manual exclusion artifact hash changed.');
     return Object.freeze({ ...body, artifact_sha256: sha256(body) });
 }
 

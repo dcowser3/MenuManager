@@ -104,8 +104,9 @@ function walkCandidateTests(root) {
     return found.sort();
 }
 
-function trustedCorrections(proposal, corrections, lanes = new Set(['code_recommendation'])) {
-    const routes = (proposal.correction_routing || []).filter((row) => lanes.has(row?.lane));
+function trustedCorrections(proposal, corrections, lanes = new Set(['code_recommendation']), eligibleCorrectionIds = null) {
+    const eligible = eligibleCorrectionIds ? new Set(eligibleCorrectionIds) : null;
+    const routes = (proposal.correction_routing || []).filter((row) => lanes.has(row?.lane) && (!eligible || eligible.has(row.correction_id)));
     if (!routes.length || !Array.isArray(corrections) || corrections.length !== routes.length) throw new Error('C2c1 requires one frozen correction mapping for every code recommendation.');
     const routeIds = new Set(routes.map((row) => row.correction_id));
     if (new Set(corrections.map((row) => row?.correction_id)).size !== corrections.length || corrections.some((row) => !routeIds.has(row.correction_id))) throw new Error('Correction mappings are not the frozen proposal routing.');
@@ -414,7 +415,7 @@ async function runCodeProposalProof(options = {}) {
     const preparationInventory = fs.existsSync(preparationInventoryPath) ? JSON.parse(regularFile(preparationInventoryPath, attemptRoot, 'Preparation inventory').toString('utf8')) : null;
     const eligibleCorrectionIds = preparationInventory?.groups ? new Set(preparationInventory.groups.filter((group) => group.status !== 'excluded').map((group) => group.correction_id)) : null;
     if (eligibleCorrectionIds && handoffInfo.handoff.draft.corrections.some((correction) => !eligibleCorrectionIds.has(correction.correction_id))) throw new Error('Draft contains a manually excluded correction.');
-    const codeCorrections = trustedCorrections(frozenProposal, handoffInfo.handoff.draft.corrections, new Set(['code_recommendation'])).filter((correction) => !eligibleCorrectionIds || eligibleCorrectionIds.has(correction.correction_id));
+    const codeCorrections = trustedCorrections(frozenProposal, handoffInfo.handoff.draft.corrections, new Set(['code_recommendation']), eligibleCorrectionIds);
     const nonCodeRoutes = (frozenProposal.correction_routing || []).filter((route) => ['replacement_rule', 'prompt'].includes(route?.lane) && (!eligibleCorrectionIds || eligibleCorrectionIds.has(route.correction_id)));
     const nonCodeCorrections = nonCodeRoutes.map((route) => {
         const replay = (frozenProposal.replay_evidence || []).find((entry) => entry?.correction_id === route.correction_id);
@@ -525,7 +526,13 @@ async function runCodeProposalProof(options = {}) {
         }
         revalidatePlan(paths.plan, plan, metadata, attemptRoot, baselineRoot, candidateRoot, bundle, trustedSuites, historicalTests, candidateTests, runtimeVerification, options.proposal, trustedVerification, behaviorModule);
         progress('holdout', 'active', { completed: caseIds.length * seeds.length, total: caseIds.length * seeds.length });
-        const behaviorArtifact = checked.behavior;
+        const eligibleSet = new Set(eligibleCorrectionIds || []);
+        const fullBehaviorArtifact = checked.behavior;
+        const behaviorArtifact = eligibleCorrectionIds ? (() => {
+            const body = { ...fullBehaviorArtifact, records: (fullBehaviorArtifact.records || []).filter((row) => eligibleSet.has(row.correctionId)), tests: (fullBehaviorArtifact.tests || []).filter((row) => eligibleSet.has(row.correctionId)), contextualTests: (fullBehaviorArtifact.contextualTests || []).filter((row) => eligibleSet.has(row.correctionId)) };
+            delete body.sha256;
+            return { ...body, sha256: behaviorModule.hashBehaviorArtifact(body) };
+        })() : fullBehaviorArtifact;
         if (!behaviorArtifact || !behaviorModule) throw new Error('Independent B6-D1 behavior evaluation requires the frozen artifact.');
         let behaviorCandidate;
         if (typeof options.behaviorExecutor === 'function') {

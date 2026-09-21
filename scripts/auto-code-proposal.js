@@ -96,7 +96,7 @@ async function dispatchCodeDraft(options = {}) {
     try {
         const result = await prepared.broker.dispatch({ requestId, endpoint: prepared.broker.authorization.endpoint, body: request, apiKey: options.apiKey, transport: options.transport });
         const validated = validateDraftResponse(result, prepared.broker.authorization);
-        const draft = validateDraft(validated.draft, prepared.checked.proposal, prepared.checked.cases, prepared.baselineRoot);
+        const draft = validateDraft(validated.draft, prepared.checked.proposal, prepared.checked.cases, prepared.baselineRoot, { eligibleCorrectionIds: prepared.checked.eligibleCorrectionIds });
         return { draft, response: validated.response, baselineRoot: prepared.baselineRoot, attemptRoot: prepared.attemptRoot, scope: prepared.scope, authorizationHash: prepared.broker.authorizationHash, checked: prepared.checked, cases: prepared.checked.cases };
     } catch (error) {
         throw new Error(redact(error?.message || error, options.secrets || []));
@@ -176,7 +176,7 @@ function persistC2bHandoff(result, proposal, candidateRoot, options = {}) {
 /** Apply the validated C2b patch and atomically emit the owner-only C2b handoff. */
 async function applyValidatedDraftWithHandoff(result, proposal, candidateRoot, options = {}) {
     if (!result?.checked?.cases && !Array.isArray(result?.cases) && !Array.isArray(options.cases)) throw new Error('C2b apply requires the frozen dataset cases returned by dispatch.');
-    validateDraft(result.draft, proposal, result.checked?.cases || result.cases || options.cases, result.baselineRoot);
+    validateDraft(result.draft, proposal, result.checked?.cases || result.cases || options.cases, result.baselineRoot, { eligibleCorrectionIds: result.checked?.eligibleCorrectionIds });
     const applied = applyValidatedDraft(result, proposal, candidateRoot, options.command, options.attemptId);
     const handoff = persistC2bHandoff(result, proposal, applied, options);
     let ownerBound = false;

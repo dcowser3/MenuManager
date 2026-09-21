@@ -269,10 +269,12 @@ function revalidateAttemptArtifacts(options = {}) {
     const promptBytes = boundedRegular(path.join(root, 'prompt.txt'), root);
     const rulesBytes = boundedRegular(path.join(root, 'rules.json'), root);
     const behaviorBytes = boundedRegular(path.join(root, 'behavior-tests.json'), root);
+    const inventoryPath = path.join(root, 'preparation-inventory.json');
     const datasetBytes = boundedRegular(path.join(root, 'dataset.jsonl'), root);
     const storedProposal = JSON.parse(proposalBytes.toString('utf8'));
     const rulesPayload = JSON.parse(rulesBytes.toString('utf8'));
     const behavior = JSON.parse(behaviorBytes.toString('utf8'));
+    const inventory = fs.existsSync(inventoryPath) ? JSON.parse(boundedRegular(inventoryPath, root).toString('utf8')) : null;
     const cases = readDataset(datasetBytes);
     digest(metadata.proposal_sha256, 'proposal'); digest(metadata.baseline_source_sha256, 'baseline'); digest(metadata.prompt_sha256, 'prompt'); digest(metadata.accepted_rules_sha256, 'accepted rules'); digest(metadata.expected_dataset_sha256, 'dataset'); digest(metadata.behavior_tests_sha256, 'behavior');
     if (verification.codeProposalVerificationFingerprint(storedProposal) !== metadata.proposal_sha256 || verification.codeProposalVerificationFingerprint(proposal) !== metadata.proposal_sha256) throw new Error('Proposal fingerprint does not match the claimed attempt.');
@@ -291,7 +293,7 @@ function revalidateAttemptArtifacts(options = {}) {
     if (behavior.sha256 !== metadata.behavior_tests_sha256 || behavior.sha256 !== storedProposal.eval_summary?.behavior_tests?.sha256) throw new Error('B6-D1 behavior artifact identity is stale.');
     const baselineRoot = inside(root, options.baselineRoot);
     if (verification.hashCodeImplementation(baselineRoot) !== metadata.baseline_source_sha256) throw new Error('Baseline source snapshot hash is stale.');
-    return { proposal: storedProposal, prompt: promptBytes.toString('utf8'), rules, behavior, cases };
+    return { proposal: storedProposal, prompt: promptBytes.toString('utf8'), rules, behavior, cases, inventory, eligibleCorrectionIds: inventory?.groups?.filter((group) => group.status !== 'excluded').map((group) => group.correction_id) || null };
 }
 
 module.exports = { snapshotBaseline, validateDraft, validateDraftPatch, validateCorrectionMappings, applyDraft, revalidateAttemptArtifacts, hashImplementation, readDataset, safePath };
