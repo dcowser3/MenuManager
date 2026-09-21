@@ -24,4 +24,6 @@ semantic projection emitted by `mapProposedRuleToCorrectionRulePayload`,
 including source, cycle/submission provenance, menu/property scope, reviewer,
 and consumed status. Only database-generated identity/timestamp/transaction
 columns are ignored, so a partial or altered readback is a conflict rather
-than an approval retry.
+than an approval retry. Global `location: null` from the mapper is equivalent
+only to the database's exact `All properties (global rule)` sentinel; scoped
+locations remain exact.

@@ -81,6 +81,7 @@ const PERSISTENT_RULE_KEYS = Object.freeze([
     'restaurant_name', 'reviewer_name', 'source', 'status', 'prompt_cycle_id',
     'consumed_at',
 ]);
+const GLOBAL_LOCATION_SENTINEL = 'All properties (global rule)';
 function persistentRuleProjection(row) {
     return Object.fromEntries(PERSISTENT_RULE_KEYS.map((key) => [key, row?.[key]]));
 }
@@ -92,6 +93,15 @@ function persistentRuleIdentity(actual, expected) {
     if (typeof consumedAt !== 'string' || !consumedAt || Number.isNaN(Date.parse(consumedAt))) return false;
     const actualProjection = persistentRuleProjection(actual);
     const expectedProjection = persistentRuleProjection(expected);
+    // The mapper uses SQL null for global location; the correction-rules
+    // endpoint normalizes that field to its explicit global sentinel. Accept
+    // only that two-value equivalence, and only when both rows remain global.
+    if (actual?.is_location_specific === false && expected?.is_location_specific === false
+        && [null, GLOBAL_LOCATION_SENTINEL].includes(actualProjection.location)
+        && [null, GLOBAL_LOCATION_SENTINEL].includes(expectedProjection.location)) {
+        actualProjection.location = null;
+        expectedProjection.location = null;
+    }
     // consumed_at is assigned by the correction-rule insert. All other
     // mapper-owned fields remain exact, including cycle and submission links.
     delete actualProjection.consumed_at;
