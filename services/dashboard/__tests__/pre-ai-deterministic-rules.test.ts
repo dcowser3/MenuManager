@@ -194,6 +194,8 @@ describe('runPreAiDeterministicChecks', () => {
             'Fish Soup, salmon, dill D 12',
             'fish soup, salmon, dill, lemon, bread D 12',
             'Salmon Benedict, poached eggs, hollandaise D 18',
+            'Salmon Ceviche, lime, onion F 18',
+            'Surf and Turf, salmon, ribeye F 48',
         ].join('\n'));
 
         expect(result.menuText).toBe([
@@ -202,6 +204,8 @@ describe('runPreAiDeterministicChecks', () => {
             'Fish Soup, salmon, dill D 12',
             'fish soup, salmon, dill, lemon, bread D 12',
             'Salmon Benedict, poached eggs, hollandaise* D 18',
+            'Salmon Ceviche*, lime, onion F 18',
+            'Surf and Turf, salmon, ribeye* F 48',
         ].join('\n'));
         expect(runPreAiDeterministicChecks(result.menuText).menuText).toBe(result.menuText);
     });

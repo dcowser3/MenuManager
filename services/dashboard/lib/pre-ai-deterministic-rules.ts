@@ -934,11 +934,6 @@ function shouldAddRawAsterisk(line: string): boolean {
     if (isCookedShrimpCevicheLine(line)) {
         return false;
     }
-    // A plain salmon dish/option is not itself evidence of raw preparation;
-    // only explicit raw preparations (sashimi, tartare, ceviche, etc.) qualify.
-    if (/\bsalmon\b/.test(normalized) && !INDEPENDENT_RAW_TERM_PATTERN.test(normalized)) {
-        return false;
-    }
     if (/\boysters?\b/.test(normalized) && !/\b(?:raw\s+oysters?|oysters?\s+on\s+the\s+half\s+shell|half[-\s]shell\s+oysters?)\b/.test(normalized)) {
         return false;
     }
