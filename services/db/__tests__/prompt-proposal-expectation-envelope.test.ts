@@ -43,3 +43,10 @@ test('between-read-and-update CAS conflict returns 409 without overwrite', async
     expect(result.status).toBe(409);
     expect(update).toHaveBeenCalled();
 });
+
+test('real PostgREST no-row CAS error returns 409', async () => {
+    const update = jest.fn().mockReturnValue({ eq: () => ({ eq: () => ({ eq: () => ({ select: () => ({ single: async () => ({ data: null, error: { message: 'JSON object requested, multiple (or no) rows returned' } }) }) }) }) }) });
+    (getSupabaseClient as jest.Mock).mockReturnValue({ from: () => ({ select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: { id: 'p1', status: 'approved', eval_summary: summary }, error: null }) }) }), update }) });
+    const result = await invoke({ expected_eval_summary_hash: hash, expectation_envelope: { sha256: 'new' } });
+    expect(result.status).toBe(409);
+});

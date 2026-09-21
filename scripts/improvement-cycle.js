@@ -1381,7 +1381,7 @@ async function main() {
                     const derivedPath = path.join(artifactsDir, 'derived-expectations.json');
                     await fsp.writeFile(derivedPath, JSON.stringify(derived.envelope, null, 2));
                     ACTIVE_EXPECTATION_ARGS = ['--expectations', derivedPath];
-                }
+                } else evalSummary = { ...(evalSummary || {}), expectation_policy_unresolved: true, expectation_policy_unresolved_reason: 'approved artifact had no unique validated-rule match' };
             } catch (error) { validated.warnings.push(`Approved expectation artifact rejected; no policy-change grading: ${error.message}`); }
         }
         if (validated.coverage_claims && validated.coverage_claims.length) {

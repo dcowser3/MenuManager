@@ -3705,7 +3705,10 @@ app.put('/prompt-proposals/:id/expectation-envelope', async (req, res) => {
         const merged = { ...(current.data.eval_summary || {}), expectation_envelope: envelope };
         const updated = await supabase.from(PROMPT_PROPOSALS_TABLE).update({ eval_summary: merged })
             .eq('id', req.params.id).eq('status', current.data.status).eq('eval_summary', current.data.eval_summary).select().single();
-        if (updated.error) throw new Error(updated.error.message);
+        if (updated.error) {
+            if (/0 rows|no rows|JSON object requested/i.test(updated.error.message || '')) return res.status(409).json({ error: 'Proposal evaluation summary changed concurrently' });
+            throw new Error(updated.error.message);
+        }
         if (!updated.data) return res.status(409).json({ error: 'Proposal evaluation summary changed concurrently' });
         res.json(updated.data);
     } catch (error: any) {

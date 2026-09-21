@@ -99,7 +99,8 @@ function validateApprovedExpectationAuthority(envelope) {
             throw new Error('Candidate lacks explicit policy-change classification.');
         const prior = envelope.expectations.find((row) => row.id === candidate.sourceExpectationId);
         const approval = approvals.filter((row) => row.priorId === candidate.sourceExpectationId && row.successorId === candidate.id);
-        if (!prior || prior.status !== 'active' || prior.approvalState !== 'approved' || approval.length !== 1 || candidate.policyVersion !== envelope.candidatePolicyVersion)
+        const links = envelope.supersedes.filter((row) => row.priorId === candidate.sourceExpectationId && row.successorId === candidate.id);
+        if (!prior || prior.status !== 'active' || prior.approvalState !== 'approved' || approval.length !== 1 || links.length !== 1 || candidate.policyVersion !== envelope.candidatePolicyVersion)
             throw new Error('Candidate authority link is invalid.');
         const record = approval[0];
         if (!record.caseId || !record.sourceRevisionId || !record.reviewer || record.status !== 'approved' || !Number.isFinite(Date.parse(record.approvedAt)))

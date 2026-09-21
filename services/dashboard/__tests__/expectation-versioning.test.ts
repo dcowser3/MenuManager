@@ -114,6 +114,8 @@ test('approved authority derives proposal envelope and activation preserves prov
     const result = planApprovedExpectationActivation(derived.envelope!, derived.rules, [{ index: 0, ok: true, correctionId: 'proposal-cycle-1-rule-0', location: 'Restaurant A', menuScope: 'food', isLocationSpecific: true }], [0]);
     expect(result?.policyChangeApprovals).toEqual(authority.policyChangeApprovals);
     expect(result?.parentArtifactHash).toBe(authority.sha256);
+    const { mapProposedRuleToCorrectionRulePayload } = require('../lib/improvement-cycle-core');
+    expect(mapProposedRuleToCorrectionRulePayload(derived.rules[0], 'cycle-1', 0, 'Reviewer').correction_id).toBe('proposal-cycle-1-rule-0');
     const bad = { ...authority, policyChangeApprovals: [{ ...authority.policyChangeApprovals![0], caseId: 'wrong' }] };
     expect(() => validateApprovedExpectationAuthority({ ...bad, sha256: 'tampered' } as any)).toThrow();
 });
