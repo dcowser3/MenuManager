@@ -106,12 +106,14 @@ class InMemoryQuery {
         const current = currentIndex >= 0 ? this.client.proposals[currentIndex] : this.client.proposal;
         const matches = currentIndex >= 0;
         const evalFilter = this.filters.find((filter) => filter.field === 'eval_summary');
+        const boundedEvaluationFilters = this.filters.filter((filter) => filter.field.startsWith('eval_summary->'));
         this.client.casWrites.push({
             table: this.table,
             filters: clone(this.filters),
             beforeStatus: current.status,
             beforeEvalSummary: clone(current.eval_summary),
             exactEvalSummaryCas: typeof evalFilter?.value === 'string' && evalFilter.value === JSON.stringify(current.eval_summary),
+            boundedEvaluationCas: !evalFilter && boundedEvaluationFilters.length > 0,
         });
         if (!matches) return { data: [], error: null };
         const updated = { ...current, ...clone(this.updatePayload) };
@@ -130,7 +132,10 @@ class InMemoryQuery {
 
     matches(row) {
         const matchesFilters = this.filters.every((filter) => {
-            const value = row?.[filter.field];
+            const textSelector = filter.field.includes('->>');
+            const pathParts = filter.field.replaceAll('->>', '->').split('->');
+            let value = pathParts.reduce((current, part) => current?.[part], row);
+            if (textSelector && value != null && typeof value === 'object') value = JSON.stringify(value);
             if (filter.type === 'eq') {
                 if (filter.field === 'eval_summary' && typeof filter.value === 'string') return filter.value === JSON.stringify(value);
                 return `${value ?? ''}` === `${filter.value ?? ''}`;
@@ -417,7 +422,7 @@ integration('prepares one owner-bound proposal, applies a synthetic draft, and v
         expect(resumed.status).toBe('verified');
         expect(resumed.resumed).toBe(true);
         expect(client.casWrites.length).toBe(attachCount);
-        expect(client.casWrites.every((write) => write.exactEvalSummaryCas)).toBe(true);
+        expect(client.casWrites.every((write) => write.boundedEvaluationCas && !write.exactEvalSummaryCas)).toBe(true);
         expect(client.casWrites.length).toBe(3);
         expect(client.calls.filter((call) => call.table === 'submissions')).toHaveLength(1);
         expect(client.calls.filter((call) => call.table === 'basic_ai_check_audits')).toHaveLength(1);
@@ -861,7 +866,7 @@ integration('runs two superseding coordinator cycles from a preconstructed snaps
         const identityHashes = ['cycle1_plan', 'cycle2_plan', 'cycle1_baseline_report', 'cycle2_baseline_report', 'cycle1_candidate_report', 'cycle2_candidate_report', 'cycle1_proof', 'cycle2_proof'].map(cycleFileHash);
         expect(new Set(identityHashes).size).toBe(identityHashes.length);
         expect(client.casWrites.length).toBe(7);
-        expect(client.casWrites.every((write) => write.exactEvalSummaryCas && write.beforeStatus === 'pending')).toBe(true);
+        expect(client.casWrites.every((write) => write.boundedEvaluationCas && !write.exactEvalSummaryCas && write.beforeStatus === 'pending')).toBe(true);
         const summaryBody = {
             schema_version: 1,
             kind: 'review-learning-coordinator-m2-evidence',
