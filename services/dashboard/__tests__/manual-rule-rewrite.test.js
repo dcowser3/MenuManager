@@ -10,9 +10,11 @@ const proposal = () => {
     return { id: 'p1', status: 'pending', correction_rule_count: 30, eval_status: 'regressed', disposition: 'rules_only', correction_routing: rows('route'), replay_evidence: rows('replay'), eval_summary: { behavior_tests: { records: rows('record'), tests: rows('test'), contextualTests: rows('context') }, regressions: [{ case_id: 'holdout-1' }] } };
 };
 const correctionRules = OLD_IDS.map((correction_id, i) => ({ id: `r${i}`, correction_id, submission_id: `s${i}`, original_text: 'walnuts', corrected_text: 'walnut', source_binding: { case_id: `case-${i}` }, reviewer_name: 'Isabella', source: 'human', status: 'pending' }));
+const targetHashes = Object.fromEntries(correctionRules.map((row) => [row.correction_id, hash(row)]));
+const planArgs = (extra = {}) => ({ correctionRules, proposal: proposal(), expectedProposalFingerprint: 'f'.repeat(64), expectedTargetHashes: targetHashes, ...extra });
 
 test('plans exact 30-member rewrite with bounded recovery and only target removals', () => {
-    const plan = buildManualRuleRewritePlan({ correctionRules, proposal: proposal(), expectedProposalFingerprint: 'f'.repeat(64) });
+    const plan = buildManualRuleRewritePlan(planArgs());
     expect(plan.correction_rule_deletes).toHaveLength(3);
     expect(plan.replacement.row).toMatchObject({ correction_id: NEW_ID, submission_id: expect.stringContaining('manual-submission-'), rule: RULE, reviewer_name: 'Derian', source: 'human', status: 'pending', source_binding: null, original_text: null, corrected_text: null });
     expect(plan.proposal_patch.correction_rule_count).toBe(27);
@@ -29,20 +31,20 @@ test.each([
     ['stale owner', () => ({ ...proposal(), eval_summary: { code_candidate: { attempt_id: 'a1', status: 'running' } } })],
     ['wrong membership', () => ({ ...proposal(), correction_routing: proposal().correction_routing.slice(1) })],
 ])('refuses %s without producing a rewrite', (_label, make) => {
-    expect(() => buildManualRuleRewritePlan({ correctionRules, proposal: make(), expectedProposalFingerprint: 'f'.repeat(64) })).toThrow();
+    expect(() => buildManualRuleRewritePlan(planArgs({ proposal: make() }))).toThrow();
 });
 
 test('requires all three exact correction rule rows and remains resumable by stable replacement id', () => {
-    const plan = buildManualRuleRewritePlan({ correctionRules, proposal: proposal(), expectedProposalFingerprint: 'f'.repeat(64) });
-    const retry = buildManualRuleRewritePlan({ correctionRules, proposal: proposal(), expectedProposalFingerprint: 'f'.repeat(64) });
+    const plan = buildManualRuleRewritePlan(planArgs());
+    const retry = buildManualRuleRewritePlan(planArgs());
     expect(retry.new_id).toBe(plan.new_id);
-    expect(() => buildManualRuleRewritePlan({ correctionRules: correctionRules.slice(1), proposal: proposal(), expectedProposalFingerprint: 'f'.repeat(64) })).toThrow(/one exact/);
+    expect(() => buildManualRuleRewritePlan(planArgs({ correctionRules: correctionRules.slice(1) }))).toThrow(/one exact/);
 });
 
 test('advances a private recovery marker only from the expected phase snapshot', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'manual-rule-rewrite-'));
     const marker = path.join(dir, 'recovery.json');
-    const plan = buildManualRuleRewritePlan({ correctionRules, proposal: proposal(), expectedProposalFingerprint: 'f'.repeat(64) });
+    const plan = buildManualRuleRewritePlan(planArgs());
     await writeRecoveryMarker(marker, plan);
     const next = await advanceRewriteMarker(marker, hash(plan), 'rules_reconciled');
     expect(next.phase).toBe('rules_reconciled');
@@ -62,7 +64,7 @@ test('resumes after a phase interruption without duplicate replacement or provid
         insertCorrectionRule: async (row) => { if (!state.correctionRules.some((item) => item.correction_id === row.correction_id)) { state.correctionRules.push(row); inserts++; } },
         updateProposal: async (next) => { state.proposal = next; },
     };
-    const plan = buildManualRuleRewritePlan({ correctionRules: state.correctionRules, proposal: state.proposal, expectedProposalFingerprint: 'f'.repeat(64) });
+    const plan = buildManualRuleRewritePlan({ ...planArgs(), correctionRules: state.correctionRules, proposal: state.proposal });
     await expect(runManualRuleRewrite({ adapter, markerPath: marker, plan, failAfterPhase: 'proposal_reconciled' })).rejects.toThrow('Injected failure');
     await runManualRuleRewrite({ adapter, markerPath: marker, plan });
     await runManualRuleRewrite({ adapter, markerPath: marker, plan });

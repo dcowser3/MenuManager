@@ -121,7 +121,8 @@ function buildManualRuleRewritePlan({ correctionRules, proposal, expectedProposa
     if (members.size !== 30 || OLD_IDS.some((id) => !members.has(id))) throw new Error('Rewrite requires exactly 30 proposal members including all exact old ids.');
     const oldRows = OLD_IDS.map((id) => rows.filter((row) => row?.correction_id === id));
     if (oldRows.some((matches) => matches.length !== 1)) throw new Error('Rewrite requires one exact correction_rules row per old id.');
-    if (expectedTargetHashes) for (const id of OLD_IDS) if (expectedTargetHashes[id] && expectedTargetHashes[id] !== hash(oldRows[OLD_IDS.indexOf(id)][0])) throw new Error(`Target correction_rules shape is stale for ${id}.`);
+    if (!expectedTargetHashes || OLD_IDS.some((id) => !DIGEST.test(expectedTargetHashes[id] || ''))) throw new Error('Rewrite requires exact target correction_rules shape hashes.');
+    for (const id of OLD_IDS) if (expectedTargetHashes[id] !== hash(oldRows[OLD_IDS.indexOf(id)][0])) throw new Error(`Target correction_rules shape is stale for ${id}.`);
     const routing = Array.isArray(proposal.correction_routing) ? proposal.correction_routing : [];
     const replay = Array.isArray(proposal.replay_evidence) ? proposal.replay_evidence : [];
     if (routing.length !== 30 || replay.length !== 30) throw new Error('Rewrite requires the exact 30-member pending proposal.');
@@ -137,6 +138,7 @@ function buildManualRuleRewritePlan({ correctionRules, proposal, expectedProposa
     return Object.freeze({
         schema_version: 1, source: 'user_directed_manual_rule_rewrite', phase: 'planned', proposal_id: proposal.id,
         expected_proposal_fingerprint: expectedProposalFingerprint, old_ids: [...OLD_IDS], new_id: NEW_ID,
+        target_hashes: Object.freeze(Object.fromEntries(OLD_IDS.map((id) => [id, hash(oldRows[OLD_IDS.indexOf(id)][0])]))),
         recovery_snapshot: Object.freeze({ before, sha256: hash(before) }),
         correction_rule_deletes: Object.freeze(oldRows.flat().map((row) => ({ id: row.id, correction_id: row.correction_id, expected_sha256: hash(row) }))),
         replacement: Object.freeze({ old_id: freeformRow.id, expected_sha256: hash(freeformRow), row: buildNewManualRule(freeformRow, reviewerName, buildCorrectionRuleRecord) }),
@@ -189,7 +191,7 @@ async function runManualRuleRewrite({ adapter, markerPath, plan, failAfterPhase,
     };
     if (phase === 'planned') {
         const state = await adapter.readState();
-        const current = buildManualRuleRewritePlan({ correctionRules: state.correctionRules, proposal: state.proposal, expectedProposalFingerprint: plan.expected_proposal_fingerprint, reviewerName: plan.replacement.row.reviewer_name, codeProposalVerificationFingerprint });
+        const current = buildManualRuleRewritePlan({ correctionRules: state.correctionRules, proposal: state.proposal, expectedProposalFingerprint: plan.expected_proposal_fingerprint, reviewerName: plan.replacement.row.reviewer_name, expectedTargetHashes: plan.target_hashes, codeProposalVerificationFingerprint });
         if (current.proposal_before_sha256 !== plan.proposal_before_sha256) throw new Error('Live state changed before rewrite.');
     }
     if (phase === 'planned') { if (markerPath) await writeRecoveryMarker(markerPath, { ...plan, phase: 'snapshot' }); await mark('snapshot'); }
@@ -198,12 +200,12 @@ async function runManualRuleRewrite({ adapter, markerPath, plan, failAfterPhase,
         // observing a proposal that references rows already deleted.
         const live = await adapter.readState();
         if (hash(live.proposal) !== plan.proposal_before_sha256) throw new Error('Proposal changed concurrently before CAS.');
-        await adapter.updateProposal(plan.proposal_patch, { expectedFingerprint: plan.expected_proposal_fingerprint });
+        await adapter.updateProposal(plan.proposal_patch, { expectedFingerprint: plan.expected_proposal_fingerprint, expectedProposal: live.proposal });
         await mark('proposal_reconciled');
     }
     if (phase === 'proposal_reconciled' || phase === 'deleted') {
         // Adapter must make this insert idempotent by correction_id.
-        await adapter.insertCorrectionRule(plan.replacement.row);
+        await adapter.insertCorrectionRule(plan.replacement.row, { expectedSha256: plan.replacement.expected_sha256 });
         await mark('inserted');
     }
     if (phase === 'inserted') {
@@ -236,22 +238,32 @@ function createSupabaseRewriteAdapter(client, proposalId) {
             return { correctionRules: rulesResult.data || [], proposal: proposalResult.data };
         },
         async updateProposal(next, guard) {
-            let query = client.from('prompt_proposals').update(next).eq('id', proposalId).eq('status', 'pending').eq('correction_rule_count', 30).select('id');
+            const expected = guard?.expectedProposal;
+            if (!expected) throw new Error('Proposal CAS requires the original proposal JSON.');
+            const patch = { correction_routing: next.correction_routing, replay_evidence: next.replay_evidence, eval_summary: next.eval_summary, correction_rule_count: next.correction_rule_count };
+            for (const field of ['coverage_claims', 'code_recommendations']) if (Object.prototype.hasOwnProperty.call(next, field)) patch[field] = next[field];
+            let query = client.from('prompt_proposals').update(patch).eq('id', proposalId).eq('status', 'pending').eq('correction_rule_count', 30).eq('eval_summary', expected.eval_summary).eq('correction_routing', expected.correction_routing).eq('replay_evidence', expected.replay_evidence).select('id');
             const result = await query;
             if (result.error) throw new Error(`Proposal CAS failed: ${result.error.message}`);
             if (!Array.isArray(result.data) || result.data.length !== 1) throw new Error('Proposal CAS affected zero or multiple rows.');
             return result.data[0];
         },
-        async insertCorrectionRule(row) {
+        async insertCorrectionRule(row, guard) {
             const existing = await client.from('correction_rules').select('correction_id').eq('correction_id', row.correction_id);
             if (existing.error) throw new Error(`Replacement lookup failed: ${existing.error.message}`);
-            if (existing.data?.length) return existing.data[0];
+            if (existing.data?.length) {
+                const full = await client.from('correction_rules').select('*').eq('correction_id', row.correction_id).single();
+                if (full.error || hash(full.data) !== hash(row)) throw new Error('Existing stable replacement conflicts with planned row.');
+                return full.data;
+            }
             const result = await client.from('correction_rules').insert(row).select('correction_id');
             if (result.error) throw new Error(`Replacement insert failed: ${result.error.message}`);
             if (!Array.isArray(result.data) || result.data.length !== 1) throw new Error('Replacement insert affected unexpected rows.');
             return result.data[0];
         },
         async deleteCorrectionRule(target) {
+            const current = await client.from('correction_rules').select('*').eq('id', target.id).eq('correction_id', target.correction_id).single();
+            if (current.error || !current.data || hash(current.data) !== target.expected_sha256) throw new Error(`Correction target is stale for ${target.correction_id}.`);
             const result = await client.from('correction_rules').delete().eq('id', target.id).eq('correction_id', target.correction_id).eq('status', 'pending').select('id');
             if (result.error) throw new Error(`Correction delete failed: ${result.error.message}`);
             if (!Array.isArray(result.data) || result.data.length !== 1) throw new Error(`Correction delete affected unexpected rows for ${target.correction_id}.`);
