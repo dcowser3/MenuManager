@@ -4,6 +4,7 @@
   "proposal_id": "72c144aa-c33e-4873-85e8-6e48537e799e",
   "baseline_head": "9239d347",
   "candidate_head": "6ac8e489712468559fea8c144fd246a941e42443",
+  "candidate_head_kind": "frozen pre-fallback source head; the manual fallback commit is recorded by git and is intentionally not self-referential",
   "lineage": {
     "parent_campaign_sha256": "4020f3c87536facfba9623e3a895d2398ea14581a0c411607398e49e497fe4dd",
     "proposal_fingerprint": "7c6be5e5ac92d965835ce4959f36b1ad3ecf89c505e9f6c806584f2433215dd6",
@@ -32,7 +33,7 @@
     {"id": "8447b59a-cbc1-4126-829b-e2c20abe451d", "status": "implemented", "group": "contextual_singularization"},
     {"id": "8c831d61-044b-4808-841a-e717cffea804", "status": "implemented", "group": "contextual_singularization"},
     {"id": "999e3f76-7c23-4173-af13-9060177eb8f9", "status": "implemented", "group": "contextual_singularization"},
-    {"id": "bd169365-f67a-4ada-b1d4-b28f2e54aa8c", "status": "implemented", "group": "contextual_singularization"},
+    {"id": "bd169365-f67f-4ada-b1d4-b28f2e54aa8c", "status": "implemented", "group": "contextual_singularization"},
     {"id": "c6390a0e-88a8-44e0-b677-e22ac3b40a3b", "status": "implemented", "group": "contextual_singularization"},
     {"id": "e92c7b42-13fa-4b45-ad15-2dc1f4454459", "status": "implemented", "group": "contextual_singularization"},
     {"id": "ff4dc3bb-4a2c-4906-a177-a1620c2fe47f", "status": "implemented", "group": "contextual_singularization"}

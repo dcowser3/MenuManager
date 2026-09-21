@@ -166,7 +166,7 @@ describe('runPreAiDeterministicChecks', () => {
         ].join('\n'));
 
         expect(result.menuText).toBe([
-            'Kale Salad, grilled cinnamon apple, heirloom cherry tomato, roasted beet root, golden raisin, candied sesame seeds, orange balsamic vinaigrette VG',
+            'Kale Salad, grilled cinnamon apple, heirloom cherry tomato, roasted beet root, golden raisin, candied sesame seed, orange balsamic vinaigrette VG',
             'Pepper Plate, baby bell pepper, Brussels Sprouts, whipped potato 18',
             'Harvest, pickled red onion, candied pecan, pickled raisin, beet, candied walnut, mandarin, lemon 20',
             'Salad, cornbread crouton, spiced pepita, Colorado apple, candied pepita 16',
@@ -182,19 +182,21 @@ describe('runPreAiDeterministicChecks', () => {
         expect(result.menuText).toBe([
             'Salad, cucumber, carrot, beet, mozzarella cheese, feta cheese, parmesan cheese 18',
             'Mozzarella Special, feta cheese, parmesan-style crisp 20',
-        ].join('\\n'));
+        ].join('\n'));
     });
 
     it('marks a bare salmon option inside a multi-option line without broad salmon matching', () => {
         const result = runPreAiDeterministicChecks([
             'grilled chicken, salmon, pasta Bolognese D G, seasonal vegetables, pepperoni & cheese pizza D G',
             'Salmon Sauce, lemon, dill D 12',
-        ].join('\\n'));
+            'Fish Soup, salmon, dill D 12',
+        ].join('\n'));
 
         expect(result.menuText).toBe([
             'grilled chicken, salmon*, pasta Bolognese D G, seasonal vegetables, pepperoni & cheese pizza D G',
             'Salmon Sauce, lemon, dill D 12',
-        ].join('\\n'));
+            'Fish Soup, salmon, dill D 12',
+        ].join('\n'));
     });
 
     it('uses bounded canonical food words to catch unseen typos without changing valid neighbors', () => {

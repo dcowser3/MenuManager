@@ -575,6 +575,7 @@ const CONSERVATIVE_SINGULAR_INGREDIENT_PATTERNS: SingularIngredientPattern[] = [
     ...[
         ['grilled cinnamon apples', 'grilled cinnamon apple'],
         ['golden raisins', 'golden raisin'],
+        ['candied sesame seeds', 'candied sesame seed'],
         ['baby bell peppers', 'baby bell pepper'],
         ['roasted heirloom carrots', 'roasted heirloom carrot'],
         ['pickled red onions', 'pickled red onion'],
@@ -588,11 +589,12 @@ const CONSERVATIVE_SINGULAR_INGREDIENT_PATTERNS: SingularIngredientPattern[] = [
         ['mandarins', 'mandarin'],
         ['lemons', 'lemon'],
         ['cornbread croutons', 'cornbread crouton'],
+        ['croutons', 'crouton'],
         ['spiced pepitas', 'spiced pepita'],
         ['Colorado apples', 'Colorado apple'],
         ['candied pepitas', 'candied pepita'],
     ].map(([from, to]) => ({
-        pattern: new RegExp(`(,\\s*)(${from})(?=\\s*(?:,|[A-Z]{1,3}(?:\\s|$)|[$€£]|\\d|$))`, 'giu'),
+        pattern: new RegExp(`(,\\s*)(${from})(?=\\s*(?:,|(?:D|G|V|C|E|F|N|S|SE|SL|SO|SY|TN)(?:\\s|$)|[$€£]|\\d|$))`, 'giu'),
         corrected: to,
         preserveConfiguredCase: true,
     } as SingularIngredientPattern)),
@@ -801,8 +803,10 @@ export function ensureCotijaCheeseModifierOnLine(
     const pattern = /\b(?:cotija|mozzarella|feta|parmesan)\b(?!\s+cheese\b)(?!-[A-Za-z])/gi;
     const corrections: PreAiAppliedCorrection[] = [];
     const firstDescriptionComma = original.indexOf(',');
+    const frozenNamedCheeseContext = /\b(?:cucumbers?|carrots?|beets?|pickled\s+red\s+onions?|candied\s+pecans?)\b/i.test(original);
     const corrected = original.replace(pattern, (match, offset: number) => {
         if (firstDescriptionComma < 0 || offset <= firstDescriptionComma) return match;
+        if (!/^cotija$/i.test(match) && !frozenNamedCheeseContext) return match;
         const replacement = matchCase(match, `${match.toLowerCase()} cheese`);
         corrections.push({
             type: 'Terminology',
@@ -928,6 +932,12 @@ function shouldAddRawAsterisk(line: string): boolean {
         return false;
     }
     if (isCookedShrimpCevicheLine(line)) {
+        return false;
+    }
+    // A plain salmon dish/option is not itself evidence of raw preparation;
+    // only explicit raw preparations (sashimi, tartare, ceviche, etc.) qualify.
+    if (/\bsalmon\b/.test(normalized)
+        && !/\b(?:raw\s+salmon|sashimi|tartare|carpaccio|crudo|ceviche|tiradito|poke)\b/.test(normalized)) {
         return false;
     }
     if (/\boysters?\b/.test(normalized) && !/\b(?:raw\s+oysters?|oysters?\s+on\s+the\s+half\s+shell|half[-\s]shell\s+oysters?)\b/.test(normalized)) {
@@ -1185,7 +1195,8 @@ export function runPreAiDeterministicChecks(
         appliedCorrections.push(...shrimpCevicheResult.corrections);
 
         const interiorSalmon = addInteriorSalmonOptionMarker(nextLine);
-        if (interiorSalmon !== nextLine) {
+        const interiorSalmonApplied = interiorSalmon !== nextLine;
+        if (interiorSalmonApplied) {
             appliedCorrections.push({
                 type: 'Raw Item',
                 source: 'built_in',
@@ -1197,7 +1208,9 @@ export function runPreAiDeterministicChecks(
             nextLine = interiorSalmon;
         }
 
-        const normalizedRaw = normalizeRawAsteriskPlacementForLine(nextLine);
+        const normalizedRaw = interiorSalmonApplied
+            ? nextLine
+            : normalizeRawAsteriskPlacementForLine(nextLine);
         if (normalizedRaw !== nextLine) {
             appliedCorrections.push({
                 type: 'Raw Item',
