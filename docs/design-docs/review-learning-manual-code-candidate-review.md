@@ -67,3 +67,15 @@ post-handoff cycles with distinct attempt/artifact paths and test-only proof
 labels. It is offline evidence only: it does not certify the real producer's
 supersession wiring or permit approval, activation, deployment, or provider
 dispatch.
+
+Milestone 1 also has an opt-in coordinator integration fixture. It exercises
+one pending proposal through the real preparation queue, manual review bridge,
+C2b handoff, and network-none C2c2 proof using an in-memory PostgREST-shaped
+store with exact pending-row compare-and-swap. Run it with
+`RUN_REVIEW_LEARNING_COORDINATOR_INTEGRATION=1 npx jest --runInBand services/dashboard/__tests__/code-proposal-coordinator-integration.test.js`.
+The fixture supplies a synthetic validated draft and a fatal draft-dispatch
+callback, so it proves zero provider calls, exact submission/full-audit/rule
+reads, verified store readback, and idempotent post-handoff resume. The source
+snapshot scanner permits only the repository's documented non-secret provider
+placeholders; key-shaped values and configured secret bytes remain rejected in
+all scanned source and fixture files.

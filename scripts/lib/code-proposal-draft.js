@@ -75,7 +75,12 @@ function credentialSecrets(env = process.env) {
 }
 
 function rejectSecret(content, file, secrets = []) {
-    if (/-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----|\b(?:sk-(?:proj-|or-v1-)?[A-Za-z0-9_-]{20,}|gh[pousr]_[A-Za-z0-9]{20,})\b/.test(content)
+    // The trusted source includes the documented, non-secret development
+    // placeholders used by the provider-key guard.  Do not treat those
+    // placeholders as credentials while continuing to reject real key-shaped
+    // values and configured secret bytes.
+    const withoutPlaceholders = content.replace(/(?:\b(?:your-openai-api-key-here|sk-your_openai_api_key_here)\b|sk-or-\.\.\.)/g, '');
+    if (/-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----|\b(?:sk-(?:proj-|or-v1-)?[A-Za-z0-9_-]{20,}|gh[pousr]_[A-Za-z0-9]{20,})\b/.test(withoutPlaceholders)
         || [...new Set(secrets)].some((secret) => secret && content.includes(secret))) throw new Error(`Credential-like content in ${file}.`);
 }
 

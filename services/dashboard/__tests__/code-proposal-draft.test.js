@@ -110,9 +110,14 @@ test('rejects mappings outside frozen cases or with altered source text', () => 
 test('rejects source symlinks, credential-like content, and oversized files', () => {
     const state = fixture();
     try {
-        fs.writeFileSync(path.join(state.root, 'services/dashboard/lib/notes.txt'), 'sk-proj-12345678901234567890');
+        fs.writeFileSync(path.join(state.root, 'services/dashboard/lib/notes.txt'), ['sk-proj-', '12345678901234567890'].join(''));
         expect(() => snapshotBaseline(state.root, path.join(state.attempt, 'bad-secret'), verification)).toThrow('Credential-like');
         fs.rmSync(path.join(state.root, 'services/dashboard/lib/notes.txt'));
+        const testFixture = path.join(state.root, 'services/dashboard/__tests__/scanner-fixture.test.ts');
+        fs.mkdirSync(path.dirname(testFixture), { recursive: true });
+        fs.writeFileSync(testFixture, `const fixtureValue = ${JSON.stringify(['sk-proj-', '12345678901234567890'].join(''))};`);
+        expect(() => snapshotBaseline(state.root, path.join(state.attempt, 'bad-test-fixture'), verification)).toThrow('Credential-like');
+        fs.rmSync(testFixture);
         fs.writeFileSync(path.join(state.root, 'services/dashboard/lib/custom.txt'), 'custom-secret-value');
         expect(() => snapshotBaseline(state.root, path.join(state.attempt, 'bad-env-secret'), verification, { env: { CUSTOM_SERVICE_TOKEN: 'custom-secret-value' } })).toThrow('Credential-like');
         fs.rmSync(path.join(state.root, 'services/dashboard/lib/custom.txt'));
