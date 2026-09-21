@@ -145,6 +145,7 @@ import {
     resolveDashboardPublicUrl,
     supersededProposalReviewBlock,
 } from './lib/improvement-cycle-core';
+import { activateApprovedSuccessor } from './lib/expectation-versioning';
 
 export {
     sanitizePlainTextInput,
@@ -2892,6 +2893,35 @@ app.post('/api/learning/prompt-proposal/:id/review', async (req, res) => {
             reviewed_at: new Date().toISOString(),
             accepted_rules: acceptedRules.length ? acceptedRules : null,
         }, { timeout: 5000 });
+
+        // A versioned expectation artifact is activated only by the same exact
+        // accepted rule/scope metadata that the reviewer selected above. Missing
+        // or mismatched metadata fails closed and leaves the frozen artifact intact.
+        if (approved && proposalRecord?.eval_summary?.expectation_envelope && acceptedRules.length) {
+            const envelope = proposalRecord.eval_summary.expectation_envelope;
+            const activation = acceptedRules.find((rule: any) => rule?.expectation_activation);
+            const activationMeta = activation?.expectation_activation;
+            if (activationMeta) {
+                try {
+                    const activatedEnvelope = activateApprovedSuccessor(envelope, {
+                        ruleId: activationMeta.ruleId || activation.id || null,
+                        restaurant: activationMeta.restaurant || activation.location || null,
+                        menuScope: activationMeta.menuScope || activation.applies_to_menu_type || null,
+                        policyVersion: activationMeta.policyVersion || envelope.activePolicyVersion,
+                        status: 'accepted',
+                        supersedesId: activationMeta.supersedesId,
+                        successorId: activationMeta.successorId,
+                    });
+                    if (activatedEnvelope.sha256 !== envelope.sha256) {
+                        await internalApi.put(`${DB_SERVICE_URL}/prompt-proposals/${encodeURIComponent(id)}`, {
+                            eval_summary: { ...proposalRecord.eval_summary, expectation_envelope: activatedEnvelope },
+                        }, { timeout: 5000 });
+                    }
+                } catch (activationError: any) {
+                    console.warn('Expectation activation failed closed:', activationError.message);
+                }
+            }
+        }
 
         // Fix 3: on rejection, un-consume the source corrections so they can seed a future cycle.
         // Approval-inserted proposal-* rows are excluded by the endpoint.

@@ -24,6 +24,7 @@ export interface ExpectationVersion {
 export interface ExpectationEnvelope {
     schemaVersion: 1;
     activePolicyVersion: string;
+    candidatePolicyVersion?: string | null;
     expectations: ExpectationVersion[];
     supersedes: Array<{ priorId: string; successorId: string }>;
     sha256: string;
@@ -81,6 +82,7 @@ export function freezeExpectationEnvelope(input: {
     const body = {
         schemaVersion: 1 as const,
         activePolicyVersion: input.policyVersion,
+        candidatePolicyVersion: null,
         expectations,
         supersedes: [...(input.supersedes || [])],
     };
@@ -148,7 +150,11 @@ export function evaluateExpectationArms(input: {
     candidateRunId: string;
 }) {
     validateExpectationEnvelope(input.envelope);
-    return input.envelope.expectations.filter((expectation) => expectation.status !== 'superseded').map((expectation) => {
+    const candidateSuccessors = new Set(input.envelope.supersedes
+        .map((link) => input.envelope.expectations.find((row) => row.id === link.successorId))
+        .filter((row) => row?.status === 'candidate').map((row) => row?.sourceExpectationId));
+    return input.envelope.expectations.filter((expectation) => expectation.status !== 'superseded'
+        && !(expectation.status === 'active' && candidateSuccessors.has(expectation.id))).map((expectation) => {
         const baseline = input.baselineOutputs[expectation.id];
         const candidate = input.candidateOutputs[expectation.id];
         const baselinePresent = typeof baseline === 'string';
@@ -176,6 +182,17 @@ export function evaluateExpectationArms(input: {
     });
 }
 
+export function deriveCandidateEnvelope(envelope: ExpectationEnvelope): ExpectationEnvelope {
+    validateExpectationEnvelope(envelope);
+    const replacements = new Map(envelope.supersedes.map((link) => [link.priorId, link.successorId]));
+    const expectations = envelope.expectations;
+    const candidateRows = expectations.filter((row) => row.status !== 'superseded'
+        && !(row.status === 'active' && replacements.has(row.id)));
+    const body = { schemaVersion: 1 as const, activePolicyVersion: envelope.candidatePolicyVersion || envelope.activePolicyVersion,
+        candidatePolicyVersion: null, expectations: candidateRows, supersedes: envelope.supersedes };
+    return { ...body, sha256: hash(body) };
+}
+
 export function activateApprovedSuccessor(envelope: ExpectationEnvelope, approval: {
     ruleId: string;
     restaurant: string | null;
@@ -196,6 +213,6 @@ export function activateApprovedSuccessor(envelope: ExpectationEnvelope, approva
     const expectations = envelope.expectations.map((row) => row.id === prior.id
         ? { ...row, status: 'superseded' as const }
         : row.id === successor.id ? { ...row, status: 'active' as const, approvalState: 'approved' as const } : row);
-    const body = { schemaVersion: 1 as const, activePolicyVersion: envelope.activePolicyVersion, expectations, supersedes: envelope.supersedes };
+    const body = { schemaVersion: 1 as const, activePolicyVersion: successor.policyVersion, candidatePolicyVersion: null, expectations, supersedes: envelope.supersedes };
     return { ...body, sha256: hash(body) };
 }

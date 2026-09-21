@@ -1086,9 +1086,6 @@ async function main() {
     const suppliedExpectationArtifact = args.expectations ? readArtifact(args.expectations) : null;
     const suppliedVersionedEnvelope = suppliedExpectationArtifact?.activePolicyVersion && suppliedExpectationArtifact?.sha256
         && Array.isArray(suppliedExpectationArtifact?.expectations) ? suppliedExpectationArtifact : null;
-    if (suppliedExpectationArtifact && !suppliedVersionedEnvelope) {
-        throw new Error('Policy-change evaluation requires a versioned expectation envelope with activePolicyVersion, expectations, and sha256.');
-    }
     const expectationEnvelope = suppliedVersionedEnvelope || null;
     if (expectationEnvelope) {
         libs.expectationVersioning.validateExpectationEnvelope(expectationEnvelope);

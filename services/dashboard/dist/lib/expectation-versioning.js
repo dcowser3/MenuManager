@@ -5,6 +5,7 @@ exports.freezeExpectationEnvelope = freezeExpectationEnvelope;
 exports.validateExpectationEnvelope = validateExpectationEnvelope;
 exports.evaluateAgainstFrozenExpectations = evaluateAgainstFrozenExpectations;
 exports.evaluateExpectationArms = evaluateExpectationArms;
+exports.deriveCandidateEnvelope = deriveCandidateEnvelope;
 exports.activateApprovedSuccessor = activateApprovedSuccessor;
 const crypto_1 = require("crypto");
 const hash = (value) => (0, crypto_1.createHash)('sha256').update(JSON.stringify(value)).digest('hex');
@@ -40,6 +41,7 @@ function freezeExpectationEnvelope(input) {
     const body = {
         schemaVersion: 1,
         activePolicyVersion: input.policyVersion,
+        candidatePolicyVersion: null,
         expectations,
         supersedes: [...(input.supersedes || [])],
     };
@@ -99,7 +101,11 @@ function evaluateAgainstFrozenExpectations(envelope, outputs, candidateLabel) {
 }
 function evaluateExpectationArms(input) {
     validateExpectationEnvelope(input.envelope);
-    return input.envelope.expectations.filter((expectation) => expectation.status !== 'superseded').map((expectation) => {
+    const candidateSuccessors = new Set(input.envelope.supersedes
+        .map((link) => input.envelope.expectations.find((row) => row.id === link.successorId))
+        .filter((row) => row?.status === 'candidate').map((row) => row?.sourceExpectationId));
+    return input.envelope.expectations.filter((expectation) => expectation.status !== 'superseded'
+        && !(expectation.status === 'active' && candidateSuccessors.has(expectation.id))).map((expectation) => {
         const baseline = input.baselineOutputs[expectation.id];
         const candidate = input.candidateOutputs[expectation.id];
         const baselinePresent = typeof baseline === 'string';
@@ -131,6 +137,16 @@ function evaluateExpectationArms(input) {
         };
     });
 }
+function deriveCandidateEnvelope(envelope) {
+    validateExpectationEnvelope(envelope);
+    const replacements = new Map(envelope.supersedes.map((link) => [link.priorId, link.successorId]));
+    const expectations = envelope.expectations;
+    const candidateRows = expectations.filter((row) => row.status !== 'superseded'
+        && !(row.status === 'active' && replacements.has(row.id)));
+    const body = { schemaVersion: 1, activePolicyVersion: envelope.candidatePolicyVersion || envelope.activePolicyVersion,
+        candidatePolicyVersion: null, expectations: candidateRows, supersedes: envelope.supersedes };
+    return { ...body, sha256: hash(body) };
+}
 function activateApprovedSuccessor(envelope, approval) {
     validateExpectationEnvelope(envelope);
     if (approval.status !== 'accepted' || approval.policyVersion !== envelope.activePolicyVersion)
@@ -145,6 +161,6 @@ function activateApprovedSuccessor(envelope, approval) {
     const expectations = envelope.expectations.map((row) => row.id === prior.id
         ? { ...row, status: 'superseded' }
         : row.id === successor.id ? { ...row, status: 'active', approvalState: 'approved' } : row);
-    const body = { schemaVersion: 1, activePolicyVersion: envelope.activePolicyVersion, expectations, supersedes: envelope.supersedes };
+    const body = { schemaVersion: 1, activePolicyVersion: successor.policyVersion, candidatePolicyVersion: null, expectations, supersedes: envelope.supersedes };
     return { ...body, sha256: hash(body) };
 }
