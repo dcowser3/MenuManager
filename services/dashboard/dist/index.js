@@ -2512,35 +2512,6 @@ app.post('/api/learning/prompt-proposal/:id/review', async (req, res) => {
             reviewed_at: new Date().toISOString(),
             accepted_rules: acceptedRules.length ? acceptedRules : null,
         }, { timeout: 5000 });
-        // A versioned expectation artifact is activated only by the same exact
-        // accepted rule/scope metadata that the reviewer selected above. Missing
-        // or mismatched metadata fails closed and leaves the frozen artifact intact.
-        if (approved && proposalRecord?.eval_summary?.expectation_envelope && acceptedRules.length) {
-            const envelope = proposalRecord.eval_summary.expectation_envelope;
-            const activation = acceptedRules.find((rule) => rule?.expectation_activation);
-            const activationMeta = activation?.expectation_activation;
-            if (activationMeta) {
-                try {
-                    const activatedEnvelope = (0, expectation_versioning_1.activateApprovedSuccessor)(envelope, {
-                        ruleId: activationMeta.ruleId || activation.id || null,
-                        restaurant: activationMeta.restaurant || activation.location || null,
-                        menuScope: activationMeta.menuScope || activation.applies_to_menu_type || null,
-                        policyVersion: activationMeta.policyVersion || envelope.activePolicyVersion,
-                        status: 'accepted',
-                        supersedesId: activationMeta.supersedesId,
-                        successorId: activationMeta.successorId,
-                    });
-                    if (activatedEnvelope.sha256 !== envelope.sha256) {
-                        await internalApi.put(`${DB_SERVICE_URL}/prompt-proposals/${encodeURIComponent(id)}`, {
-                            eval_summary: { ...proposalRecord.eval_summary, expectation_envelope: activatedEnvelope },
-                        }, { timeout: 5000 });
-                    }
-                }
-                catch (activationError) {
-                    console.warn('Expectation activation failed closed:', activationError.message);
-                }
-            }
-        }
         // Fix 3: on rejection, un-consume the source corrections so they can seed a future cycle.
         // Approval-inserted proposal-* rows are excluded by the endpoint.
         if (status === 'rejected' && proposalRecord?.cycle_id) {
@@ -2576,6 +2547,22 @@ app.post('/api/learning/prompt-proposal/:id/review', async (req, res) => {
             catch (ruleError) {
                 console.error(`Failed to save accepted proposal rule ${index}:`, ruleError.message);
                 ruleResults.push({ index, ok: false, error: ruleError.message });
+            }
+        }
+        // Persist expectation activation only after the exact selected rule has
+        // been written successfully; a failed rule write leaves the old envelope.
+        if (approved && proposalRecord?.eval_summary?.expectation_envelope && acceptedRules.length) {
+            const envelope = proposalRecord.eval_summary.expectation_envelope;
+            try {
+                const activatedEnvelope = (0, expectation_versioning_1.planApprovedExpectationActivation)(envelope, acceptedRules, ruleResults, selectedIndexes);
+                if (activatedEnvelope && activatedEnvelope.sha256 !== envelope.sha256) {
+                    await internalApi.put(`${DB_SERVICE_URL}/prompt-proposals/${encodeURIComponent(id)}`, {
+                        eval_summary: { ...proposalRecord.eval_summary, expectation_envelope: activatedEnvelope },
+                    }, { timeout: 5000 });
+                }
+            }
+            catch (activationError) {
+                console.warn('Expectation activation failed closed:', activationError.message);
             }
         }
         // File each code recommendation as a GitHub issue so it becomes a

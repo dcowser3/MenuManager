@@ -7,6 +7,7 @@ exports.evaluateAgainstFrozenExpectations = evaluateAgainstFrozenExpectations;
 exports.evaluateExpectationArms = evaluateExpectationArms;
 exports.deriveCandidateEnvelope = deriveCandidateEnvelope;
 exports.activateApprovedSuccessor = activateApprovedSuccessor;
+exports.planApprovedExpectationActivation = planApprovedExpectationActivation;
 const crypto_1 = require("crypto");
 const hash = (value) => (0, crypto_1.createHash)('sha256').update(JSON.stringify(value)).digest('hex');
 function classifyExpectation(correction) {
@@ -163,4 +164,24 @@ function activateApprovedSuccessor(envelope, approval) {
         : row.id === successor.id ? { ...row, status: 'active', approvalState: 'approved' } : row);
     const body = { schemaVersion: 1, activePolicyVersion: successor.policyVersion, candidatePolicyVersion: null, expectations, supersedes: envelope.supersedes };
     return { ...body, sha256: hash(body) };
+}
+function planApprovedExpectationActivation(envelope, acceptedRules, ruleResults, selectedIndexes = []) {
+    validateExpectationEnvelope(envelope);
+    const selected = acceptedRules
+        .map((rule, position) => ({ rule, result: ruleResults.find((entry) => entry.index === (selectedIndexes[position] ?? position)) }))
+        .find(({ rule, result }) => !!rule?.expectation_activation && result?.ok === true);
+    if (!selected)
+        return null;
+    const metadata = selected.rule.expectation_activation;
+    if (selected.rule.id && metadata.ruleId && selected.rule.id !== metadata.ruleId)
+        return null;
+    return activateApprovedSuccessor(envelope, {
+        ruleId: metadata.ruleId || selected.rule.id || null,
+        restaurant: metadata.restaurant || selected.rule.location || null,
+        menuScope: metadata.menuScope || selected.rule.applies_to_menu_type || null,
+        policyVersion: metadata.policyVersion || envelope.activePolicyVersion,
+        status: 'accepted',
+        supersedesId: metadata.supersedesId,
+        successorId: metadata.successorId,
+    });
 }

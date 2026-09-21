@@ -216,3 +216,22 @@ export function activateApprovedSuccessor(envelope: ExpectationEnvelope, approva
     const body = { schemaVersion: 1 as const, activePolicyVersion: successor.policyVersion, candidatePolicyVersion: null, expectations, supersedes: envelope.supersedes };
     return { ...body, sha256: hash(body) };
 }
+
+export function planApprovedExpectationActivation(envelope: ExpectationEnvelope, acceptedRules: any[], ruleResults: Array<{ index: number; ok: boolean }>, selectedIndexes: number[] = []) {
+    validateExpectationEnvelope(envelope);
+    const selected = acceptedRules
+        .map((rule, position) => ({ rule, result: ruleResults.find((entry) => entry.index === (selectedIndexes[position] ?? position)) }))
+        .find(({ rule, result }) => !!rule?.expectation_activation && result?.ok === true);
+    if (!selected) return null;
+    const metadata = selected.rule.expectation_activation;
+    if (selected.rule.id && metadata.ruleId && selected.rule.id !== metadata.ruleId) return null;
+    return activateApprovedSuccessor(envelope, {
+        ruleId: metadata.ruleId || selected.rule.id || null,
+        restaurant: metadata.restaurant || selected.rule.location || null,
+        menuScope: metadata.menuScope || selected.rule.applies_to_menu_type || null,
+        policyVersion: metadata.policyVersion || envelope.activePolicyVersion,
+        status: 'accepted',
+        supersedesId: metadata.supersedesId,
+        successorId: metadata.successorId,
+    });
+}
