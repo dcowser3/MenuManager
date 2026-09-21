@@ -10,6 +10,7 @@ const { activateCandidateRulesForEval } = require('./review-eval-helpers');
 const { runPreAiDeterministicChecks } = require('../services/dashboard/dist/lib/pre-ai-deterministic-rules');
 const { evalStatusFromSummary, promptProposalApprovalBlock } = require('../services/dashboard/dist/lib/improvement-cycle-core');
 const { hashCodeImplementation } = require('../services/dashboard/dist/lib/code-proposal-verification');
+const { persistedSchemaFingerprint } = require('./lib/spelling-successor-operational-path');
 
 const PARENT_ID = '72c144aa-c33e-4873-85e8-6e48537e799e';
 const TARGETS = Object.freeze([
@@ -137,7 +138,7 @@ function main() {
     if (approvalBlock) throw new Error(`successor failed normal approval gate: ${approvalBlock.reason}`);
     fs.mkdirSync(input.outputDir, { recursive: true, mode: 0o700 });
     fs.chmodSync(input.outputDir, 0o700);
-    const plan = { schema_version: 3, kind: 'rules_only_spelling_successor_plan', model_calls: 0, provider_calls: 0, parent_proposal_id: parent.id, parent_sha256: sha(parent), successor_sha256: sha(successor), source_fingerprint: sourceFingerprint, accepted_rules_sha256: acceptedRulesSha256, effective_prompt_sha256: crypto.createHash('sha256').update(runtimePrompt).digest('hex'), implementation_sha256: runtimeImplementationSha256, eval_status: evalEvidence.eval_status, approval_gate: 'passed', target_correction_ids: TARGETS.map((target) => target.correction_id), held_originals: [...HELD_ORIGINALS], successor };
+    const plan = { schema_version: 3, kind: 'rules_only_spelling_successor_plan', model_calls: 0, provider_calls: 0, parent_proposal_id: parent.id, parent_sha256: sha(parent), successor_sha256: persistedSchemaFingerprint(successor), source_fingerprint: sourceFingerprint, accepted_rules_sha256: acceptedRulesSha256, effective_prompt_sha256: crypto.createHash('sha256').update(runtimePrompt).digest('hex'), implementation_sha256: runtimeImplementationSha256, eval_status: evalEvidence.eval_status, approval_gate: 'passed', target_correction_ids: TARGETS.map((target) => target.correction_id), held_originals: [...HELD_ORIGINALS], successor };
     for (const [name, value] of [['successor.json', successor], ['plan.json', plan]]) fs.writeFileSync(path.join(input.outputDir, name), `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
     process.stdout.write(`${JSON.stringify({ status: 'ready', output_dir: input.outputDir, parent_id: parent.id, cycle_id: cycleId, parent_sha256: plan.parent_sha256, successor_sha256: plan.successor_sha256, source_fingerprint: sourceFingerprint, model_calls: 0, provider_calls: 0 }, null, 2)}\n`);
 }
