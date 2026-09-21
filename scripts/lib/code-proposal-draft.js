@@ -183,8 +183,9 @@ function validateDraftPatch(patch, baseline, proposal) {
     return files;
 }
 
-function validateCorrectionMappings(draft, proposal, cases) {
-    const routes = (proposal.correction_routing || []).filter((row) => row.lane === 'code_recommendation');
+function validateCorrectionMappings(draft, proposal, cases, eligibleCorrectionIds = null) {
+    const eligible = eligibleCorrectionIds ? new Set(eligibleCorrectionIds) : null;
+    const routes = (proposal.correction_routing || []).filter((row) => row.lane === 'code_recommendation' && (!eligible || eligible.has(row.correction_id)));
     if (!Array.isArray(draft.corrections) || draft.corrections.length !== routes.length) throw new Error('Map every routed code recommendation exactly once.');
     const seen = new Set(), covered = new Set();
     for (const entry of draft.corrections) {
@@ -202,12 +203,12 @@ function validateCorrectionMappings(draft, proposal, cases) {
     if (seen.size !== routes.length || covered.size !== proposal.code_recommendations.length) throw new Error('Every code recommendation needs exactly one mapped correction.');
 }
 
-function validateDraft(draft, proposal, dataset, baseline) {
+function validateDraft(draft, proposal, dataset, baseline, options = {}) {
     if (!draft || typeof draft !== 'object' || Array.isArray(draft) || Object.keys(draft).some((key) => !['summary', 'patch', 'test_files', 'corrections'].includes(key))) throw new Error('Draft JSON may contain only summary, patch, test_files, and corrections.');
     const files = validateDraftPatch(draft.patch, baseline, proposal);
     const tests = files.filter((file) => TEST_PATH.test(file));
     if (!Array.isArray(draft.test_files) || draft.test_files.length !== tests.length || new Set(draft.test_files).size !== tests.length || draft.test_files.some((file) => !tests.includes(file))) throw new Error('test_files must exactly identify new regression tests.');
-    validateCorrectionMappings(draft, proposal, dataset);
+    validateCorrectionMappings(draft, proposal, dataset, options.eligibleCorrectionIds);
     return { summary: String(draft.summary || '').slice(0, 3000), patch: draft.patch, test_files: tests, corrections: draft.corrections };
 }
 

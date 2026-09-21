@@ -308,7 +308,7 @@ async function prepareCodeProposalQueue(options = {}) {
         if (existing.expected_dataset_sha256 && sha256(dataset.bytes) !== existing.expected_dataset_sha256) throw new Error('Existing owner dataset changed.');
         const revalidatedFile = path.join(artifactDirectory, `.revalidated-${process.pid}.jsonl`);
         try {
-            const revalidated = await bindHistoricalDataset(options.client, ownerProposal, options.datasetPath, revalidatedFile);
+            const revalidated = await bindHistoricalDataset(options.client, ownerProposal, options.datasetPath, revalidatedFile, { eligibleCorrectionIds: stored.groups.filter((group) => group.status !== 'excluded').map((group) => group.correction_id) });
             if (existing.expected_dataset_sha256 && revalidated.sha256 !== existing.expected_dataset_sha256) throw new Error('Existing owner submission or full-audit binding changed.');
         } finally { try { fs.unlinkSync(revalidatedFile); } catch { /* best effort */ } }
         const sourceHash = verification.hashCodeImplementation(options.repoRoot);

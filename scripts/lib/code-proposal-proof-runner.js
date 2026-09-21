@@ -410,8 +410,12 @@ async function runCodeProposalProof(options = {}) {
     if (hashBytes(datasetBytes) !== metadata.expected_dataset_sha256 || JSON.stringify(caseIds) !== JSON.stringify(metadata.expected_case_ids)) throw new Error('Frozen dataset identity is stale.');
     const rulesBytes = regularFile(path.join(attemptRoot, 'rules.json'), attemptRoot, 'Accepted rules');
     if (metadata.rules_file_sha256 && hashBytes(rulesBytes) !== metadata.rules_file_sha256) throw new Error('Accepted-rule file identity is stale.');
-    const codeCorrections = trustedCorrections(frozenProposal, handoffInfo.handoff.draft.corrections, new Set(['code_recommendation']));
-    const nonCodeRoutes = (frozenProposal.correction_routing || []).filter((route) => ['replacement_rule', 'prompt'].includes(route?.lane));
+    const preparationInventoryPath = path.join(attemptRoot, 'preparation-inventory.json');
+    const preparationInventory = fs.existsSync(preparationInventoryPath) ? JSON.parse(regularFile(preparationInventoryPath, attemptRoot, 'Preparation inventory').toString('utf8')) : null;
+    const eligibleCorrectionIds = preparationInventory?.groups ? new Set(preparationInventory.groups.filter((group) => group.status !== 'excluded').map((group) => group.correction_id)) : null;
+    if (eligibleCorrectionIds && handoffInfo.handoff.draft.corrections.some((correction) => !eligibleCorrectionIds.has(correction.correction_id))) throw new Error('Draft contains a manually excluded correction.');
+    const codeCorrections = trustedCorrections(frozenProposal, handoffInfo.handoff.draft.corrections, new Set(['code_recommendation'])).filter((correction) => !eligibleCorrectionIds || eligibleCorrectionIds.has(correction.correction_id));
+    const nonCodeRoutes = (frozenProposal.correction_routing || []).filter((route) => ['replacement_rule', 'prompt'].includes(route?.lane) && (!eligibleCorrectionIds || eligibleCorrectionIds.has(route.correction_id)));
     const nonCodeCorrections = nonCodeRoutes.map((route) => {
         const replay = (frozenProposal.replay_evidence || []).find((entry) => entry?.correction_id === route.correction_id);
         const caseId = route.case_id || replay?.case_id;

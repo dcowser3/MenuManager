@@ -73,10 +73,11 @@ async function queryRows(client, table, builder) {
     return Array.isArray(result?.data) ? result.data : [];
 }
 
-async function bindHistoricalDataset(client, proposal, sourcePath, outputPath) {
+async function bindHistoricalDataset(client, proposal, sourcePath, outputPath, options = {}) {
     const frozen = readFrozenDataset(sourcePath);
     const rows = frozen.rows.map((row) => ({ ...row }));
-    const routes = (proposal.correction_routing || []).filter((route) => ROUTED_LANES.has(route?.lane));
+    const eligible = options.eligibleCorrectionIds ? new Set(options.eligibleCorrectionIds) : null;
+    const routes = (proposal.correction_routing || []).filter((route) => ROUTED_LANES.has(route?.lane) && (!eligible || eligible.has(route.correction_id)));
     if (!routes.length || routes.some((route) => !route.correction_id)
         || new Set(routes.map((route) => route.correction_id)).size !== routes.length) {
         throw new Error('Every code recommendation needs an explicitly identified motivating correction.');
@@ -193,7 +194,8 @@ async function prepareCodeProposalAttempt(options = {}) {
             if (record.disposition !== 'excluded_from_policy_learning' && record.expectationAuthority !== 'human_explanation') throw new Error(`B6-D1 behavior expectation for ${route.correction_id} is not human-bound.`);
         }
         atomicWrite(path.join(attemptRoot, 'behavior-tests.json'), Buffer.from(`${JSON.stringify(behavior, null, 2)}\n`));
-        const prepared = await bindHistoricalDataset(client, proposal, datasetPath, path.join(attemptRoot, 'dataset.jsonl'));
+        const eligibleIds = options.inventory?.groups?.filter((group) => group.status !== 'excluded').map((group) => group.correction_id);
+        const prepared = await bindHistoricalDataset(client, proposal, datasetPath, path.join(attemptRoot, 'dataset.jsonl'), { eligibleCorrectionIds: eligibleIds });
         metadata.expected_dataset_sha256 = prepared.sha256;
         metadata.expected_case_ids = prepared.rows.map((row) => row.case_id);
         metadata.behavior_tests_sha256 = behavior.sha256;
