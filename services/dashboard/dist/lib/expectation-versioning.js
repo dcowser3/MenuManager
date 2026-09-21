@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.classifyExpectation = classifyExpectation;
 exports.freezeExpectationEnvelope = freezeExpectationEnvelope;
 exports.validateExpectationEnvelope = validateExpectationEnvelope;
+exports.validateApprovedExpectationAuthority = validateApprovedExpectationAuthority;
 exports.evaluateAgainstFrozenExpectations = evaluateAgainstFrozenExpectations;
 exports.evaluateExpectationArms = evaluateExpectationArms;
 exports.deriveCandidateEnvelope = deriveCandidateEnvelope;
@@ -79,6 +80,25 @@ function validateExpectationEnvelope(envelope) {
             || successor.policyRuleId !== prior.policyRuleId || successor.restaurant !== prior.restaurant || successor.menuScope !== prior.menuScope
             || !['active', 'superseded'].includes(prior.status) || !['candidate', 'active'].includes(successor.status))
             throw new Error('Invalid supersession link.');
+    }
+    return envelope;
+}
+function validateApprovedExpectationAuthority(envelope) {
+    validateExpectationEnvelope(envelope);
+    const approvals = envelope.policyChangeApprovals || [];
+    const candidates = envelope.expectations.filter((row) => row.status === 'candidate');
+    if (!candidates.length || envelope.candidatePolicyVersion === envelope.activePolicyVersion || !envelope.candidatePolicyVersion)
+        throw new Error('Approved policy-change authority is missing or not versioned.');
+    for (const candidate of candidates) {
+        if (candidate.classification !== 'explicit_superseding_policy' || candidate.approvalState !== 'unapproved' || !candidate.sourceExpectationId)
+            throw new Error('Candidate lacks explicit policy-change classification.');
+        const prior = envelope.expectations.find((row) => row.id === candidate.sourceExpectationId);
+        const approval = approvals.filter((row) => row.priorId === candidate.sourceExpectationId && row.successorId === candidate.id);
+        if (!prior || prior.status !== 'active' || prior.approvalState !== 'approved' || approval.length !== 1)
+            throw new Error('Candidate authority link is invalid.');
+        const record = approval[0];
+        if (!record.caseId || !record.sourceRevisionId || !record.reviewer || record.status !== 'approved' || !Number.isFinite(Date.parse(record.approvedAt)))
+            throw new Error('Candidate approval provenance is incomplete.');
     }
     return envelope;
 }
@@ -176,7 +196,11 @@ function planApprovedExpectationActivation(envelope, acceptedRules, ruleResults,
         return null;
     const metadata = selected.rule.expectation_activation;
     const successor = envelope.expectations.find((row) => row.id === metadata.successorId);
-    if (!successor || metadata.ruleId !== successor.policyRuleId || successor.policyRuleId !== selected.result?.correctionId
+    const authority = (envelope.policyChangeApprovals || []).find((row) => row.priorId === metadata.supersedesId && row.successorId === metadata.successorId);
+    if (!successor || !authority || metadata.source !== 'approved_expectation_artifact' || metadata.parentArtifactHash !== envelope.parentArtifactHash
+        || metadata.derivedEnvelopeHash !== envelope.sha256 || metadata.caseId !== authority.caseId || metadata.sourceRevisionId !== authority.sourceRevisionId
+        || metadata.reviewer !== authority.reviewer || metadata.approvedAt !== authority.approvedAt
+        || metadata.ruleId !== successor.policyRuleId || successor.policyRuleId !== selected.result?.correctionId
         || metadata.restaurant !== (selected.result?.location || null)
         || metadata.menuScope !== (selected.result?.menuScope || null)
         || metadata.isLocationSpecific !== (selected.result?.isLocationSpecific === true))
@@ -210,31 +234,42 @@ function attachApprovedActivationMetadata(proposedRules, envelope) {
     });
 }
 function deriveProposalBoundEnvelope(proposedRules, authority, proposalId) {
-    validateExpectationEnvelope(authority);
-    const matches = proposedRules.map((rule, index) => ({ rule, index, expectation: authority.expectations.find((row) => row.status === 'candidate'
+    validateApprovedExpectationAuthority(authority);
+    const matches = proposedRules.map((rule, index) => ({ rule, index, expectations: authority.expectations.filter((row) => row.status === 'candidate'
             && row.input === rule.original_text && row.expected === rule.corrected_text
             && row.restaurant === (rule.is_location_specific ? rule.location : null)
             && row.menuScope === (rule.applies_to_menu_type || null)) }))
-        .filter((entry) => entry.expectation);
+        .filter((entry) => entry.expectations.length);
+    if (matches.some((entry) => entry.expectations.length !== 1))
+        return { rules: proposedRules, envelope: null };
+    const candidateToRules = new Map();
+    for (const entry of matches) {
+        const id = entry.expectations[0].id;
+        if (candidateToRules.has(id))
+            return { rules: proposedRules, envelope: null };
+        candidateToRules.set(id, entry.index);
+    }
     if (!matches.length)
         return { rules: proposedRules, envelope: null };
     const successorIds = new Set();
     const rules = proposedRules.map((rule, index) => {
         const match = matches.find((entry) => entry.index === index);
-        if (!match || successorIds.has(match.expectation.id))
+        if (!match || successorIds.has(match.expectations[0].id))
             return rule;
-        successorIds.add(match.expectation.id);
+        successorIds.add(match.expectations[0].id);
+        const approval = authority.policyChangeApprovals.find((row) => row.successorId === match.expectations[0].id);
         const policyRuleId = `proposal-${proposalId}-rule-${index}`;
         return { ...rule, expectation_activation: { source: 'approved_expectation_artifact', ruleId: policyRuleId,
-                supersedesId: match.expectation.sourceExpectationId, successorId: match.expectation.id,
-                policyVersion: authority.activePolicyVersion, restaurant: match.expectation.restaurant,
-                menuScope: match.expectation.menuScope, isLocationSpecific: !!rule.is_location_specific,
-                artifactHash: authority.sha256, sourceRevision: match.expectation.version } };
+                supersedesId: match.expectations[0].sourceExpectationId, successorId: match.expectations[0].id,
+                policyVersion: authority.activePolicyVersion, restaurant: match.expectations[0].restaurant,
+                menuScope: match.expectations[0].menuScope, isLocationSpecific: !!rule.is_location_specific,
+                parentArtifactHash: authority.sha256, caseId: approval.caseId, sourceRevisionId: approval.sourceRevisionId,
+                reviewer: approval.reviewer, approvedAt: approval.approvedAt } };
     });
-    const expectations = authority.expectations.map((row) => row.status === 'candidate' && successorIds.has(row.id)
-        ? { ...row, policyRuleId: `proposal-${proposalId}-rule-${matches.find((entry) => entry.expectation.id === row.id).index}` } : row);
+    const expectations = authority.expectations.filter((row) => row.status !== 'candidate' || successorIds.has(row.id)).map((row) => row.status === 'candidate'
+        ? { ...row, policyRuleId: `proposal-${proposalId}-rule-${matches.find((entry) => entry.expectations[0].id === row.id).index}` } : row);
     const body = { schemaVersion: 1, activePolicyVersion: authority.activePolicyVersion,
         candidatePolicyVersion: authority.candidatePolicyVersion || authority.activePolicyVersion, expectations,
-        supersedes: authority.supersedes, parentArtifactHash: authority.sha256 };
+        supersedes: authority.supersedes.filter((link) => successorIds.has(link.successorId)), policyChangeApprovals: authority.policyChangeApprovals.filter((row) => successorIds.has(row.successorId)), parentArtifactHash: authority.sha256 };
     return { rules, envelope: { ...body, sha256: hash(body) } };
 }

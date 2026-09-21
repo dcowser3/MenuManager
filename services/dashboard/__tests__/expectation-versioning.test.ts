@@ -85,9 +85,7 @@ test('activation planner requires the exact selected rule to have been written f
     ], supersedes: [{ priorId: 'a-v1', successorId: 'a-v2' }] });
     const rule = { expectation_activation: { ruleId: 'r-a', restaurant: 'Restaurant A', menuScope: 'food', isLocationSpecific: true, policyVersion: 'p1', supersedesId: 'a-v1', successorId: 'a-v2' } };
     expect(planApprovedExpectationActivation(envelope, [rule], [{ index: 4, ok: false }], [4])).toBeNull();
-    const activated = planApprovedExpectationActivation(envelope, [rule], [{ index: 4, ok: true, correctionId: 'r-a', location: 'Restaurant A', menuScope: 'food', isLocationSpecific: true }], [4]);
-    expect(activated?.expectations.find((row) => row.id === 'a-v2')).toMatchObject({ status: 'active', approvalState: 'approved' });
-    expect(activated?.expectations.find((row) => row.id === 'b-v1')).toEqual(envelope.expectations.find((row) => row.id === 'b-v1'));
+    expect(planApprovedExpectationActivation(envelope, [rule], [{ index: 4, ok: true, correctionId: 'r-a', location: 'Restaurant A', menuScope: 'food', isLocationSpecific: true }], [4])).toBeNull();
     expect(planApprovedExpectationActivation(envelope, [{ expectation_activation: rule.expectation_activation }], [{ index: 4, ok: true, correctionId: 'r-b', location: 'Restaurant B', menuScope: 'food', isLocationSpecific: true }], [4])).toBeNull();
 });
 
