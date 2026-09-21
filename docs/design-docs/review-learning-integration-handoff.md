@@ -70,9 +70,24 @@ remains separately named diagnostics.
   execution with identical model output, including footer removal,
   length-changing prechecks, later anchored edits, and rejected-merge parity.
 
-The pending approximately 30 explanation groups remain unprocessed. This code
-keeps them processable by the existing review-learning workflow; it does not
-constitute Stage2/data authority or claim that those groups were processed.
-Reusable-learning coordinators, source-anchored spelling lanes, paid-run
-orchestrators, and broader candidate workflow behavior remain explicitly
-unintegrated and tracked separately from this narrow safety commit.
+## Real explanation-backlog continuation (2026-09-21)
+
+The original 30-group backlog was source-adjudicated rather than silently
+dropped. Two irrelevant Lona Nashville sales-kit Salmon records were deleted;
+the source-unbound walnut/pistou instruction was preserved separately as a
+normal pending human rule. The active proposal therefore contains 27 groups:
+17 code recommendations and ten replacement rules. The exact paid owner was
+closed `blocked/source_context_refusal` after two calls costing $0.34330 total;
+both ledgers and the captured refusal are retained privately, and no provider
+diff was applied.
+
+The bounded manual fallback at `636bf0c027a6d251c61342b5f886379be5552208`
+implements 15 of the 17 code recommendations. Seven related suites pass
+281/281 on the host and in read-only network-none Docker, with dashboard
+typecheck, generated-manifest, whitespace, and independent Astra review also
+passing. The two remaining code recommendations request singular `Dessert`,
+which conflicts with the accepted plural-category policy; they remain explicit
+policy conflicts. The ten replacement rules and separate walnut/pistou rule
+remain pending human approval. Nothing in this handoff auto-approves a rule,
+activates the candidate, deploys code, or establishes paid quality/C2b/C2c
+provenance.
