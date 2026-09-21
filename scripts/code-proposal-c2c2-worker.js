@@ -53,7 +53,7 @@ function hashText(value) {
     return crypto.createHash('sha256').update(value).digest('hex');
 }
 
-async function runFixedDelivery(request) {
+async function runFixedDeliveryChild(request) {
     if (!request.delivery_fixture || typeof request.delivery_fixture.text !== 'string') throw new Error('delivery fixture is missing');
     const { chromium } = require('playwright');
     const deliveryRequest = { ...request, inventory: request.inventory || request.plan.test_inventory || [] };
@@ -80,8 +80,13 @@ async function runFixedDelivery(request) {
             let calls = 0; let seen = null;
             const request = window.MenuSubmission.prepareMenuSubmissionRequest({ menuContent: captured.menuContent, menuContentHtml: captured.menuContentHtml }, {});
             const response = await window.MenuSubmission.sendPreparedMenuSubmission(request, async (url, init) => { calls += 1; seen = { url, init }; return { status: 200, text: async () => JSON.stringify({ ok: true }) }; });
-            if (calls !== 1 || !seen || seen.url !== '/api/form/submit' || seen.init.method !== 'POST' || JSON.parse(seen.init.body).menuContent !== captured.menuContent) throw new Error('submission boundary capture mismatch');
-            return { text: captured.menuContent, html: captured.menuContentHtml, htmlText: q.root.innerText.trim(), request: seen };
+            const submitted = seen && JSON.parse(seen.init.body);
+            if (calls !== 1 || !seen || seen.url !== '/api/form/submit' || seen.init.method !== 'POST'
+                || seen.init.headers?.['Content-Type'] !== 'application/json'
+                || submitted.menuContent !== captured.menuContent || submitted.menuContentHtml !== captured.menuContentHtml) throw new Error('submission boundary capture mismatch');
+            const submittedHtml = document.createElement('div');
+            submittedHtml.innerHTML = submitted.menuContentHtml;
+            return { text: submitted.menuContent, html: submitted.menuContentHtml, htmlText: submittedHtml.innerText.trim(), request: seen };
             }, fixtureText);
             const browserVersion = await browser.version();
             const quillVersion = await page.evaluate(() => Quill.version);
@@ -99,8 +104,20 @@ async function runFixedDelivery(request) {
         const driverHash = hashFile(__filename);
         baselineSourceHashes.driver = driverHash;
         candidateSourceHashes.driver = driverHash;
-        return { image_id: imageId, runtime_id: runtimeId, delivery_fixture_sha256: hashValue(request.delivery_fixture), driver_sha256: driverHash, driver: 'form-submit-v1', baseline_source_hashes: baselineSourceHashes, candidate_source_hashes: candidateSourceHashes, source_manifest_sha256: sourceManifest, baseline_browser_version: baseline.browserVersion, candidate_browser_version: candidate.browserVersion, quill_version: candidate.quillVersion, baseline_submitted_text: baseline.capture.text, candidate_submitted_text: candidate.capture.text, baseline_submitted_html: baseline.capture.html, candidate_submitted_html: candidate.capture.html, baseline_submitted_html_text: baseline.capture.htmlText, candidate_submitted_html_text: candidate.capture.htmlText };
+        return { effective_uid: process.getuid(), sandbox_enabled: true, image_id: imageId, runtime_id: runtimeId, delivery_fixture_sha256: hashValue(request.delivery_fixture), driver_sha256: driverHash, driver: 'form-submit-v1', baseline_source_hashes: baselineSourceHashes, candidate_source_hashes: candidateSourceHashes, source_manifest_sha256: sourceManifest, baseline_browser_version: baseline.browserVersion, candidate_browser_version: candidate.browserVersion, quill_version: candidate.quillVersion, baseline_submitted_text: baseline.capture.text, candidate_submitted_text: candidate.capture.text, baseline_submitted_html: baseline.capture.html, candidate_submitted_html: candidate.capture.html, baseline_submitted_html_text: baseline.capture.htmlText, candidate_submitted_html_text: candidate.capture.htmlText };
     } finally { await browser.close(); }
+}
+
+async function runFixedDelivery(request) {
+    if (process.env.C2C2_DELIVERY_CHILD === '1') return runFixedDeliveryChild(request);
+    const childPath = '/runner/output/delivery-child-request.json';
+    fs.writeFileSync(childPath, `${JSON.stringify(request)}\n`, { mode: 0o444 });
+    const child = spawnSync('/usr/bin/setpriv', ['--reuid=65532', '--regid=65532', '--clear-groups', '--', '/usr/local/bin/node', '/runner/worker.js'], { env: { ...process.env, HOME: '/tmp', NODE_PATH: '/app/node_modules', PATH: '/app/node_modules/.bin:/usr/local/bin:/usr/bin:/bin', C2C2_DELIVERY_CHILD: '1', C2C2_DELIVERY_REQUEST: childPath }, encoding: 'utf8', maxBuffer: 2 * 1024 * 1024 });
+    try { fs.unlinkSync(childPath); } catch { /* bounded cleanup */ }
+    if (child.status !== 0) throw new Error(`delivery child exited with status ${child.status}: ${(child.stderr || child.stdout || '').slice(0, 500)}`);
+    const result = JSON.parse(child.stdout);
+    if (result.effective_uid !== 65532 || result.sandbox_enabled !== true) throw new Error('delivery browser child did not prove non-root sandbox execution');
+    return result;
 }
 
 function verifySupportBundle(request) {

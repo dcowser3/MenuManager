@@ -17,11 +17,13 @@ browser run. The current vendor hashes are:
 The reproducible local worker build used base image
 `menumanager/dev@sha256:c5c31c8c36565eda780fcfc7d99a2dde15d91bb22ade6f274d1b5041514452c5`,
 Playwright 1.60.0 / Chromium revision 1223 (Chrome for Testing
-148.0.7778.96), and produced image manifest
+148.0.7778.0), and produced image manifest
 `sha256:a064dc4f63d6782682254cdf3a8546bed06d50007c3ea530a718d5b67c97b41d`
 on `linux/arm64`.
 
-The launch contract is fixed: network `none`, read-only root, non-root uid
+The launch contract is fixed: network `none`, read-only root, a root staging
+process that materializes the workspaces followed by a dedicated non-root
+browser child at uid 65532,
 65532, `no-new-privileges`, all capabilities dropped, bounded tmpfs for
 `/tmp` and the worker profile, no host browser/profile/credential mounts, and
 no sandbox-disabling Chromium flags. The worker must capture the browser
@@ -39,3 +41,7 @@ Schema-v2 delivery proof also binds the worker response to the frozen delivery
 image, runtime, driver, source-manifest, browser/Quill, and fixture identities.
 Missing, stale, or tampered bindings fail closed; legacy schema-v1 evidence is
 retained only for compatibility and does not establish the new binding.
+
+The opt-in network-none causal proof passes with the baseline serializer
+omitting `TARGET` from both payload forms while the candidate preserves it;
+the current/current replay is rejected by the same before/after predicate.
