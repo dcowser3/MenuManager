@@ -311,7 +311,7 @@ function revalidatePlan(planPath, plan, metadata, attemptRoot, baselineRoot, can
     for (const entry of manifest.files || []) if (hashBytes(regularFile(path.join(bundle.root, entry.path), bundle.root, `Test bundle ${entry.path}`)) !== entry.sha256) throw new Error(`Test bundle bytes changed after plan creation: ${entry.path}.`);
 }
 
-function makePlan({ attemptRoot, metadata, proposal, baselineHash, candidateHash, parentCampaignSha256, imageId, runtimeId, replayPolicyVersion, caseIds, seeds, inventory, corrections, paths, handoffPath, handoffHash, authorizationHash, scopeHash, draftPatchHash, draftContentHash, draftResponseHash, datasetHash, promptHash, rulesHash, behaviorHash, testBundleHash, runnerHash, testContentHash, model, vocabularyHash, expectationsHash, settings, baselineRules, candidateRules, baselinePrompt, candidatePrompt, deliveryDriverHash, deliveryIdentity }) {
+function makePlan({ attemptRoot, metadata, proposal, baselineHash, candidateHash, parentCampaignSha256, imageId, runtimeId, replayPolicyVersion, caseIds, seeds, inventory, corrections, paths, handoffPath, handoffHash, authorizationHash, scopeHash, draftPatchHash, draftContentHash, draftResponseHash, datasetHash, promptHash, rulesHash, behaviorHash, testBundleHash, runnerHash, testContentHash, model, vocabularyHash, expectationsHash, settings, baselineRules, candidateRules, baselinePrompt, candidatePrompt, deliveryDriverHash, deliveryIdentity, deliveryFixture }) {
     const planBody = {
         schema_version: 1, test_only: true, attempt_id: metadata.attempt_id,
         proposal_sha256: metadata.proposal_sha256, accepted_rules_sha256: metadata.accepted_rules_sha256, parent_campaign_sha256: parentCampaignSha256,
@@ -328,6 +328,7 @@ function makePlan({ attemptRoot, metadata, proposal, baselineHash, candidateHash
         baseline_rules_sha256: hashBytes(Buffer.from(JSON.stringify(baselineRules || []))), candidate_rules_sha256: hashBytes(Buffer.from(JSON.stringify(candidateRules || []))),
         delivery_driver_sha256: deliveryDriverHash || null,
         delivery_identity: deliveryIdentity ? validateDeliveryIdentity(deliveryIdentity) : null,
+        delivery_fixture: deliveryFixture ? canonical(deliveryFixture) : null,
         case_ids: [...caseIds], seeds: [...seeds], test_inventory: [...inventory], corrections,
         paths,
     };
@@ -434,7 +435,7 @@ async function runCodeProposalProof(options = {}) {
     if (!isDigest(vocabularyHash) || !isDigest(expectationsHash)) throw new Error('C2c1 requires frozen vocabulary and expectation identities.');
     const deliveryDriverHash = options.deliveryDriverSha256 || null;
     const deliveryIdentity = options.deliveryIdentity ? validateDeliveryIdentity(options.deliveryIdentity) : null;
-    const plan = makePlan({ attemptRoot, metadata, proposal: frozenProposal, baselineHash, candidateHash, parentCampaignSha256, imageId: options.imageId, runtimeId: options.runtimeId, replayPolicyVersion: options.replayPolicyVersion, caseIds, seeds, inventory, corrections: allCorrections, paths: { ...paths, testBundle: bundle.root, testBundleManifest: bundle.manifestPath }, handoffPath: path.resolve(options.c2bHandoffFile), handoffHash: handoffInfo.handoffHash, authorizationHash: handoffInfo.handoff.authorization_hash, scopeHash: handoffInfo.handoff.scope_hash, draftPatchHash: handoffInfo.handoff.draft.patch_sha256, draftContentHash: handoffInfo.handoff.draft.content_sha256, draftResponseHash: handoffInfo.handoff.draft.response_sha256 || handoffInfo.handoff.response_sha256 || handoffInfo.handoff.response.body_sha256, datasetHash: metadata.expected_dataset_sha256, promptHash: metadata.prompt_sha256, rulesHash: metadata.rules_file_sha256 || hashBytes(rulesBytes), behaviorHash: metadata.behavior_tests_sha256, testBundleHash: bundle.sha256, runnerHash, testContentHash: bundle.contentSha256, model, vocabularyHash, expectationsHash, settings, baselineRules, candidateRules, baselinePrompt, candidatePrompt, deliveryDriverHash, deliveryIdentity });
+    const plan = makePlan({ attemptRoot, metadata, proposal: frozenProposal, baselineHash, candidateHash, parentCampaignSha256, imageId: options.imageId, runtimeId: options.runtimeId, replayPolicyVersion: options.replayPolicyVersion, caseIds, seeds, inventory, corrections: allCorrections, paths: { ...paths, testBundle: bundle.root, testBundleManifest: bundle.manifestPath }, handoffPath: path.resolve(options.c2bHandoffFile), handoffHash: handoffInfo.handoffHash, authorizationHash: handoffInfo.handoff.authorization_hash, scopeHash: handoffInfo.handoff.scope_hash, draftPatchHash: handoffInfo.handoff.draft.patch_sha256, draftContentHash: handoffInfo.handoff.draft.content_sha256, draftResponseHash: handoffInfo.handoff.draft.response_sha256 || handoffInfo.handoff.response_sha256 || handoffInfo.handoff.response.body_sha256, datasetHash: metadata.expected_dataset_sha256, promptHash: metadata.prompt_sha256, rulesHash: metadata.rules_file_sha256 || hashBytes(rulesBytes), behaviorHash: metadata.behavior_tests_sha256, testBundleHash: bundle.sha256, runnerHash, testContentHash: bundle.contentSha256, model, vocabularyHash, expectationsHash, settings, baselineRules, candidateRules, baselinePrompt, candidatePrompt, deliveryDriverHash, deliveryIdentity, deliveryFixture: options.deliveryFixture });
     atomicWrite(paths.plan, `${JSON.stringify(plan, null, 2)}\n`);
     const progress = (phase, state, extra = {}) => writeProgress(attemptRoot, metadata, phase, state, { total: caseIds.length, ...extra }, options.progressWriter);
     let attached = false;
@@ -484,7 +485,7 @@ async function runCodeProposalProof(options = {}) {
             if (deliveryIds.length) {
                 if (typeof options.deliveryExecutor !== 'function') throw new Error('Delivery evidence is required but no injected delivery executor was provided.');
                 run.delivery = [];
-                for (const correction of allCorrections.filter((entry) => deliveryIds.includes(entry.correction_id))) run.delivery.push(validateDelivery(await invokeWithTimeout(options.deliveryExecutor, { arm: 'paired', seed, runId: run.run_id, correction, plan: { ...plan } }, timeoutMs, 'Delivery executor'), correction, plan.delivery_driver_sha256, plan.delivery_identity));
+                for (const correction of allCorrections.filter((entry) => deliveryIds.includes(entry.correction_id))) run.delivery.push(validateDelivery(await invokeWithTimeout(options.deliveryExecutor, { arm: 'paired', seed, runId: run.run_id, correction, delivery_fixture: plan.delivery_fixture, plan: { ...plan } }, timeoutMs, 'Delivery executor'), correction, plan.delivery_driver_sha256, plan.delivery_identity));
             }
             run.baseline_report_sha256 = hashJson({ seed, arm: 'baseline', results: [...results.baseline.entries()] });
             run.candidate_report_sha256 = hashJson({ seed, arm: 'candidate', results: [...results.candidate.entries()] });
