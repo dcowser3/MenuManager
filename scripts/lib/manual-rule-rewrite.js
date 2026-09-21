@@ -123,6 +123,9 @@ function buildManualRuleRewritePlan({ correctionRules, proposal, expectedProposa
     if (oldRows.some((matches) => matches.length !== 1)) throw new Error('Rewrite requires one exact correction_rules row per old id.');
     if (!expectedTargetHashes || OLD_IDS.some((id) => !DIGEST.test(expectedTargetHashes[id] || ''))) throw new Error('Rewrite requires exact target correction_rules shape hashes.');
     for (const id of OLD_IDS) if (expectedTargetHashes[id] !== hash(oldRows[OLD_IDS.indexOf(id)][0])) throw new Error(`Target correction_rules shape is stale for ${id}.`);
+    const salmon = oldRows.slice(0, 2).map((rows) => rows[0]);
+    if (salmon[0].submission_id !== salmon[1].submission_id || !/salmon/i.test(JSON.stringify(salmon)) || !/salmon\*/i.test(JSON.stringify(salmon))) throw new Error('Salmon target shapes are not the exact duplicate pair.');
+    if (!/beet salad/i.test(JSON.stringify(oldRows[2][0]))) throw new Error('Beet target shape is not the exact Beet Salad correction.');
     const routing = Array.isArray(proposal.correction_routing) ? proposal.correction_routing : [];
     const replay = Array.isArray(proposal.replay_evidence) ? proposal.replay_evidence : [];
     if (routing.length !== 30 || replay.length !== 30) throw new Error('Rewrite requires the exact 30-member pending proposal.');
@@ -230,7 +233,7 @@ function createSupabaseRewriteAdapter(client, proposalId) {
     return {
         async readState() {
             const [rulesResult, proposalResult] = await Promise.all([
-                client.from('correction_rules').select('*').in('correction_id', OLD_IDS),
+                client.from('correction_rules').select('*').in('correction_id', [...OLD_IDS, NEW_ID]),
                 client.from('prompt_proposals').select('*').eq('id', proposalId).single(),
             ]);
             if (rulesResult.error) throw new Error(`Read correction_rules failed: ${rulesResult.error.message}`);
@@ -242,7 +245,7 @@ function createSupabaseRewriteAdapter(client, proposalId) {
             if (!expected) throw new Error('Proposal CAS requires the original proposal JSON.');
             const patch = { correction_routing: next.correction_routing, replay_evidence: next.replay_evidence, eval_summary: next.eval_summary, correction_rule_count: next.correction_rule_count };
             for (const field of ['coverage_claims', 'code_recommendations']) if (Object.prototype.hasOwnProperty.call(next, field)) patch[field] = next[field];
-            let query = client.from('prompt_proposals').update(patch).eq('id', proposalId).eq('status', 'pending').eq('correction_rule_count', 30).eq('eval_summary', expected.eval_summary).eq('correction_routing', expected.correction_routing).eq('replay_evidence', expected.replay_evidence).select('id');
+            let query = client.from('prompt_proposals').update(patch).eq('id', proposalId).eq('status', 'pending').eq('correction_rule_count', 30).eq('eval_summary', JSON.stringify(expected.eval_summary)).eq('correction_routing', JSON.stringify(expected.correction_routing)).eq('replay_evidence', JSON.stringify(expected.replay_evidence)).select('id');
             const result = await query;
             if (result.error) throw new Error(`Proposal CAS failed: ${result.error.message}`);
             if (!Array.isArray(result.data) || result.data.length !== 1) throw new Error('Proposal CAS affected zero or multiple rows.');

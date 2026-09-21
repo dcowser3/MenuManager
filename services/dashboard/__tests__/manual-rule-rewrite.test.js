@@ -9,7 +9,7 @@ const proposal = () => {
     const rows = (key) => ids.map((correction_id) => ({ correction_id, [key]: true }));
     return { id: 'p1', status: 'pending', correction_rule_count: 30, eval_status: 'regressed', disposition: 'rules_only', correction_routing: rows('route'), replay_evidence: rows('replay'), eval_summary: { behavior_tests: { records: rows('record'), tests: rows('test'), contextualTests: rows('context') }, regressions: [{ case_id: 'holdout-1' }] } };
 };
-const correctionRules = OLD_IDS.map((correction_id, i) => ({ id: `r${i}`, correction_id, submission_id: `s${i}`, original_text: 'walnuts', corrected_text: 'walnut', source_binding: { case_id: `case-${i}` }, reviewer_name: 'Isabella', source: 'human', status: 'pending' }));
+const correctionRules = OLD_IDS.map((correction_id, i) => ({ id: `r${i}`, correction_id, submission_id: i < 2 ? 's-salmon' : 's-beet', original_text: i < 2 ? 'Salmon' : 'Beet Salad', corrected_text: i < 2 ? 'Salmon*' : 'Beet Salad', source_binding: { case_id: `case-${i}` }, reviewer_name: 'Isabella', source: 'human', status: 'pending' }));
 const targetHashes = Object.fromEntries(correctionRules.map((row) => [row.correction_id, hash(row)]));
 const planArgs = (extra = {}) => ({ correctionRules, proposal: proposal(), expectedProposalFingerprint: 'f'.repeat(64), expectedTargetHashes: targetHashes, ...extra });
 
