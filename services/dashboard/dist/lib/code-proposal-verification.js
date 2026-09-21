@@ -317,7 +317,7 @@ function assessCodeProposalVerificationInternal(proposal, allowTestOnly) {
                     || !digest(input.delivery_driver_sha256)
                     || delivery.baseline_source_hashes?.driver !== input.delivery_driver_sha256
                     || delivery.candidate_source_hashes?.driver !== input.delivery_driver_sha256
-                    || !['form', 'form_helpers', 'diff_core', 'redline_preview', 'form_stage', 'showStep2', 'submitMenu', 'quill'].every((key) => digest(delivery.baseline_source_hashes?.[key]) && digest(delivery.candidate_source_hashes?.[key]))
+                    || !['form', 'form_helpers', 'form_submission', 'diff_core', 'redline_preview', 'form_stage', 'showStep2', 'submitMenu', 'quill'].every((key) => digest(delivery.baseline_source_hashes?.[key]) && digest(delivery.candidate_source_hashes?.[key]))
                     || !delivery.baseline_browser_version || !delivery.candidate_browser_version || delivery.quill_version !== '1.3.6'
                     || typeof delivery.baseline_submitted_text !== 'string' || typeof delivery.baseline_submitted_html !== 'string'
                     || typeof delivery.candidate_submitted_html !== 'string' || !delivery.candidate_submitted_html.trim()

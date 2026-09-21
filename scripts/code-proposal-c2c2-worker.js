@@ -65,20 +65,21 @@ async function runFixedDelivery(request) {
         let requestAttempted = false;
         await page.route('**/*', (route) => { requestAttempted = true; return route.abort(); });
         const quillSource = fs.readFileSync(path.join(candidateWorkspace, 'services/dashboard/public/vendor/quill-1.3.6/quill.js'), 'utf8');
+        const submissionSource = fs.readFileSync(path.join(candidateWorkspace, 'services/dashboard/public/js/form-submission.js'), 'utf8');
         const fixtureText = `${request.delivery_fixture.text}`;
-        const html = `<div id="editor"></div><form id="menu-form"><input name="menuContent"><input name="menuContentHtml"></form><script>${quillSource}</script>`;
+        const html = `<div id="editor"></div><form id="menu-form"><input name="menuContent"><input name="menuContentHtml"></form><script>${quillSource}</script><script>${submissionSource}</script>`;
         await page.setContent(html, { waitUntil: 'load' });
         await page.evaluate(() => { window.deliveryQuill = new Quill('#editor', { theme: 'snow' }); });
         const capture = async (text) => page.evaluate((value) => {
             const q = window.deliveryQuill;
             q.setText(value);
-            const htmlValue = q.root.innerHTML;
-            return { text: q.getText().trim(), html: htmlValue, htmlText: q.root.innerText.trim() };
+            const captured = window.MenuSubmission.captureMenuSubmission({ html: q.root.innerHTML, text: q.getText().trim() });
+            return { text: captured.menuContent, html: captured.menuContentHtml, htmlText: q.root.innerText.trim() };
         }, text);
         const baseline = await capture(fixtureText);
         const candidate = await capture(fixtureText);
         if (requestAttempted) throw new Error('delivery browser attempted a network request');
-        const sourcePaths = { form: 'services/dashboard/views/form.ejs', form_helpers: 'services/dashboard/public/js/form-helpers.js', diff_core: 'services/dashboard/public/js/form-stage.js', redline_preview: 'services/dashboard/public/js/redline-preview.js', form_stage: 'services/dashboard/public/js/form-stage.js', showStep2: 'services/dashboard/views/form.ejs', submitMenu: 'services/dashboard/views/form.ejs', quill: 'services/dashboard/public/vendor/quill-1.3.6/quill.js' };
+        const sourcePaths = { form: 'services/dashboard/views/form.ejs', form_helpers: 'services/dashboard/public/js/form-helpers.js', form_submission: 'services/dashboard/public/js/form-submission.js', diff_core: 'services/dashboard/public/js/form-stage.js', redline_preview: 'services/dashboard/public/js/redline-preview.js', form_stage: 'services/dashboard/public/js/form-stage.js', showStep2: 'services/dashboard/views/form.ejs', submitMenu: 'services/dashboard/views/form.ejs', quill: 'services/dashboard/public/vendor/quill-1.3.6/quill.js' };
         const sourceHashesFor = (workspace) => Object.fromEntries(Object.entries(sourcePaths).map(([key, relative]) => [key, hashFile(path.join(workspace, relative))]));
         const baselineSourceHashes = sourceHashesFor(baselineWorkspace);
         const candidateSourceHashes = sourceHashesFor(candidateWorkspace);

@@ -245,7 +245,7 @@ function validateDelivery(value, correction, driverHash, deliveryIdentity) {
     if (!value || value.driver !== 'form-submit-v1' || !isDigest(driverHash)
         || !isDigest(value.baseline_source_hashes?.driver) || !isDigest(value.candidate_source_hashes?.driver)
         || value.baseline_source_hashes.driver !== driverHash || value.candidate_source_hashes.driver !== driverHash
-        || !['form', 'form_helpers', 'diff_core', 'redline_preview', 'form_stage', 'showStep2', 'submitMenu', 'quill'].every((key) => isDigest(value.baseline_source_hashes?.[key]) && isDigest(value.candidate_source_hashes?.[key]))
+        || !['form', 'form_helpers', 'form_submission', 'diff_core', 'redline_preview', 'form_stage', 'showStep2', 'submitMenu', 'quill'].every((key) => isDigest(value.baseline_source_hashes?.[key]) && isDigest(value.candidate_source_hashes?.[key]))
         || !value.baseline_browser_version || !value.candidate_browser_version || value.quill_version !== '1.3.6'
         || typeof value.baseline_submitted_text !== 'string' || typeof value.candidate_submitted_text !== 'string'
         || typeof value.baseline_submitted_html !== 'string' || typeof value.candidate_submitted_html !== 'string'

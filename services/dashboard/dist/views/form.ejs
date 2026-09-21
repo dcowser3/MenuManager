@@ -11,6 +11,7 @@
     <link href="/vendor/quill-1.3.6/quill.snow.css" rel="stylesheet">
     <script src="/vendor/quill-1.3.6/quill.js"></script>
     <script src="/js/form-helpers.js"></script>
+    <script src="/js/form-submission.js"></script>
     <script src="/js/rich-text-editor.js?v=20260918-safari-selection"></script>
     <script src="/js/diff-core.js"></script>
     <script src="/js/redline-preview.js?v=20260613-extract-leading-trim"></script>
@@ -7982,11 +7983,13 @@
             const step2Visible = !document.getElementById('step2').classList.contains('hidden');
             if (step2Visible) {
                 const reviewedArea = document.getElementById('reviewedContentArea');
-                menuContentHtml = sanitizeMenuHtmlForSubmission(reviewedArea.innerHTML || '');
-                menuContentText = extractCleanTextFromReviewedArea(reviewedArea);
+                const captured = MenuSubmission.captureMenuSubmission({ html: reviewedArea.innerHTML || '', element: reviewedArea });
+                menuContentHtml = captured.menuContentHtml;
+                menuContentText = captured.menuContent;
             } else {
-                menuContentHtml = sanitizeMenuHtmlForSubmission(quill.root.innerHTML || '');
-                menuContentText = quill.getText().trim();
+                const captured = MenuSubmission.captureMenuSubmission({ html: quill.root.innerHTML || '', text: quill.getText().trim() });
+                menuContentHtml = captured.menuContentHtml;
+                menuContentText = captured.menuContent;
             }
 
             const persistentPreviewBody = document.getElementById('persistentPreviewBody');
