@@ -1663,6 +1663,10 @@ async function main() {
         evalSummary = core.stampReplayRetirementPolicyVersion({
             ...(evalSummary || {}),
             baseline_fingerprint: baselineFingerprint,
+            // Preserve the exact B6-D1 human-explanation artifact on the
+            // stored proposal so the manual code-candidate handoff can bind
+            // one group without reconstructing or inventing expectations.
+            behavior_tests: behaviorArtifact,
         });
 
         // 9. Store the proposal.
