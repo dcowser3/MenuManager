@@ -163,6 +163,7 @@ describe('runPreAiDeterministicChecks', () => {
             'Pepper Plate, baby bell peppers, Brussels Sprouts, whipped potatoes 18',
             'Harvest, pickled red onions, candied pecans, pickled raisins, beets, candied walnuts, mandarins, lemons 20',
             'Salad, cornbread croutons, spiced pepitas, Colorado apples, candied pepitas 16',
+            'Salad, spiced pepitas D,G 16',
         ].join('\n'));
 
         expect(result.menuText).toBe([
@@ -170,6 +171,7 @@ describe('runPreAiDeterministicChecks', () => {
             'Pepper Plate, baby bell pepper, Brussels Sprouts, whipped potato 18',
             'Harvest, pickled red onion, candied pecan, pickled raisin, beet, candied walnut, mandarin, lemon 20',
             'Salad, cornbread crouton, spiced pepita, Colorado apple, candied pepita 16',
+            'Salad, spiced pepita D,G 16',
         ].join('\n'));
     });
 
@@ -191,6 +193,7 @@ describe('runPreAiDeterministicChecks', () => {
             'Salmon Sauce, lemon, dill D 12',
             'Fish Soup, salmon, dill D 12',
             'fish soup, salmon, dill, lemon, bread D 12',
+            'Salmon Benedict, poached eggs, hollandaise D 18',
         ].join('\n'));
 
         expect(result.menuText).toBe([
@@ -198,6 +201,7 @@ describe('runPreAiDeterministicChecks', () => {
             'Salmon Sauce, lemon, dill D 12',
             'Fish Soup, salmon, dill D 12',
             'fish soup, salmon, dill, lemon, bread D 12',
+            'Salmon Benedict, poached eggs, hollandaise* D 18',
         ].join('\n'));
         expect(runPreAiDeterministicChecks(result.menuText).menuText).toBe(result.menuText);
     });

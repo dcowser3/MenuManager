@@ -594,7 +594,7 @@ const CONSERVATIVE_SINGULAR_INGREDIENT_PATTERNS: SingularIngredientPattern[] = [
         ['Colorado apples', 'Colorado apple'],
         ['candied pepitas', 'candied pepita'],
     ].map(([from, to]) => ({
-        pattern: new RegExp(`(,\\s*)(${from})(?=\\s*(?:,|(?:D|G|V|C|E|F|N|S|SE|SL|SO|SY|TN)(?:\\s|$)|[$€£]|\\d|$))`, 'giu'),
+        pattern: new RegExp(`(,\\s*)(${from})(?=\\s*(?:,|(?:D|G|V|C|E|F|N|S|SE|SL|SO|SY|TN)(?:\\s*,\\s*(?:D|G|V|C|E|F|N|S|SE|SL|SO|SY|TN))*(?:\\s|$)|[$€£]|\\d|$))`, 'giu'),
         corrected: to,
         preserveConfiguredCase: true,
     } as SingularIngredientPattern)),
@@ -936,8 +936,7 @@ function shouldAddRawAsterisk(line: string): boolean {
     }
     // A plain salmon dish/option is not itself evidence of raw preparation;
     // only explicit raw preparations (sashimi, tartare, ceviche, etc.) qualify.
-    if (/\bsalmon\b/.test(normalized)
-        && !/\b(?:raw\s+salmon|sashimi|tartare|carpaccio|crudo|ceviche|tiradito|poke)\b/.test(normalized)) {
+    if (/\bsalmon\b/.test(normalized) && !INDEPENDENT_RAW_TERM_PATTERN.test(normalized)) {
         return false;
     }
     if (/\boysters?\b/.test(normalized) && !/\b(?:raw\s+oysters?|oysters?\s+on\s+the\s+half\s+shell|half[-\s]shell\s+oysters?)\b/.test(normalized)) {
