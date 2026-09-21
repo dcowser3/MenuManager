@@ -11,7 +11,9 @@ bounded and paginated; an incomplete page chain fails closed. The queue is prepa
 provider draft, even when authorization or dispatch callbacks are supplied by a
 caller.
 
-The queue requires complete enumeration and one unique replay binding plus a
+The queue requires complete pagination of the pending-proposal inventory and
+processes proposals in a stable `(created_at, id)` order; one blocked proposal
+does not abort unrelated proposals. It requires one unique replay binding plus a
 human-bound behavior record for each routed group. It re-reads the durable
 proposal owner before recovery and fails closed on status, routing, authority,
 source-binding, or inventory drift, and recovers a missing local summary only

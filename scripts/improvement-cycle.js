@@ -45,7 +45,7 @@ require('dotenv').config({ path: path.join(repoRoot, '.env') });
 const { createClient } = require('@supabase/supabase-js');
 const evalHelpers = require('./review-eval-helpers');
 const behaviorArtifactLib = require('./lib/behavior-artifact');
-const { prepareCodeProposalQueue, loadPendingProposalRows } = require('./lib/code-proposal-preparation-queue');
+const { preparePendingCodeProposalQueue, loadPendingProposalRows } = require('./lib/code-proposal-preparation-queue');
 const { recordCodeVerification } = require('./lib/proposal-verification-store');
 const { appendExpectationArtifactArgs } = require('./lib/improvement-cycle-wiring');
 
@@ -129,35 +129,28 @@ function releaseLock() {
 }
 
 async function triggerManualCodeCandidateReview({ supabase, cycleId, proposalRow, artifactsDir }) {
-    if (!Array.isArray(proposalRow?.code_recommendations) || proposalRow.code_recommendations.length === 0) return null;
-
     const artifactPath = path.join(artifactsDir, 'manual-code-proposal-review.json');
     const base = { cycle_id: cycleId, status: 'blocked', provider_calls: 0 };
     try {
-        const lookup = await supabase.from('prompt_proposals').select('*').eq('cycle_id', cycleId).limit(1);
-        if (lookup.error) throw new Error(`stored proposal lookup failed: ${lookup.error.message}`);
-        const storedProposal = lookup.data?.[0];
-        if (!storedProposal?.id) throw new Error('stored proposal lookup returned no id');
-        const result = await prepareCodeProposalQueue({
+        const pending = await loadPendingProposalRows(supabase);
+        const result = await preparePendingCodeProposalQueue({
             client: supabase,
             store: { recordCodeVerification },
-            proposal: storedProposal,
+            proposals: pending,
             repoRoot,
             datasetPath: path.join(repoRoot, 'tmp', 'review-eval', 'dataset.jsonl'),
             outputRoot: path.join(repoRoot, 'tmp', 'code-proposals'),
-            attemptId: `cycle-${cycleId}`,
+            inventoryPath: path.join(repoRoot, 'tmp', 'code-proposals', 'pending-preparation-inventory.json'),
             // The outer cycle is preparation-only. Authorization and dispatch
             // are intentionally stripped by the coordinator.
         });
         const summary = {
             ...base,
             status: result.status,
-            reason: result.reason || null,
+            reason: null,
             provider_calls: result.providerCalls || 0,
-            attempt_id: result.attemptId || null,
-            delivery_holds: (result.inventory?.groups || []).filter((group) => group.reason === 'delivery_verification_required').map((group) => ({ correction_id: group.correction_id, status: group.reason })),
-            snapshot_sha256: result.inventory?.snapshot_sha256 || null,
-            groups: (result.inventory?.groups || []).map((group) => ({ correction_id: group.correction_id, lane: group.lane, status: group.status, reason: group.reason })),
+            snapshot_sha256: result.snapshot?.snapshot_sha256 || null,
+            proposals: result.results || [],
         };
         const temporary = `${artifactPath}.${process.pid}.tmp`;
         await fsp.writeFile(temporary, `${JSON.stringify(summary, null, 2)}\n`, { mode: 0o600 });
@@ -721,7 +714,7 @@ async function main() {
     // Idempotency: one proposal per calendar day (cycle_id = YYYY-MM-DD).
     const [
         { data: unconsumedAtGate },
-        { data: pendingProposals },
+        pendingProposals,
         { data: existing },
         { data: lastProposals },
         { data: approvedProposalsForBaseline },

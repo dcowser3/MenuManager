@@ -10,7 +10,7 @@ jest.mock('../../../scripts/lib/code-proposal-preparation', () => ({
 }));
 
 const { prepareCodeProposalAttempt } = require('../../../scripts/lib/code-proposal-preparation');
-const { buildPreparationInventory, finalizePreparationInventory, prepareCodeProposalQueue, enumerateCompletePages, loadPendingProposalRows } = require('../../../scripts/lib/code-proposal-preparation-queue');
+const { buildPreparationInventory, finalizePreparationInventory, prepareCodeProposalQueue, preparePendingCodeProposalQueue, enumerateCompletePages, loadPendingProposalRows } = require('../../../scripts/lib/code-proposal-preparation-queue');
 
 const HASH = (value) => crypto.createHash('sha256').update(value).digest('hex');
 const behaviorRecord = (id) => ({ correctionId: id, inputSpan: { text: 'before' }, expectedSpan: { text: 'after' }, reason: 'human reason', expectationAuthority: 'human_explanation', provenance: { reviewer: 'Reviewer' }, disposition: 'awaiting_behavior_verification' });
@@ -88,7 +88,7 @@ test('multiple groups share one owner-bound attempt and injected authorization c
         fs.mkdirSync(path.join(attemptRoot, 'candidate'), { recursive: true });
         fs.writeFileSync(path.join(attemptRoot, 'candidate', 'progress.json'), JSON.stringify({ state: 'active' }));
         fs.writeFileSync(path.join(attemptRoot, 'preparation-inventory.json'), `${JSON.stringify(options.inventory, null, 2)}\n`);
-        return { status: 'claimed', attemptId: 'proposal-proposal-queue', artifactDirectory: attemptRoot, metadata: { preparation_inventory_sha256: HASH('inventory') } };
+        return { status: 'claimed', attemptId: 'proposal-proposal-queue', artifactDirectory: attemptRoot, metadata: { preparation_inventory_sha256: HASH('inventory'), behavior_tests_sha256: HASH('behavior'), expected_dataset_sha256: HASH('dataset'), baseline_source_sha256: HASH('source'), prompt_sha256: HASH('prompt'), accepted_rules_sha256: HASH('rules') } };
     });
     try {
         const result = await prepareCodeProposalQueue({ proposal: proposal(), client: state.client, repoRoot: state.root, datasetPath: path.join(state.root, 'tmp/review-eval/dataset.jsonl'), verification, authorization: { stage: 'code-candidate', status: 'active' }, dispatchDraft: jest.fn(), runPreparedLifecycle: jest.fn() });
@@ -96,6 +96,27 @@ test('multiple groups share one owner-bound attempt and injected authorization c
         expect(result.inventory.groups).toHaveLength(2);
         expect(prepareCodeProposalAttempt).toHaveBeenCalledTimes(1);
         expect(prepareCodeProposalAttempt.mock.calls[0][0].authorization).toBeUndefined();
+    } finally { state.cleanup(); }
+});
+
+test('complete multi-proposal consumer preserves ordering and does not abort on one blocked proposal', async () => {
+    const state = setup();
+    prepareCodeProposalAttempt.mockImplementation(async (options) => {
+        const attemptRoot = path.join(state.root, 'tmp', 'code-proposals', options.proposal.id, 'attempt');
+        fs.mkdirSync(path.join(attemptRoot, 'candidate'), { recursive: true });
+        fs.writeFileSync(path.join(attemptRoot, 'candidate', 'progress.json'), JSON.stringify({ state: 'active' }));
+        fs.writeFileSync(path.join(attemptRoot, 'preparation-inventory.json'), `${JSON.stringify(options.inventory, null, 2)}\n`);
+        return { status: 'claimed', attemptId: `attempt-${options.proposal.id}`, artifactDirectory: attemptRoot, metadata: { behavior_tests_sha256: HASH('behavior'), expected_dataset_sha256: HASH('dataset'), baseline_source_sha256: HASH('source'), prompt_sha256: HASH('prompt'), accepted_rules_sha256: HASH('rules') } };
+    });
+    try {
+        const good = proposal({ id: 'p-good', cycle_id: 'cycle-good', created_at: '2026-01-02' });
+        const bad = proposal({ id: 'p-bad', cycle_id: 'cycle-bad', created_at: '2026-01-01', eval_summary: { ...proposal().eval_summary, behavior_tests: { ...proposal().eval_summary.behavior_tests, records: [] } } });
+        const result = await preparePendingCodeProposalQueue({ proposals: [good, bad], client: state.client, repoRoot: state.root, datasetPath: path.join(state.root, 'tmp/review-eval/dataset.jsonl'), verification, inventoryPath: path.join(state.root, 'tmp/pending.json') });
+        expect(result.snapshot.rows.map((row) => row.id)).toEqual(['p-bad', 'p-good']);
+        expect(result.results[0].reason).toBe('preparation_binding_incomplete');
+        expect(result.results[1].reason).toBe('code_candidate_authorization_required');
+        expect(prepareCodeProposalAttempt).toHaveBeenCalledTimes(1);
+        expect(JSON.parse(fs.readFileSync(path.join(state.root, 'tmp/pending.json'))).snapshot_sha256).toBe(result.snapshot.snapshot_sha256);
     } finally { state.cleanup(); }
 });
 
