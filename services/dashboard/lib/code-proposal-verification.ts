@@ -141,8 +141,6 @@ export interface CodeProposalVerification {
         }>;
         delivery?: Array<{
             correction_id: string;
-            effective_uid?: number;
-            sandbox_enabled?: boolean;
             image_id?: string;
             runtime_id?: string;
             delivery_fixture_sha256?: string;

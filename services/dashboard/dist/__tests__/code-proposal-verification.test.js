@@ -319,7 +319,7 @@ describe('version 2 combined verification', () => {
         mutate(proposal.eval_summary.code_verification);
         expect((0, code_proposal_verification_1.assessCodeProposalVerification)(proposal)).not.toBeNull();
     });
-    test('accepts only exact non-root sandboxed browser delivery bindings', () => {
+    test('accepts only exact non-root container-isolated browser delivery bindings', () => {
         expect((0, code_proposal_verification_1.assessCodeProposalVerification)(deliveryV2Fixture())).toBeNull();
         for (const mutate of [
             (delivery) => { delivery.controls.uid = 0; },

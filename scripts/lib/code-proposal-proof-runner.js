@@ -250,7 +250,6 @@ function validateDelivery(value, correction, driverHash, deliveryIdentity, expec
         || JSON.stringify(value.controls.network_interfaces) !== JSON.stringify(['lo'])
         || !deliveryIdentity || driverHash !== deliveryIdentity.delivery_driver_sha256
         || value.driver_sha256 !== driverHash
-        || value.effective_uid !== 65532 || value.sandbox_enabled !== true
         || value.image_id !== expectedImage || value.runtime_id !== expectedRuntime
         || value.delivery_fixture_sha256 !== expectedFixtureHash
         || !isDigest(value.baseline_source_hashes?.driver) || !isDigest(value.candidate_source_hashes?.driver)

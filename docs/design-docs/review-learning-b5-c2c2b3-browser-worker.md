@@ -21,9 +21,9 @@ Playwright 1.60.0 / Chromium revision 1223 (Chrome for Testing
 `sha256:a064dc4f63d6782682254cdf3a8546bed06d50007c3ea530a718d5b67c97b41d`
 on `linux/arm64`.
 
-The launch contract is fixed: network `none`, read-only root, a root staging
-process that materializes the workspaces followed by a direct delivery process
-at uid 65532,
+The delivery launch contract is fixed: network `none`, read-only root, and a
+container process that starts directly at uid 65532 with no privileged staging
+parent,
 `no-new-privileges`, all capabilities dropped, bounded tmpfs for
 `/tmp` and the worker profile, no host browser/profile/credential mounts, and
 Chromium sandbox disabled inside the container boundary (`chromiumSandbox:false`).
