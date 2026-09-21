@@ -15,7 +15,8 @@ const DIGEST = /^(?:sha256:)?[a-f0-9]{64}$/;
 const MAX_OUTPUT_BYTES = 2 * 1024 * 1024;
 const MAX_TIMEOUT_MS = 180000;
 const WORKER_SCRIPT = '/runner/worker.js';
-const FIXED_COMMAND = Object.freeze(['node', WORKER_SCRIPT]);
+const FIXED_ENTRYPOINT = 'node';
+const FIXED_COMMAND = Object.freeze([WORKER_SCRIPT]);
 const FIXED_ENV_KEYS = Object.freeze(['NODE_ENV', 'C2C2_PROTOCOL_VERSION', 'C2C2_PHASE', 'C2C2_ARM', 'C2C2_SEED', 'C2C2_RUN_ID', 'C2C2_RUNTIME_ID', 'C2C2_IMAGE_ID', 'C2C2_REQUEST_PATH']);
 const SUPPORT_FILES = Object.freeze(['jest.setup.js', 'tsconfig.json', 'services/dashboard/tsconfig.json']);
 
@@ -37,7 +38,7 @@ function deriveRuntimeId() {
     const lockPath = path.resolve(__dirname, '../../package-lock.json');
     const lockBytes = fs.existsSync(lockPath) ? fs.readFileSync(lockPath) : Buffer.from('no-lockfile');
     const repoRoot = path.resolve(__dirname, '../..');
-    return crypto.createHash('sha256').update(launcherBytes).update(workerBytes).update(lockBytes).update(supportIdentity(repoRoot)).update(JSON.stringify({ command: FIXED_COMMAND, maxOutput: MAX_OUTPUT_BYTES, maxTimeout: MAX_TIMEOUT_MS, network: 'none', capDrop: 'ALL', capAdd: ['SETUID', 'SETGID'], noNewPrivileges: true, stagingUid: '0:0', candidateUid: '65532:65532', dependenciesMount: '/app/node_modules', workerHome: '/tmp', supportFiles: SUPPORT_FILES })).digest('hex');
+    return crypto.createHash('sha256').update(launcherBytes).update(workerBytes).update(lockBytes).update(supportIdentity(repoRoot)).update(JSON.stringify({ entrypoint: FIXED_ENTRYPOINT, command: FIXED_COMMAND, maxOutput: MAX_OUTPUT_BYTES, maxTimeout: MAX_TIMEOUT_MS, network: 'none', capDrop: 'ALL', capAdd: ['SETUID', 'SETGID'], noNewPrivileges: true, stagingUid: '0:0', candidateUid: '65532:65532', dependenciesMount: '/app/node_modules', workerHome: '/tmp', supportFiles: SUPPORT_FILES })).digest('hex');
 }
 
 const FIXED_RUNTIME_ID = deriveRuntimeId();
@@ -177,7 +178,7 @@ function buildDockerInvocation(options = {}) {
         NODE_ENV: 'test', C2C2_PROTOCOL_VERSION: '1', C2C2_PHASE: phase,
         C2C2_ARM: arm, C2C2_SEED: `${options.seed}`, C2C2_RUN_ID: runId, C2C2_RUNTIME_ID: effectiveRuntime, C2C2_IMAGE_ID: effectiveImage, C2C2_REQUEST_PATH: '/runner/request.json',
     };
-    const args = ['run', '--rm', '--name', name, '--label', `com.menumanager.c2c2.owner=${attemptId}`, '--label', `com.menumanager.c2c2.name=${name}`, '--network', 'none', '--cap-drop', 'ALL', '--cap-add', 'SETUID', '--cap-add', 'SETGID', '--security-opt', 'no-new-privileges:true', '--read-only', '--pids-limit', '128', '--memory', '1g', '--cpus', '1', '--user', '0:0', '--tmpfs', '/tmp:rw,noexec,nosuid,size=64m', '--tmpfs', '/runner/output:rw,noexec,nosuid,size=64m,mode=1777'];
+    const args = ['run', '--rm', '--name', name, '--entrypoint', FIXED_ENTRYPOINT, '--label', `com.menumanager.c2c2.owner=${attemptId}`, '--label', `com.menumanager.c2c2.name=${name}`, '--network', 'none', '--cap-drop', 'ALL', '--cap-add', 'SETUID', '--cap-add', 'SETGID', '--security-opt', 'no-new-privileges:true', '--read-only', '--pids-limit', '128', '--memory', '1g', '--cpus', '1', '--user', '0:0', '--tmpfs', '/tmp:rw,noexec,nosuid,size=64m', '--tmpfs', '/runner/output:rw,noexec,nosuid,size=64m,mode=1777'];
     for (const mount of mounts) args.push('--mount', `type=bind,src=${mount.source},dst=${mount.destination}${mount.mode === 'ro' ? ',readonly' : ''}`);
     args.push('--mount', `type=bind,src=${requestPath},dst=/runner/request.json,readonly`, '--env', 'NODE_ENV=test', '--env', 'C2C2_PROTOCOL_VERSION=1', '--env', 'C2C2_PHASE', '--env', 'C2C2_ARM', '--env', 'C2C2_SEED', '--env', 'C2C2_RUN_ID', '--env', 'C2C2_RUNTIME_ID', '--env', 'C2C2_IMAGE_ID', '--env', 'C2C2_REQUEST_PATH', effectiveImage, ...FIXED_COMMAND);
     return Object.freeze({ command: 'docker', args, name, ownerLabel: `com.menumanager.c2c2.owner=${attemptId}`, image: effectiveImage, runtime: effectiveRuntime, deliveryIdentity, attemptRoot, outputRoot, requestPath, requestSha256: requestBytes ? crypto.createHash('sha256').update(requestBytes).digest('hex') : null, mounts, env, phase, arm, seed: options.seed, runId: env.C2C2_RUN_ID, request, supportBundleSha256: support.sha256 });
@@ -260,4 +261,4 @@ function createDockerC2c2Executors(options = {}) {
     });
 }
 
-module.exports = { buildDockerInvocation, buildContainerName, parseWorkerOutput, runDockerInvocation, cleanupOwnedContainer, createDockerC2c2Executors, FIXED_COMMAND, FIXED_RUNTIME_ID, MAX_OUTPUT_BYTES };
+module.exports = { buildDockerInvocation, buildContainerName, parseWorkerOutput, runDockerInvocation, cleanupOwnedContainer, createDockerC2c2Executors, FIXED_COMMAND, FIXED_ENTRYPOINT, FIXED_RUNTIME_ID, MAX_OUTPUT_BYTES };
