@@ -170,6 +170,16 @@ async function triggerManualCodeCandidateReview({ supabase, cycleId, proposalRow
     }
 }
 
+// Preparation-only is an intentionally isolated, no-notification seam.  It is
+// also exported so a fixture/injected client can exercise the exact path without
+// constructing the health, gate, model, or mail dependencies used by a full cycle.
+async function runPrepareOnly({ supabase = getSupabase(), cycleId = new Date().toISOString().slice(0, 10), artifactsDir = path.join(repoRoot, 'tmp', 'improvement-cycle', `prepare-only-${cycleId}`), trigger = triggerManualCodeCandidateReview } = {}) {
+    fs.mkdirSync(artifactsDir, { recursive: true, mode: 0o700 });
+    acquireLock();
+    try { return await trigger({ supabase, cycleId, proposalRow: null, artifactsDir }); }
+    finally { releaseLock(); }
+}
+
 // Minimal HTML escaper for values interpolated into notification emails.
 function escapeHtmlLite(value) {
     return `${value ?? ''}`
@@ -706,11 +716,7 @@ async function main() {
 
     if (args.prepareOnly) {
         const artifactsDir = path.join(repoRoot, 'tmp', 'improvement-cycle', `prepare-only-${baseCycleId}`);
-        acquireLock();
-        try {
-            fs.mkdirSync(artifactsDir, { recursive: true, mode: 0o700 });
-            await triggerManualCodeCandidateReview({ supabase, cycleId: baseCycleId, proposalRow: null, artifactsDir });
-        } finally { releaseLock(); }
+        await runPrepareOnly({ supabase, cycleId: baseCycleId, artifactsDir });
         return;
     }
 
@@ -1938,10 +1944,17 @@ async function sendCycleFailureEmail(error) {
     }
 }
 
-main().catch(async (error) => {
-    console.error(`Improvement cycle failed: ${error.message}`);
-    await recordCycleFailureAlert(error);
-    await sendCycleFailureEmail(error);
-    releaseLock();
-    process.exit(1);
-});
+if (require.main === module) {
+    const prepareOnly = process.argv.slice(2).includes('--prepare-only');
+    main().catch(async (error) => {
+        console.error(`Improvement cycle failed: ${error.message}`);
+        if (!prepareOnly) {
+            await recordCycleFailureAlert(error);
+            await sendCycleFailureEmail(error);
+        }
+        releaseLock();
+        process.exit(1);
+    });
+}
+
+module.exports = { runPrepareOnly, triggerManualCodeCandidateReview, parseArgs };

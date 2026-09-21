@@ -3,7 +3,7 @@
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
-const { prepareCodeProposalAttempt, bindHistoricalDataset, readFrozenDataset } = require('./code-proposal-preparation');
+const { prepareCodeProposalAttempt, bindHistoricalDataset, readFrozenDataset, safeId } = require('./code-proposal-preparation');
 const { runningClaimIsFresh } = require('./proposal-verification-store');
 
 const MAX_GROUPS = 500;
@@ -11,6 +11,7 @@ const MAX_BYTES = 8 * 1024 * 1024;
 const CODE_LANE = 'code_recommendation';
 const ROUTED_LANES = new Set([CODE_LANE, 'replacement_rule', 'prompt', 'existing_rule', 'already_correct', 'dismissed', 'unrouted']);
 const DIGEST = /^[a-f0-9]{64}$/;
+const safeSegment = (value, label) => typeof safeId === 'function' ? safeId(value, label) : (/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(`${value || ''}`) ? `${value}` : (() => { throw new Error(`Invalid ${label}.`); })());
 
 async function enumerateCompletePages(fetchPage, options = {}) {
     if (typeof fetchPage !== 'function') throw new Error('Preparation queue page reader is required.');
@@ -48,6 +49,7 @@ async function loadPendingProposalRows(client, options = {}) {
             if (!row || typeof row.id !== 'string' || !row.id.trim() || typeof row.created_at !== 'string' || !row.created_at.trim() || !Number.isFinite(Date.parse(row.created_at))) {
                 throw new Error('Pending proposal enumeration returned a malformed row.');
             }
+            if (Date.parse(row.created_at) > Date.parse(cutoff)) throw new Error('Pending proposal row exceeds the frozen cutoff.');
             const key = `${row.created_at}\u0000${row.id}`;
             if (pageKeys.has(key) || (previousKey && key <= previousKey)) throw new Error('Pending proposal enumeration order is non-monotonic.');
             pageKeys.add(key);
@@ -139,6 +141,7 @@ function buildPreparationInventory(proposal, options = {}) {
         const explicitInputSpan = Object.prototype.hasOwnProperty.call(record, 'inputSpan');
         const explicitExpectedSpan = Object.prototype.hasOwnProperty.call(record, 'expectedSpan');
         const associationConflict = (record.submissionId != null && `${record.submissionId}` !== `${replay.submission_id}`)
+            || (record.caseId != null && `${record.caseId}` !== `${replay.case_id || route.case_id || ''}`)
             || (route.case_id != null && (explicitReplayCase && `${replay.case_id}` !== `${route.case_id}`))
             || (route.original_text != null && (explicitReplayOriginal && replay.original_text !== route.original_text))
             || (route.corrected_text != null && (explicitReplayCorrected && replay.corrected_text !== route.corrected_text))
@@ -315,13 +318,16 @@ async function prepareCodeProposalQueue(options = {}) {
         validateRecoveryArtifacts(summary, progress, stored, existing, artifactDirectory);
         return { status: 'blocked', reason: 'code_candidate_authorization_required', providerCalls: 0, inventory: stored, attemptId: existing.attempt_id, artifactDirectory };
     }
-    const attemptId = options.attemptId || `proposal-${proposal.id}`;
+    const attemptId = safeSegment(options.attemptId || `proposal-${safeSegment(proposal.id, 'proposal id')}`, 'attempt id');
     // A process may have crashed after materializing the deterministic attempt
     // directory but before the durable CAS claim.  Only reclaim that directory
     // after the durable reread above proved there is no owner and the artifact
     // is an unambiguous, hash-valid preparation for this exact inventory.
     const outputRoot = options.outputRoot || path.join(options.repoRoot || process.cwd(), 'tmp', 'code-proposals');
-    const orphanRoot = path.resolve(outputRoot, proposal.id, attemptId);
+    const proposalSegment = safeSegment(proposal.id, 'proposal id');
+    const orphanRoot = path.resolve(outputRoot, proposalSegment, attemptId);
+    const resolvedOutput = path.resolve(outputRoot);
+    if (!orphanRoot.startsWith(`${resolvedOutput}${path.sep}`)) throw new Error('Orphan artifact path escapes the trusted output root.');
     if (fs.existsSync(orphanRoot)) {
         let reclaimable = false;
         try {
