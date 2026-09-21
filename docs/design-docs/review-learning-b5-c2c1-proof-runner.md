@@ -29,12 +29,16 @@ verifier, including combined baseline/candidate rules, prompt, vocabulary,
 expectation, settings, runtime and surviving-rule evidence. Under C2c2, two
 fresh paired replay seeds execute the selected arm's actual dashboard review
 pipeline in the fixed image with a test-only echo adapter; the host parses and
-recomputes the response contract, fence, similarity, correction score, extra
-edits, and run identity. Any missing corrected-menu fence or incomplete parsed
-contract blocks before scoring; `run.cases` preserves the validated contract
-flags rather than asserting success. The worker never receives ground truth or
-expected outcomes and returns only delivered response/output bytes and bounded
-diagnostics. A Docker end-to-end fixture reaches `pending_store` with paired
+recomputes the response contract, fence, final delivered-output hash,
+similarity, correction score, extra edits, and run identity. The parsed model
+corrected-menu bytes are therefore not required to equal the final delivered
+bytes: deterministic candidate guards may transform them, but the worker's
+bounded `diagnostics.outputHash` must match the host's recomputation of the
+reported final output. Any missing corrected-menu fence, incomplete parsed
+contract, or stale final-output identity blocks before scoring; `run.cases`
+preserves the validated contract flags rather than asserting success. The worker
+never receives ground truth or expected outcomes and returns only delivered
+response/output bytes and bounded diagnostics. A Docker end-to-end fixture reaches `pending_store` with paired
 Jest, both replay seeds, and behavior outcomes using only `metadata.attempt_id`.
 Every
 case and correction must have a complete response contract, no fence error,

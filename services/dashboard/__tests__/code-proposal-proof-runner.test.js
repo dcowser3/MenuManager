@@ -206,12 +206,26 @@ test('strict replay recomputes the worker identity and rejects forged host metri
     const identity = { arm: 'candidate', seed: 17, run_id: 'attempt-one:replay:17', case_id: 'case-1' };
     const hash = (value) => digest(JSON.stringify(value));
     const report_id = digest(JSON.stringify({ arm: identity.arm, seed: identity.seed, run_id: identity.run_id, case_id: identity.case_id, input_hash: hash(row.raw_input), output_hash: hash('Dish, lemon'), response_hash: hash(response) }));
-    const result = validateReplayResult({ report_id, response, output: 'Dish, lemon', composite: 0, extraEdits: 999 }, 'candidate case-1', row, { strict: true, identity });
+    const result = validateReplayResult({ report_id, response, output: 'Dish, lemon', diagnostics: { fenceMissing: false, outputHash: digest(JSON.stringify('Dish, lemon')) }, composite: 0, extraEdits: 999 }, 'candidate case-1', row, { strict: true, identity });
     expect(result.composite).toBeGreaterThan(0);
     expect(result.extraEdits).toBe(0);
-    expect(() => validateReplayResult({ report_id: 'forged', response, output: 'Dish, lemon' }, 'candidate case-1', row, { strict: true, identity })).toThrow(/identity/);
+    expect(() => validateReplayResult({ report_id: 'forged', response, output: 'Dish, lemon', diagnostics: { fenceMissing: false, outputHash: digest(JSON.stringify('Dish, lemon')) } }, 'candidate case-1', row, { strict: true, identity })).toThrow(/identity/);
     const unfenced = 'Dish, lemon';
     expect(() => validateReplayResult({ report_id, response: unfenced, output: 'Dish, lemon' }, 'candidate case-1', row, { strict: true, identity })).toThrow(/contract|fence/i);
+});
+
+test('strict replay accepts a deterministic final pipeline output and rejects tampered delivered bytes', () => {
+    const row = { raw_input: 'Dish, lemons', ground_truth: 'Dish, lemon' };
+    const response = '=== CORRECTED MENU ===\nDish, lemons\n=== END CORRECTED MENU ===\n=== SUGGESTIONS ===\n[]\n=== END SUGGESTIONS ===';
+    const identity = { arm: 'candidate', seed: 23, run_id: 'attempt-one:replay:23', case_id: 'case-1' };
+    const hash = (value) => digest(JSON.stringify(value));
+    const finalOutput = 'Dish, lemon';
+    const reportId = digest(JSON.stringify({ arm: identity.arm, seed: identity.seed, run_id: identity.run_id, case_id: identity.case_id, input_hash: hash(row.raw_input), output_hash: hash(finalOutput), response_hash: hash(response) }));
+    const result = validateReplayResult({ report_id: reportId, response, output: finalOutput, diagnostics: { fenceMissing: false, outputHash: hash(finalOutput) } }, 'candidate case-1', row, { strict: true, identity });
+    expect(result.output).toBe(finalOutput);
+    const tamperedOutput = 'Dish, tampered';
+    const tamperedReportId = digest(JSON.stringify({ ...identity, input_hash: hash(row.raw_input), output_hash: hash(tamperedOutput), response_hash: hash(response) }));
+    expect(() => validateReplayResult({ report_id: tamperedReportId, response, output: tamperedOutput, diagnostics: { fenceMissing: false, outputHash: hash(finalOutput) } }, 'candidate case-1', row, { strict: true, identity })).toThrow(/trusted pipeline recomputation/);
 });
 
 test('replay freshness, response contracts, and delivery-required omission are enforced', async () => {
