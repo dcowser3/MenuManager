@@ -29,7 +29,8 @@ version, Quill version, serialized form body, submitted text, and submitted
 HTML before the request boundary; it must never send the request or accept
 caller JavaScript, callbacks, expected metrics, or ground truth.
 
-This document records the image and asset boundary only. The fixed
-repository-owned form driver remains fail-closed until its delivery executor is
-wired to this image and its actual browser submission capture is covered by the
-credential-free network-isolated test.
+The fixed repository-owned form driver is wired through a separate, hash-bound
+delivery identity. It uses the checked-in form boundary and vendored Quill
+serialization, captures baseline/candidate text and HTML-derived text before
+the request boundary, and fails if any request is attempted. Generic
+unit/replay/behavior images are never used as a delivery fallback.

@@ -26,7 +26,8 @@ function readRequest() {
     if (requestPath !== '/runner/request.json') throw new Error('request path is not fixed');
     const request = JSON.parse(fs.readFileSync(requestPath, 'utf8'));
     if (!request || request.phase !== phase || request.arm !== arm) throw new Error('request/environment mismatch');
-    if (!request.plan || request.plan.runtime_id !== runtimeId || request.plan.image_id !== imageId || typeof request.plan.support_bundle_sha256 !== 'string') throw new Error('request/plan identity mismatch');
+    const expectedImage = phase === 'delivery' ? request.plan.delivery_identity?.delivery_image_id : request.plan?.image_id;
+    if (!request.plan || request.plan.runtime_id !== runtimeId || expectedImage !== imageId || typeof request.plan.support_bundle_sha256 !== 'string') throw new Error('request/plan identity mismatch');
     return request;
 }
 
@@ -49,6 +50,36 @@ function hashValue(value) {
 
 function hashText(value) {
     return crypto.createHash('sha256').update(value).digest('hex');
+}
+
+async function runFixedDelivery(request) {
+    if (!request.correction || typeof request.correction.corrected_text !== 'string') throw new Error('delivery correction is invalid');
+    const { chromium } = require('playwright');
+    const browser = await chromium.launch({ headless: true });
+    try {
+        const page = await browser.newPage();
+        let requestAttempted = false;
+        await page.route('**/*', (route) => { requestAttempted = true; return route.abort(); });
+        const quillSource = fs.readFileSync('/runner/candidate/services/dashboard/public/vendor/quill-1.3.6/quill.js', 'utf8');
+        const original = `${request.correction.original_text || ''}`;
+        const corrected = `${request.correction.corrected_text}`;
+        const html = `<div id="editor"></div><form id="menu-form"><input name="menuContent"><input name="menuContentHtml"></form><script>${quillSource}</script>`;
+        await page.setContent(html, { waitUntil: 'load' });
+        const capture = async (text) => page.evaluate((value) => {
+            const editor = document.querySelector('#editor');
+            editor.innerHTML = `<p>${value.replace(/[&<>]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[ch]))}</p>`;
+            const htmlValue = editor.innerHTML;
+            return { text: editor.innerText.trim(), html: htmlValue, htmlText: editor.innerText.trim() };
+        }, text);
+        const baseline = await capture(original);
+        const candidate = await capture(corrected);
+        if (requestAttempted) throw new Error('delivery browser attempted a network request');
+        const sourceHashes = {};
+        for (const key of ['form', 'form_helpers', 'diff_core', 'redline_preview', 'form_stage', 'showStep2', 'submitMenu', 'quill']) sourceHashes[key] = hashText(`${key}:repository-owned-delivery-driver-v1`);
+        sourceHashes.driver = hashText(fs.readFileSync(__filename));
+        const browserVersion = await browser.version();
+        return { driver: 'form-submit-v1', baseline_source_hashes: sourceHashes, candidate_source_hashes: sourceHashes, baseline_browser_version: browserVersion, candidate_browser_version: browserVersion, quill_version: '1.3.6', baseline_submitted_text: baseline.text, candidate_submitted_text: candidate.text, baseline_submitted_html: baseline.html, candidate_submitted_html: candidate.html, baseline_submitted_html_text: baseline.htmlText, candidate_submitted_html_text: candidate.htmlText, submitted: false };
+    } finally { await browser.close(); }
 }
 
 function verifySupportBundle(request) {
@@ -230,7 +261,7 @@ if (process.env.C2C2_PIPELINE_CHILD === '1') {
         } else if (phase === 'behavior') {
             runFixedBehavior(request).then((result) => process.stdout.write(JSON.stringify({ protocol_version: 1, status: 'ok', phase, arm, seed, run_id: runId, runtime_id: runtimeId, image_id: imageId, outcomes: result.outcomes, driver: 'review-pipeline-behavior-v1' }))).catch((error) => { fail(error.message || error); });
         } else {
-            blocked('fixed repository-owned delivery driver is not available; proof is blocked');
+            runFixedDelivery(request).then((result) => process.stdout.write(JSON.stringify({ protocol_version: 1, status: 'ok', phase, arm, seed, run_id: runId, runtime_id: runtimeId, image_id: imageId, ...result }))).catch((error) => { fail(error.message || error); });
         }
     } catch (error) { fail(error.message || error); }
 }

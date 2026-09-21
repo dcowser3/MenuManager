@@ -9,6 +9,7 @@
  * plan, reports, hashes, progress, proof, or owner identity.
  */
 const crypto = require('crypto');
+const { validateDeliveryIdentity } = require('./code-proposal-delivery-identity');
 const fs = require('fs');
 const path = require('path');
 const { revalidateAttemptArtifacts, hashImplementation, readDataset } = require('./code-proposal-draft');
@@ -269,6 +270,7 @@ function revalidatePlan(planPath, plan, metadata, attemptRoot, baselineRoot, can
     const stored = JSON.parse(bytes.toString('utf8'));
     const { plan_sha256: storedHash, ...body } = stored;
     if (storedHash !== hashJson(body) || storedHash !== plan.plan_sha256) throw new Error('Verifier plan changed after freezing.');
+    if (plan.delivery_identity) validateDeliveryIdentity(plan.delivery_identity);
     if (hashBytes(fs.readFileSync(__filename)) !== plan.runner_sha256) throw new Error('Verifier runner identity changed after freezing.');
     if (!trustedVerification || trustedVerification.codeProposalVerificationFingerprint(liveProposal) !== plan.proposal_sha256 || plan.accepted_rules_sha256 !== metadata.accepted_rules_sha256) throw new Error('Live proposal or accepted-rule identity changed after plan creation.');
     const behavior = JSON.parse(regularFile(path.join(attemptRoot, 'behavior-tests.json'), attemptRoot, 'Behavior artifact').toString('utf8'));
@@ -306,7 +308,7 @@ function revalidatePlan(planPath, plan, metadata, attemptRoot, baselineRoot, can
     for (const entry of manifest.files || []) if (hashBytes(regularFile(path.join(bundle.root, entry.path), bundle.root, `Test bundle ${entry.path}`)) !== entry.sha256) throw new Error(`Test bundle bytes changed after plan creation: ${entry.path}.`);
 }
 
-function makePlan({ attemptRoot, metadata, proposal, baselineHash, candidateHash, parentCampaignSha256, imageId, runtimeId, replayPolicyVersion, caseIds, seeds, inventory, corrections, paths, handoffPath, handoffHash, authorizationHash, scopeHash, draftPatchHash, draftContentHash, draftResponseHash, datasetHash, promptHash, rulesHash, behaviorHash, testBundleHash, runnerHash, testContentHash, model, vocabularyHash, expectationsHash, settings, baselineRules, candidateRules, baselinePrompt, candidatePrompt, deliveryDriverHash }) {
+function makePlan({ attemptRoot, metadata, proposal, baselineHash, candidateHash, parentCampaignSha256, imageId, runtimeId, replayPolicyVersion, caseIds, seeds, inventory, corrections, paths, handoffPath, handoffHash, authorizationHash, scopeHash, draftPatchHash, draftContentHash, draftResponseHash, datasetHash, promptHash, rulesHash, behaviorHash, testBundleHash, runnerHash, testContentHash, model, vocabularyHash, expectationsHash, settings, baselineRules, candidateRules, baselinePrompt, candidatePrompt, deliveryDriverHash, deliveryIdentity }) {
     const planBody = {
         schema_version: 1, test_only: true, attempt_id: metadata.attempt_id,
         proposal_sha256: metadata.proposal_sha256, accepted_rules_sha256: metadata.accepted_rules_sha256, parent_campaign_sha256: parentCampaignSha256,
@@ -322,6 +324,7 @@ function makePlan({ attemptRoot, metadata, proposal, baselineHash, candidateHash
         baseline_prompt_sha256: hashBytes(Buffer.from(baselinePrompt || '')), candidate_prompt_sha256: hashBytes(Buffer.from(candidatePrompt || '')),
         baseline_rules_sha256: hashBytes(Buffer.from(JSON.stringify(baselineRules || []))), candidate_rules_sha256: hashBytes(Buffer.from(JSON.stringify(candidateRules || []))),
         delivery_driver_sha256: deliveryDriverHash || null,
+        delivery_identity: deliveryIdentity ? validateDeliveryIdentity(deliveryIdentity) : null,
         case_ids: [...caseIds], seeds: [...seeds], test_inventory: [...inventory], corrections,
         paths,
     };
@@ -427,7 +430,8 @@ async function runCodeProposalProof(options = {}) {
     const settings = JSON.parse(JSON.stringify(options.settings || {}));
     if (!isDigest(vocabularyHash) || !isDigest(expectationsHash)) throw new Error('C2c1 requires frozen vocabulary and expectation identities.');
     const deliveryDriverHash = options.deliveryDriverSha256 || null;
-    const plan = makePlan({ attemptRoot, metadata, proposal: frozenProposal, baselineHash, candidateHash, parentCampaignSha256, imageId: options.imageId, runtimeId: options.runtimeId, replayPolicyVersion: options.replayPolicyVersion, caseIds, seeds, inventory, corrections: allCorrections, paths: { ...paths, testBundle: bundle.root, testBundleManifest: bundle.manifestPath }, handoffPath: path.resolve(options.c2bHandoffFile), handoffHash: handoffInfo.handoffHash, authorizationHash: handoffInfo.handoff.authorization_hash, scopeHash: handoffInfo.handoff.scope_hash, draftPatchHash: handoffInfo.handoff.draft.patch_sha256, draftContentHash: handoffInfo.handoff.draft.content_sha256, draftResponseHash: handoffInfo.handoff.draft.response_sha256 || handoffInfo.handoff.response_sha256 || handoffInfo.handoff.response.body_sha256, datasetHash: metadata.expected_dataset_sha256, promptHash: metadata.prompt_sha256, rulesHash: metadata.rules_file_sha256 || hashBytes(rulesBytes), behaviorHash: metadata.behavior_tests_sha256, testBundleHash: bundle.sha256, runnerHash, testContentHash: bundle.contentSha256, model, vocabularyHash, expectationsHash, settings, baselineRules, candidateRules, baselinePrompt, candidatePrompt, deliveryDriverHash });
+    const deliveryIdentity = options.deliveryIdentity ? validateDeliveryIdentity(options.deliveryIdentity) : null;
+    const plan = makePlan({ attemptRoot, metadata, proposal: frozenProposal, baselineHash, candidateHash, parentCampaignSha256, imageId: options.imageId, runtimeId: options.runtimeId, replayPolicyVersion: options.replayPolicyVersion, caseIds, seeds, inventory, corrections: allCorrections, paths: { ...paths, testBundle: bundle.root, testBundleManifest: bundle.manifestPath }, handoffPath: path.resolve(options.c2bHandoffFile), handoffHash: handoffInfo.handoffHash, authorizationHash: handoffInfo.handoff.authorization_hash, scopeHash: handoffInfo.handoff.scope_hash, draftPatchHash: handoffInfo.handoff.draft.patch_sha256, draftContentHash: handoffInfo.handoff.draft.content_sha256, draftResponseHash: handoffInfo.handoff.draft.response_sha256 || handoffInfo.handoff.response_sha256 || handoffInfo.handoff.response.body_sha256, datasetHash: metadata.expected_dataset_sha256, promptHash: metadata.prompt_sha256, rulesHash: metadata.rules_file_sha256 || hashBytes(rulesBytes), behaviorHash: metadata.behavior_tests_sha256, testBundleHash: bundle.sha256, runnerHash, testContentHash: bundle.contentSha256, model, vocabularyHash, expectationsHash, settings, baselineRules, candidateRules, baselinePrompt, candidatePrompt, deliveryDriverHash, deliveryIdentity });
     atomicWrite(paths.plan, `${JSON.stringify(plan, null, 2)}\n`);
     const progress = (phase, state, extra = {}) => writeProgress(attemptRoot, metadata, phase, state, { total: caseIds.length, ...extra }, options.progressWriter);
     let attached = false;
@@ -446,6 +450,7 @@ async function runCodeProposalProof(options = {}) {
         const runs = [];
         const replayIdentities = new Set();
         const deliveryIds = deliveryRequired(frozenProposal, allCorrections);
+        if (deliveryIds.length && !plan.delivery_identity) throw new Error('Delivery evidence requires a separate frozen delivery identity.');
         for (const seed of seeds) {
             const run = { run_id: `${metadata.attempt_id}:replay:${seed}`, seed, baseline_errors: 0, candidate_errors: 0, cases: [], corrections: [] };
             const results = { baseline: new Map(), candidate: new Map() };
@@ -476,7 +481,7 @@ async function runCodeProposalProof(options = {}) {
             if (deliveryIds.length) {
                 if (typeof options.deliveryExecutor !== 'function') throw new Error('Delivery evidence is required but no injected delivery executor was provided.');
                 run.delivery = [];
-                for (const correction of allCorrections.filter((entry) => deliveryIds.includes(entry.correction_id))) run.delivery.push(validateDelivery(await invokeWithTimeout(options.deliveryExecutor, { arm: 'paired', seed, runId: run.run_id, correction, plan: { ...plan } }, timeoutMs, 'Delivery executor'), correction, options.deliveryDriverSha256));
+                for (const correction of allCorrections.filter((entry) => deliveryIds.includes(entry.correction_id))) run.delivery.push(validateDelivery(await invokeWithTimeout(options.deliveryExecutor, { arm: 'paired', seed, runId: run.run_id, correction, plan: { ...plan } }, timeoutMs, 'Delivery executor'), correction, plan.delivery_driver_sha256));
             }
             run.baseline_report_sha256 = hashJson({ seed, arm: 'baseline', results: [...results.baseline.entries()] });
             run.candidate_report_sha256 = hashJson({ seed, arm: 'candidate', results: [...results.candidate.entries()] });
@@ -503,7 +508,7 @@ async function runCodeProposalProof(options = {}) {
             behaviorCandidate = await invokeWithTimeout(() => behaviorModule.executeBehaviorTests(behaviorArtifact, options.behaviorEvaluator), {}, timeoutMs, 'Behavior executor');
         }
         if (behaviorCandidate.artifactHash !== behaviorArtifact.sha256 || behaviorCandidate.passed !== true || behaviorCandidate.outcomes.some((outcome) => outcome.passed !== true || outcome.outputHash !== outcome.expectedHash)) throw new Error('Candidate behavior outcomes do not match frozen B6-D1 expectations.');
-        const proof = { schema_version: 2, test_only: true, runner: 'verify-code-proposal', status: 'passed', generated_at: new Date().toISOString(), proposal_sha256: plan.proposal_sha256, baseline: { source_sha256: plan.baseline_source_sha256, root: baselineRoot }, candidate: { source_sha256: plan.candidate_source_sha256, root: candidateRoot }, inputs: { dataset_sha256: plan.dataset_sha256, prompt_sha256: plan.prompt_sha256, rules_sha256: plan.rules_sha256, accepted_rules_sha256: plan.accepted_rules_sha256, tests_sha256: plan.tests_content_sha256, image_id: plan.image_id, model: plan.model, raw_ground_truth: true, case_ids: [...plan.case_ids], ...(deliveryIds.length ? { delivery_driver_sha256: plan.delivery_driver_sha256 } : {}) }, corrections, tests, runs, behavior: { artifact: behaviorArtifact, candidate: behaviorCandidate }, combined: buildCombinedVerification({ proposal: frozenProposal, baselineHash: plan.baseline_source_sha256, candidateHash: plan.candidate_source_sha256, cases: plan.case_ids, seeds: plan.seeds, runs, corrections: plan.corrections, trustedVerification, imageId: plan.image_id, runtimeId: plan.runtime_id, datasetHash: plan.dataset_sha256, acceptedRulesHash: plan.accepted_rules_sha256, model: plan.model, baselineRules: plan.baseline_rules, candidateRules: plan.candidate_rules, vocabularyHash: plan.vocabulary_sha256, expectationsHash: plan.expectations_sha256, settings: plan.settings }) };
+        const proof = { schema_version: 2, test_only: true, runner: 'verify-code-proposal', status: 'passed', generated_at: new Date().toISOString(), proposal_sha256: plan.proposal_sha256, baseline: { source_sha256: plan.baseline_source_sha256, root: baselineRoot }, candidate: { source_sha256: plan.candidate_source_sha256, root: candidateRoot }, inputs: { dataset_sha256: plan.dataset_sha256, prompt_sha256: plan.prompt_sha256, rules_sha256: plan.rules_sha256, accepted_rules_sha256: plan.accepted_rules_sha256, tests_sha256: plan.tests_content_sha256, image_id: plan.image_id, model: plan.model, raw_ground_truth: true, case_ids: [...plan.case_ids], ...(deliveryIds.length ? { delivery_driver_sha256: plan.delivery_driver_sha256, delivery_identity_sha256: plan.delivery_identity?.identity_sha256 } : {}) }, corrections, tests, runs, behavior: { artifact: behaviorArtifact, candidate: behaviorCandidate }, combined: buildCombinedVerification({ proposal: frozenProposal, baselineHash: plan.baseline_source_sha256, candidateHash: plan.candidate_source_sha256, cases: plan.case_ids, seeds: plan.seeds, runs, corrections: plan.corrections, trustedVerification, imageId: plan.image_id, runtimeId: plan.runtime_id, datasetHash: plan.dataset_sha256, acceptedRulesHash: plan.accepted_rules_sha256, model: plan.model, baselineRules: plan.baseline_rules, candidateRules: plan.candidate_rules, vocabularyHash: plan.vocabulary_sha256, expectationsHash: plan.expectations_sha256, settings: plan.settings }) };
         revalidatePlan(paths.plan, plan, metadata, attemptRoot, baselineRoot, candidateRoot, bundle, trustedSuites, historicalTests, candidateTests, runtimeVerification, options.proposal, trustedVerification);
         progress('verification', 'active', { completed: caseIds.length * seeds.length, total: caseIds.length * seeds.length });
         const candidateProposal = { ...frozenProposal, eval_summary: { ...(frozenProposal.eval_summary || {}), replay_retirement_policy_version: plan.replay_policy_version, code_candidate: { ...(frozenProposal.eval_summary?.code_candidate || {}), expected_dataset_sha256: plan.dataset_sha256, expected_case_ids: [...plan.case_ids], behavior_tests_sha256: plan.behavior_sha256 }, code_verification: proof } };

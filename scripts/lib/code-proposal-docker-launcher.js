@@ -9,6 +9,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const { spawn, execFile } = require('child_process');
+const { validateDeliveryIdentity } = require('./code-proposal-delivery-identity');
 
 const DIGEST = /^(?:sha256:)?[a-f0-9]{64}$/;
 const MAX_OUTPUT_BYTES = 2 * 1024 * 1024;
@@ -143,6 +144,12 @@ function buildDockerInvocation(options = {}) {
     const arm = safeId(options.arm, 'arm');
     if (!['unit', 'replay', 'behavior', 'delivery'].includes(phase) || !['baseline', 'candidate', 'paired'].includes(arm)) throw new Error('C2c2 phase/arm is not allowlisted.');
     if (phase === 'delivery' && arm !== 'paired') throw new Error('Delivery workers must use the paired arm.');
+    let effectiveImage = image;
+    let deliveryIdentity = null;
+    if (phase === 'delivery') {
+        deliveryIdentity = validateDeliveryIdentity(options.plan?.delivery_identity);
+        effectiveImage = digest(deliveryIdentity.delivery_image_id, 'delivery image');
+    }
     if (phase === 'behavior' && arm !== 'candidate') throw new Error('Behavior workers must use the candidate arm.');
     if (!Number.isInteger(options.seed) || options.seed < 0) throw new Error('C2c2 seed is invalid.');
     const name = buildContainerName(attemptId, options.containerNonce);
@@ -166,12 +173,12 @@ function buildDockerInvocation(options = {}) {
     const runId = safeId(options.runId || `${attemptId}:${phase}:${arm}:${options.seed}`, 'run id');
     const env = {
         NODE_ENV: 'test', C2C2_PROTOCOL_VERSION: '1', C2C2_PHASE: phase,
-        C2C2_ARM: arm, C2C2_SEED: `${options.seed}`, C2C2_RUN_ID: runId, C2C2_RUNTIME_ID: runtime, C2C2_IMAGE_ID: image, C2C2_REQUEST_PATH: '/runner/request.json',
+        C2C2_ARM: arm, C2C2_SEED: `${options.seed}`, C2C2_RUN_ID: runId, C2C2_RUNTIME_ID: runtime, C2C2_IMAGE_ID: effectiveImage, C2C2_REQUEST_PATH: '/runner/request.json',
     };
     const args = ['run', '--rm', '--name', name, '--label', `com.menumanager.c2c2.owner=${attemptId}`, '--label', `com.menumanager.c2c2.name=${name}`, '--network', 'none', '--cap-drop', 'ALL', '--cap-add', 'SETUID', '--cap-add', 'SETGID', '--security-opt', 'no-new-privileges:true', '--read-only', '--pids-limit', '128', '--memory', '1g', '--cpus', '1', '--user', '0:0', '--tmpfs', '/tmp:rw,noexec,nosuid,size=64m', '--tmpfs', '/runner/output:rw,noexec,nosuid,size=64m,mode=1777'];
     for (const mount of mounts) args.push('--mount', `type=bind,src=${mount.source},dst=${mount.destination}${mount.mode === 'ro' ? ',readonly' : ''}`);
-    args.push('--mount', `type=bind,src=${requestPath},dst=/runner/request.json,readonly`, '--env', 'NODE_ENV=test', '--env', 'C2C2_PROTOCOL_VERSION=1', '--env', 'C2C2_PHASE', '--env', 'C2C2_ARM', '--env', 'C2C2_SEED', '--env', 'C2C2_RUN_ID', '--env', 'C2C2_RUNTIME_ID', '--env', 'C2C2_IMAGE_ID', '--env', 'C2C2_REQUEST_PATH', image, ...FIXED_COMMAND);
-    return Object.freeze({ command: 'docker', args, name, ownerLabel: `com.menumanager.c2c2.owner=${attemptId}`, image, runtime, attemptRoot, outputRoot, requestPath, requestSha256: requestBytes ? crypto.createHash('sha256').update(requestBytes).digest('hex') : null, mounts, env, phase, arm, seed: options.seed, runId: env.C2C2_RUN_ID, request, supportBundleSha256: support.sha256 });
+    args.push('--mount', `type=bind,src=${requestPath},dst=/runner/request.json,readonly`, '--env', 'NODE_ENV=test', '--env', 'C2C2_PROTOCOL_VERSION=1', '--env', 'C2C2_PHASE', '--env', 'C2C2_ARM', '--env', 'C2C2_SEED', '--env', 'C2C2_RUN_ID', '--env', 'C2C2_RUNTIME_ID', '--env', 'C2C2_IMAGE_ID', '--env', 'C2C2_REQUEST_PATH', effectiveImage, ...FIXED_COMMAND);
+    return Object.freeze({ command: 'docker', args, name, ownerLabel: `com.menumanager.c2c2.owner=${attemptId}`, image: effectiveImage, runtime, deliveryIdentity, attemptRoot, outputRoot, requestPath, requestSha256: requestBytes ? crypto.createHash('sha256').update(requestBytes).digest('hex') : null, mounts, env, phase, arm, seed: options.seed, runId: env.C2C2_RUN_ID, request, supportBundleSha256: support.sha256 });
 }
 
 function parseWorkerOutput(stdout, stderr, spec = null) {
