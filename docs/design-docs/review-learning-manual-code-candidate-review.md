@@ -11,6 +11,11 @@ explicit reason `code_candidate_authorization_required`. It performs zero
 provider calls and never marks the candidate failed, verified, approved,
 activated, or deployed.
 
+The blocked marker is local progress evidence; the persisted owner claim stays
+`running` so the same attempt can be resumed after an authorized ledger is
+supplied. Before any real dispatch, the path re-reads that live owner claim and
+rejects a changed or non-running attempt.
+
 When tests supply a validated synthetic draft and an active authorization, the
 path delegates to the existing `applyValidatedDraftWithHandoff` →
 `runPreparedCodeProposalLifecycle` seam. Delivery-mismatch routes are surfaced

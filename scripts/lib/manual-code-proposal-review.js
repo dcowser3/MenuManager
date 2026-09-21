@@ -10,6 +10,7 @@ const fs = require('fs');
 const path = require('path');
 const { prepareCodeProposalAttempt } = require('./code-proposal-preparation');
 const { runPreparedCodeProposalLifecycle } = require('./code-proposal-lifecycle');
+const { dispatchCodeDraft } = require('../auto-code-proposal');
 
 function routedRows(proposal) {
     return (Array.isArray(proposal?.correction_routing) ? proposal.correction_routing : [])
@@ -27,7 +28,12 @@ function deliveryHeld(proposal) {
 }
 
 function selectBoundHumanExplanationGroup(proposal, correctionId) {
-    const routes = routedRows(proposal);
+    const evidence = new Map((proposal.replay_evidence || []).filter((row) => row?.correction_id).map((row) => [row.correction_id, row]));
+    const routes = routedRows(proposal).sort((a, b) => {
+        const aHeld = a.replay_status === 'delivery_mismatch' || evidence.get(a.correction_id)?.status === 'delivery_mismatch';
+        const bHeld = b.replay_status === 'delivery_mismatch' || evidence.get(b.correction_id)?.status === 'delivery_mismatch';
+        return Number(aHeld) - Number(bHeld) || `${a.correction_id}`.localeCompare(`${b.correction_id}`);
+    });
     const route = correctionId ? routes.find((row) => row.correction_id === correctionId) : routes[0];
     if (!route) throw new Error('No code_recommendation human explanation is available for manual review.');
     const replayEvidence = (proposal.replay_evidence || []).filter((row) => row?.correction_id === route.correction_id);
@@ -61,13 +67,28 @@ function markBlocked(attempt, reason) {
     return next;
 }
 
+async function readLiveOwner(options, attemptId) {
+    const reader = options.readCurrentProposal || options.store?.readCurrentProposal;
+    let result;
+    if (typeof reader === 'function') result = await reader(options.client, options.proposal.id);
+    else if (options.client?.from) {
+        result = await options.client.from('prompt_proposals').select('*').eq('id', options.proposal.id).single();
+        if (result?.error) throw new Error(`live owner read failed: ${result.error.message}`);
+        result = result?.data;
+    } else return null;
+    const claim = result?.eval_summary?.code_candidate;
+    if (!claim || claim.attempt_id !== attemptId || claim.status !== 'running') throw new Error('live owner claim is missing, changed, or no longer running');
+    return result;
+}
+
 async function prepareManualCodeProposalReview(options = {}) {
     const boundGroup = selectBoundHumanExplanationGroup(options.proposal, options.correctionId);
     const heldDelivery = deliveryHeld(options.proposal);
-    const prepared = await (options.prepareAttempt || prepareCodeProposalAttempt)({
-        ...options,
-        proposal: options.proposal,
-    });
+    const selectedHeld = heldDelivery.some((row) => row.correction_id === boundGroup.correctionId);
+    const prepared = options.existingAttempt || await (options.prepareAttempt || prepareCodeProposalAttempt)({ ...options, proposal: options.proposal });
+    if (selectedHeld) {
+        return { status: 'ready_for_manual_review', reason: 'delivery_verification_required', providerCalls: 0, attemptId: prepared.attemptId, artifactDirectory: prepared.artifactDirectory, boundGroup, deliveryHolds: heldDelivery, progress: JSON.parse(fs.readFileSync(path.join(prepared.artifactDirectory, 'candidate', 'progress.json'), 'utf8')) };
+    }
     const authorization = options.authorization || (options.authorizationFile && fs.existsSync(options.authorizationFile)
         ? JSON.parse(fs.readFileSync(options.authorizationFile, 'utf8'))
         : null);
@@ -75,11 +96,37 @@ async function prepareManualCodeProposalReview(options = {}) {
         const progress = markBlocked(prepared, 'code_candidate_authorization_required');
         return { status: 'blocked', reason: 'code_candidate_authorization_required', providerCalls: 0, attemptId: prepared.attemptId, artifactDirectory: prepared.artifactDirectory, boundGroup, deliveryHolds: heldDelivery, progress };
     }
-    if (!options.validatedDraftResult) {
-        return { status: 'ready_for_manual_review', reason: 'validated_draft_required', providerCalls: 0, attemptId: prepared.attemptId, artifactDirectory: prepared.artifactDirectory, boundGroup, deliveryHolds: heldDelivery, progress: JSON.parse(fs.readFileSync(path.join(prepared.artifactDirectory, 'candidate', 'progress.json'), 'utf8')) };
+    let validatedDraftResult = options.validatedDraftResult;
+    let providerCalls = 0;
+    if (!validatedDraftResult) {
+        if (!options.authorizationFile || !options.stateFile || !options.messages || !options.trustedRoot || !options.repoRoot) {
+            return { status: 'ready_for_manual_review', reason: 'validated_draft_required', providerCalls: 0, attemptId: prepared.attemptId, artifactDirectory: prepared.artifactDirectory, boundGroup, deliveryHolds: heldDelivery, progress: JSON.parse(fs.readFileSync(path.join(prepared.artifactDirectory, 'candidate', 'progress.json'), 'utf8')) };
+        }
+        const liveOwner = await readLiveOwner(options, prepared.attemptId);
+        try {
+            validatedDraftResult = await (options.dispatchDraft || dispatchCodeDraft)({
+                ...options,
+                ...prepared,
+                ...(liveOwner ? { proposal: liveOwner } : {}),
+                attemptRoot: prepared.artifactDirectory,
+                trustedRoot: options.trustedRoot,
+                sourceRoot: options.repoRoot,
+                parentCampaignSha256: options.proposal.parent_campaign_sha256 || options.proposal.eval_summary?.parent_campaign_sha256,
+                authorizationFile: options.authorizationFile,
+                stateFile: options.stateFile,
+            });
+        } catch (error) {
+            error.providerCallAttempted = true;
+            markBlocked(prepared, 'draft_dispatch_failed');
+            throw error;
+        }
+        providerCalls = 1;
     }
-    if (heldDelivery.length) {
-        return { status: 'ready_for_manual_review', reason: 'delivery_verification_required', providerCalls: 0, attemptId: prepared.attemptId, artifactDirectory: prepared.artifactDirectory, boundGroup, deliveryHolds: heldDelivery, progress: JSON.parse(fs.readFileSync(path.join(prepared.artifactDirectory, 'candidate', 'progress.json'), 'utf8')) };
+    const progressPath = path.join(prepared.artifactDirectory, 'candidate', 'progress.json');
+    const currentProgress = JSON.parse(fs.readFileSync(progressPath, 'utf8'));
+    if (currentProgress.state === 'blocked' && currentProgress.reason === 'code_candidate_authorization_required') {
+        const resumed = { ...currentProgress, phase: 'verification', state: 'blocked', reason: 'authorization_supplied', updated_at: new Date().toISOString() };
+        fs.writeFileSync(progressPath, `${JSON.stringify(resumed, null, 2)}\n`, { mode: 0o600 });
     }
     const lifecycle = await (options.runPreparedLifecycle || runPreparedCodeProposalLifecycle)({
         ...options,
@@ -89,9 +136,10 @@ async function prepareManualCodeProposalReview(options = {}) {
         metadata: prepared.metadata,
         candidateRoot: path.join(prepared.artifactDirectory, 'candidate'),
         handoffPath: path.join(prepared.artifactDirectory, 'c2b-handoff.json'),
-        validatedDraftResult: options.validatedDraftResult,
+        validatedDraftResult,
+        resume: currentProgress.state === 'blocked',
     });
-    return { status: 'ready_for_manual_review', providerCalls: 0, attemptId: prepared.attemptId, artifactDirectory: prepared.artifactDirectory, boundGroup, deliveryHolds: heldDelivery, lifecycle };
+    return { status: 'ready_for_manual_review', providerCalls, attemptId: prepared.attemptId, artifactDirectory: prepared.artifactDirectory, boundGroup, deliveryHolds: heldDelivery, lifecycle };
 }
 
 module.exports = { routedRows, deliveryHeld, selectBoundHumanExplanationGroup, prepareManualCodeProposalReview };

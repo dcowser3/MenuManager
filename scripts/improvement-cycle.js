@@ -45,6 +45,8 @@ require('dotenv').config({ path: path.join(repoRoot, '.env') });
 const { createClient } = require('@supabase/supabase-js');
 const evalHelpers = require('./review-eval-helpers');
 const behaviorArtifactLib = require('./lib/behavior-artifact');
+const { prepareManualCodeProposalReview } = require('./lib/manual-code-proposal-review');
+const { recordCodeVerification } = require('./lib/proposal-verification-store');
 
 const LOCK_PATH = path.join(repoRoot, 'tmp', 'improvement-cycle', '.lock');
 const LOCK_STALE_MS = 6 * 60 * 60 * 1000;
@@ -121,6 +123,46 @@ function acquireLock() {
 
 function releaseLock() {
     try { fs.unlinkSync(LOCK_PATH); } catch { /* best effort */ }
+}
+
+async function triggerManualCodeCandidateReview({ supabase, cycleId, proposalRow, artifactsDir }) {
+    if (!Array.isArray(proposalRow?.code_recommendations) || proposalRow.code_recommendations.length === 0) return null;
+
+    const artifactPath = path.join(artifactsDir, 'manual-code-proposal-review.json');
+    const base = { cycle_id: cycleId, status: 'blocked', provider_calls: 0 };
+    try {
+        const lookup = await supabase.from('prompt_proposals').select('*').eq('cycle_id', cycleId).limit(1);
+        if (lookup.error) throw new Error(`stored proposal lookup failed: ${lookup.error.message}`);
+        const storedProposal = lookup.data?.[0];
+        if (!storedProposal?.id) throw new Error('stored proposal lookup returned no id');
+        const result = await prepareManualCodeProposalReview({
+            client: supabase,
+            store: { recordCodeVerification },
+            proposal: storedProposal,
+            repoRoot,
+            datasetPath: path.join(repoRoot, 'tmp', 'review-eval', 'dataset.jsonl'),
+            outputRoot: path.join(repoRoot, 'tmp', 'code-proposals'),
+            attemptId: `cycle-${cycleId}`,
+            // Real dispatch is intentionally impossible without an explicit
+            // owner-bound authorization/ledger supplied for this run.
+        });
+        const summary = {
+            ...base,
+            status: result.status,
+            reason: result.reason || null,
+            provider_calls: result.providerCalls || 0,
+            attempt_id: result.attemptId || null,
+            delivery_holds: (result.deliveryHolds || []).map((hold) => ({ correction_id: hold.correction_id, status: hold.status })),
+            progress: result.progress ? { phase: result.progress.phase, state: result.progress.state, reason: result.progress.reason || null } : null,
+        };
+        await fsp.writeFile(artifactPath, `${JSON.stringify(summary, null, 2)}\n`, { mode: 0o600 });
+        return summary;
+    } catch (error) {
+        const summary = { ...base, provider_calls: error.providerCallAttempted ? 1 : 0, reason: 'manual_preparation_failed', error: `${error.message || error}`.slice(0, 500) };
+        await fsp.writeFile(artifactPath, `${JSON.stringify(summary, null, 2)}\n`, { mode: 0o600 });
+        console.warn(`Manual code-candidate review was not started: ${summary.error}`);
+        return summary;
+    }
 }
 
 // Minimal HTML escaper for values interpolated into notification emails.
@@ -1722,6 +1764,12 @@ async function main() {
             ({ error: insertError } = await supabase.from('prompt_proposals').insert(proposalRow));
         }
         if (insertError) throw new Error(`Failed to store proposal: ${insertError.message}`);
+
+        // Start the narrow human code-candidate handoff at the stored-proposal
+        // boundary. The helper is fail-closed: without an explicit
+        // authorization/ledger it only claims the owner and records local
+        // blocked progress; it never reaches a provider.
+        await triggerManualCodeCandidateReview({ supabase, cycleId, proposalRow, artifactsDir });
 
         // Supersede: mark the prior pending proposal only after the new row lands.
         const supersedeTargetId = supersedeMeta?.pendingProposalId
