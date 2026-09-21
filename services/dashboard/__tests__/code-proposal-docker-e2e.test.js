@@ -15,7 +15,7 @@ const HASH = (value) => sha(value);
 function makeDockerFixture() {
     const repo = path.resolve(__dirname, '../../..');
     const verification = loadVerificationModule(repo);
-    const root = fs.realpathSync(fs.mkdtempSync('/private/tmp/mm-c2c2-e2e-'));
+    const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'mm-c2c2-e2e-')));
     const trustedRoot = path.join(root, 'tmp', 'code-proposals');
     const attemptRoot = path.join(trustedRoot, 'p-e2e', 'attempt-one');
     const baselineRoot = path.join(attemptRoot, 'baseline');

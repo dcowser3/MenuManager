@@ -16,7 +16,7 @@ const { applyValidatedDraftWithHandoff } = require('../../../scripts/auto-code-p
 
 const HASH = 'a'.repeat(64);
 function fixture(overrides = {}) {
-    const root = fs.realpathSync(fs.mkdtempSync('/private/tmp/mm-lifecycle-'));
+    const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'mm-lifecycle-')));
     const attemptRoot = path.join(root, 'tmp', 'code-proposals', 'p1', 'attempt-one');
     fs.mkdirSync(path.join(attemptRoot, 'candidate'), { recursive: true, mode: 0o700 });
     fs.mkdirSync(path.join(attemptRoot, 'verifier'), { recursive: true, mode: 0o700 });
