@@ -109,6 +109,15 @@ function prepareSupportBundle(repoRoot, attemptRoot) {
     return { root, sha256: crypto.createHash('sha256').update(manifestBytes).digest('hex') };
 }
 
+function reviewDriver(plan, arm) {
+    const prompt = arm === 'baseline' ? plan.baseline_prompt : plan.candidate_prompt;
+    const rules = arm === 'baseline' ? plan.baseline_rules : plan.candidate_rules;
+    const promptHash = arm === 'baseline' ? plan.baseline_prompt_sha256 : plan.candidate_prompt_sha256;
+    const rulesHash = arm === 'baseline' ? plan.baseline_rules_sha256 : plan.candidate_rules_sha256;
+    if (typeof prompt !== 'string' || typeof promptHash !== 'string' || !Array.isArray(rules) || typeof rulesHash !== 'string') throw new Error('C2c2 requires bound prompt/rule driver identities.');
+    return { prompt, prompt_sha256: promptHash, rules, rules_sha256: rulesHash, settings: plan.settings || {}, vocabulary_texts: plan.vocabulary_texts || [], vocabulary_terms: plan.vocabulary_terms || [] };
+}
+
 function buildDockerInvocation(options = {}) {
     const attemptRoot = canonicalDirectory(options.attemptRoot, 'Attempt root');
     const baselineRoot = canonicalDirectory(options.baselineRoot, 'Baseline root', attemptRoot);
@@ -124,13 +133,17 @@ function buildDockerInvocation(options = {}) {
     const support = prepareSupportBundle(trustedRepoRoot, attemptRoot);
     const image = digest(options.imageId, 'image');
     const runtime = digest(options.runtimeId, 'runtime');
-    if (runtime !== FIXED_RUNTIME_ID) throw new Error('C2c2 runtime identity is not derived from the fixed launcher and worker.');
+    // Re-derive on every invocation so a long-lived host process cannot keep
+    // using a stale worker/support runtime after the checked-in boundary moves.
+    const currentRuntimeId = deriveRuntimeId();
+    if (runtime !== currentRuntimeId || FIXED_RUNTIME_ID !== currentRuntimeId) throw new Error('C2c2 runtime identity is not derived from the fixed launcher and worker.');
     if (options.plan && (options.plan.image_id !== image || options.plan.runtime_id !== runtime)) throw new Error('C2c2 image/runtime identity drifted from the frozen plan.');
     const attemptId = safeId(options.attemptId, 'attempt id');
     const phase = safeId(options.phase, 'phase');
     const arm = safeId(options.arm, 'arm');
-    if (!['unit', 'replay', 'delivery'].includes(phase) || !['baseline', 'candidate', 'paired'].includes(arm)) throw new Error('C2c2 phase/arm is not allowlisted.');
+    if (!['unit', 'replay', 'behavior', 'delivery'].includes(phase) || !['baseline', 'candidate', 'paired'].includes(arm)) throw new Error('C2c2 phase/arm is not allowlisted.');
     if (phase === 'delivery' && arm !== 'paired') throw new Error('Delivery workers must use the paired arm.');
+    if (phase === 'behavior' && arm !== 'candidate') throw new Error('Behavior workers must use the candidate arm.');
     if (!Number.isInteger(options.seed) || options.seed < 0) throw new Error('C2c2 seed is invalid.');
     const name = buildContainerName(attemptId, options.containerNonce);
     const requestPath = path.join(outputRoot, `request-${name}.json`);
@@ -170,12 +183,12 @@ function parseWorkerOutput(stdout, stderr, spec = null) {
     if (spec) {
         if (typeof value.phase !== 'string' || typeof value.arm !== 'string' || !Number.isInteger(value.seed) || typeof value.run_id !== 'string' || typeof value.runtime_id !== 'string' || typeof value.image_id !== 'string') throw new Error('C2c2 worker protocol identity types are invalid.');
         if (value.phase !== spec.phase || value.arm !== spec.arm || value.seed !== spec.seed || value.run_id !== spec.runId || value.runtime_id !== spec.runtime || value.image_id !== spec.image) throw new Error('C2c2 worker identity does not match its immutable invocation.');
-        const allowed = new Set(['protocol_version', 'status', 'phase', 'arm', 'seed', 'run_id', 'runtime_id', 'image_id', 'error', 'blocked', 'exit_code', 'report', 'report_id', 'output', 'response', 'contractComplete', 'fenceMissing', 'composite', 'extraEdits', 'rule_activations', 'driver', 'baseline_submitted_text', 'candidate_submitted_text', 'baseline_submitted_html', 'candidate_submitted_html', 'baseline_submitted_html_text', 'candidate_submitted_html_text', 'baseline_source_hashes', 'candidate_source_hashes', 'baseline_browser_version', 'candidate_browser_version', 'quill_version']);
+        const allowed = new Set(['protocol_version', 'status', 'phase', 'arm', 'seed', 'run_id', 'runtime_id', 'image_id', 'error', 'blocked', 'exit_code', 'report', 'report_id', 'output', 'response', 'diagnostics', 'outcomes', 'driver', 'baseline_submitted_text', 'candidate_submitted_text', 'baseline_submitted_html', 'candidate_submitted_html', 'baseline_submitted_html_text', 'candidate_submitted_html_text', 'baseline_source_hashes', 'candidate_source_hashes', 'baseline_browser_version', 'candidate_browser_version', 'quill_version']);
         if (Object.keys(value).some((key) => !allowed.has(key))) throw new Error('C2c2 worker report contains an unallowlisted field.');
         if (value.status === 'failed' && (typeof value.error !== 'string' || (value.blocked !== undefined && typeof value.blocked !== 'boolean'))) throw new Error('C2c2 worker failure protocol is invalid.');
         if (value.status === 'ok' && value.phase === 'unit' && (!Number.isInteger(value.exit_code) || !value.report || typeof value.report !== 'object' || Array.isArray(value.report))) throw new Error('C2c2 unit report protocol is invalid.');
     }
-    if (value.status === 'ok' && !('exit_code' in value || 'report_id' in value || value.driver === 'form-submit-v1')) throw new Error('C2c2 worker success report is incomplete.');
+    if (value.status === 'ok' && !('exit_code' in value || 'report_id' in value || ['form-submit-v1', 'review-pipeline-v1', 'review-pipeline-behavior-v1'].includes(value.driver))) throw new Error('C2c2 worker success report is incomplete.');
     return value;
 }
 
@@ -232,7 +245,8 @@ function createDockerC2c2Executors(options = {}) {
     const frozen = { ...options };
     return Object.freeze({
         executor: (input) => runDockerInvocation(buildDockerInvocation({ ...frozen, phase: 'unit', arm: input.arm, seed: 0, attemptRoot: frozen.attemptRoot, baselineRoot: frozen.baselineRoot, candidateRoot: frozen.candidateRoot, testBundleRoot: input.testBundleRoot, outputRoot: frozen.outputRoot, plan: input.plan, request: { phase: 'unit', arm: input.arm, inventory: input.inventory, plan: input.plan } }), { timeoutMs: frozen.timeoutMs, spawn: frozen.spawn, inspectImage: frozen.inspectImage }),
-        replayExecutor: (input) => runDockerInvocation(buildDockerInvocation({ ...frozen, phase: 'replay', arm: input.arm, seed: input.seed, runId: input.runId, baselineRoot: frozen.baselineRoot, candidateRoot: frozen.candidateRoot, testBundleRoot: input.testBundleRoot, outputRoot: frozen.outputRoot, request: { phase: 'replay', arm: input.arm, seed: input.seed, run_id: input.runId, case: input.case, plan: input.plan } }), { timeoutMs: frozen.timeoutMs, spawn: frozen.spawn, inspectImage: frozen.inspectImage }),
+        replayExecutor: (input) => { const { ground_truth, ...safeCase } = input.case || {}; return runDockerInvocation(buildDockerInvocation({ ...frozen, phase: 'replay', arm: input.arm, seed: input.seed, runId: input.runId, baselineRoot: frozen.baselineRoot, candidateRoot: frozen.candidateRoot, testBundleRoot: input.testBundleRoot, outputRoot: frozen.outputRoot, request: { phase: 'replay', arm: input.arm, seed: input.seed, run_id: input.runId, case: safeCase, driver: reviewDriver(input.plan, input.arm), inventory: input.plan.test_inventory, plan: input.plan } }), { timeoutMs: frozen.timeoutMs, spawn: frozen.spawn, inspectImage: frozen.inspectImage }); },
+        behaviorExecutor: (input) => runDockerInvocation(buildDockerInvocation({ ...frozen, phase: 'behavior', arm: 'candidate', seed: input.seed || 0, runId: input.runId || `${frozen.attemptId}:behavior`, baselineRoot: frozen.baselineRoot, candidateRoot: frozen.candidateRoot, testBundleRoot: input.plan.paths.testBundle, outputRoot: frozen.outputRoot, request: { phase: 'behavior', arm: 'candidate', seed: input.seed || 0, run_id: input.runId || `${frozen.attemptId}:behavior`, behavior: input.behavior, inventory: input.plan.test_inventory, driver: reviewDriver(input.plan, 'candidate'), plan: input.plan } }), { timeoutMs: frozen.timeoutMs, spawn: frozen.spawn, inspectImage: frozen.inspectImage }),
         deliveryExecutor: (input) => runDockerInvocation(buildDockerInvocation({ ...frozen, phase: 'delivery', arm: 'paired', seed: input.seed, runId: input.runId, baselineRoot: frozen.baselineRoot, candidateRoot: frozen.candidateRoot, testBundleRoot: input.plan.paths.testBundle, outputRoot: frozen.outputRoot, request: { phase: 'delivery', arm: 'paired', seed: input.seed, run_id: input.runId, correction: input.correction, plan: input.plan } }), { timeoutMs: frozen.timeoutMs, spawn: frozen.spawn, inspectImage: frozen.inspectImage }),
     });
 }

@@ -26,13 +26,20 @@ candidate must pass the complete identical inventory.
 
 The assembled proof is checked by the repository's real B5-A integrity
 verifier, including combined baseline/candidate rules, prompt, vocabulary,
-expectation, settings, runtime and surviving-rule evidence. Two fresh paired
-replay runs are derived from injected replay results. Every
+expectation, settings, runtime and surviving-rule evidence. Under C2c2, two
+fresh paired replay seeds execute the selected arm's actual dashboard review
+pipeline in the fixed image with a test-only echo adapter; the host parses and
+recomputes the response contract, fence, similarity, correction score, extra
+edits, and run identity. The worker never receives ground truth or expected
+outcomes and returns only delivered response/output bytes and bounded
+diagnostics. Every
 case and correction must have a complete response contract, no fence error,
 fresh report identity, no regression or extra-edit widening, and corrected
-candidate output. Delivery-mismatch corrections require injected form-submit
-evidence. B6-D1 outcomes are recomputed from the frozen artifact and injected
-candidate evaluator output hashes.
+candidate output. Delivery-mismatch corrections remain blocked unless the fixed
+delivery driver is available. B6-D1 outcomes execute every frozen behavior case
+through the same candidate review pipeline and compare only host-derived output
+hashes to the frozen artifact; mixed-rule proofs block when no trustworthy
+activations are produced.
 
 The repository verifier is always loaded from the trusted checkout. An
 implementation-hash seam is accepted only from explicit test-mode callers;
@@ -65,6 +72,8 @@ under uid/gid 65532 with only SETUID/SETGID retained for that drop. Both
 JavaScript and TypeScript inventories produce real Jest JSON reports; no custom
 same-process test contract or caller-provided transformer is accepted.
 `runCodeProposalProofWithDocker` rejects all caller executors and evaluators;
-the launcher cannot attach proof or self-attest. Replay and delivery currently
-return an explicit blocked protocol result because no fixed repository-owned
-drivers exist yet; they never copy expected or corrected text into evidence.
+the launcher cannot attach proof or self-attest. Replay and behavior use the
+repository-owned review-pipeline driver; delivery still returns an explicit
+blocked protocol result because no fixed repository-owned delivery driver
+exists. Support manifests reject unexpected files and the runtime identity is
+re-derived before every invocation.

@@ -43,6 +43,14 @@ function hashFile(file) {
     return crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 }
 
+function hashValue(value) {
+    return crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex');
+}
+
+function hashText(value) {
+    return crypto.createHash('sha256').update(value).digest('hex');
+}
+
 function verifySupportBundle(request) {
     const manifestPath = '/runner/support/manifest.json';
     if (hashFile(manifestPath) !== request.plan.support_bundle_sha256) throw new Error('trusted support bundle identity is stale');
@@ -51,6 +59,17 @@ function verifySupportBundle(request) {
     const entries = manifest.files.map((entry) => entry.path).sort();
     if (manifest.files.some((entry) => !entry || !SUPPORT_FILES.has(entry.path) || path.posix.normalize(entry.path) !== entry.path || !Number.isInteger(entry.bytes) || hashFile(path.join('/runner/support', entry.path)) !== entry.sha256)) throw new Error('trusted support file is missing or tampered');
     if (new Set(entries).size !== entries.length) throw new Error('trusted support manifest contains duplicate files');
+    const allowed = new Set(['manifest.json', ...manifest.files.map((entry) => entry.path)]);
+    const walk = (root, prefix = '') => {
+        for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+            const relative = prefix ? `${prefix}/${entry.name}` : entry.name;
+            const full = path.join(root, entry.name);
+            if (entry.isSymbolicLink()) throw new Error('trusted support bundle contains a symlink');
+            if (entry.isDirectory()) walk(full, relative);
+            else if (!allowed.has(relative)) throw new Error(`trusted support bundle contains an unexpected file: ${relative}`);
+        }
+    };
+    walk('/runner/support');
     return manifest.files;
 }
 
@@ -117,7 +136,83 @@ function runFixedJestTests(workspace, inventory) {
     return { exit_code: Number.isInteger(result.status) ? result.status : 1, report };
 }
 
-if (!['unit', 'replay', 'delivery'].includes(phase) || !['baseline', 'candidate', 'paired'].includes(arm)
+function buildEchoFeedback(text) {
+    return `=== CORRECTED MENU ===\n${text}\n=== END CORRECTED MENU ===\n=== SUGGESTIONS ===\n[]\n=== END SUGGESTIONS ===`;
+}
+
+async function runPipeline(workspace, input, driver) {
+    require('/app/node_modules/ts-node/register/transpile-only');
+    const quiet = { log: console.log, warn: console.warn, error: console.error };
+    console.log = () => {};
+    console.warn = () => {};
+    console.error = () => {};
+    try {
+        const contextModule = require(path.join(workspace, 'services/dashboard/lib/review-context.ts'));
+        const pipeline = require(path.join(workspace, 'services/dashboard/lib/review-pipeline.ts'));
+        const context = contextModule.reviewContextOptions({ ...(input.context || {}), menuContent: input.raw_input });
+        const response = buildEchoFeedback(input.raw_input);
+        const result = await pipeline.runFullReviewPipeline(input.raw_input, { ...context, basePrompt: driver.prompt, acceptedCorrectionRules: driver.rules, approvedVocabularyTexts: driver.vocabulary_texts || [], approvedVocabularyTerms: driver.vocabulary_terms || [], model: 'test-only', settings: driver.settings, precheckEnabled: true }, async () => response);
+        return { output: result.finalCorrectedMenu, response, diagnostics: { fenceMissing: result.post?.parsed?.fenceMissing === true, reviewStatus: result.reviewStatus, outputHash: result.outputHash } };
+    } finally {
+        console.log = quiet.log;
+        console.warn = quiet.warn;
+        console.error = quiet.error;
+    }
+}
+
+function runPipelineAsCandidate(workspace, input, driver) {
+    const requestFile = `/tmp/c2c2-pipeline-${process.pid}-${crypto.randomBytes(6).toString('hex')}.json`;
+    fs.writeFileSync(requestFile, JSON.stringify({ workspace, input, driver }), { mode: 0o444 });
+    const child = spawnSync('/usr/bin/setpriv', ['--reuid=65532', '--regid=65532', '--clear-groups', '--', '/usr/local/bin/node', '/runner/worker.js'], {
+        cwd: workspace,
+        env: { HOME: '/tmp', NODE_ENV: 'test', PATH: '/usr/local/bin:/usr/bin:/bin', C2C2_PIPELINE_CHILD: '1', C2C2_PIPELINE_REQUEST: requestFile },
+        encoding: 'utf8', maxBuffer: 1024 * 1024,
+    });
+    try { fs.unlinkSync(requestFile); } catch { /* bounded temporary cleanup */ }
+    if (child.status !== 0) throw new Error(`candidate pipeline exited with status ${child.status}: ${(child.stderr || child.stdout || '').slice(0, 500)}`);
+    try { return JSON.parse(child.stdout); } catch { throw new Error('candidate pipeline returned malformed output'); }
+}
+
+function preparePipelineWorkspace(workspace) {
+    if (!fs.existsSync(path.join(workspace, 'node_modules'))) fs.symlinkSync('/app/node_modules', path.join(workspace, 'node_modules'), 'dir');
+    lockWorkspace(workspace);
+}
+
+function validateDriver(request) {
+    const driver = request.driver;
+    if (!driver || typeof driver.prompt !== 'string' || typeof driver.prompt_sha256 !== 'string' || hashText(driver.prompt) !== driver.prompt_sha256 || !Array.isArray(driver.rules) || typeof driver.rules_sha256 !== 'string' || hashValue(driver.rules) !== driver.rules_sha256 || !driver.settings || typeof driver.settings !== 'object') throw new Error('fixed review driver identity is invalid');
+    return driver;
+}
+
+async function runFixedReplay(request) {
+    const root = arm === 'baseline' ? '/runner/baseline' : '/runner/candidate';
+    const workspace = materializeWorkspace(root, request);
+    preparePipelineWorkspace(workspace);
+    const driver = validateDriver(request);
+    const result = runPipelineAsCandidate(workspace, request.case, driver);
+    const reportId = hashValue({ arm, seed, run_id: runId, case_id: request.case.case_id, input_hash: hashValue(request.case.raw_input), output_hash: hashValue(result.output), response_hash: hashValue(result.response) });
+    return { ...result, report_id: reportId };
+}
+
+async function runFixedBehavior(request) {
+    const workspace = materializeWorkspace('/runner/candidate', request);
+    preparePipelineWorkspace(workspace);
+    const driver = validateDriver(request);
+    if (!request.behavior || !Array.isArray(request.behavior.tests)) throw new Error('fixed behavior artifact is invalid');
+    const outcomes = [];
+    for (const test of request.behavior.tests) {
+        const result = runPipelineAsCandidate(workspace, { raw_input: test.input, context: test.context || {} }, driver);
+        outcomes.push({ id: test.id, output: result.output, output_hash: hashValue(result.output), response_hash: hashValue(result.response) });
+    }
+    return { outcomes };
+}
+
+if (process.env.C2C2_PIPELINE_CHILD === '1') {
+    try {
+        const payload = JSON.parse(fs.readFileSync(process.env.C2C2_PIPELINE_REQUEST, 'utf8'));
+        runPipeline(payload.workspace, payload.input, payload.driver).then((result) => process.stdout.write(JSON.stringify(result))).catch((error) => { process.stderr.write(`${error.message || error}`); process.exitCode = 1; });
+    } catch (error) { process.stderr.write(`${error.message || error}`); process.exitCode = 1; }
+} else if (!['unit', 'replay', 'behavior', 'delivery'].includes(phase) || !['baseline', 'candidate', 'paired'].includes(arm)
     || !Number.isInteger(seed) || typeof runId !== 'string' || !/^sha256:[a-f0-9]{64}$|^[a-f0-9]{64}$/.test(runtimeId || '') || !/^sha256:[a-f0-9]{64}$|^[a-f0-9]{64}$/.test(imageId || '')) {
     fail('invalid fixed worker environment');
 } else {
@@ -130,7 +225,10 @@ if (!['unit', 'replay', 'delivery'].includes(phase) || !['baseline', 'candidate'
             const result = runFixedJestTests(workspace, request.inventory);
             process.stdout.write(JSON.stringify({ protocol_version: 1, status: 'ok', phase, arm, seed, run_id: runId, runtime_id: runtimeId, image_id: imageId, exit_code: result.exit_code, report: result.report }));
         } else if (phase === 'replay') {
-            blocked('fixed repository-owned replay driver is not available; proof is blocked');
+            if (!request.case || typeof request.case.case_id !== 'string' || typeof request.case.raw_input !== 'string') throw new Error('invalid frozen replay case');
+            runFixedReplay(request).then((result) => process.stdout.write(JSON.stringify({ protocol_version: 1, status: 'ok', phase, arm, seed, run_id: runId, runtime_id: runtimeId, image_id: imageId, report_id: result.report_id, output: result.output, response: result.response, diagnostics: result.diagnostics, driver: 'review-pipeline-v1' }))).catch((error) => { fail(error.message || error); });
+        } else if (phase === 'behavior') {
+            runFixedBehavior(request).then((result) => process.stdout.write(JSON.stringify({ protocol_version: 1, status: 'ok', phase, arm, seed, run_id: runId, runtime_id: runtimeId, image_id: imageId, outcomes: result.outcomes, driver: 'review-pipeline-behavior-v1' }))).catch((error) => { fail(error.message || error); });
         } else {
             blocked('fixed repository-owned delivery driver is not available; proof is blocked');
         }

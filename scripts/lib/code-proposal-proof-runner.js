@@ -81,6 +81,12 @@ function loadBehaviorModule(repoRoot) {
     return require(path.join(repoRoot, 'services/dashboard/dist/lib/learning-behavior-tests'));
 }
 
+function loadTrustedTsModule(repoRoot, relative) {
+    try { require(require.resolve('ts-node/register/transpile-only', { paths: [repoRoot] })); } catch { /* dist fallback below */ }
+    const source = path.join(repoRoot, `${relative}.ts`);
+    return fs.existsSync(source) ? require(source) : require(path.join(repoRoot, `${relative}.js`));
+}
+
 function walkCandidateTests(root) {
     const found = [];
     const visit = (relative) => {
@@ -199,7 +205,25 @@ function writeProgress(attemptRoot, metadata, phase, state, extra = {}, progress
     return record;
 }
 
-function validateReplayResult(value, label) {
+function validateReplayResult(value, label, row = null, options = {}) {
+    if (options.strict === true) {
+        if (!row || typeof row.raw_input !== 'string' || typeof row.ground_truth !== 'string' || typeof value?.response !== 'string' || typeof value.output !== 'string') throw new Error(`${label} replay result is missing raw response evidence.`);
+        const repoRoot = path.resolve(__dirname, '../..');
+        const pipeline = loadTrustedTsModule(repoRoot, 'services/dashboard/lib/review-pipeline');
+        const scoring = loadTrustedTsModule(repoRoot, 'services/differ/lib/eval-scoring');
+        const similarity = loadTrustedTsModule(repoRoot, 'services/dashboard/lib/text-similarity');
+        const parsed = pipeline.parseAIResponse(value.response, row.raw_input);
+        if (parsed.correctedMenu !== value.output) throw new Error(`${label} replay output does not match the trusted parsed response.`);
+        const truthStyle = similarity.normalizeComparable(row.ground_truth, { normalizeRawAsteriskStyle: true });
+        const outputStyle = similarity.normalizeComparable(parsed.correctedMenu, { normalizeRawAsteriskStyle: true });
+        const corrections = scoring.scoreCorrections(row.raw_input, parsed.correctedMenu, row.ground_truth);
+        const composite = parsed.fenceMissing ? 0 : scoring.compositeCaseScore(similarity.boundedLevenshteinSimilarity(outputStyle, truthStyle), corrections);
+        const identity = options.identity;
+        if (!identity || typeof identity.run_id !== 'string' || !Number.isInteger(identity.seed) || typeof identity.arm !== 'string' || typeof identity.case_id !== 'string') throw new Error(`${label} replay identity is missing.`);
+        const reportId = hashBytes(Buffer.from(JSON.stringify({ arm: identity.arm, seed: identity.seed, run_id: identity.run_id, case_id: identity.case_id, input_hash: hashJson(row.raw_input), output_hash: hashJson(parsed.correctedMenu), response_hash: hashJson(value.response) })));
+        if (value.report_id !== reportId && value.reportId !== reportId) throw new Error(`${label} replay report identity does not match the frozen run.`);
+        return { output: parsed.correctedMenu, report_id: reportId, contractComplete: !parsed.fenceMissing, fenceMissing: parsed.fenceMissing, composite, extraEdits: corrections.extra.length, rule_activations: [] };
+    }
     if (!value || typeof value.output !== 'string' || value.contractComplete !== true || value.fenceMissing !== false
         || !Number.isFinite(value.composite) || value.composite < 0 || value.composite > 1
         || !Number.isInteger(value.extraEdits) || value.extraEdits < 0 || typeof (value.report_id || value.reportId) !== 'string' || !(value.report_id || value.reportId).trim()) throw new Error(`${label} replay result is incomplete or has an invalid response contract.`);
@@ -251,7 +275,11 @@ function revalidatePlan(planPath, plan, metadata, attemptRoot, baselineRoot, can
     if (hashBytes(regularFile(path.join(attemptRoot, 'dataset.jsonl'), attemptRoot, 'Frozen dataset')) !== plan.dataset_sha256
         || hashBytes(regularFile(path.join(attemptRoot, 'prompt.txt'), attemptRoot, 'Prompt artifact')) !== plan.prompt_sha256
         || hashBytes(regularFile(path.join(attemptRoot, 'rules.json'), attemptRoot, 'Accepted rules')) !== plan.rules_sha256
-        || behaviorHash !== plan.behavior_sha256 || hashBytes(Buffer.from(JSON.stringify(behaviorBody))) !== behaviorHash) throw new Error('Frozen C1 input identity changed after plan creation.');
+        || behaviorHash !== plan.behavior_sha256 || hashBytes(Buffer.from(JSON.stringify(behaviorBody))) !== behaviorHash
+        || hashBytes(Buffer.from(plan.baseline_prompt || '')) !== plan.baseline_prompt_sha256
+        || hashBytes(Buffer.from(plan.candidate_prompt || '')) !== plan.candidate_prompt_sha256
+        || hashBytes(Buffer.from(JSON.stringify(plan.baseline_rules || []))) !== plan.baseline_rules_sha256
+        || hashBytes(Buffer.from(JSON.stringify(plan.candidate_rules || []))) !== plan.candidate_rules_sha256) throw new Error('Frozen C1 input identity changed after plan creation.');
     const handoffBytes = regularFile(plan.handoff_path, attemptRoot, 'C2b handoff');
     if (hashBytes(handoffBytes) !== plan.c2b_handoff_sha256) throw new Error('C2b handoff changed after plan creation.');
     const handoffInfo = readC2bHandoff(plan.handoff_path, attemptRoot, { ...metadata, authorization_hash: plan.authorization_hash, scope_hash: plan.scope_hash, c2b_handoff_sha256: plan.c2b_handoff_sha256, candidate_source_sha256: plan.candidate_source_sha256, draft_patch_sha256: plan.draft_patch_sha256, draft_content_sha256: plan.draft_content_sha256, draft_response_sha256: plan.draft_response_sha256 });
@@ -277,7 +305,7 @@ function revalidatePlan(planPath, plan, metadata, attemptRoot, baselineRoot, can
     for (const entry of manifest.files || []) if (hashBytes(regularFile(path.join(bundle.root, entry.path), bundle.root, `Test bundle ${entry.path}`)) !== entry.sha256) throw new Error(`Test bundle bytes changed after plan creation: ${entry.path}.`);
 }
 
-function makePlan({ attemptRoot, metadata, proposal, baselineHash, candidateHash, parentCampaignSha256, imageId, runtimeId, replayPolicyVersion, caseIds, seeds, inventory, corrections, paths, handoffPath, handoffHash, authorizationHash, scopeHash, draftPatchHash, draftContentHash, draftResponseHash, datasetHash, promptHash, rulesHash, behaviorHash, testBundleHash, runnerHash, testContentHash, model, vocabularyHash, expectationsHash, settings, baselineRules, candidateRules, deliveryDriverHash }) {
+function makePlan({ attemptRoot, metadata, proposal, baselineHash, candidateHash, parentCampaignSha256, imageId, runtimeId, replayPolicyVersion, caseIds, seeds, inventory, corrections, paths, handoffPath, handoffHash, authorizationHash, scopeHash, draftPatchHash, draftContentHash, draftResponseHash, datasetHash, promptHash, rulesHash, behaviorHash, testBundleHash, runnerHash, testContentHash, model, vocabularyHash, expectationsHash, settings, baselineRules, candidateRules, baselinePrompt, candidatePrompt, deliveryDriverHash }) {
     const planBody = {
         schema_version: 1, test_only: true, attempt_id: metadata.attempt_id,
         proposal_sha256: metadata.proposal_sha256, accepted_rules_sha256: metadata.accepted_rules_sha256, parent_campaign_sha256: parentCampaignSha256,
@@ -289,6 +317,9 @@ function makePlan({ attemptRoot, metadata, proposal, baselineHash, candidateHash
         scope_hash: scopeHash, draft_patch_sha256: draftPatchHash, draft_content_sha256: draftContentHash, draft_response_sha256: draftResponseHash,
         tests_content_sha256: testContentHash, model, vocabulary_sha256: vocabularyHash, expectations_sha256: expectationsHash,
         settings: canonical(settings || {}), baseline_rules: baselineRules, candidate_rules: candidateRules,
+        baseline_prompt: baselinePrompt, candidate_prompt: candidatePrompt,
+        baseline_prompt_sha256: hashBytes(Buffer.from(baselinePrompt || '')), candidate_prompt_sha256: hashBytes(Buffer.from(candidatePrompt || '')),
+        baseline_rules_sha256: hashBytes(Buffer.from(JSON.stringify(baselineRules || []))), candidate_rules_sha256: hashBytes(Buffer.from(JSON.stringify(candidateRules || []))),
         delivery_driver_sha256: deliveryDriverHash || null,
         case_ids: [...caseIds], seeds: [...seeds], test_inventory: [...inventory], corrections,
         paths,
@@ -387,13 +418,15 @@ async function runCodeProposalProof(options = {}) {
     const baselineRules = Array.isArray(rulesPayload) ? rulesPayload : rulesPayload.rules;
     if (!Array.isArray(baselineRules) || typeof trustedVerification.mergedVerificationRules !== 'function') throw new Error('Frozen accepted-rule artifact is incomplete.');
     const candidateRules = trustedVerification.mergedVerificationRules(baselineRules, frozenProposal.proposed_rules || []);
+    const baselinePrompt = regularFile(path.join(attemptRoot, 'prompt.txt'), attemptRoot, 'Prompt artifact').toString('utf8');
+    const candidatePrompt = typeof frozenProposal.proposed_prompt === 'string' && frozenProposal.proposed_prompt.trim() ? frozenProposal.proposed_prompt : baselinePrompt;
     const model = `${options.model || 'test-only'}`;
     const vocabularyHash = options.vocabularySha256 || metadata.vocabulary_sha256;
     const expectationsHash = options.expectationsSha256 || metadata.expectations_sha256;
     const settings = JSON.parse(JSON.stringify(options.settings || {}));
     if (!isDigest(vocabularyHash) || !isDigest(expectationsHash)) throw new Error('C2c1 requires frozen vocabulary and expectation identities.');
     const deliveryDriverHash = options.deliveryDriverSha256 || null;
-    const plan = makePlan({ attemptRoot, metadata, proposal: frozenProposal, baselineHash, candidateHash, parentCampaignSha256, imageId: options.imageId, runtimeId: options.runtimeId, replayPolicyVersion: options.replayPolicyVersion, caseIds, seeds, inventory, corrections: allCorrections, paths: { ...paths, testBundle: bundle.root, testBundleManifest: bundle.manifestPath }, handoffPath: path.resolve(options.c2bHandoffFile), handoffHash: handoffInfo.handoffHash, authorizationHash: handoffInfo.handoff.authorization_hash, scopeHash: handoffInfo.handoff.scope_hash, draftPatchHash: handoffInfo.handoff.draft.patch_sha256, draftContentHash: handoffInfo.handoff.draft.content_sha256, draftResponseHash: handoffInfo.handoff.draft.response_sha256 || handoffInfo.handoff.response_sha256 || handoffInfo.handoff.response.body_sha256, datasetHash: metadata.expected_dataset_sha256, promptHash: metadata.prompt_sha256, rulesHash: metadata.rules_file_sha256 || hashBytes(rulesBytes), behaviorHash: metadata.behavior_tests_sha256, testBundleHash: bundle.sha256, runnerHash, testContentHash: bundle.contentSha256, model, vocabularyHash, expectationsHash, settings, baselineRules, candidateRules, deliveryDriverHash });
+    const plan = makePlan({ attemptRoot, metadata, proposal: frozenProposal, baselineHash, candidateHash, parentCampaignSha256, imageId: options.imageId, runtimeId: options.runtimeId, replayPolicyVersion: options.replayPolicyVersion, caseIds, seeds, inventory, corrections: allCorrections, paths: { ...paths, testBundle: bundle.root, testBundleManifest: bundle.manifestPath }, handoffPath: path.resolve(options.c2bHandoffFile), handoffHash: handoffInfo.handoffHash, authorizationHash: handoffInfo.handoff.authorization_hash, scopeHash: handoffInfo.handoff.scope_hash, draftPatchHash: handoffInfo.handoff.draft.patch_sha256, draftContentHash: handoffInfo.handoff.draft.content_sha256, draftResponseHash: handoffInfo.handoff.draft.response_sha256 || handoffInfo.handoff.response_sha256 || handoffInfo.handoff.response.body_sha256, datasetHash: metadata.expected_dataset_sha256, promptHash: metadata.prompt_sha256, rulesHash: metadata.rules_file_sha256 || hashBytes(rulesBytes), behaviorHash: metadata.behavior_tests_sha256, testBundleHash: bundle.sha256, runnerHash, testContentHash: bundle.contentSha256, model, vocabularyHash, expectationsHash, settings, baselineRules, candidateRules, baselinePrompt, candidatePrompt, deliveryDriverHash });
     atomicWrite(paths.plan, `${JSON.stringify(plan, null, 2)}\n`);
     const progress = (phase, state, extra = {}) => writeProgress(attemptRoot, metadata, phase, state, { total: caseIds.length, ...extra }, options.progressWriter);
     let attached = false;
@@ -418,7 +451,7 @@ async function runCodeProposalProof(options = {}) {
             for (const arm of ['baseline', 'candidate']) {
                 for (const row of cases) {
                     const raw = await invokeWithTimeout(options.replayExecutor, { arm, root: arm === 'baseline' ? baselineRoot : candidateRoot, seed, runId: run.run_id, case: { ...row }, testBundleRoot: bundle.root, testBundleSha256: bundle.sha256, plan: { ...plan } }, timeoutMs, `${arm} replay executor`);
-                    const validated = validateReplayResult(raw, `${arm} ${row.case_id}`);
+                    const validated = validateReplayResult(raw, `${arm} ${row.case_id}`, row, { strict: options.strictReplay === true, identity: { arm, seed, run_id: run.run_id, case_id: row.case_id } });
                     if (replayIdentities.has(validated.report_id)) throw new Error(`Replay report identity was reused: ${validated.report_id}.`);
                     replayIdentities.add(validated.report_id);
                     results[arm].set(row.case_id, validated);
@@ -430,6 +463,7 @@ async function runCodeProposalProof(options = {}) {
                 run.cases.push({ case_id: row.case_id, baseline_composite: baseline.composite, candidate_composite: candidate.composite, baseline_fence_missing: false, candidate_fence_missing: false, baseline_contract_complete: true, candidate_contract_complete: true, baseline_extra_edits: baseline.extraEdits, candidate_extra_edits: candidate.extraEdits });
             }
             run.rule_activations = [...results.candidate.values()].flatMap((result) => result.rule_activations || []);
+            if (options.strictReplay === true && nonCodeRoutes.length && run.rule_activations.length === 0) throw new Error('Mixed-rule replay lacks trustworthy rule activation evidence.');
             run.combined_corrections = [];
             for (const correction of allCorrections) {
                 const baseline = results.baseline.get(correction.case_id), candidate = results.candidate.get(correction.case_id);
@@ -450,8 +484,23 @@ async function runCodeProposalProof(options = {}) {
         revalidatePlan(paths.plan, plan, metadata, attemptRoot, baselineRoot, candidateRoot, bundle, trustedSuites, historicalTests, candidateTests, runtimeVerification, options.proposal, trustedVerification);
         progress('holdout', 'active', { completed: caseIds.length * seeds.length, total: caseIds.length * seeds.length });
         const behaviorArtifact = checked.behavior;
-        if (!behaviorArtifact || typeof options.behaviorEvaluator !== 'function' || !behaviorModule?.executeBehaviorTests) throw new Error('Independent B6-D1 behavior evaluation requires an injected evaluator.');
-        const behaviorCandidate = await invokeWithTimeout(() => behaviorModule.executeBehaviorTests(behaviorArtifact, options.behaviorEvaluator), {}, timeoutMs, 'Behavior executor');
+        if (!behaviorArtifact || !behaviorModule) throw new Error('Independent B6-D1 behavior evaluation requires the frozen artifact.');
+        let behaviorCandidate;
+        if (typeof options.behaviorExecutor === 'function') {
+            const rawBehavior = await invokeWithTimeout(options.behaviorExecutor, { arm: 'candidate', seed: 0, runId: `${metadata.attempt_id}:behavior`, behavior: behaviorArtifact, plan: { ...plan } }, timeoutMs, 'Behavior executor');
+            behaviorModule.validateBehaviorArtifact(behaviorArtifact);
+            if (!rawBehavior || !Array.isArray(rawBehavior.outcomes) || rawBehavior.outcomes.length !== behaviorArtifact.tests.length) throw new Error('Behavior executor returned an incomplete output set.');
+            const byId = new Map(rawBehavior.outcomes.map((outcome) => [outcome.id, outcome]));
+            const outcomes = behaviorArtifact.tests.map((test) => {
+                const outcome = byId.get(test.id);
+                if (!outcome || typeof outcome.output !== 'string') throw new Error(`Behavior output is missing for ${test.id}.`);
+                return { id: test.id, correctionId: test.correctionId, kind: test.kind, passed: outcome.output === test.expected, inputHash: hashJson(test.input), expectedHash: hashJson(test.expected), outputHash: hashJson(outcome.output) };
+            });
+            behaviorCandidate = { artifactHash: behaviorArtifact.sha256, passed: outcomes.every((outcome) => outcome.passed), outcomes, explanations: [] };
+        } else {
+            if (typeof options.behaviorEvaluator !== 'function' || !behaviorModule.executeBehaviorTests) throw new Error('Independent B6-D1 behavior evaluation requires an injected evaluator.');
+            behaviorCandidate = await invokeWithTimeout(() => behaviorModule.executeBehaviorTests(behaviorArtifact, options.behaviorEvaluator), {}, timeoutMs, 'Behavior executor');
+        }
         if (behaviorCandidate.artifactHash !== behaviorArtifact.sha256 || behaviorCandidate.passed !== true || behaviorCandidate.outcomes.some((outcome) => outcome.passed !== true || outcome.outputHash !== outcome.expectedHash)) throw new Error('Candidate behavior outcomes do not match frozen B6-D1 expectations.');
         const proof = { schema_version: 2, test_only: true, runner: 'verify-code-proposal', status: 'passed', generated_at: new Date().toISOString(), proposal_sha256: plan.proposal_sha256, baseline: { source_sha256: plan.baseline_source_sha256, root: baselineRoot }, candidate: { source_sha256: plan.candidate_source_sha256, root: candidateRoot }, inputs: { dataset_sha256: plan.dataset_sha256, prompt_sha256: plan.prompt_sha256, rules_sha256: plan.rules_sha256, accepted_rules_sha256: plan.accepted_rules_sha256, tests_sha256: plan.tests_content_sha256, image_id: plan.image_id, model: plan.model, raw_ground_truth: true, case_ids: [...plan.case_ids], ...(deliveryIds.length ? { delivery_driver_sha256: plan.delivery_driver_sha256 } : {}) }, corrections, tests, runs, behavior: { artifact: behaviorArtifact, candidate: behaviorCandidate }, combined: buildCombinedVerification({ proposal: frozenProposal, baselineHash: plan.baseline_source_sha256, candidateHash: plan.candidate_source_sha256, cases: plan.case_ids, seeds: plan.seeds, runs, corrections: plan.corrections, trustedVerification, imageId: plan.image_id, runtimeId: plan.runtime_id, datasetHash: plan.dataset_sha256, acceptedRulesHash: plan.accepted_rules_sha256, model: plan.model, baselineRules: plan.baseline_rules, candidateRules: plan.candidate_rules, vocabularyHash: plan.vocabulary_sha256, expectationsHash: plan.expectations_sha256, settings: plan.settings }) };
         revalidatePlan(paths.plan, plan, metadata, attemptRoot, baselineRoot, candidateRoot, bundle, trustedSuites, historicalTests, candidateTests, runtimeVerification, options.proposal, trustedVerification);
@@ -497,7 +546,7 @@ async function runCodeProposalProofWithDocker(options = {}) {
     const outputRoot = path.join(path.resolve(options.attemptRoot), 'docker-output');
     ensureDirectory(outputRoot, 0o700, 'Docker output root');
     const executors = createDockerC2c2Executors({ ...options, outputRoot });
-    return runCodeProposalProof({ ...options, ...executors });
+    return runCodeProposalProof({ ...options, ...executors, strictReplay: true });
 }
 
 module.exports = { runCodeProposalProof, runCodeProposalProofWithDocker, runIndependentCodeProposalProof: runCodeProposalProof, validateReplayResult, reportsFromExecutor, walkCandidateTests, makePlan, readC2bHandoff };

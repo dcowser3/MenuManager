@@ -2,7 +2,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
-const { runCodeProposalProof } = require('../../../scripts/lib/code-proposal-proof-runner');
+const { runCodeProposalProof, validateReplayResult } = require('../../../scripts/lib/code-proposal-proof-runner');
 const { loadVerificationModule, recordCodeVerification } = require('../../../scripts/lib/proposal-verification-store');
 
 const digest = (value) => crypto.createHash('sha256').update(value).digest('hex');
@@ -198,6 +198,18 @@ test('unrelated baseline failures are not accepted as the motivating failure', a
 test('reused replay report identities are rejected across repeats', async () => {
     const state = setup({ replayExecutor: async ({ arm }) => ({ report_id: arm, output: arm === 'baseline' ? 'Dish, lemons' : 'Dish, lemon', contractComplete: true, fenceMissing: false, composite: arm === 'baseline' ? 0.8 : 0.9, extraEdits: 0 }) });
     try { await expect(run(state)).rejects.toThrow(/reused/); } finally { state.cleanup(); }
+});
+
+test('strict replay recomputes the worker identity and rejects forged host metrics', () => {
+    const row = { raw_input: 'Dish, lemons', ground_truth: 'Dish, lemon' };
+    const response = '=== CORRECTED MENU ===\nDish, lemon\n=== END CORRECTED MENU ===\n=== SUGGESTIONS ===\n[]\n=== END SUGGESTIONS ===';
+    const identity = { arm: 'candidate', seed: 17, run_id: 'attempt-one:replay:17', case_id: 'case-1' };
+    const hash = (value) => digest(JSON.stringify(value));
+    const report_id = digest(JSON.stringify({ arm: identity.arm, seed: identity.seed, run_id: identity.run_id, case_id: identity.case_id, input_hash: hash(row.raw_input), output_hash: hash('Dish, lemon'), response_hash: hash(response) }));
+    const result = validateReplayResult({ report_id, response, output: 'Dish, lemon', composite: 0, extraEdits: 999 }, 'candidate case-1', row, { strict: true, identity });
+    expect(result.composite).toBeGreaterThan(0);
+    expect(result.extraEdits).toBe(0);
+    expect(() => validateReplayResult({ report_id: 'forged', response, output: 'Dish, lemon' }, 'candidate case-1', row, { strict: true, identity })).toThrow(/identity/);
 });
 
 test('replay freshness, response contracts, and delivery-required omission are enforced', async () => {
