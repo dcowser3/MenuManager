@@ -555,6 +555,7 @@ function applyReplacementRule(
 type SingularIngredientPattern = {
     pattern: RegExp;
     corrected: string;
+    preserveConfiguredCase?: boolean;
 };
 
 const CONSERVATIVE_SINGULAR_INGREDIENT_PATTERNS: SingularIngredientPattern[] = [
@@ -567,6 +568,34 @@ const CONSERVATIVE_SINGULAR_INGREDIENT_PATTERNS: SingularIngredientPattern[] = [
     { pattern: /(,\s*)(jalapeños)(?=\s*,)/giu, corrected: 'jalapeño' },
     { pattern: /(,\s*)(prawns)(?=\s*,)/giu, corrected: 'prawn' },
     { pattern: /(,\s*)(pickles)(?=\s*,)/giu, corrected: 'pickle' },
+
+    // Verified bare ingredient-list corrections. These intentionally match the
+    // complete descriptor phrase (rather than applying a generic pluralizer),
+    // and allow a trailing allergen/price suffix on the final descriptor.
+    ...[
+        ['grilled cinnamon apples', 'grilled cinnamon apple'],
+        ['golden raisins', 'golden raisin'],
+        ['baby bell peppers', 'baby bell pepper'],
+        ['roasted heirloom carrots', 'roasted heirloom carrot'],
+        ['pickled red onions', 'pickled red onion'],
+        ['candied pecans', 'candied pecan'],
+        ['pickled raisins', 'pickled raisin'],
+        ['whipped potatoes', 'whipped potato'],
+        ['cucumbers', 'cucumber'],
+        ['carrots', 'carrot'],
+        ['beets', 'beet'],
+        ['candied walnuts', 'candied walnut'],
+        ['mandarins', 'mandarin'],
+        ['lemons', 'lemon'],
+        ['cornbread croutons', 'cornbread crouton'],
+        ['spiced pepitas', 'spiced pepita'],
+        ['Colorado apples', 'Colorado apple'],
+        ['candied pepitas', 'candied pepita'],
+    ].map(([from, to]) => ({
+        pattern: new RegExp(`(,\\s*)(${from})(?=\\s*(?:,|[A-Z]{1,3}(?:\\s|$)|[$€£]|\\d|$))`, 'giu'),
+        corrected: to,
+        preserveConfiguredCase: true,
+    } as SingularIngredientPattern)),
 ];
 
 /**
@@ -581,10 +610,12 @@ export function normalizeSingularIngredientFormsOnLine(
     let nextLine = line;
     const corrections: PreAiAppliedCorrection[] = [];
 
-    for (const { pattern, corrected } of CONSERVATIVE_SINGULAR_INGREDIENT_PATTERNS) {
+    for (const { pattern, corrected, preserveConfiguredCase } of CONSERVATIVE_SINGULAR_INGREDIENT_PATTERNS) {
         pattern.lastIndex = 0;
         nextLine = nextLine.replace(pattern, (match, prefix: string, original: string) => {
-            const replacement = matchCase(original, corrected);
+            const replacement = preserveConfiguredCase
+                ? (isAllUpper(original) ? corrected.toUpperCase() : isAllLower(original) ? corrected.toLowerCase() : corrected)
+                : matchCase(original, corrected);
             if (original === replacement) return match;
             corrections.push({
                 type: 'Singular/Plural',
@@ -767,17 +798,21 @@ export function ensureCotijaCheeseModifierOnLine(
     // Cotija is an ingredient spelling that must be followed by "cheese" in
     // menu descriptions. Do not alter already-correct text or hyphenated
     // adjective forms such as "cotija-style".
-    const pattern = /\bcotija\b(?!\s+cheese\b)(?!-[A-Za-z])/gi;
+    const pattern = /\b(?:cotija|mozzarella|feta|parmesan)\b(?!\s+cheese\b)(?!-[A-Za-z])/gi;
     const corrections: PreAiAppliedCorrection[] = [];
-    const corrected = original.replace(pattern, (match) => {
-        const replacement = matchCase(match, 'cotija cheese');
+    const firstDescriptionComma = original.indexOf(',');
+    const corrected = original.replace(pattern, (match, offset: number) => {
+        if (firstDescriptionComma < 0 || offset <= firstDescriptionComma) return match;
+        const replacement = matchCase(match, `${match.toLowerCase()} cheese`);
         corrections.push({
             type: 'Terminology',
             source: 'built_in',
             original: match,
             corrected: replacement,
             lineIndex,
-            rule: 'Cotija must include the cheese modifier.',
+            rule: /^cotija$/i.test(match)
+                ? 'Cotija must include the cheese modifier.'
+                : 'Named cheese ingredients must include the cheese modifier.',
         });
         return replacement;
     });
@@ -912,6 +947,26 @@ function shouldAddRawAsterisk(line: string): boolean {
         return false;
     }
     return RAW_ASTERISK_TERM_PATTERN.test(line);
+}
+
+/**
+ * A bare salmon option can be an interior member of an option list. The normal
+ * marker guard is deliberately conservative for comma-heavy lines, so handle
+ * this one verified option shape without treating arbitrary "salmon" mentions
+ * (for example, salmon sauce) as raw.
+ */
+export function addInteriorSalmonOptionMarker(line: string): string {
+    if (!line || line.includes('*') || !/,/.test(line)) return line;
+    const parts = line.split(',');
+    let changed = false;
+    const corrected = parts.map((part) => {
+        if (/^\s*salmon\s*$/i.test(part)) {
+            changed = true;
+            return part.replace(/(salmon)/i, '$1*');
+        }
+        return part;
+    }).join(',');
+    return changed ? corrected : line;
 }
 
 function addRawAsterisk(line: string): string {
@@ -1128,6 +1183,19 @@ export function runPreAiDeterministicChecks(
         const shrimpCevicheResult = normalizeShrimpCevicheRawMarkerOnLine(nextLine, lineIndex);
         nextLine = shrimpCevicheResult.line;
         appliedCorrections.push(...shrimpCevicheResult.corrections);
+
+        const interiorSalmon = addInteriorSalmonOptionMarker(nextLine);
+        if (interiorSalmon !== nextLine) {
+            appliedCorrections.push({
+                type: 'Raw Item',
+                source: 'built_in',
+                original: nextLine,
+                corrected: interiorSalmon,
+                lineIndex,
+                rule: 'A bare salmon option inside a multi-option line receives the raw marker.',
+            });
+            nextLine = interiorSalmon;
+        }
 
         const normalizedRaw = normalizeRawAsteriskPlacementForLine(nextLine);
         if (normalizedRaw !== nextLine) {

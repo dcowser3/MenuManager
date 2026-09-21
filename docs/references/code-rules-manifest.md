@@ -100,9 +100,9 @@ Tres Leches dessert lines must carry the V (vegetarian) allergen code; it is add
 
 - id: `pre-ai/tres-leches-vegetarian-code` · category: allergen_codes · implementation: `services/dashboard/lib/pre-ai-deterministic-rules.ts#ensureTresLechesVegetarianCodeOnLine`
 
-### Cotija requires cheese modifier
+### Named cheeses require cheese modifier
 
-Adds "cheese" after Cotija when it is used as an ingredient name, preserving capitalization. Already-correct "cotija cheese" and hyphenated adjective forms such as "cotija-style" are left unchanged.
+Adds "cheese" after Cotija, mozzarella, feta, or parmesan when used as an ingredient name, preserving capitalization. Already-correct modifiers and hyphenated adjective forms are left unchanged.
 - `Esquites, corn, cotija, bacon D 17` -> `Esquites, corn, cotija cheese, bacon D 17`
 
 - id: `pre-ai/cotija-cheese-modifier` · category: terminology · implementation: `services/dashboard/lib/pre-ai-deterministic-rules.ts#ensureCotijaCheeseModifierOnLine`
@@ -115,9 +115,9 @@ Reviewer-confirmed food words are matched with bounded Damerau edit distance, in
 
 - id: `pre-ai/curated-canonical-food-spelling` · category: spelling · implementation: `services/dashboard/lib/pre-ai-deterministic-rules.ts#normalizeCuratedFoodSpellingsOnLine`
 
-### Conservative singular ingredient forms
+### Contextual singular ingredient forms
 
-Applies the high-signal subset of the SOP singular-ingredient rule to bare comma-delimited jalapeños, prawns, pickles, and cucumber pickles; Prawn before either Tequeño or Tequeños; and a standalone Pickle side. Counted or prepared plurals such as "three pickles" and "sautéed prawns" are preserved.
+Applies verified contextual singular-ingredient corrections to comma-delimited descriptions, including jalapeños, prawns, pickles, fruit, vegetables, nuts, peppers, potatoes, and croutons; Prawn before either Tequeño or Tequeños; and a standalone Pickle side. Counted/prepared phrases, documented plural exceptions, and dish names are preserved.
 - `Guacamole, jalapeños, avocado 18` -> `Guacamole, jalapeño, avocado 18`
 - `Encocado, black cod, prawns, squid 38` -> `Encocado, black cod, prawn, squid 38`
 - `Prawns Tequeño, salsa 18` -> `Prawn Tequeño, salsa 18`
@@ -146,6 +146,13 @@ Adds a missing raw marker to dishes containing strong raw/undercooked terms: tar
 - `Vegan Tiradito, cucumber, avocado VG` -> `Vegan Tiradito, cucumber, avocado VG`
 
 - id: `pre-ai/raw-asterisk-insertion` · category: raw_markers · implementation: `services/dashboard/lib/pre-ai-deterministic-rules.ts#shouldAddRawAsterisk`
+
+### Interior salmon option marker
+
+Adds a raw marker only to a bare salmon option inside a comma-separated option line; arbitrary salmon mentions and salmon sauces remain unchanged.
+- `grilled chicken, salmon, pasta Bolognese D G` -> `grilled chicken, salmon*, pasta Bolognese D G`
+
+- id: `pre-ai/raw-asterisk-interior-salmon-option` · category: raw_markers · implementation: `services/dashboard/lib/pre-ai-deterministic-rules.ts#addInteriorSalmonOptionMarker`
 
 ### Accepted reviewer correction rules (bounded replacements)
 

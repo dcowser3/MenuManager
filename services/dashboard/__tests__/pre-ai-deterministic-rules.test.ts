@@ -157,6 +157,46 @@ describe('runPreAiDeterministicChecks', () => {
         ].join('\n'));
     });
 
+    it('applies the frozen contextual singularization corrections without flattening exceptions', () => {
+        const result = runPreAiDeterministicChecks([
+            'Kale Salad, grilled cinnamon apples, heirloom cherry tomato, roasted beet root, golden raisins, candied sesame seeds, orange balsamic vinaigrette VG',
+            'Pepper Plate, baby bell peppers, Brussels Sprouts, whipped potatoes 18',
+            'Harvest, pickled red onions, candied pecans, pickled raisins, beets, candied walnuts, mandarins, lemons 20',
+            'Salad, cornbread croutons, spiced pepitas, Colorado apples, candied pepitas 16',
+        ].join('\n'));
+
+        expect(result.menuText).toBe([
+            'Kale Salad, grilled cinnamon apple, heirloom cherry tomato, roasted beet root, golden raisin, candied sesame seeds, orange balsamic vinaigrette VG',
+            'Pepper Plate, baby bell pepper, Brussels Sprouts, whipped potato 18',
+            'Harvest, pickled red onion, candied pecan, pickled raisin, beet, candied walnut, mandarin, lemon 20',
+            'Salad, cornbread crouton, spiced pepita, Colorado apple, candied pepita 16',
+        ].join('\n'));
+    });
+
+    it('adds named cheese modifiers only in ingredient descriptions', () => {
+        const result = runPreAiDeterministicChecks([
+            'Salad, cucumbers, carrots, beets, mozzarella, feta, parmesan 18',
+            'Mozzarella Special, feta cheese, parmesan-style crisp 20',
+        ].join('\n'));
+
+        expect(result.menuText).toBe([
+            'Salad, cucumber, carrot, beet, mozzarella cheese, feta cheese, parmesan cheese 18',
+            'Mozzarella Special, feta cheese, parmesan-style crisp 20',
+        ].join('\\n'));
+    });
+
+    it('marks a bare salmon option inside a multi-option line without broad salmon matching', () => {
+        const result = runPreAiDeterministicChecks([
+            'grilled chicken, salmon, pasta Bolognese D G, seasonal vegetables, pepperoni & cheese pizza D G',
+            'Salmon Sauce, lemon, dill D 12',
+        ].join('\\n'));
+
+        expect(result.menuText).toBe([
+            'grilled chicken, salmon*, pasta Bolognese D G, seasonal vegetables, pepperoni & cheese pizza D G',
+            'Salmon Sauce, lemon, dill D 12',
+        ].join('\\n'));
+    });
+
     it('uses bounded canonical food words to catch unseen typos without changing valid neighbors', () => {
         const result = runPreAiDeterministicChecks([
             'Feugo Aioli, tamarnd glaze 18',
