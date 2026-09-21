@@ -84,3 +84,43 @@ test('durable claim crash before summary converges to blocked zero-dispatch reco
         expect(state.writes).toBe(1);
     } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
+
+test('a concurrent claim after the no-owner read cannot move or replace the winner artifact', async () => {
+    const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'prep-orphan-race-')));
+    fs.mkdirSync(path.join(root, 'tmp', 'review-eval'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'tmp', 'review-eval', 'dataset.jsonl'), `${JSON.stringify({ case_id: 'base', raw_input: 'Base', ground_truth: 'Base', context: {} })}\n`);
+    const behaviorBody = { schemaVersion: 1, frozenAt: new Date().toISOString(), records: [{ correctionId: 'c1', submissionId: 'submission-1', inputSpan: { text: 'before' }, expectedSpan: { text: 'after' }, reason: 'reason', expectationAuthority: 'human_explanation', provenance: { reviewer: 'Reviewer' }, disposition: 'awaiting_behavior_verification' }], tests: [], contextualTests: [] };
+    const behavior = { ...behaviorBody, sha256: digest(JSON.stringify(behaviorBody)) };
+    const proposal = { id: 'p-orphan-race', status: 'pending', cycle_id: 'cycle-orphan-race', proposed_prompt: 'prompt', correction_routing: [{ correction_id: 'c1', lane: 'code_recommendation', case_id: 'case-1', original_text: 'before', corrected_text: 'after', source: 'human' }], replay_evidence: [{ correction_id: 'c1', submission_id: 'submission-1', case_id: 'case-1', original_text: 'before', corrected_text: 'after', status: 'replay_mismatch' }], eval_summary: { replay_retirement_policy_version: 1, behavior_tests: behavior }, code_recommendations: [{ title: 'fix' }] };
+    const { client, state } = clientState();
+    state.proposal = proposal;
+    const verification = { REPLAY_RETIREMENT_POLICY_VERSION: 1, codeProposalVerificationFingerprint: (value) => digest(JSON.stringify({ id: value.id, cycle_id: value.cycle_id, proposed_prompt: value.proposed_prompt, correction_routing: value.correction_routing, replay_evidence: value.replay_evidence, code_recommendations: value.code_recommendations })), hashCodeImplementation: () => digest('source'), hashAcceptedRules: () => digest('rules') };
+    const inventory = buildPreparationInventory(proposal, { proposalFingerprint: verification.codeProposalVerificationFingerprint(proposal) });
+    const finalized = require('../../../scripts/lib/code-proposal-preparation-queue').finalizePreparationInventory(inventory, { behavior_tests_sha256: behavior.sha256, dataset_sha256: digest('dataset'), source_sha256: digest('source'), prompt_sha256: digest('prompt'), accepted_rules_sha256: digest('rules') });
+    const orphanRoot = path.join(root, 'tmp', 'code-proposals', proposal.id, `proposal-${proposal.id}`);
+    fs.mkdirSync(orphanRoot, { recursive: true });
+    fs.writeFileSync(path.join(orphanRoot, 'preparation-inventory.json'), `${JSON.stringify(finalized, null, 2)}\n`);
+    fs.writeFileSync(path.join(orphanRoot, 'winner-marker.txt'), 'winner-bytes');
+    const realLstat = fs.lstatSync;
+    let injected = false;
+    const lstatSpy = jest.spyOn(fs, 'lstatSync').mockImplementation((target) => {
+        if (!injected && path.resolve(`${target}`) === path.resolve(orphanRoot)) {
+            injected = true;
+            state.proposal = { ...state.proposal, eval_summary: { ...state.proposal.eval_summary, code_candidate: {
+                attempt_id: `proposal-${proposal.id}`, status: 'running', started_at: new Date().toISOString(), artifact_directory: orphanRoot,
+            } } };
+        }
+        return realLstat(target);
+    });
+    try {
+        await expect(prepareCodeProposalQueue({ client, proposal, repoRoot: root, datasetPath: path.join(root, 'tmp/review-eval/dataset.jsonl'), verification, store: { recordCodeVerification }, behaviorModule: { validateBehaviorArtifact: () => {} } })).rejects.toThrow(/already running/);
+        expect(state.proposal.eval_summary.code_candidate.attempt_id).toBe(`proposal-${proposal.id}`);
+        expect(state.proposal.eval_summary.code_candidate.artifact_directory).toBe(orphanRoot);
+        expect(fs.readFileSync(path.join(orphanRoot, 'winner-marker.txt'), 'utf8')).toBe('winner-bytes');
+        expect(fs.existsSync(orphanRoot)).toBe(true);
+        expect(state.writes).toBe(0);
+    } finally {
+        lstatSpy.mockRestore();
+        fs.rmSync(root, { recursive: true, force: true });
+    }
+});
