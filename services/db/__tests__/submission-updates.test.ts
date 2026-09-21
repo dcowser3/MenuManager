@@ -542,8 +542,8 @@ describe('submission update hardening', () => {
 
     test.each([
         ['selects the unique exact hash across multiple audits', [
-            { id: 'audit-old', attempt_id: 'attempt-source', event_type: 'completed', review_mode: 'full', final_result: { correctedMenu: 'unrelated' } },
-            { id: 'audit-match', attempt_id: 'attempt-source', event_type: 'completed', review_mode: 'full', final_result: { correctedMenu: 'frozen source' } },
+            { id: 'audit-old', submission_id: 'form-source', attempt_id: 'attempt-source', event_type: 'completed', review_mode: 'full', final_result: { correctedMenu: 'unrelated' } },
+            { id: 'audit-match', submission_id: 'form-source', attempt_id: 'attempt-source', event_type: 'completed', review_mode: 'full', final_result: { correctedMenu: 'frozen source' } },
         ], 200, 'audit-match'],
         ['rejects when no audit stage matches', [
             { id: 'audit-old', attempt_id: 'attempt-source', event_type: 'completed', review_mode: 'full', final_result: { correctedMenu: 'unrelated' } },
@@ -552,12 +552,15 @@ describe('submission update hardening', () => {
             { id: 'audit-a', attempt_id: 'attempt-source', event_type: 'completed', review_mode: 'full', final_result: { correctedMenu: 'frozen source' } },
             { id: 'audit-b', attempt_id: 'attempt-source', event_type: 'completed', review_mode: 'full', final_result: { correctedMenu: 'frozen source' } },
         ], 409, null],
+        ['rejects a hash match linked to another submission', [
+            { id: 'audit-other', submission_id: 'other-form', attempt_id: 'attempt-source', event_type: 'completed', review_mode: 'full', final_result: { correctedMenu: 'frozen source' } },
+        ], 409, null],
     ])('%s', async (_label, auditRows, expectedStatus, expectedAuditId) => {
         const sourceHash = require('crypto').createHash('sha256').update(Buffer.from('frozen source', 'utf8')).digest('hex');
         const submissionQuery: any = {
             eq: jest.fn(() => submissionQuery),
             maybeSingle: jest.fn(async () => ({
-                data: { id: 'form-source', form_attempt_id: 'attempt-source' },
+                data: { id: 'submission-uuid', legacy_id: 'form-source', form_attempt_id: 'attempt-source' },
                 error: null,
             })),
         };
@@ -572,14 +575,14 @@ describe('submission update hardening', () => {
         (getSupabaseClient as jest.Mock).mockReturnValue({ from });
 
         const response = await invokeJsonHandler(reviewSourceBindingHandler, {
-            params: { id: 'form-source' },
+            params: { id: 'submission-uuid' },
             query: { source_snapshot_sha256: sourceHash },
         });
 
         expect(response.status).toBe(expectedStatus);
         if (expectedAuditId) {
             expect(response.body).toMatchObject({
-                submission_id: 'form-source',
+                submission_id: 'submission-uuid',
                 attempt_id: 'attempt-source',
                 audit: {
                     id: expectedAuditId,

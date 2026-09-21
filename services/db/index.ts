@@ -2806,6 +2806,11 @@ app.get('/submissions/:id/review-source-binding', async (req, res) => {
         const submission = await getSubmissionRecordById(submissionId);
         if (!submission) return res.status(404).json({ error: 'Submission not found.' });
         const attemptId = `${submission.form_attempt_id || ''}`.trim();
+        const submissionAliases = new Set([
+            submissionId,
+            `${submission.id || ''}`.trim(),
+            `${submission.legacy_id || ''}`.trim(),
+        ].filter(Boolean));
         if (!attemptId) return res.status(409).json({ error: 'Submission has no form attempt binding.' });
         const sourceSnapshotSha256 = `${req.query?.source_snapshot_sha256 || ''}`.trim();
         if (!/^[a-f0-9]{64}$/u.test(sourceSnapshotSha256)) {
@@ -2825,7 +2830,7 @@ app.get('/submissions/:id/review-source-binding', async (req, res) => {
 
         const auditRows = (data || []).filter((row: any) => {
             const linkedSubmission = `${row?.submission_id || ''}`.trim();
-            return (!linkedSubmission || linkedSubmission === submissionId)
+            return (!linkedSubmission || submissionAliases.has(linkedSubmission))
                 && `${row?.attempt_id || ''}`.trim() === attemptId
                 && typeof row?.id === 'string';
         });

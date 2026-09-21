@@ -95,5 +95,8 @@ describe('human explanation source binding', () => {
             ...binding,
             span: { ...binding.span, start_utf16: binding.span.start_utf16 + 1 },
         })).toBe(false);
+
+        const reorderedSpan = Object.fromEntries(Object.entries(binding.span).reverse());
+        expect(isHumanExplanationSourceBinding({ ...binding, span: reorderedSpan })).toBe(true);
     });
 });
