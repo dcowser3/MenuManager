@@ -1,6 +1,7 @@
 'use strict';
 
 const crypto = require('crypto');
+const { mapProposedRuleToCorrectionRulePayload } = require('../../services/dashboard/dist/lib/improvement-cycle-core');
 
 const canonical = (value) => Array.isArray(value)
     ? value.map(canonical)
@@ -59,15 +60,32 @@ async function createOrRecoverSuccessor(client, plan, runtime) {
     return classifyCreateReadback(recovery.data, plan);
 }
 
-function prepareSingleApproval(proposal, runtime, acceptedRuleIndexes) {
+function prepareSingleApproval(proposal, runtime, acceptedRuleIndexes, approvalContext = {}) {
     assertFrozenRuntime(proposal, runtime, { accepted_rules_sha256: proposal.eval_summary?.baseline_accepted_rules_sha256, implementation_sha256: proposal.eval_summary?.implementation_sha256, effective_prompt_sha256: proposal.eval_summary?.effective_prompt_sha256 });
     if (proposal.status !== 'pending' || proposal.accepted_rules !== null || proposal.eval_status !== 'passed' || proposal.disposition !== 'rules_only') throw new Error('successor is not eligible for approval');
     if (JSON.stringify(acceptedRuleIndexes) !== '[0,1,2]') throw new Error('approval must select exactly all three successor rules');
-    return { status: 'approved_modified', accepted_rule_indexes: [0, 1, 2], expected_cycle_id: proposal.cycle_id, expected_proposal_fingerprint: proposalFingerprint(proposal), expected_accepted_rules: proposal.proposed_rules.map((rule) => ({ ...rule })), expected_persistent_correction_rules: proposal.proposed_rules.map((rule, index) => ({ correction_id: `proposal-${proposal.cycle_id}-rule-${index}`, original_text: rule.original_text, corrected_text: rule.corrected_text, applies_to_menu_type: rule.applies_to_menu_type, status: 'accepted' })), effective_prompt_sha256: runtime.effective_prompt_sha256, accepted_rules_sha256: runtime.accepted_rules_sha256, implementation_sha256: proposal.eval_summary?.implementation_sha256 };
+    const reviewerName = approvalContext.reviewerName ?? null;
+    const consumedAt = approvalContext.consumedAt ?? null;
+    const expectedPersistent = proposal.proposed_rules.map((rule, index) => mapProposedRuleToCorrectionRulePayload(rule, proposal.cycle_id, index, reviewerName, { cycleId: proposal.cycle_id, consumedAt }));
+    return { status: 'approved_modified', accepted_rule_indexes: [0, 1, 2], expected_cycle_id: proposal.cycle_id, expected_proposal_fingerprint: proposalFingerprint(proposal), expected_accepted_rules: proposal.proposed_rules.map((rule) => ({ ...rule })), expected_persistent_correction_rules: expectedPersistent, effective_prompt_sha256: runtime.effective_prompt_sha256, accepted_rules_sha256: runtime.accepted_rules_sha256, implementation_sha256: proposal.eval_summary?.implementation_sha256 };
 }
 
+// The correction-rules table adds database-generated identity/timestamps, but
+// every mapper-owned field is part of the approval contract. Projecting the
+// mapper shape makes readback tolerant only of those generated columns while
+// still catching provenance, scope, source, and reviewer drift.
+const PERSISTENT_RULE_KEYS = Object.freeze([
+    'submission_id', 'correction_id', 'original_text', 'corrected_text',
+    'force_target_case', 'change_type', 'rule', 'applies_to_menu_type',
+    'is_location_specific', 'location', 'other_applicable_locations',
+    'restaurant_name', 'reviewer_name', 'source', 'status', 'prompt_cycle_id',
+    'consumed_at',
+]);
+function persistentRuleProjection(row) {
+    return Object.fromEntries(PERSISTENT_RULE_KEYS.map((key) => [key, row?.[key]]));
+}
 function exactRuleIdentity(actual, expected) {
-    return JSON.stringify(canonical(actual)) === JSON.stringify(canonical(expected));
+    return sha(persistentRuleProjection(actual)) === sha(persistentRuleProjection(expected));
 }
 function recoverApprovalReadback(row, request) {
     if (!row) return { state: 'retry_allowed' };

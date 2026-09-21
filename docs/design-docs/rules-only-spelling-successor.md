@@ -18,3 +18,10 @@ Hummus, Guacamole, and spicy-crab rules remain held in parent evidence and are
 never included in the successor. The script writes private local plan artifacts
 only; production insertion and the normal approval endpoint require a separate
 review and are intentionally not performed by this command.
+
+Approval recovery compares each persisted correction rule against the complete
+semantic projection emitted by `mapProposedRuleToCorrectionRulePayload`,
+including source, cycle/submission provenance, menu/property scope, reviewer,
+and consumed status. Only database-generated identity/timestamp/transaction
+columns are ignored, so a partial or altered readback is a conflict rather
+than an approval retry.

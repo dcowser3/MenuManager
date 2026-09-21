@@ -2,7 +2,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { execFileSync } = require('child_process');
-const { evalStatusFromSummary, promptProposalApprovalBlock } = require('../dist/lib/improvement-cycle-core');
+const { evalStatusFromSummary, promptProposalApprovalBlock, mapProposedRuleToCorrectionRulePayload } = require('../dist/lib/improvement-cycle-core');
 const { assertFrozenRuntime, assertPendingInsertPayload, classifyCreateReadback, persistedSchemaFingerprint, prepareSingleApproval, recoverApprovalReadback } = require('../../../scripts/lib/spelling-successor-operational-path');
 const { hashCodeImplementation } = require('../dist/lib/code-proposal-verification');
 
@@ -75,9 +75,19 @@ test('create/readback recovery is idempotent and rejects mismatched successors',
     const pendingRequest = { expected_cycle_id: 'cycle-x', expected_proposal_fingerprint: persistedSchemaFingerprint(pending), effective_prompt_sha256: expectedPromptHash, accepted_rules_sha256: 'rules', implementation_sha256: 'impl' };
     expect(recoverApprovalReadback(pending, pendingRequest).state).toBe('retry_allowed');
     expect(recoverApprovalReadback({ ...pending, current_prompt: 'changed' }, pendingRequest).state).toBe('conflict');
-    const accepted = [{ source_correction_id: 'a', original_text: 'a', corrected_text: 'b', applies_to_menu_type: 'all' }, { source_correction_id: 'b', original_text: 'c', corrected_text: 'd', applies_to_menu_type: 'food' }, { source_correction_id: 'c', original_text: 'e', corrected_text: 'f', applies_to_menu_type: 'food' }];
-    const persistent = accepted.map((row, index) => ({ ...row, correction_id: `proposal-cycle-x-rule-${index}`, status: 'accepted' }));
-    expect(recoverApprovalReadback({ cycle_id: 'cycle-x', status: 'approved_modified', accepted_rules: accepted }, { expected_cycle_id: 'cycle-x', expected_accepted_rules: accepted, expected_persistent_correction_rules: persistent, persistentCorrectionRules: persistent }).state).toBe('already_approved');
+    const accepted = [
+        { source_correction_id: 'a', original_text: 'a', corrected_text: 'b', applies_to_menu_type: 'all', is_location_specific: false, change_type: 'spelling', rule: 'fixture a' },
+        { source_correction_id: 'b', original_text: 'c', corrected_text: 'd', applies_to_menu_type: 'food', is_location_specific: false, change_type: 'spelling', rule: 'fixture b' },
+        { source_correction_id: 'c', original_text: 'e', corrected_text: 'f', applies_to_menu_type: 'food', is_location_specific: false, change_type: 'spelling', rule: 'fixture c' },
+    ];
+    const persistent = accepted.map((row, index) => mapProposedRuleToCorrectionRulePayload(row, 'cycle-x', index, 'Reviewer', { cycleId: 'cycle-x', consumedAt: null }));
+    // Model an actual DB readback: mapper fields plus generated columns that
+    // must not weaken the semantic comparison.
+    const dbReadback = persistent.map((row, index) => ({ ...row, id: `db-${index}`, created_at: '2026-09-21T00:00:00Z', updated_at: '2026-09-21T00:00:00Z', xmin: `${index + 10}` }));
+    expect(recoverApprovalReadback({ cycle_id: 'cycle-x', status: 'approved_modified', accepted_rules: accepted }, { expected_cycle_id: 'cycle-x', expected_accepted_rules: accepted, expected_persistent_correction_rules: persistent, persistentCorrectionRules: dbReadback }).state).toBe('already_approved');
+    expect(recoverApprovalReadback({ cycle_id: 'cycle-x', status: 'approved_modified', accepted_rules: accepted }, { expected_cycle_id: 'cycle-x', expected_accepted_rules: accepted, expected_persistent_correction_rules: persistent, persistentCorrectionRules: dbReadback.map((row) => ({ ...row, source: 'human' })) }).state).toBe('conflict');
+    expect(recoverApprovalReadback({ cycle_id: 'cycle-x', status: 'approved_modified', accepted_rules: accepted }, { expected_cycle_id: 'cycle-x', expected_accepted_rules: accepted, expected_persistent_correction_rules: persistent, persistentCorrectionRules: dbReadback.map((row) => ({ ...row, applies_to_menu_type: 'all' })) }).state).toBe('conflict');
+    expect(recoverApprovalReadback({ cycle_id: 'cycle-x', status: 'approved_modified', accepted_rules: accepted }, { expected_cycle_id: 'cycle-x', expected_accepted_rules: accepted, expected_persistent_correction_rules: persistent, persistentCorrectionRules: dbReadback.map(({ submission_id, ...row }) => row) }).state).toBe('conflict');
     expect(recoverApprovalReadback({ cycle_id: 'cycle-x', status: 'approved_modified', accepted_rules: [{}, {}, {}] }, { expected_cycle_id: 'cycle-x', expected_accepted_rules: accepted, expected_persistent_correction_rules: persistent, persistentCorrectionRules: [{}, {}, {}] }).state).toBe('conflict');
     expect(recoverApprovalReadback({ cycle_id: 'cycle-y', status: 'approved_modified', accepted_rules: [{}, {}, {}] }, { expected_cycle_id: 'cycle-x' }).state).toBe('conflict');
 });
