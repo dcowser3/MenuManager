@@ -1111,6 +1111,24 @@ function isIsabellaDirectHandoff(submission) {
     const clickupTaskId = `${submission?.clickup_task_id || clickupHandoff.task_id || ''}`.trim();
     return !!clickupTaskId;
 }
+// AI review runs asynchronously after ClickUp task creation. A direct
+// Isabella handoff can therefore receive a late `pending_human_review` write
+// after the ClickUp task has already been sent to Marketing. Preserve the
+// direct-handoff state at this DB boundary; once approved, never regress it.
+function protectDirectIsabellaApprovalStatus(existingRecord, allowedFields) {
+    const requestedStatus = `${allowedFields?.status || ''}`.trim().toLowerCase();
+    if (!['pending_human_review', 'submitted_no_ai_review'].includes(requestedStatus))
+        return;
+    const merged = { ...existingRecord, ...allowedFields };
+    if (!isIsabellaDirectHandoff(merged))
+        return;
+    const currentStatus = `${existingRecord?.status || ''}`.trim().toLowerCase();
+    if (APPROVED_SUBMISSION_STATUSES.includes(currentStatus)) {
+        delete allowedFields.status;
+        return;
+    }
+    allowedFields.status = 'sent_to_marketing';
+}
 function getSubmissionServicePeriod(submission) {
     return `${submission?.service_period || submission?.raw_payload?.servicePeriod || ''}`.trim();
 }
@@ -1397,6 +1415,7 @@ function buildCorrectionRuleStorageRecord(record) {
         correction_id: `${record.correction_id}`,
         original_text: record.original_text || null,
         corrected_text: record.corrected_text || null,
+        force_target_case: record.force_target_case === true,
         change_type: record.change_type || null,
         rule: `${record.rule}`,
         applies_to_menu_type: appliesToMenuType,
@@ -1418,6 +1437,9 @@ function buildCorrectionRuleStorageRecord(record) {
         example_original: record.example_original || null,
         example_corrected: record.example_corrected || null,
         inferred_from_guidance: record.inferred_from_guidance === true,
+        source_binding: record.source_binding && typeof record.source_binding === 'object'
+            ? record.source_binding
+            : null,
     };
 }
 async function readLocalCorrectionRules() {
@@ -1491,6 +1513,7 @@ function buildCorrectionRuleUpdateFields(updates) {
         'is_location_specific',
         'other_applicable_locations',
         'change_type',
+        'force_target_case',
         'restaurant_name',
         'location',
         'project_name',
@@ -1508,6 +1531,9 @@ function buildCorrectionRuleUpdateFields(updates) {
             throw new Error('applies_to_menu_type must be all, food, or beverage');
         }
         allowedFields.applies_to_menu_type = normalized;
+    }
+    if (allowedFields.force_target_case !== undefined && typeof allowedFields.force_target_case !== 'boolean') {
+        throw new Error('force_target_case must be boolean');
     }
     return allowedFields;
 }
@@ -2039,6 +2065,54 @@ app.get('/submissions/pending', async (req, res) => {
         res.status(500).send('Error getting pending submissions.');
     }
 });
+// Legacy Isabella direct handoffs whose asynchronous AI update may have left
+// them in a review status after ClickUp already reached To Do. The
+// clickup-integration repair route uses this narrow internal list to make an
+// idempotent, status-guarded repair.
+// IMPORTANT: Must come BEFORE /submissions/:id
+app.get('/submissions/isabella-direct', async (req, res) => {
+    try {
+        const requestedIds = `${req.query.ids || ''}`
+            .split(',')
+            .map((id) => id.trim())
+            .filter(Boolean);
+        const limit = Math.min(Math.max(parseInt(`${req.query.limit || '200'}`, 10) || 200, 1), 500);
+        const sinceMs = Date.parse(`${req.query.since || ''}`);
+        const matches = (submission) => {
+            const status = `${submission?.status || ''}`.trim().toLowerCase();
+            const email = `${submission?.submitter_email || ''}`.trim().toLowerCase();
+            const publicId = `${submission?.id || submission?.legacy_id || ''}`.trim();
+            const timestamp = Date.parse(`${submission?.updated_at || submission?.created_at || ''}`);
+            return ['sent_to_marketing', 'pending_human_review', 'submitted_no_ai_review'].includes(status) &&
+                email === `${ISABELLA_EMAIL || ''}`.trim().toLowerCase() &&
+                !!(`${submission?.clickup_task_id || getRawPayloadObject(submission).clickup_handoff?.task_id || ''}`.trim()) &&
+                (!requestedIds.length || requestedIds.includes(publicId) || requestedIds.includes(`${submission?.id || ''}`.trim()) || requestedIds.includes(`${submission?.legacy_id || ''}`.trim())) &&
+                (!Number.isFinite(sinceMs) || (Number.isFinite(timestamp) && timestamp >= sinceMs));
+        };
+        let rows = [];
+        if ((0, supabase_client_1.isSupabaseConfigured)()) {
+            const { data, error } = await (0, supabase_client_1.getSupabaseClient)()
+                .from(SUBMISSIONS_TABLE)
+                .select('*')
+                .in('status', ['sent_to_marketing', 'pending_human_review', 'submitted_no_ai_review'])
+                .ilike('submitter_email', ISABELLA_EMAIL)
+                .order('updated_at', { ascending: false })
+                .limit(limit);
+            if (error)
+                throw new Error(error.message);
+            rows = data || [];
+        }
+        else {
+            const submissions = JSON.parse(await fs_1.promises.readFile(SUBMISSIONS_DB, 'utf-8'));
+            rows = Object.values(submissions);
+        }
+        res.json(rows.filter(matches).sort((a, b) => Date.parse(`${b?.updated_at || b?.created_at || ''}`) - Date.parse(`${a?.updated_at || a?.created_at || ''}`)).slice(0, limit));
+    }
+    catch (error) {
+        console.error('Error listing Isabella direct handoffs:', error.message);
+        res.status(500).json({ error: 'Failed to list Isabella direct handoffs' });
+    }
+});
 // Endpoint to get recent projects (grouped by project_name)
 // IMPORTANT: Must come BEFORE /submissions/:id
 app.get('/submissions/recent-projects', async (req, res) => {
@@ -2568,6 +2642,89 @@ app.get('/submissions/by-clickup-task/:taskId', async (req, res) => {
     }
 });
 // Endpoint to get a single submission by ID
+// Resolve the one durable Basic AI Check audit/stage that matches the frozen
+// differ comparison source. Multiple audits for an attempt are normal; the
+// exact comparison attempt plus source hash are the selectors, never recency,
+// the submission's mutable current attempt, or browser-supplied audit identity.
+app.get('/submissions/:id/review-source-binding', async (req, res) => {
+    try {
+        const submissionId = `${req.params.id || ''}`.trim();
+        const submission = await getSubmissionRecordById(submissionId);
+        if (!submission)
+            return res.status(404).json({ error: 'Submission not found.' });
+        const attemptId = `${req.query?.attempt_id || ''}`.trim();
+        const submissionAliases = new Set([
+            submissionId,
+            `${submission.id || ''}`.trim(),
+            `${submission.legacy_id || ''}`.trim(),
+        ].filter(Boolean));
+        if (!attemptId || attemptId.length > 100 || !/^[A-Za-z0-9_-]+$/u.test(attemptId)) {
+            return res.status(400).json({ error: 'A frozen comparison attempt_id is required for exact audit binding.' });
+        }
+        const sourceSnapshotSha256 = `${req.query?.source_snapshot_sha256 || ''}`.trim();
+        if (!/^[a-f0-9]{64}$/u.test(sourceSnapshotSha256)) {
+            return res.status(400).json({ error: 'source_snapshot_sha256 is required for exact audit binding.' });
+        }
+        if (!(0, supabase_client_1.isSupabaseConfigured)()) {
+            return res.status(503).json({ error: 'A durable review audit is required for source binding.' });
+        }
+        const { data, error } = await (0, supabase_client_1.getSupabaseClient)()
+            .from('basic_ai_check_audits')
+            .select('id,attempt_id,submission_id,event_type,review_mode,created_at,parsed_response,final_result')
+            .eq('attempt_id', attemptId)
+            .eq('event_type', 'completed')
+            .eq('review_mode', 'full');
+        if (error)
+            throw new Error(error.message);
+        const auditRows = (data || []).filter((row) => {
+            const linkedSubmission = `${row?.submission_id || ''}`.trim();
+            return (!linkedSubmission || submissionAliases.has(linkedSubmission))
+                && `${row?.attempt_id || ''}`.trim() === attemptId
+                && typeof row?.id === 'string';
+        });
+        const candidates = [];
+        for (const row of auditRows) {
+            const stages = [
+                ['audit_final_result_corrected_menu_v1', row?.final_result?.correctedMenu],
+                ['audit_parsed_response_corrected_menu_v1', row?.parsed_response?.correctedMenu],
+            ];
+            const matched = stages.filter(([, value]) => typeof value === 'string'
+                && value.length > 0
+                && crypto.createHash('sha256').update(Buffer.from(value, 'utf8')).digest('hex') === sourceSnapshotSha256);
+            if (matched.length > 0) {
+                // Prefer the explicit final-result stage when both audited
+                // fields contain the same exact text.
+                candidates.push({ row, stage: matched[0][0] });
+            }
+        }
+        if (candidates.length !== 1) {
+            return res.status(409).json({
+                error: candidates.length === 0
+                    ? 'No completed/full audit stage matches the frozen learning source.'
+                    : 'Multiple completed/full audit stages match the frozen learning source.',
+                attempt_id: attemptId,
+                exact_candidate_count: candidates.length,
+            });
+        }
+        const { row: audit, stage } = candidates[0];
+        return res.json({
+            submission_id: submissionId,
+            attempt_id: attemptId,
+            audit: {
+                id: audit.id,
+                created_at: audit.created_at || null,
+                event_type: audit.event_type,
+                review_mode: audit.review_mode,
+                source_stage: stage,
+                source_snapshot_sha256: sourceSnapshotSha256,
+            },
+        });
+    }
+    catch (error) {
+        console.error('Error resolving review source binding:', error.message);
+        res.status(500).json({ error: 'Failed to resolve review source binding.' });
+    }
+});
 app.get('/submissions/:id', async (req, res) => {
     try {
         const { id } = req.params;
@@ -2856,6 +3013,7 @@ app.put('/submissions/:id', async (req, res) => {
                 // Allow UUID/legacy-id updates even when local JSON entry is missing.
                 try {
                     const currentRemote = await getSubmissionRecordById(id);
+                    protectDirectIsabellaApprovalStatus(currentRemote, allowedFields);
                     await injectResolvedMenuIdIfApproving(currentRemote, allowedFields, menuDecision);
                     await mirrorSubmissionUpdateToSupabase(id, allowedFields);
                     const supabase = (0, supabase_client_1.getSupabaseClient)();
@@ -2881,6 +3039,7 @@ app.put('/submissions/:id', async (req, res) => {
             }
             return res.status(404).send('Submission not found.');
         }
+        protectDirectIsabellaApprovalStatus(submissions[resolvedId], allowedFields);
         await injectResolvedMenuIdIfApproving(submissions[resolvedId], allowedFields, menuDecision);
         const updatedSubmission = { ...submissions[resolvedId], ...allowedFields, updated_at: new Date().toISOString() };
         submissions[resolvedId] = updatedSubmission;
@@ -3382,17 +3541,55 @@ app.put('/prompt-proposals/:id', async (req, res) => {
         res.status(500).json({ error: 'Failed to update proposal' });
     }
 });
+// Narrow optimistic merge for the expectation envelope. This deliberately
+// cannot replace eval_summary or touch code_candidate/code_verification fields.
+app.put('/prompt-proposals/:id/expectation-envelope', async (req, res) => {
+    try {
+        if (!(0, supabase_client_1.isSupabaseConfigured)())
+            return res.status(503).json({ error: 'Supabase not configured' });
+        const expectedHash = `${req.body?.expected_eval_summary_hash || ''}`;
+        const envelope = req.body?.expectation_envelope;
+        if (!expectedHash || !envelope)
+            return res.status(400).json({ error: 'expected_eval_summary_hash and expectation_envelope are required' });
+        const supabase = (0, supabase_client_1.getSupabaseClient)();
+        const current = await supabase.from(PROMPT_PROPOSALS_TABLE).select('id,status,eval_summary').eq('id', req.params.id).maybeSingle();
+        if (current.error)
+            throw new Error(current.error.message);
+        if (!current.data)
+            return res.status(404).json({ error: 'Proposal not found' });
+        if (!['approved', 'approved_modified'].includes(`${current.data.status}`))
+            return res.status(409).json({ error: 'Proposal is not approved' });
+        const currentHash = crypto.createHash('sha256').update(JSON.stringify(current.data.eval_summary || {})).digest('hex');
+        if (currentHash !== expectedHash)
+            return res.status(409).json({ error: 'Proposal evaluation summary changed concurrently' });
+        const merged = { ...(current.data.eval_summary || {}), expectation_envelope: envelope };
+        const updated = await supabase.from(PROMPT_PROPOSALS_TABLE).update({ eval_summary: merged })
+            .eq('id', req.params.id).eq('status', current.data.status).eq('eval_summary', current.data.eval_summary).select().single();
+        if (updated.error) {
+            if (/0 rows|no rows|JSON object requested/i.test(updated.error.message || ''))
+                return res.status(409).json({ error: 'Proposal evaluation summary changed concurrently' });
+            throw new Error(updated.error.message);
+        }
+        if (!updated.data)
+            return res.status(409).json({ error: 'Proposal evaluation summary changed concurrently' });
+        res.json(updated.data);
+    }
+    catch (error) {
+        console.error('Error merging expectation envelope:', error.message);
+        res.status(500).json({ error: 'Failed to merge expectation envelope' });
+    }
+});
 // Critical Supabase columns whose absence silently routes writes to the local
 // JSON fallback (invisible to the improvement cycle, which reads Supabase). A
 // missing column here means a migration was not applied — surface it loudly
 // instead of losing reviewer data. Update when a migration adds load-bearing columns.
 const CRITICAL_SUPABASE_SCHEMA = {
-    correction_rules: ['applies_to_menu_type', 'prompt_cycle_id', 'consumed_at', 'submission_ids', 'example_original', 'example_corrected', 'inferred_from_guidance'],
+    correction_rules: ['applies_to_menu_type', 'prompt_cycle_id', 'consumed_at', 'submission_ids', 'example_original', 'example_corrected', 'inferred_from_guidance', 'source_binding'],
     submissions: ['form_attempt_id', 'approved_menu_content', 'approved_menu_content_html', 'menu_id', 'approver_dispute_token', 'approver_disputed_at', 'approver_dispute_note'],
     menus: ['property', 'service_period', 'name', 'current_submission_id', 'status'],
     draft_sessions: ['token', 'base_submission_id', 'form_state', 'status', 'submitted_submission_id', 'last_edited_by', 'menu_id'],
     form_attempt_logs: ['draft_session_id'],
-    basic_ai_check_audits: ['menu_content_raw', 'submission_id', 'model', 'system_fingerprint'],
+    basic_ai_check_audits: ['menu_content_raw', 'submission_id', 'model', 'seed', 'system_fingerprint', 'fence_missing'],
     prompt_proposals: ['proposed_rules', 'eval_status', 'accepted_rules', 'source', 'llm_warnings', 'replay_evidence', 'unresolved_still_missed', 'coverage_claims', 'prompt_length', 'superseded_by_cycle_id', 'superseded_from_cycle_id', 'supersede_carried_correction_count', 'supersede_new_correction_count', 'disposition', 'correction_routing'],
 };
 // Columns that MUST be nullable (shared NULLABLE_COLUMNS). A stale NOT NULL

@@ -1,0 +1,21 @@
+# Dedicated B5-C2c2b3 browser-worker image.
+# Base and browser versions are pinned by the lockfile/Playwright CLI at build time.
+FROM menumanager/dev@sha256:c5c31c8c36565eda780fcfc7d99a2dde15d91bb22ade6f274d1b5041514452c5
+
+USER root
+WORKDIR /app
+COPY package.json package-lock.json ./
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+RUN npm ci --ignore-scripts \
+    && npx playwright install --with-deps chromium
+
+# Runtime never needs a writable application tree or a host profile.
+RUN chmod -R a+rX /ms-playwright /app/node_modules \
+    && mkdir -p /tmp/browser-worker \
+    && chmod 1777 /tmp/browser-worker
+
+USER 65532:65532
+ENV HOME=/tmp/browser-worker \
+    PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
+    NODE_ENV=test
+ENTRYPOINT ["node"]

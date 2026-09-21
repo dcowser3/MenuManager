@@ -535,6 +535,10 @@ CREATE TABLE IF NOT EXISTS correction_rules (
     prompt_cycle_id VARCHAR(100),
     consumed_at TIMESTAMPTZ,
 
+    -- Immutable, server-assembled provenance for a human explanation. This is
+    -- nullable for legacy/system rows and is never an editable rule field.
+    source_binding JSONB,
+
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );

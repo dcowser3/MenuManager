@@ -100,9 +100,9 @@ Tres Leches dessert lines must carry the V (vegetarian) allergen code; it is add
 
 - id: `pre-ai/tres-leches-vegetarian-code` · category: allergen_codes · implementation: `services/dashboard/lib/pre-ai-deterministic-rules.ts#ensureTresLechesVegetarianCodeOnLine`
 
-### Cotija requires cheese modifier
+### Named cheeses require cheese modifier
 
-Adds "cheese" after Cotija when it is used as an ingredient name, preserving capitalization. Already-correct "cotija cheese" and hyphenated adjective forms such as "cotija-style" are left unchanged.
+Adds "cheese" after Cotija, mozzarella, feta, or parmesan when used as an ingredient name, preserving capitalization. Already-correct modifiers and hyphenated adjective forms are left unchanged.
 - `Esquites, corn, cotija, bacon D 17` -> `Esquites, corn, cotija cheese, bacon D 17`
 
 - id: `pre-ai/cotija-cheese-modifier` · category: terminology · implementation: `services/dashboard/lib/pre-ai-deterministic-rules.ts#ensureCotijaCheeseModifierOnLine`
@@ -117,13 +117,23 @@ Reviewer-confirmed food words are matched with bounded Damerau edit distance, in
 
 ### Conservative singular ingredient forms
 
-Applies the high-signal subset of the SOP singular-ingredient rule to bare comma-delimited jalapeños, prawns, pickles, and cucumber pickles; Prawn before either Tequeño or Tequeños; and a standalone Pickle side. Counted or prepared plurals such as "three pickles" and "sautéed prawns" are preserved.
+Applies verified contextual singular-ingredient corrections to comma-delimited descriptions, including jalapeños, prawns, pickles, fruit, vegetables, nuts, peppers, potatoes, croutons, and the explicit pistou herbs override; Prawn before either Tequeño or Tequeños; and a standalone Pickle side. Counted/prepared phrases, other documented plural exceptions, and dish names are preserved.
 - `Guacamole, jalapeños, avocado 18` -> `Guacamole, jalapeño, avocado 18`
 - `Encocado, black cod, prawns, squid 38` -> `Encocado, black cod, prawn, squid 38`
 - `Prawns Tequeño, salsa 18` -> `Prawn Tequeño, salsa 18`
 - `Ceviche, cucumber pickles, praline 24` -> `Ceviche, pickle, praline 24`
+- `Beet Salad, caramelized walnuts, pistou herbs D,G 18` -> `Beet Salad, caramelized walnut, pistou herb D,G 18`
 
 - id: `pre-ai/singular-ingredient-forms` · category: singular_plural · implementation: `services/dashboard/lib/pre-ai-deterministic-rules.ts#normalizeSingularIngredientFormsOnLine`
+
+### Contextual compound descriptor guards
+
+Three versioned guards generalize preserved review evidence without approving the original proposal rows: established modifier + grilled is joined only before a following food noun, cast iron is hyphenated only as an attributive food descriptor, and brûlée becomes brûléed only before a recognized ingredient. Punctuation, postnominal, material/cookware, crème brûlée, lexical dessert, standalone, and ambiguous uses remain unchanged; prices, allergens, separators, casing, and idempotence are preserved.
+- `Achiote Grilled Chicken D,G 29` -> `Achiote-Grilled Chicken D,G 29`
+- `Cast Iron Pancakes D,G` -> `Cast-Iron Pancakes D,G`
+- `Holiday Ham, brûlée pineapple D` -> `Holiday Ham, brûléed pineapple D`
+
+- id: `pre-ai/contextual-compound-descriptors` · category: terminology · implementation: `services/dashboard/lib/pre-ai-deterministic-rules.ts#normalizeContextualCompoundDescriptorsOnLine`
 
 ### Cooked shrimp ceviche raw-marker exception
 
@@ -147,6 +157,13 @@ Adds a missing raw marker to dishes containing strong raw/undercooked terms: tar
 
 - id: `pre-ai/raw-asterisk-insertion` · category: raw_markers · implementation: `services/dashboard/lib/pre-ai-deterministic-rules.ts#shouldAddRawAsterisk`
 
+### Interior salmon option marker
+
+Adds a raw marker only to a bare salmon option inside a comma-separated option line; arbitrary salmon mentions and salmon sauces remain unchanged.
+- `grilled chicken, salmon, pasta Bolognese D G` -> `grilled chicken, salmon*, pasta Bolognese D G`
+
+- id: `pre-ai/raw-asterisk-interior-salmon-option` · category: raw_markers · implementation: `services/dashboard/lib/pre-ai-deterministic-rules.ts#addInteriorSalmonOptionMarker`
+
 ### Accepted reviewer correction rules (bounded replacements)
 
 Accepted correction_rules rows with safe change types (spelling, diacritic, terminology, grammar, punctuation; both texts <= 240 chars) are applied when the rule scope matches the submitted property and template type. Spelling/diacritic learned rules that include tone marks match accent-insensitively while preserving word boundaries; other learned replacements remain exact. Broad content rules stay reviewer/prompt material. See the dynamic_correction_rule entries for the currently accepted set.
@@ -160,6 +177,12 @@ Allergen legend lines, the canonical foodborne-illness notice, and price/welcome
 - id: `pre-ai/footer-normalization` · category: footer · implementation: `services/dashboard/lib/menu-footer.ts#normalizeMenuFooter`
 
 ## Layer 2 — Runtime prompt sections (instructions added to the base prompt)
+
+### Prompt section: accepted_scoped_policy
+
+Authoritative accepted term pairs from the shared scope and conflict resolver. Applies when: applicable accepted policies or conflicts.
+
+- id: `prompt/accepted_scoped_policy` · category: prompt · implementation: `services/dashboard/lib/qa-prompt-builder.ts#buildFinalPrompt`
 
 ### Prompt section: raw_marker_placement
 
@@ -349,6 +372,12 @@ Drops AI suggestions asking to alphabetize allergen codes when the corrected men
 
 - id: `post-ai/allergen-suggestion-guard` · category: allergen_codes · implementation: `services/dashboard/lib/allergen-suggestion-guard.ts#guardAllergenAlphabetizationSuggestions`
 
+### Submitted allergen source preservation
+
+Latest submitted/pre-AI allergen codes are authoritative across model and final delivery lanes; candidate-only additions are stripped and ambiguous row attribution fails closed while supported price bytes remain unchanged.
+
+- id: `post-ai/submitted-allergen-preservation` · category: allergen_codes · implementation: `services/dashboard/lib/allergen-source-preservation.ts#preserveSubmittedAllergenCodes`
+
 ### High-confidence suggestion auto-apply
 
 High-confidence spelling/grammar suggestions with an extractable from->to pair are applied directly to the corrected menu and removed from the remaining suggestion list.
@@ -373,7 +402,19 @@ The corrected menu is stripped of managed footer content (allergen legend, raw n
 
 - id: `post-ai/footer-strip` · category: footer · implementation: `services/dashboard/lib/menu-footer.ts#stripManagedFooterText`
 
+### Managed raw-notice finding suppression
+
+Only a canonical tenant raw-food notice may suppress a whole-menu generic missing-notice duplicate; dish-specific, malformed, negated, or unrelated safety findings remain actionable.
+
+- id: `post-ai/managed-raw-notice-suppression` · category: footer · implementation: `services/dashboard/lib/menu-footer.ts#isGenericMissingCanonicalRawNoticeFinding`
+
 ## Layer 5 — Reconciliation and deterministic critical checks
+
+### Allergen delivery claim reconciliation
+
+Model claims about added or retained allergen codes are reconciled against the submitted and delivered row bytes; unverified claims remain advisory and never assert an unapplied change.
+
+- id: `post-ai/allergen-delivery-claim-reconciliation` · category: allergen_codes · implementation: `services/dashboard/lib/allergen-delivery-reconciliation.ts#reconcileAllergenDeliveryClaims`
 
 ### Resolved-critical reconciliation
 

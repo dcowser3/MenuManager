@@ -99,6 +99,8 @@ export interface TenantRulebook {
      * leave placement alone (missing markers are still flagged).
      */
     rawMarkerPlacement?: 'description_end' | 'preserve';
+    /** Exact canonical foodborne-illness footer used for provenance-backed suppression. */
+    rawNoticeText?: string;
 }
 export interface TenantDraftSessions {
     /** Number of idle days before shared menu-edit drafts expire. */

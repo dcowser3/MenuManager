@@ -8,8 +8,8 @@ import {
 import { buildFinalPrompt } from '../lib/qa-prompt-builder';
 
 const RULES = [
-    { original_text: 'tequileno', corrected_text: 'tequileño' },
-    { original_text: 'st. germain', corrected_text: 'St-Germain' },
+    { status: 'accepted', change_type: 'terminology', original_text: 'tequileno', corrected_text: 'tequileño' },
+    { status: 'accepted', change_type: 'terminology', original_text: 'st. germain', corrected_text: 'St-Germain' },
 ];
 
 beforeEach(() => invalidateCanonicalVocabulary());
@@ -112,10 +112,11 @@ describe('buildNearMissBriefing', () => {
     });
 
     test('a cached vocabulary keeps serving when a later fetch would fail', async () => {
-        const good = await buildNearMissBriefing('el tequileno blanco', { fetchAcceptedRules: async () => RULES });
+        const good = await buildNearMissBriefing('el tequileno blanco', { acceptedPolicyFingerprint: 'rules-v1', vocabularySnapshotHash: 'empty', fetchAcceptedRules: async () => RULES });
         expect(good).toContain('tequileño');
         // Cache hit: the review path must not lose findings because the DB blipped.
         const stillGood = await buildNearMissBriefing('el tequileno blanco', {
+            acceptedPolicyFingerprint: 'rules-v1', vocabularySnapshotHash: 'empty',
             fetchAcceptedRules: async () => { throw new Error('db down'); },
         });
         expect(stillGood).toBe(good);

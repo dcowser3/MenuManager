@@ -40,6 +40,8 @@ exports.sanitizeStoredFileName = exports.sanitizeRichTextHtml = exports.sanitize
 exports.shouldNotifyFormAttemptFailure = shouldNotifyFormAttemptFailure;
 exports.extractBaselineFromDocx = extractBaselineFromDocx;
 exports.extractUnapprovedFromDocx = extractUnapprovedFromDocx;
+exports.runSubmissionReviewThroughCoordinator = runSubmissionReviewThroughCoordinator;
+exports.generateDocxFromForm = generateDocxFromForm;
 const express_1 = __importDefault(require("express"));
 const multer_1 = __importDefault(require("multer"));
 const axios_1 = __importDefault(require("axios"));
@@ -57,6 +59,7 @@ const approval_baseline_1 = require("./lib/approval-baseline");
 const smtp_config_1 = require("./lib/smtp-config");
 const upload_security_1 = require("./lib/upload-security");
 const internal_auth_1 = require("@menumanager/internal-auth");
+const review_contract_1 = require("@menumanager/review-contract");
 const submission_workflow_1 = require("./lib/submission-workflow");
 const submission_confirmation_mail_1 = require("./lib/submission-confirmation-mail");
 const approval_workflow_1 = require("./lib/approval-workflow");
@@ -70,6 +73,7 @@ const error_report_1 = require("./lib/error-report");
 const alert_mail_1 = require("./lib/alert-mail");
 const property_catalog_1 = require("./lib/property-catalog");
 const learning_correction_rules_1 = require("./lib/learning-correction-rules");
+const human_explanation_source_binding_1 = require("./lib/human-explanation-source-binding");
 const learning_dashboard_rules_1 = require("./lib/learning-dashboard-rules");
 const learning_submissions_1 = require("./lib/learning-submissions");
 const embedded_set_menu_guard_1 = require("./lib/embedded-set-menu-guard");
@@ -78,8 +82,10 @@ const basic_ai_check_audit_1 = require("./lib/basic-ai-check-audit");
 const menu_footer_1 = require("./lib/menu-footer");
 const qa_prompt_builder_1 = require("./lib/qa-prompt-builder");
 const canonical_vocabulary_provider_1 = require("./lib/canonical-vocabulary-provider");
+const canonical_policy_1 = require("./lib/canonical-policy");
 const review_pipeline_1 = require("./lib/review-pipeline");
 const improvement_cycle_core_1 = require("./lib/improvement-cycle-core");
+const expectation_versioning_1 = require("./lib/expectation-versioning");
 var upload_security_2 = require("./lib/upload-security");
 Object.defineProperty(exports, "sanitizePlainTextInput", { enumerable: true, get: function () { return upload_security_2.sanitizePlainTextInput; } });
 Object.defineProperty(exports, "sanitizeRichTextHtml", { enumerable: true, get: function () { return upload_security_2.sanitizeRichTextHtml; } });
@@ -1535,6 +1541,115 @@ app.get('/download/approved-clean/:submissionId', async (req, res) => {
         res.status(500).send('Error downloading file');
     }
 });
+async function runSubmissionReviewThroughCoordinator(input, overrides = {}) {
+    // Resolve once per submission before preparation; the same configured and
+    // adapter-wire identity is bound into the request and validated in both
+    // services.
+    const effectiveExecutionIdentity = (0, review_contract_1.configuredExecutionIdentity)(process.env);
+    const qaPrompt = overrides.readPrompt
+        ? await overrides.readPrompt()
+        : await fs_1.promises.readFile(path.join(getRepoRoot(), 'sop-processor', 'qa_prompt.txt'), 'utf8');
+    const acceptedCorrectionRules = overrides.fetchAcceptedRules
+        ? await overrides.fetchAcceptedRules()
+        : await fetchAcceptedCorrectionRulesForPreAi();
+    let approvedVocabularyTerms = [];
+    try {
+        approvedVocabularyTerms = overrides.loadVocabulary
+            ? await overrides.loadVocabulary()
+            : await (0, approved_dishes_1.loadApprovedReviewVocabularyTerms)(getRepoRoot());
+    }
+    catch (error) {
+        console.warn(`Approved vocabulary unavailable for submission review; continuing without snapshot. (${error?.message || error})`);
+    }
+    const prepared = await (0, review_pipeline_1.prepareReview)(input.text, {
+        basePrompt: qaPrompt,
+        property: input.property,
+        templateType: input.templateType,
+        menuType: input.menuType,
+        allergens: input.allergens,
+        submissionMode: input.submissionMode,
+        revisionSource: input.revisionSource,
+        acceptedCorrectionRules,
+        approvedVocabularyTerms,
+        precheckEnabled: BASIC_AI_PRECHECK_ENABLED,
+        contextProvenance: 'new_submission',
+        model: effectiveExecutionIdentity.model,
+        settings: { executionIdentity: effectiveExecutionIdentity },
+    });
+    const envelope = prepared.envelope;
+    const contextHash = (0, canonical_policy_1.policyHash)(envelope.context);
+    const coordinatorRequest = (0, review_contract_1.buildCoordinatorRequest)({
+        schemaVersion: review_contract_1.COORDINATOR_SCHEMA_VERSION,
+        engineVersion: review_contract_1.COORDINATOR_ENGINE_VERSION,
+        text: prepared.preCheckedReviewBody,
+        prompt: prepared.promptInfo.prompt,
+        callerAttestations: {
+            sourceHash: envelope.originalBodyHash,
+            contextHash,
+            policyHash: envelope.acceptedPolicyHash,
+            vocabularySnapshotHash: envelope.vocabularySnapshotHash,
+        },
+        effectiveExecutionIdentity,
+        replayIdentity: `submission:${input.submissionId}`,
+    });
+    const baseResult = (reason) => ({
+        reviewStatus: { complete: false, transportStatus: 'rejected', reusable: false },
+        outputHash: (0, canonical_policy_1.policyHash)(prepared.preCheckedReviewBody),
+        policyHash: envelope.acceptedPolicyHash,
+        contextHash,
+        engineVersion: envelope.engineVersion,
+        correctedMenu: prepared.preCheckedReviewBody,
+        reason,
+        diagnostics: [{ stage: 'submission_adapter', reason }],
+    });
+    let response;
+    try {
+        response = await (overrides.transport || internalApi).post(`${AI_REVIEW_URL}/v1/coordinator-review`, coordinatorRequest, { timeout: AI_REVIEW_SUBMIT_TIMEOUT_MS });
+    }
+    catch (error) {
+        return baseResult(`coordinator_transport_failed:${error?.code || error?.response?.status || 'unknown'}`);
+    }
+    const data = response?.data || {};
+    const responseValidation = (0, review_contract_1.validateCoordinatorResponse)(data);
+    if (!responseValidation.ok)
+        return baseResult(`coordinator_response_invalid:${responseValidation.reason}`);
+    const responseIdentity = responseValidation.response;
+    if (responseIdentity.requestDigest !== coordinatorRequest.requestDigest
+        || responseIdentity.textHash !== coordinatorRequest.textHash
+        || responseIdentity.promptHash !== coordinatorRequest.promptHash
+        || responseIdentity.replayIdentity !== coordinatorRequest.replayIdentity
+        || JSON.stringify(responseIdentity.callerAttestations) !== JSON.stringify(coordinatorRequest.callerAttestations)
+        || !(0, review_contract_1.sameExecutionIdentity)(responseIdentity.effectiveExecutionIdentity, effectiveExecutionIdentity)
+        || responseIdentity.requestedModel !== effectiveExecutionIdentity.model
+        || responseIdentity.observedModel !== effectiveExecutionIdentity.model
+        || data.schemaVersion !== review_contract_1.COORDINATOR_SCHEMA_VERSION
+        || data.engineVersion !== review_contract_1.COORDINATOR_ENGINE_VERSION) {
+        return baseResult('coordinator_response_identity_mismatch');
+    }
+    if (data.finishReason !== 'stop') {
+        const reason = data.finishReason === null || data.finishReason === undefined
+            ? 'coordinator_finish_reason_missing'
+            : `coordinator_finish_reason_${String(data.finishReason).slice(0, 40)}`;
+        return baseResult(reason);
+    }
+    if (typeof data.feedback !== 'string' || !data.feedback.trim()) {
+        return baseResult('coordinator_feedback_missing');
+    }
+    const completed = (0, review_pipeline_1.completePreparedReview)(prepared, data.feedback, { finishReason: data.finishReason });
+    return {
+        reviewStatus: completed.authoritative.reviewStatus,
+        outputHash: completed.outputHash,
+        policyHash: envelope.acceptedPolicyHash,
+        contextHash,
+        engineVersion: envelope.engineVersion,
+        correctedMenu: completed.authoritative.correctedMenu,
+        suggestions: completed.authoritative.suggestions,
+        criticalSuggestions: completed.authoritative.criticalSuggestions,
+        hasCriticalErrors: completed.authoritative.hasCriticalErrors,
+        reason: completed.reviewStatus.complete ? 'completed' : (completed.post.safetyDiagnostics[0] || 'coordinator_delivery_rejected'),
+        diagnostics: completed.diagnostics.slice(0, 50),
+    };
+}
 const submissionWorkflowHandlers = (0, submission_workflow_1.createSubmissionWorkflowHandlers)({
     axios: internalApi,
     fs: fs_1.promises,
@@ -1567,6 +1682,31 @@ const submissionWorkflowHandlers = (0, submission_workflow_1.createSubmissionWor
             submittedSubmissionId,
         }, { timeout: 5000 });
         return response.data;
+    },
+    runSubmissionReview: runSubmissionReviewThroughCoordinator,
+    recordSubmissionReviewAudit: (input) => {
+        void (0, form_attempt_logging_1.logFormAttemptEvent)({
+            eventType: 'submission_review_completed',
+            route: '/api/form/submit',
+            projectName: input.projectName,
+            property: input.property,
+            templateType: input.templateType,
+            statusCode: 200,
+            details: {
+                submissionId: input.submissionId,
+                status: input.status,
+                complete: input.complete,
+                transportStatus: input.transportStatus,
+                reusable: input.reusable,
+                reason: input.reason,
+                artifactProvenance: input.artifactProvenance,
+                outputHash: input.outputHash,
+                policyHash: input.policyHash,
+                contextHash: input.contextHash,
+                engineVersion: input.engineVersion,
+                diagnostics: input.diagnostics || [],
+            },
+        });
     },
 });
 const approvalWorkflowHandlers = (0, approval_workflow_1.createApprovalWorkflowHandlers)({
@@ -2031,8 +2171,8 @@ app.get('/learning', async (_req, res) => {
 app.get('/learning/submission/:submissionId', async (req, res) => {
     try {
         const { submissionId } = req.params;
-        let [learningDetailResult, submissionResult, correctionRulesResult, propertiesResult] = await Promise.all([
-            internalApi.get(`${DIFFER_SERVICE_URL}/learning/submissions/${encodeURIComponent(submissionId)}`, { timeout: 3500 })
+        let [learningRevisionResult, submissionResult, correctionRulesResult, propertiesResult] = await Promise.all([
+            internalApi.get(`${DIFFER_SERVICE_URL}/learning/submissions/${encodeURIComponent(submissionId)}/revision`, { timeout: 3500 })
                 .then((r) => ({ ok: true, data: r.data, error: '' }))
                 .catch((e) => ({ ok: false, data: null, error: e?.message || 'request failed' })),
             internalApi.get(`${DB_SERVICE_URL}/submissions/${encodeURIComponent(submissionId)}`, { timeout: 3500 })
@@ -2045,6 +2185,14 @@ app.get('/learning/submission/:submissionId', async (req, res) => {
                 .then((r) => ({ ok: true, data: r.data, error: '' }))
                 .catch((e) => ({ ok: false, data: { properties: [] }, error: e?.message || 'request failed' })),
         ]);
+        let learningDetailResult = { ok: false, data: null, error: 'comparison revision unavailable' };
+        const initialRevision = learningRevisionResult.data?.comparison_revision;
+        if (learningRevisionResult.ok && initialRevision) {
+            learningDetailResult = await internalApi
+                .get(`${DIFFER_SERVICE_URL}/learning/submissions/${encodeURIComponent(submissionId)}?comparison_revision=${encodeURIComponent(initialRevision)}`, { timeout: 3500 })
+                .then((r) => ({ ok: true, data: r.data, error: '' }))
+                .catch((e) => ({ ok: false, data: null, error: e?.message || 'request failed' }));
+        }
         // Browser approval finalization creates the differ comparison just before sending
         // the reviewer here. A slow filesystem write used to make this first GET lose a
         // race and render a 404; refreshing worked because the comparison had completed.
@@ -2052,8 +2200,15 @@ app.get('/learning/submission/:submissionId', async (req, res) => {
         if (!learningDetailResult.ok && submissionResult.ok) {
             for (let attempt = 0; attempt < 4 && !learningDetailResult.ok; attempt++) {
                 await new Promise((resolve) => setTimeout(resolve, 250));
+                learningRevisionResult = await internalApi
+                    .get(`${DIFFER_SERVICE_URL}/learning/submissions/${encodeURIComponent(submissionId)}/revision`, { timeout: 3500 })
+                    .then((r) => ({ ok: true, data: r.data, error: '' }))
+                    .catch((e) => ({ ok: false, data: null, error: e?.message || 'request failed' }));
+                const retryRevision = learningRevisionResult.data?.comparison_revision;
+                if (!learningRevisionResult.ok || !retryRevision)
+                    continue;
                 learningDetailResult = await internalApi
-                    .get(`${DIFFER_SERVICE_URL}/learning/submissions/${encodeURIComponent(submissionId)}`, { timeout: 3500 })
+                    .get(`${DIFFER_SERVICE_URL}/learning/submissions/${encodeURIComponent(submissionId)}?comparison_revision=${encodeURIComponent(retryRevision)}`, { timeout: 3500 })
                     .then((r) => ({ ok: true, data: r.data, error: '' }))
                     .catch((e) => ({ ok: false, data: null, error: e?.message || 'request failed' }));
             }
@@ -2089,17 +2244,80 @@ app.get('/learning/submission/:submissionId', async (req, res) => {
 /**
  * Correction rules: create (human-annotated or accept system proposal)
  */
+async function resolveHumanExplanationSourceBinding(payload) {
+    const submissionId = `${payload?.submission_id || ''}`.trim();
+    const correctionId = `${payload?.correction_id || ''}`.trim();
+    if (!submissionId || !correctionId) {
+        throw new learning_correction_rules_1.CorrectionRuleValidationError('submission_id and correction_id are required for source binding');
+    }
+    const comparisonRevision = `${payload?.comparison_revision || ''}`.trim();
+    if (!comparisonRevision) {
+        throw new learning_correction_rules_1.CorrectionRuleValidationError('The exact learning comparison revision is required');
+    }
+    const learningResult = await internalApi.get(`${DIFFER_SERVICE_URL}/learning/submissions/${encodeURIComponent(submissionId)}?comparison_revision=${encodeURIComponent(comparisonRevision)}`, { timeout: 3500 });
+    const learning = learningResult.data || {};
+    const correction = Array.isArray(learning.dish_corrections)
+        ? learning.dish_corrections.find((item) => `${item?.correction_id || ''}` === correctionId)
+        : null;
+    if (!correction) {
+        throw new learning_correction_rules_1.CorrectionRuleValidationError('The correction is not present in the trusted learning comparison');
+    }
+    if (learning.comparison_revision !== comparisonRevision
+        || learning.source_stage !== human_explanation_source_binding_1.HUMAN_EXPLANATION_SOURCE_STAGE
+        || learning.coordinate_basis !== human_explanation_source_binding_1.HUMAN_EXPLANATION_COORDINATE_BASIS
+        || typeof learning.source_snapshot_sha256 !== 'string'
+        || typeof learning.source_extraction_version !== 'string'
+        || !learning.source_extraction_version.trim()
+        || typeof learning.source_attempt_id !== 'string'
+        || !learning.source_attempt_id.trim()) {
+        throw new learning_correction_rules_1.CorrectionRuleValidationError('The learning comparison has no trusted source revision');
+    }
+    const sourceResult = await internalApi.get(`${DB_SERVICE_URL}/submissions/${encodeURIComponent(submissionId)}/review-source-binding?source_snapshot_sha256=${encodeURIComponent(learning.source_snapshot_sha256)}&attempt_id=${encodeURIComponent(learning.source_attempt_id)}`, { timeout: 3500 });
+    const source = sourceResult.data || {};
+    const audit = source.audit || {};
+    const binding = (0, human_explanation_source_binding_1.buildHumanExplanationSourceBinding)({
+        submissionId: source.submission_id,
+        attemptId: source.attempt_id,
+        auditId: audit.id,
+        sourceSnapshotSha256: learning.source_snapshot_sha256,
+        matchedAuditStage: audit.source_stage,
+        matchedAuditSnapshotSha256: audit.source_snapshot_sha256,
+        comparisonRevision: learning.comparison_revision,
+        sourceExtractionVersion: learning.source_extraction_version,
+        correction,
+    });
+    return {
+        binding,
+        // Browser-supplied before/after values are not provenance. Keep the
+        // reviewer intent fields, but replace the source span with the exact
+        // trusted differ row before persisting the explanation.
+        trustedPayload: {
+            ...payload,
+            original_text: correction.before_line,
+            corrected_text: correction.after_line,
+            source_binding: binding,
+        },
+    };
+}
 app.post('/api/learning/correction-rules', async (req, res) => {
     try {
         const payload = req.body || {};
+        const trustedPayload = (0, learning_correction_rules_1.requiresHumanExplanationSourceBinding)(payload)
+            ? (await resolveHumanExplanationSourceBinding(payload)).trustedPayload
+            : { ...payload, source_binding: null };
         const catalog = await getPropertyCatalogFromDb();
-        const record = (0, learning_correction_rules_1.buildCorrectionRuleRecord)(payload, catalog);
+        const record = (0, learning_correction_rules_1.buildCorrectionRuleRecord)(trustedPayload, catalog);
         const response = await internalApi.post(`${DB_SERVICE_URL}/correction-rules`, record, { timeout: 3000 });
         res.json(response.data);
     }
     catch (error) {
         if ((0, learning_correction_rules_1.isCorrectionRuleValidationError)(error)) {
             return res.status(error.statusCode).json({ error: error.message });
+        }
+        if (error?.response?.status === 409) {
+            return res.status(409).json({
+                error: error?.response?.data?.error || 'The trusted learning source changed or is ambiguous; reload the comparison before saving.',
+            });
         }
         console.error('Error saving correction rule:', error.message);
         res.status(error?.response?.status || 500).json(error?.response?.data || { error: 'Failed to save correction rule' });
@@ -2398,16 +2616,41 @@ app.post('/api/learning/prompt-proposal/:id/review', async (req, res) => {
         for (const [position, rule] of acceptedRules.entries()) {
             const index = selectedIndexes[position];
             try {
-                const payload = (0, improvement_cycle_core_1.mapProposedRuleToCorrectionRulePayload)(rule, id, index, reviewer_name || null, {
+                const payload = (0, improvement_cycle_core_1.mapProposedRuleToCorrectionRulePayload)(rule, proposalRecord?.cycle_id || id, index, reviewer_name || null, {
                     cycleId: proposalRecord?.cycle_id || `proposal-${id}`,
                     consumedAt: new Date().toISOString(),
                 });
                 await internalApi.post(`${DB_SERVICE_URL}/correction-rules`, payload, { timeout: 5000 });
-                ruleResults.push({ index, ok: true });
+                ruleResults.push({
+                    index,
+                    ok: true,
+                    correctionId: `${payload.correction_id || ''}`,
+                    location: payload.location ? `${payload.location}` : null,
+                    menuScope: payload.applies_to_menu_type ? `${payload.applies_to_menu_type}` : null,
+                    isLocationSpecific: payload.is_location_specific === true,
+                });
             }
             catch (ruleError) {
                 console.error(`Failed to save accepted proposal rule ${index}:`, ruleError.message);
                 ruleResults.push({ index, ok: false, error: ruleError.message });
+            }
+        }
+        // Persist expectation activation only after the exact selected rule has
+        // been written successfully; a failed rule write leaves the old envelope.
+        if (approved && proposalRecord?.eval_summary?.expectation_envelope && acceptedRules.length) {
+            const envelope = proposalRecord.eval_summary.expectation_envelope;
+            try {
+                const activatedEnvelope = (0, expectation_versioning_1.planApprovedExpectationActivation)(envelope, acceptedRules, ruleResults, selectedIndexes);
+                if (activatedEnvelope && activatedEnvelope.sha256 !== envelope.sha256) {
+                    const expectedEvalSummaryHash = crypto_1.default.createHash('sha256').update(JSON.stringify(proposalRecord.eval_summary || {})).digest('hex');
+                    await internalApi.put(`${DB_SERVICE_URL}/prompt-proposals/${encodeURIComponent(id)}/expectation-envelope`, {
+                        expected_eval_summary_hash: expectedEvalSummaryHash,
+                        expectation_envelope: activatedEnvelope,
+                    }, { timeout: 5000 });
+                }
+            }
+            catch (activationError) {
+                console.warn('Expectation activation failed closed:', activationError.message);
             }
         }
         // File each code recommendation as a GitHub issue so it becomes a
@@ -3007,15 +3250,15 @@ async function handleBasicCheck(req, res) {
         const sanitizedMenuContent = (0, menu_footer_1.normalizeMenuFooter)(menuContent, allergens || '');
         const effectiveReviewAllergens = allergens || reviewFooterMetadata.normalizedAllergenLine;
         const acceptedCorrectionRules = await fetchAcceptedCorrectionRulesForPreAi();
-        const preAiDeterministic = (0, pre_ai_deterministic_rules_1.runPreAiDeterministicChecks)(reviewFooterMetadata.body, {
+        let preAiDeterministic = (0, pre_ai_deterministic_rules_1.runPreAiDeterministicChecks)(reviewFooterMetadata.body, {
             enabled: BASIC_AI_PRECHECK_ENABLED,
             property,
             templateType,
             allergenLegend: effectiveReviewAllergens,
             acceptedCorrectionRules,
         });
-        const preCheckedReviewBody = preAiDeterministic.menuText;
-        const embeddedSetMenuAnalysis = menuType === 'prix_fixe'
+        let preCheckedReviewBody = preAiDeterministic.menuText;
+        let embeddedSetMenuAnalysis = menuType === 'prix_fixe'
             ? { sections: [], issues: [] }
             : (0, embedded_set_menu_guard_1.analyzeEmbeddedSetMenus)(preCheckedReviewBody);
         const diagnosticsPromptSections = [];
@@ -3033,12 +3276,46 @@ async function handleBasicCheck(req, res) {
         // Scanned AFTER the deterministic pre-AI pass so already-applied fixes are not
         // re-flagged. Accepted rules are reused; approved vocabulary is DB-backed and
         // cached by the provider for the review hot path.
-        const nearMissAnalysis = await (0, canonical_vocabulary_provider_1.buildNearMissAnalysis)(preCheckedReviewBody, {
-            fetchAcceptedRules: async () => acceptedCorrectionRules || [],
-            fetchApprovedTerms: async () => (0, approved_dishes_1.loadApprovedReviewVocabularyTerms)(getRepoRoot()),
-        });
-        const promptInfo = (0, qa_prompt_builder_1.buildFinalPrompt)(qaPrompt, {
+        let approvedVocabularyTerms = [];
+        try {
+            approvedVocabularyTerms = await (0, approved_dishes_1.loadApprovedReviewVocabularyTerms)(getRepoRoot());
+        }
+        catch (error) {
+            console.warn(`Approved vocabulary unavailable; continuing without vocabulary snapshot. (${error?.message || error})`);
+        }
+        let coordinatorPreparation = null;
+        if (!changedOnlyMode) {
+            coordinatorPreparation = await (0, review_pipeline_1.prepareReview)(menuContent, {
+                basePrompt: qaPrompt,
+                property,
+                templateType,
+                menuType,
+                allergens,
+                acceptedCorrectionRules,
+                approvedVocabularyTerms,
+                precheckEnabled: BASIC_AI_PRECHECK_ENABLED,
+                managedRawNoticePresent: reviewFooterMetadata.hadRawNotice,
+                contextProvenance: 'basic_http',
+            });
+            preAiDeterministic = coordinatorPreparation.preAiDeterministic;
+            preCheckedReviewBody = coordinatorPreparation.preCheckedReviewBody;
+            embeddedSetMenuAnalysis = coordinatorPreparation.embeddedSetMenuAnalysis;
+        }
+        const nearMissAnalysis = coordinatorPreparation?.nearMissAnalysis || await (0, canonical_vocabulary_provider_1.buildNearMissAnalysis)(preCheckedReviewBody, {
+            tenantId: (0, canonical_policy_1.policyHash)(tenantConfig),
+            property,
+            templateType,
             menuType,
+            acceptedPolicyFingerprint: (0, canonical_policy_1.policyHash)(acceptedCorrectionRules),
+            vocabularySnapshotHash: (0, canonical_policy_1.policyHash)({ approvedTerms: approvedVocabularyTerms }),
+            fetchAcceptedRules: async () => acceptedCorrectionRules || [],
+            fetchApprovedTerms: async () => approvedVocabularyTerms,
+        });
+        const promptInfo = coordinatorPreparation?.promptInfo || (0, qa_prompt_builder_1.buildFinalPrompt)(qaPrompt, {
+            property,
+            templateType,
+            menuType,
+            acceptedCorrectionRules,
             effectiveAllergens: effectiveReviewAllergens,
             changedOnlyMode,
             precheckEnabled: BASIC_AI_PRECHECK_ENABLED,
@@ -3358,7 +3635,10 @@ async function handleBasicCheck(req, res) {
         console.log('=== END RAW FEEDBACK ===');
         // Parse + post-AI pipeline: deterministic cleanup, guard chain, reconciliation,
         // and prix-fixe critical enforcement (shared with the offline eval harness).
-        const postPipeline = (0, review_pipeline_1.runPostAiPipeline)({
+        const coordinatedResult = coordinatorPreparation
+            ? (0, review_pipeline_1.completePreparedReview)(coordinatorPreparation, feedback, { finishReason: qaResponse?.data?.finish_reason })
+            : null;
+        const postPipeline = coordinatedResult?.post || (0, review_pipeline_1.runPostAiPipeline)({
             feedback,
             preCheckedReviewBody,
             menuType,
@@ -3370,9 +3650,21 @@ async function handleBasicCheck(req, res) {
             canonicalSpellingFindings: nearMissAnalysis.findings,
             precheckEnabled: BASIC_AI_PRECHECK_ENABLED,
             checkId: basicCheckId,
+            managedRawNoticePresent: reviewFooterMetadata.hadRawNotice,
         });
-        const { parsed, postAiDeterministic, protectedTerms, titleGuard, structureGuard, guardedCorrectedMenu, allergenGuard, appliedHc, setMenuGuard, priceIntegrityGuard, correctedAfterHighConfidence, correctedMenuSanitized, reconciliation, reconciledSuggestions, spellingAdjudications, finalSuggestions, hasCriticalErrors, criticalSuggestions, } = postPipeline;
+        const { parsed, postAiDeterministic, protectedTerms, titleGuard, structureGuard, guardedCorrectedMenu, allergenGuard, appliedHc, setMenuGuard, priceIntegrityGuard, correctedAfterHighConfidence, correctedMenuSanitized, reconciliation, reconciledSuggestions, spellingAdjudications, finalSuggestions: attemptFinalSuggestions, hasCriticalErrors: attemptHasCriticalErrors, criticalSuggestions: attemptCriticalSuggestions, } = postPipeline;
         const originalMenuSanitized = sanitizedMenuContent.body;
+        const authoritative = coordinatedResult?.authoritative;
+        const finalSuggestions = changedOnlyMode
+            ? attemptFinalSuggestions
+            : authoritative?.suggestions || attemptFinalSuggestions;
+        const hasCriticalErrors = changedOnlyMode
+            ? attemptHasCriticalErrors
+            : authoritative?.hasCriticalErrors ?? attemptHasCriticalErrors;
+        const criticalSuggestions = changedOnlyMode
+            ? attemptCriticalSuggestions
+            : authoritative?.criticalSuggestions || attemptCriticalSuggestions;
+        const deliveredReviewStatus = changedOnlyMode ? undefined : authoritative?.reviewStatus;
         console.log('=== PARSED RESPONSE ===');
         console.log('Corrected menu length:', correctedMenuSanitized.length);
         console.log('Suggestions count:', parsed.suggestions.length);
@@ -3390,7 +3682,7 @@ async function handleBasicCheck(req, res) {
         console.log('===========================');
         let changedOnlyMergedMenu = menuContent;
         if (changedOnlyMode) {
-            const mergeResult = mergeChangedLineCorrections(menuContent, baselineMenuContent, correctedAfterHighConfidence);
+            const mergeResult = mergeChangedLineCorrections(menuContent, baselineMenuContent, correctedMenuSanitized);
             changedOnlyMergedMenu = mergeResult.merged;
             if (mergeResult.bailed) {
                 console.warn('changed_only merge bailed: AI corrected line count did not match extracted changed line count; falling back to original menu text');
@@ -3399,7 +3691,9 @@ async function handleBasicCheck(req, res) {
                 console.log(`changed_only merge applied ${mergeResult.correctionsApplied} line correction(s)`);
             }
         }
-        const finalCorrectedMenu = changedOnlyMode ? changedOnlyMergedMenu : correctedMenuSanitized;
+        const finalCorrectedMenu = changedOnlyMode
+            ? changedOnlyMergedMenu
+            : authoritative?.correctedMenu || correctedMenuSanitized;
         const finalHasChanges = changedOnlyMode
             ? changedOnlyMergedMenu !== menuContent
             : correctedMenuSanitized !== originalMenuSanitized;
@@ -3433,10 +3727,23 @@ async function handleBasicCheck(req, res) {
                 hasChanges: finalHasChanges,
                 dishNameFormattingAnchorCount: dishNameFormatting.length,
                 correctedMenuStructureGuard: {
+                    scope: 'attempt',
                     safe: structureGuard.safe,
                     reasons: structureGuard.reasons,
                     metrics: structureGuard.metrics,
                 },
+                ...(authoritative ? {
+                    deliveredReview: {
+                        scope: 'delivered_authoritative',
+                        reviewStatus: deliveredReviewStatus,
+                        structureGuard: authoritative.structureGuard,
+                        spellingAdjudications: authoritative.spellingAdjudications,
+                        suggestionsCount: finalSuggestions.length,
+                        criticalSuggestionsCount: criticalSuggestions.length,
+                        hasCriticalErrors,
+                        outputHash: coordinatedResult?.outputHash,
+                    },
+                } : {}),
                 preAiDeterministic: {
                     enabled: BASIC_AI_PRECHECK_ENABLED,
                     appliedCorrectionCount: preAiDeterministic.appliedCorrections.length,
@@ -3539,6 +3846,18 @@ async function handleBasicCheck(req, res) {
                     droppedSuggestions: reconciliation.droppedSuggestions,
                     suggestionsAfterReconciliation: reconciledSuggestions,
                 },
+                ...(authoritative ? {
+                    delivered: {
+                        reviewStatus: deliveredReviewStatus,
+                        structureGuard: authoritative.structureGuard,
+                        reconciliation: authoritative.reconciliation,
+                        suggestions: finalSuggestions,
+                        criticalSuggestions,
+                        hasCriticalErrors,
+                        spellingAdjudications: authoritative.spellingAdjudications,
+                        safetyDiagnostics: authoritative.safetyDiagnostics,
+                    },
+                } : {}),
                 spellingAdjudications,
             },
             finalResult: {
@@ -3628,6 +3947,23 @@ async function handleBasicCheck(req, res) {
                 droppedSuggestions: reconciliation.droppedSuggestions,
                 suggestionsAfterReconciliation: reconciledSuggestions,
             },
+            ...(authoritative ? {
+                delivered: {
+                    reviewStatus: deliveredReviewStatus,
+                    outputHash: coordinatedResult?.outputHash,
+                    acceptedPolicyHash: coordinatedResult?.envelope.acceptedPolicyHash,
+                    managedRawNoticePresent: coordinatedResult?.envelope.context.managedRawNoticePresent,
+                    editableSpanBasis: coordinatedResult?.envelope.editableSpanBasis,
+                    correctedMenuLength: finalCorrectedMenu.length,
+                    suggestions: finalSuggestions,
+                    criticalSuggestions,
+                    hasCriticalErrors,
+                    structureGuard: authoritative.structureGuard,
+                    reconciliation: authoritative.reconciliation,
+                    spellingAdjudications: authoritative.spellingAdjudications,
+                    safetyDiagnostics: authoritative.safetyDiagnostics,
+                },
+            } : {}),
             spellingAdjudications,
             final: {
                 suggestions: finalSuggestions,
@@ -3661,6 +3997,7 @@ async function handleBasicCheck(req, res) {
             suggestions: finalSuggestions,
             hasChanges: finalHasChanges,
             hasCriticalErrors,
+            ...(deliveredReviewStatus ? { reviewStatus: deliveredReviewStatus } : {}),
             reviewMode: changedOnlyMode ? 'changed_only' : 'full',
             changedLineCount,
             dishNameFormatting,

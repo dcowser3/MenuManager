@@ -22,6 +22,8 @@ When Basic AI Check or a suggestion updates an editable menu, heading and dish-n
 
 Review formatting preserves corrected line breaks and keeps allergen codes attached to their dishes. Description-less buffet dishes are bolded as complete dish names, separately from the following dish; descriptions and codes remain outside the automatic bold range. See [dish-name formatting and the Toro holiday regression](docs/design-docs/dish-name-formatting.md).
 
+Chef-submitted allergen codes are source-bound through model and final-byte delivery: model-only additions remain advisory, submitted codes are not silently removed, and the latest explicit edit wins over an older review. Supported currency and market-price suffixes are preserved byte-for-byte. See [submitted allergen preservation](docs/design-docs/submitted-allergen-preservation.md).
+
 Clean approved-menu extraction also collapses accidental repeated in-line spaces left by accepted tracked changes, keeping the stored text and HTML representations aligned.
 
 After a revision is approved, only a known `revision_base_submission_id` lineage relationship supersedes its parent; unrelated menus in the same property and service period remain editable. When a prior approved DOCX is uploaded as a baseline, the form may suggest a matching approved menu, but it records a lineage link only if the user explicitly confirms it.
@@ -84,6 +86,8 @@ The `/learning` dashboard separates auto-scanned detected patterns from active P
 
 Basic AI Check combines reviewer-confirmed deterministic corrections with contextual spelling evidence from approved dishes and full human-approved menus. Tight, unique matches to confirmed food words can auto-correct unseen variants; database matches are advisory and require an explicit contextual AI disposition. Uncertain or silently omitted candidates remain yellow, valid terms are acknowledged without a card, and only a token the model is highly confident is malformed but cannot safely correct becomes an overrideable red `Unrecognized Term` issue. See [Contextual Culinary Spelling](docs/design-docs/contextual-culinary-spelling.md).
 
+The deterministic pre-AI pass also applies the reviewed contextual compound-descriptor contract: confident attributive `Achiote-Grilled`/`Cast-Iron` forms and recognized ingredient forms such as `brûléed pineapple` are normalized while material, standalone, lexical-dessert, punctuation, and ambiguous uses remain unchanged. Prices, allergen suffixes, casing, and repeated-pass output are preserved. The contract and stable hash are recorded in [the code-rules manifest](docs/references/code-rules-manifest.md).
+
 After a browser approval, the reviewer is taken directly to its correction-explanations page once comparison details are ready. That page supports one reviewer name plus **Save All Explanations**, keeps unfinished entries as browser-local drafts, and does not erase other explanations after an individual save or validation error.
 
 ## Quick Start
@@ -129,6 +133,21 @@ npm run smoke:basic-ai-check
 ```
 
 For route, API, UI, or workflow changes, follow [docs/feature-delivery-workflow.md](docs/feature-delivery-workflow.md): build the affected workspace, restart the affected service, and verify the live behavior with a request or browser check.
+
+### Offline review-learning preparation
+
+The B6 human-explanation and source-bound preflight tooling is preparation-only and writes only to the local output directory supplied by the caller. Run it with frozen synthetic/public inputs in network-none Docker:
+
+```bash
+npm run review:preflight:source-bound:prepare -- --out DIR --old-fixture FILE --old-report FILE [--original-plan DIR]
+npm run review:preflight:source-bound:run -- --plan DIR --out DIR
+npm run review:preflight:human-explanations:prepare -- --corrections FILE --dataset FILE --cohorts FILE --source-manifest FILE --out DIR
+npm run review:preflight:human-explanations:package -- --preparation DIR --out DIR --image-id sha256:... --test-command COMMAND --test-log FILE --prep-log FILE --exit-code 0 --prep-exit-code 0 --test-counts binder:N,sourceBound:N,total:N
+```
+
+These commands produce local evidence/packages only. They make no provider or database calls, do not alter runtime review behavior, and do not authorize activation, deployment, paid execution, or production writes. See the [B6 handoff](docs/design-docs/review-learning-b6-binder-handoff.md) and the [human-explanation](docs/design-docs/review-learning-human-explanation-binding.md) and [source-bound preflight](docs/design-docs/review-learning-source-bound-preflight-v2.md) design docs for the input and evidence boundaries.
+
+The bounded manual code-candidate handoff binds one human explanation group and retains an owner-bound resumable attempt. Without a separate authorization/ledger it stops at `code_candidate_authorization_required` with zero provider calls; with an active authorization it re-reads the live owner claim before dispatch and delegates to the existing validated-draft/lifecycle seam. Delivery-mismatch corrections remain visibly held as `delivery_verification_required`; browser delivery certification, auto-activation, and generalized quality proof are deferred.
 
 ## Documentation Rules
 

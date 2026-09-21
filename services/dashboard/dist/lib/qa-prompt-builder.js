@@ -6,6 +6,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.QA_PROMPT_SECTIONS = void 0;
 exports.hasAiReviewFenceContract = hasAiReviewFenceContract;
 exports.buildFinalPrompt = buildFinalPrompt;
+const canonical_policy_1 = require("./canonical-policy");
 const menu_footer_1 = require("./menu-footer");
 const embedded_set_menu_guard_1 = require("./embedded-set-menu-guard");
 const tenant_config_1 = require("@menumanager/tenant-config");
@@ -13,6 +14,7 @@ const review_response_contract_1 = require("./review-response-contract");
 // Registry of every runtime prompt section. Consumed by the review-rules
 // manifest so prompt-layer rules are enumerable alongside code rules.
 exports.QA_PROMPT_SECTIONS = {
+    accepted_scoped_policy: { description: 'Authoritative accepted term pairs from the shared scope and conflict resolver.', appliesWhen: 'applicable accepted policies or conflicts' },
     raw_marker_placement: {
         description: 'Instructs the AI to preserve the author\'s raw-marker (*) placement as house style; missing markers are still flagged but none are moved.',
         appliesWhen: "rulebook.rawMarkerPlacement === 'preserve'",
@@ -191,6 +193,11 @@ Note: Use ONLY these allergen codes when checking allergen compliance. Do not us
     if (ctx.embeddedSetMenuAnalysis.sections.length > 0 && !omit.has('embedded_set_menu_rules')) {
         finalPrompt = `${finalPrompt}\n\n${(0, embedded_set_menu_guard_1.buildEmbeddedSetMenuPromptSection)(ctx.embeddedSetMenuAnalysis)}`;
         sections.push('embedded_set_menu_rules');
+    }
+    const policyGuidance = (0, canonical_policy_1.renderCanonicalPolicyGuidance)(ctx.acceptedCorrectionRules || [], ctx);
+    if (policyGuidance && !omit.has('accepted_scoped_policy')) {
+        finalPrompt += `\n\n${policyGuidance}`;
+        sections.push('accepted_scoped_policy');
     }
     return { prompt: finalPrompt, sections };
 }

@@ -15,6 +15,13 @@ const basePayload = {
     reviewer_name: 'Isabella',
 };
 describe('buildCorrectionRuleRecord', () => {
+    test('requires exact source binding only for comparison-card identities', () => {
+        expect((0, learning_correction_rules_1.requiresHumanExplanationSourceBinding)({ rule: 'manual rule', source: 'human' })).toBe(false);
+        expect((0, learning_correction_rules_1.requiresHumanExplanationSourceBinding)({ original_text: 'old', corrected_text: 'new' })).toBe(false);
+        expect((0, learning_correction_rules_1.requiresHumanExplanationSourceBinding)({ submission_id: 'submission-1' })).toBe(true);
+        expect((0, learning_correction_rules_1.requiresHumanExplanationSourceBinding)({ correction_id: 'dish-1' })).toBe(true);
+        expect((0, learning_correction_rules_1.requiresHumanExplanationSourceBinding)({ comparison_revision: 'comparison-1' })).toBe(true);
+    });
     it('defaults force_target_case to false and preserves an explicit true value', () => {
         const base = {
             submission_id: 'submission-case',
@@ -101,6 +108,48 @@ describe('buildCorrectionRuleRecord', () => {
         // immediately applied by the deterministic pre-AI pass).
         expect(record.source).toBe('human');
         expect(record.status).toBe('pending');
+    });
+    test('carries the server-assembled source binding without allowing the builder to invent one', () => {
+        const sourceBinding = { version: 'human-explanation-source-binding-v1', source_revision_id: 'SER-test' };
+        const record = (0, learning_correction_rules_1.buildCorrectionRuleRecord)({
+            ...basePayload,
+            source_binding: sourceBinding,
+        }, catalog);
+        expect(record.source_binding).toBe(sourceBinding);
+        expect((0, learning_correction_rules_1.buildCorrectionRuleRecord)(basePayload, catalog).source_binding).toBeNull();
+    });
+    test('stores only the reviewer-scoped replacement for a mixed dish-line edit', () => {
+        const record = (0, learning_correction_rules_1.buildCorrectionRuleRecord)({
+            ...basePayload,
+            original_text: 'Salmon, macha salsa, crispy potato',
+            corrected_text: 'Salmon, salsa macha, crispy potato, marigold',
+            learning_original_text: 'macha salsa',
+            learning_corrected_text: 'salsa macha',
+            rule: 'Salsa macha is the correct order.',
+        }, catalog);
+        expect(record).toMatchObject({
+            original_text: 'macha salsa',
+            corrected_text: 'salsa macha',
+            status: 'pending',
+        });
+    });
+    test('requires both fields for an exact mixed-edit learning scope', () => {
+        expect(() => (0, learning_correction_rules_1.buildCorrectionRuleRecord)({
+            ...basePayload,
+            learning_original_text: 'macha salsa',
+        }, catalog)).toThrow('learning_original_text and learning_corrected_text must be provided together');
+    });
+    test('saves menu-only updates as rejected audit rows without requiring an explanation', () => {
+        const record = (0, learning_correction_rules_1.buildCorrectionRuleRecord)({
+            ...basePayload,
+            rule: '',
+            learning_intent: 'menu_update_only',
+        }, catalog);
+        expect(record).toMatchObject({
+            status: 'rejected',
+            change_type: 'menu_update_only',
+            rule: 'Menu/content update only — excluded from learning.',
+        });
     });
     test('requires optional exact replacement fields to be paired', () => {
         expect(() => (0, learning_correction_rules_1.buildCorrectionRuleRecord)({

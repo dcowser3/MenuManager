@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.CorrectionRuleValidationError = exports.GLOBAL_CORRECTION_RULE_LOCATION = void 0;
+exports.requiresHumanExplanationSourceBinding = requiresHumanExplanationSourceBinding;
 exports.buildCorrectionRuleRecord = buildCorrectionRuleRecord;
 exports.isCorrectionRuleValidationError = isCorrectionRuleValidationError;
 exports.GLOBAL_CORRECTION_RULE_LOCATION = 'All properties (global rule)';
@@ -11,6 +12,11 @@ class CorrectionRuleValidationError extends Error {
     }
 }
 exports.CorrectionRuleValidationError = CorrectionRuleValidationError;
+/** Comparison cards are provenance-bound; dashboard-wide manual rules are explicitly unbound. */
+function requiresHumanExplanationSourceBinding(payload) {
+    return [payload?.submission_id, payload?.correction_id, payload?.comparison_revision]
+        .some((value) => typeof value === 'string' && value.trim().length > 0);
+}
 function text(value) {
     return `${value || ''}`.trim();
 }
@@ -98,6 +104,9 @@ function buildCorrectionRuleRecord(payload, catalog) {
         source: payload.source || 'human',
         example_original: originalText ? null : exampleOriginal,
         example_corrected: correctedText ? null : exampleCorrected,
+        source_binding: payload.source_binding && typeof payload.source_binding === 'object'
+            ? payload.source_binding
+            : null,
         // Saved corrections are PROPOSALS, not live rules. They stay 'pending'
         // until the improvement cycle routes them by explanation (replacement
         // rule vs prompt reasoning vs code change) and a reviewer approves the

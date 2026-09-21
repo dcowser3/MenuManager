@@ -109,6 +109,7 @@ exports.DEFAULT_TENANT_CONFIG = {
         guidelinesAnchor: '## RSH MENU GUIDELINES - COMPREHENSIVE RULES',
         allergensAnchor: '### 7. ALLERGENS',
         rawMarkerPlacement: 'description_end',
+        rawNoticeText: '*consuming raw or undercooked meats, poultry, seafood, shellfish, or eggs may increase your risk of foodborne illness.',
     },
     draftSessions: {
         expiryDays: 30,

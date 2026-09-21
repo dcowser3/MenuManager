@@ -185,11 +185,13 @@ function buildCanonicalVocabulary(params) {
     return { entries, legitimate };
 }
 function gramsOf(text) {
-    const words = `${text || ''}`.normalize('NFC').split(/\s+/).map((w) => w.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '')).filter(Boolean);
-    const grams = [...words];
-    for (let i = 0; i < words.length - 1; i++)
-        grams.push(`${words[i]} ${words[i + 1]}`);
-    return grams;
+    return `${text || ''}`.normalize('NFC').split(/\r?\n/).flatMap(line => {
+        const words = line.split(/[^\S\r\n]+/).map(w => w.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '')).filter(Boolean);
+        const grams = [...words];
+        for (let i = 0; i < words.length - 1; i++)
+            grams.push(`${words[i]} ${words[i + 1]}`);
+        return grams;
+    });
 }
 /**
  * One canonical form contained inside the other ("el tequileño" vs "tequileño") is an
@@ -299,7 +301,12 @@ function findNearMisses(menuText, vocabulary, opts = {}) {
                 });
                 continue;
             }
-            if (isContainment(gram, entry.canonical) || vocabulary.legitimate.has(gramSensitive))
+            const canonicalFolded = accentInsensitiveKey(entry.canonical);
+            const missingLetterCandidate = entry.source === 'reviewer_rule'
+                && gramFolded.length >= 4
+                && canonicalFolded.length >= 4
+                && Math.abs(gramFolded.length - canonicalFolded.length) === 1;
+            if ((!missingLetterCandidate && isContainment(gram, entry.canonical)) || vocabulary.legitimate.has(gramSensitive))
                 continue;
             if (entry.source === 'approved_corpus' && (gram.includes(' ') || entry.canonical.includes(' ')))
                 continue;

@@ -1,0 +1,307 @@
+'use strict';
+
+// Fixed, credential-free worker protocol. The host launcher chooses the image,
+// mounts, command, and environment; this file accepts no command or path input.
+const phase = process.env.C2C2_PHASE;
+const arm = process.env.C2C2_ARM;
+const seed = Number(process.env.C2C2_SEED);
+const runId = process.env.C2C2_RUN_ID;
+const runtimeId = process.env.C2C2_RUNTIME_ID;
+const imageId = process.env.C2C2_IMAGE_ID;
+const requestPath = process.env.C2C2_REQUEST_PATH;
+const fs = require('fs');
+const path = require('path');
+const crypto = require('crypto');
+const { spawnSync } = require('child_process');
+const TEST_PATH = /^services\/dashboard\/__tests__\/code-candidate-[a-z0-9-]+\.test\.(?:ts|js)$/;
+const TRUSTED_TEST_PATHS = new Set([
+    'services/dashboard/__tests__/pre-ai-deterministic-rules.test.ts',
+    'services/dashboard/__tests__/review-pipeline.test.ts',
+    'services/dashboard/__tests__/redline-preview.test.js',
+    'services/dashboard/__tests__/form-helpers.test.js',
+]);
+const SUPPORT_FILES = new Set(['jest.setup.js', 'tsconfig.json', 'services/dashboard/tsconfig.json']);
+
+function readRequest() {
+    if (requestPath !== '/runner/request.json') throw new Error('request path is not fixed');
+    const request = JSON.parse(fs.readFileSync(requestPath, 'utf8'));
+    if (!request || request.phase !== phase || request.arm !== arm) throw new Error('request/environment mismatch');
+    const expectedImage = phase === 'delivery' ? request.plan.delivery_identity?.delivery_image_id : request.plan?.image_id;
+    const expectedRuntime = phase === 'delivery' ? request.plan.delivery_identity?.delivery_runtime_id : request.plan?.runtime_id;
+    if (!request.plan || expectedRuntime !== runtimeId || expectedImage !== imageId || typeof request.plan.support_bundle_sha256 !== 'string') throw new Error('request/plan identity mismatch');
+    return request;
+}
+
+function fail(error) {
+    process.stdout.write(JSON.stringify({ protocol_version: 1, status: 'failed', phase, arm, seed, run_id: runId, runtime_id: runtimeId, image_id: imageId, error: `${error}`.slice(0, 500) }));
+    process.exitCode = 1;
+}
+
+function blocked(reason) {
+    process.stdout.write(JSON.stringify({ protocol_version: 1, status: 'failed', phase, arm, seed, run_id: runId, runtime_id: runtimeId, image_id: imageId, error: reason, blocked: true }));
+}
+
+function hashFile(file) {
+    return crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+}
+
+function hashValue(value) {
+    return crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex');
+}
+
+function hashText(value) {
+    return crypto.createHash('sha256').update(value).digest('hex');
+}
+
+function deliveryControls() {
+    const status = fs.readFileSync('/proc/self/status', 'utf8');
+    const field = (name) => (status.match(new RegExp(`^${name}:\\s*(.+)$`, 'm')) || [])[1]?.trim() || '';
+    const caps = ['CapInh', 'CapPrm', 'CapEff', 'CapAmb'];
+    const groups = field('Groups').split(/\s+/).filter(Boolean);
+    const interfaces = fs.readdirSync('/sys/class/net').sort();
+    const mounts = fs.readFileSync('/proc/mounts', 'utf8').split('\n');
+    const root = mounts.find((line) => line.split(' ')[1] === '/');
+    const controls = { uid: process.getuid(), gid: process.getgid(), raw_groups: groups, supplementary_groups: groups.filter((group) => group !== '65532'), capabilities: Object.fromEntries(caps.map((name) => [name, field(name)])), no_new_privs: field('NoNewPrivs'), seccomp: field('Seccomp'), root_mount_read_only: !!root && root.split(' ')[3].split(',').includes('ro'), network_interfaces: interfaces };
+    if (controls.uid !== 65532 || controls.gid !== 65532 || controls.supplementary_groups.length || caps.some((name) => controls.capabilities[name] !== '0000000000000000') || controls.no_new_privs !== '1' || controls.seccomp !== '2' || !controls.root_mount_read_only || JSON.stringify(interfaces) !== JSON.stringify(['lo'])) throw new Error('delivery runtime controls are not isolated');
+    return controls;
+}
+
+async function runFixedDelivery(request) {
+    if (!request.delivery_fixture || typeof request.delivery_fixture.text !== 'string') throw new Error('delivery fixture is missing');
+    const controls = deliveryControls();
+    const { chromium } = require('playwright');
+    const deliveryRequest = { ...request, inventory: request.inventory || request.plan.test_inventory || [] };
+    const baselineWorkspace = materializeWorkspace('/runner/baseline', deliveryRequest);
+    const candidateWorkspace = materializeWorkspace('/runner/candidate', deliveryRequest);
+    const browser = await chromium.launch({ headless: true, chromiumSandbox: false });
+    try {
+        const captureArm = async (workspace) => {
+            const page = await browser.newPage();
+            let requestAttempted = false;
+            await page.route('**/*', (route) => { requestAttempted = true; return route.abort(); });
+            const quillSource = fs.readFileSync(path.join(workspace, 'services/dashboard/public/vendor/quill-1.3.6/quill.js'), 'utf8');
+            const redlineSource = fs.readFileSync(path.join(workspace, 'services/dashboard/public/js/redline-preview.js'), 'utf8');
+            const diffCoreSource = fs.readFileSync(path.join(workspace, 'services/diff-core/src/index.js'), 'utf8');
+            const submissionSource = fs.readFileSync(path.join(workspace, 'services/dashboard/public/js/form-submission.js'), 'utf8');
+        const fixtureText = `${request.delivery_fixture.text}`;
+        const html = `<div id="editor"></div><form id="menu-form"><input name="menuContent"><input name="menuContentHtml"></form><script>${quillSource}</script><script>${diffCoreSource}</script><script>${redlineSource}</script><script>${submissionSource}</script>`;
+            await page.setContent(html, { waitUntil: 'load' });
+            await page.evaluate(() => { window.deliveryQuill = new Quill('#editor', { theme: 'snow' }); });
+            const capture = await page.evaluate(async (value) => {
+            const q = window.deliveryQuill;
+            q.setText(value);
+            const captured = window.MenuSubmission.captureMenuSubmission({ html: q.root.innerHTML, text: q.getText().trim() });
+            let calls = 0; let seen = null;
+            const request = window.MenuSubmission.prepareMenuSubmissionRequest({ menuContent: captured.menuContent, menuContentHtml: captured.menuContentHtml }, {});
+            const response = await window.MenuSubmission.sendPreparedMenuSubmission(request, async (url, init) => { calls += 1; seen = { url, init }; return { status: 200, text: async () => JSON.stringify({ ok: true }) }; });
+            const submitted = seen && JSON.parse(seen.init.body);
+            if (calls !== 1 || !seen || seen.url !== '/api/form/submit' || seen.init.method !== 'POST'
+                || seen.init.headers?.['Content-Type'] !== 'application/json'
+                || submitted.menuContent !== captured.menuContent || submitted.menuContentHtml !== captured.menuContentHtml) throw new Error('submission boundary capture mismatch');
+            const submittedHtml = document.createElement('div');
+            submittedHtml.innerHTML = submitted.menuContentHtml;
+            return { text: submitted.menuContent, html: submitted.menuContentHtml, htmlText: submittedHtml.innerText.trim(), request: seen };
+            }, fixtureText);
+            const browserVersion = await browser.version();
+            const quillVersion = await page.evaluate(() => Quill.version);
+            await page.close();
+            if (requestAttempted) throw new Error('delivery browser attempted a network request');
+            return { capture, browserVersion, quillVersion };
+        };
+        const baseline = await captureArm(baselineWorkspace);
+        const candidate = await captureArm(candidateWorkspace);
+        const sourcePaths = { quill: 'services/dashboard/public/vendor/quill-1.3.6/quill.js', diff_core: 'services/diff-core/src/index.js', redline_preview: 'services/dashboard/public/js/redline-preview.js', form_submission: 'services/dashboard/public/js/form-submission.js' };
+        const sourceHashesFor = (workspace) => Object.fromEntries(Object.entries(sourcePaths).map(([key, relative]) => [key, hashFile(path.join(workspace, relative))]));
+        const baselineSourceHashes = sourceHashesFor(baselineWorkspace);
+        const candidateSourceHashes = sourceHashesFor(candidateWorkspace);
+        const sourceManifest = hashValue({ baseline: baselineSourceHashes, candidate: candidateSourceHashes });
+        const driverHash = hashFile(__filename);
+        baselineSourceHashes.driver = driverHash;
+        candidateSourceHashes.driver = driverHash;
+        return { controls, chromium_sandbox_enabled: false, isolation_boundary: 'container', delivery_claim: 'serializer_request_boundary_v1', reviewed_state_selection: false, full_form_assembly: false, image_id: imageId, runtime_id: runtimeId, delivery_fixture_sha256: hashValue(request.delivery_fixture), driver_sha256: driverHash, driver: 'form-submit-v1', baseline_source_hashes: baselineSourceHashes, candidate_source_hashes: candidateSourceHashes, source_manifest_sha256: sourceManifest, baseline_browser_version: baseline.browserVersion, candidate_browser_version: candidate.browserVersion, quill_version: candidate.quillVersion, baseline_submitted_text: baseline.capture.text, candidate_submitted_text: candidate.capture.text, baseline_submitted_html: baseline.capture.html, candidate_submitted_html: candidate.capture.html, baseline_submitted_html_text: baseline.capture.htmlText, candidate_submitted_html_text: candidate.capture.htmlText };
+    } finally { await browser.close(); }
+}
+
+function verifySupportBundle(request) {
+    const manifestPath = '/runner/support/manifest.json';
+    if (hashFile(manifestPath) !== request.plan.support_bundle_sha256) throw new Error('trusted support bundle identity is stale');
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+    if (!manifest || manifest.schema_version !== 1 || !Array.isArray(manifest.files)) throw new Error('trusted support manifest is invalid');
+    const entries = manifest.files.map((entry) => entry.path).sort();
+    if (manifest.files.some((entry) => !entry || !SUPPORT_FILES.has(entry.path) || path.posix.normalize(entry.path) !== entry.path || !Number.isInteger(entry.bytes) || hashFile(path.join('/runner/support', entry.path)) !== entry.sha256)) throw new Error('trusted support file is missing or tampered');
+    if (new Set(entries).size !== entries.length) throw new Error('trusted support manifest contains duplicate files');
+    const allowed = new Set(['manifest.json', ...manifest.files.map((entry) => entry.path)]);
+    const walk = (root, prefix = '') => {
+        for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+            const relative = prefix ? `${prefix}/${entry.name}` : entry.name;
+            const full = path.join(root, entry.name);
+            if (entry.isSymbolicLink()) throw new Error('trusted support bundle contains a symlink');
+            if (entry.isDirectory()) walk(full, relative);
+            else if (!allowed.has(relative)) throw new Error(`trusted support bundle contains an unexpected file: ${relative}`);
+        }
+    };
+    walk('/runner/support');
+    return manifest.files;
+}
+
+function assertNoSymlinks(root) {
+    const entries = fs.readdirSync(root, { withFileTypes: true });
+    for (const entry of entries) {
+        const full = path.join(root, entry.name);
+        if (entry.isSymbolicLink()) throw new Error(`source contains symlink: ${entry.name}`);
+        if (entry.isDirectory()) assertNoSymlinks(full);
+    }
+}
+
+function materializeWorkspace(sourceRoot, request) {
+    assertNoSymlinks(sourceRoot);
+    const supportFiles = verifySupportBundle(request);
+    const workspace = fs.mkdtempSync('/tmp/c2c2-workspace-');
+    fs.cpSync(sourceRoot, workspace, { recursive: true, dereference: true });
+    const manifest = JSON.parse(fs.readFileSync('/runner/test-bundle/manifest.json', 'utf8'));
+    const manifestHash = hashFile('/runner/test-bundle/manifest.json');
+    if (manifestHash !== request.plan.test_bundle_sha256 || manifest.schema_version !== 1 || !Array.isArray(manifest.files)) throw new Error('frozen test bundle identity is invalid');
+    const expected = [...request.inventory].sort();
+    const listed = manifest.files.map((entry) => entry.path).sort();
+    if (JSON.stringify(expected) !== JSON.stringify(listed) || manifest.files.some((entry) => !entry || typeof entry.path !== 'string' || path.posix.normalize(entry.path) !== entry.path || entry.path.startsWith('/') || entry.path.includes('..') || !Number.isInteger(entry.bytes) || hashFile(path.join('/runner/test-bundle', entry.path)) !== entry.sha256)) throw new Error('frozen test bundle is missing, unexpected, or tampered');
+    for (const file of manifest.files) {
+        const target = path.join(workspace, file.path);
+        fs.mkdirSync(path.dirname(target), { recursive: true });
+        fs.copyFileSync(path.join('/runner/test-bundle', file.path), target);
+    }
+    for (const entry of supportFiles) {
+        const trusted = entry.path;
+        const source = path.join('/runner/support', trusted);
+        const target = path.join(workspace, trusted);
+        if (fs.existsSync(source) && fs.statSync(source).isFile()) {
+            fs.mkdirSync(path.dirname(target), { recursive: true });
+            fs.copyFileSync(source, target);
+            fs.chmodSync(target, 0o444);
+        }
+    }
+    return workspace;
+}
+
+function lockWorkspace(root) {
+    const entries = fs.readdirSync(root, { withFileTypes: true });
+    for (const entry of entries) {
+        const full = path.join(root, entry.name);
+        if (entry.isDirectory()) { lockWorkspace(full); fs.chownSync(full, 0, 0); fs.chmodSync(full, 0o555); }
+        else if (entry.isFile()) { fs.chownSync(full, 0, 0); fs.chmodSync(full, 0o444); }
+    }
+    fs.chownSync(root, 0, 0);
+    fs.chmodSync(root, 0o555);
+}
+
+function runFixedJestTests(workspace, inventory) {
+    const configPath = path.join(workspace, '.c2c2-jest.config.js');
+    fs.writeFileSync(configPath, `module.exports = { rootDir: ${JSON.stringify(workspace)}, testEnvironment: 'node', testRunner: 'jest-circus/runner', roots: [${JSON.stringify(path.join(workspace, 'services'))}], modulePaths: ['/app/node_modules'], moduleDirectories: ['/app/node_modules'], setupFiles: ${JSON.stringify(fs.existsSync(path.join(workspace, 'jest.setup.js')) ? [path.join(workspace, 'jest.setup.js')] : [])}, transform: { '^.+\\\\.tsx?$': ['/app/node_modules/ts-jest', { diagnostics: false, tsconfig: { target: 'es2020', module: 'commonjs', esModuleInterop: true, types: ['jest', 'node'], skipLibCheck: true } }] }, testPathIgnorePatterns: ['/node_modules/', '/dist/'] };\n`, { mode: 0o600 });
+    fs.chmodSync(configPath, 0o444);
+    lockWorkspace(workspace);
+    const reportFile = '/runner/output/jest-result.json';
+    const result = spawnSync('/usr/bin/setpriv', ['--reuid=65532', '--regid=65532', '--clear-groups', '--', '/app/node_modules/.bin/jest', ...inventory, '--config', configPath, '--runInBand', '--json', `--outputFile=${reportFile}`, '--cacheDirectory=/tmp/c2c2-jest-cache'], { cwd: workspace, env: { HOME: '/tmp', NODE_ENV: 'test', NODE_PATH: '/app/node_modules', PATH: '/app/node_modules/.bin:/usr/local/bin:/usr/bin:/bin' }, encoding: 'utf8', timeout: 150000, maxBuffer: 1024 * 1024 });
+    if (result.error?.code === 'ETIMEDOUT') throw new Error('fixed Jest worker timed out');
+    if (!fs.existsSync(reportFile)) throw new Error(`fixed Jest worker emitted no report: status=${result.status} stderr=${String(result.stderr || '').slice(0, 500)}`);
+    const report = JSON.parse(fs.readFileSync(reportFile, 'utf8'));
+    if (!report || !Array.isArray(report.testResults) || !Number.isInteger(report.numTotalTests) || !Number.isInteger(report.numRuntimeErrorTestSuites)) throw new Error('fixed Jest report schema is incomplete');
+    return { exit_code: Number.isInteger(result.status) ? result.status : 1, report };
+}
+
+function buildEchoFeedback(text) {
+    return `=== CORRECTED MENU ===\n${text}\n=== END CORRECTED MENU ===\n=== SUGGESTIONS ===\n[]\n=== END SUGGESTIONS ===`;
+}
+
+async function runPipeline(workspace, input, driver) {
+    require('/app/node_modules/ts-node/register/transpile-only');
+    const quiet = { log: console.log, warn: console.warn, error: console.error };
+    console.log = () => {};
+    console.warn = () => {};
+    console.error = () => {};
+    try {
+        const contextModule = require(path.join(workspace, 'services/dashboard/lib/review-context.ts'));
+        const pipeline = require(path.join(workspace, 'services/dashboard/lib/review-pipeline.ts'));
+        const context = contextModule.reviewContextOptions({ ...(input.context || {}), menuContent: input.raw_input });
+        const response = buildEchoFeedback(input.raw_input);
+        const result = await pipeline.runFullReviewPipeline(input.raw_input, { ...context, basePrompt: driver.prompt, acceptedCorrectionRules: driver.rules, approvedVocabularyTexts: driver.vocabulary_texts || [], approvedVocabularyTerms: driver.vocabulary_terms || [], model: 'test-only', settings: driver.settings, precheckEnabled: true }, async () => response);
+        return { output: result.finalCorrectedMenu, response, diagnostics: { fenceMissing: result.post?.parsed?.fenceMissing === true, reviewStatus: result.reviewStatus, outputHash: result.outputHash } };
+    } finally {
+        console.log = quiet.log;
+        console.warn = quiet.warn;
+        console.error = quiet.error;
+    }
+}
+
+function runPipelineAsCandidate(workspace, input, driver) {
+    const requestFile = `/tmp/c2c2-pipeline-${process.pid}-${crypto.randomBytes(6).toString('hex')}.json`;
+    fs.writeFileSync(requestFile, JSON.stringify({ workspace, input, driver }), { mode: 0o444 });
+    const child = spawnSync('/usr/bin/setpriv', ['--reuid=65532', '--regid=65532', '--clear-groups', '--', '/usr/local/bin/node', '/runner/worker.js'], {
+        cwd: workspace,
+        env: { HOME: '/tmp', NODE_ENV: 'test', PATH: '/usr/local/bin:/usr/bin:/bin', C2C2_PIPELINE_CHILD: '1', C2C2_PIPELINE_REQUEST: requestFile },
+        encoding: 'utf8', maxBuffer: 1024 * 1024,
+    });
+    try { fs.unlinkSync(requestFile); } catch { /* bounded temporary cleanup */ }
+    if (child.status !== 0) throw new Error(`candidate pipeline exited with status ${child.status}: ${(child.stderr || child.stdout || '').slice(0, 500)}`);
+    try { return JSON.parse(child.stdout); } catch { throw new Error('candidate pipeline returned malformed output'); }
+}
+
+function preparePipelineWorkspace(workspace) {
+    if (!fs.existsSync(path.join(workspace, 'node_modules'))) fs.symlinkSync('/app/node_modules', path.join(workspace, 'node_modules'), 'dir');
+    lockWorkspace(workspace);
+}
+
+function validateDriver(request) {
+    const driver = request.driver;
+    if (!driver || typeof driver.prompt !== 'string' || typeof driver.prompt_sha256 !== 'string' || hashText(driver.prompt) !== driver.prompt_sha256 || !Array.isArray(driver.rules) || typeof driver.rules_sha256 !== 'string' || hashValue(driver.rules) !== driver.rules_sha256 || !driver.settings || typeof driver.settings !== 'object') throw new Error('fixed review driver identity is invalid');
+    return driver;
+}
+
+async function runFixedReplay(request) {
+    const root = arm === 'baseline' ? '/runner/baseline' : '/runner/candidate';
+    const workspace = materializeWorkspace(root, request);
+    preparePipelineWorkspace(workspace);
+    const driver = validateDriver(request);
+    const result = runPipelineAsCandidate(workspace, request.case, driver);
+    const reportId = hashValue({ arm, seed, run_id: runId, case_id: request.case.case_id, input_hash: hashValue(request.case.raw_input), output_hash: hashValue(result.output), response_hash: hashValue(result.response) });
+    return { ...result, report_id: reportId };
+}
+
+async function runFixedBehavior(request) {
+    const workspace = materializeWorkspace('/runner/candidate', request);
+    preparePipelineWorkspace(workspace);
+    const driver = validateDriver(request);
+    if (!request.behavior || !Array.isArray(request.behavior.tests)) throw new Error('fixed behavior artifact is invalid');
+    const outcomes = [];
+    for (const test of request.behavior.tests) {
+        const result = runPipelineAsCandidate(workspace, { raw_input: test.input, context: test.context || {} }, driver);
+        outcomes.push({ id: test.id, output: result.output, output_hash: hashValue(result.output), response_hash: hashValue(result.response) });
+    }
+    return { outcomes };
+}
+
+if (process.env.C2C2_PIPELINE_CHILD === '1') {
+    try {
+        const payload = JSON.parse(fs.readFileSync(process.env.C2C2_PIPELINE_REQUEST, 'utf8'));
+        runPipeline(payload.workspace, payload.input, payload.driver).then((result) => process.stdout.write(JSON.stringify(result))).catch((error) => { process.stderr.write(`${error.message || error}`); process.exitCode = 1; });
+    } catch (error) { process.stderr.write(`${error.message || error}`); process.exitCode = 1; }
+} else if (!['unit', 'replay', 'behavior', 'delivery'].includes(phase) || !['baseline', 'candidate', 'paired'].includes(arm)
+    || !Number.isInteger(seed) || typeof runId !== 'string' || !/^sha256:[a-f0-9]{64}$|^[a-f0-9]{64}$/.test(runtimeId || '') || !/^sha256:[a-f0-9]{64}$|^[a-f0-9]{64}$/.test(imageId || '')) {
+    fail('invalid fixed worker environment');
+} else {
+    try {
+        const request = readRequest();
+        if (phase === 'unit') {
+            if (!Array.isArray(request.inventory) || request.inventory.some((file) => typeof file !== 'string' || (!TEST_PATH.test(file) && !TRUSTED_TEST_PATHS.has(file)))) throw new Error('invalid frozen unit inventory');
+            const root = arm === 'baseline' ? '/runner/baseline' : '/runner/candidate';
+            const workspace = materializeWorkspace(root, request);
+            const result = runFixedJestTests(workspace, request.inventory);
+            process.stdout.write(JSON.stringify({ protocol_version: 1, status: 'ok', phase, arm, seed, run_id: runId, runtime_id: runtimeId, image_id: imageId, exit_code: result.exit_code, report: result.report }));
+        } else if (phase === 'replay') {
+            if (!request.case || typeof request.case.case_id !== 'string' || typeof request.case.raw_input !== 'string') throw new Error('invalid frozen replay case');
+            runFixedReplay(request).then((result) => process.stdout.write(JSON.stringify({ protocol_version: 1, status: 'ok', phase, arm, seed, run_id: runId, runtime_id: runtimeId, image_id: imageId, report_id: result.report_id, output: result.output, response: result.response, diagnostics: result.diagnostics, driver: 'review-pipeline-v1' }))).catch((error) => { fail(error.message || error); });
+        } else if (phase === 'behavior') {
+            runFixedBehavior(request).then((result) => process.stdout.write(JSON.stringify({ protocol_version: 1, status: 'ok', phase, arm, seed, run_id: runId, runtime_id: runtimeId, image_id: imageId, outcomes: result.outcomes, driver: 'review-pipeline-behavior-v1' }))).catch((error) => { fail(error.message || error); });
+        } else {
+            runFixedDelivery(request).then((result) => process.stdout.write(JSON.stringify({ protocol_version: 1, status: 'ok', phase, arm, seed, run_id: runId, runtime_id: runtimeId, image_id: imageId, ...result }))).catch((error) => { fail(error.message || error); });
+        }
+    } catch (error) { fail(error.message || error); }
+}

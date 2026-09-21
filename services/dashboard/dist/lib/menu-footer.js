@@ -3,7 +3,10 @@
 // price/welcome boilerplate detection. Extracted verbatim from services/dashboard/index.ts
 // so the offline review pipeline (eval harness) shares the exact production behavior.
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.RAW_NOTICE_PATTERN = exports.RAW_NOTICE_TEXT = void 0;
+exports.RAW_NOTICE_PATTERN = exports.RAW_NOTICE_TEXT = exports.canonicalRawNoticeText = exports.DEFAULT_RAW_NOTICE_TEXT = void 0;
+exports.isCanonicalRawNoticeLine = isCanonicalRawNoticeLine;
+exports.containsCanonicalRawNotice = containsCanonicalRawNotice;
+exports.isGenericMissingCanonicalRawNoticeFinding = isGenericMissingCanonicalRawNoticeFinding;
 exports.normalizeWhitespace = normalizeWhitespace;
 exports.isLikelyAllergenLegendLine = isLikelyAllergenLegendLine;
 exports.isLikelyRawNoticeLine = isLikelyRawNoticeLine;
@@ -13,8 +16,34 @@ exports.extractAllergenLegendLine = extractAllergenLegendLine;
 exports.normalizeAllergenLegend = normalizeAllergenLegend;
 exports.normalizeMenuFooter = normalizeMenuFooter;
 exports.stripManagedFooterText = stripManagedFooterText;
-exports.RAW_NOTICE_TEXT = '*consuming raw or undercooked meats, poultry, seafood, shellfish, or eggs may increase your risk of foodborne illness.';
+const tenant_config_1 = require("@menumanager/tenant-config");
+exports.DEFAULT_RAW_NOTICE_TEXT = '*consuming raw or undercooked meats, poultry, seafood, shellfish, or eggs may increase your risk of foodborne illness.';
+const canonicalRawNoticeText = () => (0, tenant_config_1.getTenantConfig)().rulebook.rawNoticeText || exports.DEFAULT_RAW_NOTICE_TEXT;
+exports.canonicalRawNoticeText = canonicalRawNoticeText;
+exports.RAW_NOTICE_TEXT = exports.DEFAULT_RAW_NOTICE_TEXT;
 exports.RAW_NOTICE_PATTERN = /\*?\s*consuming raw or undercooked meats,\s*poultry,\s*seafood(?:,\s*shellfish)?,\s*or eggs may increase your risk of foodborne illness\.?/i;
+const normalizedNotice = (value) => (value || '').replace(/^\s*\*\s*/, '').replace(/[.!?\s]+$/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
+function isCanonicalRawNoticeLine(line) {
+    const observed = normalizedNotice(line);
+    const canonical = normalizedNotice((0, exports.canonicalRawNoticeText)());
+    return !!observed && (observed === canonical || observed === canonical.replace(', shellfish', ''));
+}
+function containsCanonicalRawNotice(value) {
+    return (value || '').split(/[|\n]/).some(segment => isCanonicalRawNoticeLine(segment));
+}
+function isGenericMissingCanonicalRawNoticeFinding(suggestion) {
+    const type = `${suggestion?.type || ''}`.trim().toLowerCase();
+    const item = `${suggestion?.menuItem || ''}`.trim().toLowerCase();
+    const combined = `${type} ${suggestion?.description || ''} ${suggestion?.recommendation || ''}`.trim().toLowerCase();
+    const wholeMenu = !item || /^(entire menu|whole menu|menu|general)$/.test(item);
+    const rawFoodDomain = /\b(raw|undercooked|foodborne|raw[-\s]?food|raw[-\s]?consumption)\b/.test(combined);
+    const genericWarning = /(standard|canonical|required|foodborne|raw or undercooked).*(warning|notice)/.test(combined)
+        || /(warning|notice).*(standard|canonical|required|foodborne|raw or undercooked)/.test(combined);
+    const missing = /\b(missing|absent|add|include)\b/.test(combined);
+    const dishSpecific = /(marker|asterisk|dish|item|steak|tartare|specific)/.test(combined);
+    const quotedOrNegated = /\b(todo|quoted|quote|not missing|already present|do not add|don't add)\b/.test(combined);
+    return wholeMenu && rawFoodDomain && genericWarning && missing && !dishSpecific && !quotedOrNegated;
+}
 function normalizeWhitespace(value) {
     return (value || '').replace(/\s+/g, ' ').trim();
 }
@@ -29,10 +58,7 @@ function isLikelyAllergenLegendLine(line) {
     return codeParts.length >= Math.max(2, Math.floor(parts.length * 0.6));
 }
 function isLikelyRawNoticeLine(line) {
-    const normalized = normalizeWhitespace(line).toLowerCase();
-    if (!normalized)
-        return false;
-    return normalized.includes('raw or undercooked') && normalized.includes('foodborne illness');
+    return isCanonicalRawNoticeLine(line);
 }
 function parseParenthesizedAllergenLegend(line) {
     const normalized = normalizeWhitespace(line);
@@ -92,7 +118,7 @@ function normalizeMenuFooter(text, fallbackAllergens = '') {
     for (const line of lines) {
         const allergenLine = extractAllergenLegendLine(line);
         const isHeader = isLikelyAllergenLegendHeader(line);
-        const isRawNotice = isLikelyRawNoticeLine(line);
+        const isRawNotice = isCanonicalRawNoticeLine(line);
         const isPriceFooter = /^all\s+prices\b/i.test(normalizeWhitespace(line));
         const isWelcomeFooter = /^we\s+welcome\s+enquiries\b/i.test(normalizeWhitespace(line));
         if (allergenLine || isHeader) {

@@ -98,6 +98,7 @@ export function createApprovalWorkflowHandlers(deps: ApprovalWorkflowDeps) {
             const originalHtml = input.submission.raw_payload?.form_payload?.menuContentHtml || input.submission.menu_content_html;
             await deps.axios.post(`${deps.DIFFER_SERVICE_URL}/compare`, {
                 submission_id: input.submissionId,
+                attempt_id: input.submission.form_attempt_id,
                 ai_draft_path: input.submission.ai_draft_path,
                 final_path: input.finalPath,
                 original_path: input.submission.original_path,

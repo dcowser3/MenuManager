@@ -11,6 +11,7 @@
     <link href="https://cdn.quilljs.com/1.3.6/quill.snow.css" rel="stylesheet">
     <script src="https://cdn.quilljs.com/1.3.6/quill.js"></script>
     <script src="/js/form-helpers.js"></script>
+    <script src="/js/form-submission.js"></script>
     <script src="/js/diff-core.js"></script>
     <script src="/js/redline-preview.js?v=20260613-extract-leading-trim"></script>
     <style>
@@ -6805,11 +6806,13 @@
             const step2Visible = !document.getElementById('step2').classList.contains('hidden');
             if (step2Visible) {
                 const reviewedArea = document.getElementById('reviewedContentArea');
-                menuContentHtml = sanitizeMenuHtmlForSubmission(reviewedArea.innerHTML || '');
-                menuContentText = extractCleanTextFromReviewedArea(reviewedArea);
+                const captured = MenuSubmission.captureMenuSubmission({ html: reviewedArea.innerHTML || '', element: reviewedArea });
+                menuContentHtml = captured.menuContentHtml;
+                menuContentText = captured.menuContent;
             } else {
-                menuContentHtml = sanitizeMenuHtmlForSubmission(quill.root.innerHTML || '');
-                menuContentText = quill.getText().trim();
+                const captured = MenuSubmission.captureMenuSubmission({ html: quill.root.innerHTML || '', text: quill.getText().trim() });
+                menuContentHtml = captured.menuContentHtml;
+                menuContentText = captured.menuContent;
             }
 
             const persistentPreviewBody = document.getElementById('persistentPreviewBody');
@@ -6921,7 +6924,8 @@
                 await uploadMenuImageIfNeeded();
                 formData.menuImagePath = uploadedMenuImagePath || '';
                 formData.menuImageFileName = uploadedMenuImageFileName || '';
-                const submitBody = JSON.stringify(formData);
+                const preparedSubmission = MenuSubmission.prepareMenuSubmissionRequest(formData, getAttemptHeaders());
+                const submitBody = preparedSubmission.init.body;
                 const submitBodyLength = byteLength(submitBody);
                 await logFormAttempt('submit_started', {
                     route: '/api/form/submit',
@@ -6942,11 +6946,7 @@
                     }
                 });
 
-                const response = await fetch('/api/form/submit', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', ...getAttemptHeaders() },
-                    body: submitBody
-                });
+                const response = await MenuSubmission.sendPreparedMenuSubmission(preparedSubmission);
 
                 const responseText = await response.text();
                 let data = {};

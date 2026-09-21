@@ -37,6 +37,9 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.app = void 0;
+exports.resolveAiReviewSeed = resolveAiReviewSeed;
+exports.claimCoordinatorReplayIdentity = claimCoordinatorReplayIdentity;
+exports.resetCoordinatorReplayRegistryForTests = resetCoordinatorReplayRegistryForTests;
 exports.parseDishQualityAiResponse = parseDishQualityAiResponse;
 exports.buildDishQualityPrompt = buildDishQualityPrompt;
 const express = require("express");
@@ -48,6 +51,7 @@ const axios_1 = __importDefault(require("axios"));
 const internal_auth_1 = require("@menumanager/internal-auth");
 const llm_adapter_1 = require("@menumanager/llm-adapter");
 const tenant_config_1 = require("@menumanager/tenant-config");
+const review_contract_1 = require("@menumanager/review-contract");
 // Load .env from project root (works whether running from src or dist)
 const envPath = path.resolve(__dirname, '../../../.env');
 console.log(`Loading .env from: ${envPath}`);
@@ -77,8 +81,35 @@ function parseOptionalNonNegativeInteger(value) {
     const parsed = Number(value);
     return Number.isInteger(parsed) && parsed >= 0 ? parsed : undefined;
 }
-const BASIC_AI_CHECK_SEED = parseOptionalNonNegativeInteger(process.env.BASIC_AI_CHECK_SEED) ?? 42;
+function resolveAiReviewSeed(env = process.env) {
+    // An explicitly empty AI_REVIEW_SEED is the opt-out; an absent or invalid
+    // value safely uses the production default. BASIC_AI_CHECK_SEED remains a
+    // temporary compatibility alias for existing local configurations.
+    const configured = env.AI_REVIEW_SEED ?? env.BASIC_AI_CHECK_SEED;
+    if (configured !== undefined && configured.trim() === '')
+        return undefined;
+    return parseOptionalNonNegativeInteger(configured) ?? 42;
+}
+const AI_REVIEW_SEED = resolveAiReviewSeed();
 const DOCUMENT_STORAGE_ROOT = process.env.DOCUMENT_STORAGE_ROOT || path.join(__dirname, '..', '..', '..', 'tmp', 'documents');
+const consumedCoordinatorReplayIdentities = new Map();
+const COORDINATOR_REPLAY_TTL_MS = 15 * 60 * 1000;
+const COORDINATOR_REPLAY_MAX = 1024;
+function claimCoordinatorReplayIdentity(identity, now = Date.now()) {
+    for (const [key, timestamp] of consumedCoordinatorReplayIdentities) {
+        if (now - timestamp >= COORDINATOR_REPLAY_TTL_MS)
+            consumedCoordinatorReplayIdentities.delete(key);
+    }
+    if (consumedCoordinatorReplayIdentities.has(identity))
+        return 'reused';
+    if (consumedCoordinatorReplayIdentities.size >= COORDINATOR_REPLAY_MAX)
+        return 'capacity';
+    consumedCoordinatorReplayIdentities.set(identity, now);
+    return 'claimed';
+}
+function resetCoordinatorReplayRegistryForTests() {
+    consumedCoordinatorReplayIdentities.clear();
+}
 exports.app.use(express.json());
 exports.app.use(internal_auth_1.requireInternalServiceAuth);
 function hasConfiguredLlmKey() {
@@ -177,7 +208,7 @@ exports.app.post('/approved-dishes/quality-check', async (req, res) => {
                 role: 'user',
                 content: prompt,
             },
-        ], { provider: AI_REVIEW_PROVIDER, temperature: 0 });
+        ], { provider: AI_REVIEW_PROVIDER, temperature: 0, seed: AI_REVIEW_SEED });
         const content = response.content;
         res.json({
             results: parseDishQualityAiResponse(content, rows),
@@ -209,7 +240,9 @@ exports.app.post('/run-qa-check', async (req, res) => {
             });
         }
         console.log('Running QA check...');
-        const resolvedSeed = parseOptionalNonNegativeInteger(seed) ?? BASIC_AI_CHECK_SEED;
+        const resolvedSeed = seed === null || (typeof seed === 'string' && seed.trim() === '')
+            ? undefined
+            : parseOptionalNonNegativeInteger(seed) ?? AI_REVIEW_SEED;
         const qaResponse = await (0, llm_adapter_1.callChat)({ model: AI_REVIEW_MODEL }, [
             { role: 'system', content: prompt },
             { role: 'user', content: `Here is the menu text to review:\n\n---\n\n${text}` }
@@ -227,6 +260,7 @@ exports.app.post('/run-qa-check', async (req, res) => {
             feedback,
             model: qaResponse.model || AI_REVIEW_MODEL,
             system_fingerprint: qaResponse.system_fingerprint,
+            finish_reason: qaResponse.finish_reason,
         });
     }
     catch (error) {
@@ -235,6 +269,59 @@ exports.app.post('/run-qa-check', async (req, res) => {
             error: 'Error performing QA check',
             message: error.message
         });
+    }
+});
+/**
+ * Versioned coordinator adapter for new submission reviews. The dashboard owns
+ * prepareReview/completePreparedReview and sends this endpoint only the frozen
+ * prompt/input snapshot. Legacy /run-qa-check and /ai-review clients remain
+ * unchanged.
+ */
+exports.app.post('/v1/coordinator-review', async (req, res) => {
+    const validation = (0, review_contract_1.validateCoordinatorRequest)(req.body);
+    if (!validation.ok)
+        return res.status(400).json({ error: 'Invalid coordinator review envelope', reason: validation.reason });
+    const request = validation.request;
+    const effectiveExecutionIdentity = (0, review_contract_1.configuredExecutionIdentity)(process.env);
+    if (!(0, review_contract_1.sameExecutionIdentity)(request.effectiveExecutionIdentity, effectiveExecutionIdentity)) {
+        return res.status(409).json({ error: 'Coordinator execution identity mismatch', reason: 'settings_mismatch' });
+    }
+    try {
+        if (!hasConfiguredLlmKey()) {
+            return res.status(503).json({ error: 'LLM API key not configured' });
+        }
+        const replayClaim = claimCoordinatorReplayIdentity(request.replayIdentity);
+        if (replayClaim === 'reused')
+            return res.status(409).json({ error: 'Coordinator replay identity already consumed', reason: 'replay_identity_reused' });
+        if (replayClaim === 'capacity')
+            return res.status(503).json({ error: 'Coordinator replay registry is at capacity', reason: 'replay_registry_capacity' });
+        const resolvedSeed = effectiveExecutionIdentity.seed.value === null ? undefined : effectiveExecutionIdentity.seed.value;
+        const qaResponse = await (0, llm_adapter_1.callChat)({ model: effectiveExecutionIdentity.model }, [
+            { role: 'system', content: request.prompt },
+            { role: 'user', content: `Here is the menu text to review:\n\n---\n\n${request.text}` },
+        ], {
+            provider: effectiveExecutionIdentity.provider,
+            temperature: effectiveExecutionIdentity.temperature,
+            seed: resolvedSeed,
+        });
+        return res.status(200).json({
+            schemaVersion: review_contract_1.COORDINATOR_SCHEMA_VERSION,
+            engineVersion: review_contract_1.COORDINATOR_ENGINE_VERSION,
+            textHash: request.textHash,
+            promptHash: request.promptHash,
+            requestDigest: request.requestDigest,
+            callerAttestations: request.callerAttestations,
+            replayIdentity: request.replayIdentity,
+            effectiveExecutionIdentity,
+            feedback: qaResponse.content || '',
+            requestedModel: effectiveExecutionIdentity.model,
+            observedModel: qaResponse.model || effectiveExecutionIdentity.model,
+            finishReason: qaResponse.finish_reason || null,
+        });
+    }
+    catch (error) {
+        console.error('Error during coordinator review:', error);
+        return res.status(500).json({ error: 'Error performing coordinator review', message: error.message });
     }
 });
 exports.app.post('/ai-review', async (req, res) => {
@@ -288,7 +375,7 @@ Configure OPENAI_API_KEY in .env for real AI reviews.
             const qaResponse = await (0, llm_adapter_1.callChat)({ model: AI_REVIEW_MODEL }, [
                 { role: 'system', content: qaPrompt },
                 { role: 'user', content: `Here is the menu text to review:\n\n---\n\n${text}` }
-            ], { provider: AI_REVIEW_PROVIDER, temperature: AI_REVIEW_TEMPERATURE });
+            ], { provider: AI_REVIEW_PROVIDER, temperature: AI_REVIEW_TEMPERATURE, seed: AI_REVIEW_SEED });
             generalQaFeedback = qaResponse.content || "No feedback generated.";
             issueCount = (generalQaFeedback.match(/Description of Issue:/g) || []).length;
         }

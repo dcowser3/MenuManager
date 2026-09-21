@@ -44,9 +44,14 @@ require('dotenv').config({ path: path.join(repoRoot, '.env') });
 
 const { createClient } = require('@supabase/supabase-js');
 const evalHelpers = require('./review-eval-helpers');
+const behaviorArtifactLib = require('./lib/behavior-artifact');
+const { preparePendingCodeProposalQueue, loadPendingProposalRows } = require('./lib/code-proposal-preparation-queue');
+const { recordCodeVerification, recordParentCampaignLineage } = require('./lib/proposal-verification-store');
+const { appendExpectationArtifactArgs } = require('./lib/improvement-cycle-wiring');
 
 const LOCK_PATH = path.join(repoRoot, 'tmp', 'improvement-cycle', '.lock');
 const LOCK_STALE_MS = 6 * 60 * 60 * 1000;
+let ACTIVE_EXPECTATION_ARGS = [];
 
 function requireDashboardLib(relPath) {
     const sourcePath = path.join(repoRoot, 'services', 'dashboard', 'lib', `${relPath}.ts`);
@@ -65,6 +70,10 @@ function requireDashboardLib(relPath) {
     }
     return require(distPath);
 }
+
+const replayAuditBindingLib = requireDashboardLib('replay-audit-binding');
+const replayRetirementLib = requireDashboardLib('replay-retirement');
+const expectationVersioningLib = requireDashboardLib('expectation-versioning');
 
 function requireLlmAdapter() {
     const sourcePath = path.join(repoRoot, 'services', 'llm-adapter', 'src', 'index.ts');
@@ -96,6 +105,7 @@ function parseArgs(argv) {
         skipEval: argv.includes('--skip-eval') || /^(1|true|yes|on)$/i.test(process.env.IMPROVE_SKIP_EVAL || ''),
         dryRun: argv.includes('--dry-run'),
         consolidate: argv.includes('--consolidate'),
+        prepareOnly: argv.includes('--prepare-only'),
     };
 }
 
@@ -117,6 +127,66 @@ function acquireLock() {
 
 function releaseLock() {
     try { fs.unlinkSync(LOCK_PATH); } catch { /* best effort */ }
+}
+
+async function triggerManualCodeCandidateReview({ supabase, cycleId, proposalRow, artifactsDir, proposalId = process.env.MENUMANAGER_PREPARE_PROPOSAL_ID, manualExclusionArtifactPath = process.env.MENUMANAGER_MANUAL_EXCLUSION_ARTIFACT }) {
+    const artifactPath = path.join(artifactsDir, 'manual-code-proposal-review.json');
+    const base = { cycle_id: cycleId, status: 'blocked', provider_calls: 0 };
+    try {
+        let manualExclusionArtifact;
+        if (manualExclusionArtifactPath) {
+            const stat = fs.lstatSync(manualExclusionArtifactPath);
+            if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 128 * 1024 || (stat.mode & 0o077) !== 0) throw new Error('Manual exclusion artifact must be a private regular file under 128KiB.');
+            manualExclusionArtifact = JSON.parse(fs.readFileSync(manualExclusionArtifactPath, 'utf8'));
+        }
+        const pending = await loadPendingProposalRows(supabase);
+        if (proposalId && !pending.rows.some((row) => row.id === proposalId)) throw new Error(`Requested proposal ${proposalId} was not found in the pending inventory.`);
+        const result = await preparePendingCodeProposalQueue({
+            client: supabase,
+            store: { recordCodeVerification, recordParentCampaignLineage },
+            proposals: pending.rows,
+            enumeration: pending,
+            manualExclusionArtifacts: proposalId && manualExclusionArtifact ? { [proposalId]: manualExclusionArtifact } : undefined,
+            repoRoot,
+            datasetPath: path.join(repoRoot, 'tmp', 'review-eval', 'dataset.jsonl'),
+            outputRoot: path.join(repoRoot, 'tmp', 'code-proposals'),
+            inventoryDirectory: path.join(repoRoot, 'tmp', 'code-proposals'),
+            manualExclusionArtifact,
+            // The outer cycle is preparation-only. Authorization and dispatch
+            // are intentionally stripped by the coordinator.
+        });
+        const summary = {
+            ...base,
+            status: result.status,
+            reason: null,
+            provider_calls: result.providerCalls || 0,
+            snapshot_sha256: result.snapshot?.snapshot_sha256 || null,
+            proposals: result.results || [],
+        };
+        const temporary = `${artifactPath}.${process.pid}.tmp`;
+        await fsp.writeFile(temporary, `${JSON.stringify(summary, null, 2)}\n`, { mode: 0o600 });
+        await fsp.rename(temporary, artifactPath);
+        await fsp.chmod(artifactPath, 0o600);
+        return summary;
+    } catch (error) {
+        const summary = { ...base, provider_calls: error.providerCallAttempted ? 1 : 0, reason: 'manual_preparation_failed', error: `${error.message || error}`.slice(0, 500) };
+        const temporary = `${artifactPath}.${process.pid}.tmp`;
+        await fsp.writeFile(temporary, `${JSON.stringify(summary, null, 2)}\n`, { mode: 0o600 });
+        await fsp.rename(temporary, artifactPath);
+        await fsp.chmod(artifactPath, 0o600);
+        console.warn(`Manual code-candidate review was not started: ${summary.error}`);
+        return summary;
+    }
+}
+
+// Preparation-only is an intentionally isolated, no-notification seam.  It is
+// also exported so a fixture/injected client can exercise the exact path without
+// constructing the health, gate, model, or mail dependencies used by a full cycle.
+async function runPrepareOnly({ supabase = getSupabase(), cycleId = new Date().toISOString().slice(0, 10), proposalId, artifactsDir = path.join(repoRoot, 'tmp', 'improvement-cycle', `prepare-only-${cycleId}`), manualExclusionArtifactPath, trigger = triggerManualCodeCandidateReview } = {}) {
+    fs.mkdirSync(artifactsDir, { recursive: true, mode: 0o700 });
+    acquireLock();
+    try { return await trigger({ supabase, cycleId, proposalRow: null, proposalId, artifactsDir, manualExclusionArtifactPath }); }
+    finally { releaseLock(); }
 }
 
 // Minimal HTML escaper for values interpolated into notification emails.
@@ -178,7 +248,7 @@ async function postImprovementCompletion(messages) {
 }
 
 function runEvalHarness(args) {
-    const result = spawnSync('node', [path.join(repoRoot, 'scripts', 'review-eval.js'), ...args], {
+    const result = spawnSync('node', [path.join(repoRoot, 'scripts', 'review-eval.js'), ...appendExpectationArtifactArgs(args, ACTIVE_EXPECTATION_ARGS[1])], {
         cwd: repoRoot,
         encoding: 'utf8',
         stdio: ['ignore', 'pipe', 'pipe'],
@@ -530,7 +600,7 @@ async function sendProposalEmail(supabase, { cycleId, evalStatus, evalSummary, c
             : '';
         // C3: compact per-correction routing table so the reviewer sees the conclusion in the email.
         const routing = Array.isArray(correctionRouting) ? correctionRouting : [];
-        const retiredCorrectionCount = routing.filter((r) => r && r.replay_status === 'now_correct').length;
+        const retiredCorrectionCount = routing.filter((r) => r && r.retirement_verified === true).length;
         const actionableCorrectionCount = Math.max(0, Number(correctionCount || 0) - retiredCorrectionCount);
         const routingTable = routing.length
             ? [
@@ -648,13 +718,20 @@ async function checkGraphSecretExpiry(supabase, core) {
 
 async function main() {
     const args = parseArgs(process.argv.slice(2));
-    const core = requireDashboardLib('improvement-cycle-core');
-    const manifestLib = requireDashboardLib('review-rules-manifest');
-    const preAiRulesLib = requireDashboardLib('pre-ai-deterministic-rules');
     const executorModel = process.env.AI_REVIEW_MODEL || 'gpt-4o-mini';
     const supabase = getSupabase();
     const baseCycleId = new Date().toISOString().slice(0, 10);
     let cycleId = baseCycleId;
+
+    if (args.prepareOnly) {
+        const artifactsDir = path.join(repoRoot, 'tmp', 'improvement-cycle', `prepare-only-${baseCycleId}`);
+        await runPrepareOnly({ supabase, cycleId: baseCycleId, artifactsDir });
+        return;
+    }
+
+    const core = requireDashboardLib('improvement-cycle-core');
+    const manifestLib = requireDashboardLib('review-rules-manifest');
+    const preAiRulesLib = requireDashboardLib('pre-ai-deterministic-rules');
 
     console.log(`Improvement Cycle — ${baseCycleId}`);
     console.log('='.repeat(50));
@@ -665,7 +742,7 @@ async function main() {
     // Idempotency: one proposal per calendar day (cycle_id = YYYY-MM-DD).
     const [
         { data: unconsumedAtGate },
-        { data: pendingProposals },
+        pendingEnumeration,
         { data: existing },
         { data: lastProposals },
         { data: approvedProposalsForBaseline },
@@ -676,11 +753,7 @@ async function main() {
             .is('prompt_cycle_id', null)
             .eq('source', 'human')
             .in('status', ['accepted', 'pending']),
-        supabase.from('prompt_proposals')
-            .select('id, cycle_id, created_at, correction_rule_count, submission_count, eval_status, llm_model, eval_summary')
-            .eq('status', 'pending')
-            .order('created_at', { ascending: true })
-            .limit(1),
+        loadPendingProposalRows(supabase),
         supabase.from('prompt_proposals')
             .select('id, status')
             .eq('cycle_id', baseCycleId)
@@ -708,7 +781,8 @@ async function main() {
     if (excludedUnconsumedCount > 0) {
         console.log(`Learning eligibility: excluded ${excludedUnconsumedCount} unconsumed row(s) without explicit human learning evidence.`);
     }
-    const pendingProposal = (pendingProposals || [])[0] || null;
+    const pendingProposals = pendingEnumeration.rows || [];
+    const pendingProposal = pendingProposals[0] || null;
     const effectiveAtGate = core.pickEffectivePrompt(approvedProposalsForBaseline || [], filePrompt);
     const manifestAtGate = manifestLib.buildReviewRulesManifest({ acceptedCorrectionRules: acceptedRulesForBaseline || [] });
     const baselineFingerprint = core.computeReviewBaselineFingerprint({
@@ -718,6 +792,7 @@ async function main() {
     });
     const pendingFingerprint = `${pendingProposal?.eval_summary?.baseline_fingerprint || ''}`;
     const pendingBaselineChanged = !!pendingProposal && pendingFingerprint !== baselineFingerprint;
+    const pendingReplayRetirementRefresh = core.pendingProposalNeedsReplayRetirementRefresh(pendingProposal);
 
     // Compute the run gate BEFORE cadence: a supersede (pending proposal + new
     // corrections → refresh it) must be able to bypass the cadence clock, so the
@@ -729,6 +804,7 @@ async function main() {
         minNewCorrections,
         force: !!args.force,
         pendingBaselineChanged,
+        pendingReplayRetirementRefresh,
     });
     const supersedePending = gate.run && gate.mode === 'supersede' ? gate.pendingProposal : null;
 
@@ -802,6 +878,10 @@ async function main() {
 
         // 2. Unconsumed corrections (skipped entirely in consolidate mode).
         let correctionRules = [];
+        // Keep every already-fetched human explanation as evidence. Eligibility
+        // below excludes menu-content updates from proposal input, but B6-A
+        // must still retain them as explicitly excluded behavior records.
+        let explanationRows = [];
         let supersedeMeta = null;
         if (!args.consolidate) {
             const { data: unconsumedRuleRows, error: rulesError } = await supabase
@@ -812,6 +892,7 @@ async function main() {
                 .in('status', ['accepted', 'pending'])
                 .order('created_at', { ascending: true });
             if (rulesError) throw new Error(`Failed to fetch correction rules: ${rulesError.message}`);
+            explanationRows.push(...(unconsumedRuleRows || []));
             const unconsumedRules = core.correctionsEligibleForImprovement(unconsumedRuleRows || []);
 
             if (supersedePending && supersedePending.cycle_id) {
@@ -823,6 +904,13 @@ async function main() {
                     .in('status', ['accepted', 'pending'])
                     .order('created_at', { ascending: true });
                 if (carriedErr) throw new Error(`Failed to fetch carried-over corrections: ${carriedErr.message}`);
+                if (pendingReplayRetirementRefresh
+                    && !core.pendingCorrectionsRecoveredExactly(supersedePending, carriedRuleRows || [])) {
+                    throw new Error(
+                        `Cannot refresh replay-retirement policy for ${supersedePending.cycle_id}: carried human corrections could not be recovered exactly; pending proposal remains untouched.`
+                    );
+                }
+                explanationRows.push(...(carriedRuleRows || []));
                 const carriedRules = core.correctionsEligibleForImprovement(carriedRuleRows || []);
                 const assembled = core.assembleSupersedeCorrectionSet(unconsumedRules, carriedRules);
                 correctionRules = assembled.combined;
@@ -845,6 +933,18 @@ async function main() {
         const acceptedRules = acceptedRulesForBaseline || [];
         const manifest = manifestLib.buildReviewRulesManifest({ acceptedCorrectionRules: acceptedRules || [] });
         const manifestMarkdown = manifestLib.renderRulesManifestMarkdown(manifest, { includeDynamic: true });
+
+        // B6-A: freeze human explanations and accepted-policy expectations
+        // before assembling or calling the proposal model. Consolidation has
+        // no explanation input and therefore receives an explicit empty
+        // artifact rather than invented expectations from the candidate.
+        const behaviorArtifact = await behaviorArtifactLib.writeFrozenBehaviorArtifact({
+            artifactPath: path.join(artifactsDir, 'behavior-tests.json'),
+            core,
+            explanationRows: args.consolidate ? [] : explanationRows,
+            acceptedRules: args.consolidate ? [] : acceptedRules,
+        });
+        console.log(`Behavior artifact frozen: ${behaviorArtifact.records.length} explanation record(s), ${behaviorArtifact.tests.length} deterministic test(s).`);
 
         // Distinct trigger submissions for this cycle's corrections. Declared BEFORE the
         // Fix 2 replay block (which iterates it) — a later declaration puts the replay loop
@@ -869,25 +969,44 @@ async function main() {
             }
             const acceptedForReplay = (acceptedRules || []).filter((r) => r.status === 'accepted');
             const replayOutForSid = new Map();
+            const submissionBySid = new Map();
+            const auditBindingBySid = new Map();
             for (const sid of submissionIds) {
                 let row = null;
                 for (const [cid, c] of dsByCase.entries()) {
                     if (cid === `production:${sid}` || cid.endsWith(`:${sid}`)) { row = c; break; }
                 }
-                if (!row || !row.raw_input) {
-                    // light fallback query
-                    const { data: srows } = await supabase.from('submissions').select('id,legacy_id,menu_content,approved_menu_content,form_attempt_id,property,template_type,menu_type,service_period,allergens:raw_payload->>allergens').or(`id.eq.${sid},legacy_id.eq.${sid}`).limit(1);
-                    const s = (srows || [])[0];
-                    if (s && `${s.approved_menu_content || ''}`.trim()) {
-                        let raw = s.menu_content || '';
-                        if (s.form_attempt_id) {
-                            const { data: auds } = await supabase.from('basic_ai_check_audits').select('menu_content_raw,ai_request').eq('attempt_id', s.form_attempt_id).order('created_at', { ascending: false }).limit(1);
-                            const a = (auds || [])[0];
-                            if (a && a.menu_content_raw) raw = a.menu_content_raw;
-                            else if (a && a.ai_request && a.ai_request.text) raw = a.ai_request.text;
-                        }
-                        row = { raw_input: raw, context: { property: s.property || '', templateType: s.template_type || 'food', menuType: s.menu_type || 'standard', allergens: s.allergens || '' } };
+                // Load the submission and its full audit fields independently of
+                // the dataset row. A dataset case is useful replay input, but it
+                // is not trusted provenance for retirement.
+                const { data: srows } = await supabase.from('submissions')
+                    .select('id,legacy_id,menu_content,approved_menu_content,form_attempt_id,property,template_type,menu_type,service_period,allergens:raw_payload->>allergens')
+                    .or(`id.eq.${sid},legacy_id.eq.${sid}`).limit(1);
+                const submission = (srows || [])[0] || null;
+                submissionBySid.set(sid, submission);
+                let auditBinding = { eligible: false, reason: 'missing_submission_attempt', exact_candidate_count: 0 };
+                if (submission?.form_attempt_id) {
+                    const { data: audits, error: auditError } = await supabase.from('basic_ai_check_audits')
+                        .select('id,attempt_id,created_at,event_type,review_mode,model,ai_request,ai_response,final_result')
+                        .eq('attempt_id', submission.form_attempt_id);
+                    if (!auditError) {
+                        auditBinding = replayAuditBindingLib.bindReplayAudit(audits || [], submission.form_attempt_id);
+                    } else {
+                        auditBinding = { eligible: false, reason: 'malformed_audit', exact_candidate_count: 0 };
                     }
+                }
+                auditBindingBySid.set(sid, auditBinding);
+                if ((!row || !row.raw_input) && submission && `${submission.approved_menu_content || ''}`.trim()) {
+                    const raw = submission.menu_content || '';
+                    row = {
+                        raw_input: raw,
+                        context: {
+                            property: submission.property || '',
+                            templateType: submission.template_type || 'food',
+                            menuType: submission.menu_type || 'standard',
+                            allergens: submission.allergens || '',
+                        },
+                    };
                 }
                 const raw = row && row.raw_input;
                 for (const r of correctionRules) {
@@ -916,13 +1035,58 @@ async function main() {
                     }
                     const signals = replayOut ? extractReplacementSignals(raw, replayOut) : [];
                     const replayAnalysis = core.analyzeReplayCorrection(o, c, replayOut, signals);
-                    replayEvidence.push({
+                    const observedStatus = replayAnalysis.status;
+                    let evidence = {
                         correction_id: r.id,
                         submission_id: sid,
                         original_text: o,
                         corrected_text: c,
                         ...replayAnalysis,
+                        observed_status: observedStatus,
+                    };
+                    const binding = auditBindingBySid.get(sid);
+                    const submission = submissionBySid.get(sid);
+                    const context = (row && row.context) || {};
+                    // The audit request is the frozen original review body;
+                    // never let a dataset/raw fallback replace that bound
+                    // provenance when proving retirement.
+                    const sourceText = binding?.eligible && binding.audit?.ai_request?.text
+                        ? binding.audit.ai_request.text
+                        : (raw || '');
+                    const deterministicReplay = binding?.eligible && binding.audit
+                        ? replayRetirementLib.replayOriginalResponseDeterministically(
+                            binding.audit,
+                            {
+                                property: context.property || '',
+                                templateType: context.templateType || 'food',
+                                menuType: context.menuType || 'standard',
+                                allergens: context.allergens || '',
+                            },
+                            acceptedForReplay
+                        )
+                        : null;
+                    // Always persist the bounded evidence envelope, including
+                    // an explicit ineligible proof when provenance is missing.
+                    // This keeps the cycle auditable without treating a backend
+                    // success as a retirement decision.
+                    const retirement = replayRetirementLib.assessReplayRetirement({
+                        observedStatus,
+                        originalAudit: binding?.eligible ? binding.audit : null,
+                        submissionAttemptId: submission?.form_attempt_id || null,
+                        submittedMenu: submission?.menu_content || null,
+                        deterministicReplay,
+                        correctionApplied: (menu) => core.analyzeReplayCorrection(o, c, menu, extractReplacementSignals(sourceText, menu)).status === 'now_correct',
+                        correctionProgress: (menu) => ({
+                            applied_changes: extractReplacementSignals(sourceText, menu).map((signal) => `${signal.from_norm || signal.from || ''}->${signal.to_norm || signal.to || ''}`),
+                        }),
                     });
+                    evidence = {
+                        ...evidence,
+                        status: retirement.status,
+                        observed_status: retirement.observed_status,
+                        retirement_evidence: retirement.retirement_evidence,
+                    };
+                    replayEvidence.push(evidence);
                 }
             }
             await fsp.writeFile(path.join(artifactsDir, 'replay_evidence.json'), JSON.stringify(replayEvidence, null, 2));
@@ -936,12 +1100,11 @@ async function main() {
         }
         } // end consolidate skip for replay
 
-        // Do not ask the proposal model to re-implement corrections that replay
-        // has already proved the live pipeline now produces. Keep the full
-        // evidence for the proposal page and retirement bookkeeping, but only
-        // unresolved/unavailable guidance enters the improvement prompt.
+        // Only fail-closed, original-response retirement proof may omit a
+        // correction from proposal analysis. Current backend replay has no
+        // audit producer, so its now_correct observations remain actionable.
         const replayResolvedIds = new Set(
-            replayEvidence.filter((entry) => entry?.status === 'now_correct').map((entry) => `${entry.correction_id}`)
+            replayEvidence.filter(core.isReplayRetirementVerified).map((entry) => `${entry.correction_id}`)
         );
         const correctionsForProposal = core.correctionsRequiringProposal(correctionRules, replayEvidence);
         const proposalReplayEvidence = replayEvidence.filter((entry) => !replayResolvedIds.has(`${entry.correction_id}`));
@@ -1111,7 +1274,8 @@ async function main() {
                         const remaining = Array.isArray(ev.remaining_changes) && ev.remaining_changes.length ? ev.remaining_changes.join(', ') : 'an unresolved remainder';
                         replayTag = `   REPLAY EVIDENCE: partially_correct — replay already applied [${applied}]. Remaining [${remaining}]. Route only the remainder; do not recommend repairing the proven portion.`;
                     }
-                    else if (ev.status === 'now_correct') replayTag = `   REPLAY EVIDENCE: now_correct — the current pipeline already produces the human correction.`;
+                    else if (ev.status === 'verification_required') replayTag = `   REPLAY EVIDENCE: verification_required — backend replay observed a possible match, but original-response retirement proof is unavailable. Keep this correction actionable.`;
+                    else if (ev.status === 'delivery_mismatch') replayTag = `   REPLAY EVIDENCE: delivery_mismatch — the original API and submitted text differ; attribution is unknown and requires verification.`;
                     else if (ev.status === 'not_verifiable') replayTag = `   REPLAY EVIDENCE: not_verifiable — freeform guidance, not mechanically checkable.`;
                     else replayTag = `   REPLAY EVIDENCE: ${ev.status} — replay unavailable for this submission.`;
                 }
@@ -1226,14 +1390,33 @@ async function main() {
         const currentPromptPath = path.join(artifactsDir, 'current_prompt.txt');
         const candidatePromptPath = path.join(artifactsDir, 'proposed_prompt.txt');
         const candidateRulesPath = path.join(artifactsDir, 'proposed_rules.json');
+        let evalSummary = null;
+        let expectationPolicyUnresolvedReason = null;
         await fsp.writeFile(currentPromptPath, effective.prompt);
         await fsp.writeFile(candidatePromptPath, validated.proposed_prompt);
         await fsp.writeFile(candidateRulesPath, JSON.stringify({ rules: validated.proposed_replacement_rules }, null, 2));
+        let approvedExpectationEnvelope = null;
+        const approvedExpectationPath = process.env.REVIEW_EXPECTATIONS_ARTIFACT;
+        if (approvedExpectationPath && !fs.existsSync(approvedExpectationPath)) expectationPolicyUnresolvedReason = 'configured approved expectation artifact is missing';
+        if (approvedExpectationPath && fs.existsSync(approvedExpectationPath)) {
+            try {
+                const authority = JSON.parse(fs.readFileSync(approvedExpectationPath, 'utf8'));
+                expectationVersioningLib.validateExpectationEnvelope(authority);
+                const derived = expectationVersioningLib.deriveProposalBoundEnvelope(validated.proposed_replacement_rules || [], authority, cycleId);
+                validated.proposed_replacement_rules = derived.rules;
+                await fsp.writeFile(candidateRulesPath, JSON.stringify({ rules: validated.proposed_replacement_rules }, null, 2));
+                if (derived.envelope) {
+                    approvedExpectationEnvelope = derived.envelope;
+                    const derivedPath = path.join(artifactsDir, 'derived-expectations.json');
+                    await fsp.writeFile(derivedPath, JSON.stringify(derived.envelope, null, 2));
+                    ACTIVE_EXPECTATION_ARGS = ['--expectations', derivedPath];
+                } else expectationPolicyUnresolvedReason = 'approved artifact had no unique validated-rule match';
+            } catch (error) { expectationPolicyUnresolvedReason = `approved expectation artifact rejected: ${error.message}`; validated.warnings.push(`Approved expectation artifact rejected; no policy-change grading: ${error.message}`); }
+        }
         if (validated.coverage_claims && validated.coverage_claims.length) {
             await fsp.writeFile(path.join(artifactsDir, 'coverage_claims.json'), JSON.stringify(validated.coverage_claims, null, 2));
         }
 
-        let evalSummary = null;
         let evalStatus = 'skipped';
         // C2: when the candidate is byte-identical to baseline AND has no replacement rules, a full
         // eval run is pure waste (the candidate output cannot differ). Skip it and record no_effect.
@@ -1561,12 +1744,23 @@ async function main() {
             }
             console.log(`Eval status: ${evalStatus}${evalSummary?.error ? ` (${evalSummary.error.slice(0, 160)})` : ''}`);
         }
+        if (expectationPolicyUnresolvedReason) {
+            evalSummary = { ...(evalSummary || {}), expectation_policy_unresolved: true, expectation_policy_unresolved_reason: expectationPolicyUnresolvedReason };
+        }
 
         // Keep the baseline fingerprint in the existing JSON eval column. A
         // later scheduled run can now distinguish an unchanged pending proposal
         // from one made stale by a deploy, prompt approval, accepted rule, or
         // review-model change.
-        evalSummary = { ...(evalSummary || {}), baseline_fingerprint: baselineFingerprint };
+        evalSummary = core.stampReplayRetirementPolicyVersion({
+            ...(evalSummary || {}),
+            baseline_fingerprint: baselineFingerprint,
+            // Preserve the exact B6-D1 human-explanation artifact on the
+            // stored proposal so the manual code-candidate handoff can bind
+            // one group without reconstructing or inventing expectations.
+            behavior_tests: behaviorArtifact,
+        });
+        if (approvedExpectationEnvelope) evalSummary = { ...evalSummary, expectation_envelope: approvedExpectationEnvelope };
 
         // 9. Store the proposal.
         const dates = correctionRules.map((r) => Date.parse(r.created_at)).filter(Number.isFinite);
@@ -1621,6 +1815,12 @@ async function main() {
             ({ error: insertError } = await supabase.from('prompt_proposals').insert(proposalRow));
         }
         if (insertError) throw new Error(`Failed to store proposal: ${insertError.message}`);
+
+        // Start the narrow human code-candidate handoff at the stored-proposal
+        // boundary. The helper is fail-closed: without an explicit
+        // authorization/ledger it only claims the owner and records local
+        // blocked progress; it never reaches a provider.
+        await triggerManualCodeCandidateReview({ supabase, cycleId, proposalRow, artifactsDir });
 
         // Supersede: mark the prior pending proposal only after the new row lands.
         const supersedeTargetId = supersedeMeta?.pendingProposalId
@@ -1753,10 +1953,17 @@ async function sendCycleFailureEmail(error) {
     }
 }
 
-main().catch(async (error) => {
-    console.error(`Improvement cycle failed: ${error.message}`);
-    await recordCycleFailureAlert(error);
-    await sendCycleFailureEmail(error);
-    releaseLock();
-    process.exit(1);
-});
+if (require.main === module) {
+    const prepareOnly = process.argv.slice(2).includes('--prepare-only');
+    main().catch(async (error) => {
+        console.error(`Improvement cycle failed: ${error.message}`);
+        if (!prepareOnly) {
+            await recordCycleFailureAlert(error);
+            await sendCycleFailureEmail(error);
+        }
+        releaseLock();
+        process.exit(1);
+    });
+}
+
+module.exports = { runPrepareOnly, triggerManualCodeCandidateReview, parseArgs };

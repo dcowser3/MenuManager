@@ -1,0 +1,130 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const learning_behavior_tests_1 = require("../lib/learning-behavior-tests");
+const pre_ai_deterministic_rules_1 = require("../lib/pre-ai-deterministic-rules");
+const acceptedRule = {
+    id: 'rule-house-made',
+    status: 'accepted',
+    change_type: 'terminology',
+    original_text: 'house-made',
+    corrected_text: 'housemade',
+    rule: 'Use the accepted housemade spelling.',
+};
+function humanCorrection(overrides = {}) {
+    return {
+        id: 'correction-1',
+        submission_id: 'submission-1',
+        source: 'human',
+        reviewer_name: 'Reviewer',
+        status: 'accepted',
+        learning_intent: 'missed_review_correction',
+        example_original: 'house-made',
+        example_corrected: 'housemade',
+        rule: 'Use the accepted housemade spelling.',
+        ...overrides,
+    };
+}
+function reorderObjectKeys(value) {
+    if (Array.isArray(value))
+        return value.map(reorderObjectKeys);
+    if (value && typeof value === 'object') {
+        const object = value;
+        return Object.fromEntries(Object.keys(object).reverse().map(key => [key, reorderObjectKeys(object[key])]));
+    }
+    return value;
+}
+describe('B6-A behavior artifact core', () => {
+    test('records human authority and preserves known and unknown four-stage provenance', () => {
+        const record = (0, learning_behavior_tests_1.buildBehaviorTestRecord)(humanCorrection(), {
+            stages: {
+                chef_input: { source: 'submission:1:input', text: 'house-made' },
+                human_approved: { source: 'approval:1', text: 'housemade' },
+            },
+        });
+        expect(record.expectationAuthority).toBe('human_explanation');
+        expect(record.classification).toBe('missed_review_correction');
+        expect(record.classificationStatus).toBe('reviewed');
+        expect(record.stages.chef_input).toMatchObject({ status: 'known', source: 'submission:1:input' });
+        expect(record.stages.human_approved).toMatchObject({ status: 'known', source: 'approval:1' });
+        expect(record.stages.ai_delivered).toEqual({ status: 'unknown', reference: 'submission:submission-1:ai_delivered' });
+        expect(record.stages.chef_submitted).toEqual({ status: 'unknown', reference: 'submission:submission-1:chef_submitted' });
+    });
+    test('keeps browser repair unsupported unless a no-human reproduction or edit history proves it', () => {
+        expect((0, learning_behavior_tests_1.buildBehaviorTestRecord)(humanCorrection()).browserRepairSupported).toBe(false);
+        expect((0, learning_behavior_tests_1.buildBehaviorTestRecord)(humanCorrection(), { reproduced_without_human: true }).browserRepairSupported).toBe(true);
+        expect((0, learning_behavior_tests_1.buildBehaviorTestRecord)(humanCorrection(), { edit_history_proves_failure: true }).browserRepairSupported).toBe(true);
+    });
+    test('classifies menu content updates and excludes them from policy learning', () => {
+        const record = (0, learning_behavior_tests_1.buildBehaviorTestRecord)(humanCorrection({
+            id: 'menu-update',
+            learning_intent: 'menu_content_update',
+        }));
+        expect(record.classification).toBe('menu_content_update');
+        expect(record.disposition).toBe('excluded_from_policy_learning');
+        const artifact = (0, learning_behavior_tests_1.freezeBehaviorTests)([record], [{ ...acceptedRule, id: 'menu-update', change_type: 'menu_content_update' }]);
+        expect(artifact.tests).toEqual([]);
+        expect(artifact.contextualTests).toEqual([]);
+    });
+    test('generates bounded accepted-policy families with abstention and reviewed negatives', () => {
+        const rule = {
+            ...acceptedRule,
+            is_location_specific: true,
+            location: 'Property A',
+            reviewed_negative_examples: [
+                { text: 'House Made Brand', kind: 'brand', reviewer: 'Reviewer' },
+                { text: 'maison faite', kind: 'multilingual', reviewer: 'Reviewer' },
+                { text: 'house-made rolls', kind: 'valid_neighbor', reviewer: 'Reviewer' },
+            ],
+        };
+        const family = (0, learning_behavior_tests_1.buildAcceptedPolicyTestFamily)(rule);
+        expect(family.map(test => test.kind)).toEqual(expect.arrayContaining([
+            'accepted_separator_equivalence',
+            'accepted_case_convention',
+            'quantity_preservation',
+            'wrong_scope_abstention',
+            'brand',
+            'multilingual',
+            'valid_neighbor',
+            'deterministic_abstention_context_required',
+        ]));
+        expect(family.length).toBe(17);
+        expect((0, learning_behavior_tests_1.buildAcceptedPolicyTestFamily)({
+            ...acceptedRule,
+            original_text: 'berry',
+            corrected_text: 'berries',
+        })).toEqual([]);
+    });
+    test('freezes current canonical scope and produces an immutable artifact', () => {
+        const rule = { ...acceptedRule, is_location_specific: true, location: 'Property A' };
+        const record = (0, learning_behavior_tests_1.buildBehaviorTestRecord)(humanCorrection({ id: rule.id, location: 'Property A' }));
+        const artifact = (0, learning_behavior_tests_1.freezeBehaviorTests)([record], [rule], [rule]);
+        expect(artifact.tests.length).toBeGreaterThan(0);
+        expect(artifact.tests.every(test => test.context.property === 'Property A' || test.context.property === '__outside_approved_scope__')).toBe(true);
+        expect(artifact.sha256).toMatch(/^[a-f0-9]{64}$/);
+        expect((0, learning_behavior_tests_1.validateBehaviorArtifact)(artifact)).toBe(artifact);
+    });
+    test('retains artifact identity after JSONB-style recursive key reordering', () => {
+        const rule = { ...acceptedRule, is_location_specific: true, location: 'Property A' };
+        const record = (0, learning_behavior_tests_1.buildBehaviorTestRecord)(humanCorrection({ id: rule.id, location: 'Property A' }));
+        const artifact = (0, learning_behavior_tests_1.freezeBehaviorTests)([record], [rule], [rule]);
+        const roundTripped = reorderObjectKeys(JSON.parse(JSON.stringify(artifact)));
+        const { sha256, ...body } = roundTripped;
+        expect((0, learning_behavior_tests_1.hashBehaviorArtifact)(body)).toBe(artifact.sha256);
+        expect((0, learning_behavior_tests_1.validateBehaviorArtifact)(roundTripped)).toBe(roundTripped);
+    });
+    test('executes deterministic variants against the current pre-AI canonicalizer', async () => {
+        const artifact = (0, learning_behavior_tests_1.freezeBehaviorTests)([(0, learning_behavior_tests_1.buildBehaviorTestRecord)(humanCorrection({ id: acceptedRule.id }))], [acceptedRule], [acceptedRule]);
+        const result = await (0, learning_behavior_tests_1.executeBehaviorTests)(artifact, (input, context) => (0, pre_ai_deterministic_rules_1.canonicalizeFinalTerms)(input, {
+            ...context,
+            acceptedCorrectionRules: [acceptedRule],
+        }).menuText);
+        expect(result.passed).toBe(true);
+        expect(result.outcomes).toHaveLength(13);
+        expect(result.explanations).toEqual([{ correctionId: acceptedRule.id, disposition: 'variants_passed_pending_paired_proof' }]);
+    });
+    test('rejects tampered artifacts and artifacts over the bounded test limit', () => {
+        const artifact = (0, learning_behavior_tests_1.freezeBehaviorTests)([(0, learning_behavior_tests_1.buildBehaviorTestRecord)(humanCorrection({ id: acceptedRule.id }))], [acceptedRule], [acceptedRule]);
+        expect(() => (0, learning_behavior_tests_1.validateBehaviorArtifact)({ ...artifact, records: [] })).toThrow('Trusted behavior expectations changed');
+        expect(() => (0, learning_behavior_tests_1.validateBehaviorArtifact)({ ...artifact, tests: Array.from({ length: 5001 }, (_, index) => ({ id: index })) })).toThrow('Missing trusted pre-draft behavior tests');
+    });
+});

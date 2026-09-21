@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "purpose": "Bounded manual engineering fallback for the frozen code-candidate lane",
+  "proposal_id": "72c144aa-c33e-4873-85e8-6e48537e799e",
+  "baseline_head": "9239d347",
+  "candidate_head": "6ac8e489712468559fea8c144fd246a941e42443",
+  "candidate_head_kind": "frozen pre-fallback source head; the manual fallback commit is recorded by git and is intentionally not self-referential",
+  "lineage": {
+    "parent_campaign_sha256": "4020f3c87536facfba9623e3a895d2398ea14581a0c411607398e49e497fe4dd",
+    "proposal_fingerprint": "7c6be5e5ac92d965835ce4959f36b1ad3ecf89c505e9f6c806584f2433215dd6",
+    "cycle_id": "2026-09-19",
+    "superseded_from_cycle_id": "2026-09-18",
+    "global_snapshot_sha256": "ef3f76086789b19afa44d6fd9613c4fb0a64f5d3b5ff55ad1cc432cf4628ecac",
+    "frozen_hashes": {
+      "accepted_rules_sha256": "c40677fb89252a672af77cb05162973e43f7c15423f660ad409881c912fa59e3",
+      "behavior_tests_sha256": "0f8d8be3ca8d9a8b1befc567214e5ef3caf288b77d97a75e704bb01f5f8cf5e2",
+      "dataset_sha256": "042d4a593af5cc62870f10d0e08778e42f83063cf742d2a140e2602f507a917f",
+      "prompt_sha256": "882f06f2c8705a7c60b2c76e62763217d669ddf0aec7ddc6eb80cc20cb4671dd",
+      "source_sha256": "244a8d193341c79f65584fe6caf002bfc4e1c313bd04298d01ecf37ca88469d3"
+    }
+  },
+  "corrections": [
+    {"id": "0b519352-8926-4fb7-9416-52186ad9a229", "status": "implemented", "group": "contextual_singularization"},
+    {"id": "1f453fd5-1369-494d-86bb-23f7e9a6eb7a", "status": "implemented", "group": "contextual_singularization"},
+    {"id": "1fdd8152-8544-4a50-bef9-074ac42b8e04", "status": "implemented", "group": "contextual_singularization"},
+    {"id": "2f582931-1c8c-47e0-8fd0-bcea7e32c753", "status": "unresolved_policy_conflict", "group": "category_plural_policy"},
+    {"id": "410ba1a2-b94c-4df3-9c03-eea7a3c97997", "status": "implemented", "group": "contextual_singularization"},
+    {"id": "4b424936-de26-4675-bf76-0b584933b7da", "status": "implemented", "group": "singularization_named_cheese"},
+    {"id": "5d6c8055-b126-4477-ae54-33f34f859981", "status": "implemented", "group": "singularization_named_cheese"},
+    {"id": "5e942424-7b20-4182-b09d-2ccf811c4c83", "status": "unresolved_policy_conflict", "group": "category_plural_policy"},
+    {"id": "5fbc8ba0-45ef-4a85-a8e5-b096e0b0d669", "status": "implemented", "group": "contextual_singularization"},
+    {"id": "73271371-0dda-4fa3-b5fc-c0004a3daf3e", "status": "implemented", "group": "interior_raw_option_marker"},
+    {"id": "8447b59a-cbc1-4126-829b-e2c20abe451d", "status": "implemented", "group": "contextual_singularization"},
+    {"id": "8c831d61-044b-4808-841a-e717cffea804", "status": "implemented", "group": "contextual_singularization"},
+    {"id": "999e3f76-7c23-4173-af13-9060177eb8f9", "status": "implemented", "group": "contextual_singularization"},
+    {"id": "bd169365-f67f-4ada-b1d4-b28f2e54aa8c", "status": "implemented", "group": "contextual_singularization"},
+    {"id": "c6390a0e-88a8-44e0-b677-e22ac3b40a3b", "status": "implemented", "group": "contextual_singularization"},
+    {"id": "e92c7b42-13fa-4b45-ad15-2dc1f4454459", "status": "implemented", "group": "contextual_singularization"},
+    {"id": "ff4dc3bb-4a2c-4906-a177-a1620c2fe47f", "status": "implemented", "group": "contextual_singularization"}
+  ],
+  "provenance": "Manual engineering fallback only; this manifest does not claim provider, C2b, C2c, approval, or deployment provenance."
+}

@@ -12,6 +12,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.buildReviewRulesManifest = buildReviewRulesManifest;
 exports.renderRulesManifestMarkdown = renderRulesManifestMarkdown;
 const pre_ai_deterministic_rules_1 = require("./pre-ai-deterministic-rules");
+const contextual_compound_descriptor_contract_1 = require("./contextual-compound-descriptor-contract");
 const qa_prompt_builder_1 = require("./qa-prompt-builder");
 const review_pipeline_1 = require("./review-pipeline");
 const PRE_AI_FILE = 'services/dashboard/lib/pre-ai-deterministic-rules.ts';
@@ -46,8 +47,8 @@ const FUNCTIONAL_ENTRIES = [
         id: 'pre-ai/cotija-cheese-modifier',
         layer: 'pre_ai_deterministic',
         category: 'terminology',
-        title: 'Cotija requires cheese modifier',
-        description: 'Adds "cheese" after Cotija when it is used as an ingredient name, preserving capitalization. Already-correct "cotija cheese" and hyphenated adjective forms such as "cotija-style" are left unchanged.',
+        title: 'Named cheeses require cheese modifier',
+        description: 'Adds "cheese" after Cotija, mozzarella, feta, or parmesan when used as an ingredient name, preserving capitalization. Already-correct modifiers and hyphenated adjective forms are left unchanged.',
         examples: [{ before: 'Esquites, corn, cotija, bacon D 17', after: 'Esquites, corn, cotija cheese, bacon D 17' }],
         implementation: { file: PRE_AI_FILE, exportName: 'ensureCotijaCheeseModifierOnLine' },
         source: 'code_metadata',
@@ -70,14 +71,42 @@ const FUNCTIONAL_ENTRIES = [
         layer: 'pre_ai_deterministic',
         category: 'singular_plural',
         title: 'Conservative singular ingredient forms',
-        description: 'Applies the high-signal subset of the SOP singular-ingredient rule to bare comma-delimited jalapeños, prawns, pickles, and cucumber pickles; Prawn before either Tequeño or Tequeños; and a standalone Pickle side. Counted or prepared plurals such as "three pickles" and "sautéed prawns" are preserved.',
+        description: 'Applies verified contextual singular-ingredient corrections to comma-delimited descriptions, including jalapeños, prawns, pickles, fruit, vegetables, nuts, peppers, potatoes, croutons, and the explicit pistou herbs override; Prawn before either Tequeño or Tequeños; and a standalone Pickle side. Counted/prepared phrases, other documented plural exceptions, and dish names are preserved.',
         examples: [
             { before: 'Guacamole, jalapeños, avocado 18', after: 'Guacamole, jalapeño, avocado 18' },
             { before: 'Encocado, black cod, prawns, squid 38', after: 'Encocado, black cod, prawn, squid 38' },
             { before: 'Prawns Tequeño, salsa 18', after: 'Prawn Tequeño, salsa 18' },
             { before: 'Ceviche, cucumber pickles, praline 24', after: 'Ceviche, pickle, praline 24' },
+            { before: 'Beet Salad, caramelized walnuts, pistou herbs D,G 18', after: 'Beet Salad, caramelized walnut, pistou herb D,G 18' },
         ],
         implementation: { file: PRE_AI_FILE, exportName: 'normalizeSingularIngredientFormsOnLine' },
+        source: 'code_metadata',
+    },
+    {
+        id: 'pre-ai/contextual-compound-descriptors',
+        layer: 'pre_ai_deterministic',
+        category: 'terminology',
+        title: 'Contextual compound descriptor guards',
+        description: 'Three versioned guards generalize preserved review evidence without approving the original proposal rows: established modifier + grilled is joined only before a following food noun, cast iron is hyphenated only as an attributive food descriptor, and brûlée becomes brûléed only before a recognized ingredient. Punctuation, postnominal, material/cookware, crème brûlée, lexical dessert, standalone, and ambiguous uses remain unchanged; prices, allergens, separators, casing, and idempotence are preserved.',
+        examples: [
+            { before: 'Achiote Grilled Chicken D,G 29', after: 'Achiote-Grilled Chicken D,G 29' },
+            { before: 'Cast Iron Pancakes D,G', after: 'Cast-Iron Pancakes D,G' },
+            { before: 'Holiday Ham, brûlée pineapple D', after: 'Holiday Ham, brûléed pineapple D' },
+        ],
+        implementation: { file: PRE_AI_FILE, exportName: 'normalizeContextualCompoundDescriptorsOnLine' },
+        data: {
+            version: contextual_compound_descriptor_contract_1.CONTEXTUAL_COMPOUND_DESCRIPTOR_VERSION,
+            contract_sha256: contextual_compound_descriptor_contract_1.CONTEXTUAL_COMPOUND_DESCRIPTOR_CONTRACT_SHA256,
+            motivatingEvidence: [
+                { original: 'Achiote Grilled', corrected: 'Achiote-Grilled' },
+                { original: 'Cast Iron Pancakes', corrected: 'Cast-Iron Pancakes' },
+                { original: 'brûlée pineapple', corrected: 'brûléed pineapple' },
+            ],
+            executableScope: 'generalized contextual guards; motivating rows remain human evidence and are not individually approved',
+            propertyScope: 'all properties',
+            templateScope: 'food',
+            exclusions: ['plain/freshly grilled', 'postnominal or punctuated descriptor', 'cast-iron material/cookware use', 'crème brûlée', 'lexical dessert names', 'standalone or ambiguous brûlée'],
+        },
         source: 'code_metadata',
     },
     {
@@ -111,6 +140,16 @@ const FUNCTIONAL_ENTRIES = [
             { before: 'Vegan Tiradito, cucumber, avocado VG', after: 'Vegan Tiradito, cucumber, avocado VG' },
         ],
         implementation: { file: PRE_AI_FILE, exportName: 'shouldAddRawAsterisk' },
+        source: 'code_metadata',
+    },
+    {
+        id: 'pre-ai/raw-asterisk-interior-salmon-option',
+        layer: 'pre_ai_deterministic',
+        category: 'raw_markers',
+        title: 'Interior salmon option marker',
+        description: 'Adds a raw marker only to a bare salmon option inside a comma-separated option line; arbitrary salmon mentions and salmon sauces remain unchanged.',
+        examples: [{ before: 'grilled chicken, salmon, pasta Bolognese D G', after: 'grilled chicken, salmon*, pasta Bolognese D G' }],
+        implementation: { file: PRE_AI_FILE, exportName: 'addInteriorSalmonOptionMarker' },
         source: 'code_metadata',
     },
     {
@@ -237,6 +276,24 @@ const FUNCTIONAL_ENTRIES = [
         source: 'code_metadata',
     },
     {
+        id: 'post-ai/submitted-allergen-preservation',
+        layer: 'post_ai_guard',
+        category: 'allergen_codes',
+        title: 'Submitted allergen source preservation',
+        description: 'Latest submitted/pre-AI allergen codes are authoritative across model and final delivery lanes; candidate-only additions are stripped and ambiguous row attribution fails closed while supported price bytes remain unchanged.',
+        implementation: { file: 'services/dashboard/lib/allergen-source-preservation.ts', exportName: 'preserveSubmittedAllergenCodes' },
+        source: 'code_metadata',
+    },
+    {
+        id: 'post-ai/allergen-delivery-claim-reconciliation',
+        layer: 'reconciliation',
+        category: 'allergen_codes',
+        title: 'Allergen delivery claim reconciliation',
+        description: 'Model claims about added or retained allergen codes are reconciled against the submitted and delivered row bytes; unverified claims remain advisory and never assert an unapplied change.',
+        implementation: { file: 'services/dashboard/lib/allergen-delivery-reconciliation.ts', exportName: 'reconcileAllergenDeliveryClaims' },
+        source: 'code_metadata',
+    },
+    {
         id: 'post-ai/high-confidence-auto-apply',
         layer: 'post_ai_guard',
         category: 'auto_apply',
@@ -270,6 +327,15 @@ const FUNCTIONAL_ENTRIES = [
         title: 'Managed footer strip on corrected output',
         description: 'The corrected menu is stripped of managed footer content (allergen legend, raw notice, price/welcome boilerplate) before reconciliation, mirroring the pre-review normalization.',
         implementation: { file: MENU_FOOTER_FILE, exportName: 'stripManagedFooterText' },
+        source: 'code_metadata',
+    },
+    {
+        id: 'post-ai/managed-raw-notice-suppression',
+        layer: 'post_ai_guard',
+        category: 'footer',
+        title: 'Managed raw-notice finding suppression',
+        description: 'Only a canonical tenant raw-food notice may suppress a whole-menu generic missing-notice duplicate; dish-specific, malformed, negated, or unrelated safety findings remain actionable.',
+        implementation: { file: 'services/dashboard/lib/menu-footer.ts', exportName: 'isGenericMissingCanonicalRawNoticeFinding' },
         source: 'code_metadata',
     },
     {

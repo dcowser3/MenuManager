@@ -16,6 +16,7 @@
     "@menumanager/diff-core": "*",
     "@menumanager/internal-auth": "*",
     "@menumanager/llm-adapter": "*",
+    "@menumanager/review-contract": "*",
     "@menumanager/supabase-client": "*",
     "@menumanager/tenant-config": "*",
     "axios": "^1.6.2",

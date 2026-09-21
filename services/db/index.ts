@@ -102,6 +102,9 @@ type CorrectionRuleRecord = {
     example_corrected?: string | null;
     // C4a: synthesized from freeform guidance by the improvement LLM.
     inferred_from_guidance?: boolean;
+    // Immutable server-assembled provenance for a human explanation. Legacy
+    // and system-generated rows may omit this field.
+    source_binding?: Record<string, unknown> | null;
     created_at?: string;
     updated_at?: string;
 };
@@ -1517,6 +1520,9 @@ function buildCorrectionRuleStorageRecord(record: any): CorrectionRuleRecord | n
         example_original: record.example_original || null,
         example_corrected: record.example_corrected || null,
         inferred_from_guidance: record.inferred_from_guidance === true,
+        source_binding: record.source_binding && typeof record.source_binding === 'object'
+            ? record.source_binding
+            : null,
     };
 }
 
@@ -2790,6 +2796,90 @@ app.get('/submissions/by-clickup-task/:taskId', async (req, res) => {
 });
 
 // Endpoint to get a single submission by ID
+// Resolve the one durable Basic AI Check audit/stage that matches the frozen
+// differ comparison source. Multiple audits for an attempt are normal; the
+// exact comparison attempt plus source hash are the selectors, never recency,
+// the submission's mutable current attempt, or browser-supplied audit identity.
+app.get('/submissions/:id/review-source-binding', async (req, res) => {
+    try {
+        const submissionId = `${req.params.id || ''}`.trim();
+        const submission = await getSubmissionRecordById(submissionId);
+        if (!submission) return res.status(404).json({ error: 'Submission not found.' });
+        const attemptId = `${req.query?.attempt_id || ''}`.trim();
+        const submissionAliases = new Set([
+            submissionId,
+            `${submission.id || ''}`.trim(),
+            `${submission.legacy_id || ''}`.trim(),
+        ].filter(Boolean));
+        if (!attemptId || attemptId.length > 100 || !/^[A-Za-z0-9_-]+$/u.test(attemptId)) {
+            return res.status(400).json({ error: 'A frozen comparison attempt_id is required for exact audit binding.' });
+        }
+        const sourceSnapshotSha256 = `${req.query?.source_snapshot_sha256 || ''}`.trim();
+        if (!/^[a-f0-9]{64}$/u.test(sourceSnapshotSha256)) {
+            return res.status(400).json({ error: 'source_snapshot_sha256 is required for exact audit binding.' });
+        }
+        if (!isSupabaseConfigured()) {
+            return res.status(503).json({ error: 'A durable review audit is required for source binding.' });
+        }
+
+        const { data, error } = await getSupabaseClient()
+            .from('basic_ai_check_audits')
+            .select('id,attempt_id,submission_id,event_type,review_mode,created_at,parsed_response,final_result')
+            .eq('attempt_id', attemptId)
+            .eq('event_type', 'completed')
+            .eq('review_mode', 'full');
+        if (error) throw new Error(error.message);
+
+        const auditRows = (data || []).filter((row: any) => {
+            const linkedSubmission = `${row?.submission_id || ''}`.trim();
+            return (!linkedSubmission || submissionAliases.has(linkedSubmission))
+                && `${row?.attempt_id || ''}`.trim() === attemptId
+                && typeof row?.id === 'string';
+        });
+        const candidates: Array<{ row: any; stage: string }> = [];
+        for (const row of auditRows) {
+            const stages: Array<[string, unknown]> = [
+                ['audit_final_result_corrected_menu_v1', row?.final_result?.correctedMenu],
+                ['audit_parsed_response_corrected_menu_v1', row?.parsed_response?.correctedMenu],
+            ];
+            const matched = stages.filter(([, value]) => typeof value === 'string'
+                && value.length > 0
+                && crypto.createHash('sha256').update(Buffer.from(value, 'utf8')).digest('hex') === sourceSnapshotSha256);
+            if (matched.length > 0) {
+                // Prefer the explicit final-result stage when both audited
+                // fields contain the same exact text.
+                candidates.push({ row, stage: matched[0][0] });
+            }
+        }
+        if (candidates.length !== 1) {
+            return res.status(409).json({
+                error: candidates.length === 0
+                    ? 'No completed/full audit stage matches the frozen learning source.'
+                    : 'Multiple completed/full audit stages match the frozen learning source.',
+                attempt_id: attemptId,
+                exact_candidate_count: candidates.length,
+            });
+        }
+
+        const { row: audit, stage } = candidates[0];
+        return res.json({
+            submission_id: submissionId,
+            attempt_id: attemptId,
+            audit: {
+                id: audit.id,
+                created_at: audit.created_at || null,
+                event_type: audit.event_type,
+                review_mode: audit.review_mode,
+                source_stage: stage,
+                source_snapshot_sha256: sourceSnapshotSha256,
+            },
+        });
+    } catch (error: any) {
+        console.error('Error resolving review source binding:', error.message);
+        res.status(500).json({ error: 'Failed to resolve review source binding.' });
+    }
+});
+
 app.get('/submissions/:id', async (req, res) => {
     try {
         const { id } = req.params;
@@ -3687,12 +3777,42 @@ app.put('/prompt-proposals/:id', async (req, res) => {
     }
 });
 
+// Narrow optimistic merge for the expectation envelope. This deliberately
+// cannot replace eval_summary or touch code_candidate/code_verification fields.
+app.put('/prompt-proposals/:id/expectation-envelope', async (req, res) => {
+    try {
+        if (!isSupabaseConfigured()) return res.status(503).json({ error: 'Supabase not configured' });
+        const expectedHash = `${req.body?.expected_eval_summary_hash || ''}`;
+        const envelope = req.body?.expectation_envelope;
+        if (!expectedHash || !envelope) return res.status(400).json({ error: 'expected_eval_summary_hash and expectation_envelope are required' });
+        const supabase = getSupabaseClient();
+        const current = await supabase.from(PROMPT_PROPOSALS_TABLE).select('id,status,eval_summary').eq('id', req.params.id).maybeSingle();
+        if (current.error) throw new Error(current.error.message);
+        if (!current.data) return res.status(404).json({ error: 'Proposal not found' });
+        if (!['approved', 'approved_modified'].includes(`${current.data.status}`)) return res.status(409).json({ error: 'Proposal is not approved' });
+        const currentHash = crypto.createHash('sha256').update(JSON.stringify(current.data.eval_summary || {})).digest('hex');
+        if (currentHash !== expectedHash) return res.status(409).json({ error: 'Proposal evaluation summary changed concurrently' });
+        const merged = { ...(current.data.eval_summary || {}), expectation_envelope: envelope };
+        const updated = await supabase.from(PROMPT_PROPOSALS_TABLE).update({ eval_summary: merged })
+            .eq('id', req.params.id).eq('status', current.data.status).eq('eval_summary', current.data.eval_summary).select().single();
+        if (updated.error) {
+            if (/0 rows|no rows|JSON object requested/i.test(updated.error.message || '')) return res.status(409).json({ error: 'Proposal evaluation summary changed concurrently' });
+            throw new Error(updated.error.message);
+        }
+        if (!updated.data) return res.status(409).json({ error: 'Proposal evaluation summary changed concurrently' });
+        res.json(updated.data);
+    } catch (error: any) {
+        console.error('Error merging expectation envelope:', error.message);
+        res.status(500).json({ error: 'Failed to merge expectation envelope' });
+    }
+});
+
 // Critical Supabase columns whose absence silently routes writes to the local
 // JSON fallback (invisible to the improvement cycle, which reads Supabase). A
 // missing column here means a migration was not applied — surface it loudly
 // instead of losing reviewer data. Update when a migration adds load-bearing columns.
 const CRITICAL_SUPABASE_SCHEMA: Record<string, string[]> = {
-    correction_rules: ['applies_to_menu_type', 'prompt_cycle_id', 'consumed_at', 'submission_ids', 'example_original', 'example_corrected', 'inferred_from_guidance'],
+    correction_rules: ['applies_to_menu_type', 'prompt_cycle_id', 'consumed_at', 'submission_ids', 'example_original', 'example_corrected', 'inferred_from_guidance', 'source_binding'],
     submissions: ['form_attempt_id', 'approved_menu_content', 'approved_menu_content_html', 'menu_id', 'approver_dispute_token', 'approver_disputed_at', 'approver_dispute_note'],
     menus: ['property', 'service_period', 'name', 'current_submission_id', 'status'],
     draft_sessions: ['token', 'base_submission_id', 'form_state', 'status', 'submitted_submission_id', 'last_edited_by', 'menu_id'],

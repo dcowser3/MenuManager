@@ -110,6 +110,8 @@ export interface TenantRulebook {
      * leave placement alone (missing markers are still flagged).
      */
     rawMarkerPlacement?: 'description_end' | 'preserve';
+    /** Exact canonical foodborne-illness footer used for provenance-backed suppression. */
+    rawNoticeText?: string;
 }
 
 export interface TenantDraftSessions {
@@ -208,6 +210,7 @@ export const DEFAULT_TENANT_CONFIG: TenantConfig = {
         guidelinesAnchor: '## RSH MENU GUIDELINES - COMPREHENSIVE RULES',
         allergensAnchor: '### 7. ALLERGENS',
         rawMarkerPlacement: 'description_end',
+        rawNoticeText: '*consuming raw or undercooked meats, poultry, seafood, shellfish, or eggs may increase your risk of foodborne illness.',
     },
     draftSessions: {
         expiryDays: 30,

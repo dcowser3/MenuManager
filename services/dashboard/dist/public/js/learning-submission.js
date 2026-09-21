@@ -154,6 +154,7 @@
             return {
                 submission_id: context.submissionId,
                 correction_id: dish?.correction_id,
+                comparison_revision: context.comparisonRevision,
                 original_text: dish?.before_line,
                 corrected_text: dish?.after_line,
                 learning_intent: entry.menuUpdateOnly ? 'menu_update_only' : 'review_correction',

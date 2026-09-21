@@ -7,16 +7,38 @@ import { isReasoningModel as adapterIsReasoningModel } from '@menumanager/llm-ad
 import { buildTokenEdits, tokenizeDiffText, tokenizeWords } from '@menumanager/diff-core';
 import { createHash } from 'crypto';
 import { AI_REVIEW_FENCES } from './review-response-contract';
+import { assessCodeProposalVerification } from './code-proposal-verification';
+import {
+    BackendReplayStatus,
+    ReplayRetirementEvidence,
+    ReplayStatus,
+    REPLAY_RETIREMENT_POLICY_VERSION,
+    isReplayRetirementPolicyCurrent,
+    isReplayRetirementVerified,
+    unverifiedReplayResolutionIds,
+} from './replay-retirement';
+export { isReplayRetirementVerified, isReplayRetirementPolicyCurrent, unverifiedReplayResolutionIds, REPLAY_RETIREMENT_POLICY_VERSION } from './replay-retirement';
+
+export { buildBehaviorTestRecord, buildAcceptedPolicyTestFamily, freezeBehaviorTests } from './learning-behavior-tests';
 
 export type CycleGateInput = {
     unconsumedCorrectionCount: number;
     /** When set, a pending (non-superseded) proposal exists. */
-    pendingProposal?: { id?: string; cycle_id?: string } | null;
+    pendingProposal?: {
+        id?: string;
+        cycle_id?: string;
+        correction_rule_count?: number | null;
+        eval_summary?: { replay_retirement_policy_version?: unknown; baseline_fingerprint?: unknown } | null;
+        replay_evidence?: Array<{ correction_id?: string; status?: string; retirement_evidence?: ReplayRetirementEvidence }> | null;
+        correction_routing?: Array<{ correction_id?: string; replay_status?: string }> | null;
+    } | null;
     minNewCorrections: number;
     /** Manual/on-demand run: supersede pending even with zero new corrections. */
     force?: boolean;
     /** The live prompt, review model, or code/accepted-rule manifest changed since the pending proposal was generated. */
     pendingBaselineChanged?: boolean;
+    /** Existing replay evidence was written under an old/incomplete retirement policy. */
+    pendingReplayRetirementRefresh?: boolean;
 };
 
 export type CycleGateResult =
@@ -43,6 +65,14 @@ export function shouldRunCycle(input: CycleGateInput): CycleGateResult {
     }
 
     if (pending) {
+        if (input.pendingReplayRetirementRefresh) {
+            return {
+                run: true,
+                mode: 'supersede',
+                reason: `replay-retirement policy refresh required for pending proposal ${pending.cycle_id}`,
+                pendingProposal: pending,
+            };
+        }
         if (input.unconsumedCorrectionCount >= min) {
             return {
                 run: true,
@@ -69,6 +99,34 @@ export function shouldRunCycle(input: CycleGateInput): CycleGateResult {
         };
     }
     return { run: true, mode: 'new', reason: `${input.unconsumedCorrectionCount} unconsumed correction(s) ready` };
+}
+
+/**
+ * A pending proposal is stale when its replay-retirement evidence predates the
+ * current predicate or contains legacy/status-only success claims. Routing is
+ * deliberately included in the check, but never trusted as proof by itself.
+ */
+export function pendingProposalNeedsReplayRetirementRefresh(
+    proposal: CycleGateInput['pendingProposal'] | null | undefined,
+): boolean {
+    if (!proposal) return false;
+    if (!isReplayRetirementPolicyCurrent(proposal.eval_summary || null)) return true;
+    return unverifiedReplayResolutionIds(proposal).length > 0;
+}
+
+/**
+ * Supersede refreshes may carry a pending proposal forward only when the
+ * existing prompt_cycle_id lookup recovered the exact eligible row count that
+ * the pending proposal recorded. Unknown counts fail closed.
+ */
+export function pendingCorrectionsRecoveredExactly(
+    proposal: CycleGateInput['pendingProposal'] | null | undefined,
+    carriedOver: CorrectionRuleLike[] | null | undefined,
+): boolean {
+    if (!proposal || !Number.isInteger(proposal.correction_rule_count) || (proposal.correction_rule_count || 0) < 0) return false;
+    const carried = correctionsEligibleForImprovement(carriedOver || [])
+        .filter((row) => !`${row.submission_id || ''}`.startsWith('proposal-'));
+    return carried.length === proposal.correction_rule_count;
 }
 
 /** A same-day force/supersede cannot reuse the date-based unique cycle id. */
@@ -200,6 +258,7 @@ export function isTransientOpenAiFailure(input: { status?: number | null; error?
 }
 
 export type CorrectionRuleLike = {
+    learning_intent?: string | null;
     id: string;
     submission_id?: string | null;
     original_text?: string | null;
@@ -225,7 +284,9 @@ export function isCorrectionEligibleForImprovement(correction: CorrectionRuleLik
         && ['pending', 'accepted'].includes(status)
         && !!`${correction.reviewer_name || ''}`.trim()
         && !!`${correction.rule || ''}`.trim()
-        && `${correction.change_type || ''}`.trim().toLowerCase() !== 'menu_update_only';
+        && !['menu_update_only', 'menu_content_update'].includes(
+            `${correction.learning_intent || correction.change_type || ''}`.trim().toLowerCase()
+        );
 }
 
 export function correctionsEligibleForImprovement<T extends CorrectionRuleLike>(corrections: T[]): T[] {
@@ -258,7 +319,10 @@ export type ReplayEvidenceEntry = {
     submission_id?: string;
     original_text?: string;
     corrected_text?: string;
-    status: 'still_missed' | 'partially_correct' | 'now_correct' | 'replay_unavailable' | 'not_verifiable';
+    status: ReplayStatus;
+    /** Backend sample result, kept separate from the decision to retire evidence. */
+    observed_status?: BackendReplayStatus;
+    retirement_evidence?: ReplayRetirementEvidence;
     /** Expected token-level changes that replay demonstrably applied (for compound corrections). */
     applied_changes?: string[];
     /** Expected token-level changes still absent after replay. */
@@ -271,7 +335,7 @@ export function partitionCorrectionIdsByReplayStatus(
 ): { resolvedIds: string[]; proposalIds: string[] } {
     const nowCorrect = new Set(
         (replayEvidence || [])
-            .filter((entry) => entry?.status === 'now_correct' && entry.correction_id)
+            .filter((entry) => isReplayRetirementVerified(entry) && entry.correction_id)
             .map((entry) => `${entry.correction_id}`)
     );
     const resolvedIds: string[] = [];
@@ -290,7 +354,7 @@ export function correctionsRequiringProposal<T extends CorrectionRuleLike>(
 ): T[] {
     const resolvedIds = new Set(
         (replayEvidence || [])
-            .filter((entry) => entry?.status === 'now_correct' && entry.correction_id)
+            .filter((entry) => isReplayRetirementVerified(entry) && entry.correction_id)
             .map((entry) => `${entry.correction_id}`)
     );
     return (corrections || []).filter((correction) => !resolvedIds.has(`${correction.id}`));
@@ -333,7 +397,8 @@ export function supersededProposalReviewBlock(proposal: {
 
 export type PromptProposalApprovalBlock = {
     error: string;
-    reason: 'eval_regressed' | 'eval_failed' | 'eval_no_effect' | 'eval_rule_inactive' | 'eval_skipped' | 'unresolved_misses' | 'trigger_eval_unavailable';
+    reason: 'eval_regressed' | 'eval_failed' | 'eval_no_effect' | 'eval_rule_inactive' | 'eval_skipped' | 'unresolved_misses' | 'trigger_eval_unavailable'
+        | 'code_verification_required' | 'code_verification_failed' | 'code_verification_stale';
 };
 
 /**
@@ -343,6 +408,7 @@ export type PromptProposalApprovalBlock = {
  * not become the live rulebook.
  */
 export function promptProposalApprovalBlock(proposal: {
+    code_recommendations?: unknown[];
     eval_status?: string | null;
     eval_summary?: ProposalEvalSummary | null;
     unresolved_still_missed?: boolean | null;
@@ -362,6 +428,13 @@ export function promptProposalApprovalBlock(proposal: {
             error: 'This proposal cannot be approved because its evaluation failed. Re-run evaluation before approving any change.',
             reason: 'eval_failed',
         };
+    }
+    // A code recommendation is an engineering change, not an issue description.
+    // Recompute the trust-kernel verdict at both the page and mutation boundary;
+    // stale declarations or synthetic-only evidence must never authorize it.
+    if ((proposal.code_recommendations?.length || proposal.disposition === 'code_recs_only')) {
+        const codeBlock = assessCodeProposalVerification(proposal);
+        if (codeBlock) return codeBlock;
     }
     if (proposal.unresolved_still_missed) {
         return {
@@ -528,6 +601,7 @@ export type CorrectionRoutingEntry = {
     note: string;
     /** Replay tag for this correction, copied in for rendering (still_missed/now_correct/…). */
     replay_status?: ReplayEvidenceEntry['status'];
+    retirement_verified?: boolean;
     /** Source correction text, copied in for a readable routing table (null for freeform). */
     original_text?: string | null;
     corrected_text?: string | null;
@@ -560,13 +634,14 @@ export function mergeReplayResolvedCorrectionRouting(
         if (!id) continue;
         seen.add(id);
         const evidence = evidenceById.get(id);
-        if (evidence?.status === 'now_correct') {
+        if (isReplayRetirementVerified(evidence)) {
             merged.push({
                 correction_id: id,
                 lane: 'already_correct',
                 target: 'current live review pipeline',
                 note: 'Fresh replay confirmed the reviewer correction is already produced; excluded from proposal generation and retired.',
                 replay_status: 'now_correct',
+                retirement_verified: true,
                 original_text: correction.original_text || null,
                 corrected_text: correction.corrected_text || null,
                 guidance: correction.rule || null,
@@ -574,7 +649,25 @@ export function mergeReplayResolvedCorrectionRouting(
             continue;
         }
         const routed = routingById.get(id);
-        if (routed) merged.push(routed);
+        if (routed) {
+            const unverified = evidence?.status === 'now_correct' || evidence?.status === 'verification_required' || evidence?.status === 'delivery_mismatch';
+            const normalizedReplayStatus = evidence?.status === 'now_correct' ? 'verification_required' : evidence?.status;
+            merged.push(unverified && routed.lane === 'already_correct'
+                ? { ...routed, lane: 'unrouted', note: 'Retirement is unverified; original failure and delivery require verification.', replay_status: 'verification_required', retirement_verified: false }
+                : { ...routed, ...(unverified ? { replay_status: normalizedReplayStatus, retirement_verified: false } : {}) });
+        } else if (evidence && (evidence.status === 'now_correct' || evidence.status === 'verification_required' || evidence.status === 'delivery_mismatch')) {
+            merged.push({
+                correction_id: id,
+                lane: 'unrouted',
+                target: 'Original failure verification',
+                note: evidence.retirement_evidence?.reason || 'Backend replay alone does not prove a reliable delivered correction.',
+                replay_status: evidence.status === 'now_correct' ? 'verification_required' : evidence.status,
+                retirement_verified: false,
+                original_text: correction.original_text || null,
+                corrected_text: correction.corrected_text || null,
+                guidance: correction.rule || null,
+            });
+        }
     }
     for (const route of proposalRouting || []) {
         if (!seen.has(`${route.correction_id}`)) merged.push(route);
@@ -935,7 +1028,8 @@ export function validateCorrectionRouting(
     const sources = (opts.sourceCorrections || []).filter((c) => c && c.id);
     const replayById = new Map<string, ReplayEvidenceEntry['status']>();
     for (const e of opts.replayEvidence || []) {
-        if (e && e.correction_id) replayById.set(String(e.correction_id), e.status);
+        if (e && e.correction_id) replayById.set(String(e.correction_id),
+            e.status === 'now_correct' && !isReplayRetirementVerified(e) ? 'verification_required' : e.status);
     }
     const sourceById = new Map<string, { original_text?: string | null; corrected_text?: string | null; rule?: string | null }>();
     for (const c of sources) sourceById.set(String(c.id), { original_text: c.original_text ?? undefined, corrected_text: c.corrected_text ?? undefined, rule: c.rule ?? undefined });
@@ -1818,6 +1912,7 @@ export type EvalRunSummary = {
 };
 
 export type ProposalEvalSummary = {
+    replay_retirement_policy_version?: number;
     baseline: EvalRunSummary | null;
     candidate: EvalRunSummary | null;
     comparedCases: number;
@@ -2144,6 +2239,7 @@ export function buildProposalEvalSummary(
 ): ProposalEvalSummary {
     const comparison = candidateReport?.baselineComparison || null;
     return {
+        replay_retirement_policy_version: REPLAY_RETIREMENT_POLICY_VERSION,
         baseline,
         candidate,
         comparedCases: comparison?.comparedCases ?? 0,
@@ -2166,6 +2262,16 @@ export function buildProposalEvalSummary(
         candidate_rule_activations: Array.isArray(candidateReport?.candidateRuleActivations)
             ? candidateReport.candidateRuleActivations
             : [],
+    };
+}
+
+/** Stamp every stored proposal, including skipped/failed evaluation summaries. */
+export function stampReplayRetirementPolicyVersion(
+    summary: ProposalEvalSummary | null | undefined,
+): ProposalEvalSummary {
+    return {
+        ...(summary || {} as ProposalEvalSummary),
+        replay_retirement_policy_version: REPLAY_RETIREMENT_POLICY_VERSION,
     };
 }
 
@@ -2695,7 +2801,9 @@ Prompt rewrite rules:
 - Treat every new reviewer correction as evidence that the current first-pass process missed something. Corrections may be annotated with REPLAY EVIDENCE tags from a pre-analysis replay of the current pipeline on the same raw input:
   - still_missed: the current pipeline reproduces the exact mistake on this input. Replay evidence outranks any coverage citation. A valid prompt_quote + still_missed is diagnosis ("present but ignored"); you MUST still propose a concrete change (restructuring/examples or code guard preferred over more abstract text). Claiming "already covered" for a still_missed correction is prohibited.
   - partially_correct: replay applied part of a compound reviewer correction but not all of it. The evidence lists applied_changes and remaining_changes. Treat the applied portion as proven; route ONLY the remaining delta, and do not recommend repairing a deterministic rule that replay already demonstrated. You may dismiss a remaining addition only when it is unsupported by the source/reviewer explanation, and must say so in correction_routing.
-  - now_correct: the current pipeline already produces the human's fix. You MAY leave this unaddressed, but your analysis must cite the replay evidence ("replay shows this is now produced") as the reason.
+  - now_correct: retirement is permitted only when the original failed response, same-attempt delivery, and zero-model-call deterministic replay are proven by REPLAY RETIREMENT evidence. A bare historical/backend now_correct is only an observation and remains actionable as verification_required.
+  - verification_required: a backend sample passed, but no deterministic repair of the original failed response has been verified. Keep the correction actionable; do not claim it is fixed, dismissed, or already handled.
+  - delivery_mismatch: the original API and submitted text differ after review; attribution is UNKNOWN. A human may have deliberately edited the result. Do not propose a browser/editor fix without edit-history evidence or a reproduced failure without human intervention.
   - replay_unavailable: no raw input was available for replay.
   - not_verifiable: this correction is freeform guidance (no exact original/corrected text pair) and cannot be mechanically replay-verified; use judgment.
 - When a still_missed correction occurs in a context the prompt already "mentions," prefer adding concrete examples, decision tables, or counter-examples over appending another abstract sentence. If prompt text is fundamentally unreliable for the case, recommend a deterministic code guard instead of more prompt text, and say so.

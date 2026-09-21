@@ -8,9 +8,10 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=Montserrat:wght@300;400;500;600&display=swap" rel="stylesheet">
     <!-- Quill Rich Text Editor -->
-    <link href="https://cdn.quilljs.com/1.3.6/quill.snow.css" rel="stylesheet">
-    <script src="https://cdn.quilljs.com/1.3.6/quill.js"></script>
+    <link href="/vendor/quill-1.3.6/quill.snow.css" rel="stylesheet">
+    <script src="/vendor/quill-1.3.6/quill.js"></script>
     <script src="/js/form-helpers.js"></script>
+    <script src="/js/form-submission.js"></script>
     <script src="/js/rich-text-editor.js?v=20260918-safari-selection"></script>
     <script src="/js/diff-core.js"></script>
     <script src="/js/redline-preview.js?v=20260613-extract-leading-trim"></script>
@@ -7982,11 +7983,13 @@
             const step2Visible = !document.getElementById('step2').classList.contains('hidden');
             if (step2Visible) {
                 const reviewedArea = document.getElementById('reviewedContentArea');
-                menuContentHtml = sanitizeMenuHtmlForSubmission(reviewedArea.innerHTML || '');
-                menuContentText = extractCleanTextFromReviewedArea(reviewedArea);
+                const captured = MenuSubmission.captureMenuSubmission({ html: reviewedArea.innerHTML || '', element: reviewedArea });
+                menuContentHtml = captured.menuContentHtml;
+                menuContentText = captured.menuContent;
             } else {
-                menuContentHtml = sanitizeMenuHtmlForSubmission(quill.root.innerHTML || '');
-                menuContentText = quill.getText().trim();
+                const captured = MenuSubmission.captureMenuSubmission({ html: quill.root.innerHTML || '', text: quill.getText().trim() });
+                menuContentHtml = captured.menuContentHtml;
+                menuContentText = captured.menuContent;
             }
 
             const persistentPreviewBody = document.getElementById('persistentPreviewBody');
@@ -8100,7 +8103,8 @@
                 await uploadMenuImageIfNeeded();
                 formData.menuImagePath = uploadedMenuImagePath || '';
                 formData.menuImageFileName = uploadedMenuImageFileName || '';
-                const submitBody = JSON.stringify(formData);
+                const preparedSubmission = MenuSubmission.prepareMenuSubmissionRequest(formData, getAttemptHeaders());
+                const submitBody = preparedSubmission.init.body;
                 const submitBodyLength = byteLength(submitBody);
                 await logFormAttempt('submit_started', {
                     route: '/api/form/submit',
@@ -8121,11 +8125,7 @@
                     }
                 });
 
-                const response = await fetch('/api/form/submit', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', ...getAttemptHeaders() },
-                    body: submitBody
-                });
+                const response = await MenuSubmission.sendPreparedMenuSubmission(preparedSubmission);
 
                 const responseText = await response.text();
                 let data = {};

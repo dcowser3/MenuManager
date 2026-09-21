@@ -1,6 +1,7 @@
 import {
     GLOBAL_CORRECTION_RULE_LOCATION,
     buildCorrectionRuleRecord,
+    requiresHumanExplanationSourceBinding,
 } from '../lib/learning-correction-rules';
 
 const catalog = [
@@ -19,6 +20,14 @@ const basePayload = {
 };
 
 describe('buildCorrectionRuleRecord', () => {
+    test('requires exact source binding only for comparison-card identities', () => {
+        expect(requiresHumanExplanationSourceBinding({ rule: 'manual rule', source: 'human' })).toBe(false);
+        expect(requiresHumanExplanationSourceBinding({ original_text: 'old', corrected_text: 'new' })).toBe(false);
+        expect(requiresHumanExplanationSourceBinding({ submission_id: 'submission-1' })).toBe(true);
+        expect(requiresHumanExplanationSourceBinding({ correction_id: 'dish-1' })).toBe(true);
+        expect(requiresHumanExplanationSourceBinding({ comparison_revision: 'comparison-1' })).toBe(true);
+    });
+
     it('defaults force_target_case to false and preserves an explicit true value', () => {
         const base = {
             submission_id: 'submission-case',
@@ -118,6 +127,16 @@ describe('buildCorrectionRuleRecord', () => {
         // immediately applied by the deterministic pre-AI pass).
         expect(record.source).toBe('human');
         expect(record.status).toBe('pending');
+    });
+
+    test('carries the server-assembled source binding without allowing the builder to invent one', () => {
+        const sourceBinding = { version: 'human-explanation-source-binding-v1', source_revision_id: 'SER-test' };
+        const record = buildCorrectionRuleRecord({
+            ...basePayload,
+            source_binding: sourceBinding,
+        }, catalog);
+        expect(record.source_binding).toBe(sourceBinding);
+        expect(buildCorrectionRuleRecord(basePayload, catalog).source_binding).toBeNull();
     });
 
     test('stores only the reviewer-scoped replacement for a mixed dish-line edit', () => {

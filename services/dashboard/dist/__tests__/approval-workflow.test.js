@@ -93,6 +93,7 @@ describe('approval workflow learning provenance', () => {
                 id: 'sub-1',
                 original_path: '/tmp/documents/sub-1/sub-1-original.docx',
                 ai_draft_path: '/tmp/documents/sub-1/sub-1-draft.docx',
+                form_attempt_id: 'attempt-sub-1',
                 menu_content: 'Draft menu',
                 property: 'Tamayo - Denver',
             },
@@ -111,6 +112,7 @@ describe('approval workflow learning provenance', () => {
                 id: 'sub-1',
                 original_path: '/tmp/documents/sub-1/sub-1-original.docx',
                 ai_draft_path: '/tmp/documents/sub-1/sub-1-draft.docx',
+                form_attempt_id: 'attempt-sub-1',
                 menu_content: 'Draft menu',
                 property: 'Tamayo - Denver',
             },
@@ -124,6 +126,7 @@ describe('approval workflow learning provenance', () => {
         expect(res.statusCode).toBe(200);
         expect(deps.axios.post).toHaveBeenCalledWith('http://localhost:3006/compare', expect.objectContaining({
             submission_id: 'sub-1',
+            attempt_id: 'attempt-sub-1',
             original_path: '/tmp/documents/sub-1/sub-1-original.docx',
             ai_draft_path: '/tmp/documents/sub-1/sub-1-draft.docx',
             comparison_source: 'human_review_final_approval',

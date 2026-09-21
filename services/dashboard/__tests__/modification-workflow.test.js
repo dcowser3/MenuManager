@@ -53,11 +53,13 @@ const supabaseClient = require('@menumanager/supabase-client');
 const { logAlert } = supabaseClient;
 const dashboardModule = require('../index');
 const app = dashboardModule.default;
+const { runFullReviewPipeline } = require('../lib/review-pipeline');
 const { shouldNotifyFormAttemptFailure } = dashboardModule;
 const mockedAxios = axios;
 
 function getRouteHandler(method, routePath) {
-    const layer = app._router.stack.find(
+    const router = app._router || app.router;
+    const layer = router.stack.find(
         (l) =>
             l.route &&
             l.route.path === routePath &&
@@ -99,7 +101,7 @@ function invokeJsonHandler(handler, body, options = {}) {
     });
 }
 
-function postJsonOverHttp(routePath, body) {
+function postJsonOverHttp(routePath, body, options = {}) {
     return new Promise((resolve, reject) => {
         const server = app.listen(0, async () => {
             try {
@@ -107,7 +109,7 @@ function postJsonOverHttp(routePath, body) {
                 const port = typeof address === 'object' && address ? address.port : 0;
                 const response = await fetch(`http://127.0.0.1:${port}${routePath}`, {
                     method: 'POST',
-                    headers: { 'content-type': 'application/json' },
+                    headers: { 'content-type': 'application/json', ...(options.headers || {}) },
                     body: JSON.stringify(body),
                 });
                 const payload = await response.json();
@@ -937,6 +939,120 @@ describe('Dashboard Modification Workflow (local, mocked externals)', () => {
         ]);
     });
 
+    test('actual Basic HTTP handler matches offline coordinator on precheck/footer normalization and later model edit', async () => {
+        const rawNotice = '*consuming raw or undercooked meats, poultry, seafood, shellfish, or eggs may increase your risk of foodborne illness.';
+        const payload = {
+            menuContent: [
+                'Esquites, sweet yellow corn, spicy aioli, cotija, bacon* D 17',
+                'Pork Belly, COTIJA CHEESE, pickled chili D,G 18',
+                'Taco, cotija cheese, salsa verde D 15',
+                rawNotice,
+            ].join('\n'),
+            baselineMenuContent: '',
+            reviewMode: 'full',
+            allergens: '',
+            menuType: 'standard',
+            templateType: 'food',
+        };
+        const modelFeedback = (text) => `=== CORRECTED MENU ===\n${text.replace('Taco,', 'Taco Verde,')}\n=== END CORRECTED MENU ===\n=== SUGGESTIONS ===\n[]\n=== END SUGGESTIONS ===`;
+        mockedAxios.post = jest.fn(async (url, request) => {
+            if (String(url).includes('/run-qa-check')) {
+                return { data: { feedback: modelFeedback(request.text), finish_reason: 'stop' } };
+            }
+            return { data: {} };
+        });
+
+        const http = await postJsonOverHttp('/api/form/basic-check', payload, {
+            headers: { 'x-menumanager-debug-basic-check': '1' },
+        });
+        const qaCalls = mockedAxios.post.mock.calls.filter(([url]) => String(url).includes('/run-qa-check'));
+        expect(qaCalls).toHaveLength(1);
+
+        let offlineCalls = 0;
+        const offline = await runFullReviewPipeline(payload.menuContent, {
+            basePrompt: '', property: '', templateType: payload.templateType, menuType: payload.menuType,
+            allergens: payload.allergens, acceptedCorrectionRules: [], approvedVocabularyTerms: [],
+            precheckEnabled: true, managedRawNoticePresent: true,
+        }, async (text) => {
+            offlineCalls++;
+            return { feedback: modelFeedback(text), finishReason: 'stop' };
+        });
+        expect(offlineCalls).toBe(1);
+        expect(http.status).toBe(200);
+        expect(http.body.correctedMenu).toBe(offline.finalCorrectedMenu);
+        expect(http.body.suggestions).toEqual(offline.finalSuggestions);
+        expect(http.body.hasCriticalErrors).toBe(offline.authoritative.hasCriticalErrors);
+        expect(http.body.reviewStatus).toEqual(offline.reviewStatus);
+        const delivered = http.body.basicCheckDiagnostics.delivered;
+        expect(delivered.outputHash).toBe(offline.outputHash);
+        expect(delivered.acceptedPolicyHash).toBe(offline.envelope.acceptedPolicyHash);
+        expect(delivered.managedRawNoticePresent).toBe(offline.envelope.context.managedRawNoticePresent);
+        expect(delivered.editableSpanBasis).toBe('prechecked_review_body');
+        expect(delivered.structureGuard).toEqual(offline.authoritative.structureGuard);
+        expect(delivered.reconciliation).toEqual(offline.authoritative.reconciliation);
+        expect(delivered.spellingAdjudications).toEqual(offline.authoritative.spellingAdjudications);
+    });
+
+    test('actual Basic HTTP handler matches offline coordinator on rejected merge/status', async () => {
+        supabaseClient.isSupabaseConfigured.mockReturnValue(true);
+        const acceptedRule = {
+            id: 'fish-variant', status: 'accepted', change_type: 'spelling',
+            original_text: 'Fisshh', corrected_text: 'Fish',
+        };
+        mockedAxios.get = jest.fn(async (url) => {
+            if (String(url).includes('/correction-rules')) return { data: [acceptedRule] };
+            return { data: [] };
+        });
+        const payload = {
+            menuContent: 'BEVERAGE OPTIONS\nFishh G 12\nFishh G 12',
+            baselineMenuContent: '', reviewMode: 'full', allergens: '', menuType: 'standard', templateType: 'beverage',
+        };
+        const modelFeedback = (text) => `=== CORRECTED MENU ===\n${text.replace('Fishh G 12', 'Fish G 12')}\n=== END CORRECTED MENU ===\n=== SUGGESTIONS ===\n[{"type":"Missing Price","severity":"critical","menuItem":"candidate-only","description":"candidate-only","recommendation":"invent"}]\n=== END SUGGESTIONS ===`;
+        mockedAxios.post = jest.fn(async (url, request) => {
+            if (String(url).includes('/run-qa-check')) {
+                return { data: { feedback: modelFeedback(request.text), finish_reason: 'stop' } };
+            }
+            return { data: {} };
+        });
+        const http = await postJsonOverHttp('/api/form/basic-check', payload, {
+            headers: { 'x-menumanager-debug-basic-check': '1' },
+        });
+        const qaCalls = mockedAxios.post.mock.calls.filter(([url]) => String(url).includes('/run-qa-check'));
+        expect(qaCalls).toHaveLength(1);
+
+        let offlineCalls = 0;
+        const offline = await runFullReviewPipeline(payload.menuContent, {
+            basePrompt: '', templateType: payload.templateType, menuType: payload.menuType,
+            acceptedCorrectionRules: [acceptedRule], precheckEnabled: true, managedRawNoticePresent: false,
+        }, async (text) => {
+            offlineCalls++;
+            return { feedback: modelFeedback(text), finishReason: 'stop' };
+        });
+        expect(offlineCalls).toBe(1);
+        expect(http.body.correctedMenu).toBe(payload.menuContent);
+        expect(http.body.correctedMenu).toBe(offline.finalCorrectedMenu);
+        expect(http.body.suggestions).toEqual(offline.finalSuggestions);
+        expect(http.body.hasCriticalErrors).toBe(offline.authoritative.hasCriticalErrors);
+        expect(http.body.reviewStatus).toEqual(offline.reviewStatus);
+        expect(http.body.reviewStatus).toEqual({ complete: false, transportStatus: 'rejected', reusable: false });
+        expect(http.body.basicCheckDiagnostics.delivered.structureGuard).toEqual(offline.authoritative.structureGuard);
+        expect(http.body.basicCheckDiagnostics.delivered.suggestions).toEqual(offline.authoritative.suggestions);
+        expect(http.body.basicCheckDiagnostics.delivered.spellingAdjudications).toEqual(offline.authoritative.spellingAdjudications);
+        expect(http.body.basicCheckDiagnostics.delivered.spellingAdjudications).toEqual(expect.arrayContaining([
+            expect.objectContaining({ disposition: 'not_adjudicated' }),
+        ]));
+        await flushAsyncJobs();
+        const auditPayload = mockSupabaseInsert.mock.calls
+            .map(([insertPayload]) => insertPayload)
+            .find((insertPayload) => insertPayload && insertPayload.event_type === 'basic_check_completed');
+        expect(auditPayload.details.deliveredReview).toMatchObject({
+            scope: 'delivered_authoritative',
+            reviewStatus: { complete: false, transportStatus: 'rejected', reusable: false },
+            hasCriticalErrors: offline.authoritative.hasCriticalErrors,
+        });
+        expect(auditPayload.details.correctedMenuStructureGuard.scope).toBe('attempt');
+    });
+
     test('basic-check writes a durable AI request and response audit row', async () => {
         supabaseClient.isSupabaseConfigured.mockReturnValue(true);
         const payload = {
@@ -1379,6 +1495,73 @@ describe('Dashboard Modification Workflow (local, mocked externals)', () => {
         });
     });
 
+    test('basic-check caller keeps scoped canonical policy aligned across property and template contexts', async () => {
+        const globalRule = {
+            id: 'rule-global-housemade',
+            status: 'accepted',
+            source: 'human',
+            original_text: 'house-made',
+            corrected_text: 'housemade',
+            change_type: 'terminology',
+        };
+        const localRule = {
+            ...globalRule,
+            id: 'rule-local-housemade',
+            corrected_text: 'house made',
+            is_location_specific: true,
+            location: 'Property A',
+            applies_to_menu_type: 'food',
+        };
+        const run = async ({ property, templateType, rules, target, alternate, expected, expectsFinding = true }) => {
+            mockedAxios.get = jest.fn(async (url) => {
+                if (String(url).includes('/correction-rules')) return { data: rules };
+                if (String(url).includes('/properties')) return { data: { catalog: [{ name: property }] } };
+                return { data: [] };
+            });
+            mockedAxios.post = jest.fn(async (url, payload) => {
+                if (String(url).includes('/run-qa-check')) {
+                    return { data: { feedback: `=== CORRECTED MENU ===\n${payload.text}\n=== END CORRECTED MENU ===\n=== SUGGESTIONS ===\n[]\n=== END SUGGESTIONS ===` } };
+                }
+                return { data: {} };
+            });
+            const submittedRows = 'Dish, house-made G 12\nOther, house-mad G 13';
+            const response = await invokeJsonHandler(basicCheckHandler, {
+                menuContent: submittedRows,
+                baselineMenuContent: '',
+                reviewMode: 'full',
+                allergens: '',
+                menuType: 'standard',
+                property,
+                templateType,
+            }, { headers: { 'x-menumanager-debug-basic-check': '1' } });
+            const qaCall = mockedAxios.post.mock.calls.find((call) => String(call[0]).includes('/run-qa-check'));
+            expect(mockedAxios.post.mock.calls.filter((call) => String(call[0]).includes('/run-qa-check'))).toHaveLength(1);
+            expect(response.status).toBe(200);
+            expect(response.body.correctedMenu).toBe(expected);
+            expect(qaCall[1].prompt).toContain('ACCEPTED SCOPED TERM POLICY');
+            if (expectsFinding) {
+                expect(qaCall[1].prompt).toContain(`"preferred":"${target}"`);
+                expect(qaCall[1].prompt).not.toContain(`"preferred":"${alternate}"`);
+                expect(qaCall[1].prompt).toContain('Spelling suspicions');
+            } else {
+                expect(qaCall[1].prompt).not.toContain('"preferred":"house made"');
+                expect(qaCall[1].prompt).not.toContain('"preferred":"homemade"');
+                expect(qaCall[1].prompt).not.toContain('"preferred":"housemade"');
+                expect(qaCall[1].prompt).not.toContain('Spelling suspicions');
+            }
+        };
+
+        await run({ property: 'Property A', templateType: 'food', rules: [globalRule, localRule], target: 'house made', alternate: 'housemade', expected: 'Dish, house made G 12\nOther, house-mad G 13' });
+        await run({ property: 'Property B', templateType: 'food', rules: [globalRule, localRule], target: 'housemade', alternate: 'house made', expected: 'Dish, housemade G 12\nOther, house-mad G 13' });
+        await run({ property: 'Property A', templateType: 'beverage', rules: [globalRule, localRule], target: 'housemade', alternate: 'house made', expected: 'Dish, housemade G 12\nOther, house-mad G 13' });
+        await run({
+            property: 'Property A', templateType: 'food',
+            rules: [localRule, { ...localRule, id: 'rule-local-conflict', corrected_text: 'homemade' }],
+            expected: 'Dish, house-made G 12\nOther, house-mad G 13',
+            expectsFinding: false,
+        });
+    });
+
     test.each([
         [
             '503 service error',
@@ -1638,6 +1821,57 @@ describe('Dashboard Modification Workflow (local, mocked externals)', () => {
         expect(response.body.correctedMenu).toBe(
             'Guacamole - $12\nMarket Salad, avocado, heirloom tomatoes, halloumi cheese, cucumber, red onion D,V 70'
         );
+    });
+
+    test('changed-only Basic route preserves submitted codes, strips model additions, and honors later chef removal', async () => {
+        mockedAxios.post = jest.fn(async (url, payload) => {
+            const urlStr = String(url);
+            if (urlStr.includes('/run-qa-check')) {
+                const text = `${payload.text || ''}`;
+                const latestRemoval = !text.includes(' S 22');
+                const changedDescription = text.includes('citrus marinade S 22');
+                const fullMenu = text.includes('Steak, fries D 30');
+                return { data: { feedback: latestRemoval
+                    ? `=== CORRECTED MENU ===\nCusco Chicken, citrus marinade N 22${fullMenu ? '\\nSteak, fries D 30' : ''}\n=== END CORRECTED MENU ===\n=== SUGGESTIONS ===\n[{"type":"Spelling","confidence":"high","menuItem":"Cusco Chicken","description":"Remove the trailing code from the dish wording.","recommendation":"Change \\"citrus marinade S\\" to \\"citrus marinade\\"."}]\n=== END SUGGESTIONS ===`
+                    : `=== CORRECTED MENU ===\n${changedDescription ? 'Cusco Chicken, citrus marinade S 22' : 'Cusco Chicken, citrus marinade N 22'}${fullMenu ? '\\nSteak, fries D 30' : ''}\n=== END CORRECTED MENU ===\n=== SUGGESTIONS ===\n[{"type":"Spelling","confidence":"high","menuItem":"Cusco Chicken","description":"Remove the trailing code from the dish wording.","recommendation":"Change \\"citrus marinade S\\" to \\"citrus marinade\\"."}]\n=== END SUGGESTIONS ===` } };
+            }
+            return { data: {} };
+        });
+
+        const submitted = await invokeJsonHandler(basicCheckHandler, {
+            menuContent: 'Cusco Chicken, marinade S 22\nSteak, fries D 30',
+            baselineMenuContent: '', reviewMode: 'full',
+            allergens: 'S contains shellfish | D contains dairy | N contains nuts', menuType: 'standard',
+        });
+        expect(submitted.status).toBe(200);
+        expect(submitted.body.correctedMenu).toContain('Cusco Chicken, marinade S 22');
+        expect(submitted.body.correctedMenu).not.toContain('N 22');
+        expect(submitted.body.correctedMenu).toContain('Steak, fries D 30');
+
+        const changedOnly = await invokeJsonHandler(basicCheckHandler, {
+            menuContent: 'Cusco Chicken, citrus marinade S 22\nSteak, fries D 30',
+            baselineMenuContent: 'Cusco Chicken, marinade S 22\nSteak, fries D 30',
+            reviewMode: 'changed_only',
+            allergens: 'S contains shellfish | D contains dairy | N contains nuts', menuType: 'standard',
+        });
+        expect(changedOnly.status).toBe(200);
+        expect(changedOnly.body.reviewMode).toBe('changed_only');
+        expect(changedOnly.body.correctedMenu).toContain('Cusco Chicken, citrus marinade S 22');
+        expect(changedOnly.body.correctedMenu).not.toContain('N 22');
+        expect(changedOnly.body.correctedMenu).toContain('Steak, fries D 30');
+
+        const removal = await invokeJsonHandler(basicCheckHandler, {
+            menuContent: 'Cusco Chicken, citrus marinade 22\nSteak, fries D 30',
+            baselineMenuContent: 'Cusco Chicken, marinade S 22\nSteak, fries D 30',
+            reviewMode: 'changed_only',
+            allergens: 'S contains shellfish | D contains dairy | N contains nuts', menuType: 'standard',
+        });
+        expect(removal.status).toBe(200);
+        expect(removal.body.reviewMode).toBe('changed_only');
+        expect(removal.body.correctedMenu).toContain('Cusco Chicken, citrus marinade 22');
+        expect(removal.body.correctedMenu).not.toContain('Cusco Chicken, citrus marinade S 22');
+        expect(removal.body.correctedMenu).not.toContain('N 22');
+        expect(removal.body.correctedMenu).toContain('Steak, fries D 30');
     });
 
     test('basic-check changed_only bails to original menu when AI returns mismatched line count', async () => {

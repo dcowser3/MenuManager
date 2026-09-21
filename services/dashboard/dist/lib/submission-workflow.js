@@ -95,6 +95,65 @@ function createSubmissionWorkflowHandlers(deps) {
                 console.log(`Skipping AI review for submission ${input.submissionId} (template: ${input.templateType})`);
                 return;
             }
+            if (deps.runSubmissionReview) {
+                const text = input.reviewText || (await require('mammoth').extractRawText({ path: input.originalPath })).value;
+                const review = await deps.runSubmissionReview({
+                    submissionId: input.submissionId,
+                    text,
+                    submitterEmail: input.submitterEmail,
+                    filename: input.filename,
+                    originalPath: input.originalPath,
+                    projectName: input.projectName,
+                    property: input.property || '',
+                    templateType: input.templateType,
+                    menuType: input.menuType || 'standard',
+                    allergens: input.allergens || '',
+                    submissionMode: input.submissionMode || 'new',
+                    revisionSource: input.revisionSource || '',
+                });
+                const reviewed = review.reviewStatus.complete && review.reviewStatus.transportStatus === 'complete';
+                const draftPath = path.join(path.dirname(input.originalPath), `${input.submissionId}-draft.docx`);
+                if (reviewed) {
+                    if (input.artifactFormData && deps.generateDocxFromForm && review.correctedMenu) {
+                        await deps.generateDocxFromForm(input.submissionId, {
+                            ...input.artifactFormData,
+                            menuContent: review.correctedMenu,
+                            menuContentHtml: undefined,
+                        }, { outputPath: draftPath });
+                    }
+                    else {
+                        await deps.fs.copyFile(input.originalPath, draftPath);
+                    }
+                    await deps.axios.put(`${deps.DB_SERVICE_URL}/submissions/${input.submissionId}`, {
+                        status: 'pending_human_review',
+                        ai_draft_path: draftPath,
+                    });
+                }
+                else {
+                    await deps.axios.put(`${deps.DB_SERVICE_URL}/submissions/${input.submissionId}`, {
+                        status: 'pending_human_review',
+                    });
+                }
+                await deps.recordSubmissionReviewAudit?.({
+                    submissionId: input.submissionId,
+                    projectName: input.projectName,
+                    property: input.property || '',
+                    templateType: input.templateType,
+                    status: review.reviewStatus.complete ? review.reviewStatus.transportStatus : 'rejected',
+                    complete: review.reviewStatus.complete,
+                    transportStatus: review.reviewStatus.transportStatus,
+                    reusable: review.reviewStatus.reusable,
+                    reason: review.reason || (reviewed ? 'completed' : 'coordinator_not_complete'),
+                    artifactProvenance: reviewed ? 'coordinator_reviewed' : 'unreviewed_fallback',
+                    outputHash: review.outputHash,
+                    policyHash: review.policyHash,
+                    contextHash: review.contextHash,
+                    engineVersion: review.engineVersion,
+                    diagnostics: review.diagnostics,
+                });
+                console.log(`Coordinated AI review ${reviewed ? 'completed' : 'did not complete'} for ${input.submissionId} (${review.reviewStatus.transportStatus})`);
+                return;
+            }
             const mammoth = require('mammoth');
             const result = await mammoth.extractRawText({ path: input.originalPath });
             const text = result.value;
@@ -470,6 +529,24 @@ function createSubmissionWorkflowHandlers(deps) {
                 projectName: safeProjectName,
                 skipAi,
                 templateType: normalizedTemplateType,
+                reviewText: normalizedMenuContent,
+                property: normalizedProperty,
+                menuType: safeMenuType || 'standard',
+                allergens: effectiveAllergens,
+                submissionMode: safeSubmissionMode || 'new',
+                revisionSource: safeRevisionSource || '',
+                artifactFormData: {
+                    projectName: safeProjectName,
+                    property: normalizedProperty,
+                    size: sizeForDocx,
+                    orientation: safeOrientation,
+                    menuType: safeMenuType || 'standard',
+                    templateType: normalizedTemplateType === 'non_beverage' ? 'food' : normalizedTemplateType,
+                    dateNeeded: safeDateNeeded,
+                    allergens: effectiveAllergens,
+                    footerText: preservedFooterText,
+                    shouldAddRawNotice,
+                },
             });
             let clickupWarning;
             let clickupTaskId;

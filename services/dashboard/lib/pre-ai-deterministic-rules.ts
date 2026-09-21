@@ -1,4 +1,6 @@
+import { resolveCanonicalPolicies, permitsSeparatorVariants } from './canonical-policy';
 import { involvesContextDependentTerm } from './improvement-cycle-core';
+import { CONTEXTUAL_COMPOUND_DESCRIPTOR_CONTRACT } from './contextual-compound-descriptor-contract';
 
 export type PreAiCorrectionSource = 'built_in' | 'accepted_correction_rule';
 
@@ -40,6 +42,7 @@ export type PreAiDeterministicResult = {
     appliedCorrections: PreAiAppliedCorrection[];
     learnedRulesConsidered: number;
     learnedRulesApplied: number;
+    diagnostics?: string[];
 };
 
 export type AcceptedCorrectionRulePreAiEligibility = {
@@ -61,6 +64,7 @@ export type ReplacementRule = {
     to: string;
     type: PreAiAppliedCorrection['type'];
     forceTargetCase?: boolean;
+    separatorVariants?: boolean;
 };
 
 const COMMON_ALLERGEN_CODES = new Set([
@@ -200,7 +204,16 @@ const LEARNED_RULE_CHANGE_TYPES = new Set([
     'punctuation',
 ]);
 
-const TRAILING_PRICE_PATTERN = '(?:(?:[$€£]\\s*)?\\d{1,4}(?:,\\d{3})*(?:[.]\\d{1,2})?|MKT|MP|market\\s+price)';
+export const TRAILING_PRICE_PATTERN = '(?:(?:[$€£]\\s*)?\\d{1,4}(?:,\\d{3})*(?:[.]\\d{1,2})?|MKT|MP|market\\s+price)';
+
+/** Shared trailing-price grammar for deterministic rules and source-bound delivery. */
+export function splitTrailingPrice(line: string): { body: string; price: string } {
+    const value = `${line || ''}`;
+    const match = value.match(new RegExp(`\\s+(${TRAILING_PRICE_PATTERN}(?:\\s*\\|\\s*${TRAILING_PRICE_PATTERN})?(?:\\s*(?:pp|PP))?)\\s*$`, 'i'));
+    return match && match.index !== undefined
+        ? { body: value.slice(0, match.index).trimEnd(), price: value.slice(match.index) }
+        : { body: value, price: '' };
+}
 
 function escapeRegExp(s: string): string {
     return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -299,7 +312,7 @@ function isGlobalRuleLocation(value: string | undefined): boolean {
     return !normalized || normalized === 'all properties global rule';
 }
 
-function ruleAppliesToProperty(rule: AcceptedCorrectionRule, property: string | undefined): boolean {
+export function ruleAppliesToProperty(rule: AcceptedCorrectionRule, property: string | undefined): boolean {
     if (!rule.is_location_specific || isGlobalRuleLocation(rule.location)) {
         return true;
     }
@@ -331,7 +344,7 @@ function normalizeTemplateScope(value: string | undefined | null): string {
     return normalized;
 }
 
-function ruleAppliesToTemplateType(rule: AcceptedCorrectionRule, templateType: string | undefined): boolean {
+export function ruleAppliesToTemplateType(rule: AcceptedCorrectionRule, templateType: string | undefined): boolean {
     const ruleScope = normalizeTemplateScope(rule.applies_to_menu_type);
     if (ruleScope === 'all') {
         return true;
@@ -379,8 +392,35 @@ function matchCase(source: string, target: string): string {
     return target;
 }
 
-function replacementRegExp(from: string): RegExp {
-    const escaped = escapeRegExp(from);
+function replacementRegExp(from: string, separatorVariants = false, acceptedTarget = ''): RegExp {
+    let escaped = escapeRegExp(from);
+    if (separatorVariants) {
+        const separatorPattern = /[ \u00a0\-\u2010\u2011]/;
+        const sourceChars = Array.from(from.replace(/[ \u00a0\-\u2010\u2011]/g, ''));
+        const targetChars = Array.from(acceptedTarget.replace(/[ \u00a0\-\u2010\u2011]/g, ''));
+        const sourceCore = sourceChars.join('').toLocaleLowerCase();
+        const targetCore = targetChars.join('').toLocaleLowerCase();
+        // Expand only when the accepted pair has the same lexical core. The
+        // accepted policy advertises this same predicate, so unsupported pairs
+        // remain exact rather than silently broadening their match surface.
+        if (sourceChars.length > 0 && sourceCore === targetCore) {
+            const boundaries = new Set<number>();
+            const collectBoundaries = (value: string) => {
+                let position = 0;
+                for (const part of value.split(separatorPattern)) {
+                    position += Array.from(part).length;
+                    if (position < sourceChars.length) boundaries.add(position);
+                }
+            };
+            collectBoundaries(from);
+            collectBoundaries(acceptedTarget);
+            escaped = sourceChars.map((char, index) =>
+                `${escapeRegExp(char)}${index < sourceChars.length - 1 && boundaries.has(index + 1)
+                    ? '[ \\u00a0\\u2010\\u2011-]*'
+                    : ''}`
+            ).join('');
+        }
+    }
     const startsWord = /^[A-Za-z0-9À-ÖØ-öø-ÿ]/.test(from);
     const endsWord = /[A-Za-z0-9À-ÖØ-öø-ÿ]$/.test(from);
     return new RegExp(`${startsWord ? '\\b' : ''}${escaped}${endsWord ? '\\b' : ''}`, 'gi');
@@ -429,7 +469,7 @@ function applyAccentInsensitiveReplacementRule(
     }
 
     const { normalized, map } = accentInsensitiveIndex(line);
-    const re = replacementRegExp(normalizedFrom);
+    const re = replacementRegExp(normalizedFrom, rule.separatorVariants, stripDiacritics(rule.to));
     const corrections: PreAiAppliedCorrection[] = [];
     let nextLine = '';
     let lastOriginalIndex = 0;
@@ -486,7 +526,7 @@ function applyReplacementRule(
     settings: { skipIfAlreadyCorrected?: boolean } = {}
 ): { line: string; corrections: PreAiAppliedCorrection[] } {
     const corrections: PreAiAppliedCorrection[] = [];
-    const re = replacementRegExp(rule.from);
+    const re = replacementRegExp(rule.from, rule.separatorVariants, rule.to);
     const nextLine = line.replace(re, (match, offset: number) => {
         const corrected = rule.forceTargetCase ? rule.to : matchCase(match, rule.to);
         if (match === corrected) {
@@ -516,6 +556,7 @@ function applyReplacementRule(
 type SingularIngredientPattern = {
     pattern: RegExp;
     corrected: string;
+    preserveConfiguredCase?: boolean;
 };
 
 const CONSERVATIVE_SINGULAR_INGREDIENT_PATTERNS: SingularIngredientPattern[] = [
@@ -528,6 +569,39 @@ const CONSERVATIVE_SINGULAR_INGREDIENT_PATTERNS: SingularIngredientPattern[] = [
     { pattern: /(,\s*)(jalapeños)(?=\s*,)/giu, corrected: 'jalapeño' },
     { pattern: /(,\s*)(prawns)(?=\s*,)/giu, corrected: 'prawn' },
     { pattern: /(,\s*)(pickles)(?=\s*,)/giu, corrected: 'pickle' },
+
+    // Verified bare ingredient-list corrections. These intentionally match the
+    // complete descriptor phrase (rather than applying a generic pluralizer),
+    // and allow a trailing allergen/price suffix on the final descriptor.
+    ...[
+        ['grilled cinnamon apples', 'grilled cinnamon apple'],
+        ['golden raisins', 'golden raisin'],
+        ['candied sesame seeds', 'candied sesame seed'],
+        ['baby bell peppers', 'baby bell pepper'],
+        ['roasted heirloom carrots', 'roasted heirloom carrot'],
+        ['pickled red onions', 'pickled red onion'],
+        ['candied pecans', 'candied pecan'],
+        ['pickled raisins', 'pickled raisin'],
+        ['whipped potatoes', 'whipped potato'],
+        ['cucumbers', 'cucumber'],
+        ['carrots', 'carrot'],
+        ['beets', 'beet'],
+        ['candied walnuts', 'candied walnut'],
+        ['caramelized walnuts', 'caramelized walnut'],
+        ['walnuts', 'walnut'],
+        ['pistou herbs', 'pistou herb'],
+        ['mandarins', 'mandarin'],
+        ['lemons', 'lemon'],
+        ['cornbread croutons', 'cornbread crouton'],
+        ['croutons', 'crouton'],
+        ['spiced pepitas', 'spiced pepita'],
+        ['Colorado apples', 'Colorado apple'],
+        ['candied pepitas', 'candied pepita'],
+    ].map(([from, to]) => ({
+        pattern: new RegExp(`(,\\s*)(${from})(?=\\s*(?:,|(?:D|G|V|C|E|F|N|S|SE|SL|SO|SY|TN)(?:\\s*,\\s*(?:D|G|V|C|E|F|N|S|SE|SL|SO|SY|TN))*(?:\\s|$)|[$€£]|\\d|$))`, 'giu'),
+        corrected: to,
+        preserveConfiguredCase: true,
+    } as SingularIngredientPattern)),
 ];
 
 /**
@@ -542,10 +616,12 @@ export function normalizeSingularIngredientFormsOnLine(
     let nextLine = line;
     const corrections: PreAiAppliedCorrection[] = [];
 
-    for (const { pattern, corrected } of CONSERVATIVE_SINGULAR_INGREDIENT_PATTERNS) {
+    for (const { pattern, corrected, preserveConfiguredCase } of CONSERVATIVE_SINGULAR_INGREDIENT_PATTERNS) {
         pattern.lastIndex = 0;
         nextLine = nextLine.replace(pattern, (match, prefix: string, original: string) => {
-            const replacement = matchCase(original, corrected);
+            const replacement = preserveConfiguredCase
+                ? (isAllUpper(original) ? corrected.toUpperCase() : isAllLower(original) ? corrected.toLowerCase() : corrected)
+                : matchCase(original, corrected);
             if (original === replacement) return match;
             corrections.push({
                 type: 'Singular/Plural',
@@ -580,6 +656,69 @@ export function normalizeSingularIngredientFormsOnLine(
     }
 
     return { line: nextLine, corrections };
+}
+
+/**
+ * Generalized, evidence-backed descriptor corrections. These are deliberately
+ * contextual guards rather than global replacements: the three motivating
+ * proposal rows remain human evidence and are not executable rules themselves.
+ */
+const ESTABLISHED_GRILLED_MODIFIERS = new Set(CONTEXTUAL_COMPOUND_DESCRIPTOR_CONTRACT.guards.grilled_modifier.modifiers);
+const GRILLED_FOOD_NOUNS = new Set(CONTEXTUAL_COMPOUND_DESCRIPTOR_CONTRACT.guards.grilled_modifier.food_nouns);
+const CAST_IRON_FOOD_NOUNS = new Set(CONTEXTUAL_COMPOUND_DESCRIPTOR_CONTRACT.guards.cast_iron.food_nouns);
+const BRULEE_INGREDIENTS = new Set(CONTEXTUAL_COMPOUND_DESCRIPTOR_CONTRACT.guards.brulee_participle.ingredients);
+const BRULEE_LEXICAL_DESSERTS = new Set(CONTEXTUAL_COMPOUND_DESCRIPTOR_CONTRACT.guards.brulee_participle.excluded_lexical_desserts);
+
+function preserveDescriptorCase(source: string, target: string): string {
+    return matchCase(source, target);
+}
+
+export function normalizeContextualCompoundDescriptorsOnLine(
+    line: string,
+    lineIndex: number
+): { line: string; corrections: PreAiAppliedCorrection[] } {
+    const corrections: PreAiAppliedCorrection[] = [];
+    const { body, price } = splitTrailingPrice(line);
+    let nextLine = body;
+
+    // A compound modifier must be an established modifier, appear before the
+    // participle, and be followed immediately by a food noun. Punctuation or a
+    // postnominal occurrence is intentionally not accepted.
+    nextLine = nextLine.replace(/\b([A-Za-zÀ-ÖØ-öø-ÿ]+(?:[- ][A-Za-zÀ-ÖØ-öø-ÿ]+)?)\s+(grilled)\s+([A-Za-zÀ-ÖØ-öø-ÿ]+)/giu, (match, modifier: string, participle: string, noun: string, offset: number) => {
+        const folded = modifier.toLowerCase();
+        const preceding = nextLine.slice(0, offset).trimEnd();
+        const modifierKey = folded.replace(/\s+/g, '-');
+        if (!ESTABLISHED_GRILLED_MODIFIERS.has(modifierKey) || !GRILLED_FOOD_NOUNS.has(noun.toLowerCase()) || (preceding && /[^\p{L}\d ]$/u.test(preceding))) return match;
+        const correctedModifier = preserveDescriptorCase(modifier, modifier);
+        const corrected = `${correctedModifier}-${matchCase(participle, 'grilled')} ${noun}`;
+        if (corrected === match) return match;
+        corrections.push({ type: 'Terminology', source: 'built_in', original: match, corrected, lineIndex, rule: 'Join an established modifier to grilled only in a leading compound descriptor before a food noun.' });
+        return corrected;
+    });
+
+    // Cast iron is hyphenated only as an attributive descriptor. Physical
+    // cookware/material uses are excluded, as are already-hyphenated forms.
+    nextLine = nextLine.replace(/\bcast\s+iron\s+([A-Za-zÀ-ÖØ-öø-ÿ]+)/giu, (match, noun: string, offset: number) => {
+        const preceding = nextLine.slice(0, offset).trimEnd();
+        if ((preceding && /[^\p{L}\d ]$/u.test(preceding)) || !CAST_IRON_FOOD_NOUNS.has(noun.toLowerCase())) return match;
+        const corrected = match.replace(/\s+/, '-');
+        if (corrected === match) return match;
+        corrections.push({ type: 'Terminology', source: 'built_in', original: match, corrected, lineIndex, rule: 'Hyphenate cast iron when it is an attributive descriptor before a food noun; preserve material and cookware uses.' });
+        return corrected;
+    });
+
+    // Brûlée becomes the participial adjective only for a recognized ingredient
+    // and never for crème brûlée, lexical dessert names, or a standalone noun.
+    nextLine = nextLine.replace(/\b(brûlée)\s+([A-Za-zÀ-ÖØ-öø-ÿ]+)/giu, (match, source: string, ingredient: string, offset: number) => {
+        const preceding = nextLine.slice(0, offset).trimEnd().toLowerCase();
+        const ingredientKey = stripDiacritics(ingredient).toLowerCase();
+        if (!BRULEE_INGREDIENTS.has(ingredientKey) || /(?:^|\s)crème$/.test(preceding) || BRULEE_LEXICAL_DESSERTS.has(ingredientKey)) return match;
+        const corrected = `${preserveDescriptorCase(source, 'brûléed')} ${ingredient}`;
+        corrections.push({ type: 'Terminology', source: 'built_in', original: match, corrected, lineIndex, rule: 'Use the participial brûléed only before a recognized ingredient; preserve crème brûlée and lexical dessert names.' });
+        return corrected;
+    });
+
+    return { line: `${nextLine}${price}`, corrections };
 }
 
 function learnedRuleUsesAccentInsensitiveMatching(rule: AcceptedCorrectionRule): boolean {
@@ -728,17 +867,23 @@ export function ensureCotijaCheeseModifierOnLine(
     // Cotija is an ingredient spelling that must be followed by "cheese" in
     // menu descriptions. Do not alter already-correct text or hyphenated
     // adjective forms such as "cotija-style".
-    const pattern = /\bcotija\b(?!\s+cheese\b)(?!-[A-Za-z])/gi;
+    const pattern = /\b(?:cotija|mozzarella|feta|parmesan)\b(?!\s+cheese\b)(?!-[A-Za-z])/gi;
     const corrections: PreAiAppliedCorrection[] = [];
-    const corrected = original.replace(pattern, (match) => {
-        const replacement = matchCase(match, 'cotija cheese');
+    const firstDescriptionComma = original.indexOf(',');
+    const frozenNamedCheeseContext = /\b(?:cucumbers?|carrots?|beets?|pickled\s+red\s+onions?|candied\s+pecans?)\b/i.test(original);
+    const corrected = original.replace(pattern, (match, offset: number) => {
+        if (firstDescriptionComma < 0 || offset <= firstDescriptionComma) return match;
+        if (!/^cotija$/i.test(match) && !frozenNamedCheeseContext) return match;
+        const replacement = matchCase(match, `${match.toLowerCase()} cheese`);
         corrections.push({
             type: 'Terminology',
             source: 'built_in',
             original: match,
             corrected: replacement,
             lineIndex,
-            rule: 'Cotija must include the cheese modifier.',
+            rule: /^cotija$/i.test(match)
+                ? 'Cotija must include the cheese modifier.'
+                : 'Named cheese ingredients must include the cheese modifier.',
         });
         return replacement;
     });
@@ -875,6 +1020,36 @@ function shouldAddRawAsterisk(line: string): boolean {
     return RAW_ASTERISK_TERM_PATTERN.test(line);
 }
 
+/**
+ * A bare salmon option can be an interior member of an option list. The normal
+ * marker guard is deliberately conservative for comma-heavy lines, so handle
+ * this one verified option shape without treating arbitrary "salmon" mentions
+ * (for example, salmon sauce) as raw.
+ */
+function isVerifiedMixedSalmonOptionLine(line: string): boolean {
+    if (!line || !/,/.test(line)) return false;
+    const parts = line.split(',');
+    const optionLabels = parts.map((part) => part.trim().toLowerCase());
+    return parts.length >= 5
+        && optionLabels.some((part) => /^grilled chicken\b/.test(part))
+        && optionLabels.some((part) => /^pasta\b/.test(part))
+        && optionLabels.some((part) => /\bpizza\b/.test(part));
+}
+
+export function addInteriorSalmonOptionMarker(line: string): string {
+    if (!isVerifiedMixedSalmonOptionLine(line) || line.includes('*')) return line;
+    const parts = line.split(',');
+    let changed = false;
+    const corrected = parts.map((part) => {
+        if (/^\s*salmon\s*$/i.test(part)) {
+            changed = true;
+            return part.replace(/(salmon)/i, '$1*');
+        }
+        return part;
+    }).join(',');
+    return changed ? corrected : line;
+}
+
 function addRawAsterisk(line: string): string {
     const trimmed = line.trimEnd();
     const descriptionComma = trimmed.search(/,\s*(?=[^,]*\p{Ll})/u);
@@ -927,7 +1102,7 @@ function isSafeLearnedRule(rule: AcceptedCorrectionRule): boolean {
     return getAcceptedCorrectionRulePreAiEligibility(rule).eligible;
 }
 
-function applyAcceptedCorrectionRules(
+function applyAcceptedCorrectionRulesOnce(
     lines: string[],
     options: PreAiDeterministicOptions
 ): {
@@ -950,6 +1125,7 @@ function applyAcceptedCorrectionRules(
             to: `${rule.corrected_text || ''}`.trim(),
             type: 'Learned Rule',
             forceTargetCase: rule.force_target_case === true,
+            separatorVariants: permitsSeparatorVariants(rule.original_text || '', rule.corrected_text || ''),
         };
 
         for (let i = 0; i < nextLines.length; i++) {
@@ -977,6 +1153,67 @@ function applyAcceptedCorrectionRules(
         learnedRulesConsidered: applicableRules.length,
         learnedRulesApplied: appliedRuleIds.size || appliedCorrections.length,
     };
+}
+
+export type FinalTermCanonicalizationResult = PreAiDeterministicResult & { diagnostics: string[] };
+
+/** Bounded term-only closure. A cycle, competing result, or expanding rule preserves the input row. */
+export function canonicalizeFinalTerms(menuText: string, options: PreAiDeterministicOptions = {}): FinalTermCanonicalizationResult {
+    const rules = (options.acceptedCorrectionRules || []).filter(rule =>
+        ['spelling', 'typo', 'diacritic', 'diacritics', 'terminology', 'capitalization'].includes(`${rule.change_type || ''}`.trim().toLowerCase())
+        && JSON.stringify(`${rule.original_text || ''}`.match(/\d+(?:[.,]\d+)?/g)) === JSON.stringify(`${rule.corrected_text || ''}`.match(/\d+(?:[.,]\d+)?/g))
+    );
+    return resolveAcceptedRules(menuText, { ...options, acceptedCorrectionRules: rules });
+}
+
+function resolveAcceptedRules(menuText: string, options: PreAiDeterministicOptions): FinalTermCanonicalizationResult {
+    const diagnostics: string[] = [];
+    const appliedCorrections: PreAiAppliedCorrection[] = [];
+    const policyView = resolveCanonicalPolicies(options.acceptedCorrectionRules || [], options);
+    const eligibleRules = policyView.rules;
+    diagnostics.push(...policyView.conflicts.map(conflict => `term_policy_conflict:rules:${conflict.ruleIds.join(',')}`));
+    if (options.enabled === false) return { menuText, appliedCorrections, diagnostics, learnedRulesConsidered: 0, learnedRulesApplied: 0 };
+    const lines = menuText.split('\n').map((original, lineIndex) => {
+        const settle = (rules: AcceptedCorrectionRule[]) => {
+            let line = original;
+            const seen = new Set<string>();
+            const corrections: PreAiAppliedCorrection[] = [];
+            for (let pass = 0; pass < 8; pass++) {
+                if (seen.has(line)) return null;
+                seen.add(line);
+                const result = applyAcceptedCorrectionRulesOnce([line], { ...options, acceptedCorrectionRules: rules });
+                if (result.lines[0] === line) return result.appliedCorrections.length ? null : { line, corrections };
+                if (result.lines[0].length > original.length + 1024) return null;
+                line = result.lines[0];
+                corrections.push(...result.appliedCorrections.map(c => ({ ...c, lineIndex })));
+            }
+            return null;
+        };
+        const competingTargets = new Map<string, Set<string>>();
+        for (const rule of eligibleRules) {
+            const key = `${rule.original_text || ''}`.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
+            const targets = competingTargets.get(key) || new Set<string>();
+            targets.add(`${rule.corrected_text || ''}`);
+            competingTargets.set(key, targets);
+        }
+        const competing = eligibleRules.some(rule => competingTargets.get(`${rule.original_text || ''}`.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase())!.size > 1
+            && applyAcceptedCorrectionRulesOnce([original], { ...options, acceptedCorrectionRules: [rule] }).appliedCorrections.length > 0);
+        if (competing) {
+            diagnostics.push(`term_policy_conflict:line:${lineIndex}`);
+            return original;
+        }
+        const forward = settle(eligibleRules);
+        const reverse = settle([...eligibleRules].reverse());
+        if (!forward || !reverse || forward.line !== reverse.line) {
+            diagnostics.push(`term_policy_conflict:line:${lineIndex}`);
+            return original;
+        }
+        appliedCorrections.push(...forward.corrections);
+        return forward.line;
+    });
+    return { menuText: lines.join('\n'), appliedCorrections, diagnostics,
+        learnedRulesConsidered: eligibleRules.length,
+        learnedRulesApplied: new Set(appliedCorrections.map(c => c.ruleId || `${c.original}→${c.corrected}`)).size };
 }
 
 export function runPreAiDeterministicChecks(
@@ -1012,6 +1249,10 @@ export function runPreAiDeterministicChecks(
         nextLine = singularResult.line;
         appliedCorrections.push(...singularResult.corrections);
 
+        const descriptorResult = normalizeContextualCompoundDescriptorsOnLine(nextLine, lineIndex);
+        nextLine = descriptorResult.line;
+        appliedCorrections.push(...descriptorResult.corrections);
+
         const tresLechesResult = ensureTresLechesVegetarianCodeOnLine(nextLine, lineIndex, validAllergenCodes);
         nextLine = tresLechesResult.line;
         appliedCorrections.push(...tresLechesResult.corrections);
@@ -1028,7 +1269,25 @@ export function runPreAiDeterministicChecks(
         nextLine = shrimpCevicheResult.line;
         appliedCorrections.push(...shrimpCevicheResult.corrections);
 
-        const normalizedRaw = normalizeRawAsteriskPlacementForLine(nextLine);
+        const interiorSalmon = addInteriorSalmonOptionMarker(nextLine);
+        const interiorSalmonApplied = interiorSalmon !== nextLine;
+        if (interiorSalmonApplied) {
+            appliedCorrections.push({
+                type: 'Raw Item',
+                source: 'built_in',
+                original: nextLine,
+                corrected: interiorSalmon,
+                lineIndex,
+                rule: 'A bare salmon option inside a multi-option line receives the raw marker.',
+            });
+            nextLine = interiorSalmon;
+        }
+
+        const interiorSalmonProtected = interiorSalmonApplied
+            || (isVerifiedMixedSalmonOptionLine(nextLine) && /(?:^|,)\s*salmon\*\s*(?:,|$)/i.test(nextLine));
+        const normalizedRaw = interiorSalmonProtected
+            ? nextLine
+            : normalizeRawAsteriskPlacementForLine(nextLine);
         if (normalizedRaw !== nextLine) {
             appliedCorrections.push({
                 type: 'Raw Item',
@@ -1057,8 +1316,8 @@ export function runPreAiDeterministicChecks(
         return nextLine;
     });
 
-    const learnedResult = applyAcceptedCorrectionRules(lines, options);
-    lines = learnedResult.lines;
+    const learnedResult = resolveAcceptedRules(lines.join('\n'), options);
+    lines = learnedResult.menuText.split('\n');
     appliedCorrections.push(...learnedResult.appliedCorrections);
 
     return {
@@ -1066,5 +1325,6 @@ export function runPreAiDeterministicChecks(
         appliedCorrections,
         learnedRulesConsidered: learnedResult.learnedRulesConsidered,
         learnedRulesApplied: learnedResult.learnedRulesApplied,
+        diagnostics: learnedResult.diagnostics,
     };
 }
