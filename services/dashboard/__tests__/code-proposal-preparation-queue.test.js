@@ -274,7 +274,8 @@ test('deterministic orphan is reclaimed only when its inventory identity is exac
     const result = await prepareCodeProposalQueue({ proposal: base, client: state.client, repoRoot: state.root, outputRoot: path.join(state.root, 'tmp', 'code-proposals'), datasetPath: path.join(state.root, 'tmp/review-eval/dataset.jsonl'), verification, store: { recordCodeVerification: jest.fn() } });
     expect(result.status).toBe('blocked');
     expect(result.reason).toBe('code_candidate_authorization_required');
-    expect(fs.existsSync(`${orphan}.orphan-${HASH(orphan).slice(0, 12)}`)).toBe(true);
+    expect(fs.existsSync(orphan)).toBe(true);
+    expect(prepareCodeProposalAttempt.mock.calls.at(-1)[0].attemptId).toMatch(/^proposal-proposal-queue-recovery-/);
     state.cleanup();
 });
 

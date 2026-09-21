@@ -341,11 +341,14 @@ async function prepareCodeProposalQueue(options = {}) {
             reclaimable = true;
         } catch { reclaimable = false; }
         if (!reclaimable) return { status: 'blocked', reason: 'orphan_artifact_ambiguous', providerCalls: 0, inventory, attemptId };
-        const preserved = `${orphanRoot}.orphan-${sha256(orphanRoot).slice(0, 12)}`;
-        if (fs.existsSync(preserved)) return { status: 'blocked', reason: 'orphan_artifact_ambiguous', providerCalls: 0, inventory, attemptId };
-        fs.renameSync(orphanRoot, preserved);
+        // Never move the orphan after the no-owner read: another worker may
+        // claim that exact path concurrently. Retry from a fresh path and let
+        // the durable CAS decide the winner; the orphan/winner bytes stay put.
+        const retryId = `${attemptId}-recovery-${process.pid}-${crypto.randomBytes(4).toString('hex')}`;
+        safeSegment(retryId, 'recovery attempt id');
+        options = { ...options, attemptId: retryId };
     }
-    const prepared = await prepareCodeProposalAttempt({ ...options, proposal, inventory, attemptId, authorization: undefined, authorizationFile: undefined, stateFile: undefined, dispatchDraft: undefined, runPreparedLifecycle: undefined });
+    const prepared = await prepareCodeProposalAttempt({ ...options, proposal, inventory, attemptId: options.attemptId || attemptId, authorization: undefined, authorizationFile: undefined, stateFile: undefined, dispatchDraft: undefined, runPreparedLifecycle: undefined });
     const finalizedInventory = finalizePreparationInventory(inventory, { behavior_tests_sha256: prepared.metadata.behavior_tests_sha256, dataset_sha256: prepared.metadata.expected_dataset_sha256, source_sha256: prepared.metadata.baseline_source_sha256, prompt_sha256: prepared.metadata.prompt_sha256, accepted_rules_sha256: prepared.metadata.accepted_rules_sha256 });
     const summary = summaryFor(finalizedInventory, prepared.attemptId, prepared.artifactDirectory, finalizedInventory.groups);
     writeSummary(path.join(prepared.artifactDirectory, 'preparation-summary.json'), summary);
