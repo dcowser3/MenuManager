@@ -1,7 +1,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { buildParentCampaignLineage, validateParentCampaignLineage, persistParentCampaignLineage } = require('../../../scripts/lib/parent-campaign-lineage');
+const { buildParentCampaignLineage, validateParentCampaignLineage, persistParentCampaignLineage, readImmutablePendingSnapshot, sha256 } = require('../../../scripts/lib/parent-campaign-lineage');
 
 const HASH = (n) => `${n}`.repeat(64).slice(0, 64).replace(/[^a-f0-9]/g, 'a');
 function fixture() {
@@ -28,5 +28,17 @@ test('persists private lineage and recovery evidence', () => {
         expect(result.parentCampaignSha256).toBe(lineage.parent_campaign_sha256);
         expect(fs.statSync(result.lineagePath).mode & 0o077).toBe(0);
         expect(JSON.parse(fs.readFileSync(result.recoveryPath)).parent_campaign_sha256).toBe(lineage.parent_campaign_sha256);
+    } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('requires the immutable pending snapshot bytes and self-hash', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pending-snapshot-'));
+    try {
+        const body = { schema_version: 1, source: 'prompt_proposals', query: { pagination_complete: true }, enumeration: { complete: true, count: 1, pages: 1, cutoff: '2026-09-21T00:00:00.000Z' }, rows: [{ id: 'proposal-1' }] };
+        const digest = sha256(body);
+        fs.writeFileSync(path.join(root, `pending-preparation-inventory-${digest}.json`), `${JSON.stringify({ ...body, snapshot_sha256: digest })}\n`);
+        expect(readImmutablePendingSnapshot(root, digest).row_ids).toEqual(['proposal-1']);
+        fs.appendFileSync(path.join(root, `pending-preparation-inventory-${digest}.json`), 'tampered');
+        expect(() => readImmutablePendingSnapshot(root, digest)).toThrow(/self-hash|JSON/);
     } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });

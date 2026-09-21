@@ -26,7 +26,8 @@ function requireEnumeration(enumeration) {
     if (!enumeration || enumeration.complete !== true || !Number.isInteger(enumeration.pages) || enumeration.pages < 1
         || !Number.isInteger(enumeration.rows_count) || enumeration.rows_count < 1 || !Array.isArray(enumeration.row_ids)
         || enumeration.row_ids.length !== enumeration.rows_count || new Set(enumeration.row_ids).size !== enumeration.row_ids.length
-        || !enumeration.cutoff || !enumeration.query || enumeration.query.pagination_complete !== true) {
+        || !enumeration.cutoff || !enumeration.query || enumeration.query.pagination_complete !== true
+        || !DIGEST.test(enumeration.global_snapshot_sha256 || '')) {
         throw new Error('Parent campaign lineage requires a complete pending-proposal enumeration.');
     }
     return {
@@ -36,7 +37,28 @@ function requireEnumeration(enumeration) {
         query: canonical(enumeration.query),
         row_ids: [...enumeration.row_ids],
         rows_count: enumeration.rows_count,
-        global_snapshot_sha256: enumeration.global_snapshot_sha256 || null,
+        global_snapshot_sha256: enumeration.global_snapshot_sha256,
+    };
+}
+
+function readImmutablePendingSnapshot(outputRoot, snapshotSha256) {
+    requireDigest(snapshotSha256, 'pending enumeration snapshot');
+    const file = path.join(path.resolve(outputRoot), `pending-preparation-inventory-${snapshotSha256}.json`);
+    const bytes = fs.readFileSync(file);
+    const snapshot = JSON.parse(bytes);
+    const { snapshot_sha256: actual, ...body } = snapshot;
+    if (actual !== snapshotSha256 || sha256(body) !== snapshotSha256) throw new Error('Pending enumeration snapshot bytes or self-hash changed.');
+    if (body.schema_version !== 1 || body.source !== 'prompt_proposals' || body.query?.pagination_complete !== true
+        || body.enumeration?.complete !== true || !Array.isArray(body.rows) || body.enumeration.count !== body.rows.length
+        || new Set(body.rows.map((row) => row.id)).size !== body.rows.length) throw new Error('Pending enumeration snapshot is incomplete.');
+    return {
+        complete: true,
+        cutoff: body.enumeration.cutoff,
+        pages: body.enumeration.pages,
+        query: body.query,
+        row_ids: body.rows.map((row) => row.id),
+        rows_count: body.rows.length,
+        global_snapshot_sha256: snapshotSha256,
     };
 }
 
@@ -59,7 +81,7 @@ function buildParentCampaignLineage(options = {}) {
             prompt_sha256: requireDigest(frozen?.prompt_sha256, 'prompt'),
             accepted_rules_sha256: requireDigest(frozen?.accepted_rules_sha256, 'accepted rules'),
         },
-        pending_enumeration: requireEnumeration({ ...(inventory.enumeration || {}), ...(options.enumeration || {}), query: options.enumeration?.query || inventory.query }),
+        pending_enumeration: requireEnumeration(options.pendingEnumeration || { ...(inventory.enumeration || {}), ...(options.enumeration || {}), query: options.enumeration?.query || inventory.query }),
     };
     const parent_campaign_sha256 = sha256(body);
     return Object.freeze({ ...body, parent_campaign_sha256 });
@@ -94,4 +116,4 @@ function persistParentCampaignLineage(attemptRoot, envelope, recovery = {}) {
     return { lineagePath, recoveryPath, parentCampaignSha256: envelope.parent_campaign_sha256 };
 }
 
-module.exports = { VERSION, canonical, sha256, buildParentCampaignLineage, validateParentCampaignLineage, persistParentCampaignLineage };
+module.exports = { VERSION, canonical, sha256, buildParentCampaignLineage, validateParentCampaignLineage, persistParentCampaignLineage, readImmutablePendingSnapshot };

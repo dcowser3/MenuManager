@@ -13,7 +13,7 @@ const POST_DRAFT_IDENTITY_FIELDS = [
 const FROZEN_CANDIDATE_IDENTITY_FIELDS = [
     'proposal_sha256', 'baseline_source_sha256', 'expected_dataset_sha256',
     'behavior_tests_sha256', 'prompt_sha256', 'accepted_rules_sha256',
-    'preparation_inventory_sha256', ...POST_DRAFT_IDENTITY_FIELDS,
+    'preparation_inventory_sha256', 'parent_campaign_sha256', ...POST_DRAFT_IDENTITY_FIELDS,
 ];
 
 function assertClaimIdentity(candidate) {
@@ -31,7 +31,7 @@ function assertClaimIdentity(candidate) {
 }
 
 function assertFrozenIdentity(previous, incoming) {
-    for (const field of ['proposal_sha256', 'baseline_source_sha256', 'expected_dataset_sha256', 'behavior_tests_sha256', 'prompt_sha256', 'accepted_rules_sha256', 'preparation_inventory_sha256']) {
+    for (const field of ['proposal_sha256', 'baseline_source_sha256', 'expected_dataset_sha256', 'behavior_tests_sha256', 'prompt_sha256', 'accepted_rules_sha256', 'preparation_inventory_sha256', 'parent_campaign_sha256']) {
         if (incoming[field] !== previous[field]) throw new Error(`Candidate completion differs in frozen ${field}.`);
     }
     if (incoming.preparation_inventory_sha256 !== undefined && !DIGEST.test(incoming.preparation_inventory_sha256)) throw new Error('Candidate preparation inventory identity is invalid.');
@@ -173,6 +173,7 @@ async function recordCodeVerification(supabase, original, patch, verification = 
     }
     let query = supabase.from('prompt_proposals').update({ eval_summary: summary })
         .eq('id', current.id).eq('status', 'pending');
+    if (current.xmin !== undefined && current.xmin !== null) query = query.eq('xmin', current.xmin);
     query = addEvaluationCasPredicates(query, current);
     const result = await query.select('id');
     if (result.error) throw new Error(result.error.message);
@@ -194,6 +195,7 @@ async function recordParentCampaignLineage(supabase, original, envelope, verific
     if (options.allowClosedOwner && (!owner || owner.status !== 'blocked' || owner.attempt_id !== options.expectedAttemptId)) throw new Error('Closed owner identity changed before parent lineage binding.');
     const summary = { ...(current.eval_summary || {}), parent_campaign_sha256: envelope.parent_campaign_sha256 };
     let query = supabase.from('prompt_proposals').update({ eval_summary: summary }).eq('id', current.id).eq('status', 'pending');
+    if (current.xmin !== undefined && current.xmin !== null) query = query.eq('xmin', current.xmin);
     query = owner ? addEvaluationCasPredicates(query, current) : query.is('eval_summary->code_candidate', null);
     const result = await query.select('id');
     if (result.error) throw new Error(result.error.message);
@@ -211,6 +213,7 @@ async function closeCodeCandidateOwnerForLineageRepair(supabase, original, expec
     const closed = { ...owner, status: 'blocked', phase: 'analysis', reason: 'parent_campaign_lineage_repair', closed_at: new Date().toISOString() };
     assertFrozenIdentity(owner, closed);
     let query = supabase.from('prompt_proposals').update({ eval_summary: { ...(current.eval_summary || {}), code_candidate: closed } }).eq('id', current.id).eq('status', 'pending');
+    if (current.xmin !== undefined && current.xmin !== null) query = query.eq('xmin', current.xmin);
     query = addEvaluationCasPredicates(query, current);
     const result = await query.select('id');
     if (result.error) throw new Error(result.error.message);
@@ -229,6 +232,7 @@ async function clearClosedCodeCandidateOwnerForLineageRepair(supabase, original,
     delete summary.code_candidate;
     delete summary.code_verification;
     let query = supabase.from('prompt_proposals').update({ eval_summary: summary }).eq('id', current.id).eq('status', 'pending');
+    if (current.xmin !== undefined && current.xmin !== null) query = query.eq('xmin', current.xmin);
     query = addEvaluationCasPredicates(query, current);
     const result = await query.select('id');
     if (result.error) throw new Error(result.error.message);

@@ -3,8 +3,8 @@
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
-const { loadVerificationModule, recordCodeVerification, shouldDraftCodeProposal } = require('./proposal-verification-store');
-const { buildParentCampaignLineage, persistParentCampaignLineage, validateParentCampaignLineage } = require('./parent-campaign-lineage');
+const { loadVerificationModule, recordCodeVerification, recordParentCampaignLineage, shouldDraftCodeProposal } = require('./proposal-verification-store');
+const { buildParentCampaignLineage, persistParentCampaignLineage, validateParentCampaignLineage, readImmutablePendingSnapshot } = require('./parent-campaign-lineage');
 
 const PHASES = new Set(['analysis', 'draft', 'unit_tests', 'retrospective_replay', 'holdout', 'verification', 'awaiting_approval', 'awaiting_deployment_approval']);
 const STATES = new Set(['active', 'waiting_on_model', 'blocked', 'failed', 'verified']);
@@ -178,7 +178,6 @@ async function prepareCodeProposalAttempt(options = {}) {
     let claimStarted = false;
     try {
         const rules = await queryRows(client, 'correction_rules', (query) => query.select('*').eq('status', 'accepted').order('id'));
-        atomicWrite(path.join(attemptRoot, 'proposal.json'), Buffer.from(`${JSON.stringify(proposal, null, 2)}\n`));
         atomicWrite(path.join(attemptRoot, 'prompt.txt'), promptBytes);
         const rulesBytes = Buffer.from(`${JSON.stringify({ rules }, null, 2)}\n`);
         atomicWrite(path.join(attemptRoot, 'rules.json'), rulesBytes);
@@ -225,6 +224,11 @@ async function prepareCodeProposalAttempt(options = {}) {
         // The lineage envelope is derived from the preserved proposal,
         // complete pending enumeration, and the five bytes actually frozen
         // above. It intentionally excludes owner/attempt/auth identities.
+        const pendingEnumeration = options.pendingEnumeration;
+        if (pendingEnumeration?.global_snapshot_sha256) {
+            const snapshot = readImmutablePendingSnapshot(options.outputRoot || path.join(repoRoot, 'tmp', 'code-proposals'), pendingEnumeration.global_snapshot_sha256);
+            if (JSON.stringify(snapshot) !== JSON.stringify({ complete: true, cutoff: pendingEnumeration.cutoff, pages: pendingEnumeration.pages, query: pendingEnumeration.query, row_ids: pendingEnumeration.row_ids, rows_count: pendingEnumeration.rows_count, global_snapshot_sha256: pendingEnumeration.global_snapshot_sha256 })) throw new Error('Pending enumeration metadata differs from its immutable snapshot.');
+        }
         const lineage = options.parentCampaignLineage ? validateParentCampaignLineage(options.parentCampaignLineage, { proposal }) : options.inventory ? buildParentCampaignLineage({
             proposal,
             inventory: options.inventory,
@@ -236,7 +240,7 @@ async function prepareCodeProposalAttempt(options = {}) {
                 prompt_sha256: metadata.prompt_sha256,
                 accepted_rules_sha256: metadata.accepted_rules_sha256,
             },
-            enumeration: { ...(options.inventory.enumeration || {}), query: options.inventory.query },
+            pendingEnumeration: pendingEnumeration || { ...(options.inventory.enumeration || {}), query: options.inventory.query, rows_count: options.inventory.enumeration?.rows_count || options.inventory.enumeration?.count, row_ids: options.inventory.enumeration?.row_ids },
         }) : null;
         if (lineage) {
             persistParentCampaignLineage(attemptRoot, lineage, { pre_claim: true });
@@ -250,7 +254,9 @@ async function prepareCodeProposalAttempt(options = {}) {
         if (lineage && typeof store.recordParentCampaignLineage === 'function') {
             await store.recordParentCampaignLineage(client, proposal, lineage, verification);
         }
+        if (lineage && typeof store.recordParentCampaignLineage !== 'function') throw new Error('Parent campaign lineage store binding is required.');
         const claimProposal = lineage ? { ...proposal, eval_summary: { ...(proposal.eval_summary || {}), parent_campaign_sha256: lineage.parent_campaign_sha256 } } : proposal;
+        atomicWrite(path.join(attemptRoot, 'proposal.json'), Buffer.from(`${JSON.stringify(claimProposal, null, 2)}\n`));
         await store.recordCodeVerification(client, claimProposal, { code_candidate: metadata }, verification);
         return { status: 'claimed', attemptId, artifactDirectory: attemptRoot, metadata, dataset: prepared };
     } catch (error) {

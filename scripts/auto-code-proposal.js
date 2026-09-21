@@ -6,6 +6,7 @@ const path = require('path');
 const { ModelBudgetBroker, canonicalHash, redact, sha256 } = require('./lib/model-budget-broker');
 const { snapshotBaseline, revalidateAttemptArtifacts, validateDraft, applyDraft } = require('./lib/code-proposal-draft');
 const { loadVerificationModule } = require('./lib/proposal-verification-store');
+const { validateParentCampaignLineage } = require('./lib/parent-campaign-lineage');
 
 const DIGEST = /^[a-f0-9]{64}$/;
 const MAX_MESSAGES = 8;
@@ -81,6 +82,12 @@ function loadPreparedDraft(options) {
     if (!options.baselineRoot) snapshotBaseline(options.sourceRoot, baselineRoot, options.verification, { secrets: options.secrets });
     const checked = revalidateAttemptArtifacts({ attemptRoot, trustedRoot: options.trustedRoot, metadata: options.metadata, proposal: options.proposal, verification: options.verification, behaviorModule: options.behaviorModule, baselineRoot });
     const scope = deriveDraftScope({ attemptRoot, metadata: options.metadata, parentCampaignSha256: options.parentCampaignSha256, proposal: options.proposal, checked });
+    if (options.metadata.parent_campaign_sha256) {
+        const lineageFile = path.join(attemptRoot, 'parent-campaign-lineage.json');
+        if (!fs.existsSync(lineageFile)) throw new Error('Prepared attempt parent campaign lineage is missing.');
+        const lineage = validateParentCampaignLineage(JSON.parse(fs.readFileSync(lineageFile, 'utf8')), { proposal: checked.proposal });
+        if (lineage.parent_campaign_sha256 !== options.parentCampaignSha256 || options.metadata.parent_campaign_sha256 !== lineage.parent_campaign_sha256) throw new Error('Prepared attempt parent campaign lineage differs from the dispatch scope.');
+    }
     const broker = new ModelBudgetBroker({ authorizationFile: options.authorizationFile, stateFile: options.stateFile, outputRoot: attemptRoot, env: options.env, now: options.now, transport: options.transport, countInputTokens: options.countInputTokens });
     if (canonicalHash(broker.authorization.scope) !== canonicalHash(scope)) throw new Error('Code-candidate authorization scope differs from prepared attempt identities.');
     return { attemptRoot, baselineRoot, checked, scope, broker };

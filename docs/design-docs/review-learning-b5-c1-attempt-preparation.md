@@ -13,9 +13,12 @@ at `eval_summary.parent_campaign_sha256` and excludes attempt, owner, and
 authorization identities, so a later bounded draft authorization can bind the
 same campaign without inventing historical lineage. A private
 `parent-campaign-lineage-recovery.json` records the same inputs for interrupted
-repair. Existing owners may be closed only through the guarded lineage-repair
-transition; the proposal remains pending and its content/evidence are not
-rewritten.
+repair. The pending enumeration is read back from its immutable
+`pending-preparation-inventory-<digest>.json` snapshot and its self-hash,
+cutoff, query, row ids, count, and page count are checked before use. Existing
+owners may be closed only through the guarded lineage-repair transition, with
+an `xmin` compare-and-swap and reread at every owner change; the proposal
+remains pending and its content/evidence are not rewritten.
 It validates the unchanged pending proposal through the B5-B queue gate,
 freezes the proposal, exact prompt bytes, canonical accepted-rule rows, B6-D1 behavior artifact, and complete
 historical dataset under a unique `tmp/code-proposals/<proposal>/<attempt>`

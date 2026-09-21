@@ -2,7 +2,8 @@
 
 const fs = require('fs');
 const path = require('path');
-const { buildParentCampaignLineage, persistParentCampaignLineage, validateParentCampaignLineage } = require('./parent-campaign-lineage');
+const crypto = require('crypto');
+const { buildParentCampaignLineage, persistParentCampaignLineage, validateParentCampaignLineage, readImmutablePendingSnapshot } = require('./parent-campaign-lineage');
 const { recordParentCampaignLineage, closeCodeCandidateOwnerForLineageRepair, clearClosedCodeCandidateOwnerForLineageRepair, loadVerificationModule } = require('./proposal-verification-store');
 
 function readAttemptInputs(attemptRoot) {
@@ -10,6 +11,27 @@ function readAttemptInputs(attemptRoot) {
     const inventory = JSON.parse(fs.readFileSync(path.join(root, 'preparation-inventory.json'), 'utf8'));
     if (!inventory.frozen_hashes) throw new Error('Lineage repair requires frozen preparation hashes.');
     return { root, inventory };
+}
+
+function digestBytes(bytes) { return crypto.createHash('sha256').update(bytes).digest('hex'); }
+
+function actualFrozenHashes(root, repoRoot, verification) {
+    const prompt = fs.readFileSync(path.join(root, 'prompt.txt'));
+    const dataset = fs.readFileSync(path.join(root, 'dataset.jsonl'));
+    const rules = JSON.parse(fs.readFileSync(path.join(root, 'rules.json'), 'utf8'));
+    const behaviorPath = path.join(root, 'behavior-tests.json');
+    const behavior = JSON.parse(fs.readFileSync(behaviorPath, 'utf8'));
+    const { sha256: _ignored, ...behaviorBody } = behavior;
+    let behaviorModule;
+    try { require(require.resolve('ts-node/register/transpile-only', { paths: [repoRoot] })); behaviorModule = require(path.join(repoRoot, 'services/dashboard/lib/learning-behavior-tests.ts')); }
+    catch { behaviorModule = require(path.join(repoRoot, 'services/dashboard/dist/lib/learning-behavior-tests')); }
+    return {
+        behavior_tests_sha256: behaviorModule.hashBehaviorArtifact(behaviorBody),
+        dataset_sha256: digestBytes(dataset),
+        source_sha256: verification.hashCodeImplementation(repoRoot),
+        prompt_sha256: digestBytes(prompt),
+        accepted_rules_sha256: verification.hashAcceptedRules(rules.rules || []),
+    };
 }
 
 /**
@@ -20,12 +42,21 @@ async function repairParentCampaignLineage(options = {}) {
     const verification = options.verification || loadVerificationModule(options.repoRoot);
     const { root, inventory } = readAttemptInputs(options.attemptRoot);
     const proposal = options.proposal;
+    const snapshot = readImmutablePendingSnapshot(options.outputRoot || path.join(options.repoRoot, 'tmp', 'code-proposals'), inventory.enumeration.global_snapshot_sha256);
+    const actualHashes = actualFrozenHashes(root, options.repoRoot, verification);
+    for (const [field, value] of Object.entries(actualHashes)) {
+        if (inventory.frozen_hashes[field] !== value) throw new Error(`Lineage repair frozen ${field} differs from preserved bytes.`);
+    }
+    const proposalFingerprint = verification.codeProposalVerificationFingerprint(proposal);
+    if (proposalFingerprint !== inventory.proposal_fingerprint) throw new Error('Lineage repair substantive proposal fingerprint changed.');
+    const snapshotRow = (JSON.parse(fs.readFileSync(path.join(options.outputRoot || path.join(options.repoRoot, 'tmp', 'code-proposals'), `pending-preparation-inventory-${inventory.enumeration.global_snapshot_sha256}.json`), 'utf8')).rows || []).find((row) => row.id === proposal.id);
+    if (!snapshotRow || snapshotRow.proposal_fingerprint !== proposalFingerprint) throw new Error('Lineage repair proposal is absent or changed in the immutable pending snapshot.');
     const lineage = buildParentCampaignLineage({
         proposal,
         inventory,
-        proposalFingerprint: inventory.proposal_fingerprint,
-        frozenHashes: inventory.frozen_hashes,
-        enumeration: options.enumeration ? { ...options.enumeration, query: { ...(options.enumeration.query || {}), pagination_complete: true } } : { ...(inventory.enumeration || {}), query: inventory.query },
+        proposalFingerprint,
+        frozenHashes: actualHashes,
+        pendingEnumeration: snapshot,
     });
     validateParentCampaignLineage(lineage, { proposal });
     const recovery = persistParentCampaignLineage(root, lineage, { repair: true, prior_owner_attempt_id: options.expectedAttemptId });
