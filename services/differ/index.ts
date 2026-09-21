@@ -114,6 +114,7 @@ type TrainingEntry = {
     learning_eligible?: boolean;
     comparison_key?: string;
     comparison_revision?: string;
+    source_attempt_id?: string;
     source_extraction_version?: string;
     source_stage?: string;
     coordinate_basis?: string;
@@ -248,6 +249,7 @@ app.use(requireInternalServiceAuth);
 app.post('/compare', async (req, res) => {
     try {
         const { submission_id, ai_draft_path, final_path, original_path } = req.body;
+        const sourceAttemptId = `${req.body?.attempt_id || ''}`.trim();
         const originalHtml = `${req.body?.original_html || ''}`.trim();
         const comparisonSource = `${req.body?.comparison_source || ''}`.trim();
         const reviewSource = `${req.body?.review_source || ''}`.trim();
@@ -271,6 +273,9 @@ app.post('/compare', async (req, res) => {
                 training_data_saved: false,
                 learned_rules_active: (await readLearnedRulesSnapshot()).active_rules.length,
             });
+        }
+        if (!sourceAttemptId) {
+            return res.status(400).json({ error: 'attempt_id is required for a human-review learning comparison.' });
         }
 
         console.log(`📊 Analyzing differences for submission ${submission_id}`);
@@ -328,7 +333,8 @@ app.post('/compare', async (req, res) => {
             ...(reviewCompletedAt ? { review_completed_at: reviewCompletedAt } : {}),
             changed_by_human: true,
             learning_eligible: true,
-            comparison_revision: comparisonRevision(submission_id, sourceSnapshotSha256, finalText),
+            comparison_revision: comparisonRevision(submission_id, sourceAttemptId, sourceSnapshotSha256, finalText),
+            source_attempt_id: sourceAttemptId,
             source_extraction_version: LEARNING_SOURCE_EXTRACTION_VERSION,
             source_stage: LEARNING_SOURCE_STAGE,
             coordinate_basis: LEARNING_COORDINATE_BASIS,
@@ -567,6 +573,7 @@ app.get('/learning/submissions/:submissionId/revision', async (req, res) => {
         return res.json({
             submission_id: latest.submission_id,
             comparison_revision: latest.comparison_revision,
+            source_attempt_id: latest.source_attempt_id || null,
             source_snapshot_sha256: latest.source_snapshot_sha256 || null,
             source_extraction_version: latest.source_extraction_version || null,
         });
@@ -622,6 +629,7 @@ app.get('/learning/submissions/:submissionId', async (req, res) => {
             dish_corrections: dishCorrections,
             dish_correction_count: dishCorrections.length,
             comparison_revision: latest.comparison_revision || null,
+            source_attempt_id: latest.source_attempt_id || null,
             source_extraction_version: latest.source_extraction_version || null,
             source_stage: latest.source_stage || LEARNING_SOURCE_STAGE,
             coordinate_basis: latest.coordinate_basis || LEARNING_COORDINATE_BASIS,

@@ -11,7 +11,7 @@ describe('learning source comparison revisions', () => {
         const source = 'Dish, lemons G 8';
         const finalText = 'Dish, lemon G 8';
         const sourceHash = sha256Text(source);
-        const revision = comparisonRevision('submission-1', sourceHash, finalText);
+        const revision = comparisonRevision('submission-1', 'attempt-1', sourceHash, finalText);
 
         expect(sourceHash).toMatch(/^[a-f0-9]{64}$/u);
         expect(revision).toMatch(/^comparison-[a-f0-9]{64}$/u);
@@ -25,7 +25,8 @@ describe('learning source comparison revisions', () => {
             source_stage: 'differ_ai_draft_v1',
             coordinate_basis: 'utf16_line_span_v1',
         }));
-        expect(comparisonRevision('submission-1', sourceHash, finalText)).toBe(revision);
-        expect(comparisonRevision('submission-1', sha256Text('changed source'), finalText)).not.toBe(revision);
+        expect(comparisonRevision('submission-1', 'attempt-1', sourceHash, finalText)).toBe(revision);
+        expect(comparisonRevision('submission-1', 'attempt-2', sourceHash, finalText)).not.toBe(revision);
+        expect(comparisonRevision('submission-1', 'attempt-1', sha256Text('changed source'), finalText)).not.toBe(revision);
     });
 });

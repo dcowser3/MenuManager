@@ -15,6 +15,13 @@ const basePayload = {
     reviewer_name: 'Isabella',
 };
 describe('buildCorrectionRuleRecord', () => {
+    test('requires exact source binding only for comparison-card identities', () => {
+        expect((0, learning_correction_rules_1.requiresHumanExplanationSourceBinding)({ rule: 'manual rule', source: 'human' })).toBe(false);
+        expect((0, learning_correction_rules_1.requiresHumanExplanationSourceBinding)({ original_text: 'old', corrected_text: 'new' })).toBe(false);
+        expect((0, learning_correction_rules_1.requiresHumanExplanationSourceBinding)({ submission_id: 'submission-1' })).toBe(true);
+        expect((0, learning_correction_rules_1.requiresHumanExplanationSourceBinding)({ correction_id: 'dish-1' })).toBe(true);
+        expect((0, learning_correction_rules_1.requiresHumanExplanationSourceBinding)({ comparison_revision: 'comparison-1' })).toBe(true);
+    });
     it('defaults force_target_case to false and preserves an explicit true value', () => {
         const base = {
             submission_id: 'submission-case',

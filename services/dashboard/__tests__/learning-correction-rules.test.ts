@@ -1,6 +1,7 @@
 import {
     GLOBAL_CORRECTION_RULE_LOCATION,
     buildCorrectionRuleRecord,
+    requiresHumanExplanationSourceBinding,
 } from '../lib/learning-correction-rules';
 
 const catalog = [
@@ -19,6 +20,14 @@ const basePayload = {
 };
 
 describe('buildCorrectionRuleRecord', () => {
+    test('requires exact source binding only for comparison-card identities', () => {
+        expect(requiresHumanExplanationSourceBinding({ rule: 'manual rule', source: 'human' })).toBe(false);
+        expect(requiresHumanExplanationSourceBinding({ original_text: 'old', corrected_text: 'new' })).toBe(false);
+        expect(requiresHumanExplanationSourceBinding({ submission_id: 'submission-1' })).toBe(true);
+        expect(requiresHumanExplanationSourceBinding({ correction_id: 'dish-1' })).toBe(true);
+        expect(requiresHumanExplanationSourceBinding({ comparison_revision: 'comparison-1' })).toBe(true);
+    });
+
     it('defaults force_target_case to false and preserves an explicit true value', () => {
         const base = {
             submission_id: 'submission-case',

@@ -625,6 +625,7 @@ describe('browser approval finalize route', () => {
                 return {
                     data: {
                         id: 'sub_uploaded_baseline_1',
+                        form_attempt_id: 'attempt-uploaded-baseline-1',
                         clickup_task_id: 'cu_uploaded_baseline',
                         project_name: 'Uploaded Baseline Dinner Menu',
                         property: 'Toro - Chicago',
@@ -665,6 +666,7 @@ describe('browser approval finalize route', () => {
         expect(compareCall).toBeTruthy();
         expect(compareCall[1]).toEqual({
             submission_id: 'sub_uploaded_baseline_1',
+            attempt_id: 'attempt-uploaded-baseline-1',
             ai_draft_path: '/tmp/documents/sub_uploaded_baseline_1/ai-draft.docx',
             final_path: approvedPath,
             original_path: '/tmp/documents/sub_uploaded_baseline_1/original/submitted-generated.docx',
@@ -974,6 +976,7 @@ describe('browser approval finalize route', () => {
                 return {
                     data: {
                         id: 'sub_todo_1',
+                        form_attempt_id: 'attempt-todo-1',
                         clickup_task_id: 'cu_todo',
                         project_name: 'Dinner Menu',
                         property: 'Maya - Dubai',
@@ -1015,6 +1018,7 @@ describe('browser approval finalize route', () => {
         expect(compareCall[1]).toEqual(
             expect.objectContaining({
                 submission_id: 'sub_todo_1',
+                attempt_id: 'attempt-todo-1',
                 ai_draft_path: '/tmp/documents/sub_todo_1-draft.docx',
                 comparison_source: 'human_review_final_approval',
                 review_source: 'isabella_clickup',

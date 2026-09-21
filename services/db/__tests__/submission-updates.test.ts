@@ -560,7 +560,7 @@ describe('submission update hardening', () => {
         const submissionQuery: any = {
             eq: jest.fn(() => submissionQuery),
             maybeSingle: jest.fn(async () => ({
-                data: { id: 'submission-uuid', legacy_id: 'form-source', form_attempt_id: 'attempt-source' },
+                data: { id: 'submission-uuid', legacy_id: 'form-source', form_attempt_id: 'newer-current-attempt' },
                 error: null,
             })),
         };
@@ -576,9 +576,10 @@ describe('submission update hardening', () => {
 
         const response = await invokeJsonHandler(reviewSourceBindingHandler, {
             params: { id: 'submission-uuid' },
-            query: { source_snapshot_sha256: sourceHash },
+            query: { source_snapshot_sha256: sourceHash, attempt_id: 'attempt-source' },
         });
 
+        expect(auditQuery.eq).toHaveBeenCalledWith('attempt_id', 'attempt-source');
         expect(response.status).toBe(expectedStatus);
         if (expectedAuditId) {
             expect(response.body).toMatchObject({
@@ -591,6 +592,23 @@ describe('submission update hardening', () => {
                 },
             });
         }
+    });
+
+    test('requires the frozen comparison attempt instead of reading the submission current attempt', async () => {
+        const submissionQuery: any = {
+            eq: jest.fn(() => submissionQuery),
+            maybeSingle: jest.fn(async () => ({ data: { id: 'submission-uuid', form_attempt_id: 'mutable-current' }, error: null })),
+        };
+        const from = jest.fn(() => ({ select: jest.fn(() => submissionQuery) }));
+        (isSupabaseConfigured as jest.Mock).mockReturnValue(true);
+        (getSupabaseClient as jest.Mock).mockReturnValue({ from });
+
+        const response = await invokeJsonHandler(reviewSourceBindingHandler, {
+            params: { id: 'submission-uuid' },
+            query: { source_snapshot_sha256: 'a'.repeat(64) },
+        });
+        expect(response.status).toBe(400);
+        expect(response.body.error).toContain('frozen comparison attempt_id');
     });
 
     test('uses parsed-response stage only when the final-result stage does not match', async () => {
@@ -621,7 +639,7 @@ describe('submission update hardening', () => {
 
         const response = await invokeJsonHandler(reviewSourceBindingHandler, {
             params: { id: 'form-source' },
-            query: { source_snapshot_sha256: sourceHash },
+            query: { source_snapshot_sha256: sourceHash, attempt_id: 'attempt-source' },
         });
         expect(response.status).toBe(200);
         expect(response.body.audit).toMatchObject({
@@ -659,7 +677,7 @@ describe('submission update hardening', () => {
 
         const response = await invokeJsonHandler(reviewSourceBindingHandler, {
             params: { id: 'form-source' },
-            query: { source_snapshot_sha256: sourceHash },
+            query: { source_snapshot_sha256: sourceHash, attempt_id: 'attempt-source' },
         });
         expect(response.status).toBe(200);
         expect(response.body.audit.source_stage).toBe('audit_final_result_corrected_menu_v1');

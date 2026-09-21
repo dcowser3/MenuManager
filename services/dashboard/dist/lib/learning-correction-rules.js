@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.CorrectionRuleValidationError = exports.GLOBAL_CORRECTION_RULE_LOCATION = void 0;
+exports.requiresHumanExplanationSourceBinding = requiresHumanExplanationSourceBinding;
 exports.buildCorrectionRuleRecord = buildCorrectionRuleRecord;
 exports.isCorrectionRuleValidationError = isCorrectionRuleValidationError;
 exports.GLOBAL_CORRECTION_RULE_LOCATION = 'All properties (global rule)';
@@ -11,6 +12,11 @@ class CorrectionRuleValidationError extends Error {
     }
 }
 exports.CorrectionRuleValidationError = CorrectionRuleValidationError;
+/** Comparison cards are provenance-bound; dashboard-wide manual rules are explicitly unbound. */
+function requiresHumanExplanationSourceBinding(payload) {
+    return [payload?.submission_id, payload?.correction_id, payload?.comparison_revision]
+        .some((value) => typeof value === 'string' && value.trim().length > 0);
+}
 function text(value) {
     return `${value || ''}`.trim();
 }

@@ -13,9 +13,10 @@ exports.LEARNING_COORDINATE_BASIS = 'utf16_line_span_v1';
 function sha256Text(value) {
     return crypto_1.default.createHash('sha256').update(Buffer.from(value, 'utf8')).digest('hex');
 }
-function comparisonRevision(submissionId, sourceSnapshotSha256, finalText) {
+function comparisonRevision(submissionId, sourceAttemptId, sourceSnapshotSha256, finalText) {
     return `comparison-${sha256Text(JSON.stringify({
         submission_id: submissionId,
+        source_attempt_id: sourceAttemptId,
         source_stage: exports.LEARNING_SOURCE_STAGE,
         source_snapshot_sha256: sourceSnapshotSha256,
         final_snapshot_sha256: sha256Text(finalText),

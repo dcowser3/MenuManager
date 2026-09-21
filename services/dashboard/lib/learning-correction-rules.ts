@@ -6,6 +6,12 @@ export class CorrectionRuleValidationError extends Error {
     statusCode = 400;
 }
 
+/** Comparison cards are provenance-bound; dashboard-wide manual rules are explicitly unbound. */
+export function requiresHumanExplanationSourceBinding(payload: any): boolean {
+    return [payload?.submission_id, payload?.correction_id, payload?.comparison_revision]
+        .some((value) => typeof value === 'string' && value.trim().length > 0);
+}
+
 export interface CorrectionRuleRecord {
     submission_id: string;
     correction_id: string;

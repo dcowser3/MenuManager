@@ -100,6 +100,7 @@ import {
     buildCorrectionRuleRecord,
     CorrectionRuleValidationError,
     isCorrectionRuleValidationError,
+    requiresHumanExplanationSourceBinding,
 } from './lib/learning-correction-rules';
 import {
     buildHumanExplanationSourceBinding,
@@ -2635,11 +2636,13 @@ async function resolveHumanExplanationSourceBinding(payload: any): Promise<{ bin
         || learning.coordinate_basis !== HUMAN_EXPLANATION_COORDINATE_BASIS
         || typeof learning.source_snapshot_sha256 !== 'string'
         || typeof learning.source_extraction_version !== 'string'
-        || !learning.source_extraction_version.trim()) {
+        || !learning.source_extraction_version.trim()
+        || typeof learning.source_attempt_id !== 'string'
+        || !learning.source_attempt_id.trim()) {
         throw new CorrectionRuleValidationError('The learning comparison has no trusted source revision');
     }
     const sourceResult = await internalApi.get(
-        `${DB_SERVICE_URL}/submissions/${encodeURIComponent(submissionId)}/review-source-binding?source_snapshot_sha256=${encodeURIComponent(learning.source_snapshot_sha256)}`,
+        `${DB_SERVICE_URL}/submissions/${encodeURIComponent(submissionId)}/review-source-binding?source_snapshot_sha256=${encodeURIComponent(learning.source_snapshot_sha256)}&attempt_id=${encodeURIComponent(learning.source_attempt_id)}`,
         { timeout: 3500 },
     );
     const source = sourceResult.data || {};
@@ -2672,9 +2675,11 @@ async function resolveHumanExplanationSourceBinding(payload: any): Promise<{ bin
 app.post('/api/learning/correction-rules', async (req, res) => {
     try {
         const payload = req.body || {};
-        const resolved = await resolveHumanExplanationSourceBinding(payload);
+        const trustedPayload = requiresHumanExplanationSourceBinding(payload)
+            ? (await resolveHumanExplanationSourceBinding(payload)).trustedPayload
+            : { ...payload, source_binding: null };
         const catalog = await getPropertyCatalogFromDb();
-        const record = buildCorrectionRuleRecord(resolved.trustedPayload, catalog);
+        const record = buildCorrectionRuleRecord(trustedPayload, catalog);
 
         const response = await internalApi.post(`${DB_SERVICE_URL}/correction-rules`, record, { timeout: 3000 });
         res.json(response.data);

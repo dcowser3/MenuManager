@@ -143,7 +143,9 @@ dashboard resolves provenance server-side before creating the row. The
 browser's correction text, audit ID, and source identity are not authoritative.
 The differ comparison is frozen at `/compare` creation with its extraction
 version, comparison revision, source stage, coordinate basis, and SHA-256 of
-the extracted AI-draft text. The save request must name that exact comparison
+the extracted AI-draft text. The revision also freezes the form attempt that
+produced the comparison, so a later submission update cannot redirect source
+resolution to a newer attempt. The save request must name that exact comparison
 revision; the differ service re-extracts the source and fails closed if its
 hash (or the approved output hash) changed.
 
@@ -158,6 +160,9 @@ displayed differ stage/coordinates, matched audit stage/hash, binding method,
 and the exact UTF-16 before/after span and text hashes. It is insert-only
 provenance; correction-rule updates cannot edit it. Legacy/system rows may
 remain null and no model output can create or replace a binding.
+Dashboard-wide manual rules and promoted detected patterns do not represent a
+specific comparison card, so they remain explicitly unbound
+(`source_binding: null`) and continue through their existing human-review gate.
 
 ### `prompt_proposals` Table (Supabase)
 

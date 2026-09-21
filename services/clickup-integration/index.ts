@@ -1687,6 +1687,7 @@ async function finalizeApprovedSubmission(input: {
         original_path: submission.original_path,
         ...(originalHtml ? { original_html: originalHtml } : {}),
         submission_id: submission.id,
+        attempt_id: submission.form_attempt_id,
         comparison_source: 'human_review_final_approval',
         review_source: input.approvedAssetSource || 'isabella_clickup',
         review_completed_at: new Date().toISOString(),

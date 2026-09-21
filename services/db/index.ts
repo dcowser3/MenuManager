@@ -2798,20 +2798,22 @@ app.get('/submissions/by-clickup-task/:taskId', async (req, res) => {
 // Endpoint to get a single submission by ID
 // Resolve the one durable Basic AI Check audit/stage that matches the frozen
 // differ comparison source. Multiple audits for an attempt are normal; the
-// exact source hash is the selector, never recency or browser-supplied audit
-// identity.
+// exact comparison attempt plus source hash are the selectors, never recency,
+// the submission's mutable current attempt, or browser-supplied audit identity.
 app.get('/submissions/:id/review-source-binding', async (req, res) => {
     try {
         const submissionId = `${req.params.id || ''}`.trim();
         const submission = await getSubmissionRecordById(submissionId);
         if (!submission) return res.status(404).json({ error: 'Submission not found.' });
-        const attemptId = `${submission.form_attempt_id || ''}`.trim();
+        const attemptId = `${req.query?.attempt_id || ''}`.trim();
         const submissionAliases = new Set([
             submissionId,
             `${submission.id || ''}`.trim(),
             `${submission.legacy_id || ''}`.trim(),
         ].filter(Boolean));
-        if (!attemptId) return res.status(409).json({ error: 'Submission has no form attempt binding.' });
+        if (!attemptId || attemptId.length > 100 || !/^[A-Za-z0-9_-]+$/u.test(attemptId)) {
+            return res.status(400).json({ error: 'A frozen comparison attempt_id is required for exact audit binding.' });
+        }
         const sourceSnapshotSha256 = `${req.query?.source_snapshot_sha256 || ''}`.trim();
         if (!/^[a-f0-9]{64}$/u.test(sourceSnapshotSha256)) {
             return res.status(400).json({ error: 'source_snapshot_sha256 is required for exact audit binding.' });

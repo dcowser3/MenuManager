@@ -8,9 +8,10 @@ export function sha256Text(value: string): string {
     return crypto.createHash('sha256').update(Buffer.from(value, 'utf8')).digest('hex');
 }
 
-export function comparisonRevision(submissionId: string, sourceSnapshotSha256: string, finalText: string): string {
+export function comparisonRevision(submissionId: string, sourceAttemptId: string, sourceSnapshotSha256: string, finalText: string): string {
     return `comparison-${sha256Text(JSON.stringify({
         submission_id: submissionId,
+        source_attempt_id: sourceAttemptId,
         source_stage: LEARNING_SOURCE_STAGE,
         source_snapshot_sha256: sourceSnapshotSha256,
         final_snapshot_sha256: sha256Text(finalText),
