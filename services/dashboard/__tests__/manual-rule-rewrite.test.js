@@ -1,5 +1,5 @@
 'use strict';
-const { buildManualRuleRewritePlan, assertPlan, writeRecoveryMarker, advanceRewriteMarker, OLD_IDS, NEW_ID, RULE, hash } = require('../../../scripts/lib/manual-rule-rewrite');
+const { buildManualRuleRewritePlan, assertPlan, writeRecoveryMarker, advanceRewriteMarker, runManualRuleRewrite, OLD_IDS, NEW_ID, RULE, hash } = require('../../../scripts/lib/manual-rule-rewrite');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -48,4 +48,27 @@ test('advances a private recovery marker only from the expected phase snapshot',
     expect(next.phase).toBe('rules_reconciled');
     await expect(advanceRewriteMarker(marker, hash(plan), 'proposal_reconciled')).rejects.toThrow(/changed concurrently/);
     expect(fs.statSync(marker).mode & 0o777).toBe(0o600);
+});
+
+test('resumes after a phase interruption without duplicate replacement or provider calls', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'manual-rule-rewrite-'));
+    const marker = path.join(dir, 'recovery.json');
+    let state = { correctionRules: correctionRules.map((row) => ({ ...row })), proposal: proposal() };
+    let inserts = 0;
+    const deletions = [];
+    const adapter = {
+        readState: async () => state,
+        deleteCorrectionRule: async ({ correction_id }) => { deletions.push(correction_id); state.correctionRules = state.correctionRules.filter((row) => row.correction_id !== correction_id); },
+        insertCorrectionRule: async (row) => { if (!state.correctionRules.some((item) => item.correction_id === row.correction_id)) { state.correctionRules.push(row); inserts++; } },
+        updateProposal: async (next) => { state.proposal = next; },
+    };
+    const plan = buildManualRuleRewritePlan({ correctionRules: state.correctionRules, proposal: state.proposal, expectedProposalFingerprint: 'f'.repeat(64) });
+    await expect(runManualRuleRewrite({ adapter, markerPath: marker, plan, failAfterPhase: 'proposal_reconciled' })).rejects.toThrow('Injected failure');
+    await runManualRuleRewrite({ adapter, markerPath: marker, plan });
+    await runManualRuleRewrite({ adapter, markerPath: marker, plan });
+    expect(inserts).toBe(1);
+    expect(deletions).toEqual(OLD_IDS);
+    expect(state.correctionRules.filter((row) => OLD_IDS.includes(row.correction_id))).toHaveLength(0);
+    expect(state.correctionRules.find((row) => row.correction_id === NEW_ID)).toMatchObject({ status: 'pending', source_binding: null, rule: RULE });
+    expect(state.proposal.correction_rule_count).toBe(27);
 });
