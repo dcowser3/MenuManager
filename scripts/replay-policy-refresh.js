@@ -41,6 +41,23 @@ function assertFinalReadback(actual, planned) {
     if (canonicalHash(actual) !== canonicalHash(planned)) throw new Error('Replay refresh readback differs from the complete planned proposal.');
 }
 
+/** Recognize only an exact CAS-completed plan; safe to call on a second invocation. */
+async function recoverAppliedRefresh({ proposal, proposalId, artifactDir }) {
+    const planPath = path.join(artifactDir, 'plan.json');
+    const afterPath = path.join(artifactDir, 'after.json');
+    if (!fs.existsSync(planPath) || !fs.existsSync(afterPath)) return null;
+    let plan; let after;
+    try {
+        plan = JSON.parse(await fsp.readFile(planPath, 'utf8'));
+        after = JSON.parse(await fsp.readFile(afterPath, 'utf8'));
+    } catch { return null; }
+    if (plan.proposal_id !== proposalId || plan.planned_sha256 !== canonicalHash(plan.planned)
+        || canonicalHash(after) !== plan.planned_sha256 || canonicalHash(proposal) !== plan.planned_sha256) return null;
+    assertFinalReadback(proposal, plan.planned);
+    await writePrivate(path.join(artifactDir, 'marker.json'), { state: 'recovered', proposal_id: proposalId, planned_sha256: plan.planned_sha256, model_calls: 0 });
+    return { state: 'recovered', artifactDir, downstream_fingerprint: verification.codeProposalVerificationFingerprint(proposal), model_calls: 0 };
+}
+
 async function loadMembers(client, proposal) {
     const acceptedResult = await client.from('correction_rules').select('*').eq('status', 'accepted');
     if (acceptedResult.error) throw new Error(`Accepted-rule lookup failed: ${acceptedResult.error.message}`);
@@ -89,29 +106,19 @@ async function main() {
     const result = await client.from('prompt_proposals').select('*,xmin').eq('id', proposalId).single();
     if (result.error) throw new Error(result.error.message);
     const proposal = result.data;
+    const artifactDir = path.join(artifactRoot, `proposal-${sha(proposalId).slice(0, 32)}`);
+    await fsp.mkdir(artifactDir, { recursive: true, mode: 0o700 }); await fsp.chmod(artifactDir, 0o700);
+    const recovered = await recoverAppliedRefresh({ proposal, proposalId, artifactDir });
+    if (recovered) { console.log(JSON.stringify(recovered, null, 2)); return; }
     const members = await loadMembers(client, proposal);
     const expectedFingerprint = verification.codeProposalVerificationFingerprint(proposal);
     const input = { proposal: { ...proposal, xmin: undefined }, members: members.map(({ acceptedRules, ...m }) => ({ ...m, originalAudit: m.originalAudit ? { ...m.originalAudit } : null, deterministicReplay: null })) };
-    const artifactDir = path.join(artifactRoot, `proposal-${sha(proposalId).slice(0, 32)}`);
-    await fsp.mkdir(artifactDir, { recursive: true, mode: 0o700 }); await fsp.chmod(artifactDir, 0o700);
-    const priorPlanPath = path.join(artifactDir, 'plan.json');
-    const priorAfterPath = path.join(artifactDir, 'after.json');
-    if (fs.existsSync(priorPlanPath) && fs.existsSync(priorAfterPath)) {
-        const prior = JSON.parse(await fsp.readFile(priorPlanPath, 'utf8'));
-        const priorAfter = JSON.parse(await fsp.readFile(priorAfterPath, 'utf8'));
-        if (prior.input_sha256 === sha(input) && prior.planned && canonicalHash(priorAfter) === canonicalHash(prior.planned)) {
-            assertFinalReadback(proposal, prior.planned);
-            await writePrivate(path.join(artifactDir, 'marker.json'), { state: 'recovered', proposal_id: proposalId, input_sha256: sha(input), model_calls: 0 });
-            console.log(JSON.stringify({ state: 'recovered', artifactDir, input_sha256: sha(input), downstream_fingerprint: verification.codeProposalVerificationFingerprint(proposal), model_calls: 0 }, null, 2));
-            return;
-        }
-    }
     await writePrivate(path.join(artifactDir, 'marker.json'), { state: 'prepared', proposal_id: proposalId, input_sha256: sha(input), model_calls: 0 });
     await writePrivate(path.join(artifactDir, 'before.json'), proposal);
     const prepared = prepareReplayPolicyRefresh({ proposal, expectedFingerprint, targetVersion: replay.REPLAY_RETIREMENT_POLICY_VERSION, members });
     const planned = { ...proposal, ...prepared.patch };
     await writePrivate(path.join(artifactDir, 'input.json'), { input_sha256: sha(input), members: members.map(({ acceptedRules, ...m }) => m), expected_xmin: proposal.xmin });
-    await writePrivate(path.join(artifactDir, 'plan.json'), { ...prepared, input_sha256: sha(input), planned, planned_sha256: canonicalHash(planned) });
+    await writePrivate(path.join(artifactDir, 'plan.json'), { ...prepared, proposal_id: proposalId, input_sha256: sha(input), planned, planned_sha256: canonicalHash(planned) });
     if (execute) {
         await applyReplayPolicyRefresh(client, proposalId, proposal.xmin, prepared.patch);
         const afterResult = await client.from('prompt_proposals').select('*,xmin').eq('id', proposalId).single();
@@ -127,4 +134,4 @@ async function main() {
 
 if (require.main === module) main().catch((error) => { console.error(error.stack || error.message); process.exitCode = 1; });
 
-module.exports = { loadMembers, replayCallbacks, assertFinalReadback, canonicalHash };
+module.exports = { loadMembers, replayCallbacks, assertFinalReadback, canonicalHash, recoverAppliedRefresh };
