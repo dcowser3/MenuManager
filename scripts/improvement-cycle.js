@@ -50,6 +50,7 @@ const { recordCodeVerification } = require('./lib/proposal-verification-store');
 
 const LOCK_PATH = path.join(repoRoot, 'tmp', 'improvement-cycle', '.lock');
 const LOCK_STALE_MS = 6 * 60 * 60 * 1000;
+let ACTIVE_EXPECTATION_ARGS = [];
 
 function requireDashboardLib(relPath) {
     const sourcePath = path.join(repoRoot, 'services', 'dashboard', 'lib', `${relPath}.ts`);
@@ -225,7 +226,7 @@ async function postImprovementCompletion(messages) {
 }
 
 function runEvalHarness(args) {
-    const result = spawnSync('node', [path.join(repoRoot, 'scripts', 'review-eval.js'), ...args], {
+    const result = spawnSync('node', [path.join(repoRoot, 'scripts', 'review-eval.js'), ...args, ...ACTIVE_EXPECTATION_ARGS], {
         cwd: repoRoot,
         encoding: 'utf8',
         stdio: ['ignore', 'pipe', 'pipe'],
@@ -1366,6 +1367,23 @@ async function main() {
         await fsp.writeFile(currentPromptPath, effective.prompt);
         await fsp.writeFile(candidatePromptPath, validated.proposed_prompt);
         await fsp.writeFile(candidateRulesPath, JSON.stringify({ rules: validated.proposed_replacement_rules }, null, 2));
+        let approvedExpectationEnvelope = null;
+        const approvedExpectationPath = process.env.REVIEW_EXPECTATIONS_ARTIFACT;
+        if (approvedExpectationPath && fs.existsSync(approvedExpectationPath)) {
+            try {
+                const authority = JSON.parse(fs.readFileSync(approvedExpectationPath, 'utf8'));
+                expectationVersioningLib.validateExpectationEnvelope(authority);
+                const derived = expectationVersioningLib.deriveProposalBoundEnvelope(validated.proposed_replacement_rules || [], authority, cycleId);
+                validated.proposed_replacement_rules = derived.rules;
+                await fsp.writeFile(candidateRulesPath, JSON.stringify({ rules: validated.proposed_replacement_rules }, null, 2));
+                if (derived.envelope) {
+                    approvedExpectationEnvelope = derived.envelope;
+                    const derivedPath = path.join(artifactsDir, 'derived-expectations.json');
+                    await fsp.writeFile(derivedPath, JSON.stringify(derived.envelope, null, 2));
+                    ACTIVE_EXPECTATION_ARGS = ['--expectations', derivedPath];
+                }
+            } catch (error) { validated.warnings.push(`Approved expectation artifact rejected; no policy-change grading: ${error.message}`); }
+        }
         if (validated.coverage_claims && validated.coverage_claims.length) {
             await fsp.writeFile(path.join(artifactsDir, 'coverage_claims.json'), JSON.stringify(validated.coverage_claims, null, 2));
         }
@@ -1711,19 +1729,7 @@ async function main() {
             // one group without reconstructing or inventing expectations.
             behavior_tests: behaviorArtifact,
         });
-        const approvedExpectationPath = process.env.REVIEW_EXPECTATIONS_ARTIFACT;
-        let approvedExpectationEnvelope = null;
-        if (approvedExpectationPath && fs.existsSync(approvedExpectationPath)) {
-            try {
-                approvedExpectationEnvelope = JSON.parse(fs.readFileSync(approvedExpectationPath, 'utf8'));
-                expectationVersioningLib.validateExpectationEnvelope(approvedExpectationEnvelope);
-                const derived = expectationVersioningLib.deriveProposalBoundEnvelope(validated.proposed_replacement_rules || [], approvedExpectationEnvelope, cycleId);
-                validated.proposed_replacement_rules = derived.rules;
-                if (derived.envelope) evalSummary = { ...evalSummary, expectation_envelope: derived.envelope };
-            } catch (error) {
-                validated.warnings.push(`Approved expectation artifact rejected; no activation metadata attached: ${error.message}`);
-            }
-        }
+        if (approvedExpectationEnvelope) evalSummary = { ...evalSummary, expectation_envelope: approvedExpectationEnvelope };
 
         // 9. Store the proposal.
         const dates = correctionRules.map((r) => Date.parse(r.created_at)).filter(Number.isFinite);
