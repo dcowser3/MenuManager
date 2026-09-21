@@ -11,13 +11,14 @@ const { recordCodeVerification } = require('../../../scripts/lib/proposal-verifi
 const digest = (value) => crypto.createHash('sha256').update(value).digest('hex');
 
 function clientState() {
-    const state = { proposal: null, writes: 0 };
+    const state = { proposal: null, writes: 0, beforeUpdate: null };
     const client = { from(table) {
+        const filters = [];
         const query = {
             select: () => query,
             update: (patch) => { query.patch = patch; return query; },
-            eq: () => query,
-            is: () => query,
+            eq: (field, value) => { filters.push({ kind: 'eq', field, value }); return query; },
+            is: (field, value) => { filters.push({ kind: 'is', field, value }); return query; },
             order: () => query,
             or: () => query,
             then(resolve) {
@@ -25,7 +26,18 @@ function clientState() {
                 if (table === 'submissions') return Promise.resolve({ data: [{ id: 'submission-1', legacy_id: 'legacy-1', project_name: 'Project', property: 'Property', template_type: 'food', menu_type: 'standard', service_period: 'Dinner', approved_menu_content: 'after', form_attempt_id: 'attempt-1' }] }).then(resolve);
                 if (table === 'basic_ai_check_audits') return Promise.resolve({ data: [{ id: 'audit-1', menu_content_raw: 'before', attempt_id: 'attempt-1', event_type: 'completed', review_mode: 'full' }] }).then(resolve);
                 if (query.patch) {
-                    if (state.proposal?.status !== 'pending') return Promise.resolve({ data: [] }).then(resolve);
+                    if (typeof state.beforeUpdate === 'function') {
+                        const hook = state.beforeUpdate;
+                        state.beforeUpdate = null;
+                        hook();
+                    }
+                    const matches = filters.every((filter) => {
+                        const current = state.proposal?.[filter.field];
+                        if (filter.kind === 'is') return current == null && filter.value == null;
+                        if (filter.field === 'eval_summary' && typeof filter.value === 'string') return JSON.stringify(current) === filter.value;
+                        return current === filter.value;
+                    });
+                    if (!matches) return Promise.resolve({ data: [] }).then(resolve);
                     state.proposal = { ...state.proposal, eval_summary: query.patch.eval_summary };
                     state.writes += 1;
                     return Promise.resolve({ data: [{ id: state.proposal.id }] }).then(resolve);
@@ -60,8 +72,15 @@ test('durable claim crash before summary converges to blocked zero-dispatch reco
         expect(result.reason).toBe('code_candidate_authorization_required');
         expect(fs.existsSync(path.join(prepared.artifactDirectory, 'preparation-summary.json'))).toBe(true);
         expect(state.writes).toBe(1);
-        state.proposal = { ...state.proposal, status: 'approved' };
-        await expect(recordCodeVerification(client, { ...state.proposal, status: 'pending' }, { code_candidate: { attempt_id: 'newer', status: 'running', proposal_sha256: verification.codeProposalVerificationFingerprint(state.proposal) } }, verification)).rejects.toThrow(/changed|pending/);
-        await expect(recordCodeVerification(client, { ...proposal, status: 'pending' }, { code_candidate: { attempt_id: 'late-old', status: 'running', proposal_sha256: verification.codeProposalVerificationFingerprint(proposal) } }, verification)).rejects.toThrow(/pending/);
+        const owner = state.proposal.eval_summary.code_candidate;
+        await expect(recordCodeVerification(client, state.proposal, { code_candidate: { ...owner, attempt_id: 'newer-owner', started_at: new Date().toISOString() } }, verification)).rejects.toThrow(/already running/);
+        const lateCompletion = { ...owner, status: 'blocked' };
+        state.beforeUpdate = () => {
+            state.proposal = { ...state.proposal, eval_summary: { ...state.proposal.eval_summary,
+                code_candidate: { ...owner, attempt_id: 'concurrent-owner', started_at: new Date().toISOString() } } };
+        };
+        await expect(recordCodeVerification(client, state.proposal, { code_candidate: lateCompletion }, verification)).rejects.toThrow(/changed concurrently/);
+        expect(state.proposal.eval_summary.code_candidate.attempt_id).toBe('concurrent-owner');
+        expect(state.writes).toBe(1);
     } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
