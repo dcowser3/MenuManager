@@ -9,6 +9,11 @@ const POST_DRAFT_IDENTITY_FIELDS = [
     'authorization_hash', 'scope_hash', 'c2b_handoff_sha256', 'candidate_source_sha256',
     'draft_patch_sha256', 'draft_content_sha256', 'draft_response_sha256',
 ];
+const FROZEN_CANDIDATE_IDENTITY_FIELDS = [
+    'proposal_sha256', 'baseline_source_sha256', 'expected_dataset_sha256',
+    'behavior_tests_sha256', 'prompt_sha256', 'accepted_rules_sha256',
+    'preparation_inventory_sha256', ...POST_DRAFT_IDENTITY_FIELDS,
+];
 
 function assertClaimIdentity(candidate) {
     const required = ['proposal_sha256', 'baseline_source_sha256', 'expected_dataset_sha256', 'behavior_tests_sha256', 'prompt_sha256', 'accepted_rules_sha256'];
@@ -52,6 +57,37 @@ function assertPostDraftIdentities(candidate, status) {
             if (!DIGEST.test(candidate?.[field] || '')) throw new Error(`Verified candidate claims require a valid ${field}.`);
         }
     }
+}
+
+/**
+ * Add only bounded JSON-path ownership predicates to the write CAS. The
+ * previous implementation compared the complete eval_summary JSON, which can
+ * exceed proxy URL limits when behavior evidence is large. The update body
+ * still carries the complete summary, but no private evidence is placed in
+ * the query string.
+ */
+function addEvaluationCasPredicates(query, current) {
+    const previous = current.eval_summary?.code_candidate;
+    if (previous == null) {
+        query = query.is('eval_summary->code_candidate', null);
+        const behavior = current.eval_summary?.behavior_tests;
+        if (behavior == null) return query.is('eval_summary->behavior_tests', null);
+        if (typeof behavior.sha256 !== 'string' || !DIGEST.test(behavior.sha256)) {
+            throw new Error('Initial candidate claims require an immutable behavior artifact identity.');
+        }
+        return query.eq('eval_summary->behavior_tests->>sha256', behavior.sha256);
+    }
+    if (typeof previous !== 'object' || Array.isArray(previous)
+        || typeof previous.attempt_id !== 'string' || !previous.attempt_id.trim()
+        || typeof previous.status !== 'string' || !previous.status.trim()) {
+        throw new Error('Current candidate owner identity is invalid.');
+    }
+    query = query.eq('eval_summary->code_candidate->>attempt_id', previous.attempt_id)
+        .eq('eval_summary->code_candidate->>status', previous.status);
+    for (const field of FROZEN_CANDIDATE_IDENTITY_FIELDS) {
+        if (previous[field] !== undefined) query = query.eq(`eval_summary->code_candidate->>${field}`, field === 'expected_case_ids' ? JSON.stringify(previous[field]) : previous[field]);
+    }
+    return query;
 }
 
 function runningClaimIsFresh(candidate, now = Date.now()) {
@@ -136,8 +172,7 @@ async function recordCodeVerification(supabase, original, patch, verification = 
     }
     let query = supabase.from('prompt_proposals').update({ eval_summary: summary })
         .eq('id', current.id).eq('status', 'pending');
-    query = current.eval_summary == null ? query.is('eval_summary', null)
-        : query.eq('eval_summary', JSON.stringify(current.eval_summary));
+    query = addEvaluationCasPredicates(query, current);
     const result = await query.select('id');
     if (result.error) throw new Error(result.error.message);
     if (!result.data?.length) throw new Error('Proposal evaluation changed concurrently; no evidence was overwritten.');

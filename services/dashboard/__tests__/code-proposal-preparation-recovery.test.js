@@ -11,6 +11,16 @@ const { hashBehaviorArtifact } = require('../lib/learning-behavior-tests');
 
 const digest = (value) => crypto.createHash('sha256').update(value).digest('hex');
 
+function readJsonPath(row, field) {
+    const textMarker = field.indexOf('->>');
+    const pathText = textMarker >= 0 ? field.slice(0, textMarker) : field;
+    const key = textMarker >= 0 ? field.slice(textMarker + 3) : null;
+    let value = pathText.split('->').reduce((current, part) => current == null ? null : current[part], row);
+    if (key !== null) value = value == null ? null : value[key];
+    if (textMarker >= 0 && value != null && typeof value !== 'string') return JSON.stringify(value);
+    return value;
+}
+
 function clientState() {
     const state = { proposal: null, writes: 0, beforeUpdate: null };
     const client = { from(table) {
@@ -33,7 +43,7 @@ function clientState() {
                         hook();
                     }
                     const matches = filters.every((filter) => {
-                        const current = state.proposal?.[filter.field];
+                        const current = filter.field.includes('->') ? readJsonPath(state.proposal, filter.field) : state.proposal?.[filter.field];
                         if (filter.kind === 'is') return current == null && filter.value == null;
                         if (filter.field === 'eval_summary' && typeof filter.value === 'string') return JSON.stringify(current) === filter.value;
                         return current === filter.value;

@@ -7,7 +7,7 @@ const verifier = {
     codeProposalVerificationFingerprint: (p) => p.fingerprint,
     assessCodeProposalVerification: (p) => p.eval_summary.code_verification.valid ? null : { error: 'proof failed' },
 };
-const original = { id: 'p1', status: 'pending', fingerprint: 'one', code_recommendations: [{}], eval_summary: { replay_retirement_policy_version: 1 } };
+const original = { id: 'p1', status: 'pending', fingerprint: 'one', code_recommendations: [{}], eval_summary: { replay_retirement_policy_version: 1, behavior_tests: { sha256: HASH_B } } };
 const claim = (attempt_id = 'attempt-a', started_at = new Date().toISOString()) => ({
     attempt_id, status: 'running', proposal_sha256: HASH, baseline_source_sha256: HASH_B,
     expected_dataset_sha256: HASH, behavior_tests_sha256: HASH_B, prompt_sha256: HASH, accepted_rules_sha256: HASH_B,
@@ -50,7 +50,37 @@ test('recording evidence preserves other evaluation data and uses an optimistic 
     expect(result.replay_retirement_policy_version).toBe(1);
     expect(client.writes[0]).not.toHaveProperty('status');
     expect(client.filters).toContainEqual(['status', 'pending']);
-    expect(client.filters).toContainEqual(['eval_summary', JSON.stringify(active.eval_summary)]);
+    expect(client.filters).toContainEqual(['eval_summary->code_candidate->>attempt_id', 'attempt-a']);
+    expect(client.filters).toContainEqual(['eval_summary->code_candidate->>status', 'running']);
+    expect(client.filters).not.toContainEqual(['eval_summary', JSON.stringify(active.eval_summary)]);
+});
+
+test('initial claim pins the absent owner and behavior artifact identity without serializing eval_summary', async () => {
+    const client = fakeClient(original);
+    await recordCodeVerification(client, original, { code_candidate: claim() }, verifier);
+    expect(client.filters).toContainEqual(['eval_summary->code_candidate', null]);
+    expect(client.filters).toContainEqual(['eval_summary->behavior_tests->>sha256', HASH_B]);
+    expect(client.filters.some(([field]) => field === 'eval_summary')).toBe(false);
+});
+
+test('large behavior evidence stays out of the CAS query and competing claims fail closed', async () => {
+    const largeSummary = {
+        ...original,
+        eval_summary: {
+            ...original.eval_summary,
+            behavior_tests: { sha256: HASH_B, records: [{ explanation: 'private '.repeat(20000) }] },
+        },
+    };
+    const competingClaim = fakeClient(largeSummary, []);
+    await expect(recordCodeVerification(competingClaim, largeSummary, { code_candidate: claim() }, verifier)).rejects.toThrow('concurrently');
+    expect(competingClaim.filters.some(([field]) => field === 'eval_summary')).toBe(false);
+    expect(competingClaim.filters.every(([, value]) => typeof value !== 'string' || !value.includes('private'))).toBe(true);
+    expect(JSON.stringify(competingClaim.filters).length).toBeLessThan(4096);
+
+    const active = withClaim(claim());
+    const staleOwner = fakeClient({ ...active, eval_summary: { ...active.eval_summary, code_candidate: { ...active.eval_summary.code_candidate, attempt_id: 'newer-owner' } } }, []);
+    await expect(recordCodeVerification(staleOwner, original, { code_candidate: { ...claim(), status: 'verified' } }, verifier)).rejects.toThrow('ownership changed');
+    expect(staleOwner.writes).toEqual([]);
 });
 
 test('invalid, stale or no-longer-pending proof cannot be written', async () => {
