@@ -4,6 +4,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const { loadVerificationModule, recordCodeVerification, shouldDraftCodeProposal } = require('./proposal-verification-store');
+const { buildParentCampaignLineage, persistParentCampaignLineage, validateParentCampaignLineage } = require('./parent-campaign-lineage');
 
 const PHASES = new Set(['analysis', 'draft', 'unit_tests', 'retrospective_replay', 'holdout', 'verification', 'awaiting_approval', 'awaiting_deployment_approval']);
 const STATES = new Set(['active', 'waiting_on_model', 'blocked', 'failed', 'verified']);
@@ -152,7 +153,7 @@ function loadBehaviorModule(repoRoot) {
 }
 
 async function prepareCodeProposalAttempt(options = {}) {
-    const { client, proposal, repoRoot, datasetPath, verification = loadVerificationModule(repoRoot), store = { recordCodeVerification }, now = Date.now() } = options;
+    const { client, proposal, repoRoot, datasetPath, verification = loadVerificationModule(repoRoot), store = { recordCodeVerification, recordParentCampaignLineage }, now = Date.now() } = options;
     if (!client || !proposal || !repoRoot || !datasetPath) throw new Error('Preparation requires proposal, read-only client, repo root and frozen dataset path.');
     const sourceHash = verification.hashCodeImplementation(repoRoot);
     if (!shouldDraftCodeProposal(proposal, sourceHash, verification, false)) throw new Error('Proposal is not eligible for a new code-proposal attempt.');
@@ -221,12 +222,36 @@ async function prepareCodeProposalAttempt(options = {}) {
         for (const field of ['proposal_sha256', 'baseline_source_sha256', 'expected_dataset_sha256', 'behavior_tests_sha256', 'prompt_sha256', 'accepted_rules_sha256']) {
             if (!DIGEST.test(metadata[field])) throw new Error(`Prepared claim hash ${field} is missing or malformed.`);
         }
+        // The lineage envelope is derived from the preserved proposal,
+        // complete pending enumeration, and the five bytes actually frozen
+        // above. It intentionally excludes owner/attempt/auth identities.
+        const lineage = options.parentCampaignLineage ? validateParentCampaignLineage(options.parentCampaignLineage, { proposal }) : options.inventory ? buildParentCampaignLineage({
+            proposal,
+            inventory: options.inventory,
+            proposalFingerprint: metadata.proposal_sha256,
+            frozenHashes: {
+                behavior_tests_sha256: metadata.behavior_tests_sha256,
+                dataset_sha256: metadata.expected_dataset_sha256,
+                source_sha256: metadata.baseline_source_sha256,
+                prompt_sha256: metadata.prompt_sha256,
+                accepted_rules_sha256: metadata.accepted_rules_sha256,
+            },
+            enumeration: { ...(options.inventory.enumeration || {}), query: options.inventory.query },
+        }) : null;
+        if (lineage) {
+            persistParentCampaignLineage(attemptRoot, lineage, { pre_claim: true });
+            metadata.parent_campaign_sha256 = lineage.parent_campaign_sha256;
+        }
         const progress = { schema_version: 1, attempt_id: attemptId, phase: 'analysis', state: 'active', completed: 0,
             total: prepared.rows.length, updated_at: new Date(now).toISOString(), deadline_at: deadlineAt,
             budget: { max_drafts: 2, model_calls: 0 } };
         atomicWrite(path.join(candidateRoot, 'progress.json'), Buffer.from(`${JSON.stringify(progress, null, 2)}\n`));
         claimStarted = true;
-        await store.recordCodeVerification(client, proposal, { code_candidate: metadata }, verification);
+        if (lineage && typeof store.recordParentCampaignLineage === 'function') {
+            await store.recordParentCampaignLineage(client, proposal, lineage, verification);
+        }
+        const claimProposal = lineage ? { ...proposal, eval_summary: { ...(proposal.eval_summary || {}), parent_campaign_sha256: lineage.parent_campaign_sha256 } } : proposal;
+        await store.recordCodeVerification(client, claimProposal, { code_candidate: metadata }, verification);
         return { status: 'claimed', attemptId, artifactDirectory: attemptRoot, metadata, dataset: prepared };
     } catch (error) {
         if (claimStarted) {

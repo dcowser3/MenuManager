@@ -1,6 +1,7 @@
 'use strict';
 
 const path = require('path');
+const { validateParentCampaignLineage } = require('./parent-campaign-lineage');
 const fs = require('fs');
 const CLAIM_TTL_MS = 6 * 60 * 60 * 1000;
 const DIGEST = /^[a-f0-9]{64}$/;
@@ -179,6 +180,62 @@ async function recordCodeVerification(supabase, original, patch, verification = 
     return summary;
 }
 
+/** Bind the pre-claim parent lineage with a narrow pending-row CAS. */
+async function recordParentCampaignLineage(supabase, original, envelope, verification = loadVerificationModule(), options = {}) {
+    validateParentCampaignLineage(envelope, { proposal: original });
+    const { data: current, error } = await supabase.from('prompt_proposals').select('*').eq('id', original.id).single();
+    if (error) throw new Error(error.message);
+    if (!current || current.status !== 'pending') throw new Error('Proposal is no longer pending.');
+    if (verification.codeProposalVerificationFingerprint(current) !== verification.codeProposalVerificationFingerprint(original)) throw new Error('Proposal changed while parent lineage was being bound.');
+    const existing = current.eval_summary?.parent_campaign_sha256;
+    if (existing && existing !== envelope.parent_campaign_sha256) throw new Error('Parent campaign lineage already differs.');
+    const owner = current.eval_summary?.code_candidate;
+    if (owner && !(options.allowClosedOwner && owner.status === 'blocked' && owner.attempt_id === options.expectedAttemptId)) throw new Error('Parent campaign lineage must be bound before an owner claim.');
+    if (options.allowClosedOwner && (!owner || owner.status !== 'blocked' || owner.attempt_id !== options.expectedAttemptId)) throw new Error('Closed owner identity changed before parent lineage binding.');
+    const summary = { ...(current.eval_summary || {}), parent_campaign_sha256: envelope.parent_campaign_sha256 };
+    let query = supabase.from('prompt_proposals').update({ eval_summary: summary }).eq('id', current.id).eq('status', 'pending');
+    query = owner ? addEvaluationCasPredicates(query, current) : query.is('eval_summary->code_candidate', null);
+    const result = await query.select('id');
+    if (result.error) throw new Error(result.error.message);
+    if (!result.data?.length) throw new Error('Proposal changed concurrently; parent lineage was not written.');
+    return summary;
+}
+
+/** Close exactly the current running owner before a bounded lineage repair. */
+async function closeCodeCandidateOwnerForLineageRepair(supabase, original, expectedAttemptId, verification = loadVerificationModule()) {
+    const { data: current, error } = await supabase.from('prompt_proposals').select('*').eq('id', original.id).single();
+    if (error) throw new Error(error.message);
+    const owner = current?.eval_summary?.code_candidate;
+    if (!current || current.status !== 'pending' || !owner || owner.status !== 'running' || owner.attempt_id !== expectedAttemptId) throw new Error('Lineage repair owner is not the expected pending running attempt.');
+    if (verification.codeProposalVerificationFingerprint(current) !== verification.codeProposalVerificationFingerprint(original)) throw new Error('Proposal changed before lineage repair owner closure.');
+    const closed = { ...owner, status: 'blocked', phase: 'analysis', reason: 'parent_campaign_lineage_repair', closed_at: new Date().toISOString() };
+    assertFrozenIdentity(owner, closed);
+    let query = supabase.from('prompt_proposals').update({ eval_summary: { ...(current.eval_summary || {}), code_candidate: closed } }).eq('id', current.id).eq('status', 'pending');
+    query = addEvaluationCasPredicates(query, current);
+    const result = await query.select('id');
+    if (result.error) throw new Error(result.error.message);
+    if (!result.data?.length) throw new Error('Owner changed concurrently; lineage repair closure was not written.');
+    return { ...current, eval_summary: { ...(current.eval_summary || {}), code_candidate: closed } };
+}
+
+/** Clear only the just-closed owner, retaining all private attempt artifacts. */
+async function clearClosedCodeCandidateOwnerForLineageRepair(supabase, original, expectedAttemptId, verification = loadVerificationModule()) {
+    const { data: current, error } = await supabase.from('prompt_proposals').select('*').eq('id', original.id).single();
+    if (error) throw new Error(error.message);
+    const owner = current?.eval_summary?.code_candidate;
+    if (!current || current.status !== 'pending' || !owner || owner.status !== 'blocked' || owner.attempt_id !== expectedAttemptId || owner.reason !== 'parent_campaign_lineage_repair') throw new Error('Closed lineage repair owner identity changed.');
+    if (verification.codeProposalVerificationFingerprint(current) !== verification.codeProposalVerificationFingerprint(original)) throw new Error('Proposal changed before lineage repair owner release.');
+    const summary = { ...(current.eval_summary || {}) };
+    delete summary.code_candidate;
+    delete summary.code_verification;
+    let query = supabase.from('prompt_proposals').update({ eval_summary: summary }).eq('id', current.id).eq('status', 'pending');
+    query = addEvaluationCasPredicates(query, current);
+    const result = await query.select('id');
+    if (result.error) throw new Error(result.error.message);
+    if (!result.data?.length) throw new Error('Owner changed concurrently; lineage repair release was not written.');
+    return { ...current, eval_summary: summary };
+}
+
 function shouldDraftCodeProposal(proposal, implementationHash, verification = loadVerificationModule(), force = false) {
     if (proposal?.status !== 'pending' || !proposal.code_recommendations?.length) return false;
     // Legacy replay can contain incorrectly retired delivery failures. Regenerate it under
@@ -196,4 +253,4 @@ function shouldDraftCodeProposal(proposal, implementationHash, verification = lo
     return false;
 }
 
-module.exports = { loadVerificationModule, recordCodeVerification, shouldDraftCodeProposal, runningClaimIsFresh };
+module.exports = { loadVerificationModule, recordCodeVerification, recordParentCampaignLineage, closeCodeCandidateOwnerForLineageRepair, clearClosedCodeCandidateOwnerForLineageRepair, shouldDraftCodeProposal, runningClaimIsFresh };

@@ -46,7 +46,7 @@ const { createClient } = require('@supabase/supabase-js');
 const evalHelpers = require('./review-eval-helpers');
 const behaviorArtifactLib = require('./lib/behavior-artifact');
 const { preparePendingCodeProposalQueue, loadPendingProposalRows } = require('./lib/code-proposal-preparation-queue');
-const { recordCodeVerification } = require('./lib/proposal-verification-store');
+const { recordCodeVerification, recordParentCampaignLineage } = require('./lib/proposal-verification-store');
 const { appendExpectationArtifactArgs } = require('./lib/improvement-cycle-wiring');
 
 const LOCK_PATH = path.join(repoRoot, 'tmp', 'improvement-cycle', '.lock');
@@ -143,7 +143,7 @@ async function triggerManualCodeCandidateReview({ supabase, cycleId, proposalRow
         if (proposalId && !pending.rows.some((row) => row.id === proposalId)) throw new Error(`Requested proposal ${proposalId} was not found in the pending inventory.`);
         const result = await preparePendingCodeProposalQueue({
             client: supabase,
-            store: { recordCodeVerification },
+            store: { recordCodeVerification, recordParentCampaignLineage },
             proposals: pending.rows,
             enumeration: pending,
             manualExclusionArtifacts: proposalId && manualExclusionArtifact ? { [proposalId]: manualExclusionArtifact } : undefined,

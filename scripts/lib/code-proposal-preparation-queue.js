@@ -4,7 +4,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const { prepareCodeProposalAttempt, bindHistoricalDataset, readFrozenDataset, safeId } = require('./code-proposal-preparation');
-const { runningClaimIsFresh } = require('./proposal-verification-store');
+const { runningClaimIsFresh, recordParentCampaignLineage } = require('./proposal-verification-store');
 
 const MAX_GROUPS = 500;
 const MAX_BYTES = 8 * 1024 * 1024;

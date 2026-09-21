@@ -1,6 +1,21 @@
 # Review-learning B5-C1: credential-free attempt preparation
 
 B5-C1 prepares a code-candidate attempt without drafting or running a verifier.
+
+## Parent-campaign lineage
+
+Before the owner claim, preparation derives a versioned
+`parent-campaign-lineage.json` envelope from the preserved proposal, the
+complete pending-proposal enumeration, the replay-retirement policy version,
+and the five hashes frozen by preparation (behavior, dataset, implementation
+source, prompt, and accepted rules). The envelope's canonical digest is stored
+at `eval_summary.parent_campaign_sha256` and excludes attempt, owner, and
+authorization identities, so a later bounded draft authorization can bind the
+same campaign without inventing historical lineage. A private
+`parent-campaign-lineage-recovery.json` records the same inputs for interrupted
+repair. Existing owners may be closed only through the guarded lineage-repair
+transition; the proposal remains pending and its content/evidence are not
+rewritten.
 It validates the unchanged pending proposal through the B5-B queue gate,
 freezes the proposal, exact prompt bytes, canonical accepted-rule rows, B6-D1 behavior artifact, and complete
 historical dataset under a unique `tmp/code-proposals/<proposal>/<attempt>`
