@@ -33,7 +33,7 @@ function main() {
     const proposal = JSON.parse(bytes.toString('utf8'));
     const implementationSha256 = verification.hashCodeImplementation(root);
     const fingerprint = verification.codeProposalVerificationFingerprint(proposal);
-    const plan = reconciliation.buildContextualDescriptorReconciliationPlan({ proposal, expectedProposalFingerprint: fingerprint, implementationSha256, expectedImplementationSha256: implementationSha256 });
+    const plan = reconciliation.buildContextualDescriptorReconciliationPlan({ proposal, expectedProposalFingerprint: fingerprint, computeProposalFingerprint: verification.codeProposalVerificationFingerprint, implementationSha256, expectedImplementationSha256: implementationSha256 });
     reconciliation.assertContextualDescriptorReconciliationPlan(plan);
     writePrivate(path.join(outputDir, 'before.json'), proposal);
     writePrivate(path.join(outputDir, 'plan.json'), { ...plan, input_sha256: digest(bytes), proposal_file: resolved });
