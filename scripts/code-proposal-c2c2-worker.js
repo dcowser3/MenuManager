@@ -67,9 +67,10 @@ async function runFixedDelivery(request) {
             await page.route('**/*', (route) => { requestAttempted = true; return route.abort(); });
             const quillSource = fs.readFileSync(path.join(workspace, 'services/dashboard/public/vendor/quill-1.3.6/quill.js'), 'utf8');
             const redlineSource = fs.readFileSync(path.join(workspace, 'services/dashboard/public/js/redline-preview.js'), 'utf8');
+            const diffCoreSource = fs.readFileSync(path.join(workspace, 'services/diff-core/src/index.js'), 'utf8');
             const submissionSource = fs.readFileSync(path.join(workspace, 'services/dashboard/public/js/form-submission.js'), 'utf8');
         const fixtureText = `${request.delivery_fixture.text}`;
-        const html = `<div id="editor"></div><form id="menu-form"><input name="menuContent"><input name="menuContentHtml"></form><script>${quillSource}</script><script>${redlineSource}</script><script>${submissionSource}</script>`;
+        const html = `<div id="editor"></div><form id="menu-form"><input name="menuContent"><input name="menuContentHtml"></form><script>${quillSource}</script><script>${diffCoreSource}</script><script>${redlineSource}</script><script>${submissionSource}</script>`;
             await page.setContent(html, { waitUntil: 'load' });
             await page.evaluate(() => { window.deliveryQuill = new Quill('#editor', { theme: 'snow' }); });
             const capture = await page.evaluate((value) => {
@@ -86,7 +87,7 @@ async function runFixedDelivery(request) {
         };
         const baseline = await captureArm(baselineWorkspace);
         const candidate = await captureArm(candidateWorkspace);
-        const sourcePaths = { form: 'services/dashboard/views/form.ejs', form_helpers: 'services/dashboard/public/js/form-helpers.js', form_submission: 'services/dashboard/public/js/form-submission.js', diff_core: 'services/dashboard/public/js/form-stage.js', redline_preview: 'services/dashboard/public/js/redline-preview.js', form_stage: 'services/dashboard/public/js/form-stage.js', showStep2: 'services/dashboard/views/form.ejs', submitMenu: 'services/dashboard/views/form.ejs', quill: 'services/dashboard/public/vendor/quill-1.3.6/quill.js' };
+        const sourcePaths = { form: 'services/dashboard/views/form.ejs', form_helpers: 'services/dashboard/public/js/form-helpers.js', form_submission: 'services/dashboard/public/js/form-submission.js', diff_core: 'services/diff-core/src/index.js', redline_preview: 'services/dashboard/public/js/redline-preview.js', form_stage: 'services/dashboard/public/js/form-stage.js', showStep2: 'services/dashboard/views/form.ejs', submitMenu: 'services/dashboard/views/form.ejs', quill: 'services/dashboard/public/vendor/quill-1.3.6/quill.js' };
         const sourceHashesFor = (workspace) => Object.fromEntries(Object.entries(sourcePaths).map(([key, relative]) => [key, hashFile(path.join(workspace, relative))]));
         const baselineSourceHashes = sourceHashesFor(baselineWorkspace);
         const candidateSourceHashes = sourceHashesFor(candidateWorkspace);
