@@ -100,7 +100,9 @@ function validateManualExclusionArtifact(proposal, artifact, proposalFingerprint
     const rows = Array.isArray(artifact.exclusions) ? artifact.exclusions : [];
     const ids = rows.map((row) => `${row?.correction_id || ''}`);
     if (new Set(ids).size !== ids.length || ids.some((id) => !USER_MANUAL_UNRESOLVED.has(id)) || ids.length !== USER_MANUAL_UNRESOLVED.size || [...USER_MANUAL_UNRESOLVED].some((id) => !ids.includes(id)) || rows.some((row) => row.reason !== 'user_owned_manual_unresolved')) throw new Error('Manual exclusion artifact has missing, extra, duplicate, or ambiguous exclusions.');
-    return Object.freeze({ schema_version: 1, source: artifact.source, proposal_id: artifact.proposal_id, cycle_id: artifact.cycle_id, proposal_fingerprint: artifact.proposal_fingerprint, exclusions: rows.map((row) => ({ correction_id: row.correction_id, reason: row.reason })) });
+    const body = { schema_version: 1, source: artifact.source, proposal_id: artifact.proposal_id, cycle_id: artifact.cycle_id, proposal_fingerprint: artifact.proposal_fingerprint, exclusions: rows.map((row) => ({ correction_id: row.correction_id, reason: row.reason })) };
+    if (artifact.artifact_sha256 && artifact.artifact_sha256 !== sha256(body)) throw new Error('Manual exclusion artifact hash changed.');
+    return Object.freeze({ ...body, artifact_sha256: sha256(body) });
 }
 
 function buildPreparationInventory(proposal, options = {}) {
@@ -180,6 +182,7 @@ function buildPreparationInventory(proposal, options = {}) {
         blocked_groups: groups.filter((group) => group.status === 'blocked').map((group) => ({ correction_id: group.correction_id, reason: group.reason })),
         advisory_cursor: options.advisoryCursor || null,
         manual_exclusions: manualExclusions,
+        eligible_group_set_sha256: sha256(groups.filter((group) => group.status !== 'excluded').map((group) => group.correction_id)),
     };
     if (body.enumeration.complete !== true) throw new Error('Preparation queue enumeration is incomplete.');
     const snapshot_sha256 = sha256(body);
@@ -203,7 +206,7 @@ function summaryFor(inventory, attemptId, artifactDirectory, groups, reason = nu
 }
 
 function inventoryBoundaryHash(inventory) {
-    const boundary = Object.fromEntries(['schema_version', 'source', 'proposal_id', 'cycle_id', 'superseded_from_cycle_id', 'proposal_fingerprint', 'replay_policy_version', 'behavior_tests_sha256', 'groups', 'excluded_groups', 'blocked_groups'].map((key) => [key, inventory?.[key] ?? null]));
+    const boundary = Object.fromEntries(['schema_version', 'source', 'proposal_id', 'cycle_id', 'superseded_from_cycle_id', 'proposal_fingerprint', 'replay_policy_version', 'behavior_tests_sha256', 'groups', 'excluded_groups', 'blocked_groups', 'manual_exclusions', 'eligible_group_set_sha256'].map((key) => [key, inventory?.[key] ?? null]));
     return sha256(boundary);
 }
 
