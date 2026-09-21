@@ -45,16 +45,16 @@ function assertFinalReadback(actual, planned) {
 async function recoverAppliedRefresh({ proposal, proposalId, artifactDir }) {
     const planPath = path.join(artifactDir, 'plan.json');
     const afterPath = path.join(artifactDir, 'after.json');
-    if (!fs.existsSync(planPath)) return null;
+    if (!fs.existsSync(planPath)) return null; // no saved plan: first invocation
     let plan; let after;
     try {
         plan = JSON.parse(await fsp.readFile(planPath, 'utf8'));
-    } catch { return null; }
+    } catch { throw new Error('Replay refresh saved plan is corrupt; refusing to overwrite artifacts.'); }
     if (plan.proposal_id !== proposalId || plan.planned_sha256 !== canonicalHash(plan.planned)
-        || canonicalHash(proposal) !== plan.planned_sha256) return null;
+        || canonicalHash(proposal) !== plan.planned_sha256) throw new Error('Replay refresh saved plan conflicts with the live proposal; refusing to overwrite artifacts.');
     if (fs.existsSync(afterPath)) {
-        try { after = JSON.parse(await fsp.readFile(afterPath, 'utf8')); } catch { return null; }
-        if (canonicalHash(after) !== plan.planned_sha256) return null;
+        try { after = JSON.parse(await fsp.readFile(afterPath, 'utf8')); } catch { throw new Error('Replay refresh after artifact is corrupt; refusing to overwrite artifacts.'); }
+        if (canonicalHash(after) !== plan.planned_sha256) throw new Error('Replay refresh after artifact conflicts with the saved plan; refusing to overwrite artifacts.');
     }
     assertFinalReadback(proposal, plan.planned);
     await writePrivate(path.join(artifactDir, 'marker.json'), { state: 'recovered', proposal_id: proposalId, planned_sha256: plan.planned_sha256, model_calls: 0 });
