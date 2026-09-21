@@ -27,7 +27,8 @@ function readRequest() {
     const request = JSON.parse(fs.readFileSync(requestPath, 'utf8'));
     if (!request || request.phase !== phase || request.arm !== arm) throw new Error('request/environment mismatch');
     const expectedImage = phase === 'delivery' ? request.plan.delivery_identity?.delivery_image_id : request.plan?.image_id;
-    if (!request.plan || request.plan.runtime_id !== runtimeId || expectedImage !== imageId || typeof request.plan.support_bundle_sha256 !== 'string') throw new Error('request/plan identity mismatch');
+    const expectedRuntime = phase === 'delivery' ? request.plan.delivery_identity?.delivery_runtime_id : request.plan?.runtime_id;
+    if (!request.plan || expectedRuntime !== runtimeId || expectedImage !== imageId || typeof request.plan.support_bundle_sha256 !== 'string') throw new Error('request/plan identity mismatch');
     return request;
 }
 
@@ -55,30 +56,39 @@ function hashText(value) {
 async function runFixedDelivery(request) {
     if (!request.correction || typeof request.correction.corrected_text !== 'string') throw new Error('delivery correction is invalid');
     const { chromium } = require('playwright');
+    const deliveryRequest = { ...request, inventory: request.inventory || request.plan.test_inventory || [] };
+    const baselineWorkspace = materializeWorkspace('/runner/baseline', deliveryRequest);
+    const candidateWorkspace = materializeWorkspace('/runner/candidate', deliveryRequest);
     const browser = await chromium.launch({ headless: true });
     try {
         const page = await browser.newPage();
         let requestAttempted = false;
         await page.route('**/*', (route) => { requestAttempted = true; return route.abort(); });
-        const quillSource = fs.readFileSync('/runner/candidate/services/dashboard/public/vendor/quill-1.3.6/quill.js', 'utf8');
+        const quillSource = fs.readFileSync(path.join(candidateWorkspace, 'services/dashboard/public/vendor/quill-1.3.6/quill.js'), 'utf8');
         const original = `${request.correction.original_text || ''}`;
         const corrected = `${request.correction.corrected_text}`;
         const html = `<div id="editor"></div><form id="menu-form"><input name="menuContent"><input name="menuContentHtml"></form><script>${quillSource}</script>`;
         await page.setContent(html, { waitUntil: 'load' });
+        await page.evaluate(() => { window.deliveryQuill = new Quill('#editor', { theme: 'snow' }); });
         const capture = async (text) => page.evaluate((value) => {
-            const editor = document.querySelector('#editor');
-            editor.innerHTML = `<p>${value.replace(/[&<>]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[ch]))}</p>`;
-            const htmlValue = editor.innerHTML;
-            return { text: editor.innerText.trim(), html: htmlValue, htmlText: editor.innerText.trim() };
+            const q = window.deliveryQuill;
+            q.setText(value);
+            const htmlValue = q.root.innerHTML;
+            return { text: q.getText().trim(), html: htmlValue, htmlText: q.root.innerText.trim() };
         }, text);
         const baseline = await capture(original);
         const candidate = await capture(corrected);
         if (requestAttempted) throw new Error('delivery browser attempted a network request');
-        const sourceHashes = {};
-        for (const key of ['form', 'form_helpers', 'diff_core', 'redline_preview', 'form_stage', 'showStep2', 'submitMenu', 'quill']) sourceHashes[key] = hashText(`${key}:repository-owned-delivery-driver-v1`);
-        sourceHashes.driver = hashText(fs.readFileSync(__filename));
+        const sourcePaths = { form: 'services/dashboard/views/form.ejs', form_helpers: 'services/dashboard/public/js/form-helpers.js', diff_core: 'services/dashboard/public/js/form-stage.js', redline_preview: 'services/dashboard/public/js/redline-preview.js', form_stage: 'services/dashboard/public/js/form-stage.js', showStep2: 'services/dashboard/views/form.ejs', submitMenu: 'services/dashboard/views/form.ejs', quill: 'services/dashboard/public/vendor/quill-1.3.6/quill.js' };
+        const sourceHashesFor = (workspace) => Object.fromEntries(Object.entries(sourcePaths).map(([key, relative]) => [key, hashFile(path.join(workspace, relative))]));
+        const baselineSourceHashes = sourceHashesFor(baselineWorkspace);
+        const candidateSourceHashes = sourceHashesFor(candidateWorkspace);
+        const sourceManifest = hashValue({ baseline: baselineSourceHashes, candidate: candidateSourceHashes });
+        baselineSourceHashes.driver = sourceManifest;
+        candidateSourceHashes.driver = sourceManifest;
         const browserVersion = await browser.version();
-        return { driver: 'form-submit-v1', baseline_source_hashes: sourceHashes, candidate_source_hashes: sourceHashes, baseline_browser_version: browserVersion, candidate_browser_version: browserVersion, quill_version: '1.3.6', baseline_submitted_text: baseline.text, candidate_submitted_text: candidate.text, baseline_submitted_html: baseline.html, candidate_submitted_html: candidate.html, baseline_submitted_html_text: baseline.htmlText, candidate_submitted_html_text: candidate.htmlText, submitted: false };
+        const quillVersion = await page.evaluate(() => Quill.version);
+        return { driver: 'form-submit-v1', baseline_source_hashes: baselineSourceHashes, candidate_source_hashes: candidateSourceHashes, source_manifest_sha256: sourceManifest, baseline_browser_version: browserVersion, candidate_browser_version: browserVersion, quill_version: quillVersion, baseline_submitted_text: baseline.text, candidate_submitted_text: candidate.text, baseline_submitted_html: baseline.html, candidate_submitted_html: candidate.html, baseline_submitted_html_text: baseline.htmlText, candidate_submitted_html_text: candidate.htmlText };
     } finally { await browser.close(); }
 }
 

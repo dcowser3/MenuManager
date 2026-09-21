@@ -267,6 +267,14 @@ function assessCodeProposalVerificationInternal(proposal, allowTestOnly) {
         }
         correction.recommendation_indexes.forEach((index) => covered.add(index));
     }
+    const deliveryIdentity = input.delivery_identity;
+    if (deliveryIds.size > 0 && (!deliveryIdentity || !digest(deliveryIdentity.delivery_image_id) || !digest(deliveryIdentity.delivery_runtime_id)
+        || !digest(deliveryIdentity.delivery_driver_sha256) || !digest(deliveryIdentity.delivery_source_sha256)
+        || typeof deliveryIdentity.browser_version !== 'string' || typeof deliveryIdentity.quill_version !== 'string'
+        || !digest(deliveryIdentity.identity_sha256) || input.delivery_identity_sha256 !== deliveryIdentity.identity_sha256
+        || (0, crypto_1.createHash)('sha256').update(JSON.stringify(Object.fromEntries(Object.keys(deliveryIdentity).filter((key) => key !== 'identity_sha256').sort().map((key) => [key, canonical(deliveryIdentity[key])])))).digest('hex') !== deliveryIdentity.identity_sha256)) {
+        return fail('Delivery proof lacks a valid separate hash-bound identity.');
+    }
     if (covered.size !== proposal.code_recommendations.length)
         return fail('Every code recommendation needs a linked motivating correction and regression test.');
     const testFailure = assessCodeVerificationTests(proof.tests, corrections);
