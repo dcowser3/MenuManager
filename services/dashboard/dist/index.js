@@ -73,6 +73,7 @@ const error_report_1 = require("./lib/error-report");
 const alert_mail_1 = require("./lib/alert-mail");
 const property_catalog_1 = require("./lib/property-catalog");
 const learning_correction_rules_1 = require("./lib/learning-correction-rules");
+const human_explanation_source_binding_1 = require("./lib/human-explanation-source-binding");
 const learning_dashboard_rules_1 = require("./lib/learning-dashboard-rules");
 const learning_submissions_1 = require("./lib/learning-submissions");
 const embedded_set_menu_guard_1 = require("./lib/embedded-set-menu-guard");
@@ -2170,8 +2171,8 @@ app.get('/learning', async (_req, res) => {
 app.get('/learning/submission/:submissionId', async (req, res) => {
     try {
         const { submissionId } = req.params;
-        let [learningDetailResult, submissionResult, correctionRulesResult, propertiesResult] = await Promise.all([
-            internalApi.get(`${DIFFER_SERVICE_URL}/learning/submissions/${encodeURIComponent(submissionId)}`, { timeout: 3500 })
+        let [learningRevisionResult, submissionResult, correctionRulesResult, propertiesResult] = await Promise.all([
+            internalApi.get(`${DIFFER_SERVICE_URL}/learning/submissions/${encodeURIComponent(submissionId)}/revision`, { timeout: 3500 })
                 .then((r) => ({ ok: true, data: r.data, error: '' }))
                 .catch((e) => ({ ok: false, data: null, error: e?.message || 'request failed' })),
             internalApi.get(`${DB_SERVICE_URL}/submissions/${encodeURIComponent(submissionId)}`, { timeout: 3500 })
@@ -2184,6 +2185,14 @@ app.get('/learning/submission/:submissionId', async (req, res) => {
                 .then((r) => ({ ok: true, data: r.data, error: '' }))
                 .catch((e) => ({ ok: false, data: { properties: [] }, error: e?.message || 'request failed' })),
         ]);
+        let learningDetailResult = { ok: false, data: null, error: 'comparison revision unavailable' };
+        const initialRevision = learningRevisionResult.data?.comparison_revision;
+        if (learningRevisionResult.ok && initialRevision) {
+            learningDetailResult = await internalApi
+                .get(`${DIFFER_SERVICE_URL}/learning/submissions/${encodeURIComponent(submissionId)}?comparison_revision=${encodeURIComponent(initialRevision)}`, { timeout: 3500 })
+                .then((r) => ({ ok: true, data: r.data, error: '' }))
+                .catch((e) => ({ ok: false, data: null, error: e?.message || 'request failed' }));
+        }
         // Browser approval finalization creates the differ comparison just before sending
         // the reviewer here. A slow filesystem write used to make this first GET lose a
         // race and render a 404; refreshing worked because the comparison had completed.
@@ -2191,8 +2200,15 @@ app.get('/learning/submission/:submissionId', async (req, res) => {
         if (!learningDetailResult.ok && submissionResult.ok) {
             for (let attempt = 0; attempt < 4 && !learningDetailResult.ok; attempt++) {
                 await new Promise((resolve) => setTimeout(resolve, 250));
+                learningRevisionResult = await internalApi
+                    .get(`${DIFFER_SERVICE_URL}/learning/submissions/${encodeURIComponent(submissionId)}/revision`, { timeout: 3500 })
+                    .then((r) => ({ ok: true, data: r.data, error: '' }))
+                    .catch((e) => ({ ok: false, data: null, error: e?.message || 'request failed' }));
+                const retryRevision = learningRevisionResult.data?.comparison_revision;
+                if (!learningRevisionResult.ok || !retryRevision)
+                    continue;
                 learningDetailResult = await internalApi
-                    .get(`${DIFFER_SERVICE_URL}/learning/submissions/${encodeURIComponent(submissionId)}`, { timeout: 3500 })
+                    .get(`${DIFFER_SERVICE_URL}/learning/submissions/${encodeURIComponent(submissionId)}?comparison_revision=${encodeURIComponent(retryRevision)}`, { timeout: 3500 })
                     .then((r) => ({ ok: true, data: r.data, error: '' }))
                     .catch((e) => ({ ok: false, data: null, error: e?.message || 'request failed' }));
             }
@@ -2228,17 +2244,76 @@ app.get('/learning/submission/:submissionId', async (req, res) => {
 /**
  * Correction rules: create (human-annotated or accept system proposal)
  */
+async function resolveHumanExplanationSourceBinding(payload) {
+    const submissionId = `${payload?.submission_id || ''}`.trim();
+    const correctionId = `${payload?.correction_id || ''}`.trim();
+    if (!submissionId || !correctionId) {
+        throw new learning_correction_rules_1.CorrectionRuleValidationError('submission_id and correction_id are required for source binding');
+    }
+    const comparisonRevision = `${payload?.comparison_revision || ''}`.trim();
+    if (!comparisonRevision) {
+        throw new learning_correction_rules_1.CorrectionRuleValidationError('The exact learning comparison revision is required');
+    }
+    const learningResult = await internalApi.get(`${DIFFER_SERVICE_URL}/learning/submissions/${encodeURIComponent(submissionId)}?comparison_revision=${encodeURIComponent(comparisonRevision)}`, { timeout: 3500 });
+    const learning = learningResult.data || {};
+    const correction = Array.isArray(learning.dish_corrections)
+        ? learning.dish_corrections.find((item) => `${item?.correction_id || ''}` === correctionId)
+        : null;
+    if (!correction) {
+        throw new learning_correction_rules_1.CorrectionRuleValidationError('The correction is not present in the trusted learning comparison');
+    }
+    if (learning.comparison_revision !== comparisonRevision
+        || learning.source_stage !== human_explanation_source_binding_1.HUMAN_EXPLANATION_SOURCE_STAGE
+        || learning.coordinate_basis !== human_explanation_source_binding_1.HUMAN_EXPLANATION_COORDINATE_BASIS
+        || typeof learning.source_snapshot_sha256 !== 'string'
+        || typeof learning.source_extraction_version !== 'string'
+        || !learning.source_extraction_version.trim()) {
+        throw new learning_correction_rules_1.CorrectionRuleValidationError('The learning comparison has no trusted source revision');
+    }
+    const sourceResult = await internalApi.get(`${DB_SERVICE_URL}/submissions/${encodeURIComponent(submissionId)}/review-source-binding?source_snapshot_sha256=${encodeURIComponent(learning.source_snapshot_sha256)}`, { timeout: 3500 });
+    const source = sourceResult.data || {};
+    const audit = source.audit || {};
+    const binding = (0, human_explanation_source_binding_1.buildHumanExplanationSourceBinding)({
+        submissionId: source.submission_id,
+        attemptId: source.attempt_id,
+        auditId: audit.id,
+        sourceSnapshotSha256: learning.source_snapshot_sha256,
+        matchedAuditStage: audit.source_stage,
+        matchedAuditSnapshotSha256: audit.source_snapshot_sha256,
+        comparisonRevision: learning.comparison_revision,
+        sourceExtractionVersion: learning.source_extraction_version,
+        correction,
+    });
+    return {
+        binding,
+        // Browser-supplied before/after values are not provenance. Keep the
+        // reviewer intent fields, but replace the source span with the exact
+        // trusted differ row before persisting the explanation.
+        trustedPayload: {
+            ...payload,
+            original_text: correction.before_line,
+            corrected_text: correction.after_line,
+            source_binding: binding,
+        },
+    };
+}
 app.post('/api/learning/correction-rules', async (req, res) => {
     try {
         const payload = req.body || {};
+        const resolved = await resolveHumanExplanationSourceBinding(payload);
         const catalog = await getPropertyCatalogFromDb();
-        const record = (0, learning_correction_rules_1.buildCorrectionRuleRecord)(payload, catalog);
+        const record = (0, learning_correction_rules_1.buildCorrectionRuleRecord)(resolved.trustedPayload, catalog);
         const response = await internalApi.post(`${DB_SERVICE_URL}/correction-rules`, record, { timeout: 3000 });
         res.json(response.data);
     }
     catch (error) {
         if ((0, learning_correction_rules_1.isCorrectionRuleValidationError)(error)) {
             return res.status(error.statusCode).json({ error: error.message });
+        }
+        if (error?.response?.status === 409) {
+            return res.status(409).json({
+                error: error?.response?.data?.error || 'The trusted learning source changed or is ambiguous; reload the comparison before saving.',
+            });
         }
         console.error('Error saving correction rule:', error.message);
         res.status(error?.response?.status || 500).json(error?.response?.data || { error: 'Failed to save correction rule' });

@@ -102,6 +102,15 @@ describe('buildCorrectionRuleRecord', () => {
         expect(record.source).toBe('human');
         expect(record.status).toBe('pending');
     });
+    test('carries the server-assembled source binding without allowing the builder to invent one', () => {
+        const sourceBinding = { version: 'human-explanation-source-binding-v1', source_revision_id: 'SER-test' };
+        const record = (0, learning_correction_rules_1.buildCorrectionRuleRecord)({
+            ...basePayload,
+            source_binding: sourceBinding,
+        }, catalog);
+        expect(record.source_binding).toBe(sourceBinding);
+        expect((0, learning_correction_rules_1.buildCorrectionRuleRecord)(basePayload, catalog).source_binding).toBeNull();
+    });
     test('stores only the reviewer-scoped replacement for a mixed dish-line edit', () => {
         const record = (0, learning_correction_rules_1.buildCorrectionRuleRecord)({
             ...basePayload,

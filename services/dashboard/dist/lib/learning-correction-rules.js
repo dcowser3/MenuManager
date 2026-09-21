@@ -98,6 +98,9 @@ function buildCorrectionRuleRecord(payload, catalog) {
         source: payload.source || 'human',
         example_original: originalText ? null : exampleOriginal,
         example_corrected: correctedText ? null : exampleCorrected,
+        source_binding: payload.source_binding && typeof payload.source_binding === 'object'
+            ? payload.source_binding
+            : null,
         // Saved corrections are PROPOSALS, not live rules. They stay 'pending'
         // until the improvement cycle routes them by explanation (replacement
         // rule vs prompt reasoning vs code change) and a reviewer approves the

@@ -65,7 +65,7 @@ function createFixture(fetchImpl) {
             { correction_id: 'c1', before_line: 'Old one', after_line: 'New one' },
             { correction_id: 'c2', before_line: 'Old two', after_line: 'New two' },
         ],
-        submissionContext: { submissionId: 'sub-1', projectName: 'Dinner', restaurantName: 'Dinner' },
+        submissionContext: { submissionId: 'sub-1', comparisonRevision: 'comparison-revision-1', projectName: 'Dinner', restaurantName: 'Dinner' },
         savedCorrectionIds: [],
     });
     controller.init();
@@ -100,6 +100,7 @@ describe('learning submission explanation controller', () => {
         expect(fetchImpl).toHaveBeenCalledTimes(2);
         const payloads = fetchImpl.mock.calls.map((call) => JSON.parse(call[1].body));
         expect(payloads.map((payload) => payload.reviewer_name)).toEqual(['Reviewer A', 'Reviewer A']);
+        expect(payloads.map((payload) => payload.comparison_revision)).toEqual(['comparison-revision-1', 'comparison-revision-1']);
         expect(payloads.map((payload) => payload.rule)).toEqual(['Explanation one', 'Explanation two']);
         expect(buttons.every((button) => button.disabled)).toBe(true);
         expect(elements.get('bulk-save-status').textContent).toBe('2 explanations saved.');

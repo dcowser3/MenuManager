@@ -136,6 +136,29 @@ CREATE INDEX idx_correction_rules_unconsumed ON correction_rules(prompt_cycle_id
     WHERE prompt_cycle_id IS NULL;
 ```
 
+#### Human explanation source binding
+
+When a reviewer saves an explanation from the learning comparison page, the
+dashboard resolves provenance server-side before creating the row. The
+browser's correction text, audit ID, and source identity are not authoritative.
+The differ comparison is frozen at `/compare` creation with its extraction
+version, comparison revision, source stage, coordinate basis, and SHA-256 of
+the extracted AI-draft text. The save request must name that exact comparison
+revision; the differ service re-extracts the source and fails closed if its
+hash (or the approved output hash) changed.
+
+The dashboard then asks the DB service to match that exact source hash against
+the submission's completed/full `basic_ai_check_audits` rows. Multiple audits
+are allowed, but there must be exactly one matching audit stage: the audited
+`final_result.correctedMenu` stage is preferred, with
+`parsed_response.correctedMenu` as a fallback. Missing or duplicate matches
+are rejected. The persisted nullable `correction_rules.source_binding` JSONB
+envelope records submission, derived learning case/correction identity, form attempt, audit, comparison revision,
+displayed differ stage/coordinates, matched audit stage/hash, binding method,
+and the exact UTF-16 before/after span and text hashes. It is insert-only
+provenance; correction-rule updates cannot edit it. Legacy/system rows may
+remain null and no model output can create or replace a binding.
+
 ### `prompt_proposals` Table (Supabase)
 
 Tracks weekly prompt rewrite proposals.

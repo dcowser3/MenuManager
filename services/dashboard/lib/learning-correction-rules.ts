@@ -1,3 +1,5 @@
+import type { HumanExplanationSourceBinding } from './human-explanation-source-binding';
+
 export const GLOBAL_CORRECTION_RULE_LOCATION = 'All properties (global rule)';
 
 export class CorrectionRuleValidationError extends Error {
@@ -26,6 +28,8 @@ export interface CorrectionRuleRecord {
     // in the human's exact strings. Null for exact rules (their original/corrected already serve).
     example_original: string | null;
     example_corrected: string | null;
+    /** Server-assembled immutable source provenance; null for legacy/system rows. */
+    source_binding: HumanExplanationSourceBinding | null;
 }
 
 function text(value: any): string {
@@ -129,6 +133,9 @@ export function buildCorrectionRuleRecord(payload: any, catalog: Array<{ name?: 
         source: payload.source || 'human',
         example_original: originalText ? null : exampleOriginal,
         example_corrected: correctedText ? null : exampleCorrected,
+        source_binding: payload.source_binding && typeof payload.source_binding === 'object'
+            ? payload.source_binding
+            : null,
         // Saved corrections are PROPOSALS, not live rules. They stay 'pending'
         // until the improvement cycle routes them by explanation (replacement
         // rule vs prompt reasoning vs code change) and a reviewer approves the

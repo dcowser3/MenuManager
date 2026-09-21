@@ -170,6 +170,7 @@
                 .replace(/\u2029/g, '\\u2029');
             const submissionContext = {
                 submissionId,
+                comparisonRevision: learningDetail.comparison_revision || '',
                 projectName: submissionMeta.project_name || '',
                 restaurantName: submissionMeta.project_name || submissionMeta.property || '',
             };

@@ -30,6 +30,13 @@ import {
     tokenizeDiffText,
 } from '@menumanager/diff-core';
 import {
+    comparisonRevision,
+    LEARNING_COORDINATE_BASIS,
+    LEARNING_SOURCE_EXTRACTION_VERSION,
+    LEARNING_SOURCE_STAGE,
+    sha256Text,
+} from './lib/learning-source-revision';
+import {
     BoldFormattingSignal,
     extractBoldFormattingSignals,
 } from './lib/formatting-signals';
@@ -106,6 +113,12 @@ type TrainingEntry = {
     changed_by_human?: boolean;
     learning_eligible?: boolean;
     comparison_key?: string;
+    comparison_revision?: string;
+    source_extraction_version?: string;
+    source_stage?: string;
+    coordinate_basis?: string;
+    source_snapshot_sha256?: string;
+    final_snapshot_sha256?: string;
     analysis: {
         identical: boolean;
         ai_draft_words: number;
@@ -122,7 +135,6 @@ type TrainingEntry = {
         bold_change_count: number;
     };
 };
-
 type LearnedRule = {
     source: string;
     target: string;
@@ -181,6 +193,11 @@ type DishCorrection = {
     after_line: string;
     diff_html: string;
     change_type: 'modified' | 'removed' | 'added';
+    source_span?: {
+        row_index: number;
+        start_utf16: number;
+        end_utf16: number;
+    };
 };
 
 async function initDiffer() {
@@ -271,6 +288,7 @@ app.post('/compare', async (req, res) => {
 
         const aiDraftText = aiDraftDocument.text;
         const finalText = finalDocument.text;
+        const sourceSnapshotSha256 = sha256Text(aiDraftText);
         const differences = analyzeDocuments(aiDraftText, finalText);
         const replacements = extractReplacementSignals(aiDraftText, finalText);
         const boldFormattingSignals = extractBoldFormattingSignals({
@@ -310,6 +328,12 @@ app.post('/compare', async (req, res) => {
             ...(reviewCompletedAt ? { review_completed_at: reviewCompletedAt } : {}),
             changed_by_human: true,
             learning_eligible: true,
+            comparison_revision: comparisonRevision(submission_id, sourceSnapshotSha256, finalText),
+            source_extraction_version: LEARNING_SOURCE_EXTRACTION_VERSION,
+            source_stage: LEARNING_SOURCE_STAGE,
+            coordinate_basis: LEARNING_COORDINATE_BASIS,
+            source_snapshot_sha256: sourceSnapshotSha256,
+            final_snapshot_sha256: sha256Text(finalText),
             analysis: differences.summary,
             learning_signals: {
                 replacements,
@@ -498,6 +522,9 @@ app.get('/learning/submissions', async (_req, res) => {
                 final_path: entry.final_path,
                 comparison_source: entry.comparison_source,
                 review_source: entry.review_source,
+                comparison_revision: entry.comparison_revision || null,
+                source_snapshot_sha256: entry.source_snapshot_sha256 || null,
+                source_extraction_version: entry.source_extraction_version || null,
             }));
 
         res.json({ count: submissions.length, submissions });
@@ -529,23 +556,60 @@ app.delete('/learning/submissions/:submissionId', async (req, res) => {
     }
 });
 
+app.get('/learning/submissions/:submissionId/revision', async (req, res) => {
+    try {
+        const submissionId = `${req.params.submissionId || ''}`.trim();
+        const entries = getLearningAggregationEntries(await readTrainingEntries())
+            .filter((entry) => entry.submission_id === submissionId)
+            .sort((a, b) => new Date(b.timestamp || 0).getTime() - new Date(a.timestamp || 0).getTime());
+        const latest = entries[0];
+        if (!latest?.comparison_revision) return res.status(404).json({ error: 'No frozen learning comparison revision found.' });
+        return res.json({
+            submission_id: latest.submission_id,
+            comparison_revision: latest.comparison_revision,
+            source_snapshot_sha256: latest.source_snapshot_sha256 || null,
+            source_extraction_version: latest.source_extraction_version || null,
+        });
+    } catch (error) {
+        console.error('Error loading learning comparison revision:', error);
+        return res.status(500).json({ error: 'Failed to load learning comparison revision' });
+    }
+});
+
 app.get('/learning/submissions/:submissionId', async (req, res) => {
     try {
         const submissionId = `${req.params.submissionId || ''}`.trim();
+        const requestedRevision = `${req.query?.comparison_revision || ''}`.trim();
+        if (!requestedRevision) {
+            return res.status(400).json({ error: 'comparison_revision is required.' });
+        }
         const entries = getLearningAggregationEntries(await readTrainingEntries());
         const matches = entries
             .filter((entry) => entry.submission_id === submissionId)
+            .filter((entry) => entry.comparison_revision === requestedRevision)
             .sort((a, b) => new Date(b.timestamp || 0).getTime() - new Date(a.timestamp || 0).getTime());
 
         const latest = matches[0];
         if (!latest) {
-            return res.status(404).json({ error: 'Submission not found in learning data' });
+            return res.status(409).json({
+                error: 'The requested learning comparison revision is no longer available.',
+            });
         }
 
         const aiDraftText = await extractText(latest.ai_draft_path);
+        const currentSourceHash = sha256Text(aiDraftText);
+        if (latest.source_snapshot_sha256 && latest.source_snapshot_sha256 !== currentSourceHash) {
+            return res.status(409).json({ error: 'The frozen learning comparison source has changed.' });
+        }
         const finalText = await extractText(latest.final_path);
+        if (latest.final_snapshot_sha256 && latest.final_snapshot_sha256 !== sha256Text(finalText)) {
+            return res.status(409).json({ error: 'The frozen learning comparison output has changed.' });
+        }
         const lineCorrections = extractLineCorrections(aiDraftText, finalText);
-        const dishCorrections = extractDishCorrections(aiDraftText, finalText);
+        const dishCorrections = extractDishCorrections(aiDraftText, finalText).map((correction) => ({
+            ...correction,
+            source_span: sourceSpanForLine(aiDraftText, correction.line_index, correction.before_line),
+        }));
 
         res.json({
             submission_id: latest.submission_id,
@@ -557,6 +621,11 @@ app.get('/learning/submissions/:submissionId', async (req, res) => {
             correction_count: lineCorrections.length,
             dish_corrections: dishCorrections,
             dish_correction_count: dishCorrections.length,
+            comparison_revision: latest.comparison_revision || null,
+            source_extraction_version: latest.source_extraction_version || null,
+            source_stage: latest.source_stage || LEARNING_SOURCE_STAGE,
+            coordinate_basis: latest.coordinate_basis || LEARNING_COORDINATE_BASIS,
+            source_snapshot_sha256: latest.source_snapshot_sha256 || currentSourceHash,
         });
     } catch (error) {
         console.error('Error loading learning submission details:', error);
@@ -838,6 +907,20 @@ function buildInlineDiffHtml(beforeLine: string, afterLine: string): string {
         }
     }
     return parts.join('');
+}
+
+function sourceSpanForLine(source: string, lineIndex: number, beforeLine: string): { row_index: number; start_utf16: number; end_utf16: number } {
+    const lines = source.split('\n');
+    const rowIndex = Number.isInteger(lineIndex) && lineIndex >= 0 ? lineIndex : 0;
+    const startUtf16 = lines.slice(0, rowIndex).reduce((sum, line) => sum + line.length + 1, 0);
+    const line = lines[rowIndex] || '';
+    if (!beforeLine) {
+        return { row_index: rowIndex, start_utf16: startUtf16, end_utf16: startUtf16 };
+    }
+    if (line !== beforeLine) {
+        throw new Error(`Unable to bind learning correction line ${rowIndex} to its AI draft source span.`);
+    }
+    return { row_index: rowIndex, start_utf16: startUtf16, end_utf16: startUtf16 + beforeLine.length };
 }
 
 function extractDishCorrections(aiDraft: string, final: string): DishCorrection[] {

@@ -105,6 +105,7 @@ describe('submission update hardening', () => {
     const listCorrectionRulesHandler = getRouteHandler('get', '/correction-rules');
     const pendingCorrectionRulesHandler = getRouteHandler('get', '/correction-rules/pending');
     const updateCorrectionRuleHandler = getRouteHandler('put', '/correction-rules/:id');
+    const reviewSourceBindingHandler = getRouteHandler('get', '/submissions/:id/review-source-binding');
     const originalInternalApiToken = process.env.INTERNAL_API_TOKEN;
 
     beforeEach(() => {
@@ -537,6 +538,128 @@ describe('submission update hardening', () => {
             applies_to_menu_type: 'beverage',
             rule: 'Beverage menus should keep zero-proof section names.',
         }));
+    });
+
+    test.each([
+        ['selects the unique exact hash across multiple audits', [
+            { id: 'audit-old', attempt_id: 'attempt-source', event_type: 'completed', review_mode: 'full', final_result: { correctedMenu: 'unrelated' } },
+            { id: 'audit-match', attempt_id: 'attempt-source', event_type: 'completed', review_mode: 'full', final_result: { correctedMenu: 'frozen source' } },
+        ], 200, 'audit-match'],
+        ['rejects when no audit stage matches', [
+            { id: 'audit-old', attempt_id: 'attempt-source', event_type: 'completed', review_mode: 'full', final_result: { correctedMenu: 'unrelated' } },
+        ], 409, null],
+        ['rejects when two audit rows match', [
+            { id: 'audit-a', attempt_id: 'attempt-source', event_type: 'completed', review_mode: 'full', final_result: { correctedMenu: 'frozen source' } },
+            { id: 'audit-b', attempt_id: 'attempt-source', event_type: 'completed', review_mode: 'full', final_result: { correctedMenu: 'frozen source' } },
+        ], 409, null],
+    ])('%s', async (_label, auditRows, expectedStatus, expectedAuditId) => {
+        const sourceHash = require('crypto').createHash('sha256').update(Buffer.from('frozen source', 'utf8')).digest('hex');
+        const submissionQuery: any = {
+            eq: jest.fn(() => submissionQuery),
+            maybeSingle: jest.fn(async () => ({
+                data: { id: 'form-source', form_attempt_id: 'attempt-source' },
+                error: null,
+            })),
+        };
+        const auditQuery: any = {
+            eq: jest.fn(() => auditQuery),
+            then: (resolve: any, reject: any) => Promise.resolve({ data: auditRows, error: null }).then(resolve, reject),
+        };
+        const from = jest.fn((table: string) => table === 'submissions'
+            ? { select: jest.fn(() => submissionQuery) }
+            : { select: jest.fn(() => auditQuery) });
+        (isSupabaseConfigured as jest.Mock).mockReturnValue(true);
+        (getSupabaseClient as jest.Mock).mockReturnValue({ from });
+
+        const response = await invokeJsonHandler(reviewSourceBindingHandler, {
+            params: { id: 'form-source' },
+            query: { source_snapshot_sha256: sourceHash },
+        });
+
+        expect(response.status).toBe(expectedStatus);
+        if (expectedAuditId) {
+            expect(response.body).toMatchObject({
+                submission_id: 'form-source',
+                attempt_id: 'attempt-source',
+                audit: {
+                    id: expectedAuditId,
+                    source_snapshot_sha256: sourceHash,
+                    source_stage: 'audit_final_result_corrected_menu_v1',
+                },
+            });
+        }
+    });
+
+    test('uses parsed-response stage only when the final-result stage does not match', async () => {
+        const sourceHash = require('crypto').createHash('sha256').update(Buffer.from('parsed source', 'utf8')).digest('hex');
+        const submissionQuery: any = {
+            eq: jest.fn(() => submissionQuery),
+            maybeSingle: jest.fn(async () => ({ data: { id: 'form-source', form_attempt_id: 'attempt-source' }, error: null })),
+        };
+        const auditQuery: any = {
+            eq: jest.fn(() => auditQuery),
+            then: (resolve: any, reject: any) => Promise.resolve({
+                data: [{
+                    id: 'audit-parsed',
+                    attempt_id: 'attempt-source',
+                    event_type: 'completed',
+                    review_mode: 'full',
+                    final_result: { correctedMenu: 'different final' },
+                    parsed_response: { correctedMenu: 'parsed source' },
+                }],
+                error: null,
+            }).then(resolve, reject),
+        };
+        const from = jest.fn((table: string) => table === 'submissions'
+            ? { select: jest.fn(() => submissionQuery) }
+            : { select: jest.fn(() => auditQuery) });
+        (isSupabaseConfigured as jest.Mock).mockReturnValue(true);
+        (getSupabaseClient as jest.Mock).mockReturnValue({ from });
+
+        const response = await invokeJsonHandler(reviewSourceBindingHandler, {
+            params: { id: 'form-source' },
+            query: { source_snapshot_sha256: sourceHash },
+        });
+        expect(response.status).toBe(200);
+        expect(response.body.audit).toMatchObject({
+            id: 'audit-parsed',
+            source_stage: 'audit_parsed_response_corrected_menu_v1',
+            source_snapshot_sha256: sourceHash,
+        });
+    });
+
+    test('prefers the audited final-result stage when both audited stages have the exact source', async () => {
+        const sourceHash = require('crypto').createHash('sha256').update(Buffer.from('same source', 'utf8')).digest('hex');
+        const submissionQuery: any = {
+            eq: jest.fn(() => submissionQuery),
+            maybeSingle: jest.fn(async () => ({ data: { id: 'form-source', form_attempt_id: 'attempt-source' }, error: null })),
+        };
+        const auditQuery: any = {
+            eq: jest.fn(() => auditQuery),
+            then: (resolve: any, reject: any) => Promise.resolve({
+                data: [{
+                    id: 'audit-both',
+                    attempt_id: 'attempt-source',
+                    event_type: 'completed',
+                    review_mode: 'full',
+                    final_result: { correctedMenu: 'same source' },
+                    parsed_response: { correctedMenu: 'same source' },
+                }],
+                error: null,
+            }).then(resolve, reject),
+        };
+        const from = jest.fn((table: string) => table === 'submissions'
+            ? { select: jest.fn(() => submissionQuery) }
+            : { select: jest.fn(() => auditQuery) });
+        (isSupabaseConfigured as jest.Mock).mockReturnValue(true);
+        (getSupabaseClient as jest.Mock).mockReturnValue({ from });
+
+        const response = await invokeJsonHandler(reviewSourceBindingHandler, {
+            params: { id: 'form-source' },
+            query: { source_snapshot_sha256: sourceHash },
+        });
+        expect(response.status).toBe(200);
+        expect(response.body.audit.source_stage).toBe('audit_final_result_corrected_menu_v1');
     });
 
     test('creates correction rules in local JSON when Supabase is unavailable', async () => {
