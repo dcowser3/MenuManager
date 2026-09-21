@@ -54,3 +54,9 @@ model/provider dispatch, email, approval, activation, or deployment.
 Browser delivery certification, broad proof matrices, auto-activation, and
 generalized quality proof remain deferred pending a separately approved
 browser containment design.
+
+The opt-in Docker integration fixture exercises two independent synthetic
+post-handoff cycles with distinct attempt/artifact paths and test-only proof
+labels. It is offline evidence only: it does not certify the real producer's
+supersession wiring or permit approval, activation, deployment, or provider
+dispatch.
