@@ -84,8 +84,19 @@ const PERSISTENT_RULE_KEYS = Object.freeze([
 function persistentRuleProjection(row) {
     return Object.fromEntries(PERSISTENT_RULE_KEYS.map((key) => [key, row?.[key]]));
 }
-function exactRuleIdentity(actual, expected) {
-    return sha(persistentRuleProjection(actual)) === sha(persistentRuleProjection(expected));
+function exactProposalRuleIdentity(actual, expected) {
+    return sha(actual) === sha(expected);
+}
+function persistentRuleIdentity(actual, expected) {
+    const consumedAt = actual?.consumed_at;
+    if (typeof consumedAt !== 'string' || !consumedAt || Number.isNaN(Date.parse(consumedAt))) return false;
+    const actualProjection = persistentRuleProjection(actual);
+    const expectedProjection = persistentRuleProjection(expected);
+    // consumed_at is assigned by the correction-rule insert. All other
+    // mapper-owned fields remain exact, including cycle and submission links.
+    delete actualProjection.consumed_at;
+    delete expectedProjection.consumed_at;
+    return sha(actualProjection) === sha(expectedProjection);
 }
 function recoverApprovalReadback(row, request) {
     if (!row) return { state: 'retry_allowed' };
@@ -93,7 +104,7 @@ function recoverApprovalReadback(row, request) {
     const accepted = Array.isArray(row.accepted_rules) ? row.accepted_rules : [];
     const persistent = Array.isArray(request.persistentCorrectionRules) ? request.persistentCorrectionRules : [];
     const expectedPersistent = Array.isArray(request.expected_persistent_correction_rules) ? request.expected_persistent_correction_rules : [];
-    if (row.status === 'approved_modified' && accepted.length === 3 && persistent.length === 3 && expectedPersistent.length === 3 && accepted.every((item, index) => exactRuleIdentity(item, request.expected_accepted_rules[index])) && persistent.every((item, index) => exactRuleIdentity(item, expectedPersistent[index]))) return { state: 'already_approved', proposal: row };
+    if (row.status === 'approved_modified' && accepted.length === 3 && persistent.length === 3 && expectedPersistent.length === 3 && accepted.every((item, index) => exactProposalRuleIdentity(item, request.expected_accepted_rules[index])) && persistent.every((item, index) => persistentRuleIdentity(item, expectedPersistent[index]))) return { state: 'already_approved', proposal: row };
     if (row.status === 'pending' && row.accepted_rules === null
         && request.expected_proposal_fingerprint === proposalFingerprint(row)
         && crypto.createHash('sha256').update(`${row.current_prompt || ''}`).digest('hex') === request.effective_prompt_sha256
