@@ -35,6 +35,13 @@ explicit reason `code_candidate_authorization_required`. It performs zero
 provider calls and never marks the candidate failed, verified, approved,
 activated, or deployed.
 
+When an explicitly authorized handoff resumes a prepared attempt, C2b may
+populate the existing candidate directory only when it contains exactly the
+owner-bound 0600 progress artifact for that attempt. Baseline files are copied
+around that progress file; conflicting entries, symlinks, mode changes, or
+missing attempt identity remain fail-closed. This bridge is test-only evidence
+for the handoff boundary and does not broaden the delivery certification scope.
+
 The blocked marker is local progress evidence; the persisted owner claim stays
 `running` so the same attempt can be resumed after an authorized ledger is
 supplied. Before any real dispatch, the path re-reads that live owner claim and
