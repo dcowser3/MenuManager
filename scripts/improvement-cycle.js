@@ -105,6 +105,7 @@ function parseArgs(argv) {
         skipEval: argv.includes('--skip-eval') || /^(1|true|yes|on)$/i.test(process.env.IMPROVE_SKIP_EVAL || ''),
         dryRun: argv.includes('--dry-run'),
         consolidate: argv.includes('--consolidate'),
+        prepareOnly: argv.includes('--prepare-only'),
     };
 }
 
@@ -756,6 +757,11 @@ async function main() {
     }
     const pendingProposals = pendingEnumeration.rows || [];
     const pendingProposal = pendingProposals[0] || null;
+    if (args.prepareOnly) {
+        acquireLock();
+        try { await triggerManualCodeCandidateReview({ supabase, cycleId: baseCycleId, proposalRow: pendingProposal, artifactsDir: path.join(repoRoot, 'tmp', 'improvement-cycle', `prepare-only-${baseCycleId}`) }); } finally { releaseLock(); }
+        return;
+    }
     const effectiveAtGate = core.pickEffectivePrompt(approvedProposalsForBaseline || [], filePrompt);
     const manifestAtGate = manifestLib.buildReviewRulesManifest({ acceptedCorrectionRules: acceptedRulesForBaseline || [] });
     const baselineFingerprint = core.computeReviewBaselineFingerprint({

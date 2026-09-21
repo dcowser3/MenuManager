@@ -19,8 +19,8 @@ const behaviorRecord = (id) => ({ correctionId: id, inputSpan: { text: 'before' 
 
 function proposal(overrides = {}) {
     const routes = [
-        { correction_id: 'c2', lane: 'prompt', case_id: 'case-2', original_text: 'before 2', corrected_text: 'after 2', source: 'human' },
-        { correction_id: 'c1', lane: 'code_recommendation', case_id: 'case-1', original_text: 'before 1', corrected_text: 'after 1', source: 'human' },
+        { correction_id: 'c2', lane: 'prompt', case_id: 'case-2', original_text: 'before', corrected_text: 'after', source: 'human' },
+        { correction_id: 'c1', lane: 'code_recommendation', case_id: 'case-1', original_text: 'before', corrected_text: 'after', source: 'human' },
     ];
     const records = [behaviorRecord('c1'), behaviorRecord('c2')];
     const behavior = { schemaVersion: 1, frozenAt: new Date().toISOString(), records, tests: [], contextualTests: [] };
@@ -77,10 +77,23 @@ test('pagination requires an explicit complete terminal page', async () => {
 
 test('pending proposal retrieval is fully paginated', async () => {
     const client = { from: () => {
-        const q = { select: () => q, eq: () => q, lte: () => q, order: () => q, range: (from) => Promise.resolve({ data: from >= 2 ? [] : from ? [{ id: 'p2' }] : [{ id: 'p1' }] }) };
+        const q = { select: () => q, eq: () => q, lte: () => q, order: () => q, limit: () => q, or: () => { q._cursor = true; return q; }, then: (resolve) => Promise.resolve({ data: q._cursor ? [] : [{ id: 'p1', created_at: '2026-01-01' }, { id: 'p2', created_at: '2026-01-01' }] }).then(resolve) };
         return q;
     } };
     await expect(loadPendingProposalRows(client, { pageSize: 1, cutoff: '2026-01-03' })).resolves.toMatchObject({ rows: [{ id: 'p1' }, { id: 'p2' }], rows_count: 2, row_ids: ['p1', 'p2'], complete: true });
+});
+
+test('keyset continuation retains the next row when an earlier row leaves pending, and malformed pages fail', async () => {
+    let continued = false;
+    let page = 0;
+    const client = { from: () => {
+        const q = { select: () => q, eq: () => q, lte: () => q, order: () => q, limit: () => q, or: () => { continued = true; return q; }, then: (resolve) => Promise.resolve({ data: page++ === 0 ? [{ id: 'a', created_at: '2026-01-01' }] : page === 2 ? [{ id: 'b', created_at: '2026-01-01' }] : [] }).then(resolve) };
+        return q;
+    } };
+    const rows = await loadPendingProposalRows(client, { pageSize: 1, cutoff: '2026-01-03' });
+    expect(rows.row_ids).toEqual(['a', 'b']);
+    const malformed = { from: () => ({ select: () => ({ eq: () => ({ lte: () => ({ order: () => ({ order: () => ({ limit: async () => ({ data: null }) }) }) }) }) }) }) };
+    await expect(loadPendingProposalRows(malformed, { pageSize: 1 })).rejects.toThrow(/malformed page/);
 });
 
 test('multiple groups share one owner-bound attempt and injected authorization cannot dispatch', async () => {
@@ -117,7 +130,7 @@ test('complete multi-proposal consumer preserves ordering and does not abort on 
         const enumeration = { complete: true, pages: 1, cutoff: '2026-01-03', rows_count: 2, row_ids: ['p-bad', 'p-good'], query: { table: 'prompt_proposals' } };
         const result = await preparePendingCodeProposalQueue({ proposals: [good, bad], enumeration, client: state.client, repoRoot: state.root, datasetPath: path.join(state.root, 'tmp/review-eval/dataset.jsonl'), verification, inventoryDirectory: path.join(state.root, 'tmp') });
         expect(result.snapshot.rows.map((row) => row.id)).toEqual(['p-bad', 'p-good']);
-        expect(result.results[0].reason).toBe('preparation_binding_incomplete');
+        expect(result.results[0].reason).toMatch(/exactly one behavior binding/);
         expect(result.results[1].reason).toBe('code_candidate_authorization_required');
         expect(prepareCodeProposalAttempt).toHaveBeenCalledTimes(1);
         const snapshots = fs.readdirSync(path.join(state.root, 'tmp')).filter((name) => name.startsWith('pending-preparation-inventory-'));
@@ -174,8 +187,7 @@ test('same owner reconciles across outer cutoff/snapshot refresh without dispatc
 
 test('missing or non-human binding, cross-cycle duplicate, and mutable status drift fail closed', async () => {
     const missingBehavior = proposal({ eval_summary: { replay_retirement_policy_version: 1, behavior_tests: { ...proposal().eval_summary.behavior_tests, records: [] } } });
-    const blockedInventory = buildPreparationInventory(missingBehavior);
-    expect(blockedInventory.blocked_groups[0].reason).toBe('missing_behavior_binding');
+    expect(() => buildPreparationInventory(missingBehavior)).toThrow(/exactly one behavior/);
     expect(() => buildPreparationInventory(proposal(), { previousInventories: [buildPreparationInventory(proposal(), { proposalFingerprint: HASH('old') })] })).toThrow(/supersession/);
     const state = setup();
     try {
@@ -203,6 +215,14 @@ test('explicit supersession permits a cross-cycle correction binding', async () 
 test('unknown routing lanes are explicit blocked groups', () => {
     const inventory = buildPreparationInventory(proposal({ correction_routing: [{ ...proposal().correction_routing[0], lane: 'future_lane' }] }));
     expect(inventory.groups[0]).toMatchObject({ status: 'blocked', reason: 'unknown_routing_lane' });
+});
+
+test('duplicate or conflicting human behavior bindings fail closed', () => {
+    const base = proposal();
+    const duplicate = { ...base, eval_summary: { ...base.eval_summary, behavior_tests: { ...base.eval_summary.behavior_tests, records: [...base.eval_summary.behavior_tests.records, { ...base.eval_summary.behavior_tests.records[0] }] } } };
+    expect(() => buildPreparationInventory(duplicate)).toThrow(/exactly one behavior/);
+    const conflict = { ...base, eval_summary: { ...base.eval_summary, behavior_tests: { ...base.eval_summary.behavior_tests, records: base.eval_summary.behavior_tests.records.map((record) => record.correctionId === 'c1' ? { ...record, inputSpan: { text: 'conflict' } } : record) } } };
+    expect(buildPreparationInventory(conflict).blocked_groups[0].reason).toBe('behavior_binding_conflict');
 });
 
 test('existing owner is reconciled before local recovery and changed status is not replaced', async () => {

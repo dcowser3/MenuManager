@@ -31,13 +31,20 @@ async function enumerateCompletePages(fetchPage, options = {}) {
 async function loadPendingProposalRows(client, options = {}) {
     const cutoff = options.cutoff || new Date().toISOString();
     const enumeration = await enumerateCompletePages(async (cursor) => {
-        const offset = cursor ? Number(cursor) : 0;
         const pageSize = Math.min(Math.max(Number(options.pageSize) || 100, 1), 100);
-        const query = client.from('prompt_proposals').select('*').eq('status', 'pending').lte('created_at', cutoff).order('created_at', { ascending: true }).order('id', { ascending: true }).range(offset, offset + pageSize - 1);
+        const query = client.from('prompt_proposals').select('*').eq('status', 'pending').lte('created_at', cutoff).order('created_at', { ascending: true }).order('id', { ascending: true }).limit(pageSize);
+        if (cursor) {
+            let last;
+            try { last = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8')); } catch { throw new Error('Pending proposal cursor is malformed.'); }
+            if (!last || typeof last.created_at !== 'string' || typeof last.id !== 'string' || !last.id) throw new Error('Pending proposal cursor is malformed.');
+            query.or(`created_at.gt.${last.created_at},and(created_at.eq.${last.created_at},id.gt.${last.id})`);
+        }
         const result = await query;
-        if (result?.error) throw new Error(`Pending proposal enumeration failed: ${result.error.message}`);
-        const rows = Array.isArray(result?.data) ? result.data : [];
-        return { rows, nextCursor: `${offset + rows.length}`, complete: rows.length < pageSize };
+        if (!result || result.error || !Array.isArray(result.data)) throw new Error(`Pending proposal enumeration returned a malformed page${result?.error ? `: ${result.error.message}` : '.'}`);
+        const rows = result.data;
+        const lastRow = rows[rows.length - 1];
+        const nextCursor = lastRow ? Buffer.from(JSON.stringify({ created_at: lastRow.created_at, id: lastRow.id })).toString('base64url') : cursor;
+        return { rows, nextCursor, complete: rows.length < pageSize };
     }, { cursor: null });
     return { ...enumeration, cutoff, rows_count: enumeration.rows.length, row_ids: enumeration.rows.map((row) => row.id), query: { table: 'prompt_proposals', status: 'pending', created_at_lte: cutoff, order: ['created_at', 'id'] } };
 }
@@ -91,7 +98,9 @@ function buildPreparationInventory(proposal, options = {}) {
         const matches = evidence.filter((entry) => `${entry?.correction_id || ''}` === correctionId);
         if (matches.length !== 1) throw new Error(`Preparation queue requires one replay binding for ${correctionId}.`);
         const replay = matches[0];
-        const record = records.find((entry) => `${entry?.correctionId || ''}` === correctionId);
+        const recordMatches = records.filter((entry) => `${entry?.correctionId || ''}` === correctionId);
+        if (recordMatches.length !== 1) throw new Error(`Preparation queue requires exactly one behavior binding for ${correctionId}.`);
+        const record = recordMatches[0];
         const hasTextPair = typeof route.original_text === 'string' && route.original_text.trim()
             && typeof route.corrected_text === 'string' && route.corrected_text.trim();
         const group = {
@@ -111,9 +120,12 @@ function buildPreparationInventory(proposal, options = {}) {
             group.status = 'blocked';
             group.reason = 'delivery_verification_required';
         }
-        if (!replay.submission_id || !group.source_binding.case_id || !hasTextPair || !record || record.expectationAuthority !== 'human_explanation') {
+        const associationConflict = (record.submissionId && `${record.submissionId}` !== `${replay.submission_id}`)
+            || (record.inputSpan?.text && route.original_text && record.inputSpan.text !== route.original_text)
+            || (record.expectedSpan?.text && route.corrected_text && record.expectedSpan.text !== route.corrected_text);
+        if (!replay.submission_id || !group.source_binding.case_id || !hasTextPair || record.expectationAuthority !== 'human_explanation' || associationConflict) {
             group.status = 'blocked';
-            group.reason = !replay.submission_id ? 'missing_replay_submission_mapping' : !group.source_binding.case_id ? 'missing_case_mapping' : !hasTextPair ? 'missing_human_text_pair' : !record ? 'missing_behavior_binding' : 'behavior_authority_not_human';
+            group.reason = !replay.submission_id ? 'missing_replay_submission_mapping' : !group.source_binding.case_id ? 'missing_case_mapping' : !hasTextPair ? 'missing_human_text_pair' : associationConflict ? 'behavior_binding_conflict' : 'behavior_authority_not_human';
         }
         return group;
     });
@@ -273,7 +285,12 @@ async function prepareCodeProposalQueue(options = {}) {
             summary = summaryFor(stored, existing.attempt_id, artifactDirectory, stored.groups);
             writeSummary(summaryFile, summary);
         }
-        const progress = readBoundedJson(path.join(artifactDirectory, 'candidate', 'progress.json'), 'Preparation progress');
+        const progressPath = path.join(artifactDirectory, 'candidate', 'progress.json');
+        let progress = readBoundedJson(progressPath, 'Preparation progress');
+        if (progress.state === 'active' && progress.attempt_id === existing.attempt_id && progress.budget && progress.budget.model_calls === 0) {
+            progress = { ...progress, state: 'blocked', reason: 'code_candidate_authorization_required', updated_at: new Date().toISOString() };
+            writeSummary(progressPath, progress);
+        }
         validateRecoveryArtifacts(summary, progress, stored, existing, artifactDirectory);
         return { status: 'blocked', reason: 'code_candidate_authorization_required', providerCalls: 0, inventory: stored, attemptId: existing.attempt_id, artifactDirectory };
     }

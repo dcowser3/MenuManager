@@ -46,6 +46,11 @@ human-driven handoff, but the scheduled outer cycle now stops at the queue's
 surfaced as `delivery_verification_required` and remain held without blocking
 unrelated non-delivery groups.
 
+Operators can run `node scripts/improvement-cycle.js --prepare-only` to consume
+the existing pending backlog through this same preparation-only queue even when
+the normal cadence gate would skip. This mode performs no proposal generation,
+model/provider dispatch, email, approval, activation, or deployment.
+
 Browser delivery certification, broad proof matrices, auto-activation, and
 generalized quality proof remain deferred pending a separately approved
 browser containment design.
