@@ -95,3 +95,17 @@ forms. That accepted guidance has no runtime effect until the code is merged
 and deployed. Nothing in this handoff auto-approves the ten proposal rules,
 activates the candidate, deploys code, or establishes paid quality/C2b/C2c
 provenance.
+
+## Zero-model replay-retirement reassessment
+
+The current replay-retirement policy may be reassessed only through the guarded
+`scripts/replay-policy-refresh.js --reassess-replay-retirement` path. This is a
+zero-model bookkeeping refresh: it requires the preserved 30-member provenance
+set (27 bound corrections and three unresolved bindings), recomputes each
+member with `assessReplayRetirement`, and applies one `xmin`-guarded update.
+The refresh records its provenance hashes and `model_calls: 0`; it does not
+change the terminal paid-attempt record, candidate content, accepted guidance,
+or the ten replacement-rule human-approval boundary. A normal refresh refuses
+an already-set policy version, while reassessment mode refuses incomplete
+provenance or an active owner. Private plan/readback artifacts are written
+under the proposal refresh directory with restrictive permissions.

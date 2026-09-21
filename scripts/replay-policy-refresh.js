@@ -19,12 +19,29 @@ const { extractReplacementSignals } = require('../services/differ/dist/lib/learn
 
 const proposalId = process.argv[process.argv.indexOf('--proposal-id') + 1] || process.env.REPLAY_POLICY_PROPOSAL_ID;
 const execute = process.argv.includes('--execute');
+const reassessReplayRetirement = process.argv.includes('--reassess-replay-retirement');
 const root = path.resolve(__dirname, '..');
 const artifactRoot = path.join(root, 'tmp', 'replay-policy-refresh');
 const sha = (value) => crypto.createHash('sha256').update(typeof value === 'string' ? value : JSON.stringify(value)).digest('hex');
 const canonical = (value) => Array.isArray(value) ? value.map(canonical) : value && typeof value === 'object' ? Object.fromEntries(Object.keys(value).filter((key) => key !== 'xmin').sort().map((key) => [key, canonical(value[key])])) : value;
 const canonicalHash = (value) => sha(canonical(value));
 const writePrivate = async (file, value) => { const text = typeof value === 'string' ? value : `${JSON.stringify(value, null, 2)}\n`; const temp = `${file}.tmp-${process.pid}`; await fsp.writeFile(temp, text, { mode: 0o600, flag: 'w' }); await fsp.chmod(temp, 0o600); await fsp.rename(temp, file); await fsp.chmod(file, 0o600); };
+
+async function loadPreservedProvenance() {
+    const dir = path.join(root, 'tmp', 'code-proposals', proposalId, 'provenance-backfill');
+    const names = await fsp.readdir(dir);
+    const behaviorName = names.find((name) => name.startsWith('behavior-tests-') && name.endsWith('.json'));
+    const bindingNames = names.filter((name) => name.startsWith('case-bindings-') && name.endsWith('.json'));
+    if (!behaviorName) throw new Error('Complete preserved provenance behavior artifact is missing.');
+    const behavior = JSON.parse(await fsp.readFile(path.join(dir, behaviorName), 'utf8'));
+    const candidates = await Promise.all(bindingNames.map(async (name) => ({ name, value: JSON.parse(await fsp.readFile(path.join(dir, name), 'utf8')) })));
+    const bindings = candidates.find(({ value }) => Array.isArray(value.bindings) && value.bindings.length === 27 && Array.isArray(value.unresolved) && value.unresolved.length === 3);
+    if (!Array.isArray(behavior.records) || behavior.records.length !== 30 || !bindings) throw new Error('Preserved provenance is not the complete 30-member/27-bound/3-unresolved set.');
+    const behaviorSha = behavior.sha256 || sha(behavior);
+    const bindingsSha = bindings.value.artifact_sha256 || sha(bindings.value);
+    const artifactSha = sha({ behavior_sha256: behaviorSha, behavior_records: behavior.records.length, bindings_sha256: bindingsSha, bound_correction_count: bindings.value.bindings.length, unresolved_count: bindings.value.unresolved.length });
+    return { refresh_mode: 'zero_model_assess_replay_retirement', member_count: 30, bound_correction_count: 27, unresolved_count: 3, behavior_tests_sha256: behaviorSha, case_bindings_sha256: bindingsSha, artifact_sha256: artifactSha };
+}
 
 function replayCallbacks(entry, sourceText) {
     const original = entry.original_text || entry.example_original || '';
@@ -37,7 +54,9 @@ function replayCallbacks(entry, sourceText) {
 }
 
 function assertFinalReadback(actual, planned) {
-    if (actual.status !== 'pending' || actual.eval_summary?.code_candidate || actual.eval_status !== 'regressed' || actual.disposition !== 'rules_only') throw new Error('Replay refresh readback violates pending/no-owner/regression guards.');
+    const candidate = actual.eval_summary?.code_candidate;
+    const terminalCandidate = candidate && candidate.closed_at && ['blocked', 'completed'].includes(candidate.status);
+    if (actual.status !== 'pending' || (candidate && !terminalCandidate) || actual.eval_status !== 'regressed' || actual.disposition !== 'rules_only') throw new Error('Replay refresh readback violates pending/no-active-owner/regression guards.');
     if (canonicalHash(actual) !== canonicalHash(planned)) throw new Error('Replay refresh readback differs from the complete planned proposal.');
 }
 
@@ -109,16 +128,18 @@ async function main() {
     const result = await client.from('prompt_proposals').select('*,xmin').eq('id', proposalId).single();
     if (result.error) throw new Error(result.error.message);
     const proposal = result.data;
-    const artifactDir = path.join(artifactRoot, `proposal-${sha(proposalId).slice(0, 32)}`);
+    const suffix = reassessReplayRetirement ? '-reassess' : '';
+    const artifactDir = path.join(artifactRoot, `proposal-${sha(proposalId).slice(0, 32)}${suffix}`);
     await fsp.mkdir(artifactDir, { recursive: true, mode: 0o700 }); await fsp.chmod(artifactDir, 0o700);
-    const recovered = await recoverAppliedRefresh({ proposal, proposalId, artifactDir });
+    const recovered = reassessReplayRetirement ? null : await recoverAppliedRefresh({ proposal, proposalId, artifactDir });
     if (recovered) { console.log(JSON.stringify(recovered, null, 2)); return; }
     const members = await loadMembers(client, proposal);
+    const provenance = reassessReplayRetirement ? await loadPreservedProvenance() : null;
     const expectedFingerprint = verification.codeProposalVerificationFingerprint(proposal);
     const input = { proposal: { ...proposal, xmin: undefined }, members: members.map(({ acceptedRules, ...m }) => ({ ...m, originalAudit: m.originalAudit ? { ...m.originalAudit } : null, deterministicReplay: null })) };
     await writePrivate(path.join(artifactDir, 'marker.json'), { state: 'prepared', proposal_id: proposalId, input_sha256: sha(input), model_calls: 0 });
     await writePrivate(path.join(artifactDir, 'before.json'), proposal);
-    const prepared = prepareReplayPolicyRefresh({ proposal, expectedFingerprint, targetVersion: replay.REPLAY_RETIREMENT_POLICY_VERSION, members });
+    const prepared = prepareReplayPolicyRefresh({ proposal, expectedFingerprint, targetVersion: replay.REPLAY_RETIREMENT_POLICY_VERSION, members, reassessCurrentVersion: reassessReplayRetirement, provenance });
     const planned = { ...proposal, ...prepared.patch };
     await writePrivate(path.join(artifactDir, 'input.json'), { input_sha256: sha(input), members: members.map(({ acceptedRules, ...m }) => m), expected_xmin: proposal.xmin });
     await writePrivate(path.join(artifactDir, 'plan.json'), { ...prepared, proposal_id: proposalId, input_sha256: sha(input), planned, planned_sha256: canonicalHash(planned) });

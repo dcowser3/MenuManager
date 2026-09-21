@@ -6,10 +6,16 @@ const replayRetirement = require('../../services/dashboard/dist/lib/replay-retir
 const hashJson = (value) => crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const UNRESOLVED = new Set(['still_missed', 'partially_correct']);
 
-function prepareReplayPolicyRefresh({ proposal, expectedFingerprint, targetVersion, members }) {
+function prepareReplayPolicyRefresh({ proposal, expectedFingerprint, targetVersion, members, reassessCurrentVersion = false, provenance = null }) {
     if (!proposal || proposal.status !== 'pending') throw new Error('Replay refresh requires a pending proposal.');
-    if (proposal.eval_summary?.code_candidate?.attempt_id || proposal.eval_summary?.code_candidate) throw new Error('Replay refresh refuses an owned attempt.');
-    if (!Number.isInteger(targetVersion) || targetVersion < 1 || proposal.eval_summary?.replay_retirement_policy_version != null) throw new Error('Replay refresh version state is invalid or already set.');
+    const existingCandidate = proposal.eval_summary?.code_candidate;
+    if (existingCandidate && (!existingCandidate.closed_at || !['blocked', 'completed'].includes(existingCandidate.status))) throw new Error('Replay refresh refuses an active owned attempt.');
+    const currentPolicy = proposal.eval_summary?.replay_retirement_policy_version;
+    const versionRefresh = reassessCurrentVersion && Number.isInteger(currentPolicy) && currentPolicy === targetVersion;
+    if (!Number.isInteger(targetVersion) || targetVersion < 1 || (currentPolicy != null && !versionRefresh)) throw new Error('Replay refresh version state is invalid or already set.');
+    if (versionRefresh && (!provenance || provenance.refresh_mode !== 'zero_model_assess_replay_retirement' || provenance.member_count !== 30 || provenance.bound_correction_count !== 27 || provenance.unresolved_count !== 3 || !/^[a-f0-9]{64}$/.test(provenance.artifact_sha256 || ''))) {
+        throw new Error('Current-version replay reassessment requires complete 30-member provenance.');
+    }
     if (typeof expectedFingerprint !== 'string' || !/^[a-f0-9]{64}$/.test(expectedFingerprint)) throw new Error('Replay refresh fingerprint is missing.');
     const current = Array.isArray(proposal.replay_evidence) ? proposal.replay_evidence : [];
     const ids = current.map((row) => row?.correction_id).filter(Boolean);
@@ -30,6 +36,7 @@ function prepareReplayPolicyRefresh({ proposal, expectedFingerprint, targetVersi
     const refreshedRouting = routes.map((route) => ({ ...route, replay_status: statusById.get(route.correction_id) }));
     const before = proposal.eval_summary || {};
     const after = { ...before, replay_retirement_policy_version: targetVersion };
+    if (versionRefresh) after.replay_retirement_refresh = { ...provenance, model_calls: 0 };
     return Object.freeze({ proposal_fingerprint: expectedFingerprint, expected_eval_summary_sha256: hashJson(before), expected_replay_evidence_sha256: hashJson(current), patch: Object.freeze({ eval_summary: after, replay_evidence: refreshed, correction_routing: refreshedRouting }), model_calls: 0, statuses: refreshed.map((row) => ({ correction_id: row.correction_id, status: row.status })) });
 }
 
