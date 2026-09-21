@@ -21,7 +21,7 @@ const summary = { code_candidate: { status: 'verified' }, code_verification: { s
 const hash = require('crypto').createHash('sha256').update(JSON.stringify(summary)).digest('hex');
 
 test('optimistic envelope merge preserves unrelated eval_summary fields', async () => {
-    const update = jest.fn().mockReturnValue({ eq: () => ({ eq: () => ({ select: () => ({ single: async () => ({ data: { ok: true }, error: null }) }) }) }) });
+    const update = jest.fn().mockReturnValue({ eq: () => ({ eq: () => ({ eq: () => ({ select: () => ({ single: async () => ({ data: { ok: true }, error: null }) }) }) }) }) });
     (getSupabaseClient as jest.Mock).mockReturnValue({ from: () => ({ select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: { id: 'p1', status: 'approved', eval_summary: summary }, error: null }) }) }), update }) });
     const result = await invoke({ expected_eval_summary_hash: hash, expectation_envelope: { sha256: 'new' } });
     expect(result.status).toBe(200);

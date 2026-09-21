@@ -267,3 +267,22 @@ export function buildExpectationEnvelopeFromTrustedProposal(input: {
     ];
     return freezeExpectationEnvelope({ policyVersion, expectations, supersedes: trusted.map(({ evidence }) => ({ priorId: evidence.oldExpectationId, successorId: evidence.successorId })) });
 }
+
+export function attachApprovedActivationMetadata(proposedRules: any[], envelope: ExpectationEnvelope) {
+    validateExpectationEnvelope(envelope);
+    return proposedRules.map((rule) => {
+        const match = envelope.expectations.find((expectation) => expectation.status === 'candidate'
+            && expectation.input === rule.original_text && expectation.expected === rule.corrected_text
+            && expectation.restaurant === (rule.is_location_specific ? rule.location : null)
+            && expectation.menuScope === (rule.applies_to_menu_type || null)
+            && rule.change_type === 'superseding_policy'
+            && envelope.supersedes.some((link) => link.successorId === expectation.id && link.priorId === expectation.sourceExpectationId));
+        if (!match) return rule;
+        const prior = envelope.expectations.find((expectation) => expectation.id === match.sourceExpectationId);
+        const link = envelope.supersedes.find((item) => item.successorId === match.id);
+        return { ...rule, expectation_activation: { source: 'approved_expectation_artifact', ruleId: match.policyRuleId,
+            supersedesId: prior?.id, successorId: match.id, policyVersion: envelope.activePolicyVersion,
+            restaurant: match.restaurant, menuScope: match.menuScope, isLocationSpecific: !!rule.is_location_specific,
+            artifactHash: envelope.sha256, sourceRevision: prior?.version } };
+    });
+}

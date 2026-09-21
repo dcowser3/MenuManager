@@ -3477,7 +3477,8 @@ app.put('/prompt-proposals/:id/expectation-envelope', async (req, res) => {
         if (currentHash !== expectedHash)
             return res.status(409).json({ error: 'Proposal evaluation summary changed concurrently' });
         const merged = { ...(current.data.eval_summary || {}), expectation_envelope: envelope };
-        const updated = await supabase.from(PROMPT_PROPOSALS_TABLE).update({ eval_summary: merged }).eq('id', req.params.id).eq('status', current.data.status).select().single();
+        const updated = await supabase.from(PROMPT_PROPOSALS_TABLE).update({ eval_summary: merged })
+            .eq('id', req.params.id).eq('status', current.data.status).eq('eval_summary', current.data.eval_summary).select().single();
         if (updated.error)
             throw new Error(updated.error.message);
         res.json(updated.data);

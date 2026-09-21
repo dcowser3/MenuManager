@@ -1711,11 +1711,18 @@ async function main() {
             // one group without reconstructing or inventing expectations.
             behavior_tests: behaviorArtifact,
         });
-        const expectationEnvelope = expectationVersioningLib.buildExpectationEnvelopeFromTrustedProposal({
-            proposalId: cycleId,
-            proposedRules: validated.proposed_replacement_rules || [],
-        });
-        if (expectationEnvelope) evalSummary = { ...evalSummary, expectation_envelope: expectationEnvelope };
+        const approvedExpectationPath = process.env.REVIEW_EXPECTATIONS_ARTIFACT;
+        let approvedExpectationEnvelope = null;
+        if (approvedExpectationPath && fs.existsSync(approvedExpectationPath)) {
+            try {
+                approvedExpectationEnvelope = JSON.parse(fs.readFileSync(approvedExpectationPath, 'utf8'));
+                expectationVersioningLib.validateExpectationEnvelope(approvedExpectationEnvelope);
+                validated.proposed_replacement_rules = expectationVersioningLib.attachApprovedActivationMetadata(validated.proposed_replacement_rules || [], approvedExpectationEnvelope);
+                evalSummary = { ...evalSummary, expectation_envelope: approvedExpectationEnvelope };
+            } catch (error) {
+                validated.warnings.push(`Approved expectation artifact rejected; no activation metadata attached: ${error.message}`);
+            }
+        }
 
         // 9. Store the proposal.
         const dates = correctionRules.map((r) => Date.parse(r.created_at)).filter(Number.isFinite);
