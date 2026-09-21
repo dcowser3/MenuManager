@@ -109,6 +109,32 @@ const FUNCTIONAL_ENTRIES: ManifestRuleEntry[] = [
         source: 'code_metadata',
     },
     {
+        id: 'pre-ai/contextual-compound-descriptors',
+        layer: 'pre_ai_deterministic',
+        category: 'terminology',
+        title: 'Contextual compound descriptor guards',
+        description: 'Three versioned guards generalize preserved review evidence without approving the original proposal rows: established modifier + grilled is joined only before a following food noun, cast iron is hyphenated only as an attributive food descriptor, and brûlée becomes brûléed only before a recognized ingredient. Punctuation, postnominal, material/cookware, crème brûlée, lexical dessert, standalone, and ambiguous uses remain unchanged; prices, allergens, separators, casing, and idempotence are preserved.',
+        examples: [
+            { before: 'Achiote Grilled Chicken D,G 29', after: 'Achiote-Grilled Chicken D,G 29' },
+            { before: 'Cast Iron Pancakes D,G', after: 'Cast-Iron Pancakes D,G' },
+            { before: 'Holiday Ham, brûlée pineapple D', after: 'Holiday Ham, brûléed pineapple D' },
+        ],
+        implementation: { file: PRE_AI_FILE, exportName: 'normalizeContextualCompoundDescriptorsOnLine' },
+        data: {
+            version: 'contextual-compound-descriptors-v1',
+            motivatingEvidence: [
+                { original: 'Achiote Grilled', corrected: 'Achiote-Grilled' },
+                { original: 'Cast Iron Pancakes', corrected: 'Cast-Iron Pancakes' },
+                { original: 'brûlée pineapple', corrected: 'brûléed pineapple' },
+            ],
+            executableScope: 'generalized contextual guards; motivating rows remain human evidence and are not individually approved',
+            propertyScope: 'all properties',
+            templateScope: 'food',
+            exclusions: ['plain/freshly grilled', 'postnominal or punctuated descriptor', 'cast-iron material/cookware use', 'crème brûlée', 'lexical dessert names', 'standalone or ambiguous brûlée'],
+        },
+        source: 'code_metadata',
+    },
+    {
         id: 'pre-ai/cooked-shrimp-ceviche-marker',
         layer: 'pre_ai_deterministic',
         category: 'raw_markers',

@@ -799,6 +799,46 @@ describe('runPreAiDeterministicChecks', () => {
         ).menuText).toBe('zero-proof margarita 13');
     });
 
+    it('generalizes the three descriptor corrections only in confident contextual constructions', () => {
+        const input = [
+            'Achiote Grilled Chicken D,G,S 29',
+            'Mesquite Grilled Shrimp 24',
+            'Cast Iron Pancakes D,G 18',
+            'Cast Iron Chicken D 22',
+            'Holiday Ham, brûlée pineapple D 20',
+            'Roasted Carrots, brûlée banana V 12',
+            'Freshly Grilled Chicken 18',
+            'Chicken, Achiote Grilled, sauce 20',
+            'Cast Iron, salt 4',
+            'Cast Iron Skillet 8',
+            'Crème brûlée 14',
+            'Brûlée Cheesecake 16',
+            'Pineapple brûlée 12',
+        ].join('\n');
+        const result = runPreAiDeterministicChecks(input);
+        expect(result.menuText).toBe([
+            'Achiote-Grilled Chicken D,G,S 29',
+            'Mesquite-Grilled Shrimp 24',
+            'Cast-Iron Pancakes D,G 18',
+            'Cast-Iron Chicken D 22',
+            'Holiday Ham, brûléed pineapple D 20',
+            'Roasted Carrots, brûléed banana V 12',
+            'Freshly Grilled Chicken 18',
+            'Chicken, Achiote Grilled, sauce 20',
+            'Cast Iron, salt 4',
+            'Cast Iron Skillet 8',
+            'Crème brûlée 14',
+            'Brûlée Cheesecake 16',
+            'Pineapple brûlée 12',
+        ].join('\n'));
+        expect(runPreAiDeterministicChecks(result.menuText).menuText).toBe(result.menuText);
+        expect(result.appliedCorrections).toEqual(expect.arrayContaining([
+            expect.objectContaining({ original: 'Achiote Grilled Chicken', corrected: 'Achiote-Grilled Chicken' }),
+            expect.objectContaining({ original: 'Cast Iron Pancakes', corrected: 'Cast-Iron Pancakes' }),
+            expect.objectContaining({ original: 'brûlée pineapple', corrected: 'brûléed pineapple' }),
+        ]));
+    });
+
     it('ignores pending or broad content learned rules', () => {
         const rules: AcceptedCorrectionRule[] = [
             {

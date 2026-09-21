@@ -126,6 +126,15 @@ Applies verified contextual singular-ingredient corrections to comma-delimited d
 
 - id: `pre-ai/singular-ingredient-forms` · category: singular_plural · implementation: `services/dashboard/lib/pre-ai-deterministic-rules.ts#normalizeSingularIngredientFormsOnLine`
 
+### Contextual compound descriptor guards
+
+Three versioned guards generalize preserved review evidence without approving the original proposal rows: established modifier + grilled is joined only before a following food noun, cast iron is hyphenated only as an attributive food descriptor, and brûlée becomes brûléed only before a recognized ingredient. Punctuation, postnominal, material/cookware, crème brûlée, lexical dessert, standalone, and ambiguous uses remain unchanged; prices, allergens, separators, casing, and idempotence are preserved.
+- `Achiote Grilled Chicken D,G 29` -> `Achiote-Grilled Chicken D,G 29`
+- `Cast Iron Pancakes D,G` -> `Cast-Iron Pancakes D,G`
+- `Holiday Ham, brûlée pineapple D` -> `Holiday Ham, brûléed pineapple D`
+
+- id: `pre-ai/contextual-compound-descriptors` · category: terminology · implementation: `services/dashboard/lib/pre-ai-deterministic-rules.ts#normalizeContextualCompoundDescriptorsOnLine`
+
 ### Cooked shrimp ceviche raw-marker exception
 
 Shrimp or prawn ceviche is treated as cooked under the approved house rule, so a raw marker is removed or withheld unless the line explicitly says raw/uncooked/undercooked or contains another independently raw preparation.

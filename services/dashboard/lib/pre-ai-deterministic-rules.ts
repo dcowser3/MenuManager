@@ -657,6 +657,78 @@ export function normalizeSingularIngredientFormsOnLine(
     return { line: nextLine, corrections };
 }
 
+/**
+ * Generalized, evidence-backed descriptor corrections. These are deliberately
+ * contextual guards rather than global replacements: the three motivating
+ * proposal rows remain human evidence and are not executable rules themselves.
+ */
+const ESTABLISHED_GRILLED_MODIFIERS = new Set([
+    'achiote', 'applewood', 'charcoal', 'chipotle', 'coffee', 'harissa',
+    'hickory', 'mesquite', 'miso', 'smoked', 'wood-fired', 'woodfired',
+]);
+const NON_FOOD_CAST_IRON_NOUNS = new Set(['iron', 'pan', 'pans', 'skillet', 'skillets', 'griddle', 'griddles', 'pot', 'pots', 'plate', 'plates', 'cookware']);
+const BRULEE_INGREDIENTS = new Set([
+    'apple', 'apples', 'apricot', 'apricots', 'banana', 'bananas', 'berry', 'berries',
+    'carrot', 'carrots', 'cherry', 'cherries', 'fig', 'figs', 'ham', 'hams',
+    'mango', 'mangos', 'mangoes', 'nectarine', 'nectarines', 'orange', 'oranges',
+    'peach', 'peaches', 'pear', 'pears', 'pineapple', 'pineapples', 'plum', 'plums',
+    'rhubarb', 'strawberry', 'strawberries', 'tomato', 'tomatoes', 'turnip', 'turnips',
+    'yam', 'yams', 'zucchini',
+]);
+const BRULEE_LEXICAL_DESSERTS = new Set(['cake', 'cakes', 'cheesecake', 'cheesecakes', 'custard', 'custards', 'dessert', 'desserts', 'mousse', 'parfait', 'parfaits', 'tart', 'tarts']);
+
+function preserveDescriptorCase(source: string, target: string): string {
+    return matchCase(source, target);
+}
+
+export function normalizeContextualCompoundDescriptorsOnLine(
+    line: string,
+    lineIndex: number
+): { line: string; corrections: PreAiAppliedCorrection[] } {
+    const corrections: PreAiAppliedCorrection[] = [];
+    const { body, price } = splitTrailingPrice(line);
+    let nextLine = body;
+
+    // A compound modifier must be an established modifier, appear before the
+    // participle, and be followed immediately by a food noun. Punctuation or a
+    // postnominal occurrence is intentionally not accepted.
+    nextLine = nextLine.replace(/\b([A-Za-zÀ-ÖØ-öø-ÿ]+(?:[- ][A-Za-zÀ-ÖØ-öø-ÿ]+)?)\s+(grilled)\s+([A-Za-zÀ-ÖØ-öø-ÿ]+)/giu, (match, modifier: string, participle: string, noun: string, offset: number) => {
+        const folded = modifier.toLowerCase();
+        const preceding = nextLine.slice(0, offset).trimEnd();
+        const modifierKey = folded.replace(/\s+/g, '-');
+        if (!ESTABLISHED_GRILLED_MODIFIERS.has(modifierKey) || (preceding && /[^\p{L}\d ]$/u.test(preceding))) return match;
+        const correctedModifier = preserveDescriptorCase(modifier, modifier);
+        const corrected = `${correctedModifier}-${matchCase(participle, 'grilled')} ${noun}`;
+        if (corrected === match) return match;
+        corrections.push({ type: 'Terminology', source: 'built_in', original: match, corrected, lineIndex, rule: 'Join an established modifier to grilled only in a leading compound descriptor before a food noun.' });
+        return corrected;
+    });
+
+    // Cast iron is hyphenated only as an attributive descriptor. Physical
+    // cookware/material uses are excluded, as are already-hyphenated forms.
+    nextLine = nextLine.replace(/\bcast\s+iron\s+([A-Za-zÀ-ÖØ-öø-ÿ]+)/giu, (match, noun: string, offset: number) => {
+        const preceding = nextLine.slice(0, offset).trimEnd();
+        if ((preceding && /[^\p{L}\d ]$/u.test(preceding)) || NON_FOOD_CAST_IRON_NOUNS.has(noun.toLowerCase())) return match;
+        const corrected = match.replace(/\s+/, '-');
+        if (corrected === match) return match;
+        corrections.push({ type: 'Terminology', source: 'built_in', original: match, corrected, lineIndex, rule: 'Hyphenate cast iron when it is an attributive descriptor before a food noun; preserve material and cookware uses.' });
+        return corrected;
+    });
+
+    // Brûlée becomes the participial adjective only for a recognized ingredient
+    // and never for crème brûlée, lexical dessert names, or a standalone noun.
+    nextLine = nextLine.replace(/\b(brûlée)\s+([A-Za-zÀ-ÖØ-öø-ÿ]+)/giu, (match, source: string, ingredient: string, offset: number) => {
+        const preceding = nextLine.slice(0, offset).trimEnd().toLowerCase();
+        const ingredientKey = stripDiacritics(ingredient).toLowerCase();
+        if (!BRULEE_INGREDIENTS.has(ingredientKey) || /(?:^|\s)crème$/.test(preceding) || BRULEE_LEXICAL_DESSERTS.has(ingredientKey)) return match;
+        const corrected = `${preserveDescriptorCase(source, 'brûléed')} ${ingredient}`;
+        corrections.push({ type: 'Terminology', source: 'built_in', original: match, corrected, lineIndex, rule: 'Use the participial brûléed only before a recognized ingredient; preserve crème brûlée and lexical dessert names.' });
+        return corrected;
+    });
+
+    return { line: `${nextLine}${price}`, corrections };
+}
+
 function learnedRuleUsesAccentInsensitiveMatching(rule: AcceptedCorrectionRule): boolean {
     const changeType = `${rule.change_type || ''}`.trim().toLowerCase();
     if (!['diacritic', 'diacritics', 'spelling', 'typo'].includes(changeType)) {
@@ -1184,6 +1256,10 @@ export function runPreAiDeterministicChecks(
         const singularResult = normalizeSingularIngredientFormsOnLine(nextLine, lineIndex);
         nextLine = singularResult.line;
         appliedCorrections.push(...singularResult.corrections);
+
+        const descriptorResult = normalizeContextualCompoundDescriptorsOnLine(nextLine, lineIndex);
+        nextLine = descriptorResult.line;
+        appliedCorrections.push(...descriptorResult.corrections);
 
         const tresLechesResult = ensureTresLechesVegetarianCodeOnLine(nextLine, lineIndex, validAllergenCodes);
         nextLine = tresLechesResult.line;

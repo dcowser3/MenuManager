@@ -96,6 +96,14 @@ and deployed. Nothing in this handoff auto-approves the ten proposal rules,
 activates the candidate, deploys code, or establishes paid quality/C2b/C2c
 provenance.
 
+The three narrow descriptor findings (`Achiote Grilled`, `Cast Iron Pancakes`,
+and `brûlée pineapple`) remain motivating evidence rather than individually
+approved correction-rule rows. Their bounded generalized form is represented
+by the versioned `pre-ai/contextual-compound-descriptors` guard: it requires an
+allowlisted modifier or ingredient context, preserves casing and suffixes, and
+abstains on punctuation/postnominal, material/cookware, crème brûlée, lexical
+dessert, standalone, and otherwise ambiguous uses.
+
 ## Zero-model replay-retirement reassessment
 
 The current replay-retirement policy may be reassessed only through the guarded
