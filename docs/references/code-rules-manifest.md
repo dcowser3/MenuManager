@@ -349,6 +349,13 @@ Drops AI suggestions asking to alphabetize allergen codes when the corrected men
 
 - id: `post-ai/allergen-suggestion-guard` · category: allergen_codes · implementation: `services/dashboard/lib/allergen-suggestion-guard.ts#guardAllergenAlphabetizationSuggestions`
 
+### Submitted allergen preservation
+
+The final review output may add allergen codes but cannot remove codes present before AI review. Missing submitted codes are restored, explicit code-removal suggestions are dropped, and unsafe row alignment falls back to the complete pre-AI menu.
+- `Truffle Mac, aged cheddar D,G 24 -> AI: Truffle Mac, aged cheddar G 24` -> `Truffle Mac, aged cheddar D,G 24`
+
+- id: `post-ai/allergen-preservation` · category: allergen_codes · implementation: `services/dashboard/lib/allergen-integrity-guard.ts#guardCorrectedMenuAllergens`
+
 ### High-confidence suggestion auto-apply
 
 High-confidence spelling/grammar suggestions with an extractable from->to pair are applied directly to the corrected menu and removed from the remaining suggestion list.

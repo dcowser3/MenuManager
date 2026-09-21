@@ -1,5 +1,9 @@
 # Menu Manager
 
+AI review is additive-only for allergen codes: codes present before review are
+protected by a deterministic final guard and cannot be removed by model output or
+auto-applied AI suggestions.
+
 Menu Manager is an AI-powered menu submission review and approval system. Chefs submit menus through the dashboard web form, the system runs deterministic checks and AI review, human reviewers approve or correct the work, and approved menus/dishes are retained for downstream operations.
 
 Prix-fixe review accepts one or more clearly labeled overall package prices near the top of a menu, including per-person, pairing, and supported currency formats; individual prix-fixe dishes do not require separate prices.

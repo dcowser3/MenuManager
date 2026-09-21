@@ -264,6 +264,16 @@ const FUNCTIONAL_ENTRIES: ManifestRuleEntry[] = [
         source: 'code_metadata',
     },
     {
+        id: 'post-ai/allergen-preservation',
+        layer: 'post_ai_guard',
+        category: 'allergen_codes',
+        title: 'Submitted allergen preservation',
+        description: 'The final review output may add allergen codes but cannot remove codes present before AI review. Missing submitted codes are restored, explicit code-removal suggestions are dropped, and unsafe row alignment falls back to the complete pre-AI menu.',
+        examples: [{ before: 'Truffle Mac, aged cheddar D,G 24 -> AI: Truffle Mac, aged cheddar G 24', after: 'Truffle Mac, aged cheddar D,G 24' }],
+        implementation: { file: 'services/dashboard/lib/allergen-integrity-guard.ts', exportName: 'guardCorrectedMenuAllergens' },
+        source: 'code_metadata',
+    },
+    {
         id: 'post-ai/high-confidence-auto-apply',
         layer: 'post_ai_guard',
         category: 'auto_apply',

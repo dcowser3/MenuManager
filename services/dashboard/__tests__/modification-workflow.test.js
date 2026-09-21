@@ -1044,6 +1044,40 @@ describe('Dashboard Modification Workflow (local, mocked externals)', () => {
         expect(response.body.basicCheckDiagnostics.structureGuard.metrics.missingMeaningfulLineSamples).toContain('Lagunitas N/A');
     });
 
+    test('basic-check live route restores allergens removed by AI review', async () => {
+        mockedAxios.post = jest.fn(async (url) => String(url).includes('/run-qa-check') ? {
+            data: {
+                feedback: [
+                    '=== CORRECTED MENU ===',
+                    'Truffle Mac, aged cheddar G 24',
+                    '=== END CORRECTED MENU ===',
+                    '=== SUGGESTIONS ===',
+                    JSON.stringify([{
+                        type: 'Allergen Code',
+                        confidence: 'high',
+                        menuItem: 'Truffle Mac',
+                        description: 'Remove the dairy code.',
+                        recommendation: "Change 'D,G' to 'G'.",
+                    }]),
+                    '=== END SUGGESTIONS ===',
+                ].join('\n'),
+            },
+        } : { data: {} });
+
+        const response = await postJsonOverHttp('/api/form/basic-check', {
+            menuContent: 'Truffle Mac, aged cheddar D,G 24',
+            reviewMode: 'full',
+            allergens: 'D contains dairy | G contains gluten',
+            menuType: 'standard',
+            templateType: 'food',
+        });
+
+        expect(response.status).toBe(200);
+        expect(response.body.correctedMenu).toBe('Truffle Mac, aged cheddar D,G 24');
+        expect(response.body.suggestions).toEqual([]);
+        expect(response.body.hasChanges).toBe(false);
+    });
+
     test('basic-check suppresses missing-price false positive for priced add-on option rows', async () => {
         mockedAxios.post = jest.fn(async (url, payload) => {
             const urlStr = String(url);

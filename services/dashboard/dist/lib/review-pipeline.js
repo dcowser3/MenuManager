@@ -27,6 +27,7 @@ const allergen_suggestion_guard_1 = require("./allergen-suggestion-guard");
 const apply_high_confidence_suggestions_1 = require("./apply-high-confidence-suggestions");
 const embedded_set_menu_guard_1 = require("./embedded-set-menu-guard");
 const price_integrity_guard_1 = require("./price-integrity-guard");
+const allergen_integrity_guard_1 = require("./allergen-integrity-guard");
 const menu_footer_1 = require("./menu-footer");
 const qa_prompt_builder_1 = require("./qa-prompt-builder");
 const canonical_vocabulary_provider_1 = require("./canonical-vocabulary-provider");
@@ -587,8 +588,9 @@ function runPostAiPipeline(args) {
     const appliedHc = (0, apply_high_confidence_suggestions_1.applyHighConfidenceSuggestionsToMenu)(allergenGuard.correctedMenu, allergenGuard.suggestions);
     const setMenuGuard = (0, embedded_set_menu_guard_1.guardEmbeddedSetMenuPrices)(args.preCheckedReviewBody, appliedHc.menuText, appliedHc.suggestions, args.embeddedSetMenuAnalysis);
     const priceIntegrityGuard = (0, price_integrity_guard_1.guardCorrectedMenuPrices)(args.preCheckedReviewBody, setMenuGuard.correctedMenu, setMenuGuard.suggestions);
-    const correctedAfterHighConfidence = priceIntegrityGuard.correctedMenu;
-    const suggestionsAfterAutoApply = priceIntegrityGuard.suggestions;
+    const allergenIntegrityGuard = (0, allergen_integrity_guard_1.guardCorrectedMenuAllergens)(args.preCheckedReviewBody, priceIntegrityGuard.correctedMenu, priceIntegrityGuard.suggestions, args.effectiveReviewAllergens);
+    const correctedAfterHighConfidence = allergenIntegrityGuard.correctedMenu;
+    const suggestionsAfterAutoApply = allergenIntegrityGuard.suggestions;
     // Re-run the protected-term guard after every model-driven auto-apply. A
     // suggestion can otherwise reintroduce a rewrite that the earlier guard
     // correctly removed from the model's corrected-menu block.
@@ -629,6 +631,7 @@ function runPostAiPipeline(args) {
         appliedHc,
         setMenuGuard,
         priceIntegrityGuard,
+        allergenIntegrityGuard,
         correctedAfterHighConfidence,
         correctedMenuSanitized,
         reconciliation,

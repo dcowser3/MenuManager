@@ -18,6 +18,7 @@ import {
     guardEmbeddedSetMenuPrices,
 } from './embedded-set-menu-guard';
 import { guardCorrectedMenuPrices } from './price-integrity-guard';
+import { guardCorrectedMenuAllergens } from './allergen-integrity-guard';
 import { RAW_NOTICE_PATTERN, normalizeMenuFooter, stripManagedFooterText } from './menu-footer';
 import { QaPromptSectionId, buildFinalPrompt } from './qa-prompt-builder';
 import { buildNearMissAnalysis } from './canonical-vocabulary-provider';
@@ -724,6 +725,7 @@ export type PostAiPipelineResult = {
     appliedHc: ReturnType<typeof applyHighConfidenceSuggestionsToMenu>;
     setMenuGuard: ReturnType<typeof guardEmbeddedSetMenuPrices>;
     priceIntegrityGuard: ReturnType<typeof guardCorrectedMenuPrices>;
+    allergenIntegrityGuard: ReturnType<typeof guardCorrectedMenuAllergens>;
     correctedAfterHighConfidence: string;
     correctedMenuSanitized: string;
     reconciliation: ReturnType<typeof reconcileCriticalSuggestionsAgainstCorrectedMenuWithDiagnostics>;
@@ -767,8 +769,14 @@ export function runPostAiPipeline(args: PostAiPipelineArgs): PostAiPipelineResul
         setMenuGuard.correctedMenu,
         setMenuGuard.suggestions
     );
-    const correctedAfterHighConfidence = priceIntegrityGuard.correctedMenu;
-    const suggestionsAfterAutoApply = priceIntegrityGuard.suggestions;
+    const allergenIntegrityGuard = guardCorrectedMenuAllergens(
+        args.preCheckedReviewBody,
+        priceIntegrityGuard.correctedMenu,
+        priceIntegrityGuard.suggestions,
+        args.effectiveReviewAllergens
+    );
+    const correctedAfterHighConfidence = allergenIntegrityGuard.correctedMenu;
+    const suggestionsAfterAutoApply = allergenIntegrityGuard.suggestions;
     // Re-run the protected-term guard after every model-driven auto-apply. A
     // suggestion can otherwise reintroduce a rewrite that the earlier guard
     // correctly removed from the model's corrected-menu block.
@@ -824,6 +832,7 @@ export function runPostAiPipeline(args: PostAiPipelineArgs): PostAiPipelineResul
         appliedHc,
         setMenuGuard,
         priceIntegrityGuard,
+        allergenIntegrityGuard,
         correctedAfterHighConfidence,
         correctedMenuSanitized,
         reconciliation,
