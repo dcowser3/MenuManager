@@ -23,3 +23,15 @@ test('prepare-only seam runs the bounded consumer without health, gate, model, o
         expect(JSON.parse(fs.readFileSync(path.join(artifactsDir, 'fixture-summary.json'), 'utf8')).provider_calls).toBe(0);
     } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
+
+test('prepare-only passes an explicitly supplied manual exclusion artifact path', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'prepare-only-exclusion-'));
+    const artifactsDir = path.join(root, 'artifacts');
+    const artifactPath = path.join(root, 'manual.json');
+    fs.writeFileSync(artifactPath, JSON.stringify({ schema_version: 1 }), { mode: 0o600 });
+    const trigger = jest.fn(async ({ manualExclusionArtifactPath }) => ({ status: 'completed', providerCalls: 0, manualExclusionArtifactPath }));
+    try {
+        await expect(runPrepareOnly({ supabase: {}, cycleId: 'fixture-cycle', artifactsDir, manualExclusionArtifactPath: artifactPath, trigger })).resolves.toMatchObject({ manualExclusionArtifactPath: artifactPath });
+        expect(trigger).toHaveBeenCalledWith(expect.objectContaining({ manualExclusionArtifactPath: artifactPath }));
+    } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});

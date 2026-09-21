@@ -129,10 +129,16 @@ function releaseLock() {
     try { fs.unlinkSync(LOCK_PATH); } catch { /* best effort */ }
 }
 
-async function triggerManualCodeCandidateReview({ supabase, cycleId, proposalRow, artifactsDir }) {
+async function triggerManualCodeCandidateReview({ supabase, cycleId, proposalRow, artifactsDir, manualExclusionArtifactPath = process.env.MENUMANAGER_MANUAL_EXCLUSION_ARTIFACT }) {
     const artifactPath = path.join(artifactsDir, 'manual-code-proposal-review.json');
     const base = { cycle_id: cycleId, status: 'blocked', provider_calls: 0 };
     try {
+        let manualExclusionArtifact;
+        if (manualExclusionArtifactPath) {
+            const stat = fs.lstatSync(manualExclusionArtifactPath);
+            if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 128 * 1024 || (stat.mode & 0o077) !== 0) throw new Error('Manual exclusion artifact must be a private regular file under 128KiB.');
+            manualExclusionArtifact = JSON.parse(fs.readFileSync(manualExclusionArtifactPath, 'utf8'));
+        }
         const pending = await loadPendingProposalRows(supabase);
         const result = await preparePendingCodeProposalQueue({
             client: supabase,
@@ -143,6 +149,7 @@ async function triggerManualCodeCandidateReview({ supabase, cycleId, proposalRow
             datasetPath: path.join(repoRoot, 'tmp', 'review-eval', 'dataset.jsonl'),
             outputRoot: path.join(repoRoot, 'tmp', 'code-proposals'),
             inventoryDirectory: path.join(repoRoot, 'tmp', 'code-proposals'),
+            manualExclusionArtifact,
             // The outer cycle is preparation-only. Authorization and dispatch
             // are intentionally stripped by the coordinator.
         });
@@ -173,10 +180,10 @@ async function triggerManualCodeCandidateReview({ supabase, cycleId, proposalRow
 // Preparation-only is an intentionally isolated, no-notification seam.  It is
 // also exported so a fixture/injected client can exercise the exact path without
 // constructing the health, gate, model, or mail dependencies used by a full cycle.
-async function runPrepareOnly({ supabase = getSupabase(), cycleId = new Date().toISOString().slice(0, 10), artifactsDir = path.join(repoRoot, 'tmp', 'improvement-cycle', `prepare-only-${cycleId}`), trigger = triggerManualCodeCandidateReview } = {}) {
+async function runPrepareOnly({ supabase = getSupabase(), cycleId = new Date().toISOString().slice(0, 10), artifactsDir = path.join(repoRoot, 'tmp', 'improvement-cycle', `prepare-only-${cycleId}`), manualExclusionArtifactPath, trigger = triggerManualCodeCandidateReview } = {}) {
     fs.mkdirSync(artifactsDir, { recursive: true, mode: 0o700 });
     acquireLock();
-    try { return await trigger({ supabase, cycleId, proposalRow: null, artifactsDir }); }
+    try { return await trigger({ supabase, cycleId, proposalRow: null, artifactsDir, manualExclusionArtifactPath }); }
     finally { releaseLock(); }
 }
 

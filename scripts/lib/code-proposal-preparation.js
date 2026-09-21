@@ -193,12 +193,18 @@ async function prepareCodeProposalAttempt(options = {}) {
             if (!record) throw new Error(`B6-D1 behavior artifact does not cover ${route.correction_id}.`);
             if (record.disposition !== 'excluded_from_policy_learning' && record.expectationAuthority !== 'human_explanation') throw new Error(`B6-D1 behavior expectation for ${route.correction_id} is not human-bound.`);
         }
-        atomicWrite(path.join(attemptRoot, 'behavior-tests.json'), Buffer.from(`${JSON.stringify(behavior, null, 2)}\n`));
         const eligibleIds = options.inventory?.groups?.filter((group) => group.status !== 'excluded').map((group) => group.correction_id);
+        const scopedBehavior = eligibleIds ? (() => {
+            const eligible = new Set(eligibleIds);
+            const body = { ...behavior, records: (behavior.records || []).filter((row) => eligible.has(row.correctionId)), tests: (behavior.tests || []).filter((row) => eligible.has(row.correctionId)), contextualTests: (behavior.contextualTests || []).filter((row) => eligible.has(row.correctionId)) };
+            delete body.sha256;
+            return { ...body, sha256: behaviorModule.hashBehaviorArtifact(body) };
+        })() : behavior;
+        atomicWrite(path.join(attemptRoot, 'behavior-tests.json'), Buffer.from(`${JSON.stringify(scopedBehavior, null, 2)}\n`));
         const prepared = await bindHistoricalDataset(client, proposal, datasetPath, path.join(attemptRoot, 'dataset.jsonl'), { eligibleCorrectionIds: eligibleIds });
         metadata.expected_dataset_sha256 = prepared.sha256;
         metadata.expected_case_ids = prepared.rows.map((row) => row.case_id);
-        metadata.behavior_tests_sha256 = behavior.sha256;
+        metadata.behavior_tests_sha256 = scopedBehavior.sha256;
         if (options.inventory) {
             const queue = require('./code-proposal-preparation-queue');
             const finalized = queue.finalizePreparationInventory(options.inventory, {

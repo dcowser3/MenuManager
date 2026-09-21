@@ -275,6 +275,13 @@ function revalidateAttemptArtifacts(options = {}) {
     const rulesPayload = JSON.parse(rulesBytes.toString('utf8'));
     const behavior = JSON.parse(behaviorBytes.toString('utf8'));
     const inventory = fs.existsSync(inventoryPath) ? JSON.parse(boundedRegular(inventoryPath, root).toString('utf8')) : null;
+    if (inventory) {
+        const inventoryBytes = boundedRegular(inventoryPath, root);
+        digest(metadata.preparation_inventory_sha256, 'preparation inventory');
+        if (hash(inventoryBytes) !== metadata.preparation_inventory_sha256 || inventory.proposal_id !== proposal.id || inventory.proposal_fingerprint !== metadata.proposal_sha256 || !DIGEST.test(inventory.eligible_group_set_sha256 || '')) throw new Error('Preparation inventory identity or eligible scope is stale.');
+        const eligibleHash = hash(JSON.stringify((inventory.groups || []).filter((group) => group.status !== 'excluded').map((group) => group.correction_id)));
+        if (eligibleHash !== inventory.eligible_group_set_sha256) throw new Error('Preparation inventory eligible scope changed.');
+    }
     const cases = readDataset(datasetBytes);
     digest(metadata.proposal_sha256, 'proposal'); digest(metadata.baseline_source_sha256, 'baseline'); digest(metadata.prompt_sha256, 'prompt'); digest(metadata.accepted_rules_sha256, 'accepted rules'); digest(metadata.expected_dataset_sha256, 'dataset'); digest(metadata.behavior_tests_sha256, 'behavior');
     if (verification.codeProposalVerificationFingerprint(storedProposal) !== metadata.proposal_sha256 || verification.codeProposalVerificationFingerprint(proposal) !== metadata.proposal_sha256) throw new Error('Proposal fingerprint does not match the claimed attempt.');
@@ -290,7 +297,7 @@ function revalidateAttemptArtifacts(options = {}) {
     })());
     if (!behaviorModule || typeof behaviorModule.validateBehaviorArtifact !== 'function') throw new Error('Trusted behavior artifact validator is unavailable.');
     behaviorModule.validateBehaviorArtifact(behavior);
-    if (behavior.sha256 !== metadata.behavior_tests_sha256 || behavior.sha256 !== storedProposal.eval_summary?.behavior_tests?.sha256) throw new Error('B6-D1 behavior artifact identity is stale.');
+    if (behavior.sha256 !== metadata.behavior_tests_sha256 || (!inventory && behavior.sha256 !== storedProposal.eval_summary?.behavior_tests?.sha256)) throw new Error('B6-D1 behavior artifact identity is stale.');
     const baselineRoot = inside(root, options.baselineRoot);
     if (verification.hashCodeImplementation(baselineRoot) !== metadata.baseline_source_sha256) throw new Error('Baseline source snapshot hash is stale.');
     return { proposal: storedProposal, prompt: promptBytes.toString('utf8'), rules, behavior, cases, inventory, eligibleCorrectionIds: inventory?.groups?.filter((group) => group.status !== 'excluded').map((group) => group.correction_id) || null };
