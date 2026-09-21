@@ -2916,7 +2916,7 @@ app.post('/api/learning/prompt-proposal/:id/review', async (req, res) => {
 
         // Insert accepted deterministic replacement rules as accepted correction_rules
         // so the pre-AI pass starts applying them immediately.
-        const ruleResults: Array<{ index: number; ok: boolean; error?: string }> = [];
+        const ruleResults: Array<{ index: number; ok: boolean; error?: string; correctionId?: string; location?: string | null; menuScope?: string | null; isLocationSpecific?: boolean }> = [];
         for (const [position, rule] of acceptedRules.entries()) {
             const index = selectedIndexes[position];
             try {
@@ -2925,7 +2925,14 @@ app.post('/api/learning/prompt-proposal/:id/review', async (req, res) => {
                     consumedAt: new Date().toISOString(),
                 });
                 await internalApi.post(`${DB_SERVICE_URL}/correction-rules`, payload, { timeout: 5000 });
-                ruleResults.push({ index, ok: true });
+                ruleResults.push({
+                    index,
+                    ok: true,
+                    correctionId: `${payload.correction_id || ''}`,
+                    location: payload.location ? `${payload.location}` : null,
+                    menuScope: payload.applies_to_menu_type ? `${payload.applies_to_menu_type}` : null,
+                    isLocationSpecific: payload.is_location_specific === true,
+                });
             } catch (ruleError: any) {
                 console.error(`Failed to save accepted proposal rule ${index}:`, ruleError.message);
                 ruleResults.push({ index, ok: false, error: ruleError.message });

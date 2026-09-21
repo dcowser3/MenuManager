@@ -173,7 +173,11 @@ function planApprovedExpectationActivation(envelope, acceptedRules, ruleResults,
     if (!selected)
         return null;
     const metadata = selected.rule.expectation_activation;
-    if (selected.rule.id && metadata.ruleId && selected.rule.id !== metadata.ruleId)
+    const successor = envelope.expectations.find((row) => row.id === metadata.successorId);
+    if (!successor || metadata.ruleId !== successor.policyRuleId || successor.policyRuleId !== selected.result?.correctionId
+        || metadata.restaurant !== (selected.result?.location || null)
+        || metadata.menuScope !== (selected.result?.menuScope || null)
+        || metadata.isLocationSpecific !== (selected.result?.isLocationSpecific === true))
         return null;
     return activateApprovedSuccessor(envelope, {
         ruleId: metadata.ruleId || selected.rule.id || null,

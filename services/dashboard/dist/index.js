@@ -2542,7 +2542,14 @@ app.post('/api/learning/prompt-proposal/:id/review', async (req, res) => {
                     consumedAt: new Date().toISOString(),
                 });
                 await internalApi.post(`${DB_SERVICE_URL}/correction-rules`, payload, { timeout: 5000 });
-                ruleResults.push({ index, ok: true });
+                ruleResults.push({
+                    index,
+                    ok: true,
+                    correctionId: `${payload.correction_id || ''}`,
+                    location: payload.location ? `${payload.location}` : null,
+                    menuScope: payload.applies_to_menu_type ? `${payload.applies_to_menu_type}` : null,
+                    isLocationSpecific: payload.is_location_specific === true,
+                });
             }
             catch (ruleError) {
                 console.error(`Failed to save accepted proposal rule ${index}:`, ruleError.message);

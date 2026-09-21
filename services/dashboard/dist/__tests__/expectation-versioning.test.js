@@ -71,10 +71,10 @@ test('activation planner requires the exact selected rule to have been written f
             { id: 'a-v2', version: 2, status: 'candidate', classification: 'explicit_superseding_policy', policyRuleId: 'r-a', restaurant: 'Restaurant A', menuScope: 'food', input: 'house-made', expected: 'housemade', sourceExpectationId: 'a-v1', approvalState: 'unapproved' },
             { id: 'b-v1', version: 1, status: 'active', classification: 'missed_existing_rule', policyRuleId: 'r-b', restaurant: 'Restaurant B', menuScope: 'food', input: 'house-made', expected: 'house-made', approvalState: 'approved' },
         ], supersedes: [{ priorId: 'a-v1', successorId: 'a-v2' }] });
-    const rule = { id: 'r-a', expectation_activation: { ruleId: 'r-a', restaurant: 'Restaurant A', menuScope: 'food', policyVersion: 'p1', supersedesId: 'a-v1', successorId: 'a-v2' } };
+    const rule = { expectation_activation: { ruleId: 'r-a', restaurant: 'Restaurant A', menuScope: 'food', isLocationSpecific: true, policyVersion: 'p1', supersedesId: 'a-v1', successorId: 'a-v2' } };
     expect((0, expectation_versioning_1.planApprovedExpectationActivation)(envelope, [rule], [{ index: 4, ok: false }], [4])).toBeNull();
-    const activated = (0, expectation_versioning_1.planApprovedExpectationActivation)(envelope, [rule], [{ index: 4, ok: true }], [4]);
+    const activated = (0, expectation_versioning_1.planApprovedExpectationActivation)(envelope, [rule], [{ index: 4, ok: true, correctionId: 'r-a', location: 'Restaurant A', menuScope: 'food', isLocationSpecific: true }], [4]);
     expect(activated?.expectations.find((row) => row.id === 'a-v2')).toMatchObject({ status: 'active', approvalState: 'approved' });
     expect(activated?.expectations.find((row) => row.id === 'b-v1')).toEqual(envelope.expectations.find((row) => row.id === 'b-v1'));
-    expect((0, expectation_versioning_1.planApprovedExpectationActivation)(envelope, [{ id: 'r-b', expectation_activation: rule.expectation_activation }], [{ index: 4, ok: true }], [4])).toBeNull();
+    expect((0, expectation_versioning_1.planApprovedExpectationActivation)(envelope, [{ expectation_activation: rule.expectation_activation }], [{ index: 4, ok: true, correctionId: 'r-b', location: 'Restaurant B', menuScope: 'food', isLocationSpecific: true }], [4])).toBeNull();
 });

@@ -217,14 +217,18 @@ export function activateApprovedSuccessor(envelope: ExpectationEnvelope, approva
     return { ...body, sha256: hash(body) };
 }
 
-export function planApprovedExpectationActivation(envelope: ExpectationEnvelope, acceptedRules: any[], ruleResults: Array<{ index: number; ok: boolean }>, selectedIndexes: number[] = []) {
+export function planApprovedExpectationActivation(envelope: ExpectationEnvelope, acceptedRules: any[], ruleResults: Array<{ index: number; ok: boolean; correctionId?: string; location?: string | null; menuScope?: string | null; isLocationSpecific?: boolean }>, selectedIndexes: number[] = []) {
     validateExpectationEnvelope(envelope);
     const selected = acceptedRules
         .map((rule, position) => ({ rule, result: ruleResults.find((entry) => entry.index === (selectedIndexes[position] ?? position)) }))
         .find(({ rule, result }) => !!rule?.expectation_activation && result?.ok === true);
     if (!selected) return null;
     const metadata = selected.rule.expectation_activation;
-    if (selected.rule.id && metadata.ruleId && selected.rule.id !== metadata.ruleId) return null;
+    const successor = envelope.expectations.find((row) => row.id === metadata.successorId);
+    if (!successor || metadata.ruleId !== successor.policyRuleId || successor.policyRuleId !== selected.result?.correctionId
+        || metadata.restaurant !== (selected.result?.location || null)
+        || metadata.menuScope !== (selected.result?.menuScope || null)
+        || metadata.isLocationSpecific !== (selected.result?.isLocationSpecific === true)) return null;
     return activateApprovedSuccessor(envelope, {
         ruleId: metadata.ruleId || selected.rule.id || null,
         restaurant: metadata.restaurant || selected.rule.location || null,
