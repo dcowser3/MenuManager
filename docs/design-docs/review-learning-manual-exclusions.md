@@ -20,3 +20,20 @@ missing provenance as unresolved/unverified, marks original/submitted
 disagreement as `delivery_mismatch` with unknown attribution, and returns a
 CAS-bound patch only after recomputing per-row retirement evidence. It does
 not rerun model replay or approve/activate anything.
+
+## Guarded manual-rule rewrite
+
+The three user-directed legacy rows are handled by a separate resumable rewrite
+plan (`scripts/lib/manual-rule-rewrite.js`). It requires the exact pending
+30-member proposal with no code-candidate owner, captures a bounded private
+before snapshot, removes the two duplicate Salmon IDs, and replaces the Beet
+row with a new stable, unbound, global `human`/`pending` rule for singularizing
+“walnuts” and “pistou herbs”. The replacement is deliberately outside the
+current proposal and remains unconsumed for a future cycle.
+
+The plan removes all three legacy IDs from routing, replay, behavior, and
+coverage/code-membership structures, recomputes the 27-rule count, and
+preserves regressed/rules-only status and regression evidence. Exact-row hashes,
+the proposal fingerprint, and an on-disk recovery marker make retries
+idempotent; preparation remains blocked until readback reconciles completely.
+No live rewrite is performed by the planning/tests path.
