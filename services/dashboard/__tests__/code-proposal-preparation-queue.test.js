@@ -96,6 +96,29 @@ test('keyset continuation retains the next row when an earlier row leaves pendin
     await expect(loadPendingProposalRows(malformed, { pageSize: 1 })).rejects.toThrow(/malformed page/);
 });
 
+test('pending enumeration rejects invalid rows, duplicate keys, and non-advancing pages', async () => {
+    const clientFor = (rows) => ({ from: () => {
+        const q = { select: () => q, eq: () => q, lte: () => q, order: () => q, limit: () => q, or: () => q, then: (resolve) => Promise.resolve({ data: rows }).then(resolve) };
+        return q;
+    } });
+    await expect(loadPendingProposalRows(clientFor([{ id: '', created_at: '2026-01-01' }]), { pageSize: 1 })).rejects.toThrow(/malformed row/);
+    await expect(loadPendingProposalRows(clientFor([{ id: 'a', created_at: 'not-a-date' }]), { pageSize: 1 })).rejects.toThrow(/malformed row/);
+    let calls = 0;
+    const duplicate = { from: () => {
+        const q = { select: () => q, eq: () => q, lte: () => q, order: () => q, limit: () => q, or: () => q, then: (resolve) => Promise.resolve({ data: calls++ ? [{ id: 'a', created_at: '2026-01-01' }] : [{ id: 'a', created_at: '2026-01-01' }] }).then(resolve) };
+        return q;
+    } };
+    await expect(loadPendingProposalRows(duplicate, { pageSize: 1 })).rejects.toThrow(/non-monotonic/);
+});
+
+test('explicit replay and behavior associations reject case, text, and empty-span conflicts', () => {
+    const base = proposal();
+    const mismatch = { ...base, correction_routing: base.correction_routing.map((row) => ({ ...row, case_id: 'route-case' })), replay_evidence: base.replay_evidence.map((row) => ({ ...row, case_id: 'wrong-case' })) };
+    expect(buildPreparationInventory(mismatch).groups[0].reason).toBe('behavior_binding_conflict');
+    const emptySpan = { ...base, eval_summary: { ...base.eval_summary, behavior_tests: { ...base.eval_summary.behavior_tests, records: base.eval_summary.behavior_tests.records.map((row) => ({ ...row, inputSpan: { text: '' } })) } } };
+    expect(buildPreparationInventory(emptySpan).groups[0].reason).toBe('behavior_binding_conflict');
+});
+
 test('multiple groups share one owner-bound attempt and injected authorization cannot dispatch', async () => {
     const state = setup();
     prepareCodeProposalAttempt.mockImplementation(async (options) => {
@@ -232,4 +255,25 @@ test('existing owner is reconciled before local recovery and changed status is n
         await expect(prepareCodeProposalQueue({ proposal: current, client: state.client, repoRoot: state.root, datasetPath: path.join(state.root, 'tmp/review-eval/dataset.jsonl'), verification, readCurrentProposal: async () => ({ ...current, status: 'approved' }) })).rejects.toThrow(/no longer pending/);
         expect(prepareCodeProposalAttempt).not.toHaveBeenCalled();
     } finally { state.cleanup(); }
+});
+
+test('deterministic orphan is reclaimed only when its inventory identity is exact', async () => {
+    const state = setup();
+    const base = proposal({ correction_routing: [proposal().correction_routing[1]], replay_evidence: [proposal().replay_evidence[1]], eval_summary: { replay_retirement_policy_version: 1, behavior_tests: proposal().eval_summary.behavior_tests } });
+    const inventory = finalizePreparationInventory(buildPreparationInventory(base, { proposalFingerprint: verification.codeProposalVerificationFingerprint(base) }), { behavior_tests_sha256: HASH('behavior'), dataset_sha256: HASH('dataset'), source_sha256: HASH('source'), prompt_sha256: HASH('prompt'), accepted_rules_sha256: HASH('rules') });
+    const orphan = path.join(state.root, 'tmp', 'code-proposals', base.id, `proposal-${base.id}`);
+    fs.mkdirSync(orphan, { recursive: true });
+    fs.writeFileSync(path.join(orphan, 'preparation-inventory.json'), `${JSON.stringify(inventory, null, 2)}\n`);
+    prepareCodeProposalAttempt.mockImplementationOnce(async (options) => {
+        const artifactDirectory = path.join(state.root, 'tmp', 'code-proposals', base.id, options.attemptId);
+        fs.mkdirSync(path.join(artifactDirectory, 'candidate'), { recursive: true });
+        fs.writeFileSync(path.join(artifactDirectory, 'preparation-inventory.json'), `${JSON.stringify(options.inventory, null, 2)}\n`);
+        fs.writeFileSync(path.join(artifactDirectory, 'candidate', 'progress.json'), JSON.stringify({ state: 'active', budget: { model_calls: 0 } }));
+        return { status: 'claimed', attemptId: options.attemptId, artifactDirectory, metadata: { behavior_tests_sha256: HASH('behavior'), expected_dataset_sha256: HASH('dataset'), baseline_source_sha256: HASH('source'), prompt_sha256: HASH('prompt'), accepted_rules_sha256: HASH('rules') } };
+    });
+    const result = await prepareCodeProposalQueue({ proposal: base, client: state.client, repoRoot: state.root, outputRoot: path.join(state.root, 'tmp', 'code-proposals'), datasetPath: path.join(state.root, 'tmp/review-eval/dataset.jsonl'), verification, store: { recordCodeVerification: jest.fn() } });
+    expect(result.status).toBe('blocked');
+    expect(result.reason).toBe('code_candidate_authorization_required');
+    expect(fs.existsSync(`${orphan}.orphan-${HASH(orphan).slice(0, 12)}`)).toBe(true);
+    state.cleanup();
 });

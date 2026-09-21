@@ -30,6 +30,7 @@ async function enumerateCompletePages(fetchPage, options = {}) {
 
 async function loadPendingProposalRows(client, options = {}) {
     const cutoff = options.cutoff || new Date().toISOString();
+    let previousKey = null;
     const enumeration = await enumerateCompletePages(async (cursor) => {
         const pageSize = Math.min(Math.max(Number(options.pageSize) || 100, 1), 100);
         const query = client.from('prompt_proposals').select('*').eq('status', 'pending').lte('created_at', cutoff).order('created_at', { ascending: true }).order('id', { ascending: true }).limit(pageSize);
@@ -42,9 +43,21 @@ async function loadPendingProposalRows(client, options = {}) {
         const result = await query;
         if (!result || result.error || !Array.isArray(result.data)) throw new Error(`Pending proposal enumeration returned a malformed page${result?.error ? `: ${result.error.message}` : '.'}`);
         const rows = result.data;
+        const pageKeys = new Set();
+        for (const row of rows) {
+            if (!row || typeof row.id !== 'string' || !row.id.trim() || typeof row.created_at !== 'string' || !row.created_at.trim() || !Number.isFinite(Date.parse(row.created_at))) {
+                throw new Error('Pending proposal enumeration returned a malformed row.');
+            }
+            const key = `${row.created_at}\u0000${row.id}`;
+            if (pageKeys.has(key) || (previousKey && key <= previousKey)) throw new Error('Pending proposal enumeration order is non-monotonic.');
+            pageKeys.add(key);
+            previousKey = key;
+        }
         const lastRow = rows[rows.length - 1];
         const nextCursor = lastRow ? Buffer.from(JSON.stringify({ created_at: lastRow.created_at, id: lastRow.id })).toString('base64url') : cursor;
-        return { rows, nextCursor, complete: rows.length < pageSize };
+        // A short non-empty page is not proof of completion: fetch the next
+        // keyset page and require an explicit empty terminal page.
+        return { rows, nextCursor, complete: rows.length === 0 };
     }, { cursor: null });
     return { ...enumeration, cutoff, rows_count: enumeration.rows.length, row_ids: enumeration.rows.map((row) => row.id), query: { table: 'prompt_proposals', status: 'pending', created_at_lte: cutoff, order: ['created_at', 'id'] } };
 }
@@ -120,9 +133,17 @@ function buildPreparationInventory(proposal, options = {}) {
             group.status = 'blocked';
             group.reason = 'delivery_verification_required';
         }
-        const associationConflict = (record.submissionId && `${record.submissionId}` !== `${replay.submission_id}`)
-            || (record.inputSpan?.text && route.original_text && record.inputSpan.text !== route.original_text)
-            || (record.expectedSpan?.text && route.corrected_text && record.expectedSpan.text !== route.corrected_text);
+        const explicitReplayCase = Object.prototype.hasOwnProperty.call(replay, 'case_id');
+        const explicitReplayOriginal = Object.prototype.hasOwnProperty.call(replay, 'original_text');
+        const explicitReplayCorrected = Object.prototype.hasOwnProperty.call(replay, 'corrected_text');
+        const explicitInputSpan = Object.prototype.hasOwnProperty.call(record, 'inputSpan');
+        const explicitExpectedSpan = Object.prototype.hasOwnProperty.call(record, 'expectedSpan');
+        const associationConflict = (record.submissionId != null && `${record.submissionId}` !== `${replay.submission_id}`)
+            || (route.case_id != null && (explicitReplayCase && `${replay.case_id}` !== `${route.case_id}`))
+            || (route.original_text != null && (explicitReplayOriginal && replay.original_text !== route.original_text))
+            || (route.corrected_text != null && (explicitReplayCorrected && replay.corrected_text !== route.corrected_text))
+            || (explicitInputSpan && (!record.inputSpan || record.inputSpan.text !== route.original_text))
+            || (explicitExpectedSpan && (!record.expectedSpan || record.expectedSpan.text !== route.corrected_text));
         if (!replay.submission_id || !group.source_binding.case_id || !hasTextPair || record.expectationAuthority !== 'human_explanation' || associationConflict) {
             group.status = 'blocked';
             group.reason = !replay.submission_id ? 'missing_replay_submission_mapping' : !group.source_binding.case_id ? 'missing_case_mapping' : !hasTextPair ? 'missing_human_text_pair' : associationConflict ? 'behavior_binding_conflict' : 'behavior_authority_not_human';
@@ -295,6 +316,27 @@ async function prepareCodeProposalQueue(options = {}) {
         return { status: 'blocked', reason: 'code_candidate_authorization_required', providerCalls: 0, inventory: stored, attemptId: existing.attempt_id, artifactDirectory };
     }
     const attemptId = options.attemptId || `proposal-${proposal.id}`;
+    // A process may have crashed after materializing the deterministic attempt
+    // directory but before the durable CAS claim.  Only reclaim that directory
+    // after the durable reread above proved there is no owner and the artifact
+    // is an unambiguous, hash-valid preparation for this exact inventory.
+    const outputRoot = options.outputRoot || path.join(options.repoRoot || process.cwd(), 'tmp', 'code-proposals');
+    const orphanRoot = path.resolve(outputRoot, proposal.id, attemptId);
+    if (fs.existsSync(orphanRoot)) {
+        let reclaimable = false;
+        try {
+            const stat = fs.lstatSync(orphanRoot);
+            if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error('orphan artifact directory is unsafe');
+            const stored = readBoundedJson(path.join(orphanRoot, 'preparation-inventory.json'), 'Orphan preparation inventory');
+            if (!stored.frozen_hashes || Object.values(stored.frozen_hashes).some((hash) => !DIGEST.test(hash || ''))) throw new Error('orphan frozen hashes are malformed');
+            if (inventoryBoundaryHash(stored) !== inventoryBoundaryHash(inventory)) throw new Error('orphan inventory identity changed');
+            reclaimable = true;
+        } catch { reclaimable = false; }
+        if (!reclaimable) return { status: 'blocked', reason: 'orphan_artifact_ambiguous', providerCalls: 0, inventory, attemptId };
+        const preserved = `${orphanRoot}.orphan-${sha256(orphanRoot).slice(0, 12)}`;
+        if (fs.existsSync(preserved)) return { status: 'blocked', reason: 'orphan_artifact_ambiguous', providerCalls: 0, inventory, attemptId };
+        fs.renameSync(orphanRoot, preserved);
+    }
     const prepared = await prepareCodeProposalAttempt({ ...options, proposal, inventory, attemptId, authorization: undefined, authorizationFile: undefined, stateFile: undefined, dispatchDraft: undefined, runPreparedLifecycle: undefined });
     const finalizedInventory = finalizePreparationInventory(inventory, { behavior_tests_sha256: prepared.metadata.behavior_tests_sha256, dataset_sha256: prepared.metadata.expected_dataset_sha256, source_sha256: prepared.metadata.baseline_source_sha256, prompt_sha256: prepared.metadata.prompt_sha256, accepted_rules_sha256: prepared.metadata.accepted_rules_sha256 });
     const summary = summaryFor(finalizedInventory, prepared.attemptId, prepared.artifactDirectory, finalizedInventory.groups);

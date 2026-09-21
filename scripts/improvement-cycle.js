@@ -699,13 +699,24 @@ async function checkGraphSecretExpiry(supabase, core) {
 
 async function main() {
     const args = parseArgs(process.argv.slice(2));
-    const core = requireDashboardLib('improvement-cycle-core');
-    const manifestLib = requireDashboardLib('review-rules-manifest');
-    const preAiRulesLib = requireDashboardLib('pre-ai-deterministic-rules');
     const executorModel = process.env.AI_REVIEW_MODEL || 'gpt-4o-mini';
     const supabase = getSupabase();
     const baseCycleId = new Date().toISOString().slice(0, 10);
     let cycleId = baseCycleId;
+
+    if (args.prepareOnly) {
+        const artifactsDir = path.join(repoRoot, 'tmp', 'improvement-cycle', `prepare-only-${baseCycleId}`);
+        acquireLock();
+        try {
+            fs.mkdirSync(artifactsDir, { recursive: true, mode: 0o700 });
+            await triggerManualCodeCandidateReview({ supabase, cycleId: baseCycleId, proposalRow: null, artifactsDir });
+        } finally { releaseLock(); }
+        return;
+    }
+
+    const core = requireDashboardLib('improvement-cycle-core');
+    const manifestLib = requireDashboardLib('review-rules-manifest');
+    const preAiRulesLib = requireDashboardLib('pre-ai-deterministic-rules');
 
     console.log(`Improvement Cycle — ${baseCycleId}`);
     console.log('='.repeat(50));
@@ -757,11 +768,6 @@ async function main() {
     }
     const pendingProposals = pendingEnumeration.rows || [];
     const pendingProposal = pendingProposals[0] || null;
-    if (args.prepareOnly) {
-        acquireLock();
-        try { await triggerManualCodeCandidateReview({ supabase, cycleId: baseCycleId, proposalRow: pendingProposal, artifactsDir: path.join(repoRoot, 'tmp', 'improvement-cycle', `prepare-only-${baseCycleId}`) }); } finally { releaseLock(); }
-        return;
-    }
     const effectiveAtGate = core.pickEffectivePrompt(approvedProposalsForBaseline || [], filePrompt);
     const manifestAtGate = manifestLib.buildReviewRulesManifest({ acceptedCorrectionRules: acceptedRulesForBaseline || [] });
     const baselineFingerprint = core.computeReviewBaselineFingerprint({
