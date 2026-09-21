@@ -1,8 +1,8 @@
 'use strict';
 
 /**
- * Small outer coordinator for the human approval handoff. It selects one
- * owner-bound human explanation group from the improvement-cycle proposal,
+ * Small outer coordinator for the human approval handoff. It binds every
+ * code-recommendation group in one proposal to the same owner attempt,
  * prepares the existing code-candidate attempt, and stops before any provider
  * call when the separate code-candidate authorization/ledger is absent.
  */
@@ -18,42 +18,85 @@ function routedRows(proposal) {
         .sort((a, b) => `${a.correction_id}`.localeCompare(`${b.correction_id}`));
 }
 
+function identity(value) {
+    return value == null || `${value}` === '' ? null : `${value}`;
+}
+
+function requireConsistentIdentity(label, values) {
+    const present = values.map(identity).filter(Boolean);
+    if (!present.length || present.some((value) => value !== present[0])) throw new Error(`Human explanation binding has inconsistent ${label} authority.`);
+    return present[0];
+}
+
+function requireConsistentText(correctionId, label, values) {
+    const present = values.filter((value) => typeof value === 'string' && value.length > 0);
+    if (present.length !== values.length || present.some((value) => value !== present[0])) throw new Error(`Human explanation ${correctionId} has inconsistent ${label} authority.`);
+    return present[0];
+}
+
+function selectBoundHumanExplanationGroups(proposal) {
+    const routes = routedRows(proposal);
+    if (!routes.length) throw new Error('No code_recommendation human explanation is available for manual review.');
+    const evidence = Array.isArray(proposal?.replay_evidence) ? proposal.replay_evidence : [];
+    const behaviorRecords = Array.isArray(proposal?.eval_summary?.behavior_tests?.records)
+        ? proposal.eval_summary.behavior_tests.records
+        : [];
+    const seenRoutes = new Set();
+    const groups = routes.map((route) => {
+        const correctionId = identity(route.correction_id);
+        if (!correctionId || seenRoutes.has(correctionId)) throw new Error(`Human explanation ${correctionId || '(missing)'} has a non-unique route binding.`);
+        seenRoutes.add(correctionId);
+        const replayMatches = evidence.filter((row) => identity(row?.correction_id) === correctionId);
+        if (replayMatches.length !== 1) throw new Error(`Human explanation ${correctionId} has no unique replay evidence.`);
+        const replayEvidence = replayMatches[0];
+        const behaviorMatches = behaviorRecords.filter((row) => identity(row?.correctionId) === correctionId);
+        if (behaviorMatches.length !== 1) throw new Error(`Human explanation ${correctionId} has no unique behavior record.`);
+        const behaviorRecord = behaviorMatches[0];
+        if (behaviorRecord.expectationAuthority !== 'human_explanation') throw new Error(`Human explanation ${correctionId} is not bound to the frozen behavior artifact.`);
+
+        const submissionId = requireConsistentIdentity('submission', [route.submission_id, replayEvidence.submission_id, behaviorRecord.submissionId ?? behaviorRecord.submission_id]);
+        const caseId = requireConsistentIdentity('case', [route.case_id, replayEvidence.case_id, behaviorRecord.caseId ?? behaviorRecord.case_id]);
+        const originalText = requireConsistentText(correctionId, 'original text', [route.original_text, replayEvidence.original_text, behaviorRecord.inputSpan?.text]);
+        const correctedText = requireConsistentText(correctionId, 'corrected text', [route.corrected_text, replayEvidence.corrected_text, behaviorRecord.expectedSpan?.text]);
+        const held = route.replay_status === 'delivery_mismatch' || replayEvidence.status === 'delivery_mismatch';
+        return Object.freeze({
+            correctionId,
+            route: { ...route },
+            replayEvidence: { ...replayEvidence },
+            behaviorRecord: { ...behaviorRecord },
+            submissionId,
+            caseId,
+            originalText,
+            correctedText,
+            deliveryHeld: held,
+            rawHumanExplanation: {
+                original_text: originalText,
+                corrected_text: correctedText,
+                source: route.source || 'human',
+                rule: route.rule || null,
+                change_type: route.change_type || null,
+            },
+        });
+    });
+    return Object.freeze(groups);
+}
+
 function deliveryHeld(proposal) {
-    const evidence = new Map((Array.isArray(proposal?.replay_evidence) ? proposal.replay_evidence : [])
-        .filter((row) => row?.correction_id)
-        .map((row) => [row.correction_id, row]));
-    return routedRows(proposal)
-        .filter((route) => route.replay_status === 'delivery_mismatch' || evidence.get(route.correction_id)?.status === 'delivery_mismatch')
-        .map((route) => ({ correction_id: route.correction_id, status: 'delivery_verification_required', route: { ...route }, replay_evidence: evidence.get(route.correction_id) ? { ...evidence.get(route.correction_id) } : null }));
+    return selectBoundHumanExplanationGroups(proposal)
+        .filter((group) => group.deliveryHeld)
+        .map((group) => ({
+            correction_id: group.correctionId,
+            status: 'delivery_verification_required',
+            route: { ...group.route },
+            replay_evidence: { ...group.replayEvidence },
+        }));
 }
 
 function selectBoundHumanExplanationGroup(proposal, correctionId) {
-    const evidence = new Map((proposal.replay_evidence || []).filter((row) => row?.correction_id).map((row) => [row.correction_id, row]));
-    const routes = routedRows(proposal).sort((a, b) => {
-        const aHeld = a.replay_status === 'delivery_mismatch' || evidence.get(a.correction_id)?.status === 'delivery_mismatch';
-        const bHeld = b.replay_status === 'delivery_mismatch' || evidence.get(b.correction_id)?.status === 'delivery_mismatch';
-        return Number(aHeld) - Number(bHeld) || `${a.correction_id}`.localeCompare(`${b.correction_id}`);
-    });
-    const route = correctionId ? routes.find((row) => row.correction_id === correctionId) : routes[0];
-    if (!route) throw new Error('No code_recommendation human explanation is available for manual review.');
-    const replayEvidence = (proposal.replay_evidence || []).filter((row) => row?.correction_id === route.correction_id);
-    if (replayEvidence.length !== 1) throw new Error(`Human explanation ${route.correction_id} has no unique replay evidence.`);
-    const behavior = proposal.eval_summary?.behavior_tests;
-    const behaviorRecord = (behavior?.records || []).find((row) => row?.correctionId === route.correction_id);
-    if (!behaviorRecord || behaviorRecord.expectationAuthority !== 'human_explanation') throw new Error(`Human explanation ${route.correction_id} is not bound to the frozen behavior artifact.`);
-    return Object.freeze({
-        correctionId: route.correction_id,
-        route: { ...route },
-        replayEvidence: { ...replayEvidence[0] },
-        behaviorRecord: { ...behaviorRecord },
-        rawHumanExplanation: {
-            original_text: route.original_text,
-            corrected_text: route.corrected_text,
-            source: route.source || 'human',
-            rule: route.rule || null,
-            change_type: route.change_type || null,
-        },
-    });
+    const groups = selectBoundHumanExplanationGroups(proposal);
+    const group = correctionId ? groups.find((candidate) => candidate.correctionId === correctionId) : groups[0];
+    if (!group) throw new Error(`No code_recommendation human explanation is available for ${correctionId}.`);
+    return group;
 }
 
 function markBlocked(attempt, reason) {
@@ -82,25 +125,34 @@ async function readLiveOwner(options, attemptId) {
 }
 
 async function prepareManualCodeProposalReview(options = {}) {
-    const boundGroup = selectBoundHumanExplanationGroup(options.proposal, options.correctionId);
-    const heldDelivery = deliveryHeld(options.proposal);
-    const selectedHeld = heldDelivery.some((row) => row.correction_id === boundGroup.correctionId);
+    const boundGroups = selectBoundHumanExplanationGroups(options.proposal);
+    const boundGroup = options.correctionId
+        ? boundGroups.find((group) => group.correctionId === options.correctionId)
+        : boundGroups[0];
+    if (!boundGroup) throw new Error(`No code_recommendation human explanation is available for ${options.correctionId}.`);
+    const heldDelivery = boundGroups.filter((group) => group.deliveryHeld).map((group) => ({
+        correction_id: group.correctionId,
+        status: 'delivery_verification_required',
+        route: { ...group.route },
+        replay_evidence: { ...group.replayEvidence },
+    }));
     const prepared = options.existingAttempt || await (options.prepareAttempt || prepareCodeProposalAttempt)({ ...options, proposal: options.proposal });
-    if (selectedHeld) {
-        return { status: 'ready_for_manual_review', reason: 'delivery_verification_required', providerCalls: 0, attemptId: prepared.attemptId, artifactDirectory: prepared.artifactDirectory, boundGroup, deliveryHolds: heldDelivery, progress: JSON.parse(fs.readFileSync(path.join(prepared.artifactDirectory, 'candidate', 'progress.json'), 'utf8')) };
+    const common = { attemptId: prepared.attemptId, artifactDirectory: prepared.artifactDirectory, boundGroup, boundGroups, deliveryHolds: heldDelivery };
+    if (heldDelivery.length) {
+        return { status: 'ready_for_manual_review', reason: 'delivery_verification_required', providerCalls: 0, ...common, progress: JSON.parse(fs.readFileSync(path.join(prepared.artifactDirectory, 'candidate', 'progress.json'), 'utf8')) };
     }
     const authorization = options.authorization || (options.authorizationFile && fs.existsSync(options.authorizationFile)
         ? JSON.parse(fs.readFileSync(options.authorizationFile, 'utf8'))
         : null);
     if (!authorization || authorization.stage !== 'code-candidate' || authorization.status !== 'active') {
         const progress = markBlocked(prepared, 'code_candidate_authorization_required');
-        return { status: 'blocked', reason: 'code_candidate_authorization_required', providerCalls: 0, attemptId: prepared.attemptId, artifactDirectory: prepared.artifactDirectory, boundGroup, deliveryHolds: heldDelivery, progress };
+        return { status: 'blocked', reason: 'code_candidate_authorization_required', providerCalls: 0, ...common, progress };
     }
     let validatedDraftResult = options.validatedDraftResult;
     let providerCalls = 0;
     if (!validatedDraftResult) {
         if (!options.authorizationFile || !options.stateFile || !options.messages || !options.trustedRoot || !options.repoRoot) {
-            return { status: 'ready_for_manual_review', reason: 'validated_draft_required', providerCalls: 0, attemptId: prepared.attemptId, artifactDirectory: prepared.artifactDirectory, boundGroup, deliveryHolds: heldDelivery, progress: JSON.parse(fs.readFileSync(path.join(prepared.artifactDirectory, 'candidate', 'progress.json'), 'utf8')) };
+            return { status: 'ready_for_manual_review', reason: 'validated_draft_required', providerCalls: 0, ...common, progress: JSON.parse(fs.readFileSync(path.join(prepared.artifactDirectory, 'candidate', 'progress.json'), 'utf8')) };
         }
         const liveOwner = await readLiveOwner(options, prepared.attemptId);
         try {
@@ -139,7 +191,7 @@ async function prepareManualCodeProposalReview(options = {}) {
         validatedDraftResult,
         resume: currentProgress.state === 'blocked',
     });
-    return { status: 'ready_for_manual_review', providerCalls, attemptId: prepared.attemptId, artifactDirectory: prepared.artifactDirectory, boundGroup, deliveryHolds: heldDelivery, lifecycle };
+    return { status: 'ready_for_manual_review', providerCalls, ...common, lifecycle };
 }
 
-module.exports = { routedRows, deliveryHeld, selectBoundHumanExplanationGroup, prepareManualCodeProposalReview };
+module.exports = { routedRows, deliveryHeld, selectBoundHumanExplanationGroups, selectBoundHumanExplanationGroup, prepareManualCodeProposalReview };

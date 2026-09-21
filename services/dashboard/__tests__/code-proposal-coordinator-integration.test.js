@@ -185,7 +185,7 @@ function makeBehavior() {
         schemaVersion: 1,
         frozenAt: new Date().toISOString(),
         records: [{
-            correctionId: 'c1', submissionId: 'submission-1',
+            correctionId: 'c1', submissionId: 'submission-1', caseId: 'production:submission-1',
             inputSpan: { text: 'Dish, lemons, olive oil', start: null, end: null },
             expectedSpan: { text: 'Dish, lemon, olive oil', start: null, end: null },
             reason: 'Use the approved singular ingredient spelling.',
@@ -204,7 +204,7 @@ function makeCycleBehavior(corrections) {
         frozenAt: new Date().toISOString(),
         records: corrections.map((correction) => ({
             correctionId: correction.correction_id,
-            submissionId: correction.submission_id,
+            submissionId: correction.submission_id, caseId: correction.case_id,
             inputSpan: { text: correction.original_text, start: null, end: null },
             expectedSpan: { text: correction.corrected_text, start: null, end: null },
             reason: correction.reason,

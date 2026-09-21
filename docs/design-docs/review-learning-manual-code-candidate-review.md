@@ -49,9 +49,16 @@ rejects a changed or non-running attempt.
 
 The legacy manual helper remains available for an explicitly authorized,
 human-driven handoff, but the scheduled outer cycle now stops at the queue's
-`code_candidate_authorization_required` boundary. Delivery-mismatch routes are
-surfaced as `delivery_verification_required` and remain held without blocking
-unrelated non-delivery groups.
+`code_candidate_authorization_required` boundary. The manual helper binds every
+`code_recommendation` route in one proposal in deterministic `correction_id`
+order to exactly one replay-evidence row and exactly one human-explanation
+behavior record. Submission, case, original-text, corrected-text, and behavior
+span authority must agree; duplicate or incomplete bindings fail closed before
+drafting. All groups share the one proposal-level owner attempt and the
+unchanged full proposal is passed to C2b/C2c verification. A delivery-mismatch
+member is surfaced in `deliveryHolds` as
+`delivery_verification_required` and holds the aggregate, even when a caller
+selects another member; no group is silently omitted or dispatched separately.
 
 Operators can run `node scripts/improvement-cycle.js --prepare-only` to consume
 the existing pending backlog through this same preparation-only queue even when
