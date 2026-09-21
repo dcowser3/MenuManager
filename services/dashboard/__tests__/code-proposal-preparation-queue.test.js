@@ -248,13 +248,32 @@ test('user-owned manual exclusions preserve inventory while removing exactly thr
     const evidence = routes.map((route) => ({ correction_id: route.correction_id, submission_id: `submission-${route.correction_id}`, case_id: route.case_id, original_text: route.original_text, corrected_text: route.corrected_text, status: 'replay_mismatch' }));
     const p = proposal({ id: 'manual-exclusion', cycle_id: 'cycle-manual', correction_routing: routes, replay_evidence: evidence, eval_summary: { behavior_tests: { records } } });
     const fingerprint = HASH(JSON.stringify(p));
-    const artifact = { schema_version: 1, source: 'user_owned_manual_exclusion', proposal_id: p.id, cycle_id: p.cycle_id, proposal_fingerprint: fingerprint, exclusions: ids.map((correction_id) => ({ correction_id, reason: 'user_owned_manual_unresolved' })) };
+    const artifact = { schema_version: 1, source: 'user_owned_manual_exclusion', user_instruction_ref: 'user-message:manual-exclusions', proposal_id: p.id, cycle_id: p.cycle_id, proposal_fingerprint: fingerprint, group_binding_hashes: Object.fromEntries(ids.map((id) => [id, HASH(`binding:${id}`)])), exclusions: ids.map((correction_id) => ({ correction_id, reason: 'user_owned_manual_unresolved' })) };
     const inventory = buildPreparationInventory(p, { proposalFingerprint: fingerprint, manualExclusionArtifact: artifact });
     expect(inventory.groups).toHaveLength(4);
     expect(inventory.groups.filter((group) => group.reason === 'user_owned_manual_unresolved')).toHaveLength(3);
     expect(inventory.groups.find((group) => group.correction_id === 'eligible-code').status).toBe('awaiting_code_candidate_authorization');
     expect(() => validateManualExclusionArtifact(p, { ...artifact, exclusions: artifact.exclusions.slice(0, 2) }, fingerprint)).toThrow(/missing/);
     expect(() => validateManualExclusionArtifact(p, { ...artifact, source: 'model' }, fingerprint)).toThrow(/missing or stale/);
+});
+
+test('production-shaped thirty-group inventory keeps three missing bindings manual and twenty-seven eligible', () => {
+    const excluded = [...USER_MANUAL_UNRESOLVED];
+    const code = Array.from({ length: 17 }, (_, i) => `code-${i + 1}`);
+    const nonCode = Array.from({ length: 10 }, (_, i) => `prompt-${i + 1}`);
+    const ids = [...code, ...nonCode, ...excluded];
+    const routes = ids.map((id) => ({ correction_id: id, lane: code.includes(id) ? 'code_recommendation' : 'prompt', ...(excluded.includes(id) ? {} : { case_id: id }), original_text: 'before', corrected_text: 'after', source: 'human' }));
+    const records = ids.map((id) => ({ ...behaviorRecord(id), ...(excluded.includes(id) ? {} : { caseId: id }) }));
+    const evidence = ids.map((id) => ({ correction_id: id, submission_id: `submission-${id}`, ...(excluded.includes(id) ? {} : { case_id: id }), status: 'replay_mismatch' }));
+    const p = proposal({ id: 'production-shaped', cycle_id: 'cycle-30', correction_routing: routes, replay_evidence: evidence, eval_summary: { behavior_tests: { records } } });
+    const fingerprint = HASH(JSON.stringify(p));
+    const artifact = { schema_version: 1, source: 'user_owned_manual_exclusion', user_instruction_ref: 'user-message:manual-exclusions', proposal_id: p.id, cycle_id: p.cycle_id, proposal_fingerprint: fingerprint, group_binding_hashes: Object.fromEntries(excluded.map((id) => [id, HASH(`binding:${id}`)])), exclusions: excluded.map((correction_id) => ({ correction_id, reason: 'user_owned_manual_unresolved' })) };
+    const inventory = buildPreparationInventory(p, { proposalFingerprint: fingerprint, manualExclusionArtifact: artifact });
+    expect(inventory.groups).toHaveLength(30);
+    expect(inventory.groups.filter((group) => group.reason === 'user_owned_manual_unresolved')).toHaveLength(3);
+    expect(inventory.groups.filter((group) => group.status !== 'excluded')).toHaveLength(27);
+    expect(inventory.groups.filter((group) => group.status !== 'excluded' && group.lane === 'code_recommendation')).toHaveLength(17);
+    expect(inventory.groups.filter((group) => group.status !== 'excluded' && group.lane !== 'code_recommendation')).toHaveLength(10);
 });
 
 test('duplicate or conflicting human behavior bindings fail closed', () => {
