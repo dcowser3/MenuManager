@@ -206,10 +206,25 @@ function validateDraft(draft, proposal, dataset, baseline) {
     return { summary: String(draft.summary || '').slice(0, 3000), patch: draft.patch, test_files: tests, corrections: draft.corrections };
 }
 
-function applyDraft(patch, baseline, candidate, proposal, command = spawnSync) {
+function applyDraft(patch, baseline, candidate, proposal, command = spawnSync, expectedAttemptId = null) {
     validateDraftPatch(patch, baseline, proposal);
-    if (fs.existsSync(candidate)) throw new Error('Candidate directory already exists.');
-    fs.cpSync(baseline, candidate, { recursive: true, errorOnExist: true, force: false });
+    if (fs.existsSync(candidate)) {
+        if (!expectedAttemptId) throw new Error('Candidate directory already exists.');
+        const candidateStat = fs.lstatSync(candidate);
+        if (candidateStat.isSymbolicLink() || !candidateStat.isDirectory() || (candidateStat.mode & 0o777) !== 0o700) throw new Error('Candidate directory already exists and is unsafe.');
+        const entries = fs.readdirSync(candidate);
+        if (entries.length !== 1 || entries[0] !== 'progress.json') throw new Error('Existing candidate directory must contain only progress.json.');
+        const progress = fs.lstatSync(path.join(candidate, 'progress.json'));
+        if (progress.isSymbolicLink() || !progress.isFile() || progress.size > MAX_FILE || (progress.mode & 0o777) !== 0o600) throw new Error('Existing candidate progress artifact is unsafe.');
+        const payload = JSON.parse(fs.readFileSync(path.join(candidate, 'progress.json'), 'utf8'));
+        if (!payload || payload.attempt_id !== expectedAttemptId || path.basename(path.dirname(candidate)) !== expectedAttemptId) throw new Error('Existing candidate progress identity differs.');
+        for (const entry of fs.readdirSync(baseline)) {
+            if (entry === 'progress.json') continue;
+            const source = path.join(baseline, entry), target = path.join(candidate, entry);
+            if (fs.existsSync(target)) throw new Error('Existing candidate contains a conflicting source entry.');
+            fs.cpSync(source, target, { recursive: true, errorOnExist: true, force: false });
+        }
+    } else fs.cpSync(baseline, candidate, { recursive: true, errorOnExist: true, force: false });
     const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('GIT_')));
     Object.assign(env, { GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: os.devNull, GIT_CEILING_DIRECTORIES: path.dirname(candidate) });
     const init = command('git', ['-C', candidate, 'init', '--quiet'], { encoding: 'utf8', timeout: 30000, env });

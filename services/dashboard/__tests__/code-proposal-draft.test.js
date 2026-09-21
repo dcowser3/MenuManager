@@ -59,9 +59,34 @@ test('revalidates bounded artifacts, snapshots baseline, and applies only a safe
             }
             return { status: 0, stderr: '' };
         };
-        applyDraft(patch, baseline, candidate, state.proposal, fakeGit);
+        applyDraft(patch, baseline, candidate, state.proposal, fakeGit, path.basename(state.attempt));
         expect(fs.readFileSync(path.join(candidate, 'services/dashboard/lib/rule.ts'), 'utf8')).toContain('value = 2');
         expect(fs.readFileSync(path.join(state.root, 'services/dashboard/lib/rule.ts'), 'utf8')).toContain('value = 1');
+    } finally { state.cleanup(); }
+});
+
+test('applies into a prepared candidate while preserving its owner progress artifact', () => {
+    const state = fixture();
+    try {
+        const baseline = path.join(state.attempt, 'baseline');
+        snapshotBaseline(state.root, baseline, verification);
+        const candidate = path.join(state.attempt, 'candidate');
+        fs.mkdirSync(candidate, { recursive: true, mode: 0o700 });
+        fs.writeFileSync(path.join(candidate, 'progress.json'), JSON.stringify({ attempt_id: path.basename(state.attempt), state: 'blocked' }), { mode: 0o600 });
+        const fakeGit = (_command, args) => { if (args.includes('apply') && !args.includes('--check')) { fs.mkdirSync(path.join(candidate, 'services/dashboard/__tests__'), { recursive: true }); fs.writeFileSync(path.join(candidate, 'services/dashboard/lib/rule.ts'), 'export const value = 2;'); fs.writeFileSync(path.join(candidate, 'services/dashboard/__tests__/code-candidate-fix.test.ts'), "test('fix', () => {});\n"); } return { status: 0, stderr: '' }; };
+        applyDraft(patch, baseline, candidate, state.proposal, fakeGit, path.basename(state.attempt));
+        expect(JSON.parse(fs.readFileSync(path.join(candidate, 'progress.json'), 'utf8')).attempt_id).toBe(path.basename(state.attempt));
+    } finally { state.cleanup(); }
+});
+
+test.each(['wrong-mode', 'conflicting-entry'])('rejects unsafe prepared candidate: %s', (kind) => {
+    const state = fixture();
+    try {
+        const baseline = path.join(state.attempt, 'baseline'); snapshotBaseline(state.root, baseline, verification);
+        const candidate = path.join(state.attempt, 'candidate'); fs.mkdirSync(candidate, { recursive: true, mode: kind === 'wrong-mode' ? 0o755 : 0o700 });
+        if (kind === 'wrong-mode') fs.writeFileSync(path.join(candidate, 'progress.json'), JSON.stringify({ attempt_id: path.basename(state.attempt) }), { mode: 0o600 });
+        else { fs.writeFileSync(path.join(candidate, 'progress.json'), JSON.stringify({ attempt_id: path.basename(state.attempt) }), { mode: 0o600 }); fs.writeFileSync(path.join(candidate, 'extra'), 'x'); }
+        expect(() => applyDraft(patch, baseline, candidate, state.proposal, () => ({ status: 0, stderr: '' }))).toThrow();
     } finally { state.cleanup(); }
 });
 

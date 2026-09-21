@@ -103,9 +103,9 @@ async function dispatchCodeDraft(options = {}) {
     }
 }
 
-function applyValidatedDraft(result, proposal, candidateRoot, command) {
+function applyValidatedDraft(result, proposal, candidateRoot, command, expectedAttemptId) {
     if (!result?.draft || result?.proof || result?.code_verification || result?.verification) throw new Error('C2b cannot apply or carry verification evidence.');
-    return applyDraft(result.draft.patch, result.baselineRoot, candidateRoot, proposal, command);
+    return applyDraft(result.draft.patch, result.baselineRoot, candidateRoot, proposal, command, expectedAttemptId);
 }
 
 function atomicOwnerWrite(file, bytes) {
@@ -177,7 +177,7 @@ function persistC2bHandoff(result, proposal, candidateRoot, options = {}) {
 async function applyValidatedDraftWithHandoff(result, proposal, candidateRoot, options = {}) {
     if (!result?.checked?.cases && !Array.isArray(result?.cases) && !Array.isArray(options.cases)) throw new Error('C2b apply requires the frozen dataset cases returned by dispatch.');
     validateDraft(result.draft, proposal, result.checked?.cases || result.cases || options.cases, result.baselineRoot);
-    const applied = applyValidatedDraft(result, proposal, candidateRoot, options.command);
+    const applied = applyValidatedDraft(result, proposal, candidateRoot, options.command, options.attemptId);
     const handoff = persistC2bHandoff(result, proposal, applied, options);
     let ownerBound = false;
     if (options.client && options.originalProposal) {
