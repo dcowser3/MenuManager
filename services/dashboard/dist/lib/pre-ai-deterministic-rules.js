@@ -520,10 +520,10 @@ function normalizeSingularIngredientFormsOnLine(line, lineIndex) {
  * proposal rows remain human evidence and are not executable rules themselves.
  */
 const ESTABLISHED_GRILLED_MODIFIERS = new Set(contextual_compound_descriptor_contract_1.CONTEXTUAL_COMPOUND_DESCRIPTOR_CONTRACT.guards.grilled_modifier.modifiers);
-const NON_FOOD_CAST_IRON_NOUNS = new Set(contextual_compound_descriptor_contract_1.CONTEXTUAL_COMPOUND_DESCRIPTOR_CONTRACT.guards.cast_iron.excluded_nouns);
+const GRILLED_FOOD_NOUNS = new Set(contextual_compound_descriptor_contract_1.CONTEXTUAL_COMPOUND_DESCRIPTOR_CONTRACT.guards.grilled_modifier.food_nouns);
+const CAST_IRON_FOOD_NOUNS = new Set(contextual_compound_descriptor_contract_1.CONTEXTUAL_COMPOUND_DESCRIPTOR_CONTRACT.guards.cast_iron.food_nouns);
 const BRULEE_INGREDIENTS = new Set(contextual_compound_descriptor_contract_1.CONTEXTUAL_COMPOUND_DESCRIPTOR_CONTRACT.guards.brulee_participle.ingredients);
 const BRULEE_LEXICAL_DESSERTS = new Set(contextual_compound_descriptor_contract_1.CONTEXTUAL_COMPOUND_DESCRIPTOR_CONTRACT.guards.brulee_participle.excluded_lexical_desserts);
-const NON_FOOD_DESCRIPTOR_FOLLOWERS = new Set(['a', 'an', 'and', 'at', 'by', 'cooking', 'for', 'in', 'is', 'lime', 'of', 'on', 'or', 'rosemary', 'served', 'the', 'to', 'used', 'with']);
 function preserveDescriptorCase(source, target) {
     return matchCase(source, target);
 }
@@ -538,7 +538,7 @@ function normalizeContextualCompoundDescriptorsOnLine(line, lineIndex) {
         const folded = modifier.toLowerCase();
         const preceding = nextLine.slice(0, offset).trimEnd();
         const modifierKey = folded.replace(/\s+/g, '-');
-        if (!ESTABLISHED_GRILLED_MODIFIERS.has(modifierKey) || NON_FOOD_DESCRIPTOR_FOLLOWERS.has(noun.toLowerCase()) || (preceding && /[^\p{L}\d ]$/u.test(preceding)))
+        if (!ESTABLISHED_GRILLED_MODIFIERS.has(modifierKey) || !GRILLED_FOOD_NOUNS.has(noun.toLowerCase()) || (preceding && /[^\p{L}\d ]$/u.test(preceding)))
             return match;
         const correctedModifier = preserveDescriptorCase(modifier, modifier);
         const corrected = `${correctedModifier}-${matchCase(participle, 'grilled')} ${noun}`;
@@ -551,7 +551,7 @@ function normalizeContextualCompoundDescriptorsOnLine(line, lineIndex) {
     // cookware/material uses are excluded, as are already-hyphenated forms.
     nextLine = nextLine.replace(/\bcast\s+iron\s+([A-Za-zÀ-ÖØ-öø-ÿ]+)/giu, (match, noun, offset) => {
         const preceding = nextLine.slice(0, offset).trimEnd();
-        if ((preceding && /[^\p{L}\d ]$/u.test(preceding)) || NON_FOOD_CAST_IRON_NOUNS.has(noun.toLowerCase()) || NON_FOOD_DESCRIPTOR_FOLLOWERS.has(noun.toLowerCase()))
+        if ((preceding && /[^\p{L}\d ]$/u.test(preceding)) || !CAST_IRON_FOOD_NOUNS.has(noun.toLowerCase()))
             return match;
         const corrected = match.replace(/\s+/, '-');
         if (corrected === match)

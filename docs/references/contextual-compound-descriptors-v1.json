@@ -6,12 +6,13 @@
     "grilled_modifier": {
       "trigger": "An allowlisted established modifier precedes grilled, which immediately precedes a food noun at the start of an attributive construction.",
       "transformation": "Join the modifier and grilled with a hyphen, preserving casing.",
-      "modifiers": ["achiote", "applewood", "charcoal", "chipotle", "coffee", "harissa", "hickory", "mesquite", "miso", "smoked", "wood-fired", "woodfired"]
+      "modifiers": ["achiote", "applewood", "charcoal", "chipotle", "coffee", "harissa", "hickory", "mesquite", "miso", "smoked", "wood-fired", "woodfired"],
+      "food_nouns": ["apples", "beef", "broccoli", "chicken", "fish", "ham", "lamb", "lime", "mushrooms", "pancakes", "pasta", "pizza", "pork", "salmon", "shrimp", "steak", "tofu", "vegetables"]
     },
     "cast_iron": {
       "trigger": "Cast iron immediately precedes an attributive food noun.",
       "transformation": "Join cast and iron with a hyphen, preserving casing.",
-      "excluded_nouns": ["iron", "pan", "pans", "skillet", "skillets", "griddle", "griddles", "pot", "pots", "plate", "plates", "cookware"]
+      "food_nouns": ["beef", "chicken", "fish", "lamb", "lime", "mushrooms", "pancakes", "pasta", "pizza", "pork", "salmon", "shrimp", "steak", "tofu", "vegetables"]
     },
     "brulee_participle": {
       "trigger": "brûlée immediately precedes a recognized ingredient in an ingredient-preparation adjective construction.",
@@ -28,6 +29,7 @@
   ],
   "unseen_positive_examples": [
     { "before": "Mesquite Grilled Shrimp 24", "after": "Mesquite-Grilled Shrimp 24" },
+    { "before": "Mesquite Grilled Lime 9", "after": "Mesquite-Grilled Lime 9" },
     { "before": "Roasted Carrots, brûlée banana V 12", "after": "Roasted Carrots, brûléed banana V 12" }
   ],
   "negative_examples": [
@@ -36,7 +38,11 @@
     { "before": "Cast Iron Skillet 8", "after": "Cast Iron Skillet 8" },
     { "before": "Crème brûlée 14", "after": "Crème brûlée 14" },
     { "before": "Brûlée Cheesecake 16", "after": "Brûlée Cheesecake 16" },
-    { "before": "Pineapple brûlée 12", "after": "Pineapple brûlée 12" }
+    { "before": "Pineapple brûlée 12", "after": "Pineapple brûlée 12" },
+    { "before": "Chicken cooked in cast iron over coals", "after": "Chicken cooked in cast iron over coals" },
+    { "before": "Cast iron retains heat", "after": "Cast iron retains heat" },
+    { "before": "Achiote grilled until tender", "after": "Achiote grilled until tender" },
+    { "before": "Cast iron over coals", "after": "Cast iron over coals" }
   ],
   "expectations": {
     "casing": "Preserve source casing for transformed words.",
