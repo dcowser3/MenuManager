@@ -13,3 +13,10 @@ Preparation-only operators must pass the private artifact explicitly with
 `runPrepareOnly({ manualExclusionArtifactPath })`). The loader accepts only a
 private regular JSON file no larger than 128 KiB; it never scans temporary
 directories for artifacts.
+
+The accepted replay-policy refresh seam is zero-model and evidence-first: it
+reuses `assessReplayRetirement` for the exact frozen member set, preserves
+missing provenance as unresolved/unverified, marks original/submitted
+disagreement as `delivery_mismatch` with unknown attribution, and returns a
+CAS-bound patch only after recomputing per-row retirement evidence. It does
+not rerun model replay or approve/activate anything.
