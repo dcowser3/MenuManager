@@ -5,6 +5,7 @@ const fs = require('fs');
 const path = require('path');
 const { prepareCodeProposalAttempt, bindHistoricalDataset, readFrozenDataset, safeId } = require('./code-proposal-preparation');
 const { runningClaimIsFresh, recordParentCampaignLineage } = require('./proposal-verification-store');
+const { validateParentCampaignLineage } = require('./parent-campaign-lineage');
 
 const MAX_GROUPS = 500;
 const MAX_BYTES = 8 * 1024 * 1024;
@@ -370,6 +371,22 @@ async function prepareCodeProposalQueue(options = {}) {
         const retryId = `${attemptId}-recovery-${process.pid}-${crypto.randomBytes(4).toString('hex')}`;
         safeSegment(retryId, 'recovery attempt id');
         options = { ...options, attemptId: retryId };
+    }
+    // A crash after the pre-claim lineage write but before the owner CAS leaves
+    // an orphan. Reuse its validated campaign envelope; never mint a newer
+    // cutoff/enumeration for the resumed attempt.
+    if (!options.parentCampaignLineage && proposal.eval_summary?.parent_campaign_sha256) {
+        const proposalRoot = path.resolve(outputRoot, proposalSegment);
+        if (fs.existsSync(proposalRoot)) {
+            for (const name of fs.readdirSync(proposalRoot).sort()) {
+                const candidate = path.join(proposalRoot, name, 'parent-campaign-lineage.json');
+                if (!fs.existsSync(candidate)) continue;
+                try {
+                    const lineage = validateParentCampaignLineage(JSON.parse(fs.readFileSync(candidate, 'utf8')), { proposal });
+                    if (lineage.parent_campaign_sha256 === proposal.eval_summary.parent_campaign_sha256) { options = { ...options, parentCampaignLineage: lineage }; break; }
+                } catch { /* stale or partial orphan; continue looking */ }
+            }
+        }
     }
     const prepared = await prepareCodeProposalAttempt({ ...options, proposal, inventory, attemptId: options.attemptId || attemptId, authorization: undefined, authorizationFile: undefined, stateFile: undefined, dispatchDraft: undefined, runPreparedLifecycle: undefined });
     const finalizedInventory = finalizePreparationInventory(inventory, { behavior_tests_sha256: prepared.metadata.behavior_tests_sha256, dataset_sha256: prepared.metadata.expected_dataset_sha256, source_sha256: prepared.metadata.baseline_source_sha256, prompt_sha256: prepared.metadata.prompt_sha256, accepted_rules_sha256: prepared.metadata.accepted_rules_sha256 });

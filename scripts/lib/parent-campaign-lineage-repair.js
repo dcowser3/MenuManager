@@ -62,6 +62,7 @@ async function repairParentCampaignLineage(options = {}) {
     const recovery = persistParentCampaignLineage(root, lineage, { repair: true, prior_owner_attempt_id: options.expectedAttemptId });
     let current = await options.readCurrentProposal(options.client, proposal.id);
     if (!current || current.status !== 'pending') throw new Error('Lineage repair requires the exact pending proposal.');
+    if (options.expectedExistingParentCampaignSha256 && current.eval_summary?.parent_campaign_sha256 !== options.expectedExistingParentCampaignSha256) throw new Error('Lineage repair existing parent digest differs from the explicitly authorized invalid digest.');
     const owner = current.eval_summary?.code_candidate;
     if (owner?.status === 'running') {
         if (owner.attempt_id !== options.expectedAttemptId) throw new Error('Lineage repair owner attempt differs from the expected attempt.');
@@ -70,7 +71,7 @@ async function repairParentCampaignLineage(options = {}) {
         throw new Error('Lineage repair found a different terminal or active owner.');
     }
     if (current.eval_summary?.parent_campaign_sha256 !== lineage.parent_campaign_sha256) {
-        current = await recordParentCampaignLineage(options.client, current, lineage, verification, { allowClosedOwner: true, expectedAttemptId: options.expectedAttemptId });
+        current = await recordParentCampaignLineage(options.client, current, lineage, verification, { allowClosedOwner: true, expectedAttemptId: options.expectedAttemptId, replaceExistingDigest: !!options.expectedExistingParentCampaignSha256, expectedExistingDigest: options.expectedExistingParentCampaignSha256 });
     }
     current = await options.readCurrentProposal(options.client, proposal.id);
     if (current.eval_summary?.code_candidate?.status === 'blocked') {

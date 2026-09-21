@@ -18,6 +18,7 @@ const claim = (attempt_id = 'attempt-a', started_at = new Date().toISOString()) 
 });
 const withClaim = (candidate) => ({ ...original, eval_summary: { ...original.eval_summary, code_candidate: candidate } });
 function fakeClient(current = original, updated = [{ id: 'p1' }]) {
+    current = { ...current, xmin: current.xmin || '1' };
     const writes = [];
     const filters = [];
     return {
@@ -53,6 +54,13 @@ test('recording evidence preserves other evaluation data and uses an optimistic 
     expect(client.filters).toContainEqual(['eval_summary->code_candidate->>attempt_id', 'attempt-a']);
     expect(client.filters).toContainEqual(['eval_summary->code_candidate->>status', 'running']);
     expect(client.filters).not.toContainEqual(['eval_summary', JSON.stringify(active.eval_summary)]);
+    expect(client.filters).toContainEqual(['xmin', '1']);
+});
+
+test('missing xmin fails closed before any write', async () => {
+    const client = fakeClient(original);
+    client.from = () => ({ select: () => ({ eq: () => ({ single: async () => ({ data: { ...original, xmin: null } }) }) }) });
+    await expect(recordCodeVerification(client, original, { code_candidate: claim() }, verifier)).rejects.toThrow(/xmin/);
 });
 
 test('initial claim pins the absent owner and behavior artifact identity without serializing eval_summary', async () => {

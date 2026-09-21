@@ -229,7 +229,7 @@ async function prepareCodeProposalAttempt(options = {}) {
             const snapshot = readImmutablePendingSnapshot(options.outputRoot || path.join(repoRoot, 'tmp', 'code-proposals'), pendingEnumeration.global_snapshot_sha256);
             if (JSON.stringify(snapshot) !== JSON.stringify({ complete: true, cutoff: pendingEnumeration.cutoff, pages: pendingEnumeration.pages, query: pendingEnumeration.query, row_ids: pendingEnumeration.row_ids, rows_count: pendingEnumeration.rows_count, global_snapshot_sha256: pendingEnumeration.global_snapshot_sha256 })) throw new Error('Pending enumeration metadata differs from its immutable snapshot.');
         }
-        const lineage = options.parentCampaignLineage ? validateParentCampaignLineage(options.parentCampaignLineage, { proposal }) : options.inventory ? buildParentCampaignLineage({
+        const computedLineage = options.inventory ? buildParentCampaignLineage({
             proposal,
             inventory: options.inventory,
             proposalFingerprint: metadata.proposal_sha256,
@@ -240,8 +240,10 @@ async function prepareCodeProposalAttempt(options = {}) {
                 prompt_sha256: metadata.prompt_sha256,
                 accepted_rules_sha256: metadata.accepted_rules_sha256,
             },
-            pendingEnumeration: pendingEnumeration || { ...(options.inventory.enumeration || {}), query: options.inventory.query, rows_count: options.inventory.enumeration?.rows_count || options.inventory.enumeration?.count, row_ids: options.inventory.enumeration?.row_ids },
+            pendingEnumeration: options.parentCampaignLineage?.pending_enumeration || pendingEnumeration || { ...(options.inventory.enumeration || {}), query: options.inventory.query, rows_count: options.inventory.enumeration?.rows_count || options.inventory.enumeration?.count, row_ids: options.inventory.enumeration?.row_ids },
         }) : null;
+        const lineage = options.parentCampaignLineage ? validateParentCampaignLineage(options.parentCampaignLineage, { proposal }) : computedLineage;
+        if (options.parentCampaignLineage && computedLineage && JSON.stringify(options.parentCampaignLineage) !== JSON.stringify(computedLineage)) throw new Error('Supplied parent campaign lineage differs from freshly computed artifacts.');
         if (lineage) {
             persistParentCampaignLineage(attemptRoot, lineage, { pre_claim: true });
             metadata.parent_campaign_sha256 = lineage.parent_campaign_sha256;

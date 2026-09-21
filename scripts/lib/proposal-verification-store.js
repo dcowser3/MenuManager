@@ -15,6 +15,10 @@ const FROZEN_CANDIDATE_IDENTITY_FIELDS = [
     'behavior_tests_sha256', 'prompt_sha256', 'accepted_rules_sha256',
     'preparation_inventory_sha256', 'parent_campaign_sha256', ...POST_DRAFT_IDENTITY_FIELDS,
 ];
+function requireXmin(current) {
+    if (!current || current.xmin === undefined || current.xmin === null || `${current.xmin}` === '') throw new Error('Proposal CAS requires xmin.');
+    return current;
+}
 
 function assertClaimIdentity(candidate) {
     const required = ['proposal_sha256', 'baseline_source_sha256', 'expected_dataset_sha256', 'behavior_tests_sha256', 'prompt_sha256', 'accepted_rules_sha256'];
@@ -147,9 +151,9 @@ function loadVerificationModule(repoRoot = path.resolve(__dirname, '../..')) {
 
 /** Store only evidence for an unchanged pending proposal; never approve, deploy, or send mail. */
 async function recordCodeVerification(supabase, original, patch, verification = loadVerificationModule()) {
-    const { data: current, error } = await supabase.from('prompt_proposals').select('*').eq('id', original.id).single();
+    const { data: current, error } = await supabase.from('prompt_proposals').select('*,xmin').eq('id', original.id).single();
     if (error) throw new Error(error.message);
-    if (!current || current.status !== 'pending') throw new Error('Proposal is no longer pending.');
+    requireXmin(current); if (current.status !== 'pending') throw new Error('Proposal is no longer pending.');
     const fingerprint = verification.codeProposalVerificationFingerprint;
     if (fingerprint(current) !== fingerprint(original)) throw new Error('Proposal changed while the candidate was being verified.');
     assertAttemptOwnership(current, patch);
@@ -184,12 +188,12 @@ async function recordCodeVerification(supabase, original, patch, verification = 
 /** Bind the pre-claim parent lineage with a narrow pending-row CAS. */
 async function recordParentCampaignLineage(supabase, original, envelope, verification = loadVerificationModule(), options = {}) {
     validateParentCampaignLineage(envelope, { proposal: original });
-    const { data: current, error } = await supabase.from('prompt_proposals').select('*').eq('id', original.id).single();
+    const { data: current, error } = await supabase.from('prompt_proposals').select('*,xmin').eq('id', original.id).single();
     if (error) throw new Error(error.message);
-    if (!current || current.status !== 'pending') throw new Error('Proposal is no longer pending.');
+    requireXmin(current); if (current.status !== 'pending') throw new Error('Proposal is no longer pending.');
     if (verification.codeProposalVerificationFingerprint(current) !== verification.codeProposalVerificationFingerprint(original)) throw new Error('Proposal changed while parent lineage was being bound.');
     const existing = current.eval_summary?.parent_campaign_sha256;
-    if (existing && existing !== envelope.parent_campaign_sha256) throw new Error('Parent campaign lineage already differs.');
+    if (existing && existing !== envelope.parent_campaign_sha256 && !(options.replaceExistingDigest && existing === options.expectedExistingDigest)) throw new Error('Parent campaign lineage already differs.');
     const owner = current.eval_summary?.code_candidate;
     if (owner && !(options.allowClosedOwner && owner.status === 'blocked' && owner.attempt_id === options.expectedAttemptId)) throw new Error('Parent campaign lineage must be bound before an owner claim.');
     if (options.allowClosedOwner && (!owner || owner.status !== 'blocked' || owner.attempt_id !== options.expectedAttemptId)) throw new Error('Closed owner identity changed before parent lineage binding.');
@@ -205,9 +209,9 @@ async function recordParentCampaignLineage(supabase, original, envelope, verific
 
 /** Close exactly the current running owner before a bounded lineage repair. */
 async function closeCodeCandidateOwnerForLineageRepair(supabase, original, expectedAttemptId, verification = loadVerificationModule()) {
-    const { data: current, error } = await supabase.from('prompt_proposals').select('*').eq('id', original.id).single();
+    const { data: current, error } = await supabase.from('prompt_proposals').select('*,xmin').eq('id', original.id).single();
     if (error) throw new Error(error.message);
-    const owner = current?.eval_summary?.code_candidate;
+    requireXmin(current); const owner = current?.eval_summary?.code_candidate;
     if (!current || current.status !== 'pending' || !owner || owner.status !== 'running' || owner.attempt_id !== expectedAttemptId) throw new Error('Lineage repair owner is not the expected pending running attempt.');
     if (verification.codeProposalVerificationFingerprint(current) !== verification.codeProposalVerificationFingerprint(original)) throw new Error('Proposal changed before lineage repair owner closure.');
     const closed = { ...owner, status: 'blocked', phase: 'analysis', reason: 'parent_campaign_lineage_repair', closed_at: new Date().toISOString() };
@@ -223,9 +227,9 @@ async function closeCodeCandidateOwnerForLineageRepair(supabase, original, expec
 
 /** Clear only the just-closed owner, retaining all private attempt artifacts. */
 async function clearClosedCodeCandidateOwnerForLineageRepair(supabase, original, expectedAttemptId, verification = loadVerificationModule()) {
-    const { data: current, error } = await supabase.from('prompt_proposals').select('*').eq('id', original.id).single();
+    const { data: current, error } = await supabase.from('prompt_proposals').select('*,xmin').eq('id', original.id).single();
     if (error) throw new Error(error.message);
-    const owner = current?.eval_summary?.code_candidate;
+    requireXmin(current); const owner = current?.eval_summary?.code_candidate;
     if (!current || current.status !== 'pending' || !owner || owner.status !== 'blocked' || owner.attempt_id !== expectedAttemptId || owner.reason !== 'parent_campaign_lineage_repair') throw new Error('Closed lineage repair owner identity changed.');
     if (verification.codeProposalVerificationFingerprint(current) !== verification.codeProposalVerificationFingerprint(original)) throw new Error('Proposal changed before lineage repair owner release.');
     const summary = { ...(current.eval_summary || {}) };
