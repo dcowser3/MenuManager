@@ -47,6 +47,7 @@ const evalHelpers = require('./review-eval-helpers');
 const behaviorArtifactLib = require('./lib/behavior-artifact');
 const { prepareManualCodeProposalReview } = require('./lib/manual-code-proposal-review');
 const { recordCodeVerification } = require('./lib/proposal-verification-store');
+const { appendExpectationArtifactArgs } = require('./lib/improvement-cycle-wiring');
 
 const LOCK_PATH = path.join(repoRoot, 'tmp', 'improvement-cycle', '.lock');
 const LOCK_STALE_MS = 6 * 60 * 60 * 1000;
@@ -226,7 +227,7 @@ async function postImprovementCompletion(messages) {
 }
 
 function runEvalHarness(args) {
-    const result = spawnSync('node', [path.join(repoRoot, 'scripts', 'review-eval.js'), ...args, ...ACTIVE_EXPECTATION_ARGS], {
+    const result = spawnSync('node', [path.join(repoRoot, 'scripts', 'review-eval.js'), ...appendExpectationArtifactArgs(args, ACTIVE_EXPECTATION_ARGS[1])], {
         cwd: repoRoot,
         encoding: 'utf8',
         stdio: ['ignore', 'pipe', 'pipe'],
@@ -1364,6 +1365,8 @@ async function main() {
         const currentPromptPath = path.join(artifactsDir, 'current_prompt.txt');
         const candidatePromptPath = path.join(artifactsDir, 'proposed_prompt.txt');
         const candidateRulesPath = path.join(artifactsDir, 'proposed_rules.json');
+        let evalSummary = null;
+        let expectationPolicyUnresolvedReason = null;
         await fsp.writeFile(currentPromptPath, effective.prompt);
         await fsp.writeFile(candidatePromptPath, validated.proposed_prompt);
         await fsp.writeFile(candidateRulesPath, JSON.stringify({ rules: validated.proposed_replacement_rules }, null, 2));
@@ -1381,14 +1384,13 @@ async function main() {
                     const derivedPath = path.join(artifactsDir, 'derived-expectations.json');
                     await fsp.writeFile(derivedPath, JSON.stringify(derived.envelope, null, 2));
                     ACTIVE_EXPECTATION_ARGS = ['--expectations', derivedPath];
-                } else evalSummary = { ...(evalSummary || {}), expectation_policy_unresolved: true, expectation_policy_unresolved_reason: 'approved artifact had no unique validated-rule match' };
+                } else expectationPolicyUnresolvedReason = 'approved artifact had no unique validated-rule match';
             } catch (error) { validated.warnings.push(`Approved expectation artifact rejected; no policy-change grading: ${error.message}`); }
         }
         if (validated.coverage_claims && validated.coverage_claims.length) {
             await fsp.writeFile(path.join(artifactsDir, 'coverage_claims.json'), JSON.stringify(validated.coverage_claims, null, 2));
         }
 
-        let evalSummary = null;
         let evalStatus = 'skipped';
         // C2: when the candidate is byte-identical to baseline AND has no replacement rules, a full
         // eval run is pure waste (the candidate output cannot differ). Skip it and record no_effect.
@@ -1715,6 +1717,9 @@ async function main() {
                 }
             }
             console.log(`Eval status: ${evalStatus}${evalSummary?.error ? ` (${evalSummary.error.slice(0, 160)})` : ''}`);
+        }
+        if (expectationPolicyUnresolvedReason) {
+            evalSummary = { ...(evalSummary || {}), expectation_policy_unresolved: true, expectation_policy_unresolved_reason: expectationPolicyUnresolvedReason };
         }
 
         // Keep the baseline fingerprint in the existing JSON eval column. A
