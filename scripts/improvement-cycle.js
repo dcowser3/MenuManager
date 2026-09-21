@@ -1372,6 +1372,7 @@ async function main() {
         await fsp.writeFile(candidateRulesPath, JSON.stringify({ rules: validated.proposed_replacement_rules }, null, 2));
         let approvedExpectationEnvelope = null;
         const approvedExpectationPath = process.env.REVIEW_EXPECTATIONS_ARTIFACT;
+        if (approvedExpectationPath && !fs.existsSync(approvedExpectationPath)) expectationPolicyUnresolvedReason = 'configured approved expectation artifact is missing';
         if (approvedExpectationPath && fs.existsSync(approvedExpectationPath)) {
             try {
                 const authority = JSON.parse(fs.readFileSync(approvedExpectationPath, 'utf8'));
@@ -1385,7 +1386,7 @@ async function main() {
                     await fsp.writeFile(derivedPath, JSON.stringify(derived.envelope, null, 2));
                     ACTIVE_EXPECTATION_ARGS = ['--expectations', derivedPath];
                 } else expectationPolicyUnresolvedReason = 'approved artifact had no unique validated-rule match';
-            } catch (error) { validated.warnings.push(`Approved expectation artifact rejected; no policy-change grading: ${error.message}`); }
+            } catch (error) { expectationPolicyUnresolvedReason = `approved expectation artifact rejected: ${error.message}`; validated.warnings.push(`Approved expectation artifact rejected; no policy-change grading: ${error.message}`); }
         }
         if (validated.coverage_claims && validated.coverage_claims.length) {
             await fsp.writeFile(path.join(artifactsDir, 'coverage_claims.json'), JSON.stringify(validated.coverage_claims, null, 2));
