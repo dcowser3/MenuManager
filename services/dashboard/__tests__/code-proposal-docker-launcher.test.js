@@ -154,6 +154,7 @@ test('nonzero, signal, and malformed worker exits fail closed', async () => {
             const child = new EventEmitter(); child.stdout = new EventEmitter(); child.stderr = new EventEmitter(); child.kill = jest.fn();
             const value = spec(state);
             const promise = runDockerInvocation(value, { timeoutMs: 100, spawn: () => child, inspectImage: async () => value.image });
+            await Promise.resolve(); // let the image check finish and attach child listeners before the synthetic exit
             if (event === 'malformed') { child.stdout.emit('data', 'bad'); child.emit('close', 0, null); }
             else if (event === 'signal') child.emit('close', null, 'SIGKILL');
             else child.emit('close', 1, null);

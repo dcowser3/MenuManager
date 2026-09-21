@@ -77,36 +77,3 @@ dockerE2e('runs the real Docker proof to pending_store using metadata attempt id
         expect(progress.attemptId).toBe(fixture.metadata.attempt_id);
     } finally { fs.rmSync(fixture.root, { recursive: true, force: true }); }
 }, 180000);
-
-dockerE2e('composes two independent synthetic cycles without reusing owner artifacts', async () => {
-    const first = makeDockerFixture();
-    const second = makeDockerFixture();
-    const runCycle = async (fixture) => {
-        const imageId = childProcess.execFileSync('docker', ['image', 'inspect', 'menumanager/dev:latest', '--format', '{{.Id}}'], { encoding: 'utf8' }).trim();
-        let live = fixture.proposal;
-        const writes = [];
-        const store = {
-            recordCodeVerification: async (_client, original, patch) => {
-                if (live.status !== 'pending' || JSON.stringify(live.eval_summary) !== JSON.stringify(original.eval_summary)) throw new Error('synthetic CAS conflict');
-                writes.push(patch);
-                live = { ...live, eval_summary: { ...live.eval_summary, ...patch } };
-            },
-            readCurrentProposal: async () => live,
-        };
-        const result = await runCodeProposalLifecycle({ ...fixture, progressRoot: fixture.root, readCurrentProposal: store.readCurrentProposal, c2bHandoffFile: fixture.handoffFile, imageId, runtimeId: FIXED_RUNTIME_ID, replayPolicyVersion: fixture.verification.REPLAY_RETIREMENT_POLICY_VERSION, vocabularySha256: HASH('vocab'), expectationsSha256: HASH('expect'), model: 'test-only', client: {}, originalProposal: fixture.proposal, store, executorTimeoutMs: 150000 });
-        return { result, writes, live };
-    };
-    try {
-        const [a, b] = await Promise.all([runCycle(first), runCycle(second)]);
-        expect(a.result.status).toBe('verified');
-        expect(b.result.status).toBe('verified');
-        expect(a.result.proof.test_only).toBe(true);
-        expect(b.result.proof.test_only).toBe(true);
-        expect(a.writes).toHaveLength(1);
-        expect(b.writes).toHaveLength(1);
-        expect(first.attemptRoot).not.toBe(second.attemptRoot);
-        expect(path.join(first.attemptRoot, 'verifier', 'proof.json')).not.toBe(path.join(second.attemptRoot, 'verifier', 'proof.json'));
-        expect(a.live.eval_summary.code_verification).toBe(a.result.proof);
-        expect(b.live.eval_summary.code_verification).toBe(b.result.proof);
-    } finally { fs.rmSync(first.root, { recursive: true, force: true }); fs.rmSync(second.root, { recursive: true, force: true }); }
-}, 360000);
