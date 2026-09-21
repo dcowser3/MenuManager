@@ -14,48 +14,67 @@ const { prepareReplayPolicyRefresh, applyReplayPolicyRefresh, hashJson } = requi
 const replay = require('../services/dashboard/dist/lib/replay-retirement');
 const binding = require('../services/dashboard/dist/lib/replay-audit-binding');
 const verification = require('../services/dashboard/dist/lib/code-proposal-verification');
+const core = require('../services/dashboard/dist/lib/improvement-cycle-core');
+const { extractReplacementSignals } = require('../services/differ/dist/lib/learning-signals');
 
 const proposalId = process.argv[process.argv.indexOf('--proposal-id') + 1] || process.env.REPLAY_POLICY_PROPOSAL_ID;
 const execute = process.argv.includes('--execute');
 const root = path.resolve(__dirname, '..');
 const artifactRoot = path.join(root, 'tmp', 'replay-policy-refresh');
 const sha = (value) => crypto.createHash('sha256').update(typeof value === 'string' ? value : JSON.stringify(value)).digest('hex');
-const writePrivate = async (file, value) => { await fsp.writeFile(file, typeof value === 'string' ? value : `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 }); await fsp.chmod(file, 0o600); };
+const canonical = (value) => Array.isArray(value) ? value.map(canonical) : value && typeof value === 'object' ? Object.fromEntries(Object.keys(value).filter((key) => key !== 'xmin').sort().map((key) => [key, canonical(value[key])])) : value;
+const canonicalHash = (value) => sha(canonical(value));
+const writePrivate = async (file, value) => { const text = typeof value === 'string' ? value : `${JSON.stringify(value, null, 2)}\n`; const temp = `${file}.tmp-${process.pid}`; await fsp.writeFile(temp, text, { mode: 0o600, flag: 'w' }); await fsp.chmod(temp, 0o600); await fsp.rename(temp, file); await fsp.chmod(file, 0o600); };
 
-function correctionApplied(original, corrected, menu) {
-    const before = `${original || ''}`.trim().toLocaleLowerCase();
-    const after = `${corrected || ''}`.trim().toLocaleLowerCase();
-    const body = `${menu || ''}`.toLocaleLowerCase();
-    return !!after && body.includes(after) && (!before || !body.includes(before));
+function replayCallbacks(entry, sourceText) {
+    const original = entry.original_text || entry.example_original || '';
+    const corrected = entry.corrected_text || entry.example_corrected || '';
+    const signals = (menu) => extractReplacementSignals(sourceText, menu);
+    return {
+        correctionApplied: (menu) => core.analyzeReplayCorrection(original, corrected, menu, signals(menu)).status === 'now_correct',
+        correctionProgress: (menu) => ({ applied_changes: signals(menu).map((signal) => `${signal.from_norm || signal.from || ''}->${signal.to_norm || signal.to || ''}`) }),
+    };
+}
+
+function assertFinalReadback(actual, planned) {
+    if (actual.status !== 'pending' || actual.eval_summary?.code_candidate || actual.eval_summary?.eval_status !== 'regressed' || actual.eval_summary?.disposition !== 'rules_only') throw new Error('Replay refresh readback violates pending/no-owner/regression guards.');
+    if (canonicalHash(actual) !== canonicalHash(planned)) throw new Error('Replay refresh readback differs from the complete planned proposal.');
 }
 
 async function loadMembers(client, proposal) {
-    const accepted = (await client.from('correction_rules').select('*').eq('status', 'accepted')).data || [];
+    const acceptedResult = await client.from('correction_rules').select('*').eq('status', 'accepted');
+    if (acceptedResult.error) throw new Error(`Accepted-rule lookup failed: ${acceptedResult.error.message}`);
+    const accepted = acceptedResult.data || [];
     const members = [];
     for (const entry of proposal.replay_evidence || []) {
         const sid = entry.submission_id;
         let submission = null;
         if (sid) {
-            const result = await client.from('submissions').select('id,legacy_id,menu_content,approved_menu_content,form_attempt_id').or(`id.eq.${sid},legacy_id.eq.${sid}`).limit(1);
+            const result = await client.from('submissions').select('id,legacy_id,menu_content,approved_menu_content,form_attempt_id,property,template_type,menu_type,service_period,raw_payload').or(`id.eq.${sid},legacy_id.eq.${sid}`);
+            if (result.error) throw new Error(`Submission lookup failed for ${sid}: ${result.error.message}`);
+            if ((result.data || []).length > 1) throw new Error(`Ambiguous submission binding for ${sid}.`);
             submission = result.data?.[0] || null;
         }
         let originalAudit = null;
         if (submission?.form_attempt_id) {
             const result = await client.from('basic_ai_check_audits').select('id,attempt_id,created_at,event_type,review_mode,model,ai_request,ai_response,final_result').eq('attempt_id', submission.form_attempt_id);
+            if (result.error) throw new Error(`Audit lookup failed for ${submission.form_attempt_id}: ${result.error.message}`);
             const bound = binding.bindReplayAudit(result.data || [], submission.form_attempt_id);
             if (bound.eligible) originalAudit = bound.audit;
         }
         const original = entry.original_text || entry.example_original || '';
         const corrected = entry.corrected_text || entry.example_corrected || '';
+        const sourceText = originalAudit?.ai_request?.text || submission?.menu_content || '';
+        const callbacks = replayCallbacks(entry, sourceText);
+        const deterministicReplay = replay.replayOriginalResponseDeterministically(originalAudit, { property: submission?.property || '', templateType: submission?.template_type || 'food', menuType: submission?.menu_type || 'standard', allergens: submission?.raw_payload?.allergens || '' }, accepted);
         members.push({
             correction_id: entry.correction_id,
             observedStatus: entry.observed_status || entry.status,
             originalAudit,
             submissionAttemptId: submission?.form_attempt_id || entry.attempt_id || null,
             submittedMenu: submission?.menu_content || null,
-            deterministicReplay: null,
-            correctionApplied: (menu) => correctionApplied(original, corrected, menu),
-            correctionProgress: (menu) => ({ applied_changes: correctionApplied(original, corrected, menu) ? [`${original}->${corrected}`] : [] }),
+            deterministicReplay,
+            ...callbacks,
             acceptedRules: accepted,
         });
     }
@@ -73,18 +92,32 @@ async function main() {
     const members = await loadMembers(client, proposal);
     const expectedFingerprint = verification.codeProposalVerificationFingerprint(proposal);
     const input = { proposal: { ...proposal, xmin: undefined }, members: members.map(({ acceptedRules, ...m }) => ({ ...m, originalAudit: m.originalAudit ? { ...m.originalAudit } : null, deterministicReplay: null })) };
-    const artifactDir = path.join(artifactRoot, `${Date.now()}-${proposalId}`);
+    const artifactDir = path.join(artifactRoot, `proposal-${sha(proposalId).slice(0, 32)}`);
     await fsp.mkdir(artifactDir, { recursive: true, mode: 0o700 }); await fsp.chmod(artifactDir, 0o700);
+    const priorPlanPath = path.join(artifactDir, 'plan.json');
+    const priorAfterPath = path.join(artifactDir, 'after.json');
+    if (fs.existsSync(priorPlanPath) && fs.existsSync(priorAfterPath)) {
+        const prior = JSON.parse(await fsp.readFile(priorPlanPath, 'utf8'));
+        const priorAfter = JSON.parse(await fsp.readFile(priorAfterPath, 'utf8'));
+        if (prior.input_sha256 === sha(input) && prior.planned && canonicalHash(priorAfter) === canonicalHash(prior.planned)) {
+            assertFinalReadback(proposal, prior.planned);
+            await writePrivate(path.join(artifactDir, 'marker.json'), { state: 'recovered', proposal_id: proposalId, input_sha256: sha(input), model_calls: 0 });
+            console.log(JSON.stringify({ state: 'recovered', artifactDir, input_sha256: sha(input), downstream_fingerprint: verification.codeProposalVerificationFingerprint(proposal), model_calls: 0 }, null, 2));
+            return;
+        }
+    }
     await writePrivate(path.join(artifactDir, 'marker.json'), { state: 'prepared', proposal_id: proposalId, input_sha256: sha(input), model_calls: 0 });
     await writePrivate(path.join(artifactDir, 'before.json'), proposal);
     const prepared = prepareReplayPolicyRefresh({ proposal, expectedFingerprint, targetVersion: replay.REPLAY_RETIREMENT_POLICY_VERSION, members });
+    const planned = { ...proposal, ...prepared.patch };
     await writePrivate(path.join(artifactDir, 'input.json'), { input_sha256: sha(input), members: members.map(({ acceptedRules, ...m }) => m), expected_xmin: proposal.xmin });
-    await writePrivate(path.join(artifactDir, 'plan.json'), prepared);
+    await writePrivate(path.join(artifactDir, 'plan.json'), { ...prepared, input_sha256: sha(input), planned, planned_sha256: canonicalHash(planned) });
     if (execute) {
         await applyReplayPolicyRefresh(client, proposalId, proposal.xmin, prepared.patch);
         const afterResult = await client.from('prompt_proposals').select('*,xmin').eq('id', proposalId).single();
         if (afterResult.error) throw new Error(afterResult.error.message);
         const after = afterResult.data;
+        assertFinalReadback(after, planned);
         if (after.eval_summary?.replay_retirement_policy_version !== replay.REPLAY_RETIREMENT_POLICY_VERSION) throw new Error('Policy version readback mismatch.');
         await writePrivate(path.join(artifactDir, 'after.json'), after);
         await writePrivate(path.join(artifactDir, 'marker.json'), { state: 'applied', proposal_id: proposalId, input_sha256: sha(input), downstream_fingerprint: verification.codeProposalVerificationFingerprint(after), model_calls: 0 });
@@ -92,6 +125,6 @@ async function main() {
     } else console.log(JSON.stringify({ state: 'dry-run', artifactDir, input_sha256: sha(input), statuses: prepared.statuses, model_calls: 0 }, null, 2));
 }
 
-main().catch((error) => { console.error(error.stack || error.message); process.exitCode = 1; });
+if (require.main === module) main().catch((error) => { console.error(error.stack || error.message); process.exitCode = 1; });
 
-module.exports = { correctionApplied, loadMembers };
+module.exports = { loadMembers, replayCallbacks, assertFinalReadback, canonicalHash };
