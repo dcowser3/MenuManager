@@ -6,9 +6,14 @@ seam for a narrowly scoped successor to the preserved regressed proposal
 corrections `chilies → chilis`, `affila → affilla`, and `afila → affilla`,
 retaining each source correction ID, menu scope, replay route, and provenance.
 
-The generated successor is linked to the parent cycle and includes deterministic
-pre-AI activation evidence for positive, casing, boundary, and idempotence
-cases. It records zero model/provider calls. Salmon and the Turkey, Chipotle
+The generated successor is a schema-valid `prompt_proposals` insert payload
+(the database supplies `id`; the artifact never uses `id: null`) with the
+current prompt copied byte-for-byte into `proposed_prompt`. It is linked to the
+parent cycle and stores provenance inside the existing `eval_summary` JSONB
+field. It includes deterministic pre-AI activation evidence for positive,
+casing, boundary, and idempotence cases. The real `evalStatusFromSummary`
+helper derives `passed`, and the normal approval gate is checked before the
+artifact is emitted. It records zero model/provider calls. Salmon and the Turkey, Chipotle
 Hummus, Guacamole, and spicy-crab rules remain held in parent evidence and are
 never included in the successor. The script writes private local plan artifacts
 only; production insertion and the normal approval endpoint require a separate

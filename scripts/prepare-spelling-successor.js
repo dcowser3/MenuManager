@@ -8,6 +8,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { activateCandidateRulesForEval } = require('./review-eval-helpers');
 const { runPreAiDeterministicChecks } = require('../services/dashboard/dist/lib/pre-ai-deterministic-rules');
+const { evalStatusFromSummary, promptProposalApprovalBlock } = require('../services/dashboard/dist/lib/improvement-cycle-core');
 
 const PARENT_ID = '72c144aa-c33e-4873-85e8-6e48537e799e';
 const TARGETS = Object.freeze([
@@ -34,21 +35,27 @@ function args(argv) {
 }
 function exactRule(row, target) { return row?.original_text === target.original_text && row?.corrected_text === target.corrected_text; }
 function exactRoute(row, target) { return row?.correction_id === target.correction_id && row?.target === `${target.original_text} -> ${target.corrected_text}`; }
-function evaluateRules(rules) {
+function evaluateRules(rules, routes) {
     const activated = activateCandidateRulesForEval(rules);
     const cases = [
-        ['pickled chilies, lime 12', 'pickled chilis, lime 12'],
+        ...routes.map((route) => [route.original_text, route.corrected_text]),
         ['PICKLED CHILIES, LIME 12', 'PICKLED CHILIS, LIME 12'],
-        ['affila cress D', 'affilla cress D'],
         ['AFILA CRESS D', 'AFFILLA CRESS D'],
         ['chiliesque affilaxy afila2', 'chiliesque affilaxy afila2'],
     ];
     const activations = Object.fromEntries(rules.map((rule, index) => [rule.original_text, 0]));
+    const baselineOutputs = [];
+    const candidateOutputs = [];
+    const reports = [];
     for (const [input, expected] of cases) {
+        const baseline = runPreAiDeterministicChecks(input, { acceptedCorrectionRules: [] });
         const first = runPreAiDeterministicChecks(input, { acceptedCorrectionRules: activated });
         if (first.menuText !== expected) throw new Error(`deterministic spelling mismatch: ${input} -> ${first.menuText}`);
         const second = runPreAiDeterministicChecks(first.menuText, { acceptedCorrectionRules: activated });
         if (second.menuText !== first.menuText) throw new Error(`spelling rule is not idempotent: ${input}`);
+        baselineOutputs.push(baseline.menuText);
+        candidateOutputs.push(first.menuText);
+        reports.push({ case_id: `spelling-${reports.length}`, deterministicRuleActivations: first.appliedCorrections.filter((entry) => entry.source === 'accepted_correction_rule').map((entry) => ({ rule_id: entry.ruleId, phase: 'pre_ai' })) });
         for (const correction of first.appliedCorrections.filter((entry) => entry.source === 'accepted_correction_rule')) {
             const ruleIndex = Number.parseInt(`${correction.ruleId || ''}`.replace('eval-candidate-rule-', ''), 10);
             const rule = Number.isInteger(ruleIndex) ? rules[ruleIndex] : rules.find((candidate) => `${correction.original || ''}`.toLowerCase() === candidate.original_text.toLowerCase());
@@ -56,7 +63,11 @@ function evaluateRules(rules) {
         }
     }
     if (Object.values(activations).some((count) => count < 1)) throw new Error(`not every spelling rule activated: ${JSON.stringify(activations)}`);
-    return { cases, activations, model_calls: 0, provider_calls: 0 };
+    const candidateRuleActivations = activated.map((rule, index) => ({ rule_index: index, rule_id: rule.id, original_text: rule.original_text, corrected_text: rule.corrected_text, pre_ai_activations: activations[rule.original_text], post_ai_activations: 0, replay_activations: 0, total_activations: activations[rule.original_text], case_ids: reports.filter((report) => report.deterministicRuleActivations.some((entry) => entry.rule_id === rule.id)).map((report) => report.case_id), correction_ids: [rules[index].source_correction_id] }));
+    const summary = { baseline: { label: 'baseline', casesEvaluated: cases.length, deterministicOutputs: baselineOutputs }, candidate: { label: 'candidate', casesEvaluated: cases.length, deterministicOutputs: candidateOutputs }, comparedCases: cases.length, regressed: 0, regressions: [], noiseRegressed: 0, flaggedRegressed: 0, candidate_rule_activations: candidateRuleActivations, triggers_improved: 0, triggers_regressed: 0, triggers_unchanged: cases.length };
+    const eval_status = evalStatusFromSummary(summary, { rulesOnly: true });
+    if (eval_status !== 'passed') throw new Error(`real rules-only eval did not pass: ${eval_status}`);
+    return { cases, activations, candidateRuleActivations, summary, eval_status, model_calls: 0, provider_calls: 0 };
 }
 function main() {
     const input = args(process.argv);
@@ -78,28 +89,41 @@ function main() {
     });
     if (selectedRoutes.some((row) => row.lane !== 'replacement_rule' || row.replay_status === 'now_correct')) throw new Error('selected routes are not unresolved replacement-rule evidence');
     if (rules.some((row) => HELD_ORIGINALS.has(row.original_text) && selectedRules.includes(row))) throw new Error('held rule leaked into successor');
-    const evalEvidence = evaluateRules(selectedRules);
+    const evalEvidence = evaluateRules(selectedRules, selectedRoutes);
     const sourceFingerprint = sha({ parent_id: parent.id, parent_cycle_id: parent.cycle_id || null, source_rule_ids: TARGETS.map((target) => target.correction_id), source_rule_hash: sha(selectedRules), source_route_hash: sha(selectedRoutes) });
     const cycleId = `manual-spelling-successor-${sourceFingerprint.slice(0, 16)}`;
     const successor = {
-        id: null,
         cycle_id: cycleId,
-        status: 'pending',
-        eval_status: 'passed',
-        disposition: 'rules_only',
-        proposed_prompt: parent.proposed_prompt,
-        final_prompt: parent.final_prompt || parent.proposed_prompt,
-        proposed_rules: selectedRules,
+        current_prompt: parent.current_prompt,
+        proposed_prompt: parent.current_prompt,
+        prompt_diff: null,
         correction_rule_count: selectedRules.length,
+        submission_count: selectedRoutes.length,
+        date_range_start: parent.date_range_start || null,
+        date_range_end: parent.date_range_end || null,
+        llm_analysis: 'Deterministic rules-only successor; no model analysis or prompt change.',
+        llm_model: null,
+        status: 'pending',
+        disposition: 'rules_only',
+        final_prompt: null,
+        reviewed_at: null,
+        proposed_rules: selectedRules,
+        code_recommendations: [],
+        eval_summary: { ...evalEvidence.summary, deterministic_only: true, model_calls: 0, provider_calls: 0, successor_provenance: { parent_proposal_id: parent.id, parent_cycle_id: parent.cycle_id || null, parent_sha256: sha(parent), source_correction_ids: TARGETS.map((target) => target.correction_id), source_fingerprint: sourceFingerprint, held_originals: [...HELD_ORIGINALS], parent_terminal_owner_sha256: sha(parent.eval_summary.code_candidate) } },
+        eval_status: evalEvidence.eval_status,
+        accepted_rules: null,
+        source: 'improvement_cycle',
+        replay_evidence: selectedRoutes.map((route) => ({ correction_id: route.correction_id, submission_id: route.submission_id, original_text: route.original_text, corrected_text: route.corrected_text, status: route.replay_status })),
+        unresolved_still_missed: false,
+        coverage_claims: [],
         correction_routing: selectedRoutes,
         superseded_from_cycle_id: parent.cycle_id || parent.id,
-        source_provenance: { parent_proposal_id: parent.id, parent_cycle_id: parent.cycle_id || null, source_correction_ids: TARGETS.map((target) => target.correction_id), source_fingerprint: sourceFingerprint, held_originals: [...HELD_ORIGINALS] },
-        eval_summary: { deterministic_only: true, model_calls: 0, provider_calls: 0, candidate_rule_activations: TARGETS.map((target) => ({ correction_id: target.correction_id, total_activations: evalEvidence.activations[target.original_text], pre_ai_activations: evalEvidence.activations[target.original_text], post_ai_activations: 0, replay_activations: 0 })), regressions: [], casing_boundary_idempotence: evalEvidence.cases },
-        preserved_parent_terminal_owner: parent.eval_summary.code_candidate,
     };
+    const approvalBlock = promptProposalApprovalBlock(successor);
+    if (approvalBlock) throw new Error(`successor failed normal approval gate: ${approvalBlock.reason}`);
     fs.mkdirSync(input.outputDir, { recursive: true, mode: 0o700 });
     fs.chmodSync(input.outputDir, 0o700);
-    const plan = { schema_version: 1, kind: 'rules_only_spelling_successor_plan', model_calls: 0, provider_calls: 0, parent_proposal_id: parent.id, parent_sha256: sha(parent), successor_sha256: sha(successor), source_fingerprint: sourceFingerprint, target_correction_ids: TARGETS.map((target) => target.correction_id), held_originals: [...HELD_ORIGINALS], successor };
+    const plan = { schema_version: 2, kind: 'rules_only_spelling_successor_plan', model_calls: 0, provider_calls: 0, parent_proposal_id: parent.id, parent_sha256: sha(parent), successor_sha256: sha(successor), source_fingerprint: sourceFingerprint, eval_status: evalEvidence.eval_status, approval_gate: 'passed', target_correction_ids: TARGETS.map((target) => target.correction_id), held_originals: [...HELD_ORIGINALS], successor };
     for (const [name, value] of [['successor.json', successor], ['plan.json', plan]]) fs.writeFileSync(path.join(input.outputDir, name), `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
     process.stdout.write(`${JSON.stringify({ status: 'ready', output_dir: input.outputDir, parent_id: parent.id, cycle_id: cycleId, parent_sha256: plan.parent_sha256, successor_sha256: plan.successor_sha256, source_fingerprint: sourceFingerprint, model_calls: 0, provider_calls: 0 }, null, 2)}\n`);
 }
