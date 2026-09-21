@@ -145,6 +145,8 @@ npm run review:preflight:human-explanations:package -- --preparation DIR --out D
 
 These commands produce local evidence/packages only. They make no provider or database calls, do not alter runtime review behavior, and do not authorize activation, deployment, paid execution, or production writes. See the [B6 handoff](docs/design-docs/review-learning-b6-binder-handoff.md) and the [human-explanation](docs/design-docs/review-learning-human-explanation-binding.md) and [source-bound preflight](docs/design-docs/review-learning-source-bound-preflight-v2.md) design docs for the input and evidence boundaries.
 
+The bounded manual code-candidate handoff is preparation-only: it binds one human explanation group, retains the owner-bound attempt, and stops at `code_candidate_authorization_required` until a separate authorization/ledger exists. Delivery-mismatch corrections remain visibly held as `delivery_verification_required`; browser delivery certification, auto-activation, and generalized quality proof are deferred.
+
 ## Documentation Rules
 
 - Keep this README limited to orientation, startup, and links.
