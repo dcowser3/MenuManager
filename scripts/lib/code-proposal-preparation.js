@@ -99,11 +99,19 @@ async function bindHistoricalDataset(client, proposal, sourcePath, outputPath) {
         if (!submission.form_attempt_id || typeof submission.approved_menu_content !== 'string' || !submission.approved_menu_content.trim()) {
             throw new Error(`Human-approved ground truth is unavailable for ${route.correction_id}.`);
         }
-        const audits = await queryRows(client, 'basic_ai_check_audits', (query) => query
-            .select('id,menu_content_raw,created_at,review_mode,event_type,attempt_id')
-            .eq('attempt_id', submission.form_attempt_id).eq('event_type', 'completed').eq('review_mode', 'full'));
+        const explicitAuditId = evidence.audit_id;
+        if (explicitAuditId !== undefined && (typeof explicitAuditId !== 'string' || !explicitAuditId.trim())) {
+            throw new Error(`Correction ${route.correction_id} has an invalid explicit audit binding.`);
+        }
+        const audits = await queryRows(client, 'basic_ai_check_audits', (query) => {
+            let auditQuery = query.select('id,menu_content_raw,created_at,review_mode,event_type,attempt_id')
+                .eq('attempt_id', submission.form_attempt_id).eq('event_type', 'completed').eq('review_mode', 'full');
+            if (explicitAuditId !== undefined) auditQuery = auditQuery.eq('id', explicitAuditId);
+            return auditQuery;
+        });
         if (audits.length !== 1 || !audits[0].id || audits[0].attempt_id !== submission.form_attempt_id
             || audits[0].event_type !== 'completed' || audits[0].review_mode !== 'full'
+            || (explicitAuditId !== undefined && audits[0].id !== explicitAuditId)
             || typeof audits[0].menu_content_raw !== 'string' || !audits[0].menu_content_raw.trim()) {
             throw new Error(`Exactly one complete completed/full raw audit is required for ${route.correction_id}.`);
         }

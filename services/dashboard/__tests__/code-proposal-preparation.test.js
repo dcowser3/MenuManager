@@ -42,7 +42,14 @@ function makeClient(options = {}) {
         const query = originalFrom(table);
         if (table === 'basic_ai_check_audits') {
             let count = 0;
-            query.eq = () => { count += 1; return count === 3 ? Promise.resolve({ data: options.audits || [] }) : query; };
+            const filters = [];
+            query.eq = (field, value) => {
+                filters.push([field, value]);
+                count += 1;
+                if (count !== (options.auditEqCount || 3)) return query;
+                const data = (options.audits || []).filter((audit) => filters.every(([key, expected]) => `${audit[key] ?? ''}` === `${expected ?? ''}`));
+                return Promise.resolve({ data });
+            };
         }
         return query;
     };
@@ -140,7 +147,7 @@ test('ambiguous replay mapping and duplicate audit evidence fail closed before c
     duplicate.client = makeClient({
         rules: [{ id: 'rule-1', status: 'accepted' }],
         submissions: [{ id: 'submission-1', approved_menu_content: 'Dish, lemon', form_attempt_id: 'attempt-1' }],
-        audits: [{ id: 'audit-1', menu_content_raw: 'Dish, lemons', review_mode: 'full', event_type: 'completed' }, { id: 'audit-2', menu_content_raw: 'Dish, lemons', review_mode: 'full', event_type: 'completed' }],
+        audits: [{ id: 'audit-1', attempt_id: 'attempt-1', menu_content_raw: 'Dish, lemons', review_mode: 'full', event_type: 'completed' }, { id: 'audit-2', attempt_id: 'attempt-1', menu_content_raw: 'Dish, lemons', review_mode: 'full', event_type: 'completed' }],
     });
     try { await expect(prepareCodeProposalAttempt({ ...duplicate, attemptId: 'attempt-duplicate' })).rejects.toThrow('Exactly one complete'); expect(duplicate.calls).toHaveLength(0); } finally { duplicate.cleanup(); }
 });
@@ -180,6 +187,61 @@ test.each([
     const state = setup();
     state.client = makeClient({ rules: [{ id: 'rule-1', status: 'accepted' }], submissions: [{ id: 'submission-1', approved_menu_content: 'Dish, lemon', form_attempt_id: 'attempt-1' }], audits });
     try { await expect(prepareCodeProposalAttempt({ ...state, attemptId: `attempt-${_name.replace(/\s+/g, '-')}` })).rejects.toThrow(message); expect(state.calls).toHaveLength(0); } finally { state.cleanup(); }
+});
+
+test('an explicit audit binding selects exactly one matching completed/full raw audit', async () => {
+    const state = setup();
+    state.proposal.replay_evidence[0].audit_id = 'audit-2';
+    state.client = makeClient({
+        auditEqCount: 4,
+        rules: [{ id: 'rule-1', status: 'accepted' }],
+        submissions: [{ id: 'submission-1', approved_menu_content: 'Dish, lemon', form_attempt_id: 'attempt-1' }],
+        audits: [
+            { id: 'audit-1', attempt_id: 'attempt-1', menu_content_raw: 'Dish, old', review_mode: 'full', event_type: 'completed' },
+            { id: 'audit-2', attempt_id: 'attempt-1', menu_content_raw: 'Dish, lemons', review_mode: 'full', event_type: 'completed' },
+        ],
+    });
+    try {
+        const result = await prepareCodeProposalAttempt({ ...state, attemptId: 'attempt-explicit-audit' });
+        const row = result.dataset.rows.find((entry) => entry.case_id === 'production:submission-1');
+        expect(row).toMatchObject({ audit_id: 'audit-2', attempt_id: 'attempt-1', raw_input: 'Dish, lemons' });
+    } finally { state.cleanup(); }
+});
+
+test.each([
+    ['wrong id', 'audit-missing', [{ id: 'audit-1', attempt_id: 'attempt-1', menu_content_raw: 'Dish, lemons', review_mode: 'full', event_type: 'completed' }]],
+    ['stale other-attempt id', 'audit-stale', [{ id: 'audit-stale', attempt_id: 'other-attempt', menu_content_raw: 'Dish, lemons', review_mode: 'full', event_type: 'completed' }]],
+    ['ambiguous duplicate id', 'audit-duplicate', [
+        { id: 'audit-duplicate', attempt_id: 'attempt-1', menu_content_raw: 'Dish, lemons', review_mode: 'full', event_type: 'completed' },
+        { id: 'audit-duplicate', attempt_id: 'attempt-1', menu_content_raw: 'Dish, lemons', review_mode: 'full', event_type: 'completed' },
+    ]],
+])('explicit audit binding rejects %s', async (_name, auditId, audits) => {
+    const state = setup();
+    state.proposal.replay_evidence[0].audit_id = auditId;
+    state.client = makeClient({ auditEqCount: 4, rules: [{ id: 'rule-1', status: 'accepted' }], submissions: [{ id: 'submission-1', approved_menu_content: 'Dish, lemon', form_attempt_id: 'attempt-1' }], audits });
+    try {
+        await expect(prepareCodeProposalAttempt({ ...state, attemptId: `attempt-explicit-${_name.replace(/\s+/g, '-')}` })).rejects.toThrow('Exactly one complete');
+        expect(state.calls).toHaveLength(0);
+    } finally { state.cleanup(); }
+});
+
+test('an explicit audit binding rejects an empty identifier and changed persisted raw bytes', async () => {
+    const empty = setup();
+    empty.proposal.replay_evidence[0].audit_id = '   ';
+    try {
+        await expect(prepareCodeProposalAttempt({ ...empty, attemptId: 'attempt-empty-audit' })).rejects.toThrow('invalid explicit audit');
+        expect(empty.calls).toHaveLength(0);
+    } finally { empty.cleanup(); }
+
+    const changed = setup();
+    changed.proposal.replay_evidence[0].audit_id = 'audit-1';
+    changed.client = makeClient({ auditEqCount: 4, rules: [{ id: 'rule-1', status: 'accepted' }], submissions: [{ id: 'submission-1', approved_menu_content: 'Dish, lemon', form_attempt_id: 'attempt-1' }], audits: [{ id: 'audit-1', attempt_id: 'attempt-1', menu_content_raw: 'Dish, changed', review_mode: 'full', event_type: 'completed' }] });
+    const datasetPath = changed.datasetPath;
+    fs.writeFileSync(datasetPath, `${JSON.stringify({ case_id: 'production:submission-1', submission_id: 'submission-1', attempt_id: 'attempt-1', audit_id: 'audit-1', raw_input: 'Dish, lemons', ground_truth: 'Dish, lemon', context: {} })}\n`);
+    try {
+        await expect(prepareCodeProposalAttempt({ ...changed, attemptId: 'attempt-changed-audit' })).rejects.toThrow('evidence changed');
+        expect(changed.calls).toHaveLength(0);
+    } finally { changed.cleanup(); }
 });
 
 test('malformed frozen datasets fail before ownership claim', async () => {
