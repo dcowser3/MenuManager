@@ -50,6 +50,9 @@ function versionId(input: Omit<ExpectationVersion, 'id'>) {
 
 export function freezeExpectationEnvelope(input: {
     policyVersion: string;
+    candidatePolicyVersion?: string | null;
+    policyChangeApprovals?: ExpectationEnvelope['policyChangeApprovals'];
+    parentArtifactHash?: string | null;
     expectations: Array<{
         id?: string;
         version?: number;
@@ -62,6 +65,7 @@ export function freezeExpectationEnvelope(input: {
         sourceExpectationId?: string | null;
         approvalState: 'approved' | 'unapproved';
         status?: ExpectationStatus;
+        policyVersion?: string;
     }>;
     supersedes?: Array<{ priorId: string; successorId: string }>;
 }): ExpectationEnvelope {
@@ -71,7 +75,7 @@ export function freezeExpectationEnvelope(input: {
             status: row.status || (row.approvalState === 'approved' ? 'active' : 'candidate'),
             classification: row.classification,
             policyRuleId: row.policyRuleId || null,
-            policyVersion: input.policyVersion,
+            policyVersion: row.policyVersion || input.policyVersion,
             restaurant: row.restaurant || null,
             menuScope: row.menuScope || null,
             input: row.input,
@@ -84,9 +88,11 @@ export function freezeExpectationEnvelope(input: {
     const body = {
         schemaVersion: 1 as const,
         activePolicyVersion: input.policyVersion,
-        candidatePolicyVersion: null,
+        candidatePolicyVersion: input.candidatePolicyVersion || null,
         expectations,
         supersedes: [...(input.supersedes || [])],
+        policyChangeApprovals: input.policyChangeApprovals || [],
+        parentArtifactHash: input.parentArtifactHash || null,
     };
     return { ...body, sha256: hash(body) };
 }
@@ -124,11 +130,13 @@ export function validateApprovedExpectationAuthority(envelope: ExpectationEnvelo
     const approvals = envelope.policyChangeApprovals || [];
     const candidates = envelope.expectations.filter((row) => row.status === 'candidate');
     if (!candidates.length || envelope.candidatePolicyVersion === envelope.activePolicyVersion || !envelope.candidatePolicyVersion) throw new Error('Approved policy-change authority is missing or not versioned.');
+    const candidateIds = new Set(candidates.map((row) => row.id));
+    if (approvals.length !== candidates.length || approvals.some((row) => !candidateIds.has(row.successorId))) throw new Error('Approval records contain orphan or duplicate rows.');
     for (const candidate of candidates) {
         if (candidate.classification !== 'explicit_superseding_policy' || candidate.approvalState !== 'unapproved' || !candidate.sourceExpectationId) throw new Error('Candidate lacks explicit policy-change classification.');
         const prior = envelope.expectations.find((row) => row.id === candidate.sourceExpectationId);
         const approval = approvals.filter((row) => row.priorId === candidate.sourceExpectationId && row.successorId === candidate.id);
-        if (!prior || prior.status !== 'active' || prior.approvalState !== 'approved' || approval.length !== 1) throw new Error('Candidate authority link is invalid.');
+        if (!prior || prior.status !== 'active' || prior.approvalState !== 'approved' || approval.length !== 1 || candidate.policyVersion !== envelope.candidatePolicyVersion) throw new Error('Candidate authority link is invalid.');
         const record = approval[0];
         if (!record.caseId || !record.sourceRevisionId || !record.reviewer || record.status !== 'approved' || !Number.isFinite(Date.parse(record.approvedAt))) throw new Error('Candidate approval provenance is incomplete.');
     }
@@ -231,7 +239,8 @@ export function activateApprovedSuccessor(envelope: ExpectationEnvelope, approva
     const expectations = envelope.expectations.map((row) => row.id === prior.id
         ? { ...row, status: 'superseded' as const }
         : row.id === successor.id ? { ...row, status: 'active' as const, approvalState: 'approved' as const } : row);
-    const body = { schemaVersion: 1 as const, activePolicyVersion: successor.policyVersion, candidatePolicyVersion: null, expectations, supersedes: envelope.supersedes };
+    const body = { schemaVersion: 1 as const, activePolicyVersion: successor.policyVersion, candidatePolicyVersion: null, expectations, supersedes: envelope.supersedes,
+        parentArtifactHash: envelope.parentArtifactHash, policyChangeApprovals: envelope.policyChangeApprovals };
     return { ...body, sha256: hash(body) };
 }
 
@@ -305,10 +314,14 @@ export function deriveProposalBoundEnvelope(proposedRules: any[], authority: Exp
             parentArtifactHash: authority.sha256, caseId: approval.caseId, sourceRevisionId: approval.sourceRevisionId,
             reviewer: approval.reviewer, approvedAt: approval.approvedAt } };
     });
-    const expectations = authority.expectations.filter((row) => row.status !== 'candidate' || successorIds.has(row.id)).map((row) => row.status === 'candidate'
-        ? { ...row, policyRuleId: `proposal-${proposalId}-rule-${matches.find((entry) => entry.expectations[0].id === row.id)!.index}` } : row);
+    const expectations = authority.expectations.filter((row) => row.status !== 'candidate' || successorIds.has(row.id)).map((row) => {
+        const match = matches.find((entry) => entry.expectations[0].id === row.id || entry.expectations[0].sourceExpectationId === row.id);
+        return match ? { ...row, policyRuleId: `proposal-${proposalId}-rule-${match.index}` } : row;
+    });
     const body = { schemaVersion: 1 as const, activePolicyVersion: authority.activePolicyVersion,
         candidatePolicyVersion: authority.candidatePolicyVersion || authority.activePolicyVersion, expectations,
         supersedes: authority.supersedes.filter((link) => successorIds.has(link.successorId)), policyChangeApprovals: authority.policyChangeApprovals!.filter((row) => successorIds.has(row.successorId)), parentArtifactHash: authority.sha256 };
-    return { rules, envelope: { ...body, sha256: hash(body) } };
+    const derivedEnvelope = { ...body, sha256: hash(body) };
+    const rulesWithHash = rules.map((rule) => rule.expectation_activation ? { ...rule, expectation_activation: { ...rule.expectation_activation, derivedEnvelopeHash: derivedEnvelope.sha256 } } : rule);
+    return { rules: rulesWithHash, envelope: derivedEnvelope };
 }

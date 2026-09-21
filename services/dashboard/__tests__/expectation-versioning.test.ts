@@ -6,6 +6,7 @@ import {
     activateApprovedSuccessor,
     planApprovedExpectationActivation,
     attachApprovedActivationMetadata,
+    deriveProposalBoundEnvelope, validateApprovedExpectationAuthority,
     validateExpectationEnvelope,
 } from '../lib/expectation-versioning';
 
@@ -97,4 +98,22 @@ test('producer attaches only exact approved artifact activation metadata', () =>
     const attached = attachApprovedActivationMetadata([{ change_type: 'terminology', original_text: 'house-made', corrected_text: 'housemade', is_location_specific: true, location: 'Restaurant A', applies_to_menu_type: 'food' }], envelope)[0];
     expect(attached.expectation_activation).toMatchObject({ source: 'approved_expectation_artifact', successorId: 'a-v2', artifactHash: envelope.sha256 });
     expect(attachApprovedActivationMetadata([{ change_type: 'terminology', original_text: 'house-made', corrected_text: 'housemade' }], envelope)[0].expectation_activation).toBeUndefined();
+});
+
+test('approved authority derives proposal envelope and activation preserves provenance', () => {
+    const authority = freezeExpectationEnvelope({ policyVersion: 'p1', candidatePolicyVersion: 'p2', expectations: [
+        { id: 'a-v1', version: 1, status: 'active', classification: 'missed_existing_rule', policyRuleId: 'authority-rule', restaurant: 'Restaurant A', menuScope: 'food', input: 'house-made', expected: 'house-made', approvalState: 'approved' },
+        { id: 'a-v2', version: 2, status: 'candidate', classification: 'explicit_superseding_policy', policyRuleId: 'authority-rule', policyVersion: 'p2', restaurant: 'Restaurant A', menuScope: 'food', input: 'house-made', expected: 'housemade', sourceExpectationId: 'a-v1', approvalState: 'unapproved' },
+        { id: 'b-v1', version: 1, status: 'active', classification: 'missed_existing_rule', policyRuleId: 'b', restaurant: 'Restaurant B', menuScope: 'food', input: 'house-made', expected: 'house-made', approvalState: 'approved' },
+    ], supersedes: [{ priorId: 'a-v1', successorId: 'a-v2' }], policyChangeApprovals: [{ priorId: 'a-v1', successorId: 'a-v2', caseId: 'a-v2', sourceRevisionId: 'rev-7', status: 'approved', reviewer: 'Reviewer', approvedAt: '2026-09-20T00:00:00Z' }] });
+    expect(() => validateApprovedExpectationAuthority(authority)).not.toThrow();
+    const derived = deriveProposalBoundEnvelope([{ change_type: 'terminology', original_text: 'house-made', corrected_text: 'housemade', is_location_specific: true, location: 'Restaurant A', applies_to_menu_type: 'food', expectation_activation: { source: 'model', ruleId: 'bad' } }], authority, 'cycle-1');
+    expect(derived.envelope).toBeTruthy();
+    expect(derived.rules[0].expectation_activation).toMatchObject({ source: 'approved_expectation_artifact', derivedEnvelopeHash: derived.envelope!.sha256, parentArtifactHash: authority.sha256, caseId: 'a-v2', sourceRevisionId: 'rev-7' });
+    expect(derived.envelope!.expectations.find((row) => row.id === 'b-v1')).toEqual(authority.expectations.find((row) => row.id === 'b-v1'));
+    const result = planApprovedExpectationActivation(derived.envelope!, derived.rules, [{ index: 0, ok: true, correctionId: 'proposal-cycle-1-rule-0', location: 'Restaurant A', menuScope: 'food', isLocationSpecific: true }], [0]);
+    expect(result?.policyChangeApprovals).toEqual(authority.policyChangeApprovals);
+    expect(result?.parentArtifactHash).toBe(authority.sha256);
+    const bad = { ...authority, policyChangeApprovals: [{ ...authority.policyChangeApprovals![0], caseId: 'wrong' }] };
+    expect(() => validateApprovedExpectationAuthority({ ...bad, sha256: 'tampered' } as any)).toThrow();
 });
