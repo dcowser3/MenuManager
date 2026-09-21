@@ -8,7 +8,6 @@ exports.evaluateExpectationArms = evaluateExpectationArms;
 exports.deriveCandidateEnvelope = deriveCandidateEnvelope;
 exports.activateApprovedSuccessor = activateApprovedSuccessor;
 exports.planApprovedExpectationActivation = planApprovedExpectationActivation;
-exports.buildExpectationEnvelopeFromTrustedProposal = buildExpectationEnvelopeFromTrustedProposal;
 exports.attachApprovedActivationMetadata = attachApprovedActivationMetadata;
 const crypto_1 = require("crypto");
 const hash = (value) => (0, crypto_1.createHash)('sha256').update(JSON.stringify(value)).digest('hex');
@@ -191,31 +190,6 @@ function planApprovedExpectationActivation(envelope, acceptedRules, ruleResults,
         successorId: metadata.successorId,
     });
 }
-function buildExpectationEnvelopeFromTrustedProposal(input) {
-    const trusted = input.proposedRules.map((rule, index) => ({ rule, index, evidence: rule?.expectation_activation }))
-        .filter((entry) => entry.rule?.change_type === 'superseding_policy' && entry.evidence?.source === 'human_evidence');
-    if (!trusted.length || trusted.some(({ evidence }) => !evidence.oldExpectationId || !evidence.sourceRevision
-        || !evidence.supersedesId || !evidence.successorId || !evidence.previousPolicyVersion || !evidence.candidatePolicyVersion
-        || !evidence.restaurant || !evidence.menuScope || !evidence.oldInput || !evidence.oldExpected
-        || !evidence.candidateExpected))
-        return null;
-    const policyVersion = trusted[0].evidence.previousPolicyVersion;
-    if (trusted.some(({ evidence }) => evidence.previousPolicyVersion !== policyVersion))
-        return null;
-    const expectations = [
-        ...trusted.map(({ evidence, index }) => ({ id: evidence.oldExpectationId, version: 1, status: 'active',
-            classification: 'missed_existing_rule', policyRuleId: `proposal-${input.proposalId}-rule-${index}`,
-            policyVersion, restaurant: evidence.restaurant, menuScope: evidence.menuScope, input: evidence.oldInput,
-            expected: evidence.oldExpected, sourceExpectationId: null, approvalState: 'approved' })),
-        ...trusted.map(({ evidence, index }) => ({ id: evidence.successorId, version: 2, status: 'candidate',
-            classification: 'explicit_superseding_policy', policyRuleId: `proposal-${input.proposalId}-rule-${index}`,
-            policyVersion: evidence.candidatePolicyVersion, restaurant: evidence.restaurant, menuScope: evidence.menuScope,
-            input: evidence.oldInput, expected: evidence.candidateExpected, sourceExpectationId: evidence.oldExpectationId,
-            approvalState: 'unapproved' })),
-        ...(input.unchangedExpectations || []),
-    ];
-    return freezeExpectationEnvelope({ policyVersion, expectations, supersedes: trusted.map(({ evidence }) => ({ priorId: evidence.oldExpectationId, successorId: evidence.successorId })) });
-}
 function attachApprovedActivationMetadata(proposedRules, envelope) {
     validateExpectationEnvelope(envelope);
     return proposedRules.map((rule) => {
@@ -228,7 +202,6 @@ function attachApprovedActivationMetadata(proposedRules, envelope) {
         if (!match)
             return rule;
         const prior = envelope.expectations.find((expectation) => expectation.id === match.sourceExpectationId);
-        const link = envelope.supersedes.find((item) => item.successorId === match.id);
         return { ...rule, expectation_activation: { source: 'approved_expectation_artifact', ruleId: match.policyRuleId,
                 supersedesId: prior?.id, successorId: match.id, policyVersion: envelope.activePolicyVersion,
                 restaurant: match.restaurant, menuScope: match.menuScope, isLocationSpecific: !!rule.is_location_specific,

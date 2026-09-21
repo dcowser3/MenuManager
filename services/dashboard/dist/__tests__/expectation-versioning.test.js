@@ -78,13 +78,12 @@ test('activation planner requires the exact selected rule to have been written f
     expect(activated?.expectations.find((row) => row.id === 'b-v1')).toEqual(envelope.expectations.find((row) => row.id === 'b-v1'));
     expect((0, expectation_versioning_1.planApprovedExpectationActivation)(envelope, [{ expectation_activation: rule.expectation_activation }], [{ index: 4, ok: true, correctionId: 'r-b', location: 'Restaurant B', menuScope: 'food', isLocationSpecific: true }], [4])).toBeNull();
 });
-test('proposal producer creates only explicit human-evidence supersession envelopes', () => {
-    const rule = { change_type: 'superseding_policy', expectation_activation: {
-            source: 'human_evidence', sourceRevision: 'rev-1', oldExpectationId: 'a-v1', supersedesId: 'a-v1', successorId: 'a-v2',
-            previousPolicyVersion: 'p1', candidatePolicyVersion: 'p2', restaurant: 'Restaurant A', menuScope: 'food', oldInput: 'house-made', oldExpected: 'house-made', candidateExpected: 'housemade',
-        } };
-    const envelope = (0, expectation_versioning_1.buildExpectationEnvelopeFromTrustedProposal)({ proposalId: 'cycle-1', proposedRules: [rule] });
-    expect(envelope?.expectations).toEqual(expect.arrayContaining([expect.objectContaining({ id: 'a-v1', status: 'active' }), expect.objectContaining({ id: 'a-v2', status: 'candidate' })]));
-    expect((0, expectation_versioning_1.buildExpectationEnvelopeFromTrustedProposal)({ proposalId: 'cycle-1', proposedRules: [{ ...rule, change_type: 'terminology' }] })).toBeNull();
-    expect((0, expectation_versioning_1.buildExpectationEnvelopeFromTrustedProposal)({ proposalId: 'cycle-1', proposedRules: [{ ...rule, expectation_activation: { ...rule.expectation_activation, sourceRevision: null } }] })).toBeNull();
+test('producer attaches only exact approved artifact activation metadata', () => {
+    const envelope = (0, expectation_versioning_1.freezeExpectationEnvelope)({ policyVersion: 'p1', expectations: [
+            { id: 'a-v1', version: 1, status: 'active', classification: 'missed_existing_rule', policyRuleId: 'r-a', restaurant: 'Restaurant A', menuScope: 'food', input: 'house-made', expected: 'house-made', approvalState: 'approved' },
+            { id: 'a-v2', version: 2, status: 'candidate', classification: 'explicit_superseding_policy', policyRuleId: 'r-a', restaurant: 'Restaurant A', menuScope: 'food', input: 'house-made', expected: 'housemade', sourceExpectationId: 'a-v1', approvalState: 'unapproved' },
+        ], supersedes: [{ priorId: 'a-v1', successorId: 'a-v2' }] });
+    const attached = (0, expectation_versioning_1.attachApprovedActivationMetadata)([{ change_type: 'superseding_policy', original_text: 'house-made', corrected_text: 'housemade', is_location_specific: true, location: 'Restaurant A', applies_to_menu_type: 'food' }], envelope)[0];
+    expect(attached.expectation_activation).toMatchObject({ source: 'approved_expectation_artifact', successorId: 'a-v2', artifactHash: envelope.sha256 });
+    expect((0, expectation_versioning_1.attachApprovedActivationMetadata)([{ change_type: 'terminology', original_text: 'house-made', corrected_text: 'housemade' }], envelope)[0].expectation_activation).toBeUndefined();
 });
