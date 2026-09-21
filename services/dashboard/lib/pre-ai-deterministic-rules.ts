@@ -965,8 +965,18 @@ function shouldAddRawAsterisk(line: string): boolean {
  * this one verified option shape without treating arbitrary "salmon" mentions
  * (for example, salmon sauce) as raw.
  */
+function isVerifiedMixedSalmonOptionLine(line: string): boolean {
+    if (!line || !/,/.test(line)) return false;
+    const parts = line.split(',');
+    const optionLabels = parts.map((part) => part.trim().toLowerCase());
+    return parts.length >= 5
+        && optionLabels.some((part) => /^grilled chicken\b/.test(part))
+        && optionLabels.some((part) => /^pasta\b/.test(part))
+        && optionLabels.some((part) => /\bpizza\b/.test(part));
+}
+
 export function addInteriorSalmonOptionMarker(line: string): string {
-    if (!line || line.includes('*') || !/,/.test(line)) return line;
+    if (!isVerifiedMixedSalmonOptionLine(line) || line.includes('*')) return line;
     const parts = line.split(',');
     let changed = false;
     const corrected = parts.map((part) => {
@@ -1208,7 +1218,9 @@ export function runPreAiDeterministicChecks(
             nextLine = interiorSalmon;
         }
 
-        const normalizedRaw = interiorSalmonApplied
+        const interiorSalmonProtected = interiorSalmonApplied
+            || (isVerifiedMixedSalmonOptionLine(nextLine) && /(?:^|,)\s*salmon\*\s*(?:,|$)/i.test(nextLine));
+        const normalizedRaw = interiorSalmonProtected
             ? nextLine
             : normalizeRawAsteriskPlacementForLine(nextLine);
         if (normalizedRaw !== nextLine) {

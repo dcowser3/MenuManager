@@ -190,13 +190,16 @@ describe('runPreAiDeterministicChecks', () => {
             'grilled chicken, salmon, pasta Bolognese D G, seasonal vegetables, pepperoni & cheese pizza D G',
             'Salmon Sauce, lemon, dill D 12',
             'Fish Soup, salmon, dill D 12',
+            'fish soup, salmon, dill, lemon, bread D 12',
         ].join('\n'));
 
         expect(result.menuText).toBe([
             'grilled chicken, salmon*, pasta Bolognese D G, seasonal vegetables, pepperoni & cheese pizza D G',
             'Salmon Sauce, lemon, dill D 12',
             'Fish Soup, salmon, dill D 12',
+            'fish soup, salmon, dill, lemon, bread D 12',
         ].join('\n'));
+        expect(runPreAiDeterministicChecks(result.menuText).menuText).toBe(result.menuText);
     });
 
     it('uses bounded canonical food words to catch unseen typos without changing valid neighbors', () => {
