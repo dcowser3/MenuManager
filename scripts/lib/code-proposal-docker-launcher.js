@@ -13,16 +13,30 @@ const { spawn, execFile } = require('child_process');
 const DIGEST = /^(?:sha256:)?[a-f0-9]{64}$/;
 const MAX_OUTPUT_BYTES = 2 * 1024 * 1024;
 const MAX_TIMEOUT_MS = 180000;
-const WORKER_SCRIPT = '/runner/trusted/scripts/code-proposal-c2c2-worker.js';
+const WORKER_SCRIPT = '/runner/worker.js';
 const FIXED_COMMAND = Object.freeze(['node', WORKER_SCRIPT]);
 const FIXED_ENV_KEYS = Object.freeze(['NODE_ENV', 'C2C2_PROTOCOL_VERSION', 'C2C2_PHASE', 'C2C2_ARM', 'C2C2_SEED', 'C2C2_RUN_ID', 'C2C2_RUNTIME_ID', 'C2C2_IMAGE_ID', 'C2C2_REQUEST_PATH']);
+const SUPPORT_FILES = Object.freeze(['jest.setup.js', 'tsconfig.json', 'services/dashboard/tsconfig.json']);
+
+function supportIdentity(repoRoot) {
+    const hash = crypto.createHash('sha256');
+    for (const relative of SUPPORT_FILES) {
+        const file = path.join(repoRoot, relative);
+        if (!fs.existsSync(file)) continue;
+        const stat = fs.lstatSync(file);
+        if (stat.isSymbolicLink() || !stat.isFile()) throw new Error(`Trusted support file is not a regular file: ${relative}`);
+        hash.update(relative).update('\0').update(fs.readFileSync(file)).update('\0');
+    }
+    return hash.digest('hex');
+}
 
 function deriveRuntimeId() {
     const launcherBytes = fs.readFileSync(__filename);
     const workerBytes = fs.readFileSync(path.resolve(__dirname, '../code-proposal-c2c2-worker.js'));
     const lockPath = path.resolve(__dirname, '../../package-lock.json');
     const lockBytes = fs.existsSync(lockPath) ? fs.readFileSync(lockPath) : Buffer.from('no-lockfile');
-    return crypto.createHash('sha256').update(launcherBytes).update(workerBytes).update(lockBytes).update(JSON.stringify({ command: FIXED_COMMAND, maxOutput: MAX_OUTPUT_BYTES, maxTimeout: MAX_TIMEOUT_MS, network: 'none', capDrop: 'ALL', noNewPrivileges: true, uid: '65532:65532', dependenciesMount: '/app/node_modules', workerHome: '/tmp' })).digest('hex');
+    const repoRoot = path.resolve(__dirname, '../..');
+    return crypto.createHash('sha256').update(launcherBytes).update(workerBytes).update(lockBytes).update(supportIdentity(repoRoot)).update(JSON.stringify({ command: FIXED_COMMAND, maxOutput: MAX_OUTPUT_BYTES, maxTimeout: MAX_TIMEOUT_MS, network: 'none', capDrop: 'ALL', capAdd: ['SETUID', 'SETGID'], noNewPrivileges: true, stagingUid: '0:0', candidateUid: '65532:65532', dependenciesMount: '/app/node_modules', workerHome: '/tmp', supportFiles: SUPPORT_FILES })).digest('hex');
 }
 
 const FIXED_RUNTIME_ID = deriveRuntimeId();
@@ -67,6 +81,34 @@ function buildContainerName(attemptId, nonce = crypto.randomBytes(8).toString('h
     return `mm-c2c2-${attempt.slice(0, room)}-${unique}`;
 }
 
+function prepareSupportBundle(repoRoot, attemptRoot) {
+    const root = path.join(attemptRoot, 'c2c2-support');
+    if (fs.existsSync(root)) {
+        const existing = fs.lstatSync(root);
+        if (existing.isSymbolicLink() || !existing.isDirectory() || (existing.mode & 0o777) !== 0o700) throw new Error('C2c2 support bundle is not an owner-only directory.');
+    } else fs.mkdirSync(root, { mode: 0o700 });
+    const manifest = [];
+    for (const relative of SUPPORT_FILES) {
+        const source = path.join(repoRoot, relative);
+        if (!fs.existsSync(source)) continue;
+        const stat = fs.lstatSync(source);
+        if (stat.isSymbolicLink() || !stat.isFile()) throw new Error(`Trusted support file is not a regular file: ${relative}`);
+        const target = path.join(root, relative);
+        fs.mkdirSync(path.dirname(target), { recursive: true, mode: 0o700 });
+        const bytes = fs.readFileSync(source);
+        if (fs.existsSync(target) && !fs.readFileSync(target).equals(bytes)) throw new Error(`C2c2 support bundle changed: ${relative}`);
+        if (!fs.existsSync(target)) fs.writeFileSync(target, bytes, { mode: 0o444 });
+        fs.chmodSync(target, 0o444);
+        manifest.push({ path: relative, bytes: bytes.length, sha256: crypto.createHash('sha256').update(bytes).digest('hex') });
+    }
+    const manifestBytes = Buffer.from(`${JSON.stringify({ schema_version: 1, files: manifest }, null, 2)}\n`);
+    const manifestPath = path.join(root, 'manifest.json');
+    if (fs.existsSync(manifestPath) && !fs.readFileSync(manifestPath).equals(manifestBytes)) throw new Error('C2c2 support manifest changed.');
+    if (!fs.existsSync(manifestPath)) fs.writeFileSync(manifestPath, manifestBytes, { mode: 0o444 });
+    fs.chmodSync(manifestPath, 0o444);
+    return { root, sha256: crypto.createHash('sha256').update(manifestBytes).digest('hex') };
+}
+
 function buildDockerInvocation(options = {}) {
     const attemptRoot = canonicalDirectory(options.attemptRoot, 'Attempt root');
     const baselineRoot = canonicalDirectory(options.baselineRoot, 'Baseline root', attemptRoot);
@@ -75,6 +117,11 @@ function buildDockerInvocation(options = {}) {
     const outputRoot = canonicalDirectory(options.outputRoot || path.join(attemptRoot, 'docker-output'), 'Output root', attemptRoot);
     if ((fs.lstatSync(outputRoot).mode & 0o777) !== 0o700) throw new Error('Output root must be owner-only mode 0700.');
     const trustedRepoRoot = canonicalDirectory(options.repoRoot || path.resolve(__dirname, '../..'), 'Trusted repository root');
+    if (supportIdentity(trustedRepoRoot) !== supportIdentity(path.resolve(__dirname, '../..'))) throw new Error('C2c2 trusted support identity drifted from the fixed runtime.');
+    const workerSource = path.resolve(__dirname, '../code-proposal-c2c2-worker.js');
+    const workerStat = fs.lstatSync(workerSource);
+    if (workerStat.isSymbolicLink() || !workerStat.isFile()) throw new Error('C2c2 worker source must be a regular file.');
+    const support = prepareSupportBundle(trustedRepoRoot, attemptRoot);
     const image = digest(options.imageId, 'image');
     const runtime = digest(options.runtimeId, 'runtime');
     if (runtime !== FIXED_RUNTIME_ID) throw new Error('C2c2 runtime identity is not derived from the fixed launcher and worker.');
@@ -87,7 +134,7 @@ function buildDockerInvocation(options = {}) {
     if (!Number.isInteger(options.seed) || options.seed < 0) throw new Error('C2c2 seed is invalid.');
     const name = buildContainerName(attemptId, options.containerNonce);
     const requestPath = path.join(outputRoot, `request-${name}.json`);
-    const request = options.request || null;
+    const request = options.request ? { ...options.request, plan: options.request.plan ? { ...options.request.plan, support_bundle_sha256: support.sha256 } : options.request.plan } : null;
     const requestBytes = request ? Buffer.from(`${JSON.stringify(request)}\n`) : null;
     if (requestBytes && requestBytes.length > MAX_OUTPUT_BYTES) throw new Error('C2c2 worker request exceeded the bounded limit.');
     if (requestBytes) {
@@ -98,7 +145,8 @@ function buildDockerInvocation(options = {}) {
         { source: baselineRoot, destination: '/runner/baseline', mode: 'ro' },
         { source: candidateRoot, destination: '/runner/candidate', mode: 'ro' },
         { source: testBundleRoot, destination: '/runner/test-bundle', mode: 'ro' },
-        { source: trustedRepoRoot, destination: '/runner/trusted', mode: 'ro' },
+        { source: support.root, destination: '/runner/support', mode: 'ro' },
+        { source: workerSource, destination: WORKER_SCRIPT, mode: 'ro' },
     ];
     assertNoOverlap(mounts.map((mount) => ({ path: mount.source })));
     assertNoOverlap([...mounts.map((mount) => ({ path: mount.source })), { path: outputRoot }]);
@@ -107,10 +155,10 @@ function buildDockerInvocation(options = {}) {
         NODE_ENV: 'test', C2C2_PROTOCOL_VERSION: '1', C2C2_PHASE: phase,
         C2C2_ARM: arm, C2C2_SEED: `${options.seed}`, C2C2_RUN_ID: runId, C2C2_RUNTIME_ID: runtime, C2C2_IMAGE_ID: image, C2C2_REQUEST_PATH: '/runner/request.json',
     };
-    const args = ['run', '--rm', '--name', name, '--label', `com.menumanager.c2c2.owner=${attemptId}`, '--label', `com.menumanager.c2c2.name=${name}`, '--network', 'none', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges:true', '--read-only', '--pids-limit', '128', '--memory', '1g', '--cpus', '1', '--user', '65532:65532', '--tmpfs', '/tmp:rw,noexec,nosuid,size=64m', '--tmpfs', '/runner/output:rw,noexec,nosuid,size=64m,mode=1777'];
+    const args = ['run', '--rm', '--name', name, '--label', `com.menumanager.c2c2.owner=${attemptId}`, '--label', `com.menumanager.c2c2.name=${name}`, '--network', 'none', '--cap-drop', 'ALL', '--cap-add', 'SETUID', '--cap-add', 'SETGID', '--security-opt', 'no-new-privileges:true', '--read-only', '--pids-limit', '128', '--memory', '1g', '--cpus', '1', '--user', '0:0', '--tmpfs', '/tmp:rw,noexec,nosuid,size=64m', '--tmpfs', '/runner/output:rw,noexec,nosuid,size=64m,mode=1777'];
     for (const mount of mounts) args.push('--mount', `type=bind,src=${mount.source},dst=${mount.destination}${mount.mode === 'ro' ? ',readonly' : ''}`);
     args.push('--mount', `type=bind,src=${requestPath},dst=/runner/request.json,readonly`, '--env', 'NODE_ENV=test', '--env', 'C2C2_PROTOCOL_VERSION=1', '--env', 'C2C2_PHASE', '--env', 'C2C2_ARM', '--env', 'C2C2_SEED', '--env', 'C2C2_RUN_ID', '--env', 'C2C2_RUNTIME_ID', '--env', 'C2C2_IMAGE_ID', '--env', 'C2C2_REQUEST_PATH', image, ...FIXED_COMMAND);
-    return Object.freeze({ command: 'docker', args, name, ownerLabel: `com.menumanager.c2c2.owner=${attemptId}`, image, runtime, attemptRoot, outputRoot, requestPath, requestSha256: requestBytes ? crypto.createHash('sha256').update(requestBytes).digest('hex') : null, mounts, env, phase, arm, seed: options.seed, runId: env.C2C2_RUN_ID, request });
+    return Object.freeze({ command: 'docker', args, name, ownerLabel: `com.menumanager.c2c2.owner=${attemptId}`, image, runtime, attemptRoot, outputRoot, requestPath, requestSha256: requestBytes ? crypto.createHash('sha256').update(requestBytes).digest('hex') : null, mounts, env, phase, arm, seed: options.seed, runId: env.C2C2_RUN_ID, request, supportBundleSha256: support.sha256 });
 }
 
 function parseWorkerOutput(stdout, stderr, spec = null) {

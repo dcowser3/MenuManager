@@ -55,11 +55,15 @@ file, container tmpfs output, network-none/no-new-privileges/cap-drop-all/pid
 limits, allowlisted environment, bounded JSON, deadlines, labels, and
 ownership-checked cleanup. Unit workers materialize a fresh arm workspace and
 verify the frozen test-bundle manifest before running the identical inventory
-through the image-owned Jest runner and pinned `ts-jest` transformer. Trusted
-repository code/config is mounted under `/runner/trusted`; `/app/node_modules`
-remains the immutable image dependency tree. Both JavaScript and TypeScript
-inventories produce real Jest JSON reports; no custom same-process test contract
-or caller-provided transformer is accepted.
+through the image-owned Jest runner and pinned `ts-jest` transformer. The
+worker is mounted as one exact file and receives only a hashed support bundle
+(the reviewed Jest setup and TypeScript configs); the repository, `.git`, env
+files, docs, and artifacts are never mounted. `/app/node_modules` remains the
+immutable image dependency tree. A root staging phase chowns the materialized
+workspace to root and locks it 0555/0444, then launches Jest and candidate code
+under uid/gid 65532 with only SETUID/SETGID retained for that drop. Both
+JavaScript and TypeScript inventories produce real Jest JSON reports; no custom
+same-process test contract or caller-provided transformer is accepted.
 `runCodeProposalProofWithDocker` rejects all caller executors and evaluators;
 the launcher cannot attach proof or self-attest. Replay and delivery currently
 return an explicit blocked protocol result because no fixed repository-owned

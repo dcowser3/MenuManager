@@ -25,13 +25,19 @@ test('builds an immutable, isolated, fixed worker invocation', () => {
     const state = setup();
     try {
         const value = spec(state);
-        expect(value.args).toEqual(expect.arrayContaining(['--network', 'none', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges:true', '--read-only', '--user', '65532:65532']));
+        expect(value.args).toEqual(expect.arrayContaining(['--network', 'none', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges:true', '--read-only', '--user', '0:0']));
         expect(value.args).toEqual(expect.arrayContaining(FIXED_COMMAND));
         expect(value.args).not.toContain('--privileged');
         expect(value.args).not.toContain('--pid=host');
         expect(value.args).not.toContain('--ipc=host');
-        expect(value.mounts.filter((mount) => mount.mode === 'ro')).toHaveLength(4);
-        expect(value.mounts.find((mount) => mount.destination === '/runner/trusted').source).toBe(path.resolve(__dirname, '../../..'));
+        expect(value.mounts.filter((mount) => mount.mode === 'ro')).toHaveLength(5);
+        expect(value.mounts.find((mount) => mount.destination === '/runner/support').source).toContain('c2c2-support');
+        expect(value.mounts.find((mount) => mount.destination === '/runner/worker.js').source).toMatch(/code-proposal-c2c2-worker\.js$/);
+        expect(value.mounts.find((mount) => mount.destination === '/runner/trusted')).toBeUndefined();
+        expect(value.mounts.some((mount) => /\.env|\.git|config/.test(mount.source))).toBe(false);
+        expect(value.request.plan.support_bundle_sha256).toMatch(/^[a-f0-9]{64}$/);
+        expect(value.args).toContain('--user');
+        expect(value.args).toContain('0:0');
         expect(value.mounts.find((mount) => mount.destination === '/runner/output')).toBeUndefined();
         expect(value.env).toEqual(expect.objectContaining({ NODE_ENV: 'test', C2C2_PROTOCOL_VERSION: '1', C2C2_RUNTIME_ID: FIXED_RUNTIME_ID, C2C2_IMAGE_ID: HASH }));
         expect(value.args).toEqual(expect.arrayContaining(['--tmpfs', '/runner/output:rw,noexec,nosuid,size=64m,mode=1777']));

@@ -20,12 +20,13 @@ const TRUSTED_TEST_PATHS = new Set([
     'services/dashboard/__tests__/redline-preview.test.js',
     'services/dashboard/__tests__/form-helpers.test.js',
 ]);
+const SUPPORT_FILES = new Set(['jest.setup.js', 'tsconfig.json', 'services/dashboard/tsconfig.json']);
 
 function readRequest() {
     if (requestPath !== '/runner/request.json') throw new Error('request path is not fixed');
     const request = JSON.parse(fs.readFileSync(requestPath, 'utf8'));
     if (!request || request.phase !== phase || request.arm !== arm) throw new Error('request/environment mismatch');
-    if (!request.plan || request.plan.runtime_id !== runtimeId || request.plan.image_id !== imageId) throw new Error('request/plan identity mismatch');
+    if (!request.plan || request.plan.runtime_id !== runtimeId || request.plan.image_id !== imageId || typeof request.plan.support_bundle_sha256 !== 'string') throw new Error('request/plan identity mismatch');
     return request;
 }
 
@@ -42,6 +43,17 @@ function hashFile(file) {
     return crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 }
 
+function verifySupportBundle(request) {
+    const manifestPath = '/runner/support/manifest.json';
+    if (hashFile(manifestPath) !== request.plan.support_bundle_sha256) throw new Error('trusted support bundle identity is stale');
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+    if (!manifest || manifest.schema_version !== 1 || !Array.isArray(manifest.files)) throw new Error('trusted support manifest is invalid');
+    const entries = manifest.files.map((entry) => entry.path).sort();
+    if (manifest.files.some((entry) => !entry || !SUPPORT_FILES.has(entry.path) || path.posix.normalize(entry.path) !== entry.path || !Number.isInteger(entry.bytes) || hashFile(path.join('/runner/support', entry.path)) !== entry.sha256)) throw new Error('trusted support file is missing or tampered');
+    if (new Set(entries).size !== entries.length) throw new Error('trusted support manifest contains duplicate files');
+    return manifest.files;
+}
+
 function assertNoSymlinks(root) {
     const entries = fs.readdirSync(root, { withFileTypes: true });
     for (const entry of entries) {
@@ -53,6 +65,7 @@ function assertNoSymlinks(root) {
 
 function materializeWorkspace(sourceRoot, request) {
     assertNoSymlinks(sourceRoot);
+    const supportFiles = verifySupportBundle(request);
     const workspace = fs.mkdtempSync('/tmp/c2c2-workspace-');
     fs.cpSync(sourceRoot, workspace, { recursive: true, dereference: true });
     const manifest = JSON.parse(fs.readFileSync('/runner/test-bundle/manifest.json', 'utf8'));
@@ -66,8 +79,9 @@ function materializeWorkspace(sourceRoot, request) {
         fs.mkdirSync(path.dirname(target), { recursive: true });
         fs.copyFileSync(path.join('/runner/test-bundle', file.path), target);
     }
-    for (const trusted of ['jest.setup.js', 'tsconfig.json', 'services/dashboard/tsconfig.json']) {
-        const source = path.join('/runner/trusted', trusted);
+    for (const entry of supportFiles) {
+        const trusted = entry.path;
+        const source = path.join('/runner/support', trusted);
         const target = path.join(workspace, trusted);
         if (fs.existsSync(source) && fs.statSync(source).isFile()) {
             fs.mkdirSync(path.dirname(target), { recursive: true });
@@ -82,9 +96,11 @@ function lockWorkspace(root) {
     const entries = fs.readdirSync(root, { withFileTypes: true });
     for (const entry of entries) {
         const full = path.join(root, entry.name);
-        if (entry.isDirectory()) { lockWorkspace(full); fs.chmodSync(full, 0o555); }
-        else if (entry.isFile()) fs.chmodSync(full, 0o444);
+        if (entry.isDirectory()) { lockWorkspace(full); fs.chownSync(full, 0, 0); fs.chmodSync(full, 0o555); }
+        else if (entry.isFile()) { fs.chownSync(full, 0, 0); fs.chmodSync(full, 0o444); }
     }
+    fs.chownSync(root, 0, 0);
+    fs.chmodSync(root, 0o555);
 }
 
 function runFixedJestTests(workspace, inventory) {
@@ -93,7 +109,7 @@ function runFixedJestTests(workspace, inventory) {
     fs.chmodSync(configPath, 0o444);
     lockWorkspace(workspace);
     const reportFile = '/runner/output/jest-result.json';
-    const result = spawnSync('/app/node_modules/.bin/jest', [...inventory, '--config', configPath, '--runInBand', '--json', `--outputFile=${reportFile}`, '--cacheDirectory=/tmp/c2c2-jest-cache'], { cwd: workspace, env: { HOME: '/tmp', NODE_ENV: 'test', NODE_PATH: '/app/node_modules', PATH: '/app/node_modules/.bin:/usr/local/bin:/usr/bin:/bin' }, encoding: 'utf8', timeout: 150000, maxBuffer: 1024 * 1024 });
+    const result = spawnSync('/usr/bin/setpriv', ['--reuid=65532', '--regid=65532', '--clear-groups', '--', '/app/node_modules/.bin/jest', ...inventory, '--config', configPath, '--runInBand', '--json', `--outputFile=${reportFile}`, '--cacheDirectory=/tmp/c2c2-jest-cache'], { cwd: workspace, env: { HOME: '/tmp', NODE_ENV: 'test', NODE_PATH: '/app/node_modules', PATH: '/app/node_modules/.bin:/usr/local/bin:/usr/bin:/bin' }, encoding: 'utf8', timeout: 150000, maxBuffer: 1024 * 1024 });
     if (result.error?.code === 'ETIMEDOUT') throw new Error('fixed Jest worker timed out');
     if (!fs.existsSync(reportFile)) throw new Error(`fixed Jest worker emitted no report: status=${result.status} stderr=${String(result.stderr || '').slice(0, 500)}`);
     const report = JSON.parse(fs.readFileSync(reportFile, 'utf8'));
