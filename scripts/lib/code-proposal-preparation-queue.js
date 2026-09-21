@@ -335,6 +335,8 @@ async function prepareCodeProposalQueue(options = {}) {
             if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error('orphan artifact directory is unsafe');
             const stored = readBoundedJson(path.join(orphanRoot, 'preparation-inventory.json'), 'Orphan preparation inventory');
             if (!stored.frozen_hashes || Object.values(stored.frozen_hashes).some((hash) => !DIGEST.test(hash || ''))) throw new Error('orphan frozen hashes are malformed');
+            const { snapshot_sha256: orphanSnapshot, ...orphanBody } = stored;
+            if (!DIGEST.test(orphanSnapshot || '') || orphanSnapshot !== sha256(orphanBody)) throw new Error('orphan inventory snapshot hash is invalid');
             if (inventoryBoundaryHash(stored) !== inventoryBoundaryHash(inventory)) throw new Error('orphan inventory identity changed');
             reclaimable = true;
         } catch { reclaimable = false; }

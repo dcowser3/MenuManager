@@ -277,3 +277,16 @@ test('deterministic orphan is reclaimed only when its inventory identity is exac
     expect(fs.existsSync(`${orphan}.orphan-${HASH(orphan).slice(0, 12)}`)).toBe(true);
     state.cleanup();
 });
+
+test('tampered orphan snapshot and frozen boundary remain blocked and preserved', async () => {
+    const state = setup();
+    const base = proposal({ correction_routing: [proposal().correction_routing[1]], replay_evidence: [proposal().replay_evidence[1]], eval_summary: { replay_retirement_policy_version: 1, behavior_tests: proposal().eval_summary.behavior_tests } });
+    const inventory = finalizePreparationInventory(buildPreparationInventory(base, { proposalFingerprint: verification.codeProposalVerificationFingerprint(base) }), { behavior_tests_sha256: HASH('behavior'), dataset_sha256: HASH('dataset'), source_sha256: HASH('source'), prompt_sha256: HASH('prompt'), accepted_rules_sha256: HASH('rules') });
+    const orphan = path.join(state.root, 'tmp', 'code-proposals', base.id, `proposal-${base.id}`);
+    fs.mkdirSync(orphan, { recursive: true });
+    fs.writeFileSync(path.join(orphan, 'preparation-inventory.json'), `${JSON.stringify({ ...inventory, snapshot_sha256: HASH('tampered') }, null, 2)}\n`);
+    const result = await prepareCodeProposalQueue({ proposal: base, client: state.client, repoRoot: state.root, outputRoot: path.join(state.root, 'tmp', 'code-proposals'), datasetPath: path.join(state.root, 'tmp/review-eval/dataset.jsonl'), verification });
+    expect(result.reason).toBe('orphan_artifact_ambiguous');
+    expect(fs.existsSync(orphan)).toBe(true);
+    state.cleanup();
+});
