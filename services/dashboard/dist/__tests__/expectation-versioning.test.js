@@ -50,6 +50,7 @@ test('baseline-first arm comparison separates policy gap, no-change, regression,
         gap: 'expected_policy_gap', same: 'already_passing/no_change_needed', reg: 'genuine_regression', fail: 'existing_failure',
     });
     expect(rows[0]).toMatchObject({ baselineRunId: 'baseline-1', candidateRunId: 'candidate-1', policyVersion: 'p1', expectationHash: expect.any(String) });
+    expect((0, expectation_versioning_1.evaluateExpectationArms)({ envelope, baselineRunId: 'legacy-without-output', candidateRunId: 'candidate-1', baselineOutputs: {}, candidateOutputs: { gap: 'housemade' } })[0].classification).toBe('uncertainty');
 });
 test('only exact accepted linked approval activates Restaurant A successor', () => {
     const envelope = (0, expectation_versioning_1.freezeExpectationEnvelope)({ policyVersion: 'p1', expectations: [

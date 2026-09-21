@@ -79,14 +79,23 @@ function createEvaluationContract({ mode = 'retrospective', dataset, vocabularyS
     }
     // Even retrospective runs use raw inputs, never their own approved answers, for fallback vocabulary.
     vocabulary ||= { schemaVersion: 1, texts: dataset.map(row => row.raw_input), terms: [], provenance: { source: 'retrospective_inputs', caseIds: dataset.map(row => row.case_id) } };
-    if (expectationArtifact && (expectationArtifact.schemaVersion !== 1 || !expectationArtifact.approvedBy || !expectationArtifact.revision || !expectationArtifact.expectations)) {
+    const versionedEnvelope = expectationArtifact && expectationArtifact.activePolicyVersion && expectationArtifact.sha256 && Array.isArray(expectationArtifact.expectations)
+        ? expectationArtifact : null;
+    if (expectationArtifact && !versionedEnvelope && (expectationArtifact.schemaVersion !== 1 || !expectationArtifact.approvedBy || !expectationArtifact.revision || !expectationArtifact.expectations)) {
         throw new Error('Changed expectations require a separately versioned reviewer-approved artifact.');
     }
     const expectations = Object.fromEntries(dataset.map(row => [row.case_id,
-        expectationArtifact?.expectations[row.case_id] ?? row.ground_truth]));
+        versionedEnvelope
+            ? versionedEnvelope.expectations.find(expectation => expectation.id === row.case_id)?.expected
+            : expectationArtifact?.expectations[row.case_id] ?? row.ground_truth]));
+    if (versionedEnvelope && Object.values(expectations).some(value => typeof value !== 'string')) {
+        throw new Error('Versioned expectation envelope does not cover the frozen dataset.');
+    }
     return Object.freeze({ schemaVersion: 1, mode, datasetMembership: dataset.map(row => row.case_id),
         inputHashes: Object.fromEntries(dataset.map(row => [row.case_id, hash({ input: row.raw_input, context: row.context })])),
-        expectations: Object.freeze(expectations), expectationHash: hash(expectations), expectationRevision: expectationArtifact?.revision || 'raw-human',
+        expectations: Object.freeze(expectations), expectationHash: hash(expectations), expectationRevision: versionedEnvelope?.sha256 || expectationArtifact?.revision || 'raw-human',
+        policyVersion: versionedEnvelope?.activePolicyVersion || null,
+        expectationEnvelopeHash: versionedEnvelope?.sha256 || null,
         vocabulary: JSON.parse(JSON.stringify(vocabulary)), vocabularyHash: hash(vocabulary), splitHash: split ? hash(split) : null,
         provenance: vocabulary.provenance });
 }

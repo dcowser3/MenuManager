@@ -1083,15 +1083,30 @@ async function main() {
         expectationVersioning: requireLib('dashboard', 'lib/expectation-versioning'),
     };
     args.baselineModel = libs.improvementCore.resolveEvalBaselineModel(args.model, args.baselineModel);
+    const suppliedExpectationArtifact = args.expectations ? readArtifact(args.expectations) : null;
+    const suppliedVersionedEnvelope = suppliedExpectationArtifact?.activePolicyVersion && suppliedExpectationArtifact?.sha256
+        && Array.isArray(suppliedExpectationArtifact?.expectations) ? suppliedExpectationArtifact : null;
+    if (suppliedExpectationArtifact && !suppliedVersionedEnvelope) {
+        throw new Error('Policy-change evaluation requires a versioned expectation envelope with activePolicyVersion, expectations, and sha256.');
+    }
+    const expectationEnvelope = suppliedVersionedEnvelope || null;
+    if (expectationEnvelope) {
+        libs.expectationVersioning.validateExpectationEnvelope(expectationEnvelope);
+        for (const row of dataset) {
+            const expectation = expectationEnvelope.expectations.find((item) => item.id === row.case_id);
+            if (!expectation || expectation.input !== row.raw_input) throw new Error(`Dataset input differs from frozen expectation: ${row.case_id}`);
+        }
+    }
     const rulesInfo = await resolveCorrectionRules(args.rules);
     const policyVersion = evidenceHash(JSON.stringify(rulesInfo.rules));
-    const expectationEnvelope = libs.expectationVersioning.freezeExpectationEnvelope({
+    const legacyExpectationEnvelope = libs.expectationVersioning.freezeExpectationEnvelope({
         policyVersion,
         expectations: dataset.map((row) => ({ id: row.case_id, classification: 'missed_existing_rule', policyRuleId: null,
             restaurant: row.context?.property || row.restaurant || null, menuScope: row.context?.templateType || null,
             input: row.raw_input, expected: row.ground_truth, approvalState: 'approved', status: 'active' })),
     });
-    args.expectationEnvelope = expectationEnvelope;
+    args.expectationEnvelope = expectationEnvelope || legacyExpectationEnvelope;
+    args.policyChangeEvaluation = !!expectationEnvelope;
 
     // Baseline config for back-to-back regression confirmation (optional). Needs
     // the baseline prompt; without it, flagged regressions can't be re-confirmed
@@ -1125,7 +1140,7 @@ async function main() {
         const baselineOutputs = Object.fromEntries((baselineReport.cases || []).map((row) => [row.case_id, row.candidateOutput]));
         const candidateOutputs = Object.fromEntries(caseReports.map((row) => [row.case_id, row.candidateOutput]));
         expectationArmComparison = libs.expectationVersioning.evaluateExpectationArms({
-            envelope: expectationEnvelope,
+            envelope: args.expectationEnvelope,
             baselineOutputs,
             candidateOutputs,
             baselineRunId: baselineReport.generatedAt || baselinePath,
@@ -1151,9 +1166,10 @@ async function main() {
         },
         evaluation: {
             ...args.evaluationContract,
-            policyVersion: expectationEnvelope.activePolicyVersion,
-            expectationEnvelopeHash: expectationEnvelope.sha256,
-            expectationCount: expectationEnvelope.expectations.length,
+            policyVersion: args.expectationEnvelope.activePolicyVersion,
+            expectationEnvelopeHash: args.expectationEnvelope.sha256,
+            expectationCount: args.expectationEnvelope.expectations.length,
+            policyChangeEvaluation: args.policyChangeEvaluation === true,
             expectationArmComparison,
             expectations: undefined,
             vocabulary: undefined,

@@ -64,7 +64,7 @@ export function freezeExpectationEnvelope(input: {
 }): ExpectationEnvelope {
     const expectations = input.expectations.map((row) => {
         const body: Omit<ExpectationVersion, 'id'> = {
-            version: row.version || 1,
+            version: row.version || (row.sourceExpectationId ? 2 : 1),
             status: row.status || (row.approvalState === 'approved' ? 'active' : 'candidate'),
             classification: row.classification,
             policyRuleId: row.policyRuleId || null,
@@ -101,6 +101,17 @@ export function validateExpectationEnvelope(envelope: ExpectationEnvelope): Expe
             throw new Error('Unapproved expectation cannot be active.');
         }
     }
+    const linkedPrior = new Set<string>();
+    const linkedSuccessor = new Set<string>();
+    for (const link of envelope.supersedes) {
+        if (linkedPrior.has(link.priorId) || linkedSuccessor.has(link.successorId)) throw new Error('Supersession links must be one-to-one.');
+        linkedPrior.add(link.priorId); linkedSuccessor.add(link.successorId);
+        const prior = envelope.expectations.find((row) => row.id === link.priorId);
+        const successor = envelope.expectations.find((row) => row.id === link.successorId);
+        if (!prior || !successor || successor.sourceExpectationId !== prior.id || successor.version <= prior.version
+            || successor.policyRuleId !== prior.policyRuleId || successor.restaurant !== prior.restaurant || successor.menuScope !== prior.menuScope
+            || !['active', 'superseded'].includes(prior.status) || !['candidate', 'active'].includes(successor.status)) throw new Error('Invalid supersession link.');
+    }
     return envelope;
 }
 
@@ -110,7 +121,7 @@ export function evaluateAgainstFrozenExpectations(
     candidateLabel: string,
 ) {
     validateExpectationEnvelope(envelope);
-    return envelope.expectations.map((expectation) => {
+    return envelope.expectations.filter((expectation) => expectation.status !== 'superseded').map((expectation) => {
         const output = outputs[expectation.id];
         const hasOutput = typeof output === 'string';
         const passed = hasOutput && output === expectation.expected;
@@ -137,7 +148,7 @@ export function evaluateExpectationArms(input: {
     candidateRunId: string;
 }) {
     validateExpectationEnvelope(input.envelope);
-    return input.envelope.expectations.map((expectation) => {
+    return input.envelope.expectations.filter((expectation) => expectation.status !== 'superseded').map((expectation) => {
         const baseline = input.baselineOutputs[expectation.id];
         const candidate = input.candidateOutputs[expectation.id];
         const baselinePresent = typeof baseline === 'string';
@@ -178,14 +189,13 @@ export function activateApprovedSuccessor(envelope: ExpectationEnvelope, approva
     if (approval.status !== 'accepted' || approval.policyVersion !== envelope.activePolicyVersion) return envelope;
     const prior = envelope.expectations.find((row) => row.id === approval.supersedesId);
     const successor = envelope.expectations.find((row) => row.id === approval.successorId);
-    if (!prior || !successor || successor.sourceExpectationId !== prior.id
+    const linked = envelope.supersedes.some((row) => row.priorId === approval.supersedesId && row.successorId === approval.successorId);
+    if (!linked || !prior || !successor || !['active', 'superseded'].includes(prior.status) || successor.status !== 'candidate' || successor.sourceExpectationId !== prior.id
         || successor.policyRuleId !== approval.ruleId || successor.restaurant !== approval.restaurant
         || successor.menuScope !== approval.menuScope || successor.approvalState !== 'unapproved') return envelope;
     const expectations = envelope.expectations.map((row) => row.id === prior.id
         ? { ...row, status: 'superseded' as const }
         : row.id === successor.id ? { ...row, status: 'active' as const, approvalState: 'approved' as const } : row);
-    const supersedes = envelope.supersedes.some((row) => row.priorId === prior.id && row.successorId === successor.id)
-        ? envelope.supersedes : [...envelope.supersedes, { priorId: prior.id, successorId: successor.id }];
-    const body = { schemaVersion: 1 as const, activePolicyVersion: envelope.activePolicyVersion, expectations, supersedes };
+    const body = { schemaVersion: 1 as const, activePolicyVersion: envelope.activePolicyVersion, expectations, supersedes: envelope.supersedes };
     return { ...body, sha256: hash(body) };
 }
