@@ -213,6 +213,7 @@ function validateReplayResult(value, label, row = null, options = {}) {
         const scoring = loadTrustedTsModule(repoRoot, 'services/differ/lib/eval-scoring');
         const similarity = loadTrustedTsModule(repoRoot, 'services/dashboard/lib/text-similarity');
         const parsed = pipeline.parseAIResponse(value.response, row.raw_input);
+        if (parsed.fenceMissing === true || typeof parsed.correctedMenu !== 'string' || !Array.isArray(parsed.suggestions)) throw new Error(`${label} replay response contract is incomplete or missing required fences.`);
         if (parsed.correctedMenu !== value.output) throw new Error(`${label} replay output does not match the trusted parsed response.`);
         const truthStyle = similarity.normalizeComparable(row.ground_truth, { normalizeRawAsteriskStyle: true });
         const outputStyle = similarity.normalizeComparable(parsed.correctedMenu, { normalizeRawAsteriskStyle: true });
@@ -460,7 +461,7 @@ async function runCodeProposalProof(options = {}) {
             for (const row of cases) {
                 const baseline = results.baseline.get(row.case_id), candidate = results.candidate.get(row.case_id);
                 if (candidate.composite - baseline.composite < -0.02 || candidate.extraEdits > baseline.extraEdits) throw new Error(`Candidate replay regresses or widens edits for ${row.case_id}.`);
-                run.cases.push({ case_id: row.case_id, baseline_composite: baseline.composite, candidate_composite: candidate.composite, baseline_fence_missing: false, candidate_fence_missing: false, baseline_contract_complete: true, candidate_contract_complete: true, baseline_extra_edits: baseline.extraEdits, candidate_extra_edits: candidate.extraEdits });
+                run.cases.push({ case_id: row.case_id, baseline_composite: baseline.composite, candidate_composite: candidate.composite, baseline_fence_missing: baseline.fenceMissing, candidate_fence_missing: candidate.fenceMissing, baseline_contract_complete: baseline.contractComplete, candidate_contract_complete: candidate.contractComplete, baseline_extra_edits: baseline.extraEdits, candidate_extra_edits: candidate.extraEdits });
             }
             run.rule_activations = [...results.candidate.values()].flatMap((result) => result.rule_activations || []);
             if (options.strictReplay === true && nonCodeRoutes.length && run.rule_activations.length === 0) throw new Error('Mixed-rule replay lacks trustworthy rule activation evidence.');

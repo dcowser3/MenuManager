@@ -30,9 +30,13 @@ expectation, settings, runtime and surviving-rule evidence. Under C2c2, two
 fresh paired replay seeds execute the selected arm's actual dashboard review
 pipeline in the fixed image with a test-only echo adapter; the host parses and
 recomputes the response contract, fence, similarity, correction score, extra
-edits, and run identity. The worker never receives ground truth or expected
-outcomes and returns only delivered response/output bytes and bounded
-diagnostics. Every
+edits, and run identity. Any missing corrected-menu fence or incomplete parsed
+contract blocks before scoring; `run.cases` preserves the validated contract
+flags rather than asserting success. The worker never receives ground truth or
+expected outcomes and returns only delivered response/output bytes and bounded
+diagnostics. A Docker end-to-end fixture reaches `pending_store` with paired
+Jest, both replay seeds, and behavior outcomes using only `metadata.attempt_id`.
+Every
 case and correction must have a complete response contract, no fence error,
 fresh report identity, no regression or extra-edit widening, and corrected
 candidate output. Delivery-mismatch corrections remain blocked unless the fixed

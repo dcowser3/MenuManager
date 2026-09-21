@@ -210,6 +210,8 @@ test('strict replay recomputes the worker identity and rejects forged host metri
     expect(result.composite).toBeGreaterThan(0);
     expect(result.extraEdits).toBe(0);
     expect(() => validateReplayResult({ report_id: 'forged', response, output: 'Dish, lemon' }, 'candidate case-1', row, { strict: true, identity })).toThrow(/identity/);
+    const unfenced = 'Dish, lemon';
+    expect(() => validateReplayResult({ report_id, response: unfenced, output: 'Dish, lemon' }, 'candidate case-1', row, { strict: true, identity })).toThrow(/contract|fence/i);
 });
 
 test('replay freshness, response contracts, and delivery-required omission are enforced', async () => {
