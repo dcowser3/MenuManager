@@ -117,11 +117,12 @@ Reviewer-confirmed food words are matched with bounded Damerau edit distance, in
 
 ### Conservative singular ingredient forms
 
-Applies verified contextual singular-ingredient corrections to comma-delimited descriptions, including jalapeños, prawns, pickles, fruit, vegetables, nuts, peppers, potatoes, and croutons; Prawn before either Tequeño or Tequeños; and a standalone Pickle side. Counted/prepared phrases, documented plural exceptions, and dish names are preserved.
+Applies verified contextual singular-ingredient corrections to comma-delimited descriptions, including jalapeños, prawns, pickles, fruit, vegetables, nuts, peppers, potatoes, croutons, and the explicit pistou herbs override; Prawn before either Tequeño or Tequeños; and a standalone Pickle side. Counted/prepared phrases, other documented plural exceptions, and dish names are preserved.
 - `Guacamole, jalapeños, avocado 18` -> `Guacamole, jalapeño, avocado 18`
 - `Encocado, black cod, prawns, squid 38` -> `Encocado, black cod, prawn, squid 38`
 - `Prawns Tequeño, salsa 18` -> `Prawn Tequeño, salsa 18`
 - `Ceviche, cucumber pickles, praline 24` -> `Ceviche, pickle, praline 24`
+- `Beet Salad, caramelized walnuts, pistou herbs D,G 18` -> `Beet Salad, caramelized walnut, pistou herb D,G 18`
 
 - id: `pre-ai/singular-ingredient-forms` · category: singular_plural · implementation: `services/dashboard/lib/pre-ai-deterministic-rules.ts#normalizeSingularIngredientFormsOnLine`
 

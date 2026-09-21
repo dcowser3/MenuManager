@@ -164,6 +164,8 @@ describe('runPreAiDeterministicChecks', () => {
             'Harvest, pickled red onions, candied pecans, pickled raisins, beets, candied walnuts, mandarins, lemons 20',
             'Salad, cornbread croutons, spiced pepitas, Colorado apples, candied pepitas 16',
             'Salad, spiced pepitas D,G 16',
+            'Beet Salad, caramelized walnuts, pistou herbs D,G 18',
+            'Garden Salad, mixed herbs, sesame seeds V 16',
         ].join('\n'));
 
         expect(result.menuText).toBe([
@@ -172,6 +174,8 @@ describe('runPreAiDeterministicChecks', () => {
             'Harvest, pickled red onion, candied pecan, pickled raisin, beet, candied walnut, mandarin, lemon 20',
             'Salad, cornbread crouton, spiced pepita, Colorado apple, candied pepita 16',
             'Salad, spiced pepita D,G 16',
+            'Beet Salad, caramelized walnut, pistou herb D,G 18',
+            'Garden Salad, mixed herbs, sesame seeds V 16',
         ].join('\n'));
     });
 
