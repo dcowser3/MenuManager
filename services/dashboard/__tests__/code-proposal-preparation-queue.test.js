@@ -12,7 +12,7 @@ jest.mock('../../../scripts/lib/code-proposal-preparation', () => ({
 }));
 
 const { prepareCodeProposalAttempt } = require('../../../scripts/lib/code-proposal-preparation');
-const { buildPreparationInventory, finalizePreparationInventory, prepareCodeProposalQueue, preparePendingCodeProposalQueue, enumerateCompletePages, loadPendingProposalRows, inventoryBoundaryHash } = require('../../../scripts/lib/code-proposal-preparation-queue');
+const { buildPreparationInventory, finalizePreparationInventory, prepareCodeProposalQueue, preparePendingCodeProposalQueue, enumerateCompletePages, loadPendingProposalRows, inventoryBoundaryHash, validateManualExclusionArtifact, USER_MANUAL_UNRESOLVED } = require('../../../scripts/lib/code-proposal-preparation-queue');
 const { hashBehaviorArtifact } = require('../lib/learning-behavior-tests');
 
 const HASH = (value) => crypto.createHash('sha256').update(value).digest('hex');
@@ -239,6 +239,22 @@ test('explicit supersession permits a cross-cycle correction binding', async () 
 test('unknown routing lanes are explicit blocked groups', () => {
     const inventory = buildPreparationInventory(proposal({ correction_routing: [{ ...proposal().correction_routing[0], lane: 'future_lane' }] }));
     expect(inventory.groups[0]).toMatchObject({ status: 'blocked', reason: 'unknown_routing_lane' });
+});
+
+test('user-owned manual exclusions preserve inventory while removing exactly three groups from automatic scope', () => {
+    const ids = [...USER_MANUAL_UNRESOLVED];
+    const routes = ids.map((id) => ({ correction_id: id, lane: 'prompt', case_id: id, original_text: 'before', corrected_text: 'after', source: 'human' })).concat([{ correction_id: 'eligible-code', lane: 'code_recommendation', case_id: 'eligible', original_text: 'before', corrected_text: 'after', source: 'human' }]);
+    const records = routes.map((route) => behaviorRecord(route.correction_id));
+    const evidence = routes.map((route) => ({ correction_id: route.correction_id, submission_id: `submission-${route.correction_id}`, case_id: route.case_id, original_text: route.original_text, corrected_text: route.corrected_text, status: 'replay_mismatch' }));
+    const p = proposal({ id: 'manual-exclusion', cycle_id: 'cycle-manual', correction_routing: routes, replay_evidence: evidence, eval_summary: { behavior_tests: { records } } });
+    const fingerprint = HASH(JSON.stringify(p));
+    const artifact = { schema_version: 1, source: 'user_owned_manual_exclusion', proposal_id: p.id, cycle_id: p.cycle_id, proposal_fingerprint: fingerprint, exclusions: ids.map((correction_id) => ({ correction_id, reason: 'user_owned_manual_unresolved' })) };
+    const inventory = buildPreparationInventory(p, { proposalFingerprint: fingerprint, manualExclusionArtifact: artifact });
+    expect(inventory.groups).toHaveLength(4);
+    expect(inventory.groups.filter((group) => group.reason === 'user_owned_manual_unresolved')).toHaveLength(3);
+    expect(inventory.groups.find((group) => group.correction_id === 'eligible-code').status).toBe('awaiting_code_candidate_authorization');
+    expect(() => validateManualExclusionArtifact(p, { ...artifact, exclusions: artifact.exclusions.slice(0, 2) }, fingerprint)).toThrow(/missing/);
+    expect(() => validateManualExclusionArtifact(p, { ...artifact, source: 'model' }, fingerprint)).toThrow(/missing or stale/);
 });
 
 test('duplicate or conflicting human behavior bindings fail closed', () => {

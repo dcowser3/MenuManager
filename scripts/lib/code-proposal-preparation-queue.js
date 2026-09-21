@@ -94,6 +94,15 @@ function routeRows(proposal) {
     return rows.filter((row) => row);
 }
 
+const USER_MANUAL_UNRESOLVED = new Set(['ce9e56a4-12c4-46aa-a12e-606df66b6b43', '3f338cf9-483e-4d66-afde-d9c46fb285b2', 'fc08d1d2-2145-4cf8-b44b-55ea830d6e07']);
+function validateManualExclusionArtifact(proposal, artifact, proposalFingerprint) {
+    if (!artifact || artifact.source !== 'user_owned_manual_exclusion' || artifact.proposal_id !== proposal.id || artifact.cycle_id !== (proposal.cycle_id || null) || !proposalFingerprint || artifact.proposal_fingerprint !== proposalFingerprint) throw new Error('Manual exclusion artifact is missing or stale.');
+    const rows = Array.isArray(artifact.exclusions) ? artifact.exclusions : [];
+    const ids = rows.map((row) => `${row?.correction_id || ''}`);
+    if (new Set(ids).size !== ids.length || ids.some((id) => !USER_MANUAL_UNRESOLVED.has(id)) || ids.length !== USER_MANUAL_UNRESOLVED.size || [...USER_MANUAL_UNRESOLVED].some((id) => !ids.includes(id)) || rows.some((row) => row.reason !== 'user_owned_manual_unresolved')) throw new Error('Manual exclusion artifact has missing, extra, duplicate, or ambiguous exclusions.');
+    return Object.freeze({ schema_version: 1, source: artifact.source, proposal_id: artifact.proposal_id, cycle_id: artifact.cycle_id, proposal_fingerprint: artifact.proposal_fingerprint, exclusions: rows.map((row) => ({ correction_id: row.correction_id, reason: row.reason })) });
+}
+
 function buildPreparationInventory(proposal, options = {}) {
     if (!proposal?.id || proposal.status !== 'pending') throw new Error('Preparation queue requires one pending proposal.');
     const routes = routeRows(proposal);
@@ -105,6 +114,7 @@ function buildPreparationInventory(proposal, options = {}) {
     const seen = new Set();
     const evidence = Array.isArray(proposal.replay_evidence) ? proposal.replay_evidence : [];
     const behavior = proposal.eval_summary?.behavior_tests;
+    const manualExclusions = options.manualExclusionArtifact ? validateManualExclusionArtifact(proposal, options.manualExclusionArtifact, options.proposalFingerprint) : null;
     const records = Array.isArray(behavior?.records) ? behavior.records : [];
     const groups = routes.slice().sort((a, b) => `${a.correction_id}`.localeCompare(`${b.correction_id}`)).map((route) => {
         const correctionId = `${route.correction_id || ''}`.trim();
@@ -131,6 +141,7 @@ function buildPreparationInventory(proposal, options = {}) {
             behavior_sha256: record ? sha256(record) : null,
             source_binding: { submission_id: replay.submission_id || null, case_id: replay.case_id || route.case_id || null, audit_id: replay.audit_id || null, attempt_id: replay.attempt_id || null },
         };
+        if (manualExclusions?.exclusions.some((row) => row.correction_id === correctionId)) { group.status = 'excluded'; group.reason = 'user_owned_manual_unresolved'; }
         if (route.replay_status === 'delivery_mismatch' || replay.status === 'delivery_mismatch') {
             group.status = 'blocked';
             group.reason = 'delivery_verification_required';
@@ -168,6 +179,7 @@ function buildPreparationInventory(proposal, options = {}) {
         excluded_groups: groups.filter((group) => group.status === 'excluded').map((group) => group.correction_id),
         blocked_groups: groups.filter((group) => group.status === 'blocked').map((group) => ({ correction_id: group.correction_id, reason: group.reason })),
         advisory_cursor: options.advisoryCursor || null,
+        manual_exclusions: manualExclusions,
     };
     if (body.enumeration.complete !== true) throw new Error('Preparation queue enumeration is incomplete.');
     const snapshot_sha256 = sha256(body);
@@ -359,4 +371,4 @@ async function prepareCodeProposalQueue(options = {}) {
     return { status: 'blocked', reason: 'code_candidate_authorization_required', providerCalls: 0, inventory: finalizedInventory, attemptId: prepared.attemptId, artifactDirectory: prepared.artifactDirectory, metadata: prepared.metadata, summary };
 }
 
-module.exports = { buildPreparationInventory, finalizePreparationInventory, prepareCodeProposalQueue, preparePendingCodeProposalQueue, enumerateCompletePages, loadPendingProposalRows, inventoryBoundaryHash, canonical, sha256 };
+module.exports = { buildPreparationInventory, finalizePreparationInventory, prepareCodeProposalQueue, preparePendingCodeProposalQueue, enumerateCompletePages, loadPendingProposalRows, inventoryBoundaryHash, canonical, sha256, validateManualExclusionArtifact, USER_MANUAL_UNRESOLVED };
