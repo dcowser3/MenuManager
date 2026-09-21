@@ -244,6 +244,7 @@ function deliveryRequired(proposal, corrections) {
 function validateDelivery(value, correction, driverHash, deliveryIdentity, expectedImage, expectedRuntime, expectedFixtureHash) {
     if (!value || value.driver !== 'form-submit-v1' || !isDigest(driverHash)
         || !deliveryIdentity || driverHash !== deliveryIdentity.delivery_driver_sha256
+        || value.driver_sha256 !== driverHash
         || value.image_id !== expectedImage || value.runtime_id !== expectedRuntime
         || value.delivery_fixture_sha256 !== expectedFixtureHash
         || !isDigest(value.baseline_source_hashes?.driver) || !isDigest(value.candidate_source_hashes?.driver)

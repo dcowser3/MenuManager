@@ -150,12 +150,17 @@ describe('code proposal verification gate', () => {
         proposal.eval_summary.code_verification.corrections[0].delivery_assertion = true;
         expect(assessCodeProposalVerification(proposal)).not.toBeNull();
         proposal.eval_summary.code_verification.inputs.delivery_driver_sha256 = digest('driver');
+        const identityBody = { browser_version: 'fixture', delivery_driver_sha256: digest('driver'), delivery_image_id: digest('image'), delivery_runtime_id: digest('runtime'), delivery_source_sha256: digest('source'), quill_version: '1.3.6' };
+        proposal.eval_summary.code_verification.inputs.delivery_identity = { ...identityBody, identity_sha256: digest(JSON.stringify(identityBody)) };
+        proposal.eval_summary.code_verification.inputs.delivery_identity_sha256 = proposal.eval_summary.code_verification.inputs.delivery_identity.identity_sha256;
         const sourceHashes = Object.fromEntries(['driver', 'form', 'form_helpers', 'diff_core', 'redline_preview', 'form_stage', 'showStep2', 'submitMenu', 'quill'].map((key) => [key, digest(key)]));
-        for (const run of proposal.eval_summary.code_verification.runs) run.delivery = [{ correction_id: 'c1', driver: 'form-submit-v1',
+        for (const run of proposal.eval_summary.code_verification.runs) run.delivery = [{ correction_id: 'c1', driver: 'form-submit-v1', driver_sha256: digest('driver'),
             baseline_submitted_text: 'Dish, lemons', candidate_submitted_text: 'Dish, lemon', baseline_submitted_html: '<p>Dish, lemons</p>', candidate_submitted_html: '<p>Dish, lemon</p>',
             baseline_submitted_html_text: 'Dish, lemons', candidate_submitted_html_text: 'Dish, lemon',
             baseline_source_hashes: sourceHashes, candidate_source_hashes: sourceHashes, baseline_browser_version: 'fixture', candidate_browser_version: 'fixture', quill_version: '1.3.6' }];
-        expect(assessCodeProposalVerification(proposal)).toBeNull();
+        // Legacy schema-v1 delivery fixtures remain readable but do not assert
+        // the schema-v2 worker identity contract.
+        expect(assessCodeProposalVerification(proposal)).not.toBeNull();
         proposal.eval_summary.code_verification.runs[0].delivery[0].candidate_submitted_html_text = 'Dish, lemons';
         expect(assessCodeProposalVerification(proposal)).not.toBeNull();
     });

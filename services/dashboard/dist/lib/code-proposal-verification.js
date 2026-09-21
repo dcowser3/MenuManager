@@ -272,11 +272,12 @@ function assessCodeProposalVerificationInternal(proposal, allowTestOnly) {
         return fail('Correction delivery evidence requires a browser delivery/save assertion.');
     }
     const deliveryBindingsRequired = proof.schema_version >= 2;
-    if (deliveryIds.size > 0 && deliveryBindingsRequired && (!deliveryIdentity || input.delivery_driver_sha256 !== deliveryIdentity.delivery_driver_sha256
+    if (deliveryIds.size > 0 && (!deliveryIdentity || (deliveryBindingsRequired && input.delivery_driver_sha256 !== deliveryIdentity.delivery_driver_sha256)
         || !digest(deliveryIdentity.delivery_image_id) || !digest(deliveryIdentity.delivery_runtime_id)
         || !digest(deliveryIdentity.delivery_driver_sha256) || !digest(deliveryIdentity.delivery_source_sha256)
-        || (deliveryBindingsRequired && !digest(input.delivery_fixture_sha256 || ''))
-        || (deliveryBindingsRequired && deliveryIdentity.delivery_fixture_sha256 !== undefined && input.delivery_fixture_sha256 !== deliveryIdentity.delivery_fixture_sha256)
+        || (deliveryBindingsRequired && !digest(input.delivery_fixture_sha256 || '')
+            || deliveryBindingsRequired && !digest(deliveryIdentity.delivery_fixture_sha256 || '')
+            || deliveryBindingsRequired && input.delivery_fixture_sha256 !== deliveryIdentity.delivery_fixture_sha256)
         || typeof deliveryIdentity.browser_version !== 'string' || typeof deliveryIdentity.quill_version !== 'string'
         || !digest(deliveryIdentity.identity_sha256) || input.delivery_identity_sha256 !== deliveryIdentity.identity_sha256
         || (0, crypto_1.createHash)('sha256').update(JSON.stringify(Object.fromEntries(Object.keys(deliveryIdentity).filter((key) => key !== 'identity_sha256').sort().map((key) => [key, canonical(deliveryIdentity[key])])))).digest('hex') !== deliveryIdentity.identity_sha256)) {
@@ -326,6 +327,7 @@ function assessCodeProposalVerificationInternal(proposal, allowTestOnly) {
                     || (deliveryBindingsRequired && delivery.delivery_fixture_sha256 !== input.delivery_fixture_sha256)
                     || (deliveryBindingsRequired && delivery.source_manifest_sha256 !== deliveryIdentity?.delivery_source_sha256)
                     || !digest(input.delivery_driver_sha256)
+                    || (deliveryBindingsRequired && delivery.driver_sha256 !== input.delivery_driver_sha256)
                     || delivery.baseline_source_hashes?.driver !== input.delivery_driver_sha256
                     || delivery.candidate_source_hashes?.driver !== input.delivery_driver_sha256
                     || !['form', 'form_helpers', 'form_submission', 'diff_core', 'redline_preview', 'form_stage', 'showStep2', 'submitMenu', 'quill'].every((key) => digest(delivery.baseline_source_hashes?.[key]) && digest(delivery.candidate_source_hashes?.[key]))
