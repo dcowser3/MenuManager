@@ -37,7 +37,7 @@ function replayCallbacks(entry, sourceText) {
 }
 
 function assertFinalReadback(actual, planned) {
-    if (actual.status !== 'pending' || actual.eval_summary?.code_candidate || actual.eval_summary?.eval_status !== 'regressed' || actual.eval_summary?.disposition !== 'rules_only') throw new Error('Replay refresh readback violates pending/no-owner/regression guards.');
+    if (actual.status !== 'pending' || actual.eval_summary?.code_candidate || actual.eval_status !== 'regressed' || actual.disposition !== 'rules_only') throw new Error('Replay refresh readback violates pending/no-owner/regression guards.');
     if (canonicalHash(actual) !== canonicalHash(planned)) throw new Error('Replay refresh readback differs from the complete planned proposal.');
 }
 
@@ -45,14 +45,17 @@ function assertFinalReadback(actual, planned) {
 async function recoverAppliedRefresh({ proposal, proposalId, artifactDir }) {
     const planPath = path.join(artifactDir, 'plan.json');
     const afterPath = path.join(artifactDir, 'after.json');
-    if (!fs.existsSync(planPath) || !fs.existsSync(afterPath)) return null;
+    if (!fs.existsSync(planPath)) return null;
     let plan; let after;
     try {
         plan = JSON.parse(await fsp.readFile(planPath, 'utf8'));
-        after = JSON.parse(await fsp.readFile(afterPath, 'utf8'));
     } catch { return null; }
     if (plan.proposal_id !== proposalId || plan.planned_sha256 !== canonicalHash(plan.planned)
-        || canonicalHash(after) !== plan.planned_sha256 || canonicalHash(proposal) !== plan.planned_sha256) return null;
+        || canonicalHash(proposal) !== plan.planned_sha256) return null;
+    if (fs.existsSync(afterPath)) {
+        try { after = JSON.parse(await fsp.readFile(afterPath, 'utf8')); } catch { return null; }
+        if (canonicalHash(after) !== plan.planned_sha256) return null;
+    }
     assertFinalReadback(proposal, plan.planned);
     await writePrivate(path.join(artifactDir, 'marker.json'), { state: 'recovered', proposal_id: proposalId, planned_sha256: plan.planned_sha256, model_calls: 0 });
     return { state: 'recovered', artifactDir, downstream_fingerprint: verification.codeProposalVerificationFingerprint(proposal), model_calls: 0 };
