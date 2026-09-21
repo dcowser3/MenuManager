@@ -1,12 +1,13 @@
 'use strict';
 
 const crypto = require('crypto');
+const { isDeepStrictEqual } = require('util');
 const fs = require('fs');
 const path = require('path');
 const { ModelBudgetBroker, canonicalHash, redact, sha256 } = require('./lib/model-budget-broker');
 const { snapshotBaseline, revalidateAttemptArtifacts, validateDraft, applyDraft } = require('./lib/code-proposal-draft');
 const { loadVerificationModule } = require('./lib/proposal-verification-store');
-const { validateParentCampaignLineage, buildParentCampaignLineage, readImmutablePendingSnapshot } = require('./lib/parent-campaign-lineage');
+const { canonical, validateParentCampaignLineage, buildParentCampaignLineage, readImmutablePendingSnapshot } = require('./lib/parent-campaign-lineage');
 
 const DIGEST = /^[a-f0-9]{64}$/;
 const MAX_MESSAGES = 8;
@@ -87,9 +88,11 @@ function loadPreparedDraft(options) {
         if (!fs.existsSync(lineageFile)) throw new Error('Prepared attempt parent campaign lineage is missing.');
         const lineage = validateParentCampaignLineage(JSON.parse(fs.readFileSync(lineageFile, 'utf8')), { proposal: checked.proposal });
         const inventory = JSON.parse(fs.readFileSync(path.join(attemptRoot, 'preparation-inventory.json'), 'utf8'));
-        const snapshot = readImmutablePendingSnapshot(path.join(attemptRoot, '..', '..', '..'), lineage.pending_enumeration.global_snapshot_sha256);
+        const snapshotRoot = path.resolve(attemptRoot, '..', '..');
+        if (!snapshotRoot.endsWith(`${path.sep}tmp${path.sep}code-proposals`)) throw new Error('Prepared attempt snapshot root is not the trusted code-proposals root.');
+        const snapshot = readImmutablePendingSnapshot(snapshotRoot, lineage.pending_enumeration.global_snapshot_sha256);
         const expected = buildParentCampaignLineage({ proposal: checked.proposal, inventory, proposalFingerprint: options.metadata.proposal_sha256, frozenHashes: { behavior_tests_sha256: options.metadata.behavior_tests_sha256, dataset_sha256: options.metadata.expected_dataset_sha256, source_sha256: options.metadata.baseline_source_sha256, prompt_sha256: options.metadata.prompt_sha256, accepted_rules_sha256: options.metadata.accepted_rules_sha256 }, pendingEnumeration: snapshot });
-        if (JSON.stringify(lineage) !== JSON.stringify(expected) || lineage.parent_campaign_sha256 !== options.parentCampaignSha256 || options.metadata.parent_campaign_sha256 !== lineage.parent_campaign_sha256) throw new Error('Prepared attempt parent campaign lineage differs from the dispatch scope.');
+        if (!isDeepStrictEqual(canonical(lineage), canonical(expected)) || lineage.parent_campaign_sha256 !== options.parentCampaignSha256 || options.metadata.parent_campaign_sha256 !== lineage.parent_campaign_sha256) throw new Error('Prepared attempt parent campaign lineage differs from the dispatch scope.');
     }
     const broker = new ModelBudgetBroker({ authorizationFile: options.authorizationFile, stateFile: options.stateFile, outputRoot: attemptRoot, env: options.env, now: options.now, transport: options.transport, countInputTokens: options.countInputTokens });
     if (canonicalHash(broker.authorization.scope) !== canonicalHash(scope)) throw new Error('Code-candidate authorization scope differs from prepared attempt identities.');

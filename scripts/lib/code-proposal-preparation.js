@@ -4,7 +4,8 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const { loadVerificationModule, recordCodeVerification, recordParentCampaignLineage, shouldDraftCodeProposal } = require('./proposal-verification-store');
-const { buildParentCampaignLineage, persistParentCampaignLineage, validateParentCampaignLineage, readImmutablePendingSnapshot } = require('./parent-campaign-lineage');
+const { isDeepStrictEqual } = require('util');
+const { canonical, buildParentCampaignLineage, persistParentCampaignLineage, validateParentCampaignLineage, readImmutablePendingSnapshot } = require('./parent-campaign-lineage');
 
 const PHASES = new Set(['analysis', 'draft', 'unit_tests', 'retrospective_replay', 'holdout', 'verification', 'awaiting_approval', 'awaiting_deployment_approval']);
 const STATES = new Set(['active', 'waiting_on_model', 'blocked', 'failed', 'verified']);
@@ -243,7 +244,7 @@ async function prepareCodeProposalAttempt(options = {}) {
             pendingEnumeration: options.parentCampaignLineage?.pending_enumeration || pendingEnumeration || { ...(options.inventory.enumeration || {}), query: options.inventory.query, rows_count: options.inventory.enumeration?.rows_count || options.inventory.enumeration?.count, row_ids: options.inventory.enumeration?.row_ids },
         }) : null;
         const lineage = options.parentCampaignLineage ? validateParentCampaignLineage(options.parentCampaignLineage, { proposal }) : computedLineage;
-        if (options.parentCampaignLineage && computedLineage && JSON.stringify(options.parentCampaignLineage) !== JSON.stringify(computedLineage)) throw new Error('Supplied parent campaign lineage differs from freshly computed artifacts.');
+        if (options.parentCampaignLineage && computedLineage && !isDeepStrictEqual(canonical(options.parentCampaignLineage), canonical(computedLineage))) throw new Error('Supplied parent campaign lineage differs from freshly computed artifacts.');
         if (lineage) {
             persistParentCampaignLineage(attemptRoot, lineage, { pre_claim: true });
             metadata.parent_campaign_sha256 = lineage.parent_campaign_sha256;

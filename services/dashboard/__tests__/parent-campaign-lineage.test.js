@@ -42,3 +42,9 @@ test('requires the immutable pending snapshot bytes and self-hash', () => {
         expect(() => readImmutablePendingSnapshot(root, digest)).toThrow(/self-hash|JSON/);
     } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
+
+test('rejects a supplied envelope when its snapshot root or substantive binding is unavailable', () => {
+    const { proposal, inventory } = fixture();
+    const lineage = buildParentCampaignLineage({ proposal, inventory });
+    expect(() => validateParentCampaignLineage({ ...lineage, pending_enumeration: { ...lineage.pending_enumeration, global_snapshot_sha256: 'b'.repeat(64) } }, { proposal })).toThrow(/digest changed|snapshot/);
+});
