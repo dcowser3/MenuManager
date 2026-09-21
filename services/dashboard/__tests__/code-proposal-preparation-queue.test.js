@@ -36,7 +36,7 @@ function setup() {
     fs.mkdirSync(path.join(root, 'tmp', 'review-eval'), { recursive: true });
     fs.writeFileSync(path.join(root, 'tmp', 'review-eval', 'dataset.jsonl'), `${JSON.stringify({ case_id: 'base', raw_input: 'Base', ground_truth: 'Base', context: {} })}\n`);
     const client = { from: (table) => {
-        const q = { select: () => q, eq: () => q, order: () => Promise.resolve({ data: table === 'correction_rules' ? [] : [] }), or: () => Promise.resolve({ data: [] }) };
+        const q = { select: () => q, eq: () => q, order: () => Promise.resolve({ data: table === 'correction_rules' ? [] : [] }), or: () => Promise.resolve({ data: [] }), single: async () => ({ data: null }) };
         return q;
     } };
     return { root, client, cleanup: () => fs.rmSync(root, { recursive: true, force: true }) };
@@ -121,6 +121,24 @@ test('complete multi-proposal consumer preserves ordering and does not abort on 
         const snapshots = fs.readdirSync(path.join(state.root, 'tmp')).filter((name) => name.startsWith('pending-preparation-inventory-'));
         expect(snapshots).toHaveLength(1);
         expect(JSON.parse(fs.readFileSync(path.join(state.root, 'tmp', snapshots[0]))).snapshot_sha256).toBe(result.snapshot.snapshot_sha256);
+    } finally { state.cleanup(); }
+});
+
+test('production-style consumer resolves its verifier when no verifier is injected', async () => {
+    const state = setup();
+    prepareCodeProposalAttempt.mockImplementation(async (options) => {
+        const attemptRoot = path.join(state.root, 'tmp', 'code-proposals', options.proposal.id, 'attempt');
+        fs.mkdirSync(path.join(attemptRoot, 'candidate'), { recursive: true });
+        fs.writeFileSync(path.join(attemptRoot, 'candidate', 'progress.json'), JSON.stringify({ state: 'active' }));
+        fs.writeFileSync(path.join(attemptRoot, 'preparation-inventory.json'), `${JSON.stringify(options.inventory, null, 2)}\n`);
+        return { status: 'claimed', attemptId: `attempt-${options.proposal.id}`, artifactDirectory: attemptRoot, metadata: { behavior_tests_sha256: HASH('behavior'), expected_dataset_sha256: HASH('dataset'), baseline_source_sha256: HASH('source'), prompt_sha256: HASH('prompt'), accepted_rules_sha256: HASH('rules') } };
+    });
+    try {
+        const item = proposal({ id: 'p-production', cycle_id: 'cycle-production' });
+        const enumeration = { complete: true, pages: 1, cutoff: '2026-01-03', rows_count: 1, row_ids: ['p-production'], query: { table: 'prompt_proposals' } };
+        const result = await preparePendingCodeProposalQueue({ proposals: [item], enumeration, client: state.client, repoRoot: process.cwd(), datasetPath: path.join(state.root, 'tmp/review-eval/dataset.jsonl'), inventoryDirectory: path.join(state.root, 'tmp') });
+        expect(result.snapshot.rows[0].proposal_fingerprint).toMatch(/^[a-f0-9]{64}$/);
+        expect(result.results[0].reason).toBe('code_candidate_authorization_required');
     } finally { state.cleanup(); }
 });
 

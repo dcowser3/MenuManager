@@ -160,10 +160,10 @@ function inventoryBoundaryHash(inventory) {
 }
 
 function validateRecoveryArtifacts(summary, progress, stored, existing, artifactDirectory) {
-    if (!summary || summary.schema_version !== 1 || summary.snapshot_sha256 !== stored.snapshot_sha256 || summary.attempt_id !== existing.attempt_id || summary.artifact_directory !== artifactDirectory || summary.provider_calls !== 0 || summary.status !== 'blocked') throw new Error('Preparation summary integrity is invalid.');
+    if (!summary || summary.schema_version !== 1 || summary.snapshot_sha256 !== stored.snapshot_sha256 || summary.proposal_id !== stored.proposal_id || summary.cycle_id !== stored.cycle_id || summary.attempt_id !== existing.attempt_id || summary.artifact_directory !== artifactDirectory || summary.provider_calls !== 0 || summary.status !== 'blocked' || summary.reason !== 'code_candidate_authorization_required' || summary.advisory_cursor !== stored.advisory_cursor) throw new Error('Preparation summary integrity is invalid.');
     const expectedGroups = stored.groups.map((group) => ({ correction_id: group.correction_id, lane: group.lane, status: group.status, reason: group.reason }));
     if (JSON.stringify(summary.groups) !== JSON.stringify(expectedGroups)) throw new Error('Preparation summary group dispositions changed.');
-    if (!progress || progress.schema_version !== 1 || progress.attempt_id !== existing.attempt_id || progress.state !== 'blocked' || progress.reason !== 'code_candidate_authorization_required' || Number(progress.budget?.model_calls || 0) !== 0) throw new Error('Preparation progress integrity is invalid.');
+    if (!progress || progress.schema_version !== 1 || progress.attempt_id !== existing.attempt_id || progress.state !== 'blocked' || progress.reason !== 'code_candidate_authorization_required' || !progress.budget || progress.budget.model_calls !== 0 || (existing.deadline_at && progress.deadline_at !== existing.deadline_at)) throw new Error('Preparation progress integrity is invalid.');
 }
 
 async function readDurableProposal(options, proposal) {
@@ -185,6 +185,9 @@ async function acceptedRulesHash(options, verification) {
 }
 
 async function preparePendingCodeProposalQueue(options = {}) {
+    const verification = options.verification || require('./proposal-verification-store').loadVerificationModule(options.repoRoot);
+    if (typeof verification.codeProposalVerificationFingerprint !== 'function') throw new Error('Preparation queue requires a resolved proposal verifier.');
+    options = { ...options, verification };
     const enumeration = options.enumeration;
     if (!enumeration || enumeration.complete !== true || !Number.isInteger(enumeration.pages) || enumeration.pages < 1 || enumeration.cutoff == null) throw new Error('Preparation queue requires a complete validated pending-proposal enumeration.');
     const proposals = (options.proposals || []).slice().sort((a, b) => `${a.created_at || ''}\u0000${a.id || ''}`.localeCompare(`${b.created_at || ''}\u0000${b.id || ''}`));
@@ -195,10 +198,10 @@ async function preparePendingCodeProposalQueue(options = {}) {
     for (const proposal of proposals) for (const row of proposal.correction_routing || []) {
         if (!row?.correction_id) continue;
         const prior = priorByCorrection.get(row.correction_id);
-        if (prior && prior.cycle_id !== proposal.superseded_from_cycle_id && proposal.cycle_id !== prior.superseded_from_cycle_id) throw new Error(`Cross-cycle correction ${row.correction_id} lacks an explicit supersession link.`);
+        if (prior && proposal.superseded_from_cycle_id !== prior.cycle_id) throw new Error(`Cross-cycle correction ${row.correction_id} lacks an explicit supersession link.`);
         priorByCorrection.set(row.correction_id, proposal);
     }
-    const body = { schema_version: 1, source: 'prompt_proposals', query: { ...enumeration.query, pagination_complete: true }, enumeration: { complete: true, count: proposals.length, pages: enumeration.pages, cutoff: enumeration.cutoff, order: 'created_at ascending, id ascending' }, rows: proposals.map((proposal) => ({ id: proposal.id, cycle_id: proposal.cycle_id || null, superseded_from_cycle_id: proposal.superseded_from_cycle_id || null, status: proposal.status, correction_ids: (proposal.correction_routing || []).map((row) => row.correction_id).sort(), proposal_fingerprint: options.verification?.codeProposalVerificationFingerprint ? options.verification.codeProposalVerificationFingerprint(proposal) : null })) };
+    const body = { schema_version: 1, source: 'prompt_proposals', query: { ...enumeration.query, pagination_complete: true }, enumeration: { complete: true, count: proposals.length, pages: enumeration.pages, cutoff: enumeration.cutoff, order: 'created_at ascending, id ascending' }, rows: proposals.map((proposal) => { const proposal_fingerprint = verification.codeProposalVerificationFingerprint(proposal); if (!DIGEST.test(proposal_fingerprint || '')) throw new Error(`Proposal ${proposal.id} has no valid fingerprint.`); return { id: proposal.id, cycle_id: proposal.cycle_id || null, superseded_from_cycle_id: proposal.superseded_from_cycle_id || null, status: proposal.status, correction_ids: (proposal.correction_routing || []).map((row) => row.correction_id).sort(), proposal_fingerprint }; }) };
     const snapshot = Object.freeze({ ...body, snapshot_sha256: sha256(body) });
     if (options.inventoryDirectory) { fs.mkdirSync(options.inventoryDirectory, { recursive: true, mode: 0o700 }); atomicWrite(path.join(options.inventoryDirectory, `pending-preparation-inventory-${snapshot.snapshot_sha256}.json`), Buffer.from(`${JSON.stringify(snapshot, null, 2)}\n`)); }
     const results = [];
@@ -220,8 +223,14 @@ async function prepareCodeProposalQueue(options = {}) {
     const codeGroups = inventory.groups.filter((group) => group.lane === CODE_LANE);
     if (!codeGroups.length) return { status: 'blocked', reason: 'no_code_recommendation_groups', providerCalls: 0, inventory };
     if (inventory.groups.some((group) => group.status === 'blocked' && group.reason !== 'delivery_verification_required')) return { status: 'blocked', reason: 'preparation_binding_incomplete', providerCalls: 0, inventory };
-    const existing = proposal.eval_summary?.code_candidate;
+    let existing = proposal.eval_summary?.code_candidate;
+    if (!existing?.attempt_id && options.client?.from) {
+        const live = await readDurableProposal(options, proposal);
+        if (live?.eval_summary?.code_candidate?.attempt_id) return prepareCodeProposalQueue({ ...options, proposal: live });
+    }
     if (existing?.attempt_id) {
+        let ownerProposal = proposal;
+        let owner = existing;
         if (options.client?.from || typeof options.readCurrentProposal === 'function') {
             const live = await readDurableProposal(options, proposal);
             if (!live || live.status !== 'pending') throw new Error('Existing code-candidate owner proposal is no longer pending.');
@@ -229,9 +238,13 @@ async function prepareCodeProposalQueue(options = {}) {
             if (liveFingerprint !== proposalFingerprint) throw new Error('Existing code-candidate owner proposal changed.');
             const liveInventory = buildPreparationInventory(live, { ...options, proposalFingerprint: liveFingerprint });
             if (liveInventory.snapshot_sha256 !== inventory.snapshot_sha256) throw new Error('Existing code-candidate owner routing or authority changed.');
+            ownerProposal = live;
+            owner = live.eval_summary?.code_candidate;
+            if (!owner || owner.attempt_id !== existing.attempt_id || owner.status !== existing.status) throw new Error('Existing code-candidate owner changed while resuming.');
         } else if (proposal.status !== 'pending') throw new Error('Existing code-candidate owner proposal is no longer pending.');
-        if (!runningClaimIsFresh(existing) || existing.status !== 'running') return { status: 'blocked', reason: 'terminal_owner_history_preserved', providerCalls: 0, inventory, attemptId: existing.attempt_id, artifactDirectory: existing.artifact_directory };
-        const artifactDirectory = existing.artifact_directory;
+        if (!runningClaimIsFresh(owner) || owner.status !== 'running') return { status: 'blocked', reason: 'terminal_owner_history_preserved', providerCalls: 0, inventory, attemptId: owner.attempt_id, artifactDirectory: owner.artifact_directory };
+        existing = owner;
+        const artifactDirectory = owner.artifact_directory;
         if (!artifactDirectory || !fs.existsSync(path.join(artifactDirectory, 'preparation-inventory.json'))) throw new Error('Existing owner inventory is missing; ownership is unknown and cannot be replaced.');
         const stored = readBoundedJson(path.join(artifactDirectory, 'preparation-inventory.json'), 'Existing owner inventory');
         if (!stored.frozen_hashes || Object.values(stored.frozen_hashes).some((hash) => !DIGEST.test(hash || ''))) throw new Error('Existing owner inventory frozen hashes are missing or malformed.');
@@ -243,13 +256,13 @@ async function prepareCodeProposalQueue(options = {}) {
         if (existing.expected_dataset_sha256 && sha256(dataset.bytes) !== existing.expected_dataset_sha256) throw new Error('Existing owner dataset changed.');
         const revalidatedFile = path.join(artifactDirectory, `.revalidated-${process.pid}.jsonl`);
         try {
-            const revalidated = await bindHistoricalDataset(options.client, proposal, options.datasetPath, revalidatedFile);
+            const revalidated = await bindHistoricalDataset(options.client, ownerProposal, options.datasetPath, revalidatedFile);
             if (existing.expected_dataset_sha256 && revalidated.sha256 !== existing.expected_dataset_sha256) throw new Error('Existing owner submission or full-audit binding changed.');
         } finally { try { fs.unlinkSync(revalidatedFile); } catch { /* best effort */ } }
         const sourceHash = verification.hashCodeImplementation(options.repoRoot);
-        const promptHash = sha256(Buffer.from(proposal.proposed_prompt || proposal.current_prompt || ''));
+        const promptHash = sha256(Buffer.from(ownerProposal.proposed_prompt || ownerProposal.current_prompt || ''));
         const rulesHash = await acceptedRulesHash(options, verification);
-        const behaviorHash = proposal.eval_summary?.behavior_tests?.sha256;
+        const behaviorHash = ownerProposal.eval_summary?.behavior_tests?.sha256;
         const expectedHashes = { behavior_tests_sha256: behaviorHash, dataset_sha256: existing.expected_dataset_sha256, source_sha256: sourceHash, prompt_sha256: promptHash, accepted_rules_sha256: rulesHash };
         for (const [key, value] of Object.entries(expectedHashes)) if (value !== stored.frozen_hashes[key]) throw new Error(`Existing owner ${key} changed.`);
         const summaryFile = path.join(artifactDirectory, 'preparation-summary.json');
