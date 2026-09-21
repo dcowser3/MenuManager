@@ -112,6 +112,7 @@ export interface CodeProposalVerification {
         delivery_identity_sha256?: string;
         delivery_identity?: JsonRecord;
         delivery_fixture_sha256?: string;
+        delivery_claim?: string;
     };
     corrections: CodeVerificationCorrection[];
     tests: {
@@ -148,6 +149,9 @@ export interface CodeProposalVerification {
             source_manifest_sha256?: string;
             chromium_sandbox_enabled?: boolean;
             isolation_boundary?: string;
+            delivery_claim?: string;
+            reviewed_state_selection?: boolean;
+            full_form_assembly?: boolean;
             controls?: JsonRecord;
             driver: 'form-submit-v1';
             baseline_submitted_text: string;
@@ -175,6 +179,11 @@ export const CODE_PROPOSAL_REGRESSION_TESTS = [
     'pre-ai-deterministic-rules.test.ts', 'review-pipeline.test.ts', 'redline-preview.test.js', 'form-helpers.test.js',
 ].map((name) => `services/dashboard/__tests__/${name}`);
 const normalized = (value: unknown): string => `${value || ''}`.normalize('NFC').replace(/\r/g, '').replace(/[ \t]+/g, ' ').trim();
+const DELIVERY_SOURCE_KEYS = ['quill', 'diff_core', 'redline_preview', 'form_submission'];
+const deliverySourceManifestHash = (delivery: any): string => createHash('sha256').update(JSON.stringify({
+    baseline: Object.fromEntries(DELIVERY_SOURCE_KEYS.map((key) => [key, delivery.baseline_source_hashes?.[key]])),
+    candidate: Object.fromEntries(DELIVERY_SOURCE_KEYS.map((key) => [key, delivery.candidate_source_hashes?.[key]])),
+})).digest('hex');
 
 /** Exact reviewer wording must occur on its own line; do not ignore accents or raw markers. */
 export function codeVerificationCorrectionPresent(output: string, correction: Pick<CodeVerificationCorrection, 'original_text' | 'corrected_text'>): boolean {
@@ -317,7 +326,7 @@ function assessCodeProposalVerificationInternal(proposal: JsonRecord | null | un
         return fail('Correction delivery evidence requires a browser delivery/save assertion.');
     }
     const deliveryBindingsRequired = proof.schema_version >= 2;
-    if (deliveryIds.size > 0 && (!deliveryIdentity || (deliveryBindingsRequired && input.delivery_driver_sha256 !== deliveryIdentity.delivery_driver_sha256)
+    if (deliveryIds.size > 0 && (!deliveryIdentity || (deliveryBindingsRequired && (input.delivery_driver_sha256 !== deliveryIdentity.delivery_driver_sha256 || input.delivery_claim !== 'serializer_request_boundary_v1'))
         || !digest(deliveryIdentity.delivery_image_id) || !digest(deliveryIdentity.delivery_runtime_id)
         || !digest(deliveryIdentity.delivery_driver_sha256) || !digest(deliveryIdentity.delivery_source_sha256)
         || (deliveryBindingsRequired && !digest(input.delivery_fixture_sha256 || '')
@@ -361,15 +370,20 @@ function assessCodeProposalVerificationInternal(proposal: JsonRecord | null | un
                 const delivery = (run.delivery || []).find((entry) => entry.correction_id === correction.correction_id);
                 if (!delivery || delivery.driver !== 'form-submit-v1'
                     || (deliveryBindingsRequired && (delivery.chromium_sandbox_enabled !== false || delivery.isolation_boundary !== 'container'
+                        || delivery.delivery_claim !== 'serializer_request_boundary_v1' || delivery.reviewed_state_selection !== false || delivery.full_form_assembly !== false
                         || delivery.controls?.uid !== 65532 || delivery.controls?.gid !== 65532
+                        || !Array.isArray(delivery.controls?.raw_groups) || delivery.controls.raw_groups.some((group: any) => group !== '65532')
                         || !Array.isArray(delivery.controls?.supplementary_groups) || delivery.controls.supplementary_groups.length
-                        || !delivery.controls?.capabilities || Object.values(delivery.controls.capabilities).some((entry) => entry !== '0000000000000000')
+                        || !delivery.controls?.capabilities || JSON.stringify(Object.keys(delivery.controls.capabilities).sort()) !== JSON.stringify(['CapAmb', 'CapEff', 'CapInh', 'CapPrm']) || Object.values(delivery.controls.capabilities).some((entry) => entry !== '0000000000000000')
                         || delivery.controls?.no_new_privs !== '1' || delivery.controls?.seccomp !== '2' || delivery.controls?.root_mount_read_only !== true
                         || JSON.stringify(delivery.controls?.network_interfaces) !== JSON.stringify(['lo'])))
                     || (deliveryBindingsRequired && delivery.image_id !== deliveryIdentity?.delivery_image_id)
                     || (deliveryBindingsRequired && delivery.runtime_id !== deliveryIdentity?.delivery_runtime_id)
                     || (deliveryBindingsRequired && delivery.delivery_fixture_sha256 !== input.delivery_fixture_sha256)
                     || (deliveryBindingsRequired && delivery.source_manifest_sha256 !== deliveryIdentity?.delivery_source_sha256)
+                    || (deliveryBindingsRequired && delivery.source_manifest_sha256 !== deliverySourceManifestHash(delivery))
+                    || (deliveryBindingsRequired && JSON.stringify(Object.keys(delivery.baseline_source_hashes || {}).sort()) !== JSON.stringify([...DELIVERY_SOURCE_KEYS, 'driver'].sort()))
+                    || (deliveryBindingsRequired && JSON.stringify(Object.keys(delivery.candidate_source_hashes || {}).sort()) !== JSON.stringify([...DELIVERY_SOURCE_KEYS, 'driver'].sort()))
                     || !digest(input.delivery_driver_sha256)
                     || (deliveryBindingsRequired && delivery.driver_sha256 !== input.delivery_driver_sha256)
                     || delivery.baseline_source_hashes?.driver !== input.delivery_driver_sha256

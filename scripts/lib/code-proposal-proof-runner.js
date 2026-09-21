@@ -27,6 +27,8 @@ const canonical = (value) => Array.isArray(value) ? value.map(canonical)
     : value && typeof value === 'object' ? Object.fromEntries(Object.keys(value).sort().map((key) => [key, canonical(value[key])])) : value;
 const isDigest = (value) => typeof value === 'string' && DIGEST.test(value);
 const isImmutableIdentity = (value) => typeof value === 'string' && /^(?:sha256:)?[a-f0-9]{64}$/.test(value);
+const DELIVERY_SOURCE_KEYS = ['quill', 'diff_core', 'redline_preview', 'form_submission'];
+const deliverySourceManifestHash = (value) => hashBytes(Buffer.from(JSON.stringify({ baseline: Object.fromEntries(DELIVERY_SOURCE_KEYS.map((key) => [key, value.baseline_source_hashes?.[key]])), candidate: Object.fromEntries(DELIVERY_SOURCE_KEYS.map((key) => [key, value.candidate_source_hashes?.[key]])) })));
 const safeId = (value, label) => {
     if (!/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,199}$/.test(`${value || ''}`)) throw new Error(`Invalid ${label}.`);
     return `${value}`;
@@ -244,8 +246,9 @@ function deliveryRequired(proposal, corrections) {
 function validateDelivery(value, correction, driverHash, deliveryIdentity, expectedImage, expectedRuntime, expectedFixtureHash) {
     if (!value || value.driver !== 'form-submit-v1' || !isDigest(driverHash)
         || value.chromium_sandbox_enabled !== false || value.isolation_boundary !== 'container'
-        || value.controls?.uid !== 65532 || value.controls?.gid !== 65532 || !Array.isArray(value.controls?.supplementary_groups) || value.controls.supplementary_groups.length
-        || !value.controls?.capabilities || Object.values(value.controls.capabilities).some((entry) => entry !== '0000000000000000')
+        || value.controls?.uid !== 65532 || value.controls?.gid !== 65532 || !Array.isArray(value.controls?.raw_groups) || value.controls.raw_groups.some((group) => group !== '65532') || !Array.isArray(value.controls?.supplementary_groups) || value.controls.supplementary_groups.length
+        || !value.controls?.capabilities || JSON.stringify(Object.keys(value.controls.capabilities).sort()) !== JSON.stringify(['CapAmb', 'CapEff', 'CapInh', 'CapPrm']) || Object.values(value.controls.capabilities).some((entry) => entry !== '0000000000000000')
+        || value.delivery_claim !== 'serializer_request_boundary_v1' || value.reviewed_state_selection !== false || value.full_form_assembly !== false
         || value.controls.no_new_privs !== '1' || value.controls.seccomp !== '2' || value.controls.root_mount_read_only !== true
         || JSON.stringify(value.controls.network_interfaces) !== JSON.stringify(['lo'])
         || !deliveryIdentity || driverHash !== deliveryIdentity.delivery_driver_sha256
@@ -259,7 +262,9 @@ function validateDelivery(value, correction, driverHash, deliveryIdentity, expec
         || typeof value.baseline_submitted_text !== 'string' || typeof value.candidate_submitted_text !== 'string'
         || typeof value.baseline_submitted_html !== 'string' || typeof value.candidate_submitted_html !== 'string'
         || typeof value.baseline_submitted_html_text !== 'string' || typeof value.candidate_submitted_html_text !== 'string'
-        || value.source_manifest_sha256 !== deliveryIdentity.delivery_source_sha256
+        || JSON.stringify(Object.keys(value.baseline_source_hashes || {}).sort()) !== JSON.stringify([...DELIVERY_SOURCE_KEYS, 'driver'].sort())
+        || JSON.stringify(Object.keys(value.candidate_source_hashes || {}).sort()) !== JSON.stringify([...DELIVERY_SOURCE_KEYS, 'driver'].sort())
+        || value.source_manifest_sha256 !== deliverySourceManifestHash(value) || value.source_manifest_sha256 !== deliveryIdentity.delivery_source_sha256
         || value.baseline_browser_version !== deliveryIdentity.browser_version || value.candidate_browser_version !== deliveryIdentity.browser_version
         || value.quill_version !== deliveryIdentity.quill_version
         || (deliveryIdentity.delivery_fixture_sha256 && deliveryIdentity.delivery_fixture_sha256 !== expectedFixtureHash)) throw new Error(`Delivery evidence is incomplete for ${correction.correction_id}.`);
@@ -339,6 +344,7 @@ function makePlan({ attemptRoot, metadata, proposal, baselineHash, candidateHash
         delivery_driver_sha256: deliveryDriverHash || null,
         delivery_identity: deliveryIdentity ? validateDeliveryIdentity(deliveryIdentity) : null,
         delivery_fixture_sha256: deliveryFixture ? hashJson(deliveryFixture) : null,
+        delivery_claim: deliveryIdentity ? 'serializer_request_boundary_v1' : null,
         delivery_fixture: deliveryFixture ? canonical(deliveryFixture) : null,
         case_ids: [...caseIds], seeds: [...seeds], test_inventory: [...inventory], corrections,
         paths,
@@ -525,7 +531,7 @@ async function runCodeProposalProof(options = {}) {
             behaviorCandidate = await invokeWithTimeout(() => behaviorModule.executeBehaviorTests(behaviorArtifact, options.behaviorEvaluator), {}, timeoutMs, 'Behavior executor');
         }
         if (behaviorCandidate.artifactHash !== behaviorArtifact.sha256 || behaviorCandidate.passed !== true || behaviorCandidate.outcomes.some((outcome) => outcome.passed !== true || outcome.outputHash !== outcome.expectedHash)) throw new Error('Candidate behavior outcomes do not match frozen B6-D1 expectations.');
-        const proof = { schema_version: 2, test_only: true, runner: 'verify-code-proposal', status: 'passed', generated_at: new Date().toISOString(), proposal_sha256: plan.proposal_sha256, baseline: { source_sha256: plan.baseline_source_sha256, root: baselineRoot }, candidate: { source_sha256: plan.candidate_source_sha256, root: candidateRoot }, inputs: { dataset_sha256: plan.dataset_sha256, prompt_sha256: plan.prompt_sha256, rules_sha256: plan.rules_sha256, accepted_rules_sha256: plan.accepted_rules_sha256, tests_sha256: plan.tests_content_sha256, image_id: plan.image_id, model: plan.model, raw_ground_truth: true, case_ids: [...plan.case_ids], ...(deliveryIds.length ? { delivery_driver_sha256: plan.delivery_driver_sha256, delivery_identity_sha256: plan.delivery_identity?.identity_sha256, delivery_identity: plan.delivery_identity, delivery_fixture_sha256: plan.delivery_fixture_sha256 } : {}) }, corrections, tests, runs, behavior: { artifact: behaviorArtifact, candidate: behaviorCandidate }, combined: buildCombinedVerification({ proposal: frozenProposal, baselineHash: plan.baseline_source_sha256, candidateHash: plan.candidate_source_sha256, cases: plan.case_ids, seeds: plan.seeds, runs, corrections: plan.corrections, trustedVerification, imageId: plan.image_id, runtimeId: plan.runtime_id, datasetHash: plan.dataset_sha256, acceptedRulesHash: plan.accepted_rules_sha256, model: plan.model, baselineRules: plan.baseline_rules, candidateRules: plan.candidate_rules, vocabularyHash: plan.vocabulary_sha256, expectationsHash: plan.expectations_sha256, settings: plan.settings }) };
+        const proof = { schema_version: 2, test_only: true, runner: 'verify-code-proposal', status: 'passed', generated_at: new Date().toISOString(), proposal_sha256: plan.proposal_sha256, baseline: { source_sha256: plan.baseline_source_sha256, root: baselineRoot }, candidate: { source_sha256: plan.candidate_source_sha256, root: candidateRoot }, inputs: { dataset_sha256: plan.dataset_sha256, prompt_sha256: plan.prompt_sha256, rules_sha256: plan.rules_sha256, accepted_rules_sha256: plan.accepted_rules_sha256, tests_sha256: plan.tests_content_sha256, image_id: plan.image_id, model: plan.model, raw_ground_truth: true, case_ids: [...plan.case_ids], ...(deliveryIds.length ? { delivery_driver_sha256: plan.delivery_driver_sha256, delivery_identity_sha256: plan.delivery_identity?.identity_sha256, delivery_identity: plan.delivery_identity, delivery_fixture_sha256: plan.delivery_fixture_sha256, delivery_claim: plan.delivery_claim } : {}) }, corrections, tests, runs, behavior: { artifact: behaviorArtifact, candidate: behaviorCandidate }, combined: buildCombinedVerification({ proposal: frozenProposal, baselineHash: plan.baseline_source_sha256, candidateHash: plan.candidate_source_sha256, cases: plan.case_ids, seeds: plan.seeds, runs, corrections: plan.corrections, trustedVerification, imageId: plan.image_id, runtimeId: plan.runtime_id, datasetHash: plan.dataset_sha256, acceptedRulesHash: plan.accepted_rules_sha256, model: plan.model, baselineRules: plan.baseline_rules, candidateRules: plan.candidate_rules, vocabularyHash: plan.vocabulary_sha256, expectationsHash: plan.expectations_sha256, settings: plan.settings }) };
         revalidatePlan(paths.plan, plan, metadata, attemptRoot, baselineRoot, candidateRoot, bundle, trustedSuites, historicalTests, candidateTests, runtimeVerification, options.proposal, trustedVerification);
         progress('verification', 'active', { completed: caseIds.length * seeds.length, total: caseIds.length * seeds.length });
         const candidateProposal = { ...frozenProposal, eval_summary: { ...(frozenProposal.eval_summary || {}), replay_retirement_policy_version: plan.replay_policy_version, code_candidate: { ...(frozenProposal.eval_summary?.code_candidate || {}), expected_dataset_sha256: plan.dataset_sha256, expected_case_ids: [...plan.case_ids], behavior_tests_sha256: plan.behavior_sha256 }, code_verification: proof } };
