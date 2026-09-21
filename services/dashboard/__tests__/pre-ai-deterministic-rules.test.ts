@@ -814,6 +814,9 @@ describe('runPreAiDeterministicChecks', () => {
             'Crème brûlée 14',
             'Brûlée Cheesecake 16',
             'Pineapple brûlée 12',
+            'Chicken cooked in cast iron with rosemary 20',
+            'Cast iron is used for cooking 12',
+            'Achiote grilled with lime 20',
         ].join('\n');
         const result = runPreAiDeterministicChecks(input);
         expect(result.menuText).toBe([
@@ -830,6 +833,9 @@ describe('runPreAiDeterministicChecks', () => {
             'Crème brûlée 14',
             'Brûlée Cheesecake 16',
             'Pineapple brûlée 12',
+            'Chicken cooked in cast iron with rosemary 20',
+            'Cast iron is used for cooking 12',
+            'Achiote grilled with lime 20',
         ].join('\n'));
         expect(runPreAiDeterministicChecks(result.menuText).menuText).toBe(result.menuText);
         expect(result.appliedCorrections).toEqual(expect.arrayContaining([

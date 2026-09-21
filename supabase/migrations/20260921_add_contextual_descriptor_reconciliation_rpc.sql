@@ -18,6 +18,7 @@ SET search_path = public
 AS $$
 DECLARE
     locked public.prompt_proposals;
+    locked_xmin text;
 BEGIN
     IF p_proposal_id IS NULL OR coalesce(p_expected_xmin, '') = ''
         OR p_expected_substantive IS NULL OR jsonb_typeof(p_expected_substantive) <> 'object'
@@ -26,14 +27,14 @@ BEGIN
         RAISE EXCEPTION 'contextual descriptor reconciliation expectations are incomplete' USING ERRCODE = '22023';
     END IF;
 
-    SELECT * INTO locked
-      FROM public.prompt_proposals
-     WHERE id = p_proposal_id
+    SELECT p, p.xmin::text INTO locked, locked_xmin
+      FROM public.prompt_proposals AS p
+     WHERE p.id = p_proposal_id
      FOR UPDATE;
     IF NOT FOUND THEN
         RAISE EXCEPTION 'contextual descriptor proposal not found' USING ERRCODE = 'P0002';
     END IF;
-    IF locked.xmin::text <> p_expected_xmin THEN
+    IF locked_xmin <> p_expected_xmin THEN
         RAISE EXCEPTION 'contextual descriptor proposal xmin conflict' USING ERRCODE = '40001';
     END IF;
     IF locked.status <> 'pending' OR locked.eval_status <> 'regressed' OR locked.disposition <> 'rules_only' THEN

@@ -667,6 +667,7 @@ const ESTABLISHED_GRILLED_MODIFIERS = new Set(CONTEXTUAL_COMPOUND_DESCRIPTOR_CON
 const NON_FOOD_CAST_IRON_NOUNS = new Set(CONTEXTUAL_COMPOUND_DESCRIPTOR_CONTRACT.guards.cast_iron.excluded_nouns);
 const BRULEE_INGREDIENTS = new Set(CONTEXTUAL_COMPOUND_DESCRIPTOR_CONTRACT.guards.brulee_participle.ingredients);
 const BRULEE_LEXICAL_DESSERTS = new Set(CONTEXTUAL_COMPOUND_DESCRIPTOR_CONTRACT.guards.brulee_participle.excluded_lexical_desserts);
+const NON_FOOD_DESCRIPTOR_FOLLOWERS = new Set(['a', 'an', 'and', 'at', 'by', 'cooking', 'for', 'in', 'is', 'lime', 'of', 'on', 'or', 'rosemary', 'served', 'the', 'to', 'used', 'with']);
 
 function preserveDescriptorCase(source: string, target: string): string {
     return matchCase(source, target);
@@ -687,7 +688,7 @@ export function normalizeContextualCompoundDescriptorsOnLine(
         const folded = modifier.toLowerCase();
         const preceding = nextLine.slice(0, offset).trimEnd();
         const modifierKey = folded.replace(/\s+/g, '-');
-        if (!ESTABLISHED_GRILLED_MODIFIERS.has(modifierKey) || (preceding && /[^\p{L}\d ]$/u.test(preceding))) return match;
+        if (!ESTABLISHED_GRILLED_MODIFIERS.has(modifierKey) || NON_FOOD_DESCRIPTOR_FOLLOWERS.has(noun.toLowerCase()) || (preceding && /[^\p{L}\d ]$/u.test(preceding))) return match;
         const correctedModifier = preserveDescriptorCase(modifier, modifier);
         const corrected = `${correctedModifier}-${matchCase(participle, 'grilled')} ${noun}`;
         if (corrected === match) return match;
@@ -699,7 +700,7 @@ export function normalizeContextualCompoundDescriptorsOnLine(
     // cookware/material uses are excluded, as are already-hyphenated forms.
     nextLine = nextLine.replace(/\bcast\s+iron\s+([A-Za-zÀ-ÖØ-öø-ÿ]+)/giu, (match, noun: string, offset: number) => {
         const preceding = nextLine.slice(0, offset).trimEnd();
-        if ((preceding && /[^\p{L}\d ]$/u.test(preceding)) || NON_FOOD_CAST_IRON_NOUNS.has(noun.toLowerCase())) return match;
+        if ((preceding && /[^\p{L}\d ]$/u.test(preceding)) || NON_FOOD_CAST_IRON_NOUNS.has(noun.toLowerCase()) || NON_FOOD_DESCRIPTOR_FOLLOWERS.has(noun.toLowerCase())) return match;
         const corrected = match.replace(/\s+/, '-');
         if (corrected === match) return match;
         corrections.push({ type: 'Terminology', source: 'built_in', original: match, corrected, lineIndex, rule: 'Hyphenate cast iron when it is an attributive descriptor before a food noun; preserve material and cookware uses.' });

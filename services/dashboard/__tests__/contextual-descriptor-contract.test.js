@@ -11,6 +11,7 @@ const { runPreAiDeterministicChecks } = require('../../../services/dashboard/lib
 
 const contract = JSON.parse(fs.readFileSync(path.join(__dirname, '../../../docs/references/contextual-compound-descriptors-v1.json'), 'utf8'));
 const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, '../../../docs/references/code-rules-manifest.json'), 'utf8'));
+const distContract = require('../../../services/dashboard/dist/lib/contextual-compound-descriptor-contract');
 const baseProposal = (overrides = {}) => ({
     id: 'proposal', xmin: 'old-xmin', status: 'pending', eval_status: 'regressed', disposition: 'rules_only',
     eval_summary: { code_candidate: { status: 'blocked', closed_at: '2026-09-21T18:34:29.335Z', attempt_id: 'terminal-paid' } },
@@ -39,6 +40,7 @@ test('reviewed contract artifact is stable and hash-bound', () => {
     const entry = manifest.entries.find((candidate) => candidate.id === 'pre-ai/contextual-compound-descriptors');
     expect(entry.data.contract_sha256).toBe(contractHash());
     expect(entry.data.version).toBe(contract.version);
+    expect(distContract.CONTEXTUAL_COMPOUND_DESCRIPTOR_CONTRACT_SHA256).toBe(contractHash());
 });
 
 test('every reviewed contract example executes through the real deterministic pass', () => {
@@ -79,7 +81,7 @@ test('CAS requires exact pending xmin and readback preserves full evidence/histo
     const plan = buildContextualDescriptorReconciliationPlan({ proposal, expectedProposalFingerprint: hash(proposal), computeProposalFingerprint: hash, implementationSha256: hash('a'), expectedImplementationSha256: hash('a') });
     const calls = [];
     const client = { rpc: async (name, args) => { calls.push(['rpc', name, args]); return { data: [baseProposal({ proposed_rules: plan.proposal_patch.proposed_rules, correction_routing: plan.proposal_patch.correction_routing, xmin: 'new-xmin' })], error: null }; } };
-    const result = await applyContextualDescriptorReconciliation(client, 'proposal', 'old-xmin', plan);
+    const result = await applyContextualDescriptorReconciliation(client, 'proposal', 'old-xmin', plan, async () => baseProposal({ proposed_rules: plan.proposal_patch.proposed_rules, correction_routing: plan.proposal_patch.correction_routing, xmin: 'new-xmin' }));
     result.xmin = 'new-xmin';
     expect(result.proposed_rules).toHaveLength(2);
     expect(calls[0][0]).toBe('rpc');
@@ -88,7 +90,21 @@ test('CAS requires exact pending xmin and readback preserves full evidence/histo
     expect(() => assertContextualDescriptorReadback({ ...result, eval_summary: proposal.eval_summary, replay_evidence: proposal.replay_evidence, status: proposal.status, eval_status: proposal.eval_status, disposition: proposal.disposition }, plan)).not.toThrow();
     expect(() => assertContextualDescriptorReadback({ ...result, proposed_rules: result.proposed_rules.map((row) => row.original_text === 'chilies' ? { ...row, corrected_text: 'changed' } : row), eval_summary: proposal.eval_summary, replay_evidence: proposal.replay_evidence, status: proposal.status, eval_status: proposal.eval_status, disposition: proposal.disposition }, plan)).toThrow(/state\/history/);
     const race = { rpc: async () => ({ data: [], error: { message: 'xmin conflict' } }) };
-    await expect(applyContextualDescriptorReconciliation(race, 'proposal', 'old-xmin', plan)).rejects.toThrow(/xmin conflict/);
+    await expect(applyContextualDescriptorReconciliation(race, 'proposal', 'old-xmin', plan, async () => { throw new Error('must not read'); })).rejects.toThrow(/xmin conflict/);
+});
+
+test('tampered proposal patch is rejected before RPC and untrusted RPC return is ignored', async () => {
+    const proposal = baseProposal();
+    const plan = buildContextualDescriptorReconciliationPlan({ proposal, expectedProposalFingerprint: hash(proposal), computeProposalFingerprint: hash, implementationSha256: hash('a'), expectedImplementationSha256: hash('a') });
+    const tampered = { ...plan, proposal_patch: { ...plan.proposal_patch, proposed_rules: [] } };
+    let calls = 0;
+    await expect(applyContextualDescriptorReconciliation({ rpc: async () => { calls += 1; return { data: [{}], error: null }; } }, 'proposal', 'old-xmin', tampered, async () => { throw new Error('must not read'); })).rejects.toThrow(/after-state hash/);
+    expect(calls).toBe(0);
+    const tamperedRouting = { ...plan, proposal_patch: { ...plan.proposal_patch, correction_routing: [] } };
+    await expect(applyContextualDescriptorReconciliation({ rpc: async () => { calls += 1; return { data: [{}], error: null }; } }, 'proposal', 'old-xmin', tamperedRouting, async () => { throw new Error('must not read'); })).rejects.toThrow(/after-state hash/);
+    expect(calls).toBe(0);
+    const result = await applyContextualDescriptorReconciliation({ rpc: async () => ({ data: [{}], error: null }) }, 'proposal', 'old-xmin', plan, async () => ({ ...proposal, proposed_rules: plan.proposal_patch.proposed_rules, correction_routing: plan.proposal_patch.correction_routing, xmin: 'new-xmin' }));
+    expect(result.xmin).toBe('new-xmin');
 });
 
 test('recovery resolves timeout-after-commit and retries only an exact untouched before-state', async () => {
@@ -98,8 +114,8 @@ test('recovery resolves timeout-after-commit and retries only an exact untouched
     const recovery = require('../../../scripts/lib/contextual-descriptor-reconciliation').resumeContextualDescriptorReconciliation;
     const recovered = await recovery({ client: { rpc: async () => { throw new Error('must not redispatch'); } }, proposalId: 'proposal', expectedXmin: 'old-xmin', plan, readCurrent: async () => after });
     expect(recovered.state).toBe('already_applied');
-    const before = baseProposal(); let calls = 0;
-    const retried = await recovery({ client: { rpc: async () => { calls += 1; return { data: [after], error: null }; } }, proposalId: 'proposal', expectedXmin: 'old-xmin', plan, readCurrent: async () => before });
+    const before = baseProposal(); let calls = 0; let current = before;
+    const retried = await recovery({ client: { rpc: async () => { calls += 1; current = after; return { data: [after], error: null }; } }, proposalId: 'proposal', expectedXmin: 'old-xmin', plan, readCurrent: async () => current });
     expect(retried.state).toBe('applied'); expect(calls).toBe(1);
     await expect(recovery({ client: { rpc: async () => ({ data: [after], error: null }) }, proposalId: 'proposal', expectedXmin: 'old-xmin', plan, readCurrent: async () => ({ ...before, disposition: 'prompt_only' }) })).rejects.toThrow(/conflicting state/);
 });

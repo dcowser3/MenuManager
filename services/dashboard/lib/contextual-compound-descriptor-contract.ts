@@ -1,4 +1,6 @@
 import crypto from 'crypto';
+import fs from 'fs';
+import path from 'path';
 
 export type ContextualCompoundDescriptorContract = {
     version: string;
@@ -14,7 +16,17 @@ export type ContextualCompoundDescriptorContract = {
 // The reviewed JSON artifact is the runtime source of truth. Keeping the
 // loader here makes the production guard, manifest, and tests share one file.
 // eslint-disable-next-line @typescript-eslint/no-var-requires
-export const CONTEXTUAL_COMPOUND_DESCRIPTOR_CONTRACT = require('../../../docs/references/contextual-compound-descriptors-v1.json') as ContextualCompoundDescriptorContract;
+function loadContract(): ContextualCompoundDescriptorContract {
+    const candidates = [
+        path.resolve(__dirname, '../../../docs/references/contextual-compound-descriptors-v1.json'),
+        path.resolve(__dirname, '../../../../docs/references/contextual-compound-descriptors-v1.json'),
+    ];
+    const file = candidates.find((candidate) => fs.existsSync(candidate));
+    if (!file) throw new Error('Contextual compound descriptor contract artifact is unavailable.');
+    return JSON.parse(fs.readFileSync(file, 'utf8')) as ContextualCompoundDescriptorContract;
+}
+
+export const CONTEXTUAL_COMPOUND_DESCRIPTOR_CONTRACT = loadContract();
 
 function canonical(value: any): any {
     if (Array.isArray(value)) return value.map(canonical);
