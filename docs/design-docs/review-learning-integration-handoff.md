@@ -32,6 +32,15 @@ artifacts, prompt guidance, configuration, the code-rules manifest, and the
 user-facing documentation. The broader packet lifecycle/paid-run validators are
 evidence artifacts and are intentionally not shipped as product runtime code.
 
+The prepared review coordinator carries one immutable execution snapshot for
+the raw-input/reviewed-body pair, precheck provenance, prompt/context,
+near-miss and embedded-menu analysis, footer state, and delivery-affecting
+options. Anchored spans are validated against the prechecked-body coordinate
+basis; ambiguous zero-width edits, duplicate spans, out-of-range spans, and
+true overlaps fail closed. If an anchored merge is rejected, final decision
+fields are recomputed from delivered source bytes while the rejected candidate
+remains separately named diagnostics.
+
 ## Verification
 
 - Docker network-none focused suites: 6 suites, 137 tests, all passed, including
@@ -57,6 +66,9 @@ evidence artifacts and are intentionally not shipped as product runtime code.
   that requested read-only check was unavailable.
 - No provider calls, paid runs, shared-stack changes, deployment, activation, or
   production writes were performed.
+- The review-envelope parity suite covers mocked Basic HTTP and offline
+  execution with identical model output, including footer removal,
+  length-changing prechecks, later anchored edits, and rejected-merge parity.
 
 The pending approximately 30 explanation groups remain unprocessed. This code
 keeps them processable by the existing review-learning workflow; it does not

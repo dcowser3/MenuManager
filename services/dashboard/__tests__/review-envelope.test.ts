@@ -25,12 +25,18 @@ test('validates immutable source anchors before applying offset-changing edits',
         .toBe('read_only_or_ambiguous_anchor');
     expect(applyAnchoredMutations(source, [{ start: 5, end: 5, before: '', after: 'A' }, { start: 5, end: 5, before: '', after: 'B' }], editable).reason)
         .toBe('overlapping_edits');
+    expect(applyAnchoredMutations(source, [{ start: 5, end: 5, before: '', after: 'A' }, { start: 5, end: 6, before: 'F', after: 'f' }], editable).reason)
+        .toBe('overlapping_edits');
+    expect(applyAnchoredMutations(source, [{ start: 5, end: 5, before: '', after: 'A' }, { start: 5, end: 10, before: 'Fishh', after: 'Fish' }], editable).reason)
+        .toBe('overlapping_edits');
     expect(applyAnchoredMutations(source, [{ start: 5, end: 6, before: 'F', after: 'f' }], [{ id: 'x', start: 0, end: 10 }, { id: 'x', start: 11, end: source.length }]).reason)
         .toBe('ambiguous_editable_spans');
     expect(applyAnchoredMutations(source, [{ start: 5, end: 6, before: 'F', after: 'f' }], [{ id: 'x', start: 0, end: 12 }, { id: 'y', start: 11, end: source.length }]).reason)
         .toBe('ambiguous_editable_spans');
     expect(applyAnchoredMutations(source, [{ start: 5, end: 6, before: 'F', after: 'f' }], [{ id: '', start: 0, end: 10 }]).reason)
         .toBe('malformed_editable_spans');
+    expect(applyAnchoredMutations(source, [{ start: source.length + 1, end: source.length + 1, before: '', after: 'x' }], editable).reason)
+        .toBe('source_anchor_mismatch');
 });
 
 test('length-changing earlier edits do not shift later anchors', () => {
@@ -72,6 +78,8 @@ test('envelope is frozen and records hashes, context, baseline and editable span
     expect(prepared.envelope.promptHash).toMatch(/^[a-f0-9]{64}$/);
     expect(prepared.envelope.baselineProvenance).toEqual({ id: 'approved-1' });
     expect(prepared.envelope.editableSpans).toEqual([{ id: 'row:0', start: 0, end: 6 }, { id: 'row:1', start: 7, end: 17 }]);
+    expect(prepared.envelope.coordinateBasis).toBe('prechecked_review_body');
+    expect(prepared.envelope.precheckProvenance.sourceBodyHash).toBe(prepared.envelope.precheckedBodyHash);
     expect(prepared.envelope.context.managedRawNoticePresent).toBe(true);
 });
 
@@ -106,6 +114,38 @@ test.each([
     expect(result.finalCorrectedMenu).toBe('DINNER\nFishh G 12');
     expect(result.reviewStatus).toEqual({ complete: false, transportStatus: 'rejected', reusable: false });
     expect(result.diagnostics[0].stage).toBe('integrity');
+});
+
+test('execution snapshot rejects direct prepared replacement and nested option mutation', async () => {
+    const prepared: any = await prepareReview('DINNER\nFishh G 12', {
+        basePrompt: 'BASE', acceptedCorrectionRules: [rule], settings: { temperature: 0 }, precheckEnabled: false,
+    });
+    expect(prepared.__integrity.executionSnapshotHash).toMatch(/^[a-f0-9]{64}$/);
+    const replaced: any = { ...prepared, opts: { ...prepared.opts, settings: { temperature: 1 } } };
+    Object.defineProperty(replaced, '__integrity', { value: prepared.__integrity, enumerable: false });
+    const replacementResult = completePreparedReview(replaced, fenced('DINNER\nFish G 12'));
+    expect(replacementResult.diagnostics[0]).toEqual({ stage: 'integrity', reason: 'prepared_state_drift:options' });
+    expect(() => { prepared.opts.settings.temperature = 1; }).toThrow();
+    const nestedResult = completePreparedReview(prepared, fenced('DINNER\nFish G 12'));
+    expect(nestedResult.finalCorrectedMenu).toBe('DINNER\nFish G 12');
+});
+
+test('footer removal and earlier length-changing precheck preserve later anchored coordinates', async () => {
+    const rawNotice = '*consuming raw or undercooked meats, poultry, seafood, shellfish, or eggs may increase your risk of foodborne illness.';
+    const accepted = { id: 'fishh', status: 'accepted', change_type: 'spelling', original_text: 'Fishh', corrected_text: 'Fresh fish' };
+    const raw = `Fishh G 12\nSoupp D 8\n${rawNotice}`;
+    const prepared = await prepareReview(raw, {
+        basePrompt: 'BASE', acceptedCorrectionRules: [accepted], precheckEnabled: true,
+        managedRawNoticePresent: true,
+    });
+    expect(prepared.envelope.originalBodyHash).toBe(policyHash(raw));
+    expect(prepared.envelope.precheckedBodyHash).not.toBe(prepared.envelope.originalBodyHash);
+    expect(prepared.preCheckedReviewBody).toBe('Fresh Fish G 12\nSoupp D 8');
+    const feedback = fenced(prepared.preCheckedReviewBody.replace('Soupp', 'Soup'));
+    const result = completePreparedReview(prepared, feedback, { finishReason: 'stop' });
+    expect(result.finalCorrectedMenu).toBe('Fresh Fish G 12\nSoup D 8');
+    expect(result.envelope.coordinateBasis).toBe('prechecked_review_body');
+    expect(result.reviewStatus.complete).toBe(true);
 });
 
 test('missing integrity fails closed without dereferencing or throwing', async () => {
@@ -250,7 +290,10 @@ test('rejected delivery rederives spelling warning and adjudication from restore
     expect(result.authoritative.suggestions).toEqual(expect.arrayContaining([
         expect.objectContaining({ type: 'Spelling', sourceToken: 'Fishh', spellingDisposition: 'not_adjudicated' }),
     ]));
-    expect(result.post.spellingAdjudications).toEqual(expect.arrayContaining([
+    expect(result.post.rejectedAttempt?.spellingAdjudications).toEqual(expect.arrayContaining([
+        expect.objectContaining({ disposition: 'corrected' }),
+    ]));
+    expect(result.post.spellingAdjudications).not.toEqual(expect.arrayContaining([
         expect.objectContaining({ disposition: 'corrected' }),
     ]));
     expect(result.authoritative.spellingAdjudications).toEqual(expect.arrayContaining([

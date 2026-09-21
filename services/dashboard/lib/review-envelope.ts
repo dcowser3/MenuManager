@@ -79,9 +79,19 @@ export function applyAnchoredMutations(source: string, mutations: SourceMutation
             return { text: source, reason: 'source_anchor_mismatch' as const };
         }
         if (patch.start < previousEnd) return { text: source, reason: 'overlapping_edits' as const };
-        if (previousPatch && patch.start === patch.end && previousPatch.start === previousPatch.end
-            && patch.start === previousPatch.start) {
-            return { text: source, reason: 'overlapping_edits' as const };
+        if (previousPatch) {
+            const currentZeroWidth = patch.start === patch.end;
+            const previousZeroWidth = previousPatch.start === previousPatch.end;
+            // A zero-width insertion has no stable ordering relative to an
+            // edit at the same coordinate or inside the edit's replaced span.
+            // Reject both cases instead of guessing which bytes the model
+            // intended to address.
+            if ((currentZeroWidth && patch.start === previousPatch.start)
+                || (previousZeroWidth && patch.start === previousPatch.start)
+                || (currentZeroWidth && previousPatch.start < patch.start && patch.start < previousPatch.end)
+                || (previousZeroWidth && patch.start < previousPatch.start && previousPatch.start < patch.end)) {
+                return { text: source, reason: 'overlapping_edits' as const };
+            }
         }
         const containing = editable.filter(span => patch.start >= span.start && patch.end <= span.end);
         if (containing.length !== 1) return { text: source, reason: 'read_only_or_ambiguous_anchor' as const };
