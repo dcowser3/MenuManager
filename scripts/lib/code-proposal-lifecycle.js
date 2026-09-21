@@ -69,14 +69,14 @@ function readVisibleProgress(options) {
     return visible;
 }
 
-function readExactStagedProof(options, verification) {
+function readExactStagedProof(options, verification, proposal = options.proposal) {
     const file = path.join(path.resolve(options.attemptRoot), 'verifier', 'staged-proof.json');
     if (!fs.existsSync(file)) return null;
     const stat = fs.lstatSync(file);
     if (stat.isSymbolicLink() || !stat.isFile() || stat.size > 12 * 1024 * 1024) throw new Error('Lifecycle staged proof is not a bounded regular file.');
     const envelope = JSON.parse(fs.readFileSync(file, 'utf8'));
     if (envelope?.staged_status !== 'pending_store' || !envelope.proof || envelope.proof.status !== 'passed' || envelope.proof.proposal_sha256 !== options.metadata.proposal_sha256) throw new Error('Lifecycle staged proof identity is stale or incomplete.');
-    const candidate = { ...options.proposal, eval_summary: { ...(options.proposal.eval_summary || {}), code_verification: envelope.proof } };
+    const candidate = { ...proposal, eval_summary: { ...(proposal.eval_summary || {}), code_verification: envelope.proof } };
     const block = verification.assessCodeProposalVerificationIntegrity(candidate);
     if (block) throw new Error(`Lifecycle staged proof failed integrity: ${block.error || block}`);
     return envelope.proof;
@@ -120,6 +120,16 @@ async function runCodeProposalLifecycle(options = {}) {
         if (integrityBlock) throw new Error(`Lifecycle verified proof failed integrity: ${integrityBlock.error || integrityBlock}`);
         return { status: 'verified', resumed: true, progress: existing, proofPath };
     }
+    const liveVerified = liveBeforeProof?.eval_summary?.code_candidate?.status === 'verified' && liveBeforeProof?.eval_summary?.code_verification;
+    if (options.resume && liveVerified) {
+        const staged = readExactStagedProof(options, verification, liveBeforeProof);
+        if (!staged || JSON.stringify(canonical(staged)) !== JSON.stringify(canonical(liveBeforeProof.eval_summary.code_verification))) throw new Error('Lifecycle crash recovery proof does not match the live verified store.');
+        assertSafeVerifierRoot(attemptRoot);
+        const proofPath = path.join(attemptRoot, 'verifier', 'proof.json');
+        atomicWrite(proofPath, `${JSON.stringify(staged, null, 2)}\n`);
+        const progress = writeProgress(attemptRoot, options.metadata, 'verification', 'verified', { completed: options.metadata.expected_case_ids?.length || 0, total: options.metadata.expected_case_ids?.length || 0, proof_path: proofPath });
+        return { status: 'verified', resumed: true, proof: staged, progress, proofPath };
+    }
     const handoff = claimHandoff;
     if (!options.metadata.deadline_at || !Number.isFinite(Date.parse(options.metadata.deadline_at))) { writeProgress(attemptRoot, options.metadata, 'verification', 'failed', { reason: 'invalid_deadline' }); throw new Error('Lifecycle deadline is missing or invalid.'); }
     if (Date.parse(options.metadata.deadline_at) < Date.now()) { writeProgress(attemptRoot, options.metadata, 'verification', 'failed', { reason: 'attempt_deadline_exceeded' }); throw new Error('Lifecycle attempt deadline exceeded.'); }
@@ -128,7 +138,7 @@ async function runCodeProposalLifecycle(options = {}) {
     if (existing?.state === 'blocked' && options.resume && existing.phase !== 'verification') throw new Error('Lifecycle cannot resume a blocked phase without its missing accepted transition.');
     const deliveryRequired = (options.proposal.correction_routing || []).some((route) => route?.replay_status === 'delivery_mismatch') || (options.proposal.replay_evidence || []).some((entry) => entry?.status === 'delivery_mismatch');
     if (deliveryRequired) { writeProgress(attemptRoot, options.metadata, 'verification', 'blocked', { reason: 'delivery_driver_unavailable' }); return { status: 'blocked', reason: 'delivery_driver_unavailable' }; }
-    const stagedProof = existing?.state === 'blocked' && options.resume ? readExactStagedProof(options, verification) : null;
+    const stagedProof = existing?.state === 'blocked' && options.resume ? readExactStagedProof(options, verification, liveBeforeProof || options.proposal) : null;
     writeProgress(attemptRoot, options.metadata, 'verification', 'active', { completed: 0, total: options.metadata.expected_case_ids?.length || 0, handoff_sha256: handoff.handoffHash });
     let result;
     try {

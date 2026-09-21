@@ -86,3 +86,16 @@ test('successful store transport without exact proof readback cannot become veri
     await expect(runCodeProposalLifecycle({ ...state, client: {}, originalProposal: state.proposal, readCurrentProposal: async () => live, store: { recordCodeVerification: async () => { live.eval_summary.code_candidate.status = 'verified'; } } })).rejects.toThrow(/readback/);
     expect(JSON.parse(fs.readFileSync(path.join(state.attemptRoot, 'candidate', 'progress.json'))).reason).toBe('attached_but_local_finalization_failed');
 });
+
+test('active crash window with live verified store finalizes staged proof without rerun or reattach', async () => {
+    const state = fixture();
+    const proof = { status: 'passed', proposal_sha256: HASH };
+    fs.writeFileSync(path.join(state.attemptRoot, 'verifier', 'staged-proof.json'), JSON.stringify({ staged_status: 'pending_store', proof }));
+    writeProgress(state.attemptRoot, state.metadata, 'verification', 'active');
+    const live = { ...state.proposal, eval_summary: { ...state.proposal.eval_summary, code_candidate: { ...state.proposal.eval_summary.code_candidate, status: 'verified' }, code_verification: proof } };
+    const store = { recordCodeVerification: jest.fn(), readCurrentProposal: async () => live };
+    const result = await runCodeProposalLifecycle({ ...state, progressRoot: state.root, readCurrentProposal: store.readCurrentProposal, client: {}, originalProposal: state.proposal, store, resume: true });
+    expect(result.status).toBe('verified');
+    expect(proofRunner.runCodeProposalProofWithDocker).not.toHaveBeenCalled();
+    expect(store.recordCodeVerification).not.toHaveBeenCalled();
+});

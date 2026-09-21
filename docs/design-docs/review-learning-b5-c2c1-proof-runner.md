@@ -94,3 +94,6 @@ progress, and proof-integrity failures remain blocked/failed and cannot be
 silently retried as verified. C1 preparation and model drafting remain an
 upstream accepted component; this slice's default path begins at the validated
 draft/handoff boundary and never invokes the model broker.
+If storage is already verified while local progress is active or blocked, the
+coordinator recovers only from an exact integrity-valid staged proof and never
+reruns Docker or reattaches.
