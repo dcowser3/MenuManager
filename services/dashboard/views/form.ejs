@@ -16,6 +16,7 @@
     <script src="/js/diff-core.js"></script>
     <script src="/js/redline-preview.js?v=20260613-extract-leading-trim"></script>
     <script src="/js/form-stage.js?v=20260616-reorder-highlights"></script>
+    <script src="/js/form-submit-diagnostics.js?v=20260923"></script>
     <style>
         :root {
             --color-primary: #2c2c2c;
@@ -3208,6 +3209,15 @@
             } catch (error) {
                 console.warn('Failed to log form attempt event:', error);
             }
+        }
+
+        async function logSubmitDiagnostic(eventType, extra) {
+            const payload = getAttemptMetadata({ eventType, ...(extra || {}) });
+            if (window.MenuSubmitDiagnostics) {
+                return window.MenuSubmitDiagnostics.send(payload);
+            }
+            await logFormAttempt(eventType, extra);
+            return false;
         }
 
         const BASIC_CHECK_CLIENT_TIMEOUT_MS = 150000;
@@ -8099,14 +8109,20 @@
                 draftSessionToken: draftSessionToken || ''
             };
 
+            const submitStartedAt = Date.now();
+            let submitPhase = 'prepare';
+            let submitRequestBytes = null;
             try {
                 await uploadMenuImageIfNeeded();
+                submitPhase = 'serialize';
                 formData.menuImagePath = uploadedMenuImagePath || '';
                 formData.menuImageFileName = uploadedMenuImageFileName || '';
                 const preparedSubmission = MenuSubmission.prepareMenuSubmissionRequest(formData, getAttemptHeaders());
                 const submitBody = preparedSubmission.init.body;
                 const submitBodyLength = byteLength(submitBody);
-                await logFormAttempt('submit_started', {
+                submitRequestBytes = submitBodyLength;
+                submitPhase = 'log_start';
+                await logSubmitDiagnostic('submit_started', {
                     route: '/api/form/submit',
                     menuTextLength: menuContentText.length,
                     menuHtmlLength: menuContentHtml.length,
@@ -8116,6 +8132,12 @@
                     criticalSuggestionsCount: (aiCheckResults?.suggestions || []).filter((s) => s.severity === 'critical').length,
                     criticalSuggestions: (aiCheckResults?.suggestions || []).filter((s) => s.severity === 'critical'),
                     details: {
+                        clientTime: new Date().toISOString(),
+                        phase: 'before_fetch',
+                        online: navigator.onLine,
+                        visibilityState: document.visibilityState,
+                        menuHtmlLength: menuContentHtml.length,
+                        persistentDiffHtmlLength: persistentDiffHtml.length,
                         skipAiReview: !!skipAiReview,
                         unapprovedMode: !!formData.unapprovedMode,
                         hasMenuImage: !!formData.menuImagePath,
@@ -8125,8 +8147,10 @@
                     }
                 });
 
+                submitPhase = 'fetch_submit';
                 const response = await MenuSubmission.sendPreparedMenuSubmission(preparedSubmission);
 
+                submitPhase = 'read_response';
                 const responseText = await response.text();
                 let data = {};
                 if (responseText) {
@@ -8168,6 +8192,7 @@
                     }
                     throw new Error(data.error || 'Failed to submit menu');
                 }
+                submitPhase = 'log_completed';
                 await logFormAttempt('submit_completed', {
                     route: '/api/form/submit',
                     statusCode: response.status,
@@ -8217,7 +8242,7 @@
 
             } catch (error) {
                 console.error('Error:', error);
-                await logFormAttempt('submit_client_exception', {
+                await logSubmitDiagnostic('submit_client_exception', {
                     route: '/api/form/submit',
                     menuTextLength: menuContentText.length,
                     menuHtmlLength: menuContentHtml.length,
@@ -8228,6 +8253,16 @@
                     criticalSuggestions: (aiCheckResults?.suggestions || []).filter((s) => s.severity === 'critical'),
                     errorMessage: error.message,
                     details: {
+                        clientTime: new Date().toISOString(),
+                        phase: submitPhase,
+                        elapsedMs: Date.now() - submitStartedAt,
+                        online: navigator.onLine,
+                        visibilityState: document.visibilityState,
+                        errorName: error.name || '',
+                        errorCode: error.code || '',
+                        menuHtmlLength: menuContentHtml.length,
+                        persistentDiffHtmlLength: persistentDiffHtml.length,
+                        requestBodyLength: submitRequestBytes,
                         skipAiReview: !!skipAiReview,
                         unapprovedMode: !!formData.unapprovedMode,
                         overriddenCriticalCount: criticalOverrides.length,
