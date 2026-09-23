@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.HUMAN_EXPLANATION_AUDIT_STAGES = exports.HUMAN_EXPLANATION_BINDING_METHOD = exports.HUMAN_EXPLANATION_COORDINATE_BASIS = exports.HUMAN_EXPLANATION_SOURCE_STAGE = exports.HUMAN_EXPLANATION_SOURCE_BINDING_VERSION = void 0;
+exports.HUMAN_EXPLANATION_AUDIT_STAGES = exports.HUMAN_EXPLANATION_SUBMITTED_DRAFT_METHOD = exports.HUMAN_EXPLANATION_BINDING_METHOD = exports.HUMAN_EXPLANATION_COORDINATE_BASIS = exports.HUMAN_EXPLANATION_SOURCE_STAGE = exports.HUMAN_EXPLANATION_SOURCE_BINDING_VERSION = void 0;
+exports.matchesSubmittedDraftToLearningComparison = matchesSubmittedDraftToLearningComparison;
 exports.buildHumanExplanationSourceBinding = buildHumanExplanationSourceBinding;
 exports.isHumanExplanationSourceBinding = isHumanExplanationSourceBinding;
 exports.sha256Text = sha256Text;
@@ -14,10 +15,21 @@ exports.HUMAN_EXPLANATION_SOURCE_BINDING_VERSION = 'human-explanation-source-bin
 exports.HUMAN_EXPLANATION_SOURCE_STAGE = 'differ_ai_draft_v1';
 exports.HUMAN_EXPLANATION_COORDINATE_BASIS = 'utf16_line_span_v1';
 exports.HUMAN_EXPLANATION_BINDING_METHOD = 'exact_content_hash_v1';
+exports.HUMAN_EXPLANATION_SUBMITTED_DRAFT_METHOD = 'submitted_draft_comparison_hash_v1';
 exports.HUMAN_EXPLANATION_AUDIT_STAGES = new Set([
     'audit_final_result_corrected_menu_v1',
     'audit_parsed_response_corrected_menu_v1',
 ]);
+/** Only the durable draft for this exact submission and attempt can replace an audit text match. */
+function matchesSubmittedDraftToLearningComparison(submission, learning, submissionId) {
+    return submission?.id === submissionId
+        && typeof submission?.form_attempt_id === 'string'
+        && submission.form_attempt_id.length > 0
+        && submission.form_attempt_id === learning?.source_attempt_id
+        && typeof submission?.ai_draft_path === 'string'
+        && submission.ai_draft_path.length > 0
+        && submission.ai_draft_path === learning?.ai_draft_path;
+}
 function text(value, label) {
     if (typeof value !== 'string' || !value.trim())
         throw new Error(`${label} is required.`);
@@ -39,14 +51,15 @@ function digest(value, label) {
 function buildHumanExplanationSourceBinding(input) {
     const submissionId = text(input.submissionId, 'submission_id').trim();
     const attemptId = text(input.attemptId, 'attempt_id').trim();
-    const auditId = text(input.auditId, 'audit_id').trim();
+    const sourceDocumentPath = input.sourceDocumentPath == null ? undefined : text(input.sourceDocumentPath, 'source_document_path').trim();
+    const auditId = sourceDocumentPath ? null : text(input.auditId, 'audit_id').trim();
     const sourceSnapshotSha256 = digest(input.sourceSnapshotSha256, 'source_snapshot_sha256');
-    const matchedAuditStage = text(input.matchedAuditStage, 'matched_audit_stage').trim();
-    if (!exports.HUMAN_EXPLANATION_AUDIT_STAGES.has(matchedAuditStage)) {
+    const matchedAuditStage = sourceDocumentPath ? null : text(input.matchedAuditStage, 'matched_audit_stage').trim();
+    if (!sourceDocumentPath && !exports.HUMAN_EXPLANATION_AUDIT_STAGES.has(matchedAuditStage)) {
         throw new Error('matched_audit_stage is not an approved audited source stage.');
     }
-    const matchedAuditSnapshotSha256 = digest(input.matchedAuditSnapshotSha256, 'matched_audit_snapshot_sha256');
-    if (matchedAuditSnapshotSha256 !== sourceSnapshotSha256) {
+    const matchedAuditSnapshotSha256 = sourceDocumentPath ? null : digest(input.matchedAuditSnapshotSha256, 'matched_audit_snapshot_sha256');
+    if (!sourceDocumentPath && matchedAuditSnapshotSha256 !== sourceSnapshotSha256) {
         throw new Error('The matched audit source hash must equal the trusted differ source hash.');
     }
     const comparisonRevision = text(input.comparisonRevision, 'comparison_revision').trim();
@@ -93,12 +106,13 @@ function buildHumanExplanationSourceBinding(input) {
         audit_id: auditId,
         comparison_revision: comparisonRevision,
         source_extraction_version: sourceExtractionVersion,
-        binding_method: exports.HUMAN_EXPLANATION_BINDING_METHOD,
+        binding_method: sourceDocumentPath ? exports.HUMAN_EXPLANATION_SUBMITTED_DRAFT_METHOD : exports.HUMAN_EXPLANATION_BINDING_METHOD,
         source_stage: exports.HUMAN_EXPLANATION_SOURCE_STAGE,
         coordinate_basis: exports.HUMAN_EXPLANATION_COORDINATE_BASIS,
         source_snapshot_sha256: sourceSnapshotSha256,
         matched_audit_stage: matchedAuditStage,
         matched_audit_snapshot_sha256: matchedAuditSnapshotSha256,
+        ...(sourceDocumentPath ? { source_document_path: sourceDocumentPath } : {}),
         span,
     };
     return Object.freeze({
@@ -116,6 +130,7 @@ function isHumanExplanationSourceBinding(value) {
             submissionId: binding.submission_id,
             attemptId: binding.attempt_id,
             auditId: binding.audit_id,
+            sourceDocumentPath: binding.source_document_path,
             sourceSnapshotSha256: binding.source_snapshot_sha256,
             matchedAuditStage: binding.matched_audit_stage,
             matchedAuditSnapshotSha256: binding.matched_audit_snapshot_sha256,
@@ -137,7 +152,7 @@ function isHumanExplanationSourceBinding(value) {
             && binding.case_id === `learning:${binding.submission_id}:${binding.correction_id}`
             && binding.source_stage === exports.HUMAN_EXPLANATION_SOURCE_STAGE
             && binding.coordinate_basis === exports.HUMAN_EXPLANATION_COORDINATE_BASIS
-            && binding.binding_method === exports.HUMAN_EXPLANATION_BINDING_METHOD
+            && binding.binding_method === rebuilt.binding_method
             && binding.source_revision_id === rebuilt.source_revision_id
             && binding.span.line_index === rebuilt.span.line_index
             && binding.span.row_index === rebuilt.span.row_index

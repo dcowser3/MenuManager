@@ -2272,13 +2272,32 @@ async function resolveHumanExplanationSourceBinding(payload) {
         || !learning.source_attempt_id.trim()) {
         throw new learning_correction_rules_1.CorrectionRuleValidationError('The learning comparison has no trusted source revision');
     }
-    const sourceResult = await internalApi.get(`${DB_SERVICE_URL}/submissions/${encodeURIComponent(submissionId)}/review-source-binding?source_snapshot_sha256=${encodeURIComponent(learning.source_snapshot_sha256)}&attempt_id=${encodeURIComponent(learning.source_attempt_id)}`, { timeout: 3500 });
-    const source = sourceResult.data || {};
+    let source;
+    let sourceDocumentPath;
+    try {
+        const sourceResult = await internalApi.get(`${DB_SERVICE_URL}/submissions/${encodeURIComponent(submissionId)}/review-source-binding?source_snapshot_sha256=${encodeURIComponent(learning.source_snapshot_sha256)}&attempt_id=${encodeURIComponent(learning.source_attempt_id)}`, { timeout: 3500 });
+        source = sourceResult.data || {};
+    }
+    catch (error) {
+        // A submitted DOCX may contain the reviewer's later form edits and the
+        // generated footer. Its extracted text then cannot equal an earlier AI
+        // response even though it is the exact draft shown in this comparison.
+        if (error?.response?.status !== 409 || error?.response?.data?.exact_candidate_count !== 0)
+            throw error;
+        const submissionResult = await internalApi.get(`${DB_SERVICE_URL}/submissions/${encodeURIComponent(submissionId)}`, { timeout: 3500 });
+        const submission = submissionResult.data || {};
+        if (!(0, human_explanation_source_binding_1.matchesSubmittedDraftToLearningComparison)(submission, learning, submissionId)) {
+            throw new learning_correction_rules_1.CorrectionRuleValidationError('The comparison draft does not match this submission and form attempt');
+        }
+        source = { submission_id: submission.id, attempt_id: submission.form_attempt_id };
+        sourceDocumentPath = submission.ai_draft_path;
+    }
     const audit = source.audit || {};
     const binding = (0, human_explanation_source_binding_1.buildHumanExplanationSourceBinding)({
         submissionId: source.submission_id,
         attemptId: source.attempt_id,
         auditId: audit.id,
+        sourceDocumentPath,
         sourceSnapshotSha256: learning.source_snapshot_sha256,
         matchedAuditStage: audit.source_stage,
         matchedAuditSnapshotSha256: audit.source_snapshot_sha256,

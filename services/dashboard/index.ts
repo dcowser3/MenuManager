@@ -106,6 +106,7 @@ import {
     buildHumanExplanationSourceBinding,
     HUMAN_EXPLANATION_COORDINATE_BASIS,
     HUMAN_EXPLANATION_SOURCE_STAGE,
+    matchesSubmittedDraftToLearningComparison,
 } from './lib/human-explanation-source-binding';
 import { listActionablePendingCorrectionRules } from './lib/learning-dashboard-rules';
 import { decorateLearningSubmissionsWithMenuNames } from './lib/learning-submissions';
@@ -2641,16 +2642,36 @@ async function resolveHumanExplanationSourceBinding(payload: any): Promise<{ bin
         || !learning.source_attempt_id.trim()) {
         throw new CorrectionRuleValidationError('The learning comparison has no trusted source revision');
     }
-    const sourceResult = await internalApi.get(
-        `${DB_SERVICE_URL}/submissions/${encodeURIComponent(submissionId)}/review-source-binding?source_snapshot_sha256=${encodeURIComponent(learning.source_snapshot_sha256)}&attempt_id=${encodeURIComponent(learning.source_attempt_id)}`,
-        { timeout: 3500 },
-    );
-    const source = sourceResult.data || {};
+    let source: any;
+    let sourceDocumentPath: string | undefined;
+    try {
+        const sourceResult = await internalApi.get(
+            `${DB_SERVICE_URL}/submissions/${encodeURIComponent(submissionId)}/review-source-binding?source_snapshot_sha256=${encodeURIComponent(learning.source_snapshot_sha256)}&attempt_id=${encodeURIComponent(learning.source_attempt_id)}`,
+            { timeout: 3500 },
+        );
+        source = sourceResult.data || {};
+    } catch (error: any) {
+        // A submitted DOCX may contain the reviewer's later form edits and the
+        // generated footer. Its extracted text then cannot equal an earlier AI
+        // response even though it is the exact draft shown in this comparison.
+        if (error?.response?.status !== 409 || error?.response?.data?.exact_candidate_count !== 0) throw error;
+        const submissionResult = await internalApi.get(
+            `${DB_SERVICE_URL}/submissions/${encodeURIComponent(submissionId)}`,
+            { timeout: 3500 },
+        );
+        const submission = submissionResult.data || {};
+        if (!matchesSubmittedDraftToLearningComparison(submission, learning, submissionId)) {
+            throw new CorrectionRuleValidationError('The comparison draft does not match this submission and form attempt');
+        }
+        source = { submission_id: submission.id, attempt_id: submission.form_attempt_id };
+        sourceDocumentPath = submission.ai_draft_path;
+    }
     const audit = source.audit || {};
     const binding = buildHumanExplanationSourceBinding({
         submissionId: source.submission_id,
         attemptId: source.attempt_id,
         auditId: audit.id,
+        sourceDocumentPath,
         sourceSnapshotSha256: learning.source_snapshot_sha256,
         matchedAuditStage: audit.source_stage,
         matchedAuditSnapshotSha256: audit.source_snapshot_sha256,

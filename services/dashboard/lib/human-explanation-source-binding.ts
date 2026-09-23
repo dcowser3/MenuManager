@@ -9,10 +9,22 @@ export const HUMAN_EXPLANATION_SOURCE_BINDING_VERSION = 'human-explanation-sourc
 export const HUMAN_EXPLANATION_SOURCE_STAGE = 'differ_ai_draft_v1';
 export const HUMAN_EXPLANATION_COORDINATE_BASIS = 'utf16_line_span_v1';
 export const HUMAN_EXPLANATION_BINDING_METHOD = 'exact_content_hash_v1';
+export const HUMAN_EXPLANATION_SUBMITTED_DRAFT_METHOD = 'submitted_draft_comparison_hash_v1';
 export const HUMAN_EXPLANATION_AUDIT_STAGES = new Set([
     'audit_final_result_corrected_menu_v1',
     'audit_parsed_response_corrected_menu_v1',
 ]);
+
+/** Only the durable draft for this exact submission and attempt can replace an audit text match. */
+export function matchesSubmittedDraftToLearningComparison(submission: any, learning: any, submissionId: string): boolean {
+    return submission?.id === submissionId
+        && typeof submission?.form_attempt_id === 'string'
+        && submission.form_attempt_id.length > 0
+        && submission.form_attempt_id === learning?.source_attempt_id
+        && typeof submission?.ai_draft_path === 'string'
+        && submission.ai_draft_path.length > 0
+        && submission.ai_draft_path === learning?.ai_draft_path;
+}
 
 type SourceCorrection = {
     correction_id: string;
@@ -32,7 +44,7 @@ export type HumanExplanationSourceBinding = {
     case_id: string;
     correction_id: string;
     attempt_id: string;
-    audit_id: string;
+    audit_id: string | null;
     source_revision_id: string;
     comparison_revision: string;
     source_extraction_version: string;
@@ -40,8 +52,9 @@ export type HumanExplanationSourceBinding = {
     source_stage: string;
     coordinate_basis: string;
     source_snapshot_sha256: string;
-    matched_audit_stage: string;
-    matched_audit_snapshot_sha256: string;
+    matched_audit_stage: string | null;
+    matched_audit_snapshot_sha256: string | null;
+    source_document_path?: string;
     span: {
         line_index: number;
         row_index: number | null;
@@ -78,23 +91,25 @@ export function buildHumanExplanationSourceBinding(input: {
     submissionId: unknown;
     attemptId: unknown;
     auditId: unknown;
+    sourceDocumentPath?: unknown;
     sourceSnapshotSha256: unknown;
-    matchedAuditStage: unknown;
-    matchedAuditSnapshotSha256: unknown;
+    matchedAuditStage?: unknown;
+    matchedAuditSnapshotSha256?: unknown;
     comparisonRevision: unknown;
     sourceExtractionVersion: unknown;
     correction: SourceCorrection;
 }): HumanExplanationSourceBinding {
     const submissionId = text(input.submissionId, 'submission_id').trim();
     const attemptId = text(input.attemptId, 'attempt_id').trim();
-    const auditId = text(input.auditId, 'audit_id').trim();
+    const sourceDocumentPath = input.sourceDocumentPath == null ? undefined : text(input.sourceDocumentPath, 'source_document_path').trim();
+    const auditId = sourceDocumentPath ? null : text(input.auditId, 'audit_id').trim();
     const sourceSnapshotSha256 = digest(input.sourceSnapshotSha256, 'source_snapshot_sha256');
-    const matchedAuditStage = text(input.matchedAuditStage, 'matched_audit_stage').trim();
-    if (!HUMAN_EXPLANATION_AUDIT_STAGES.has(matchedAuditStage)) {
+    const matchedAuditStage = sourceDocumentPath ? null : text(input.matchedAuditStage, 'matched_audit_stage').trim();
+    if (!sourceDocumentPath && !HUMAN_EXPLANATION_AUDIT_STAGES.has(matchedAuditStage!)) {
         throw new Error('matched_audit_stage is not an approved audited source stage.');
     }
-    const matchedAuditSnapshotSha256 = digest(input.matchedAuditSnapshotSha256, 'matched_audit_snapshot_sha256');
-    if (matchedAuditSnapshotSha256 !== sourceSnapshotSha256) {
+    const matchedAuditSnapshotSha256 = sourceDocumentPath ? null : digest(input.matchedAuditSnapshotSha256, 'matched_audit_snapshot_sha256');
+    if (!sourceDocumentPath && matchedAuditSnapshotSha256 !== sourceSnapshotSha256) {
         throw new Error('The matched audit source hash must equal the trusted differ source hash.');
     }
     const comparisonRevision = text(input.comparisonRevision, 'comparison_revision').trim();
@@ -142,12 +157,13 @@ export function buildHumanExplanationSourceBinding(input: {
         audit_id: auditId,
         comparison_revision: comparisonRevision,
         source_extraction_version: sourceExtractionVersion,
-        binding_method: HUMAN_EXPLANATION_BINDING_METHOD,
+        binding_method: sourceDocumentPath ? HUMAN_EXPLANATION_SUBMITTED_DRAFT_METHOD : HUMAN_EXPLANATION_BINDING_METHOD,
         source_stage: HUMAN_EXPLANATION_SOURCE_STAGE,
         coordinate_basis: HUMAN_EXPLANATION_COORDINATE_BASIS,
         source_snapshot_sha256: sourceSnapshotSha256,
         matched_audit_stage: matchedAuditStage,
         matched_audit_snapshot_sha256: matchedAuditSnapshotSha256,
+        ...(sourceDocumentPath ? { source_document_path: sourceDocumentPath } : {}),
         span,
     };
     return Object.freeze({
@@ -165,6 +181,7 @@ export function isHumanExplanationSourceBinding(value: unknown): value is HumanE
             submissionId: binding.submission_id,
             attemptId: binding.attempt_id,
             auditId: binding.audit_id,
+            sourceDocumentPath: binding.source_document_path,
             sourceSnapshotSha256: binding.source_snapshot_sha256,
             matchedAuditStage: binding.matched_audit_stage,
             matchedAuditSnapshotSha256: binding.matched_audit_snapshot_sha256,
@@ -186,7 +203,7 @@ export function isHumanExplanationSourceBinding(value: unknown): value is HumanE
             && binding.case_id === `learning:${binding.submission_id}:${binding.correction_id}`
             && binding.source_stage === HUMAN_EXPLANATION_SOURCE_STAGE
             && binding.coordinate_basis === HUMAN_EXPLANATION_COORDINATE_BASIS
-            && binding.binding_method === HUMAN_EXPLANATION_BINDING_METHOD
+            && binding.binding_method === rebuilt.binding_method
             && binding.source_revision_id === rebuilt.source_revision_id
             && binding.span.line_index === rebuilt.span.line_index
             && binding.span.row_index === rebuilt.span.row_index

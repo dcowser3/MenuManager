@@ -153,10 +153,18 @@ The dashboard then asks the DB service to match that exact source hash against
 the submission's completed/full `basic_ai_check_audits` rows. Multiple audits
 are allowed, but there must be exactly one matching audit stage: the audited
 `final_result.correctedMenu` stage is preferred, with
-`parsed_response.correctedMenu` as a fallback. Missing or duplicate matches
-are rejected. The persisted nullable `correction_rules.source_binding` JSONB
-envelope records submission, derived learning case/correction identity, form attempt, audit, comparison revision,
-displayed differ stage/coordinates, matched audit stage/hash, binding method,
+`parsed_response.correctedMenu` as a fallback. A submitted draft can differ
+from both audit stages because the reviewer edited the form after AI review or
+the DOCX generator added footer text. When no audit stage matches, the dashboard
+instead requires the differ's frozen draft path and attempt ID to exactly match
+the durable submission's `ai_draft_path` and `form_attempt_id`. The differ has
+already re-extracted the draft and verified its frozen source hash. This binds
+the explanation to that specific submitted menu and comparison revision without
+mistaking the earlier AI response for the submitted DOCX. Ambiguous audit
+matches, changed documents, and mismatched submission paths or attempts are
+still rejected. The persisted nullable `correction_rules.source_binding` JSONB
+envelope records submission, derived learning case/correction identity, form attempt, comparison revision,
+displayed differ stage/coordinates, binding method, and the matched audit or submitted draft path,
 and the exact UTF-16 before/after span and text hashes. It is insert-only
 provenance; correction-rule updates cannot edit it. Legacy/system rows may
 remain null and no model output can create or replace a binding.

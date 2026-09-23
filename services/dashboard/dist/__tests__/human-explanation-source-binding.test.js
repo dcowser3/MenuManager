@@ -68,6 +68,39 @@ describe('human explanation source binding', () => {
             correction: correction(),
         })).toThrow('matched audit source hash');
     });
+    test('binds a submitted DOCX comparison when later edits make the audit text different', () => {
+        const sourceHash = digest('submitted draft with reviewed edits and footer');
+        const binding = (0, human_explanation_source_binding_1.buildHumanExplanationSourceBinding)({
+            submissionId: 'submission-1',
+            attemptId: 'attempt-1',
+            auditId: null,
+            sourceDocumentPath: '/app/tmp/documents/submission-1/draft.docx',
+            sourceSnapshotSha256: sourceHash,
+            comparisonRevision: 'comparison-a1',
+            sourceExtractionVersion: 'differ-source-extraction-v1',
+            correction: correction(),
+        });
+        expect(binding).toMatchObject({
+            submission_id: 'submission-1',
+            attempt_id: 'attempt-1',
+            audit_id: null,
+            source_document_path: '/app/tmp/documents/submission-1/draft.docx',
+            source_snapshot_sha256: sourceHash,
+            binding_method: 'submitted_draft_comparison_hash_v1',
+            matched_audit_stage: null,
+        });
+        expect((0, human_explanation_source_binding_1.isHumanExplanationSourceBinding)(binding)).toBe(true);
+        expect((0, human_explanation_source_binding_1.isHumanExplanationSourceBinding)({ ...binding, source_document_path: '/app/tmp/documents/other/draft.docx' })).toBe(false);
+        expect((0, human_explanation_source_binding_1.isHumanExplanationSourceBinding)({ ...binding, source_snapshot_sha256: digest('another menu') })).toBe(false);
+    });
+    test('allows only the same submission, form attempt, and submitted draft path', () => {
+        const submission = { id: 'submission-1', form_attempt_id: 'attempt-1', ai_draft_path: '/app/tmp/one.docx' };
+        const comparison = { source_attempt_id: 'attempt-1', ai_draft_path: '/app/tmp/one.docx' };
+        expect((0, human_explanation_source_binding_1.matchesSubmittedDraftToLearningComparison)(submission, comparison, 'submission-1')).toBe(true);
+        expect((0, human_explanation_source_binding_1.matchesSubmittedDraftToLearningComparison)(submission, comparison, 'submission-2')).toBe(false);
+        expect((0, human_explanation_source_binding_1.matchesSubmittedDraftToLearningComparison)(submission, { ...comparison, source_attempt_id: 'attempt-2' }, 'submission-1')).toBe(false);
+        expect((0, human_explanation_source_binding_1.matchesSubmittedDraftToLearningComparison)(submission, { ...comparison, ai_draft_path: '/app/tmp/two.docx' }, 'submission-1')).toBe(false);
+    });
     test('rejects tampered coordinates or revision identity after persistence', () => {
         const hash = digest('title\nDish, lemons G 8');
         const binding = (0, human_explanation_source_binding_1.buildHumanExplanationSourceBinding)({

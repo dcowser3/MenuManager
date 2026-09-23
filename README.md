@@ -60,6 +60,8 @@ Chef / manager submission
   -> Learning / improvement loop from human-reviewed corrections
 ```
 
+Correction explanations saved from a submission's learning page are tied to that submission's exact reviewed DOCX and comparison revision. Edits made after the Basic AI Check, including generated footer text, do not prevent reviewers from saving their explanations.
+
 > **Rollout note:** the dashboard's `/form` link serves the new upload-first submission form by default. The original multi-section form remains available at `/form-legacy`, and `/form-new` is kept as a stable alias for the new flow. Set `NEW_SUBMISSION_FORM_DEFAULT=false` only as a temporary rollback (see [docs/environment.md](docs/environment.md)).
 
 DOCX uploads are capped at 15 MB. Both form versions reject larger files before upload with a clear support message, while the production nginx configuration allows enough request headroom for the dashboard to return structured `413` diagnostics.
