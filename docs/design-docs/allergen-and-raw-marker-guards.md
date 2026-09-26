@@ -58,10 +58,12 @@ which guard reverted what:
 
 - **Allergen suggestions** are always advisory. The description starts with the
   delivered fact ("Allergen codes were not changed (kept as submitted: D,G,S).")
-  followed by the model's reasoning as an "AI note", with clauses that claim the
-  menu was edited removed, and phrases claiming the key defines a code it does
-  not (e.g. "the key defines fish as F") removed. "Retain/keep ..." recommendations
-  become "Confirm with the chef ...". A literal `Change 'X' to 'Y'` is kept so the
+  then what the model proposed ("AI suggests adding G" / "AI suggests removing S"),
+  then the model's reasoning as an "AI note". Clauses that claim the menu was
+  edited are removed, but their reason is kept ("The S code was removed because
+  octopus is a mollusc" keeps "Octopus is a mollusc"), and phrases claiming the key defines a code it does
+  not (e.g. "the key defines fish as F") removed. "Retain the G code unless ..."
+  becomes "Consider adding G unless ... Confirm with the chef ...". A literal `Change 'X' to 'Y'` is kept so the
   chef can still apply it with one click. Codes the menu key does not define are
   flagged. Hallucinated "code X is not defined" premises are dropped.
 - **Raw-marker suggestions** that ask to remove an asterisk are held (asterisks are

@@ -42,9 +42,33 @@ describe('reconcileSuggestionsWithDeliveredMenu: allergen suggestions', () => {
 
         const [suggestion] = result.suggestions;
         expect(suggestion.deliveryStatus).toBe('not_applied');
-        expect(suggestion.recommendation).toBe("Confirm with the chef before changing this dish's allergen codes. F is not defined in this menu's allergen key.");
+        expect(suggestion.recommendation).toBe("Consider adding F. Confirm with the chef before changing allergen codes. F is not defined in this menu's allergen key.");
         // The false premise "the key defines fish as F" is removed; the true part about S stays.
-        expect(suggestion.description).toBe('Allergen codes were not changed (kept as submitted: S). AI note: Seabass is a fish; the existing S code correctly identifies shrimp.');
+        expect(suggestion.description).toBe('Allergen codes were not changed (kept as submitted: S). AI suggests adding F. AI note: Seabass is a fish; the existing S code correctly identifies shrimp.');
+    });
+
+    // Prod audit 6459513a (2026-09-26): whole reasoning sentences were dropped and
+    // "Retain the G allergen code unless ..." lost both the code and the condition.
+    test('keeps the reason from a removal claim and states the proposal', () => {
+        const row = 'Bone Marrow, grilled octopus, salsa verde G,S 24';
+        const result = reconcileSuggestionsWithDeliveredMenu(row, row, [{
+            type: 'Allergen Code', menuItem: 'Bone Marrow',
+            description: "The existing S code was removed because octopus is a mollusc, while this menu's key defines S as shellfish and does not define a mollusc code.",
+            recommendation: "Confirm the property's allergen policy for molluscs and whether a separate mollusc code should be added to the allergen key.",
+        }], RSH_LEGEND);
+        expect(result.suggestions[0].description).toBe("Allergen codes were not changed (kept as submitted: G,S). AI suggests removing S. AI note: Octopus is a mollusc, while this menu's key defines S as shellfish and does not define a mollusc code.");
+        expect(result.suggestions[0].recommendation).toBe("Confirm the property's allergen policy for molluscs and whether a separate mollusc code should be added to the allergen key.");
+    });
+
+    test('turns "Retain the added G" into a proposal that keeps the condition', () => {
+        const row = 'Black Bean Soup, crispy tortilla, crema D,V 12';
+        const result = reconcileSuggestionsWithDeliveredMenu(row, row, [{
+            type: 'Allergen Code', menuItem: 'Black Bean Soup',
+            description: 'The dish contains a crispy tortilla, which is a visible gluten source; G was added in the corrected menu.',
+            recommendation: 'Retain the G allergen code unless the tortilla is verified to be gluten-free.',
+        }], RSH_LEGEND);
+        expect(result.suggestions[0].description).toBe('Allergen codes were not changed (kept as submitted: D,V). AI suggests adding G. AI note: The dish contains a crispy tortilla, which is a visible gluten source.');
+        expect(result.suggestions[0].recommendation).toBe('Consider adding G unless the tortilla is verified to be gluten-free. Confirm with the chef before changing allergen codes.');
     });
 
     test('keeps a literal change pair so the chef can still apply it', () => {
@@ -73,8 +97,8 @@ describe('reconcileSuggestionsWithDeliveredMenu: allergen suggestions', () => {
         const result = reconcileSuggestionsWithDeliveredMenu('Soup D 8\nSoup G 9', 'Soup D 8\nSoup G 9', [{
             type: 'Allergen Code', menuItem: 'Soup', description: 'The S code was added.', recommendation: 'Keep the added S code.',
         }], RSH_LEGEND);
-        expect(result.suggestions[0].description).toBe('Allergen codes were not changed by the AI review.');
-        expect(result.suggestions[0].recommendation).toBe("Confirm with the chef before changing this dish's allergen codes.");
+        expect(result.suggestions[0].description).toBe('Allergen codes were not changed by the AI review. AI suggests adding S.');
+        expect(result.suggestions[0].recommendation).toBe('Consider adding S. Confirm with the chef before changing allergen codes.');
         expect(result.diagnostics).toContain('suggestion_delivery_row_unresolved:allergen:Soup');
     });
 
