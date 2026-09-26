@@ -82,7 +82,10 @@ function fixture() {
     client.tables.submissions.push({ id: 'submission-1', legacy_id: 'submission-1', project_name: 'real', property: '', template_type: 'food', menu_type: 'standard', service_period: 'Dinner', approved_menu_content: 'Dish, lemon', form_attempt_id: 'form-1', allergens: '' });
     client.tables.basic_ai_check_audits.push({ id: 'audit-1', attempt_id: 'form-1', event_type: 'completed', review_mode: 'full', menu_content_raw: 'Dish, lemons', created_at: '2026-09-21T12:01:00.000Z' });
     const datasetPath = path.join(root, 'dataset.jsonl'); fs.writeFileSync(datasetPath, `${JSON.stringify({ case_id: 'production:submission-1', submission_id: 'submission-1', attempt_id: 'form-1', audit_id: 'audit-1', raw_input: 'Dish, lemons', ground_truth: 'Dish, lemon', context: {} })}\n`);
+    // Preparation only trusts <repo>/tmp/code-proposals. tmp/ is gitignored, so it is
+    // absent in CI and fresh clones; create it (cleanup below removes only what this test adds).
     const outputRoot = path.join(path.resolve(__dirname, '../../..'), 'tmp', 'code-proposals');
+    fs.mkdirSync(outputRoot, { recursive: true, mode: 0o700 });
     const sentinelPath = path.join(outputRoot, 'pending-preparation-inventory-sentinel.json');
     const sentinelExisted = fs.existsSync(sentinelPath);
     const sentinelBytes = sentinelExisted ? fs.readFileSync(sentinelPath) : Buffer.from('{"sentinel":true}\n');

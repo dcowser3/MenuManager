@@ -128,6 +128,26 @@ For route and page work, the minimum bar is:
 3. hit the real route
 4. confirm expected status code and behavior
 
+## CI Gate
+
+`.github/workflows/ci.yml` runs on every pull request and is called by
+`deploy-lightsail.yml`, whose `deploy` job `needs: tests`. A push to `main`
+therefore deploys only if all of these pass on Node 24 / Python 3.11:
+
+1. `npm ci`, then build every workspace in the same order as
+   `docker/Dockerfile.service` (shared libraries first). `tsc` runs inside each
+   build, so this is also the typecheck.
+2. `npx jest --ci` (all services).
+3. `npm run test:business` (Cucumber scenarios).
+4. `python -m pytest` in `services/docx-redliner`.
+
+Tests must be hermetic: no dependency on a local `.env`, a Mac-only Python venv,
+Docker, network, or pre-existing files under `tmp/` (create what a test needs).
+
+Local note: a Finder-duplicated `node_modules/@types/@types 2` folder makes `tsc`
+fail with `Cannot find type definition file for '@types 2'`. Delete the duplicate
+or reinstall with `npm ci`.
+
 ## When a Change Looks Missing
 
 If a route or UI change is “not there,” check these in order:

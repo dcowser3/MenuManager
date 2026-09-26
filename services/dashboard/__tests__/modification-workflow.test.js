@@ -316,11 +316,14 @@ describe('Dashboard Modification Workflow (local, mocked externals)', () => {
         );
         expect(assetCall[1].file_name).toBe(expectedFilename);
 
-        const aiReviewCall = mockedAxios.post.mock.calls.find((c) =>
-            String(c[0]).includes('/ai-review')
+        // Submissions are reviewed through the review coordinator. Its request is
+        // identity-hashed (text, prompt, replay identity) and carries no filename.
+        const coordinatorCall = mockedAxios.post.mock.calls.find((c) =>
+            String(c[0]).includes('/v1/coordinator-review')
         );
-        expect(aiReviewCall[1].filename).toBe(expectedFilename);
-        expect(aiReviewCall[2]).toEqual({ timeout: 120000 });
+        expect(coordinatorCall).toBeDefined();
+        expect(coordinatorCall[1].replayIdentity).toBe(`submission:${submissionCall[1].id}`);
+        expect(coordinatorCall[2]).toEqual({ timeout: 120000 });
 
         const clickupCall = mockedAxios.post.mock.calls.find((c) =>
             String(c[0]).includes('/create-task')
@@ -715,7 +718,8 @@ describe('Dashboard Modification Workflow (local, mocked externals)', () => {
             if (urlStr.includes('/assets')) {
                 return Promise.resolve({ data: { id: 'asset_123' } });
             }
-            if (urlStr.includes('/ai-review')) {
+            // Tier 2 review goes through the review coordinator; hold it open.
+            if (urlStr.includes('/v1/coordinator-review')) {
                 return new Promise((resolve) => {
                     resolveAiReview = resolve;
                 });
@@ -755,9 +759,14 @@ describe('Dashboard Modification Workflow (local, mocked externals)', () => {
         expect(response.status).toBe(200);
         expect(response.body.success).toBe(true);
         expect(response.body.clickup.taskId).toBe('cu_123');
-        expect(mockedAxios.post.mock.calls.some((c) =>
-            String(c[0]).includes('/ai-review')
-        )).toBe(true);
+        // The review is started in the background after the response. The coordinator
+        // prepares the review asynchronously before posting, so wait for the call to be
+        // issued (it stays pending: resolveAiReview has not been called).
+        const reviewStarted = () => mockedAxios.post.mock.calls.some((c) => String(c[0]).includes('/v1/coordinator-review'));
+        for (let waited = 0; !reviewStarted() && waited < 5000; waited += 25) {
+            await new Promise((resolve) => setTimeout(resolve, 25));
+        }
+        expect(reviewStarted()).toBe(true);
         expect(resolveAiReview).toBeDefined();
 
         resolveAiReview({ data: { success: true } });
@@ -1155,9 +1164,10 @@ describe('Dashboard Modification Workflow (local, mocked externals)', () => {
         expect(response.body.success).toBe(true);
         expect(response.body.correctedMenu).toBe(payload.menuContent);
         expect(response.body.hasChanges).toBe(false);
-        expect(response.body.basicCheckDiagnostics.structureGuard.safe).toBe(false);
-        expect(response.body.basicCheckDiagnostics.structureGuard.reasons).toContain('missing_submitted_line');
-        expect(response.body.basicCheckDiagnostics.structureGuard.metrics.missingMeaningfulLineSamples).toContain('Lagunitas N/A');
+        // The coordinator's source-anchored delivery rejects a model block that drops a
+        // submitted row before the legacy structure guard sees it; delivery fails closed.
+        expect(response.body.basicCheckDiagnostics.delivered.reviewStatus).toMatchObject({ complete: false, transportStatus: 'rejected' });
+        expect(response.body.basicCheckDiagnostics.parsed.correctedMenu).not.toContain('Lagunitas N/A');
     });
 
     test('basic-check suppresses missing-price false positive for priced add-on option rows', async () => {
@@ -1370,12 +1380,14 @@ describe('Dashboard Modification Workflow (local, mocked externals)', () => {
         expect(response.body.success).toBe(true);
         expect(response.body.suggestions).toEqual([]);
         expect(response.body.hasCriticalErrors).toBe(false);
-        expect(response.body.basicCheckDiagnostics.reconciliation.droppedSuggestions).toEqual([
-            expect.objectContaining({
-                reason: 'critical_resolved_in_corrected_menu',
-                matchedLine: 'Short Rib al Carbón, housemade tomatillo sauce, roasted tomato salsa, butter lettuce, pickled red onion 54',
-            }),
+        // The model re-wrapped the row, so source-anchored delivery rejects its block and
+        // reconciles against the submitted source, where the trailing 54 resolves the
+        // model's Missing Price critical.
+        expect(response.body.basicCheckDiagnostics.parsed.suggestions).toEqual([
+            expect.objectContaining({ type: 'Missing Price', severity: 'critical', menuItem: 'Short Rib al Carbón' }),
         ]);
+        expect(response.body.basicCheckDiagnostics.delivered.reviewStatus).toMatchObject({ complete: false, transportStatus: 'rejected' });
+        expect(response.body.correctedMenu).toContain('Short Rib al Carbón, housemade tomatillo sauce, roasted tomato salsa, butter lettuce, pickled red onion 54');
     });
 
     test('basic-check does not borrow the next dish price for a truly unpriced item', async () => {
