@@ -28,6 +28,7 @@ const corrected_menu_structure_guard_1 = require("./corrected-menu-structure-gua
 const allergen_suggestion_guard_1 = require("./allergen-suggestion-guard");
 const allergen_delivery_reconciliation_1 = require("./allergen-delivery-reconciliation");
 const allergen_source_preservation_1 = require("./allergen-source-preservation");
+const raw_marker_integrity_guard_1 = require("./raw-marker-integrity-guard");
 const apply_high_confidence_suggestions_1 = require("./apply-high-confidence-suggestions");
 const embedded_set_menu_guard_1 = require("./embedded-set-menu-guard");
 const price_integrity_guard_1 = require("./price-integrity-guard");
@@ -566,7 +567,7 @@ function normalizeRawAsteriskPlacementForLine(line) {
     }
     // If we extracted any suffix, place marker before suffix; otherwise keep at line end.
     if (trailingAllergens || trailingPrice) {
-        return `${working} *${trailingAllergens ? ` ${trailingAllergens}` : ''}${trailingPrice ? ` ${trailingPrice}` : ''}`.trim();
+        return `${working}*${trailingAllergens ? ` ${trailingAllergens}` : ''}${trailingPrice ? ` ${trailingPrice}` : ''}`.trim();
     }
     return `${working}*`;
 }
@@ -614,6 +615,14 @@ function runPostAiPipeline(args) {
     const finalAllergenPreservation = (0, allergen_source_preservation_1.preserveSubmittedAllergenCodes)(args.preCheckedReviewBody, correctedMenuSanitized, args.effectiveReviewAllergens || '');
     correctedMenuSanitized = finalAllergenPreservation.menuText;
     safetyDiagnostics.push(...finalAllergenPreservation.diagnostics);
+    // Raw markers are add-only: restore any submitted asterisk the model or
+    // post-processing dropped (runs after allergen preservation so a restored
+    // marker lands before the submitted allergen cluster).
+    const rawMarkerIntegrityGuard = (0, raw_marker_integrity_guard_1.guardCorrectedMenuRawMarkers)(args.preCheckedReviewBody, correctedMenuSanitized);
+    correctedMenuSanitized = rawMarkerIntegrityGuard.correctedMenu;
+    safetyDiagnostics.push(...rawMarkerIntegrityGuard.changes.map(change => `raw_marker_restored:${change.lineIndex}`));
+    if (rawMarkerIntegrityGuard.usedFullMenuFallback)
+        safetyDiagnostics.push('raw_marker_full_menu_fallback');
     const reconciliation = reconcileCriticalSuggestionsAgainstCorrectedMenuWithDiagnostics(correctedMenuSanitized, suggestionsAfterAutoApply);
     const reconciledSuggestions = reconciliation.suggestions;
     let finalSuggestions = reconciledSuggestions;
@@ -648,6 +657,7 @@ function runPostAiPipeline(args) {
         appliedHc,
         setMenuGuard,
         priceIntegrityGuard,
+        rawMarkerIntegrityGuard,
         correctedAfterHighConfidence,
         correctedMenuSanitized,
         reconciliation,

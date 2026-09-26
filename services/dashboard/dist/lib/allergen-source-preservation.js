@@ -6,6 +6,14 @@ const pre_ai_deterministic_rules_1 = require("./pre-ai-deterministic-rules");
 const normalizeRow = (value) => `${value || ''}`.normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ')
     .replace(/\s+/g, ' ').trim();
+// Code-shaped tokens a model may emit even when this menu's legend does not
+// define them (e.g. F for fish on a key without F). They must be recognized so
+// they can be stripped; they are never added back unless the chef submitted them.
+const COMMON_ALLERGEN_CODES = [
+    'A', 'C', 'CE', 'D', 'DF', 'E', 'ET', 'F', 'G', 'GF', 'L', 'M', 'MO',
+    'MU', 'N', 'P', 'PN', 'S', 'SE', 'SF', 'SL', 'SS', 'SU', 'SY', 'T', 'TN',
+    'V', 'VG',
+];
 function configuredCodes(legend) {
     const codes = new Set();
     for (const segment of `${legend || ''}`.split(/[|\n]/)) {
@@ -13,6 +21,11 @@ function configuredCodes(legend) {
         if (match?.[1])
             codes.add(match[1].toUpperCase());
     }
+    // No legend means no allergen program to protect (unchanged behavior).
+    if (codes.size === 0)
+        return codes;
+    for (const code of COMMON_ALLERGEN_CODES)
+        codes.add(code);
     return codes;
 }
 function extractCodes(line, validCodes) {

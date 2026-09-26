@@ -246,7 +246,7 @@ function applyRawAsteriskOnLine(line: string): string | null {
         working = working.slice(0, allergenMatch.index).trim();
     }
 
-    return `${leadingWhitespace}${working} *${trailingAllergens ? ` ${trailingAllergens}` : ''}${trailingPrice ? ` ${trailingPrice}` : ''}`.trimEnd();
+    return `${leadingWhitespace}${working}*${trailingAllergens ? ` ${trailingAllergens}` : ''}${trailingPrice ? ` ${trailingPrice}` : ''}`.trimEnd();
 }
 
 export function applyHighConfidenceSuggestionsToMenu(

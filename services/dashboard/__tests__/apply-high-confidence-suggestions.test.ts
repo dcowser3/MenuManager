@@ -207,7 +207,7 @@ describe('applyHighConfidenceSuggestionsToMenu', () => {
             },
         ]);
 
-        expect(menuText).toContain('avocado, wakame * C,D,E,F,G,M,PN,SL,SS,SY,TN 105');
+        expect(menuText).toContain('avocado, wakame* C,D,E,F,G,M,PN,SL,SS,SY,TN 105');
         expect(suggestions).toHaveLength(0);
     });
 });

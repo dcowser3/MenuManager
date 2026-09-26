@@ -55,7 +55,8 @@ describe('parseAIResponse (extracted from index.ts)', () => {
             effectiveReviewAllergens: 'D dairy | G gluten | N nuts | S shellfish | V vegetarian | VG vegan',
         });
         expect(result.structureGuard.safe).toBe(true);
-        expect(result.correctedMenuSanitized).toContain('Jumbo Shrimp, cocktail sauce, horseradish, lemons S');
+        // Accepted singular-ingredient guidance turns the garnish 'lemons' into 'lemon'; the S code is preserved.
+        expect(result.correctedMenuSanitized).toContain('Jumbo Shrimp, cocktail sauce, horseradish, lemon S');
         expect(result.correctedMenuSanitized).toContain('Snow Crab Claws & Crab Legs');
         expect(result.correctedMenuSanitized).not.toContain('Snow Crab Claws & Crab Legs S');
         expect(result.correctedMenuSanitized).not.toContain('Vegan Tiradito, cucumber, avocado, serrano, aguachile VG');
@@ -182,12 +183,17 @@ describe('parseAIResponse (extracted from index.ts)', () => {
 describe('normalizeRawAsteriskPlacement (post-AI canonicalization)', () => {
     test('moves the raw marker before trailing allergens and price', () => {
         expect(normalizeRawAsteriskPlacement('Steak Tartare*, capers, egg yolk D,G 24'))
-            .toBe('Steak Tartare, capers, egg yolk * D,G 24');
+            .toBe('Steak Tartare, capers, egg yolk* D,G 24');
+    });
+
+    test('never puts a space before the raw marker', () => {
+        expect(normalizeRawAsteriskPlacement('Tán Ceviche Trio, signature ceviches, tán ceviche *S 48'))
+            .toBe('Tán Ceviche Trio, signature ceviches, tán ceviche* S 48');
     });
 
     test('collapses duplicate markers to a single canonical marker', () => {
         expect(normalizeRawAsteriskPlacement('Salmon Crudo*, ponzu* 16'))
-            .toBe('Salmon Crudo, ponzu * 16');
+            .toBe('Salmon Crudo, ponzu* 16');
     });
 
     test('leaves titles, legends, and the raw notice untouched', () => {
@@ -204,7 +210,7 @@ describe('normalizeRawAsteriskPlacement (post-AI canonicalization)', () => {
 // the author's marker position.
 describe("rawMarkerPlacement branch in parseAIResponse", () => {
     const authored = 'Steak Tartare*, capers, egg yolk D,G 24';
-    const canonical = 'Steak Tartare, capers, egg yolk * D,G 24';
+    const canonical = 'Steak Tartare, capers, egg yolk* D,G 24';
 
     afterEach(() => {
         mockRawMarkerPlacement = 'description_end';
@@ -746,5 +752,44 @@ describe('enforceAllergenProgramCheck', () => {
         const existing = [{ type: 'Spelling', severity: 'normal', menuItem: 'Crab Cake' }];
         const result = enforceAllergenProgramCheck(uncodedMenu, existing);
         expect(result).toHaveLength(2);
+    });
+});
+
+describe('tan dinner 2026-09-21 regression (allergen lock + raw marker)', () => {
+    const legend = 'G contains gluten | V vegetarian | D contains dairy | S contain shellfish | N contain nuts | VG vegan';
+    const original = [
+        'Tán Ceviche, lobster, shrimp, bay scallop, coconut leche de tigre, kaffir oil* S 26',
+        'Seabass & Shrimp Ceviche, cucumber, red onion, macha-aguachile, cilantro, avocado* S 23',
+        'Tán Ceviche Trio, signature ceviches, amarillo, tuluminati, tán ceviche* S 48',
+    ].join('\n');
+
+    test('strips an AI-added F the key does not define and keeps the chef asterisk', () => {
+        // Model output recorded in basic_ai_check_audits d8791b30 (excerpt).
+        const modelLines = [
+            'Tán Ceviche, lobster, shrimp, bay scallop, coconut leche de tigre, kaffir oil* S 26',
+            'Seabass & Shrimp Ceviche, cucumber, red onion, macha-aguachile, cilantro, avocado F,S 23',
+            'Tán Ceviche Trio, signature ceviches, amarillo, tuluminati, tán ceviche* F,S 48',
+        ];
+        const result = runPostAiPipeline({
+            feedback: buildFeedback(modelLines.join('\n'), [{
+                type: 'Allergen Code',
+                confidence: 'medium',
+                menuItem: 'Seabass & Shrimp Ceviche',
+                description: "Seabass is a fish and the menu's allergen key defines fish as F.",
+                recommendation: 'Retain F,S allergen codes.',
+            }]),
+            preCheckedReviewBody: original,
+            effectiveReviewAllergens: legend,
+            acceptedCorrectionRules: [],
+            embeddedSetMenuAnalysis: { sections: [], issues: [] },
+            precheckEnabled: true,
+        });
+
+        expect(result.correctedMenuSanitized).toBe(original);
+        expect(result.finalSuggestions).not.toContainEqual(expect.objectContaining({ recommendation: 'Retain F,S allergen codes.' }));
+        expect(result.finalSuggestions).toContainEqual(expect.objectContaining({
+            menuItem: 'Seabass & Shrimp Ceviche',
+            recommendation: expect.stringContaining('Not applied'),
+        }));
     });
 });
