@@ -69,6 +69,20 @@ describe('reconcileSuggestionsWithDeliveredMenu: allergen suggestions', () => {
         expect(result.suggestions[0].recommendation).toBe("Confirm with the chef before changing this dish's allergen codes.");
         expect(result.diagnostics).toContain('suggestion_delivery_row_unresolved:allergen:Soup');
     });
+    test('leaves the menu-wide "no allergen program" critical untouched (regression from #9)', () => {
+        const critical = {
+            type: 'Allergen Code', confidence: 'high', severity: 'critical', menuItem: 'Entire menu',
+            description: 'No dishes on this menu carry allergen codes — the menu has no allergen program.',
+            recommendation: 'Code each dish per the allergen key (e.g., D dairy, G gluten, N nuts, S shellfish) so allergen information is available at a glance.',
+        };
+        const result = (0, suggestion_delivery_reconciliation_1.reconcileSuggestionsWithDeliveredMenu)('Tecate 7\nPacifico 7', 'Tecate 7\nPacifico 7', [critical], '');
+        expect(result.suggestions).toEqual([critical]);
+        expect(result.diagnostics).toEqual([]);
+    });
+    test('leaves an unresolvable-row advisory note untouched when it claims no change', () => {
+        const note = { type: 'Allergen Code', menuItem: 'Chef special', description: 'Nuts may be present.', recommendation: 'Confirm whether N applies.' };
+        expect((0, suggestion_delivery_reconciliation_1.reconcileSuggestionsWithDeliveredMenu)('Soup D 8', 'Soup D 8', [note], RSH_LEGEND).suggestions).toEqual([note]);
+    });
     test('drops exact duplicates produced by the rewrite', () => {
         const row = 'Oysters D,G 20';
         const s = { type: 'Allergen Code', menuItem: 'Oysters', description: 'The S code was added.', recommendation: 'Retain S.' };

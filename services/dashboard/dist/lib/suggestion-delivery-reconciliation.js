@@ -42,6 +42,9 @@ const CODE_LIST = /(?:['"‘’“”]([A-Z]{1,3}(?:\s*,\s*[A-Z]{1,3})*)['"‘�
 const normalize = (value) => `${value || ''}`.normalize('NFD')
     .replace(/[̀-ͯ]/g, '').toLowerCase().replace(/\*/g, '')
     .replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
+function isMenuWide(menuItem) {
+    return /^\s*(?:entire|whole|full|all)\s+(?:menu|dishes|items)\s*$|^\s*(?:menu|general|n\/a)\s*$/i.test(`${menuItem || ''}`);
+}
 function categorize(suggestion) {
     const type = `${suggestion.type || ''}`.toLowerCase();
     if (/allergen/.test(type))
@@ -129,6 +132,13 @@ function reconcileAllergen(suggestion, submittedRow, deliveredRow, legend, diagn
         diagnostics.push(`unsupported_allergen_code_source_claim:${undefinedClaim[1].toUpperCase()}`);
         return null;
     }
+    // Menu-wide findings (e.g. the "no allergen program" critical on "Entire menu")
+    // are not about a dish row; leave them exactly as written.
+    if (submittedRow === null && isMenuWide(suggestion.menuItem))
+        return suggestion;
+    // A row we cannot resolve is only rewritten when its text claims a change.
+    if (submittedRow === null && !CHANGE_ASSERTION.test(description) && !APPLIED_RECOMMENDATION.test(recommendation))
+        return suggestion;
     const rowChanged = submittedRow !== null && deliveredRow !== null
         && (submittedCodes.length !== deliveredCodes.length || submittedCodes.some(code => !deliveredCodes.includes(code)));
     if (rowChanged) {
