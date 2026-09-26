@@ -11,7 +11,7 @@ import {
 import { MenuTitleGuardResult, preserveLeadingMenuTitle } from './menu-title-guard';
 import { CorrectedMenuStructureGuardResult, assessCorrectedMenuStructure } from './corrected-menu-structure-guard';
 import { guardAllergenAlphabetizationSuggestions } from './allergen-suggestion-guard';
-import { reconcileAllergenDeliveryClaims } from './allergen-delivery-reconciliation';
+import { reconcileSuggestionsWithDeliveredMenu } from './suggestion-delivery-reconciliation';
 import { preserveSubmittedAllergenCodes } from './allergen-source-preservation';
 import { guardCorrectedMenuRawMarkers } from './raw-marker-integrity-guard';
 import { applyHighConfidenceSuggestionsToMenu } from './apply-high-confidence-suggestions';
@@ -48,6 +48,10 @@ export type ReviewSuggestion = {
     spellingDisposition?: string;
     sourceToken?: string;
     suggestedReplacement?: string;
+    /** Set by suggestion-delivery reconciliation: whether the delivered menu contains this change. */
+    deliveryStatus?: 'applied' | 'not_applied';
+    /** Delivered value for the suggestion's field (e.g. allergen codes "D,G" or "asterisk"). */
+    deliveredValue?: string;
 };
 
 export type ParsedAiResponse = {
@@ -848,9 +852,16 @@ export function runPostAiPipeline(args: PostAiPipelineArgs): PostAiPipelineResul
         args.canonicalSpellingFindings || []
     );
     finalSuggestions = spellingAdjudication.suggestions as ReviewSuggestion[];
-    const allergenDelivery = reconcileAllergenDeliveryClaims(args.preCheckedReviewBody, correctedMenuSanitized, finalSuggestions);
-    finalSuggestions = allergenDelivery.suggestions;
-    safetyDiagnostics.push(...allergenDelivery.diagnostics);
+    // Last suggestion stage: every allergen / raw-marker suggestion must describe
+    // the DELIVERED menu, not the model's draft that guards may have reverted.
+    const suggestionDelivery = reconcileSuggestionsWithDeliveredMenu(
+        args.preCheckedReviewBody,
+        correctedMenuSanitized,
+        finalSuggestions,
+        args.effectiveReviewAllergens || '',
+    );
+    finalSuggestions = suggestionDelivery.suggestions;
+    safetyDiagnostics.push(...suggestionDelivery.diagnostics);
 
     const hasCriticalErrors = finalSuggestions.some(s => s.severity === 'critical');
     const criticalSuggestions = finalSuggestions.filter(s => s.severity === 'critical');

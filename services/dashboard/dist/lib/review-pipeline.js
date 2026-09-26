@@ -26,7 +26,7 @@ const pre_ai_deterministic_rules_1 = require("./pre-ai-deterministic-rules");
 const menu_title_guard_1 = require("./menu-title-guard");
 const corrected_menu_structure_guard_1 = require("./corrected-menu-structure-guard");
 const allergen_suggestion_guard_1 = require("./allergen-suggestion-guard");
-const allergen_delivery_reconciliation_1 = require("./allergen-delivery-reconciliation");
+const suggestion_delivery_reconciliation_1 = require("./suggestion-delivery-reconciliation");
 const allergen_source_preservation_1 = require("./allergen-source-preservation");
 const raw_marker_integrity_guard_1 = require("./raw-marker-integrity-guard");
 const apply_high_confidence_suggestions_1 = require("./apply-high-confidence-suggestions");
@@ -641,9 +641,11 @@ function runPostAiPipeline(args) {
     finalSuggestions = detectKnownTextArtifactSuggestions(correctedMenuSanitized, finalSuggestions);
     const spellingAdjudication = (0, canonical_vocabulary_1.adjudicateCanonicalSpellingFindings)(correctedMenuSanitized, finalSuggestions, args.canonicalSpellingFindings || []);
     finalSuggestions = spellingAdjudication.suggestions;
-    const allergenDelivery = (0, allergen_delivery_reconciliation_1.reconcileAllergenDeliveryClaims)(args.preCheckedReviewBody, correctedMenuSanitized, finalSuggestions);
-    finalSuggestions = allergenDelivery.suggestions;
-    safetyDiagnostics.push(...allergenDelivery.diagnostics);
+    // Last suggestion stage: every allergen / raw-marker suggestion must describe
+    // the DELIVERED menu, not the model's draft that guards may have reverted.
+    const suggestionDelivery = (0, suggestion_delivery_reconciliation_1.reconcileSuggestionsWithDeliveredMenu)(args.preCheckedReviewBody, correctedMenuSanitized, finalSuggestions, args.effectiveReviewAllergens || '');
+    finalSuggestions = suggestionDelivery.suggestions;
+    safetyDiagnostics.push(...suggestionDelivery.diagnostics);
     const hasCriticalErrors = finalSuggestions.some(s => s.severity === 'critical');
     const criticalSuggestions = finalSuggestions.filter(s => s.severity === 'critical');
     return {

@@ -418,11 +418,12 @@ Only a canonical tenant raw-food notice may suppress a whole-menu generic missin
 
 ## Layer 5 — Reconciliation and deterministic critical checks
 
-### Allergen delivery claim reconciliation
+### Suggestions describe the delivered menu
 
-Model claims about added or retained allergen codes are reconciled against the submitted and delivered row bytes; unverified claims remain advisory and never assert an unapplied change.
+Final suggestion stage. Each allergen and raw-marker suggestion is compared with the delivered row (after every guard): clauses claiming the menu was changed are removed when the delivered row does not contain that change, allergen suggestions are marked not applied with the submitted codes and ask the chef to confirm (flagging codes the menu key does not define), requests to remove an asterisk are held, hallucinated "code X is not defined" premises are dropped, and duplicates are removed. Sets deliveryStatus/deliveredValue on the suggestion.
+- `Tikin-Xic Fish D,G,S 45: 'The corrected menu removes S; the key has no fish code.'` -> `'Allergen codes were not changed (kept as submitted: D,G,S). AI note: ...' (not applied)`
 
-- id: `post-ai/allergen-delivery-claim-reconciliation` · category: allergen_codes · implementation: `services/dashboard/lib/allergen-delivery-reconciliation.ts#reconcileAllergenDeliveryClaims`
+- id: `post-ai/suggestion-delivery-reconciliation` · category: allergen_codes · implementation: `services/dashboard/lib/suggestion-delivery-reconciliation.ts#reconcileSuggestionsWithDeliveredMenu`
 
 ### Resolved-critical reconciliation
 
