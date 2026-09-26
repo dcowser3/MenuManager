@@ -54,6 +54,7 @@ const util_1 = require("util");
 // Supabase client for dish extraction and alerting (optional - gracefully handles if not configured)
 const supabase_client_1 = require("@menumanager/supabase-client");
 const nodemailer_1 = __importDefault(require("nodemailer"));
+const llm_adapter_1 = require("@menumanager/llm-adapter");
 const tenant_config_1 = require("@menumanager/tenant-config");
 const approval_baseline_1 = require("./lib/approval-baseline");
 const smtp_config_1 = require("./lib/smtp-config");
@@ -3025,10 +3026,9 @@ async function requestErrorReportAiTriage(report, incident) {
         body: JSON.stringify({
             model: ERROR_REPORT_TRIAGE_MODEL,
             // This model falls back to IMPROVE_MODEL / AI_REVIEW_MODEL, so it
-            // inherits reasoning-class models (gpt-5 family), which reject a
-            // non-default temperature with a 400. Same test as isReasoningModel()
-            // in lib/improvement-cycle-core.ts.
-            ...(/o[0-9]|gpt-5|reasoning/i.test(ERROR_REPORT_TRIAGE_MODEL) ? {} : { temperature: 0.2 }),
+            // inherits reasoning-class models (gpt-5/gpt-6 families), which reject
+            // a non-default temperature with a 400. Uses the shared adapter table.
+            ...((0, llm_adapter_1.isReasoningModel)(ERROR_REPORT_TRIAGE_MODEL) ? {} : { temperature: 0.2 }),
             messages: [
                 {
                     role: 'system',

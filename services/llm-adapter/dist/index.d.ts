@@ -13,7 +13,7 @@ export type ModelCapabilities = {
 /**
  * Capability data for the model families currently used by the application.
  * The reasoning pattern deliberately preserves the historical
- * /o[0-9]|gpt-5|reasoning/i semantics; callers consult this table instead of
+ * /o[0-9]|gpt-(5|6)|reasoning/i semantics; callers consult this table instead of
  * carrying their own model regex.
  */
 export declare const MODEL_CAPABILITY_MAP: readonly {

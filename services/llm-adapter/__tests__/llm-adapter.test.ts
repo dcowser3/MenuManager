@@ -27,6 +27,8 @@ describe('llm adapter', () => {
 
     test.each([
         ['gpt-5.6-luna', false, 'max_completion_tokens'],
+        ['gpt-6-luna', false, 'max_completion_tokens'],
+        ['gpt-6-sol', false, 'max_completion_tokens'],
         ['o3', false, 'max_completion_tokens'],
         ['gpt-4o-mini-2024-07-18', true, 'max_tokens'],
     ])('shapes %s according to its capability entry', (model, supportsTemperature, maxTokensParam) => {

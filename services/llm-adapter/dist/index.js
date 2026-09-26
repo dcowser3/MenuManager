@@ -14,13 +14,13 @@ exports.callChat = callChat;
 /**
  * Capability data for the model families currently used by the application.
  * The reasoning pattern deliberately preserves the historical
- * /o[0-9]|gpt-5|reasoning/i semantics; callers consult this table instead of
+ * /o[0-9]|gpt-(5|6)|reasoning/i semantics; callers consult this table instead of
  * carrying their own model regex.
  */
 exports.MODEL_CAPABILITY_MAP = [
     {
         family: 'reasoning',
-        modelPattern: 'o[0-9]|gpt-5|reasoning',
+        modelPattern: 'o[0-9]|gpt-(?:5|6)|reasoning',
         supportsTemperature: false,
         maxTokensParam: 'max_completion_tokens',
         supportsSeed: true,
