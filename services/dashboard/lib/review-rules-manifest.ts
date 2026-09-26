@@ -325,12 +325,13 @@ const FUNCTIONAL_ENTRIES: ManifestRuleEntry[] = [
         source: 'code_metadata',
     },
     {
-        id: 'post-ai/allergen-delivery-claim-reconciliation',
+        id: 'post-ai/suggestion-delivery-reconciliation',
         layer: 'reconciliation',
         category: 'allergen_codes',
-        title: 'Allergen delivery claim reconciliation',
-        description: 'Model claims about added or retained allergen codes are reconciled against the submitted and delivered row bytes; unverified claims remain advisory and never assert an unapplied change.',
-        implementation: { file: 'services/dashboard/lib/allergen-delivery-reconciliation.ts', exportName: 'reconcileAllergenDeliveryClaims' },
+        title: 'Suggestions describe the delivered menu',
+        description: 'Final suggestion stage. Each allergen and raw-marker suggestion is compared with the delivered row (after every guard): clauses claiming the menu was changed are removed when the delivered row does not contain that change, allergen suggestions are marked not applied with the submitted codes and ask the chef to confirm (flagging codes the menu key does not define), requests to remove an asterisk are held, hallucinated "code X is not defined" premises are dropped, and duplicates are removed. Sets deliveryStatus/deliveredValue on the suggestion.',
+        examples: [{ before: "Tikin-Xic Fish D,G,S 45: 'The corrected menu removes S; the key has no fish code.'", after: "'Allergen codes were not changed (kept as submitted: D,G,S). AI note: ...' (not applied)" }],
+        implementation: { file: 'services/dashboard/lib/suggestion-delivery-reconciliation.ts', exportName: 'reconcileSuggestionsWithDeliveredMenu' },
         source: 'code_metadata',
     },
     {

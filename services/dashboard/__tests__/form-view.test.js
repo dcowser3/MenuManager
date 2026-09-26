@@ -748,4 +748,23 @@ describe('dashboard form modification source chooser', () => {
         expect(template).toContain("submitBtn.classList.remove('blocked');\n                submitBtn.textContent = 'Run Basic AI Check';");
         expect(template).toContain("submitBtn.innerHTML = '<span class=\"spinner\"></span>Running AI Check...';");
     });
+
+    test('suggestion cards mark server-reported not-applied changes', () => {
+        const template = readView();
+        const start = template.indexOf('function renderSuggestionCard(');
+        const end = template.indexOf('function updateSubmitButtonState(', start);
+        expect(start).toBeGreaterThan(-1);
+        const context = {
+            criticalErrorOverrides: {},
+            escapeHtml: (value) => String(value ?? ''),
+            getSuggestionChangePair: () => null,
+        };
+        vm.createContext(context);
+        vm.runInContext(`${template.slice(start, end)}; this.renderSuggestionCard = renderSuggestionCard;`, context);
+
+        const base = { type: 'Allergen Code', confidence: 'medium', severity: 'normal', menuItem: 'Tikin-Xic Fish', description: 'd', recommendation: 'r' };
+        expect(context.renderSuggestionCard({ ...base, deliveryStatus: 'not_applied' }, 0)).toContain('NOT APPLIED');
+        expect(context.renderSuggestionCard(base, 0)).not.toContain('NOT APPLIED');
+        expect(context.renderSuggestionCard({ ...base, deliveryStatus: 'applied' }, 0)).not.toContain('NOT APPLIED');
+    });
 });

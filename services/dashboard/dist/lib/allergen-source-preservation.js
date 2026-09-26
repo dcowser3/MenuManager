@@ -1,6 +1,10 @@
 "use strict";
 /** Preserve chef-authored allergen semantics across model and delivery lanes. */
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.COMMON_ALLERGEN_CODES = void 0;
+exports.configuredCodes = configuredCodes;
+exports.legendDefinedCodes = legendDefinedCodes;
+exports.allergenCodesOnLine = allergenCodesOnLine;
 exports.preserveSubmittedAllergenCodes = preserveSubmittedAllergenCodes;
 const pre_ai_deterministic_rules_1 = require("./pre-ai-deterministic-rules");
 const normalizeRow = (value) => `${value || ''}`.normalize('NFD')
@@ -9,22 +13,17 @@ const normalizeRow = (value) => `${value || ''}`.normalize('NFD')
 // Code-shaped tokens a model may emit even when this menu's legend does not
 // define them (e.g. F for fish on a key without F). They must be recognized so
 // they can be stripped; they are never added back unless the chef submitted them.
-const COMMON_ALLERGEN_CODES = [
+exports.COMMON_ALLERGEN_CODES = [
     'A', 'C', 'CE', 'D', 'DF', 'E', 'ET', 'F', 'G', 'GF', 'L', 'M', 'MO',
     'MU', 'N', 'P', 'PN', 'S', 'SE', 'SF', 'SL', 'SS', 'SU', 'SY', 'T', 'TN',
     'V', 'VG',
 ];
 function configuredCodes(legend) {
-    const codes = new Set();
-    for (const segment of `${legend || ''}`.split(/[|\n]/)) {
-        const match = segment.trim().match(/^([A-Za-z]{1,3})\b/);
-        if (match?.[1])
-            codes.add(match[1].toUpperCase());
-    }
+    const codes = legendDefinedCodes(legend);
     // No legend means no allergen program to protect (unchanged behavior).
     if (codes.size === 0)
         return codes;
-    for (const code of COMMON_ALLERGEN_CODES)
+    for (const code of exports.COMMON_ALLERGEN_CODES)
         codes.add(code);
     return codes;
 }
@@ -37,6 +36,23 @@ function extractCodes(line, validCodes) {
     if (!codes.length || codes.some(code => !validCodes.has(code)))
         return { codes: [], body: priced.body, price: priced.price };
     return { codes, body: priced.body.slice(0, match.index).trimEnd(), price: priced.price };
+}
+/** Codes the menu's own allergen legend defines (excludes the common fallback set). */
+function legendDefinedCodes(legend) {
+    const codes = new Set();
+    for (const segment of `${legend || ''}`.split(/[|\n]/)) {
+        const match = segment.trim().match(/^([A-Za-z]{1,3})\b/);
+        if (match?.[1])
+            codes.add(match[1].toUpperCase());
+    }
+    return codes;
+}
+/** Trailing allergen codes on one menu row, using the same recognition as preservation. */
+function allergenCodesOnLine(line, legend) {
+    const validCodes = configuredCodes(legend);
+    if (!validCodes.size)
+        return [];
+    return extractCodes(line, validCodes).codes;
 }
 function renderWithCodes(line, codes, validCodes) {
     const priced = (0, pre_ai_deterministic_rules_1.splitTrailingPrice)(line);

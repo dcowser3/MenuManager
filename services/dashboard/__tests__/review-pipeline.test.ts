@@ -789,7 +789,54 @@ describe('tan dinner 2026-09-21 regression (allergen lock + raw marker)', () => 
         expect(result.finalSuggestions).not.toContainEqual(expect.objectContaining({ recommendation: 'Retain F,S allergen codes.' }));
         expect(result.finalSuggestions).toContainEqual(expect.objectContaining({
             menuItem: 'Seabass & Shrimp Ceviche',
-            recommendation: expect.stringContaining('Not applied'),
+            deliveryStatus: 'not_applied',
+            description: 'Allergen codes were not changed (kept as submitted: S). AI note: Seabass is a fish.',
+            recommendation: "Confirm with the chef before changing this dish's allergen codes. F is not defined in this menu's allergen key.",
         }));
+    });
+});
+
+describe('prod audit 47df1fe9 (2026-09-26): suggestions must match the delivered menu', () => {
+    const legend = 'G contains gluten | V vegetarian | D contains dairy | S contain shellfish | N contain nuts | VG vegan';
+    const submitted = [
+        'Tikin-Xic Fish, whole branzino, red chili & green tomatillo adobo marinade, creamy plantain, pickled onion, black bean purée D,G,S 45',
+        'Salmon a la Talla, pepita pipián, celery root purée, roasted parsnip, green sprouts* D,G,S 34',
+        'Yucatán Chicken, adobo marinade, potato espuma, roasted broccolini, cilantro, salsa criolla D,G,S 32',
+    ].join('\n');
+    const modelMenu = submitted.replace(/ D,G,S /g, ' D,G ');
+    const claim = (menuItem: string, fish: string) => ({
+        type: 'Allergen Code', menuItem, severity: 'normal', confidence: 'medium',
+        description: `The original S code indicates shellfish, but the visible seafood ingredient is ${fish}, which is fish rather than shellfish. The corrected menu removes S; the current allergen key does not define a fish code.`,
+        recommendation: 'Confirm the intended fish-allergen code and consider adding a fish designation to the allergen key.',
+    });
+
+    test('S stays on every dish and no suggestion says it was removed', () => {
+        const result = runPostAiPipeline({
+            feedback: buildFeedback(modelMenu, [
+                claim('Tikin-Xic Fish', 'branzino'),
+                claim('Salmon a la Talla', 'salmon'),
+                {
+                    type: 'Allergen Code', menuItem: 'Yucatán Chicken', severity: 'normal', confidence: 'medium',
+                    description: 'The visible ingredients do not clearly indicate shellfish, although the original line includes S.',
+                    recommendation: 'Confirm whether S is intended; remove it if the adobo marinade and salsa criolla contain no shellfish.',
+                },
+            ]),
+            preCheckedReviewBody: submitted,
+            effectiveReviewAllergens: legend,
+            acceptedCorrectionRules: [],
+            embeddedSetMenuAnalysis: { sections: [], issues: [] },
+            precheckEnabled: true,
+        });
+
+        expect(result.correctedMenuSanitized).toBe(submitted);
+        const allergen = result.finalSuggestions.filter(s => s.type === 'Allergen Code');
+        expect(allergen).toHaveLength(3);
+        for (const suggestion of allergen) {
+            expect(suggestion.deliveryStatus).toBe('not_applied');
+            expect(suggestion.deliveredValue).toBe('D,G,S');
+            expect(suggestion.description).toMatch(/^Allergen codes were not changed \(kept as submitted: D,G,S\)\./);
+            expect(`${suggestion.description} ${suggestion.recommendation}`).not.toMatch(/corrected menu removes/i);
+        }
+        expect(allergen[2].recommendation).toBe('Confirm whether S is intended; remove it if the adobo marinade and salsa criolla contain no shellfish.');
     });
 });

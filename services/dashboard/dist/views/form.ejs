@@ -7434,11 +7434,18 @@
                 ? `<div class="suggestion-actions">${applyBtnHtml}${overrideBtnHtml}</div>`
                 : '';
 
+            // Set server-side by suggestion-delivery reconciliation: the delivered
+            // menu does NOT contain this change (e.g. allergen codes are locked).
+            const notAppliedHtml = suggestion.deliveryStatus === 'not_applied'
+                ? `<span class="confidence-badge" title="This change was not made to your menu. Review and apply it yourself if it is correct.">NOT APPLIED</span>`
+                : '';
+
             return `
                 <div class="suggestion-item ${criticalClass} ${overriddenClass}" data-suggestion-index="${idx}">
                     <div class="suggestion-type">
                         ${escapeHtml(suggestion.type)}
                         ${badgeHtml}
+                        ${notAppliedHtml}
                     </div>
                     ${suggestion.menuItem ? `<div style="font-weight: 600; color: var(--color-text); font-size: 0.75rem; margin: 0.25rem 0;">Item: ${escapeHtml(suggestion.menuItem)}</div>` : ''}
                     <div class="suggestion-detail">${escapeHtml(suggestion.description)}</div>

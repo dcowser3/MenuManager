@@ -15,18 +15,14 @@ const normalizeRow = (value: string): string => `${value || ''}`.normalize('NFD'
 // Code-shaped tokens a model may emit even when this menu's legend does not
 // define them (e.g. F for fish on a key without F). They must be recognized so
 // they can be stripped; they are never added back unless the chef submitted them.
-const COMMON_ALLERGEN_CODES = [
+export const COMMON_ALLERGEN_CODES: readonly string[] = [
     'A', 'C', 'CE', 'D', 'DF', 'E', 'ET', 'F', 'G', 'GF', 'L', 'M', 'MO',
     'MU', 'N', 'P', 'PN', 'S', 'SE', 'SF', 'SL', 'SS', 'SU', 'SY', 'T', 'TN',
     'V', 'VG',
 ];
 
-function configuredCodes(legend: string): Set<string> {
-    const codes = new Set<string>();
-    for (const segment of `${legend || ''}`.split(/[|\n]/)) {
-        const match = segment.trim().match(/^([A-Za-z]{1,3})\b/);
-        if (match?.[1]) codes.add(match[1].toUpperCase());
-    }
+export function configuredCodes(legend: string): Set<string> {
+    const codes = legendDefinedCodes(legend);
     // No legend means no allergen program to protect (unchanged behavior).
     if (codes.size === 0) return codes;
     for (const code of COMMON_ALLERGEN_CODES) codes.add(code);
@@ -40,6 +36,23 @@ function extractCodes(line: string, validCodes: Set<string>): { codes: string[];
     const codes = match[1].split(/\s*,\s*/).map(code => code.replace(/^\*/, '').toUpperCase());
     if (!codes.length || codes.some(code => !validCodes.has(code))) return { codes: [], body: priced.body, price: priced.price };
     return { codes, body: priced.body.slice(0, match.index).trimEnd(), price: priced.price };
+}
+
+/** Codes the menu's own allergen legend defines (excludes the common fallback set). */
+export function legendDefinedCodes(legend: string): Set<string> {
+    const codes = new Set<string>();
+    for (const segment of `${legend || ''}`.split(/[|\n]/)) {
+        const match = segment.trim().match(/^([A-Za-z]{1,3})\b/);
+        if (match?.[1]) codes.add(match[1].toUpperCase());
+    }
+    return codes;
+}
+
+/** Trailing allergen codes on one menu row, using the same recognition as preservation. */
+export function allergenCodesOnLine(line: string, legend: string): string[] {
+    const validCodes = configuredCodes(legend);
+    if (!validCodes.size) return [];
+    return extractCodes(line, validCodes).codes;
 }
 
 function renderWithCodes(line: string, codes: string[], validCodes: Set<string>): string {
