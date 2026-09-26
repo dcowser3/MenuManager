@@ -214,7 +214,7 @@ function applyRawAsteriskOnLine(line) {
         trailingAllergens = allergenMatch[1];
         working = working.slice(0, allergenMatch.index).trim();
     }
-    return `${leadingWhitespace}${working} *${trailingAllergens ? ` ${trailingAllergens}` : ''}${trailingPrice ? ` ${trailingPrice}` : ''}`.trimEnd();
+    return `${leadingWhitespace}${working}*${trailingAllergens ? ` ${trailingAllergens}` : ''}${trailingPrice ? ` ${trailingPrice}` : ''}`.trimEnd();
 }
 function applyHighConfidenceSuggestionsToMenu(menuText, suggestions) {
     if (!menuText || !Array.isArray(suggestions) || suggestions.length === 0) {

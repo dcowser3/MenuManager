@@ -8,7 +8,6 @@ exports.ruleAppliesToTemplateType = ruleAppliesToTemplateType;
 exports.normalizeSingularIngredientFormsOnLine = normalizeSingularIngredientFormsOnLine;
 exports.normalizeContextualCompoundDescriptorsOnLine = normalizeContextualCompoundDescriptorsOnLine;
 exports.ensureCotijaCheeseModifierOnLine = ensureCotijaCheeseModifierOnLine;
-exports.normalizeShrimpCevicheRawMarkerOnLine = normalizeShrimpCevicheRawMarkerOnLine;
 exports.addInteriorSalmonOptionMarker = addInteriorSalmonOptionMarker;
 exports.getAcceptedCorrectionRulePreAiEligibility = getAcceptedCorrectionRulePreAiEligibility;
 exports.canonicalizeFinalTerms = canonicalizeFinalTerms;
@@ -766,33 +765,18 @@ function normalizeRawAsteriskPlacementForLine(line) {
 }
 const RAW_ASTERISK_TERM_PATTERN = /\b(?:sashimi|tartare|carpaccio|crudo|ceviche|tiradito|poke|raw\s+(?:tuna|salmon|hamachi|fish|beef|oysters?)|oysters?\s+on\s+the\s+half\s+shell|half[-\s]shell\s+oysters?|sunny[-\s]side(?:[-\s]up)?\s+eggs?|sunny[-\s]side[-\s]up|poached\s+eggs?|soft[-\s]boiled|rib[-\s]?eye|hollandaise|bearnaise|béarnaise|caesar\s+dressing|tiramisu|cured\s+egg\s+yolk|meringue|egg[-\s]+white)\b/i;
 const INDEPENDENT_RAW_TERM_PATTERN = /\b(?:sashimi|tartare|carpaccio|crudo|tiradito|poke|raw|uncooked|undercooked|oysters?\s+on\s+the\s+half\s+shell|half[-\s]shell\s+oysters?|sunny[-\s]side(?:[-\s]up)?\s+eggs?|sunny[-\s]side[-\s]up|poached\s+eggs?|soft[-\s]boiled|hollandaise|bearnaise|béarnaise|caesar\s+dressing|tiramisu|cured\s+egg\s+yolk|meringue|egg[-\s]+white)\b/i;
+// Fish named on the same line means the ceviche is not shrimp-only
+// ("Seabass & Shrimp Ceviche"), so the cooked-shrimp exemption must not apply.
+const CEVICHE_FISH_TERM_PATTERN = /\b(?:fish|sea\s*bass|seabass|bass|branzino|tuna|ahi|hamachi|yellowtail|salmon|snapper|huachinango|corvina|halibut|fluke|sole|mackerel|cod|grouper|mahi|swordfish|octopus|scallops?)\b/i;
 function isCookedShrimpCevicheLine(line) {
     const normalized = `${line || ''}`.toLowerCase();
     return /\b(?:shrimp|prawn)\s+ceviche\b/.test(normalized)
-        && !INDEPENDENT_RAW_TERM_PATTERN.test(normalized);
+        && !INDEPENDENT_RAW_TERM_PATTERN.test(normalized)
+        && !CEVICHE_FISH_TERM_PATTERN.test(normalized);
 }
-/** Shrimp ceviche is cooked under the approved house rule unless raw is explicit. */
-function normalizeShrimpCevicheRawMarkerOnLine(line, lineIndex) {
-    if (!isCookedShrimpCevicheLine(line) || !line.includes('*')) {
-        return { line, corrections: [] };
-    }
-    const corrected = line.replace(/\s*\*\s*/g, (match) => (/\s/.test(match) ? ' ' : ''))
-        .replace(/\s{2,}/g, ' ')
-        .trimEnd();
-    if (corrected === line)
-        return { line, corrections: [] };
-    return {
-        line: corrected,
-        corrections: [{
-                type: 'Raw Item',
-                source: 'built_in',
-                original: line,
-                corrected,
-                lineIndex,
-                rule: 'Shrimp ceviche is treated as cooked unless raw or undercooked content is explicit.',
-            }],
-    };
-}
+// Raw markers are add-only (see raw-marker-integrity-guard.ts). The
+// cooked-shrimp-ceviche house note only WITHHOLDS an automatic marker on
+// shrimp-only ceviche; a marker the chef wrote is never removed.
 function shouldAddRawAsterisk(line) {
     const normalized = line.toLowerCase();
     if (!normalized.trim() || normalized.includes('*') || /consuming raw or undercooked/.test(normalized)) {
@@ -1043,9 +1027,6 @@ function runPreAiDeterministicChecks(menuText, options = {}) {
         const allergenResult = normalizeAllergenClusterOnLine(nextLine, lineIndex, validAllergenCodes);
         nextLine = allergenResult.line;
         appliedCorrections.push(...allergenResult.corrections);
-        const shrimpCevicheResult = normalizeShrimpCevicheRawMarkerOnLine(nextLine, lineIndex);
-        nextLine = shrimpCevicheResult.line;
-        appliedCorrections.push(...shrimpCevicheResult.corrections);
         const interiorSalmon = addInteriorSalmonOptionMarker(nextLine);
         const interiorSalmonApplied = interiorSalmon !== nextLine;
         if (interiorSalmonApplied) {

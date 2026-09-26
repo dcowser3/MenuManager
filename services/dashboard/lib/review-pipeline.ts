@@ -13,6 +13,7 @@ import { CorrectedMenuStructureGuardResult, assessCorrectedMenuStructure } from 
 import { guardAllergenAlphabetizationSuggestions } from './allergen-suggestion-guard';
 import { reconcileAllergenDeliveryClaims } from './allergen-delivery-reconciliation';
 import { preserveSubmittedAllergenCodes } from './allergen-source-preservation';
+import { guardCorrectedMenuRawMarkers } from './raw-marker-integrity-guard';
 import { applyHighConfidenceSuggestionsToMenu } from './apply-high-confidence-suggestions';
 import {
     EmbeddedSetMenuAnalysis,
@@ -698,7 +699,7 @@ function normalizeRawAsteriskPlacementForLine(line: string): string {
 
     // If we extracted any suffix, place marker before suffix; otherwise keep at line end.
     if (trailingAllergens || trailingPrice) {
-        return `${working} *${trailingAllergens ? ` ${trailingAllergens}` : ''}${trailingPrice ? ` ${trailingPrice}` : ''}`.trim();
+        return `${working}*${trailingAllergens ? ` ${trailingAllergens}` : ''}${trailingPrice ? ` ${trailingPrice}` : ''}`.trim();
     }
 
     return `${working}*`;
@@ -730,6 +731,7 @@ export type PostAiPipelineResult = {
     appliedHc: ReturnType<typeof applyHighConfidenceSuggestionsToMenu>;
     setMenuGuard: ReturnType<typeof guardEmbeddedSetMenuPrices>;
     priceIntegrityGuard: ReturnType<typeof guardCorrectedMenuPrices>;
+    rawMarkerIntegrityGuard: ReturnType<typeof guardCorrectedMenuRawMarkers>;
     correctedAfterHighConfidence: string;
     correctedMenuSanitized: string;
     reconciliation: ReturnType<typeof reconcileCriticalSuggestionsAgainstCorrectedMenuWithDiagnostics>;
@@ -812,6 +814,13 @@ export function runPostAiPipeline(args: PostAiPipelineArgs): PostAiPipelineResul
     const finalAllergenPreservation = preserveSubmittedAllergenCodes(args.preCheckedReviewBody, correctedMenuSanitized, args.effectiveReviewAllergens || '');
     correctedMenuSanitized = finalAllergenPreservation.menuText;
     safetyDiagnostics.push(...finalAllergenPreservation.diagnostics);
+    // Raw markers are add-only: restore any submitted asterisk the model or
+    // post-processing dropped (runs after allergen preservation so a restored
+    // marker lands before the submitted allergen cluster).
+    const rawMarkerIntegrityGuard = guardCorrectedMenuRawMarkers(args.preCheckedReviewBody, correctedMenuSanitized);
+    correctedMenuSanitized = rawMarkerIntegrityGuard.correctedMenu;
+    safetyDiagnostics.push(...rawMarkerIntegrityGuard.changes.map(change => `raw_marker_restored:${change.lineIndex}`));
+    if (rawMarkerIntegrityGuard.usedFullMenuFallback) safetyDiagnostics.push('raw_marker_full_menu_fallback');
     const reconciliation = reconcileCriticalSuggestionsAgainstCorrectedMenuWithDiagnostics(
         correctedMenuSanitized,
         suggestionsAfterAutoApply
@@ -857,6 +866,7 @@ export function runPostAiPipeline(args: PostAiPipelineArgs): PostAiPipelineResul
         appliedHc,
         setMenuGuard,
         priceIntegrityGuard,
+        rawMarkerIntegrityGuard,
         correctedAfterHighConfidence,
         correctedMenuSanitized,
         reconciliation,

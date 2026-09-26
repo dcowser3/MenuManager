@@ -134,6 +134,57 @@ describe('runPreAiDeterministicChecks', () => {
             'Taco, sautéed prawns, avocado 18',
         ].join('\n'));
     });
+    it('applies the frozen contextual singularization corrections without flattening exceptions', () => {
+        const result = (0, pre_ai_deterministic_rules_1.runPreAiDeterministicChecks)([
+            'Kale Salad, grilled cinnamon apples, heirloom cherry tomato, roasted beet root, golden raisins, candied sesame seeds, orange balsamic vinaigrette VG',
+            'Pepper Plate, baby bell peppers, Brussels Sprouts, whipped potatoes 18',
+            'Harvest, pickled red onions, candied pecans, pickled raisins, beets, candied walnuts, mandarins, lemons 20',
+            'Salad, cornbread croutons, spiced pepitas, Colorado apples, candied pepitas 16',
+            'Salad, spiced pepitas D,G 16',
+            'Beet Salad, caramelized walnuts, pistou herbs D,G 18',
+            'Garden Salad, mixed herbs, sesame seeds V 16',
+        ].join('\n'));
+        expect(result.menuText).toBe([
+            'Kale Salad, grilled cinnamon apple, heirloom cherry tomato, roasted beet root, golden raisin, candied sesame seed, orange balsamic vinaigrette VG',
+            'Pepper Plate, baby bell pepper, Brussels Sprouts, whipped potato 18',
+            'Harvest, pickled red onion, candied pecan, pickled raisin, beet, candied walnut, mandarin, lemon 20',
+            'Salad, cornbread crouton, spiced pepita, Colorado apple, candied pepita 16',
+            'Salad, spiced pepita D,G 16',
+            'Beet Salad, caramelized walnut, pistou herb D,G 18',
+            'Garden Salad, mixed herbs, sesame seeds V 16',
+        ].join('\n'));
+    });
+    it('adds named cheese modifiers only in ingredient descriptions', () => {
+        const result = (0, pre_ai_deterministic_rules_1.runPreAiDeterministicChecks)([
+            'Salad, cucumbers, carrots, beets, mozzarella, feta, parmesan 18',
+            'Mozzarella Special, feta cheese, parmesan-style crisp 20',
+        ].join('\n'));
+        expect(result.menuText).toBe([
+            'Salad, cucumber, carrot, beet, mozzarella cheese, feta cheese, parmesan cheese 18',
+            'Mozzarella Special, feta cheese, parmesan-style crisp 20',
+        ].join('\n'));
+    });
+    it('marks a bare salmon option inside a multi-option line without broad salmon matching', () => {
+        const result = (0, pre_ai_deterministic_rules_1.runPreAiDeterministicChecks)([
+            'grilled chicken, salmon, pasta Bolognese D G, seasonal vegetables, pepperoni & cheese pizza D G',
+            'Salmon Sauce, lemon, dill D 12',
+            'Fish Soup, salmon, dill D 12',
+            'fish soup, salmon, dill, lemon, bread D 12',
+            'Salmon Benedict, poached eggs, hollandaise D 18',
+            'Salmon Ceviche, lime, onion F 18',
+            'Surf and Turf, salmon, ribeye F 48',
+        ].join('\n'));
+        expect(result.menuText).toBe([
+            'grilled chicken, salmon*, pasta Bolognese D G, seasonal vegetables, pepperoni & cheese pizza D G',
+            'Salmon Sauce, lemon, dill D 12',
+            'Fish Soup, salmon, dill D 12',
+            'fish soup, salmon, dill, lemon, bread D 12',
+            'Salmon Benedict, poached eggs, hollandaise* D 18',
+            'Salmon Ceviche*, lime, onion F 18',
+            'Surf and Turf, salmon, ribeye* F 48',
+        ].join('\n'));
+        expect((0, pre_ai_deterministic_rules_1.runPreAiDeterministicChecks)(result.menuText).menuText).toBe(result.menuText);
+    });
     it('uses bounded canonical food words to catch unseen typos without changing valid neighbors', () => {
         const result = (0, pre_ai_deterministic_rules_1.runPreAiDeterministicChecks)([
             'Feugo Aioli, tamarnd glaze 18',
@@ -331,19 +382,38 @@ describe('runPreAiDeterministicChecks', () => {
         ].join('\n'));
         expect(result.appliedCorrections.filter((c) => c.type === 'Raw Item')).toHaveLength(1);
     });
-    it('removes the raw marker from cooked shrimp ceviche but preserves explicit raw content', () => {
-        const result = (0, pre_ai_deterministic_rules_1.runPreAiDeterministicChecks)([
+    it('never removes a chef-written raw marker, including on shrimp ceviche', () => {
+        const lines = [
             'Shrimp Ceviche*, lime, avocado C 24',
             'Prawn Ceviche, citrus, onion C 25',
             'Raw Shrimp Ceviche*, lime, avocado C 24',
             'Shrimp Ceviche with Tuna Tartare*, lime C,F 28',
+        ];
+        const result = (0, pre_ai_deterministic_rules_1.runPreAiDeterministicChecks)(lines.join('\n'));
+        expect(result.menuText).toBe(lines.join('\n'));
+    });
+    it('keeps and places the raw marker on mixed fish and shrimp ceviche (tan dinner 2026-09-21)', () => {
+        const result = (0, pre_ai_deterministic_rules_1.runPreAiDeterministicChecks)([
+            'Seabass & Shrimp Ceviche, cucumber, red onion, macha-aguachile, cilantro, avocado *S 23',
+            'Seabass & Shrimp Ceviche, cucumber, red onion, macha-aguachile, cilantro, avocado S* 23',
         ].join('\n'));
-        expect(result.menuText).toBe([
-            'Shrimp Ceviche, lime, avocado C 24',
-            'Prawn Ceviche, citrus, onion C 25',
-            'Raw Shrimp Ceviche*, lime, avocado C 24',
-            'Shrimp Ceviche with Tuna Tartare*, lime C,F 28',
-        ].join('\n'));
+        expect(result.menuText.split('\n')).toEqual([
+            'Seabass & Shrimp Ceviche, cucumber, red onion, macha-aguachile, cilantro, avocado* S 23',
+            'Seabass & Shrimp Ceviche, cucumber, red onion, macha-aguachile, cilantro, avocado* S 23',
+        ]);
+    });
+    it('never lowers the raw-marker count on any line', () => {
+        const lines = [
+            'Shrimp Ceviche*, lime, avocado C 24',
+            'Tán Ceviche, lobster, shrimp, kaffir oil *S 26',
+            'Grilled Oysters, beurre blanc, tobiko* S 26',
+            'Braised Short Rib*, polenta D 38',
+            'Salmon*, lentils 34',
+        ];
+        const out = (0, pre_ai_deterministic_rules_1.runPreAiDeterministicChecks)(lines.join('\n')).menuText.split('\n');
+        lines.forEach((line, i) => {
+            expect((out[i].match(/\*/g) || []).length).toBeGreaterThanOrEqual((line.match(/\*/g) || []).length);
+        });
     });
     it('applies accepted global learned replacement rules exactly', () => {
         const rules = [{
@@ -626,6 +696,51 @@ describe('runPreAiDeterministicChecks', () => {
         expect((0, pre_ai_deterministic_rules_1.runPreAiDeterministicChecks)('zero proof margarita 13', { templateType: 'food', acceptedCorrectionRules: rules }).menuText).toBe('zero proof margarita 13');
         expect((0, pre_ai_deterministic_rules_1.runPreAiDeterministicChecks)('zero proof margarita 13', { templateType: 'beverage', acceptedCorrectionRules: rules }).menuText).toBe('zero-proof margarita 13');
         expect((0, pre_ai_deterministic_rules_1.runPreAiDeterministicChecks)('zero proof margarita 13', { templateType: 'food_beverage', acceptedCorrectionRules: rules }).menuText).toBe('zero-proof margarita 13');
+    });
+    it('generalizes the three descriptor corrections only in confident contextual constructions', () => {
+        const input = [
+            'Achiote Grilled Chicken D,G,S 29',
+            'Mesquite Grilled Shrimp 24',
+            'Cast Iron Pancakes D,G 18',
+            'Cast Iron Chicken D 22',
+            'Holiday Ham, brûlée pineapple D 20',
+            'Roasted Carrots, brûlée banana V 12',
+            'Freshly Grilled Chicken 18',
+            'Chicken, Achiote Grilled, sauce 20',
+            'Cast Iron, salt 4',
+            'Cast Iron Skillet 8',
+            'Crème brûlée 14',
+            'Brûlée Cheesecake 16',
+            'Pineapple brûlée 12',
+            'Chicken cooked in cast iron with rosemary 20',
+            'Cast iron is used for cooking 12',
+            'Achiote grilled with lime 20',
+        ].join('\n');
+        const result = (0, pre_ai_deterministic_rules_1.runPreAiDeterministicChecks)(input);
+        expect(result.menuText).toBe([
+            'Achiote-Grilled Chicken D,G,S 29',
+            'Mesquite-Grilled Shrimp 24',
+            'Cast-Iron Pancakes D,G 18',
+            'Cast-Iron Chicken D 22',
+            'Holiday Ham, brûléed pineapple D 20',
+            'Roasted Carrots, brûléed banana V 12',
+            'Freshly Grilled Chicken 18',
+            'Chicken, Achiote Grilled, sauce 20',
+            'Cast Iron, salt 4',
+            'Cast Iron Skillet 8',
+            'Crème brûlée 14',
+            'Brûlée Cheesecake 16',
+            'Pineapple brûlée 12',
+            'Chicken cooked in cast iron with rosemary 20',
+            'Cast iron is used for cooking 12',
+            'Achiote grilled with lime 20',
+        ].join('\n'));
+        expect((0, pre_ai_deterministic_rules_1.runPreAiDeterministicChecks)(result.menuText).menuText).toBe(result.menuText);
+        expect(result.appliedCorrections).toEqual(expect.arrayContaining([
+            expect.objectContaining({ original: 'Achiote Grilled Chicken', corrected: 'Achiote-Grilled Chicken' }),
+            expect.objectContaining({ original: 'Cast Iron Pancakes', corrected: 'Cast-Iron Pancakes' }),
+            expect.objectContaining({ original: 'brûlée pineapple', corrected: 'brûléed pineapple' }),
+        ]));
     });
     it('ignores pending or broad content learned rules', () => {
         const rules = [

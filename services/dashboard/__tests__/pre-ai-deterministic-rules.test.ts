@@ -438,20 +438,40 @@ describe('runPreAiDeterministicChecks', () => {
         expect(result.appliedCorrections.filter((c) => c.type === 'Raw Item')).toHaveLength(1);
     });
 
-    it('removes the raw marker from cooked shrimp ceviche but preserves explicit raw content', () => {
-        const result = runPreAiDeterministicChecks([
+    it('never removes a chef-written raw marker, including on shrimp ceviche', () => {
+        const lines = [
             'Shrimp Ceviche*, lime, avocado C 24',
             'Prawn Ceviche, citrus, onion C 25',
             'Raw Shrimp Ceviche*, lime, avocado C 24',
             'Shrimp Ceviche with Tuna Tartare*, lime C,F 28',
-        ].join('\n'));
+        ];
+        const result = runPreAiDeterministicChecks(lines.join('\n'));
+        expect(result.menuText).toBe(lines.join('\n'));
+    });
 
-        expect(result.menuText).toBe([
-            'Shrimp Ceviche, lime, avocado C 24',
-            'Prawn Ceviche, citrus, onion C 25',
-            'Raw Shrimp Ceviche*, lime, avocado C 24',
-            'Shrimp Ceviche with Tuna Tartare*, lime C,F 28',
+    it('keeps and places the raw marker on mixed fish and shrimp ceviche (tan dinner 2026-09-21)', () => {
+        const result = runPreAiDeterministicChecks([
+            'Seabass & Shrimp Ceviche, cucumber, red onion, macha-aguachile, cilantro, avocado *S 23',
+            'Seabass & Shrimp Ceviche, cucumber, red onion, macha-aguachile, cilantro, avocado S* 23',
         ].join('\n'));
+        expect(result.menuText.split('\n')).toEqual([
+            'Seabass & Shrimp Ceviche, cucumber, red onion, macha-aguachile, cilantro, avocado* S 23',
+            'Seabass & Shrimp Ceviche, cucumber, red onion, macha-aguachile, cilantro, avocado* S 23',
+        ]);
+    });
+
+    it('never lowers the raw-marker count on any line', () => {
+        const lines = [
+            'Shrimp Ceviche*, lime, avocado C 24',
+            'Tán Ceviche, lobster, shrimp, kaffir oil *S 26',
+            'Grilled Oysters, beurre blanc, tobiko* S 26',
+            'Braised Short Rib*, polenta D 38',
+            'Salmon*, lentils 34',
+        ];
+        const out = runPreAiDeterministicChecks(lines.join('\n')).menuText.split('\n');
+        lines.forEach((line, i) => {
+            expect((out[i].match(/\*/g) || []).length).toBeGreaterThanOrEqual((line.match(/\*/g) || []).length);
+        });
     });
 
     it('applies accepted global learned replacement rules exactly', () => {

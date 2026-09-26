@@ -2,7 +2,9 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.reconcileAllergenDeliveryClaims = reconcileAllergenDeliveryClaims;
 const APPLIED = /\b(?:added|retain(?:ed)?)\b/i;
-const CODE = /\b((?:VG|D|G|N|S|V)(?:\s*,\s*(?:VG|D|G|N|S|V))*)\b(?=\s+(?:allergen\s+)?codes?\b|[.:,;\s]*$)/i;
+// Any 1-3 letter uppercase code list (not only the RSH legend), so claims about
+// codes the legend does not define (e.g. "Retain F,S") are checked too.
+const CODE = /\b([A-Z]{1,3}(?:\s*,\s*[A-Z]{1,3})*)\b(?=\s+(?:allergen\s+)?codes?\b|[.:,;\s]*$)/;
 function row(menu, item) {
     const needle = item.trim().toLocaleLowerCase().replace(/\s+/g, ' ');
     const matches = menu.split('\n').filter(line => line.toLocaleLowerCase().replace(/\s+/g, ' ').includes(needle));

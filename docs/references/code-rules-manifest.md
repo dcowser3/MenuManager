@@ -135,12 +135,13 @@ Three versioned guards generalize preserved review evidence without approving th
 
 - id: `pre-ai/contextual-compound-descriptors` · category: terminology · implementation: `services/dashboard/lib/pre-ai-deterministic-rules.ts#normalizeContextualCompoundDescriptorsOnLine`
 
-### Cooked shrimp ceviche raw-marker exception
+### Shrimp-only ceviche: no automatic raw marker
 
-Shrimp or prawn ceviche is treated as cooked under the approved house rule, so a raw marker is removed or withheld unless the line explicitly says raw/uncooked/undercooked or contains another independently raw preparation.
-- `Shrimp Ceviche*, lime, avocado C 24` -> `Shrimp Ceviche, lime, avocado C 24`
+Shrimp-only or prawn-only ceviche does not receive an automatically added raw marker unless the line says raw/uncooked/undercooked or names another independently raw preparation. Lines that also name a fish (for example, seabass or tuna) are not exempt. A marker the chef wrote is never removed.
+- `Shrimp Ceviche, lime, avocado C 24` -> `Shrimp Ceviche, lime, avocado C 24`
+- `Shrimp Ceviche*, lime, avocado C 24` -> `Shrimp Ceviche*, lime, avocado C 24`
 
-- id: `pre-ai/cooked-shrimp-ceviche-marker` · category: raw_markers · implementation: `services/dashboard/lib/pre-ai-deterministic-rules.ts#normalizeShrimpCevicheRawMarkerOnLine`
+- id: `pre-ai/cooked-shrimp-ceviche-marker` · category: raw_markers · implementation: `services/dashboard/lib/pre-ai-deterministic-rules.ts#shouldAddRawAsterisk`
 
 ### Raw-marker spacing normalization (pre-AI, conservative)
 
@@ -374,9 +375,16 @@ Drops AI suggestions asking to alphabetize allergen codes when the corrected men
 
 ### Submitted allergen source preservation
 
-Latest submitted/pre-AI allergen codes are authoritative across model and final delivery lanes; candidate-only additions are stripped and ambiguous row attribution fails closed while supported price bytes remain unchanged.
+Latest submitted/pre-AI allergen codes are authoritative across model and final delivery lanes; candidate-only additions are stripped (including code-shaped tokens such as F that the menu legend does not define) and ambiguous row attribution fails closed while supported price bytes remain unchanged.
 
 - id: `post-ai/submitted-allergen-preservation` · category: allergen_codes · implementation: `services/dashboard/lib/allergen-source-preservation.ts#preserveSubmittedAllergenCodes`
+
+### Raw markers are add-only
+
+A raw marker (*) present on a dish line before AI review is never removed. If the delivered line lost it, one marker is reinserted at the end of the description, before allergen codes and price; if only its word position changed, the pre-AI placement is kept. Adding a marker is allowed.
+- `Seabass & Shrimp Ceviche, avocado* S 23 -> AI: ...avocado S 23` -> `Seabass & Shrimp Ceviche, avocado* S 23`
+
+- id: `post-ai/raw-marker-preservation` · category: raw_markers · implementation: `services/dashboard/lib/raw-marker-integrity-guard.ts#guardCorrectedMenuRawMarkers`
 
 ### High-confidence suggestion auto-apply
 

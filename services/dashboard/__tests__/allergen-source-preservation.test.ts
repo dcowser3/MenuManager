@@ -19,6 +19,20 @@ describe('submitted allergen source preservation', () => {
         expect(result.menuText).toBe('Cusco Chicken, marinade S 22\nNew Dish 18');
     });
 
+    test('strips a code the legend does not define instead of duplicating the submitted code (tan dinner 2026-09-21)', () => {
+        const rsLegend = 'G contains gluten | V vegetarian | D contains dairy | S contain shellfish | N contain nuts | VG vegan';
+        const result = preserveSubmittedAllergenCodes(
+            'Seabass & Shrimp Ceviche, cilantro, avocado* S 23\nTán Ceviche Trio, tán ceviche* S 48',
+            'Seabass & Shrimp Ceviche, cilantro, avocado F,S 23\nTán Ceviche Trio, tán ceviche* F,S 48',
+            rsLegend,
+        );
+        expect(result.menuText).toBe('Seabass & Shrimp Ceviche, cilantro, avocado S 23\nTán Ceviche Trio, tán ceviche* S 48');
+    });
+
+    test('keeps no-legend menus unchanged (no allergen program to protect)', () => {
+        expect(preserveSubmittedAllergenCodes('Soup 12', 'Soup F 12', '').menuText).toBe('Soup F 12');
+    });
+
     test('fails closed for ambiguous duplicate source rows', () => {
         const source = 'Chicken, soy S 10\nChicken, soy D 11';
         const result = preserveSubmittedAllergenCodes(source, 'Chicken, soy 10\nChicken, soy 11', legend);
