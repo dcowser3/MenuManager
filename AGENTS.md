@@ -33,6 +33,7 @@ For any feature, bug fix, route, API, UI, or workflow change:
 2. Run focused verification for the changed area before reporting completion.
 3. For any new or changed page, route, download flow, or form submission path, verify the running app behavior directly with a live request or browser check, not only by static code inspection.
 4. If verification cannot be completed, explicitly say what was not verified, why, and what risk remains before marking the work done.
+5. CI (`.github/workflows/ci.yml`) runs the full build, Jest, Cucumber, and docx-redliner pytest on every PR, and production deploys only after it passes. Keep the suite green: fix a failing test's root cause or update a stale expectation with a comment explaining the new contract; never skip a test to get a deploy through.
 
 ## Services
 

@@ -6,7 +6,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { prepareCodeProposalAttempt } = require('../../../scripts/lib/code-proposal-preparation');
 const { buildPreparationInventory, prepareCodeProposalQueue } = require('../../../scripts/lib/code-proposal-preparation-queue');
-const { recordCodeVerification } = require('../../../scripts/lib/proposal-verification-store');
+const { recordCodeVerification, recordParentCampaignLineage } = require('../../../scripts/lib/proposal-verification-store');
 const { hashBehaviorArtifact } = require('../lib/learning-behavior-tests');
 
 const digest = (value) => crypto.createHash('sha256').update(value).digest('hex');
@@ -19,6 +19,15 @@ function readJsonPath(row, field) {
     if (key !== null) value = value == null ? null : value[key];
     if (textMarker >= 0 && value != null && typeof value !== 'string') return JSON.stringify(value);
     return value;
+}
+
+// Preparation now binds a parent-campaign lineage, which requires a complete
+// pending-proposal enumeration (see scripts/lib/parent-campaign-lineage.js).
+function completeEnumeration(proposal) {
+    return {
+        query: { table: 'prompt_proposals', status: 'pending', pagination_complete: true },
+        enumeration: { complete: true, pages: 1, cutoff: '2026-09-21T13:00:00.000Z', rows_count: 1, count: 1, row_ids: [proposal.id], global_snapshot_sha256: digest(`snapshot-${proposal.id}`) },
+    };
 }
 
 function clientState() {
@@ -49,7 +58,8 @@ function clientState() {
                         return current === filter.value;
                     });
                     if (!matches) return Promise.resolve({ data: [] }).then(resolve);
-                    state.proposal = { ...state.proposal, eval_summary: query.patch.eval_summary };
+                    // Model Postgres xmin: every committed row write changes it.
+                    state.proposal = { ...state.proposal, eval_summary: query.patch.eval_summary, xmin: String(Number(state.proposal.xmin || 0) + 1) };
                     state.writes += 1;
                     return Promise.resolve({ data: [{ id: state.proposal.id }] }).then(resolve);
                 }
@@ -68,21 +78,23 @@ test('durable claim crash before summary converges to blocked zero-dispatch reco
     fs.writeFileSync(path.join(root, 'tmp', 'review-eval', 'dataset.jsonl'), `${JSON.stringify({ case_id: 'base', raw_input: 'Base', ground_truth: 'Base', context: {} })}\n`);
     const behaviorBody = { schemaVersion: 1, frozenAt: new Date().toISOString(), records: [{ correctionId: 'c1', submissionId: 'submission-1', inputSpan: { text: 'before' }, expectedSpan: { text: 'after' }, reason: 'reason', expectationAuthority: 'human_explanation', provenance: { reviewer: 'Reviewer' }, disposition: 'awaiting_behavior_verification' }], tests: [], contextualTests: [] };
     const behavior = { ...behaviorBody, sha256: hashBehaviorArtifact(behaviorBody) };
-    const proposal = { id: 'p-recovery', status: 'pending', cycle_id: 'cycle-recovery', proposed_prompt: 'prompt', correction_routing: [{ correction_id: 'c1', lane: 'code_recommendation', case_id: 'case-1', original_text: 'before', corrected_text: 'after', source: 'human' }], replay_evidence: [{ correction_id: 'c1', submission_id: 'submission-1', case_id: 'case-1', original_text: 'before', corrected_text: 'after', status: 'replay_mismatch' }], eval_summary: { replay_retirement_policy_version: 1, behavior_tests: behavior }, code_recommendations: [{ title: 'fix' }] };
+    const proposal = { id: 'p-recovery', status: 'pending', cycle_id: 'cycle-recovery', proposed_prompt: 'prompt', correction_routing: [{ correction_id: 'c1', lane: 'code_recommendation', case_id: 'case-1', original_text: 'before', corrected_text: 'after', source: 'human' }], replay_evidence: [{ correction_id: 'c1', submission_id: 'submission-1', case_id: 'case-1', original_text: 'before', corrected_text: 'after', status: 'replay_mismatch' }], eval_summary: { replay_retirement_policy_version: 1, behavior_tests: behavior }, code_recommendations: [{ title: 'fix' }], xmin: '1' };
     const { client, state } = clientState();
     const verification = { REPLAY_RETIREMENT_POLICY_VERSION: 1, codeProposalVerificationFingerprint: (value) => digest(JSON.stringify({ id: value.id, cycle_id: value.cycle_id, proposed_prompt: value.proposed_prompt, correction_routing: value.correction_routing, replay_evidence: value.replay_evidence, code_recommendations: value.code_recommendations })), hashCodeImplementation: () => digest('source'), hashAcceptedRules: () => digest('rules') };
     state.proposal = proposal;
-    const store = { recordCodeVerification };
-    const behaviorModule = { validateBehaviorArtifact: () => {} };
+    const store = { recordCodeVerification, recordParentCampaignLineage };
+    const behaviorModule = { validateBehaviorArtifact: () => {}, hashBehaviorArtifact };
     try {
-        const inventory = buildPreparationInventory(proposal, { proposalFingerprint: verification.codeProposalVerificationFingerprint(proposal) });
+        const inventory = buildPreparationInventory(proposal, { proposalFingerprint: verification.codeProposalVerificationFingerprint(proposal), ...completeEnumeration(proposal) });
         const prepared = await prepareCodeProposalAttempt({ client, proposal, repoRoot: root, datasetPath: path.join(root, 'tmp/review-eval/dataset.jsonl'), verification, store, behaviorModule, inventory, attemptId: 'attempt-recovery' });
-        expect(state.writes).toBe(1);
+        // Two committed writes: the pre-claim parent-campaign lineage, then the owner claim.
+        const writesAfterPrepare = state.writes;
+        expect(writesAfterPrepare).toBe(2);
         fs.rmSync(path.join(prepared.artifactDirectory, 'preparation-summary.json'), { force: true });
-        const result = await prepareCodeProposalQueue({ client, proposal: state.proposal, repoRoot: root, datasetPath: path.join(root, 'tmp/review-eval/dataset.jsonl'), verification, store, readCurrentProposal: async () => state.proposal });
+        const result = await prepareCodeProposalQueue({ client, proposal: state.proposal, repoRoot: root, datasetPath: path.join(root, 'tmp/review-eval/dataset.jsonl'), verification, store, readCurrentProposal: async () => state.proposal, ...completeEnumeration(state.proposal) });
         expect(result.reason).toBe('code_candidate_authorization_required');
         expect(fs.existsSync(path.join(prepared.artifactDirectory, 'preparation-summary.json'))).toBe(true);
-        expect(state.writes).toBe(1);
+        expect(state.writes).toBe(writesAfterPrepare);
         const owner = state.proposal.eval_summary.code_candidate;
         await expect(recordCodeVerification(client, state.proposal, { code_candidate: { ...owner, attempt_id: 'newer-owner', started_at: new Date().toISOString() } }, verification)).rejects.toThrow(/already running/);
         const lateCompletion = { ...owner, status: 'blocked' };
@@ -92,7 +104,7 @@ test('durable claim crash before summary converges to blocked zero-dispatch reco
         };
         await expect(recordCodeVerification(client, state.proposal, { code_candidate: lateCompletion }, verification)).rejects.toThrow(/changed concurrently/);
         expect(state.proposal.eval_summary.code_candidate.attempt_id).toBe('concurrent-owner');
-        expect(state.writes).toBe(1);
+        expect(state.writes).toBe(writesAfterPrepare);
     } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 
@@ -102,11 +114,11 @@ test('a concurrent claim after the no-owner read cannot move or replace the winn
     fs.writeFileSync(path.join(root, 'tmp', 'review-eval', 'dataset.jsonl'), `${JSON.stringify({ case_id: 'base', raw_input: 'Base', ground_truth: 'Base', context: {} })}\n`);
     const behaviorBody = { schemaVersion: 1, frozenAt: new Date().toISOString(), records: [{ correctionId: 'c1', submissionId: 'submission-1', inputSpan: { text: 'before' }, expectedSpan: { text: 'after' }, reason: 'reason', expectationAuthority: 'human_explanation', provenance: { reviewer: 'Reviewer' }, disposition: 'awaiting_behavior_verification' }], tests: [], contextualTests: [] };
     const behavior = { ...behaviorBody, sha256: hashBehaviorArtifact(behaviorBody) };
-    const proposal = { id: 'p-orphan-race', status: 'pending', cycle_id: 'cycle-orphan-race', proposed_prompt: 'prompt', correction_routing: [{ correction_id: 'c1', lane: 'code_recommendation', case_id: 'case-1', original_text: 'before', corrected_text: 'after', source: 'human' }], replay_evidence: [{ correction_id: 'c1', submission_id: 'submission-1', case_id: 'case-1', original_text: 'before', corrected_text: 'after', status: 'replay_mismatch' }], eval_summary: { replay_retirement_policy_version: 1, behavior_tests: behavior }, code_recommendations: [{ title: 'fix' }] };
+    const proposal = { id: 'p-orphan-race', status: 'pending', cycle_id: 'cycle-orphan-race', proposed_prompt: 'prompt', correction_routing: [{ correction_id: 'c1', lane: 'code_recommendation', case_id: 'case-1', original_text: 'before', corrected_text: 'after', source: 'human' }], replay_evidence: [{ correction_id: 'c1', submission_id: 'submission-1', case_id: 'case-1', original_text: 'before', corrected_text: 'after', status: 'replay_mismatch' }], eval_summary: { replay_retirement_policy_version: 1, behavior_tests: behavior }, code_recommendations: [{ title: 'fix' }], xmin: '1' };
     const { client, state } = clientState();
     state.proposal = proposal;
     const verification = { REPLAY_RETIREMENT_POLICY_VERSION: 1, codeProposalVerificationFingerprint: (value) => digest(JSON.stringify({ id: value.id, cycle_id: value.cycle_id, proposed_prompt: value.proposed_prompt, correction_routing: value.correction_routing, replay_evidence: value.replay_evidence, code_recommendations: value.code_recommendations })), hashCodeImplementation: () => digest('source'), hashAcceptedRules: () => digest('rules') };
-    const inventory = buildPreparationInventory(proposal, { proposalFingerprint: verification.codeProposalVerificationFingerprint(proposal) });
+    const inventory = buildPreparationInventory(proposal, { proposalFingerprint: verification.codeProposalVerificationFingerprint(proposal), ...completeEnumeration(proposal) });
     const finalized = require('../../../scripts/lib/code-proposal-preparation-queue').finalizePreparationInventory(inventory, { behavior_tests_sha256: behavior.sha256, dataset_sha256: digest('dataset'), source_sha256: digest('source'), prompt_sha256: digest('prompt'), accepted_rules_sha256: digest('rules') });
     const orphanRoot = path.join(root, 'tmp', 'code-proposals', proposal.id, `proposal-${proposal.id}`);
     fs.mkdirSync(orphanRoot, { recursive: true });
@@ -124,7 +136,7 @@ test('a concurrent claim after the no-owner read cannot move or replace the winn
         return realLstat(target);
     });
     try {
-        await expect(prepareCodeProposalQueue({ client, proposal, repoRoot: root, datasetPath: path.join(root, 'tmp/review-eval/dataset.jsonl'), verification, store: { recordCodeVerification }, behaviorModule: { validateBehaviorArtifact: () => {} } })).rejects.toThrow(/already running/);
+        await expect(prepareCodeProposalQueue({ client, proposal, repoRoot: root, datasetPath: path.join(root, 'tmp/review-eval/dataset.jsonl'), verification, store: { recordCodeVerification, recordParentCampaignLineage }, behaviorModule: { validateBehaviorArtifact: () => {}, hashBehaviorArtifact }, ...completeEnumeration(proposal) })).rejects.toThrow(/must be bound before an owner claim/);
         expect(state.proposal.eval_summary.code_candidate.attempt_id).toBe(`proposal-${proposal.id}`);
         expect(state.proposal.eval_summary.code_candidate.artifact_directory).toBe(orphanRoot);
         expect(fs.readFileSync(path.join(orphanRoot, 'winner-marker.txt'), 'utf8')).toBe('winner-bytes');

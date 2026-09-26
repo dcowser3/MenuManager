@@ -24,7 +24,11 @@ describe('B6-D2 cycle retirement boundary', () => {
     });
 
     test('refreshes stale pending policy evidence and stamps replacement summaries', () => {
-        expect(scriptSource).toContain("eval_summary, replay_evidence, correction_routing");
+        // Pending proposals are loaded through the complete-enumeration queue helper, which
+        // selects every column (so eval_summary, replay_evidence and correction_routing are present).
+        expect(scriptSource).toContain('loadPendingProposalRows(supabase)');
+        const queueSource = fs.readFileSync(path.resolve(__dirname, '../../../scripts/lib/code-proposal-preparation-queue.js'), 'utf8');
+        expect(queueSource).toMatch(/from\('prompt_proposals'\)\.select\('\*'\)\.eq\('status', 'pending'\)/);
         expect(scriptSource).toContain('core.pendingProposalNeedsReplayRetirementRefresh(pendingProposal)');
         expect(scriptSource).toContain('pendingReplayRetirementRefresh');
         expect(scriptSource).toContain('core.pendingCorrectionsRecoveredExactly(supersedePending, carriedRuleRows || [])');

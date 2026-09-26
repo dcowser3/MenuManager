@@ -309,7 +309,7 @@ app.use(express.json({
         req.rawBody = buf.toString('utf8');
     }
 }));
-app.use(['/create-task', '/approval/finalize', '/webhook/backfill-pending', '/webhook/register', '/sharepoint/file'], internal_auth_1.requireInternalServiceAuth);
+app.use(['/create-task', '/approval/finalize', '/webhook/backfill-pending', '/webhook/backfill-isabella-direct', '/webhook/register', '/sharepoint/file'], internal_auth_1.requireInternalServiceAuth);
 function safeTimingEqual(a, b) {
     try {
         const ab = Buffer.from(a);
@@ -1031,6 +1031,60 @@ async function extractApprovedDishesForSubmission(input) {
     console.log(`Approved dish extraction complete for ${input.submissionId}: ${added} dishes added`);
     return added;
 }
+/**
+ * Isabella's direct handoff is already a corporate approval. It must become
+ * visible in Approved Menus after the DOCX reaches the ClickUp To Do handoff,
+ * without treating a later manual ClickUp Approved status as a trigger.
+ * Keep this separate from the reviewer finalizer: there is no correction
+ * event, email, learning diff, or ClickUp status mutation to perform here.
+ */
+async function finalizeDirectIsabellaHandoff(input) {
+    const submission = input.submission || {};
+    let extractedRaw = '';
+    let extractedClean = '';
+    let extractedCleanHtml = '';
+    try {
+        const extracted = await extractApprovedMenuContent(input.approvedPath);
+        extractedRaw = extracted.raw;
+        extractedClean = extracted.cleaned;
+        extractedCleanHtml = extracted.cleanedHtml;
+    }
+    catch (extractError) {
+        console.warn(`Failed to extract Isabella direct DOCX ${input.approvedPath}: ${extractError.message}`);
+    }
+    // The submitted form payload is the safe fallback for a DOCX extraction
+    // failure. This keeps the approved menu editable/searchable while leaving
+    // the original DOCX as the canonical downloadable artifact.
+    extractedRaw = extractedRaw || `${submission.menu_content || ''}`;
+    extractedClean = extractedClean || `${submission.menu_content || ''}`;
+    extractedCleanHtml = extractedCleanHtml || `${submission.menu_content_html || ''}`;
+    await internalApi.put(`${DB_SERVICE_URL}/submissions/${encodeURIComponent(submission.id)}`, {
+        ...(0, approval_finalization_1.buildApprovedSubmissionUpdate)({
+            approvedPath: input.approvedPath,
+            extractedRaw,
+            extractedClean,
+            extractedCleanHtml,
+        }),
+        clickup_task_id: input.clickupTaskId,
+        reviewed_at: new Date().toISOString(),
+    });
+    try {
+        await internalApi.post(`${DB_SERVICE_URL}/assets`, (0, approval_finalization_1.buildApprovedDocxAssetRecord)({
+            submissionId: submission.id,
+            approvedPath: input.approvedPath,
+            source: input.assetSource || 'isabella_direct_handoff',
+            clickupTaskId: input.clickupTaskId,
+        }));
+    }
+    catch (assetError) {
+        // The approved submission and menu pointer are authoritative. A
+        // missing asset metadata row does not make the already-uploaded DOCX
+        // unapproved; the final_path download remains usable and the asset
+        // can be repaired separately.
+        console.error(`Failed to save approved_docx asset metadata for ${submission.id}:`, assetError.message);
+    }
+    console.log(`Marked Isabella direct submission ${submission.id} approved after ClickUp task ${input.clickupTaskId} reached To Do`);
+}
 async function finalizeApprovedSubmission(input) {
     const submission = input.submission;
     const clickupTaskId = `${input.clickupTaskId || submission?.clickup_task_id || ''}`.trim();
@@ -1537,11 +1591,42 @@ app.post('/create-task', async (req, res) => {
             }
         }
         if (submissionId) {
-            const submissionUpdate = { clickup_task_id: taskId };
-            if (routeToMarketing) {
-                submissionUpdate.status = 'sent_to_marketing';
+            if (routeToMarketing && !attachmentUploadFailed && docxPath && fs_1.default.existsSync(docxPath)) {
+                try {
+                    await finalizeDirectIsabellaHandoff({
+                        submission: {
+                            id: submissionId,
+                            project_name: projectName,
+                            property,
+                            service_period: servicePeriod,
+                            submitter_email: submitterEmail,
+                            submitter_name: submitterName,
+                            filename,
+                            menu_content: req.body.menuContent,
+                            menu_content_html: req.body.menuContentHtml,
+                        },
+                        approvedPath: docxPath,
+                        approvedFileName: filename || path_1.default.basename(docxPath),
+                        clickupTaskId: taskId,
+                    });
+                }
+                catch (approvalError) {
+                    // Preserve the handoff link and the old queue-exclusion
+                    // state so the repair endpoint can retry the DB transition.
+                    warnings.push(`Approved Menus repair pending: ${approvalError.response?.data?.error || approvalError.message}`);
+                    await internalApi.put(`${DB_SERVICE_URL}/submissions/${submissionId}`, {
+                        clickup_task_id: taskId,
+                        status: 'sent_to_marketing',
+                    });
+                }
             }
-            await internalApi.put(`${DB_SERVICE_URL}/submissions/${submissionId}`, submissionUpdate);
+            else {
+                const submissionUpdate = { clickup_task_id: taskId };
+                if (routeToMarketing) {
+                    submissionUpdate.status = 'sent_to_marketing';
+                }
+                await internalApi.put(`${DB_SERVICE_URL}/submissions/${submissionId}`, submissionUpdate);
+            }
             console.log(`Stored clickup_task_id ${taskId} on submission ${submissionId}`);
         }
         res.json({
@@ -1721,6 +1806,84 @@ app.post('/webhook/backfill-pending', async (_req, res) => {
     catch (error) {
         console.error('Error running pending webhook backfill:', error.response?.data || error.message);
         res.status(500).json({ error: 'Failed to run pending backfill', details: error.message });
+    }
+});
+app.post('/webhook/backfill-isabella-direct', async (req, res) => {
+    try {
+        const requestedIds = Array.isArray(req.body?.submissionIds)
+            ? req.body.submissionIds.map((id) => `${id || ''}`.trim()).filter(Boolean)
+            : [];
+        const query = requestedIds.length ? `?ids=${encodeURIComponent(requestedIds.join(','))}` : '';
+        const directResponse = await internalApi.get(`${DB_SERVICE_URL}/submissions/isabella-direct${query}`);
+        const candidates = Array.isArray(directResponse.data) ? directResponse.data : [];
+        const summary = {
+            scanned: candidates.length,
+            repaired: 0,
+            skipped: 0,
+            failed: 0,
+            details: [],
+        };
+        for (const submission of candidates) {
+            const submissionId = `${submission?.id || submission?.legacy_id || ''}`.trim();
+            const taskId = `${submission?.clickup_task_id || ''}`.trim();
+            try {
+                if (!taskId) {
+                    summary.skipped += 1;
+                    summary.details.push({ submission_id: submissionId, status: 'skipped', reason: 'no ClickUp task linked' });
+                    continue;
+                }
+                const taskResponse = await axios_1.default.get(`https://api.clickup.com/api/v2/task/${taskId}`, {
+                    headers: clickupHeaders,
+                });
+                const task = taskResponse.data || {};
+                if (!isConfiguredMenuManagerTask(task)) {
+                    summary.skipped += 1;
+                    summary.details.push({ submission_id: submissionId, clickup_task_id: taskId, status: 'skipped', reason: 'task is outside the configured Menu Manager list' });
+                    continue;
+                }
+                const currentStatus = normalizeStatus(task.status?.status);
+                if (currentStatus !== normalizeStatus(CLICKUP_ISABELLA_DIRECT_STATUS)) {
+                    summary.skipped += 1;
+                    summary.details.push({ submission_id: submissionId, clickup_task_id: taskId, status: 'skipped', reason: `task status is "${currentStatus}"; only "${normalizeStatus(CLICKUP_ISABELLA_DIRECT_STATUS)}" is eligible` });
+                    continue;
+                }
+                const hasDocxAttachment = Array.isArray(task.attachments) && task.attachments.some(isDocxAttachment);
+                const approvedPath = getFallbackApprovedSourcePath(submission);
+                if (!hasDocxAttachment || !approvedPath) {
+                    summary.skipped += 1;
+                    summary.details.push({
+                        submission_id: submissionId,
+                        clickup_task_id: taskId,
+                        status: 'skipped',
+                        reason: !hasDocxAttachment ? 'ClickUp task has no DOCX attachment' : 'no local DOCX source exists',
+                    });
+                    continue;
+                }
+                await finalizeDirectIsabellaHandoff({
+                    submission,
+                    approvedPath,
+                    approvedFileName: submission.filename || path_1.default.basename(approvedPath),
+                    clickupTaskId: taskId,
+                    assetSource: 'isabella_direct_backfill',
+                });
+                summary.repaired += 1;
+                summary.details.push({ submission_id: submissionId, clickup_task_id: taskId, status: 'repaired' });
+            }
+            catch (error) {
+                summary.failed += 1;
+                summary.details.push({
+                    submission_id: submissionId,
+                    clickup_task_id: taskId || undefined,
+                    status: 'failed',
+                    reason: error.response?.data?.error || error.message,
+                });
+            }
+        }
+        res.json({ success: true, ...summary });
+    }
+    catch (error) {
+        console.error('Error running Isabella direct handoff backfill:', error.response?.data || error.message);
+        res.status(500).json({ error: 'Failed to run Isabella direct handoff backfill', details: error.message });
     }
 });
 app.post('/webhook/register', async (_req, res) => {
