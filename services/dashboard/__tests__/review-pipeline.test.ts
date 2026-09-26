@@ -790,8 +790,8 @@ describe('tan dinner 2026-09-21 regression (allergen lock + raw marker)', () => 
         expect(result.finalSuggestions).toContainEqual(expect.objectContaining({
             menuItem: 'Seabass & Shrimp Ceviche',
             deliveryStatus: 'not_applied',
-            description: 'Allergen codes were not changed (kept as submitted: S). AI note: Seabass is a fish.',
-            recommendation: "Confirm with the chef before changing this dish's allergen codes. F is not defined in this menu's allergen key.",
+            description: 'Allergen codes were not changed (kept as submitted: S). AI suggests adding F. AI note: Seabass is a fish.',
+            recommendation: "Consider adding F. Confirm with the chef before changing allergen codes. F is not defined in this menu's allergen key.",
         }));
     });
 });

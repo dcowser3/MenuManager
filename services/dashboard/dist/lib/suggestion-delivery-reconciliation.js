@@ -80,9 +80,47 @@ function splitClauses(text) {
     return `${text || ''}`.split(/(?<=[.;!?])\s+/).map(part => part.trim()).filter(Boolean);
 }
 /** Drop clauses that claim the menu was edited; keep the model's reasoning about the dish. */
+const CLAIM_REASON = /\b(?:because|since|as)\s+(.+)$/i;
+/**
+ * Drop clauses that claim the menu was edited, but keep the model's reasoning
+ * about the dish: "The S code was removed because octopus is a mollusc ..." keeps
+ * "Octopus is a mollusc ...".
+ */
 function withoutChangeClaims(text) {
-    const kept = splitClauses(text).filter(clause => !CHANGE_ASSERTION.test(clause));
+    const kept = [];
+    for (const clause of splitClauses(text)) {
+        if (!CHANGE_ASSERTION.test(clause)) {
+            kept.push(clause);
+            continue;
+        }
+        const reason = clause.match(CLAIM_REASON)?.[1]?.trim();
+        if (reason && !CHANGE_ASSERTION.test(reason))
+            kept.push(sentence(reason));
+    }
     return kept.join(' ').replace(/[;,]\s*$/, '.').trim();
+}
+const ADD_WORDS = /\b(?:add(?:ed|ing|s)?|retain(?:ed|ing|s)?|keep|includ(?:e|ed|es|ing)|appl(?:y|ied|ies|ying))\b/i;
+const REMOVE_WORDS = /\b(?:remov(?:e|ed|es|ing)|drop(?:ped|s|ping)?|delet(?:e|ed|es|ing))\b/i;
+/** What the model wanted to change, stated as a proposal the chef can act on. */
+function proposalSummary(text, submittedCodes, knownCodes) {
+    const clauses = splitClauses(text).flatMap(clause => clause.split(/;\s*/));
+    const additions = new Set();
+    const removals = new Set();
+    for (const clause of clauses) {
+        const codes = mentionedCodes(clause, knownCodes);
+        if (!codes.length)
+            continue;
+        if (REMOVE_WORDS.test(clause))
+            codes.filter(code => submittedCodes.includes(code)).forEach(code => removals.add(code));
+        else if (ADD_WORDS.test(clause))
+            codes.filter(code => !submittedCodes.includes(code)).forEach(code => additions.add(code));
+    }
+    const parts = [];
+    if (additions.size)
+        parts.push(`adding ${[...additions].join(',')}`);
+    if (removals.size)
+        parts.push(`removing ${[...removals].join(',')}`);
+    return { additions: [...additions], removals: [...removals], summary: parts.length ? `AI suggests ${parts.join(' and ')}.` : '' };
 }
 // "the menu's allergen key defines fish as F" when the key has no F.
 const KEY_DEFINES_PHRASE = /(\s*(?:,\s*)?(?:\band\s+)?(?:the\s+)?(?:menu['’]s\s+|current\s+)?(?:allergen\s+)?(?:key|legend)\s+(?:defines|includes|has|lists|uses)\b[^.;,]*?\b(?:as\s+)?)([A-Z]{1,3})\b(?![a-z])/g;
@@ -149,21 +187,30 @@ function reconcileAllergen(suggestion, submittedRow, deliveredRow, legend, diagn
     const proposed = mentionedCodes(`${description} ${recommendation}`, knownCodes);
     const undefinedCodes = legendCodes.size ? proposed.filter(code => !legendCodes.has(code)) : [];
     const reasoning = withoutFalseKeyClaims(withoutChangeClaims(description), legendCodes);
+    const proposal = proposalSummary(`${description} ${recommendation}`, submittedCodes, knownCodes);
     const status = submittedRow === null
         ? 'Allergen codes were not changed by the AI review.'
         : `Allergen codes were not changed (kept as submitted: ${codesLabel(submittedCodes)}).`;
     const hasChangePair = /\b(?:change|replace)\s+['"‘“]/i.test(recommendation);
-    const recommendationBase = !recommendation.trim() || (APPLIED_RECOMMENDATION.test(recommendation) && !hasChangePair)
+    // "Retain the G allergen code unless ..." presupposes G was added. Turn it into
+    // a proposal that keeps the model's condition: "Consider adding G unless ...".
+    const appliedRecommendation = !hasChangePair && APPLIED_RECOMMENDATION.test(recommendation);
+    const reframed = appliedRecommendation && proposal.additions.length
+        ? recommendation.replace(/^\s*(?:retain|keep|leave|maintain)\s+(?:the\s+)?(?:added\s+)?(?:[A-Z]{1,3}(?:\s*,\s*[A-Z]{1,3})*\s+)?(?:allergen\s+)?(?:codes?\s*)?/i, `Consider adding ${proposal.additions.join(',')} `)
+        : '';
+    const recommendationBase = !recommendation.trim() || (appliedRecommendation && !reframed)
         ? "Confirm with the chef before changing this dish's allergen codes."
-        : /\b(?:confirm|verify|check)\b/i.test(recommendation)
-            ? sentence(recommendation)
-            : `${sentence(recommendation)} Confirm with the chef before changing allergen codes.`;
+        : reframed
+            ? `${sentence(reframed.replace(/\s+/g, ' ').replace(/\s+([.,;])/g, '$1'))} Confirm with the chef before changing allergen codes.`
+            : /\b(?:confirm|verify|check)\b/i.test(recommendation)
+                ? sentence(recommendation)
+                : `${sentence(recommendation)} Confirm with the chef before changing allergen codes.`;
     const undefinedNote = undefinedCodes.length
         ? ` ${undefinedCodes.join(',')} ${undefinedCodes.length === 1 ? 'is' : 'are'} not defined in this menu's allergen key.`
         : '';
     const next = {
         ...suggestion,
-        description: reasoning ? `${status} AI note: ${sentence(reasoning)}` : status,
+        description: [status, proposal.summary, reasoning ? `AI note: ${sentence(reasoning)}` : ''].filter(Boolean).join(' '),
         recommendation: `${recommendationBase}${undefinedNote}`,
         deliveryStatus: 'not_applied',
         deliveredValue: codesLabel(submittedRow !== null ? submittedCodes : deliveredCodes),
