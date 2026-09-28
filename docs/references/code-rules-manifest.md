@@ -340,6 +340,12 @@ The full deterministic pre-AI pass is re-applied to the AI-corrected menu so the
 
 - id: `post-ai/deterministic-re-run` · category: deterministic · implementation: `services/dashboard/lib/pre-ai-deterministic-rules.ts#runPreAiDeterministicChecks`
 
+### Complete-menu allergen-program presence check
+
+Food-menu revision checks use the complete current menu to test for any configured allergen code. Absolute no-code AI claims are removed when coded dishes exist; partial and item-specific concerns remain. A zero-code menu receives a critical program finding.
+
+- id: `post-ai/allergen-program-presence` · category: allergen_codes · implementation: `services/dashboard/lib/review-pipeline.ts#enforceAllergenProgramCheck`
+
 ### Unresolved canonical spelling finding guarantee
 
 The model receives contextual near misses first. If it leaves a unique non-ambiguous reviewer/corpus match unchanged and does not mention it, the pipeline adds a medium-confidence, normal-severity spelling suggestion so the possible typo cannot silently pass. Ambiguous matches never synthesize a correction.

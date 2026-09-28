@@ -901,6 +901,32 @@ describe('Dashboard Modification Workflow (local, mocked externals)', () => {
         expect(qaCall[1].text).toBe('Ceviche* $15');
     });
 
+    test('HTTP revision check uses full menu context and clears only disproved incident flags', async () => {
+        const baseline = 'BRUNCH\nToast, avocado G 14\nCOCKTAILS\nBloody Mary 18\nVodka – Tomato – pepper – celery';
+        const changed = 'vodka – tomato – pepper – horseradish';
+        const menuContent = baseline.replace('Vodka – Tomato – pepper – celery', changed);
+        const previousPost = mockedAxios.post;
+        mockedAxios.post = jest.fn(async (url, payload) => String(url).includes('/run-qa-check')
+            ? { data: { feedback: `=== CORRECTED MENU ===\n${payload.text}\n=== END CORRECTED MENU ===\n=== SUGGESTIONS ===\n${JSON.stringify([
+                { type: 'Allergen Code', severity: 'critical', menuItem: 'Entire menu', description: 'No dishes carry allergen codes.' },
+                { type: 'Missing Price', severity: 'critical', menuItem: changed, description: 'No price is shown.' },
+                { type: 'Incomplete Dish Name', severity: 'critical', menuItem: changed, description: 'No recognizable drink name.' },
+                { type: 'Allergen Code', severity: 'critical', menuItem: changed, description: 'Confirm whether the recipe needs an allergen code.' },
+            ])}\n=== END SUGGESTIONS ===` } }
+            : previousPost(url, payload));
+        const response = await postJsonOverHttp('/api/form/basic-check', {
+            menuContent, baselineMenuContent: baseline, reviewMode: 'changed_only', templateType: 'food',
+            menuType: 'standard', allergens: 'G contains gluten | D contains dairy',
+        });
+        const request = mockedAxios.post.mock.calls.find(([url]) => String(url).includes('/run-qa-check'))[1];
+        expect(response.status).toBe(200);
+        expect(request.text).toBe(changed);
+        expect(request.prompt).toContain('2: Toast, avocado G 14');
+        expect(request.prompt).toContain('4: Bloody Mary 18');
+        expect(response.body.correctedMenu).toBe(menuContent);
+        expect(response.body.suggestions).toEqual([expect.objectContaining({ menuItem: changed, type: 'Allergen Code' })]);
+    });
+
     test('basic-check returns dish-name formatting anchors for changed_only merged menus', async () => {
         const payload = {
             menuContent: 'Guacamole - $12\nClassic Margarita 18',

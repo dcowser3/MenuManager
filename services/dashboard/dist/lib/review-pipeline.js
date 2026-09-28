@@ -12,6 +12,7 @@ exports.findCorrectedLineForMenuItem = findCorrectedLineForMenuItem;
 exports.isCriticalResolvedByCorrectedMenu = isCriticalResolvedByCorrectedMenu;
 exports.reconcileCriticalSuggestionsAgainstCorrectedMenu = reconcileCriticalSuggestionsAgainstCorrectedMenu;
 exports.reconcileCriticalSuggestionsAgainstCorrectedMenuWithDiagnostics = reconcileCriticalSuggestionsAgainstCorrectedMenuWithDiagnostics;
+exports.suppressResolvedRevisionItemFindings = suppressResolvedRevisionItemFindings;
 exports.detectTopLevelPrixFixePrice = detectTopLevelPrixFixePrice;
 exports.enforcePrixFixeCriticalChecks = enforcePrixFixeCriticalChecks;
 exports.enforceAllergenProgramCheck = enforceAllergenProgramCheck;
@@ -242,6 +243,43 @@ function reconcileCriticalSuggestionsAgainstCorrectedMenuWithDiagnostics(correct
     }
     return { suggestions: kept, droppedSuggestions };
 }
+/** A changed ingredient row can inherit its own immediately preceding priced name. */
+function suppressResolvedRevisionItemFindings(menuContent, baselineContent, changedIndices, suggestions) {
+    const lines = menuContent.split('\n');
+    const baselineLines = baselineContent.split('\n');
+    // Approved descriptions may be title-cased even when the edited version
+    // starts lower-case. Their repeated ingredient separators establish shape;
+    // the baseline pairing and shared words establish identity.
+    const isIngredientRow = (row) => (row.match(/[–—]/g) || []).length >= 2;
+    return suggestions.filter((suggestion) => {
+        if (suggestion.severity !== 'critical' || !/missing price|incomplete dish name/i.test(suggestion.type || ''))
+            return true;
+        const item = normalizeForSuggestionMatch(suggestion.menuItem || '');
+        if (!item)
+            return true;
+        const matches = changedIndices.filter(index => normalizeForSuggestionMatch(lines[index] || '') === item);
+        if (!matches.length)
+            return true;
+        return !matches.every((index) => {
+            const row = (lines[index] || '').trim();
+            const previous = (lines[index - 1] || '').trim();
+            // Multiple ingredient separators identify a continuation, rather
+            // than a newly added unpriced dish after an unrelated priced dish.
+            const pricedName = previous && looksLikePriceOnLine(previous) && !/[–—,]/.test(previous);
+            if (!isIngredientRow(row) || !pricedName)
+                return false;
+            const baselineHeaders = baselineLines.map((line, position) => line.trim() === previous ? position : -1).filter(position => position >= 0);
+            if (baselineHeaders.length !== 1)
+                return false;
+            const baselineDescription = (baselineLines[baselineHeaders[0] + 1] || '').trim();
+            if (!isIngredientRow(baselineDescription))
+                return false;
+            const originalWords = new Set(normalizeForSuggestionMatch(baselineDescription).split(' ').filter(word => word.length > 2));
+            const sharedWords = normalizeForSuggestionMatch(row).split(' ').filter(word => originalWords.has(word));
+            return new Set(sharedWords).size >= 2;
+        });
+    });
+}
 const PRICE_AMOUNT = String.raw `\d{1,4}(?:[.,]\d{1,2})?`;
 const EXPLICIT_PRICE_PATTERNS = [
     { reason: 'per_person_marker', pattern: new RegExp(`\\b(${PRICE_AMOUNT})\\s*(?:pp\\b|per\\s+person\\b)`, 'i') },
@@ -358,24 +396,56 @@ function enforcePrixFixeCriticalChecks(menuContent, suggestions) {
 // when, after stripping a trailing price token, it ends in a cluster of 1-2
 // uppercase code tokens (comma-separated, no spaces), e.g. "... G,D 24".
 const TRAILING_PRICE_FOR_ALLERGEN_CHECK = /\s+\$?\d+(?:[.,]\d+)?(?:\s*(?:each|pp|per\s*person))?\s*$/i;
-const TRAILING_ALLERGEN_CLUSTER = /\s(?:[A-Z]{1,2}(?:,[A-Z]{1,2})+|VG|[A-Z])$/;
-function enforceAllergenProgramCheck(menuContent, suggestions) {
-    const existing = [...(suggestions || [])];
-    // Only an existing menu-wide allergen flag suppresses the injection.
-    // Per-dish AI allergen suggestions must NOT — a menu with zero codes
-    // still deserves the critical "no allergen program" banner.
-    const hasAllergenSuggestion = existing.some((s) => `${s.type || ''}`.toLowerCase().includes('allergen') &&
-        `${s.menuItem || ''}`.toLowerCase().includes('entire menu'));
-    const lines = (menuContent || '').split('\n').map((l) => l.trim()).filter(Boolean);
-    const codedLines = lines.filter((line) => {
-        const withoutPrice = line.replace(TRAILING_PRICE_FOR_ALLERGEN_CHECK, '');
-        // Ignore section headings (all-caps lines) and the allergen legend itself
-        if (/^[A-Z\s&+•·-]+$/.test(withoutPrice))
-            return false;
-        if (/allergen|contains|gluten|vegetarian|vegan/i.test(withoutPrice) && /\|/.test(withoutPrice))
-            return false;
-        return TRAILING_ALLERGEN_CLUSTER.test(withoutPrice);
+function parseAllergenCodesForProgramCheck(allergenLegend) {
+    const configuredLegend = `${allergenLegend || (0, tenant_config_1.getTenantConfig)().allergenKey || ''}`;
+    const codes = new Set();
+    for (const segment of configuredLegend.split(/\||\n/)) {
+        const match = segment.trim().match(/^([A-Za-z]{1,3})\b/);
+        if (match?.[1]) {
+            codes.add(match[1].toUpperCase());
+        }
+    }
+    return codes;
+}
+function lineCarriesConfiguredAllergenCode(line, validCodes) {
+    if (!line || validCodes.size === 0)
+        return false;
+    if (/allergen|contains|gluten|vegetarian|vegan/i.test(line) && /\|/.test(line))
+        return false;
+    const hasTrailingPrice = TRAILING_PRICE_FOR_ALLERGEN_CHECK.test(line);
+    const clusters = line.match(/\b[A-Z]{1,3}(?:,[A-Z]{1,3})*(?=\d|\b)/g) || [];
+    const hasConfiguredCluster = clusters.some((cluster) => {
+        const codes = cluster.split(',');
+        return codes.length > 0 && codes.every((code) => validCodes.has(code));
     });
+    const compactCodePrice = clusters.some((cluster) => {
+        const codes = cluster.split(',');
+        if (!codes.length || codes.some((code) => !validCodes.has(code)))
+            return false;
+        return new RegExp(`${escapeRegExp(cluster)}\\d+(?:[.,]\\d+)?\\s*$`).test(line);
+    });
+    const hasTrailingCodes = clusters.some((cluster) => {
+        if (!cluster.split(',').every((code) => validCodes.has(code)))
+            return false;
+        return new RegExp(`\\S.*\\s${escapeRegExp(cluster)}\\s*$`).test(line);
+    });
+    return hasConfiguredCluster && (hasTrailingPrice || compactCodePrice || hasTrailingCodes);
+}
+function enforceAllergenProgramCheck(menuContent, suggestions, allergenLegend) {
+    const validCodes = parseAllergenCodesForProgramCheck(allergenLegend);
+    const lines = (menuContent || '').split('\n').map((l) => l.trim()).filter(Boolean);
+    const codedLines = lines.filter((line) => lineCarriesConfiguredAllergenCode(line, validCodes));
+    const isMenuWideAllergen = (s) => `${s.type || ''}`.toLowerCase().includes('allergen') &&
+        `${s.menuItem || ''}`.toLowerCase().includes('entire menu');
+    const isExplicitZeroCodeClaim = (s) => isMenuWideAllergen(s) &&
+        /^(?:no|none|zero)\b[^.]*\b(?:allergen\s+)?codes?\b|^(?:the\s+)?(?:entire\s+|whole\s+)?menu\s+(?:has|contains|carries)\s+no\b[^.]*\bcodes?\b/i.test(`${s.description || ''}`.trim());
+    // A partial review can make the model claim that the *entire* menu has no
+    // codes. Full-menu evidence disproves only that claim, not dish-specific
+    // allergen findings or other menu-wide allergen concerns.
+    const existing = (suggestions || []).filter((s) => !(codedLines.length > 0 && isExplicitZeroCodeClaim(s)));
+    // Only an existing zero-code claim suppresses the injection. Partial or
+    // per-dish concerns cannot stand in for a missing-program critical.
+    const hasAllergenSuggestion = existing.some(s => isExplicitZeroCodeClaim(s) || (isMenuWideAllergen(s) && !`${s.description || ''}`.trim()));
     if (codedLines.length === 0 && !hasAllergenSuggestion) {
         existing.push({
             type: 'Allergen Code',
@@ -633,7 +703,7 @@ function runPostAiPipeline(args) {
     // allergen codes, so the "no allergen program" critical is a false positive on
     // them. Gate to food menus (default when templateType is unset).
     if (args.templateType !== 'beverage') {
-        finalSuggestions = enforceAllergenProgramCheck(correctedMenuSanitized, finalSuggestions);
+        finalSuggestions = enforceAllergenProgramCheck(args.allergenProgramMenuContent || correctedMenuSanitized, finalSuggestions, args.effectiveReviewAllergens);
     }
     if (args.managedRawNoticePresent) {
         finalSuggestions = finalSuggestions.filter(suggestion => !(0, menu_footer_1.isGenericMissingCanonicalRawNoticeFinding)(suggestion));

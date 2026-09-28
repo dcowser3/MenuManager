@@ -171,7 +171,7 @@ Note: Use ONLY these allergen codes when checking allergen compliance. Do not us
         sections.push('pre_ai_deterministic_checks');
     }
     if (ctx.changedOnlyMode && !omit.has('changed_only_scope')) {
-        finalPrompt = `${finalPrompt}\n\nIMPORTANT SCOPE FOR THIS REVIEW:\nYou are reviewing ONLY changed excerpts from a menu revision.\nDo NOT flag unchanged baseline content.\nReturn issues only for the changed excerpts provided.\nThe CORRECTED MENU section MUST contain exactly the same lines you received, in the same order, with high-confidence corrections applied to each line. Do not add, remove, merge, split, or reorder lines.`;
+        finalPrompt = `${finalPrompt}\n\nIMPORTANT SCOPE FOR THIS REVIEW:\nYou are reviewing ONLY changed excerpts from a menu revision.\nThe complete current menu is supplied separately as READ-ONLY CONTEXT. Use it to identify the name and price belonging to a changed ingredient/description row, and to evaluate any claim about the entire menu (including allergen-code absence). A price on an unrelated neighboring item does not satisfy a new item's missing price.\nDo NOT flag unchanged baseline content.\nReturn issues only for the changed excerpts provided, except a genuine menu-wide absence of allergen codes established by the complete current menu.\nThe CORRECTED MENU section MUST contain exactly the same lines you received, in the same order, with high-confidence corrections applied to each line. Do not add, remove, merge, split, or reorder lines or copy read-only context into it.`;
         sections.push('changed_only_scope');
     }
     if (!omit.has('footer_rules')) {

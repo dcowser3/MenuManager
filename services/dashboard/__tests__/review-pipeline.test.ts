@@ -27,6 +27,7 @@ import {
     parseAIResponse,
     reconcileCriticalSuggestionsAgainstCorrectedMenuWithDiagnostics,
     runPostAiPipeline,
+    suppressResolvedRevisionItemFindings,
 } from '../lib/review-pipeline';
 import { AI_REVIEW_FENCES } from '../lib/review-response-contract';
 
@@ -752,6 +753,38 @@ describe('enforceAllergenProgramCheck', () => {
         const existing = [{ type: 'Spelling', severity: 'normal', menuItem: 'Crab Cake' }];
         const result = enforceAllergenProgramCheck(uncodedMenu, existing);
         expect(result).toHaveLength(2);
+    });
+
+    it('uses complete menu codes to reject only an absolute no-code claim', () => {
+        const suggestions = [
+            { type: 'Allergen Code', severity: 'critical', menuItem: 'Entire menu', description: 'No dishes carry allergen codes.' },
+            { type: 'Allergen Code', severity: 'critical', menuItem: 'Entire menu', description: 'Some dishes are missing allergen codes.' },
+            { type: 'Allergen Code', severity: 'critical', menuItem: 'New taco', description: 'Check dairy coding.' },
+        ];
+        expect(enforceAllergenProgramCheck('Toast, avocado G 14\nBloody Mary 18\nvodka – tomato – pepper', suggestions, 'G gluten'))
+            .toEqual([suggestions[1], suggestions[2]]);
+        const unspecified = { type: 'Allergen Code', severity: 'critical', menuItem: 'Entire menu' };
+        expect(enforceAllergenProgramCheck('Toast, avocado G 14', [unspecified], 'G gluten')).toEqual([unspecified]);
+        expect(enforceAllergenProgramCheck('Toast, avocado 14', [suggestions[1]], 'G gluten'))
+            .toEqual([suggestions[1], expect.objectContaining({ menuItem: 'Entire menu', severity: 'critical', description: expect.stringContaining('No dishes') })]);
+    });
+});
+
+describe('revision ingredient context', () => {
+    const baseline = 'BRUNCH\nToast, avocado G 14\nBloody Mary 18\nVodka – Tomato – pepper – celery';
+    const current = baseline.replace('Vodka – Tomato – pepper – celery', 'vodka – tomato – pepper – horseradish');
+    const changed = 'vodka – tomato – pepper – horseradish';
+    const missing = (type: string, menuItem = changed) => ({ type, menuItem, severity: 'critical' });
+
+    it('recognizes an edited description paired with its priced name in the approved baseline', () => {
+        expect(suppressResolvedRevisionItemFindings(current, baseline, [3], [missing('Missing Price'), missing('Incomplete Dish Name')])).toEqual([]);
+    });
+
+    it('does not borrow a priced neighbor for a newly inserted name or price', () => {
+        const added = 'seasonal spritz – sparkling wine – peach';
+        const source = `${baseline}\nHouse margarita 18\n${added}`;
+        const suggestions = [missing('Missing Price', added), missing('Incomplete Dish Name', added)];
+        expect(suppressResolvedRevisionItemFindings(source, `${baseline}\nHouse margarita 18`, [5], suggestions)).toEqual(suggestions);
     });
 });
 

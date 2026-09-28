@@ -256,6 +256,15 @@ const FUNCTIONAL_ENTRIES: ManifestRuleEntry[] = [
         source: 'code_metadata',
     },
     {
+        id: 'post-ai/allergen-program-presence',
+        layer: 'post_ai_guard',
+        category: 'allergen_codes',
+        title: 'Complete-menu allergen-program presence check',
+        description: 'Food-menu revision checks use the complete current menu to test for any configured allergen code. Absolute no-code AI claims are removed when coded dishes exist; partial and item-specific concerns remain. A zero-code menu receives a critical program finding.',
+        implementation: { file: REVIEW_PIPELINE_FILE, exportName: 'enforceAllergenProgramCheck' },
+        source: 'code_metadata',
+    },
+    {
         id: 'post-ai/canonical-spelling-suggestion-guarantee',
         layer: 'post_ai_guard',
         category: 'spelling',

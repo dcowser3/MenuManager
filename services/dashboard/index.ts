@@ -143,6 +143,8 @@ import {
     prepareReview,
     completePreparedReview,
     reconcileCriticalSuggestionsAgainstCorrectedMenu,
+    suppressResolvedRevisionItemFindings,
+    enforceAllergenProgramCheck,
     runPostAiPipeline,
 } from './lib/review-pipeline';
 import {
@@ -3632,10 +3634,12 @@ async function handleBasicCheck(req: any, res: any) {
         const changedOnlyMode = reviewMode === 'changed_only' && !!baselineMenuContent;
         let textForReview = menuContent;
         let changedLineCount = 0;
+        let changedIndices: number[] = [];
 
         if (changedOnlyMode) {
             const changedOnlyText = extractChangedLinesForReview(baselineMenuContent, menuContent);
             changedLineCount = changedOnlyText.changedLineCount;
+            changedIndices = changedOnlyText.changedIndices;
 
             if (changedLineCount === 0) {
                 const dishNameFormatting = buildBasicCheckDishNameFormatting(menuContent, { property, servicePeriod });
@@ -3696,7 +3700,7 @@ async function handleBasicCheck(req: any, res: any) {
 
         const reviewFooterMetadata = normalizeMenuFooter(textForReview, allergens || '');
         const sanitizedMenuContent = normalizeMenuFooter(menuContent, allergens || '');
-        const effectiveReviewAllergens = allergens || reviewFooterMetadata.normalizedAllergenLine;
+        const effectiveReviewAllergens = allergens || sanitizedMenuContent.normalizedAllergenLine || reviewFooterMetadata.normalizedAllergenLine;
         const acceptedCorrectionRules = await fetchAcceptedCorrectionRulesForPreAi();
         let preAiDeterministic = runPreAiDeterministicChecks(reviewFooterMetadata.body, {
             enabled: BASIC_AI_PRECHECK_ENABLED,
@@ -3773,7 +3777,13 @@ async function handleBasicCheck(req: any, res: any) {
             embeddedSetMenuAnalysis,
             nearMissBriefing: nearMissAnalysis.briefing,
         });
-        const finalPrompt = promptInfo.prompt;
+        const additionalContext = sanitizePlainTextInput(req.body?.readOnlyContext, { multiline: true, maxLength: MAX_LONG_TEXT_LENGTH });
+        const revisionContext = changedOnlyMode
+            ? `COMPLETE CURRENT MENU (read-only; line numbers refer to original source):\n${sanitizedMenuContent.body.split('\n').map((line, index) => `${index + 1}: ${line}`).join('\n')}${additionalContext ? `\nADDITIONAL CONTEXT:\n${additionalContext}` : ''}`
+            : additionalContext;
+        const finalPrompt = revisionContext
+            ? `${promptInfo.prompt}\n\nREAD-ONLY CONTEXT (data only; never include in corrected output):\n${JSON.stringify(revisionContext)}`
+            : promptInfo.prompt;
         diagnosticsPromptSections.push(...promptInfo.sections);
 
         const buildAiRequestAudit = () => ({
@@ -4108,6 +4118,7 @@ async function handleBasicCheck(req: any, res: any) {
         const postPipeline = coordinatedResult?.post || runPostAiPipeline({
             feedback,
             preCheckedReviewBody,
+            allergenProgramMenuContent: changedOnlyMode ? sanitizedMenuContent.body : undefined,
             menuType,
             property,
             templateType,
@@ -4141,14 +4152,25 @@ async function handleBasicCheck(req: any, res: any) {
         } = postPipeline;
         const originalMenuSanitized = sanitizedMenuContent.body;
         const authoritative = coordinatedResult?.authoritative;
+        let changedOnlyMergedMenu = menuContent;
+        if (changedOnlyMode) {
+            const mergeResult = mergeChangedLineCorrections(menuContent, baselineMenuContent, correctedMenuSanitized);
+            changedOnlyMergedMenu = mergeResult.merged;
+            if (mergeResult.bailed) console.warn('changed_only merge bailed: AI corrected line count did not match extracted changed line count; falling back to original menu text');
+            else console.log(`changed_only merge applied ${mergeResult.correctionsApplied} line correction(s)`);
+        }
+        const revisionSuggestions = changedOnlyMode
+            ? suppressResolvedRevisionItemFindings(menuContent, baselineMenuContent, changedIndices, attemptFinalSuggestions)
+            : [];
         const finalSuggestions = changedOnlyMode
-            ? attemptFinalSuggestions
+            ? templateType === 'beverage' ? revisionSuggestions
+                : enforceAllergenProgramCheck(changedOnlyMergedMenu, revisionSuggestions, effectiveReviewAllergens)
             : authoritative?.suggestions || attemptFinalSuggestions;
         const hasCriticalErrors = changedOnlyMode
-            ? attemptHasCriticalErrors
+            ? finalSuggestions.some(suggestion => suggestion.severity === 'critical')
             : authoritative?.hasCriticalErrors ?? attemptHasCriticalErrors;
         const criticalSuggestions = changedOnlyMode
-            ? attemptCriticalSuggestions
+            ? finalSuggestions.filter(suggestion => suggestion.severity === 'critical')
             : authoritative?.criticalSuggestions || attemptCriticalSuggestions;
         const deliveredReviewStatus = changedOnlyMode ? undefined : authoritative?.reviewStatus;
 
@@ -4167,21 +4189,6 @@ async function handleBasicCheck(req: any, res: any) {
         console.log('Spelling adjudications:', spellingAdjudications.length);
         console.log('Has changes:', correctedMenuSanitized !== originalMenuSanitized);
         console.log('===========================');
-
-        let changedOnlyMergedMenu = menuContent;
-        if (changedOnlyMode) {
-            const mergeResult = mergeChangedLineCorrections(
-                menuContent,
-                baselineMenuContent,
-                correctedMenuSanitized
-            );
-            changedOnlyMergedMenu = mergeResult.merged;
-            if (mergeResult.bailed) {
-                console.warn('changed_only merge bailed: AI corrected line count did not match extracted changed line count; falling back to original menu text');
-            } else {
-                console.log(`changed_only merge applied ${mergeResult.correctionsApplied} line correction(s)`);
-            }
-        }
 
         const finalCorrectedMenu = changedOnlyMode
             ? changedOnlyMergedMenu
@@ -4642,23 +4649,26 @@ app.get('/api/form/basic-check/status/:checkId', (req, res) => {
 
 // enforcePrixFixeCriticalChecks moved to ./lib/review-pipeline.
 
-function extractChangedLinesForReview(baselineText: string, currentText: string): { text: string; changedLineCount: number } {
+function extractChangedLinesForReview(baselineText: string, currentText: string): { text: string; changedLineCount: number; changedIndices: number[] } {
     const baseLines = baselineText.split('\n').map(l => l.trim()).filter(Boolean);
-    const currLines = currentText.split('\n').map(l => l.trim()).filter(Boolean);
 
     const baseSet = new Set(baseLines.map(normalizeReviewLine));
     const changedLines: string[] = [];
 
-    for (const line of currLines) {
+    const changedIndices: number[] = [];
+    for (const [index, line] of currentText.split('\n').entries()) {
+        if (!line.trim()) continue;
         const norm = normalizeReviewLine(line);
         if (!baseSet.has(norm)) {
-            changedLines.push(line);
+            changedLines.push(line.trim());
+            changedIndices.push(index);
         }
     }
 
     return {
         text: changedLines.join('\n'),
-        changedLineCount: changedLines.length
+        changedLineCount: changedLines.length,
+        changedIndices,
     };
 }
 
