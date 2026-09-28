@@ -1,10 +1,16 @@
 #!/usr/bin/env bash
-# Daily improvement-cycle cron entrypoint (installed on the Lightsail host by
+# Weekly improvement-cycle cron entrypoint (installed on the Lightsail host by
 # the deploy workflow). Runs the cycle inside the deployed dashboard container
 # so it gets the compose env (.env), the built dist/, and the persistent
-# tmp/logs volumes. The script itself gates on new reviewer corrections, so an
-# idle day costs one database count query.
+# tmp/logs volumes. Scheduled runs are restricted to Sunday in UTC.
 set -euo pipefail
+
+# Guard before Docker/database/model/mail access. A stale nightly crontab must
+# not bypass the requested weekly schedule through pending-proposal refreshes.
+if [[ "$(date -u +%u)" != "7" ]]; then
+  echo "Weekly improvement cycle: skipping outside Sunday (UTC)."
+  exit 0
+fi
 
 cd "$(dirname "$0")/.."
 
