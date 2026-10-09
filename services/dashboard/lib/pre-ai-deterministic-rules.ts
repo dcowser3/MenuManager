@@ -917,7 +917,9 @@ function normalizeRawAsteriskPlacementForLine(line: string): string {
         return compactedInlineMarker;
     }
 
-    let working = trimmed.replace(/\*/g, '').replace(/\s{2,}/g, ' ').trim();
+    // A marker glued to the price ("Chimichurri *29") must not fuse the price
+    // into the last word when the marker is removed.
+    let working = trimmed.replace(/\*(?=\s*[$€£]?\d)/g, ' ').replace(/\*/g, '').replace(/\s{2,}/g, ' ').trim();
     let trailingPrice = '';
     let trailingAllergens = '';
 

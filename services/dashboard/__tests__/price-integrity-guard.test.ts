@@ -110,4 +110,31 @@ describe('guardCorrectedMenuPrices', () => {
             }),
         ]);
     });
+
+    // Incident err-20261009T205923Z-9699af86: the chef's price sat behind a raw
+    // marker ("Chimichurri *29"); the guard read the line as price-less and
+    // stripped the 29 as "AI-added".
+    describe('prices next to a raw marker', () => {
+        const corrected = 'Steak & Eggs, 4 oz Colorado hanger steak, Eggs any style, house potatoes, Chimichurri* 29';
+
+        it.each([
+            ['marker before the price', 'Steak & Eggs, 4 oz Colorado hanger steak, Eggs any style, house potatoes, Chimichurri *29'],
+            ['marker after the price', 'Steak & Eggs, 4 oz Colorado hanger steak, Eggs any style, house potatoes, Chimichurri 29*'],
+            ['price glued to the last word', 'Steak & Eggs, 4 oz Colorado hanger steak, Eggs any style, house potatoes, Chimichurri29*'],
+        ])('keeps the submitted price when the %s', (_label, original) => {
+            const result = guardCorrectedMenuPrices(original, corrected, []);
+
+            expect(result.correctedMenu).toBe(corrected);
+            expect(result.changes).toEqual([]);
+            expect(result.suggestions).toEqual([]);
+        });
+
+        it('still restores a changed price written behind a raw marker', () => {
+            const original = 'Steak & Eggs, 4 oz hanger steak, Chimichurri *29';
+            const result = guardCorrectedMenuPrices(original, 'Steak & Eggs, 4 oz hanger steak, Chimichurri* 32', []);
+
+            expect(result.correctedMenu).toBe('Steak & Eggs, 4 oz hanger steak, Chimichurri* 29');
+            expect(result.changes).toEqual([expect.objectContaining({ reason: 'changed_price', originalPrice: '29' })]);
+        });
+    });
 });

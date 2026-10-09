@@ -30,6 +30,7 @@ import {
     suppressResolvedRevisionItemFindings,
 } from '../lib/review-pipeline';
 import { AI_REVIEW_FENCES } from '../lib/review-response-contract';
+import { runPreAiDeterministicChecks } from '../lib/pre-ai-deterministic-rules';
 
 function buildFeedback(correctedMenu: string, suggestions: any[]): string {
     return [
@@ -44,6 +45,39 @@ function buildFeedback(correctedMenu: string, suggestions: any[]): string {
 }
 
 describe('parseAIResponse (extracted from index.ts)', () => {
+    // Incident err-20261009T205923Z-9699af86 (Toro Snowmass breakfast): the
+    // delivered menu lost the Steak & Eggs price and gained V on dishes.
+    test('keeps the chef price behind a raw marker and blocks AI-added V under the default key', () => {
+        const submitted = [
+            'Specialties',
+            'Steak & Eggs, 4 oz Colorado hanger steak, Eggs any style, house potatoes, Chimichurri *29',
+            'Breakfast Tacos, three tacos, pico de gallo, house salsa, avocado, scrambled eggs GF 22',
+            'French Toast, vanilla custard, banana, mixed berries, mint, powdered sugar D G 24',
+        ].join('\n');
+        const preChecked = runPreAiDeterministicChecks(submitted).menuText;
+        const modelCorrected = [
+            'Specialties',
+            'Steak & Eggs, 4 oz Colorado hanger steak, Eggs any style, house potatoes, Chimichurri 29*',
+            'Breakfast Tacos, three tacos, pico de gallo, house salsa, avocado, scrambled eggs GF,V 22',
+            'French Toast, vanilla custard, banana, mixed berries, mint, powdered sugar D,G,V 24',
+        ].join('\n');
+
+        const result = runPostAiPipeline({
+            feedback: buildFeedback(modelCorrected, []),
+            preCheckedReviewBody: preChecked,
+            acceptedCorrectionRules: [],
+            embeddedSetMenuAnalysis: { sections: [], issues: [] },
+            precheckEnabled: true,
+            effectiveReviewAllergens: 'G contains gluten | V vegetarian | D contains dairy | S contain shellfish | N contain nuts | VG vegan',
+        });
+
+        expect(result.correctedMenuSanitized).toContain('Chimichurri* 29');
+        expect(result.priceIntegrityGuard.changes).toEqual([]);
+        expect(result.criticalSuggestions).not.toContainEqual(expect.objectContaining({ type: 'Missing Price' }));
+        expect(result.correctedMenuSanitized).toContain('scrambled eggs GF 22');
+        expect(result.correctedMenuSanitized).toContain('powdered sugar D,G 24');
+    });
+
     test('replays the Toro response without moving allergen suffixes or adding a vegan raw marker', () => {
         const fixture = require('../__fixtures__/basic-check/toro-holiday.json');
         const corrected = fixture.modelCorrectedLines.join('\n');
@@ -190,6 +224,11 @@ describe('normalizeRawAsteriskPlacement (post-AI canonicalization)', () => {
     test('never puts a space before the raw marker', () => {
         expect(normalizeRawAsteriskPlacement('Tán Ceviche Trio, signature ceviches, tán ceviche *S 48'))
             .toBe('Tán Ceviche Trio, signature ceviches, tán ceviche* S 48');
+    });
+
+    test('keeps a price written directly after the raw marker', () => {
+        expect(normalizeRawAsteriskPlacement('Steak & Eggs, hanger steak, house potatoes, Chimichurri *29'))
+            .toBe('Steak & Eggs, hanger steak, house potatoes, Chimichurri* 29');
     });
 
     test('collapses duplicate markers to a single canonical marker', () => {

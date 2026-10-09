@@ -821,7 +821,9 @@ function normalizeRawAsteriskPlacementForLine(line: string): string {
     if (!trimmed.includes('*')) return original;
 
     // Remove all raw markers first; we'll reinsert exactly one at canonical position.
-    let working = trimmed.replace(/\*/g, '').replace(/\s{2,}/g, ' ').trim();
+    // A marker glued to the price ("Chimichurri *29") becomes a separator so the
+    // price is not fused into the last word.
+    let working = trimmed.replace(/\*(?=\s*[$€£]?\d)/g, ' ').replace(/\*/g, '').replace(/\s{2,}/g, ' ').trim();
 
     // Skip obvious non-dish lines (titles/legends).
     if (/^[A-Za-zÀ-ÖØ-öø-ÿ0-9 '&\-]+$/.test(working) && !working.includes(',')) {

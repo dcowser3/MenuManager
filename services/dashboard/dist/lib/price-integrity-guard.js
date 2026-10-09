@@ -34,6 +34,27 @@ function extractTrailingPrice(line) {
         lineWithoutPrice: `${match.groups.before || ''}${match.groups.trailing || ''}`.trimEnd(),
     };
 }
+/**
+ * Price on a submitted line, tolerating raw markers next to the price
+ * ("Chimichurri *29", "Chimichurri 29*"). The submitted side must never be
+ * read as price-less just because of marker placement.
+ */
+function extractSubmittedTrailingPrice(line) {
+    return extractTrailingPrice(line)
+        || extractTrailingPrice((line || '').replace(/\*/g, ' ').replace(/[ \t]{2,}/g, ' ').trimEnd());
+}
+/**
+ * True when the submitted line already ends in the corrected price digits, even
+ * glued to the previous word ("Chimichurri29*"). Stripping that price would
+ * delete the chef's price, so the guard must leave it alone.
+ */
+function submittedLineEndsWithPriceDigits(line, normalizedPrice) {
+    if (!/^\d+(?:\.\d+)?$/.test(normalizedPrice)) {
+        return false;
+    }
+    const escaped = normalizedPrice.replace(/\./g, '\\.');
+    return new RegExp(`(?:^|[^\\d.,])[$\u20ac\u00a3]?${escaped}(?:\\.0{1,2})?\\*?\\s*$`).test(line || '');
+}
 function stripTrailingAllergenCluster(line) {
     return (line || '').replace(/\s+[A-Z]{1,3}(?:,[A-Z]{1,3})*\s*$/u, '').trim();
 }
@@ -124,9 +145,12 @@ function guardCorrectedMenuPrices(originalMenu, correctedMenu, suggestions) {
             continue;
         }
         const originalLine = originalRef.line;
-        const originalPrice = extractTrailingPrice(originalLine);
+        const originalPrice = extractSubmittedTrailingPrice(originalLine);
         const correctedPrice = extractTrailingPrice(correctedLine);
         if (!correctedPrice) {
+            continue;
+        }
+        if (!originalPrice && submittedLineEndsWithPriceDigits(originalLine, correctedPrice.normalizedPrice)) {
             continue;
         }
         const menuItem = deriveMenuItem(originalLine || correctedLine);

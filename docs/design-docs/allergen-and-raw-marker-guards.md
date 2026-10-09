@@ -29,7 +29,15 @@ model's "Retain F,S" suggestion.
   legend exists, code-shaped tokens are recognized from the legend **plus** a
   common allergen code set (`F`, `C`, `E`, `SE`, `SY`, ...). Tokens the chef did
   not submit are stripped even if the legend does not define them. Menus with no
-  legend are unchanged.
+  legend are unchanged. Space-separated clusters (`D G`, `VG N`) are read as one
+  cluster, so restoring a submitted set never drops all but the last code.
+- Basic AI Check (`/api/form/basic-check`) falls back to the tenant default
+  allergen key (`tenantConfig.allergenKey`) when the form has no key and the
+  menu has no footer legend, the same fallback the submit and approval paths
+  use. Before this, a key-less form delivered an empty legend to the guards,
+  which switched the lock off (incident `err-20261009T205923Z-9699af86`, Toro
+  Snowmass breakfast, 2026-10-09: the AI added `V` to five dishes and the
+  delivery note claimed the codes were "not changed").
 - `lib/raw-marker-integrity-guard.ts` (`guardCorrectedMenuRawMarkers`) runs after
   final allergen preservation: a pre-AI marker missing from the delivered row is
   reinserted at the end of the description, before codes and price; if only the

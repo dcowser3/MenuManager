@@ -24,6 +24,19 @@ describe('submitted allergen source preservation', () => {
     test('keeps no-legend menus unchanged (no allergen program to protect)', () => {
         expect((0, allergen_source_preservation_1.preserveSubmittedAllergenCodes)('Soup 12', 'Soup F 12', '').menuText).toBe('Soup F 12');
     });
+    // Incident err-20261009T205923Z-9699af86: the AI added V to dishes and the chef
+    // wrote some clusters space-separated ("D G").
+    const defaultKey = 'G contains gluten | V vegetarian | D contains dairy | S contain shellfish | N contain nuts';
+    test('removes an AI-added V under the default key', () => {
+        expect((0, allergen_source_preservation_1.preserveSubmittedAllergenCodes)('Breakfast Tacos, three tacos, pico de gallo, house salsa, avocado, scrambled eggs GF 22', 'Breakfast Tacos, three tacos, pico de gallo, house salsa, avocado, scrambled eggs GF,V 22', defaultKey).menuText).toBe('Breakfast Tacos, three tacos, pico de gallo, house salsa, avocado, scrambled eggs GF 22');
+    });
+    test('restores every space-separated submitted code, not just the last one', () => {
+        expect((0, allergen_source_preservation_1.preserveSubmittedAllergenCodes)('French Toast, vanilla custard, banana, mixed berries, mint, powdered sugar D G 24', 'French Toast, vanilla custard, banana, mixed berries, mint, powdered sugar D,G,V 24', defaultKey).menuText).toBe('French Toast, vanilla custard, banana, mixed berries, mint, powdered sugar D,G 24');
+    });
+    test('keeps codes the AI only reformatted', () => {
+        const delivered = 'Churro Waffles, macerated strawberry, candied pecan, cinnamon D,G,N 22';
+        expect((0, allergen_source_preservation_1.preserveSubmittedAllergenCodes)('Churro Waffles, macerated strawberry, candied pecan, cinnamon G, D, N 22', delivered, defaultKey).menuText).toBe(delivered);
+    });
     test('fails closed for ambiguous duplicate source rows', () => {
         const source = 'Chicken, soy S 10\nChicken, soy D 11';
         const result = (0, allergen_source_preservation_1.preserveSubmittedAllergenCodes)(source, 'Chicken, soy 10\nChicken, soy 11', legend);

@@ -1803,20 +1803,44 @@
         return areLinesSimilarEnoughForTokenDiff(baseText, revisedText);
     }
 
+    // How strongly two lines belong together (0 = never pair them). Weighting the
+    // alignment by similarity keeps a loosely similar neighbour from stealing a
+    // line's true partner: a tracked-inserted row such as "Waygu Enchiladas, farm
+    // eggs any style, ..." shares enough tokens with the next row "Steak & Eggs,
+    // ... Eggs any style ..." that an unweighted alignment tied and shifted every
+    // following row (incident err-20261009T205923Z-9699af86).
+    function lineAlignmentWeight(baseLine, revisedLine) {
+        if (!shouldAlignLinesForTokenDiff(baseLine, revisedLine)) {
+            return 0;
+        }
+        const baseValues = Array.from(new Set(getMeaningfulTokenValues(baseLine)));
+        const revisedValues = Array.from(new Set(getMeaningfulTokenValues(revisedLine)));
+        if (!baseValues.length || !revisedValues.length) {
+            return 1;
+        }
+        const revisedSet = new Set(revisedValues);
+        const shared = baseValues.filter(function (value) {
+            return revisedSet.has(value);
+        }).length;
+        return Math.max(shared / Math.max(baseValues.length, revisedValues.length), 0.01);
+    }
+
     function buildLineLcs(baseLines, revisedLines) {
         const rows = baseLines.length + 1;
         const cols = revisedLines.length + 1;
         const table = Array.from({ length: rows }, function () {
             return Array(cols).fill(0);
         });
+        const weights = baseLines.map(function (baseLine) {
+            return revisedLines.map(function (revisedLine) {
+                return lineAlignmentWeight(baseLine.text, revisedLine.text);
+            });
+        });
 
         for (let i = baseLines.length - 1; i >= 0; i--) {
             for (let j = revisedLines.length - 1; j >= 0; j--) {
-                if (shouldAlignLinesForTokenDiff(baseLines[i].text, revisedLines[j].text)) {
-                    table[i][j] = table[i + 1][j + 1] + 1;
-                } else {
-                    table[i][j] = Math.max(table[i + 1][j], table[i][j + 1]);
-                }
+                const matched = weights[i][j] > 0 ? table[i + 1][j + 1] + weights[i][j] : 0;
+                table[i][j] = Math.max(matched, table[i + 1][j], table[i][j + 1]);
             }
         }
 
@@ -1824,7 +1848,7 @@
         let i = 0;
         let j = 0;
         while (i < baseLines.length && j < revisedLines.length) {
-            if (shouldAlignLinesForTokenDiff(baseLines[i].text, revisedLines[j].text)) {
+            if (weights[i][j] > 0 && Math.abs(table[i][j] - (table[i + 1][j + 1] + weights[i][j])) < 1e-9) {
                 matches.push({ baseIndex: i, revisedIndex: j });
                 i++;
                 j++;

@@ -3772,7 +3772,13 @@ async function handleBasicCheck(req: any, res: any) {
 
         const reviewFooterMetadata = normalizeMenuFooter(textForReview, allergens || '');
         const sanitizedMenuContent = normalizeMenuFooter(menuContent, allergens || '');
-        const effectiveReviewAllergens = allergens || sanitizedMenuContent.normalizedAllergenLine || reviewFooterMetadata.normalizedAllergenLine;
+        // Same fallback as submit/approval: without it a key-less form disabled the
+        // allergen-code lock and the AI's added codes were delivered (incident
+        // err-20261009T205923Z-9699af86).
+        const effectiveReviewAllergens = allergens
+            || sanitizedMenuContent.normalizedAllergenLine
+            || reviewFooterMetadata.normalizedAllergenLine
+            || DEFAULT_ALLERGEN_KEY;
         const acceptedCorrectionRules = await fetchAcceptedCorrectionRulesForPreAi();
         let preAiDeterministic = runPreAiDeterministicChecks(reviewFooterMetadata.body, {
             enabled: BASIC_AI_PRECHECK_ENABLED,

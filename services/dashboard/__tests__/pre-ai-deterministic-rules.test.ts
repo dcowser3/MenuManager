@@ -438,6 +438,16 @@ describe('runPreAiDeterministicChecks', () => {
         expect(result.appliedCorrections.filter((c) => c.type === 'Raw Item')).toHaveLength(1);
     });
 
+    it('keeps a price written directly after the raw marker (incident err-20261009T205923Z-9699af86)', () => {
+        const result = runPreAiDeterministicChecks(
+            'Steak & Eggs, 4 oz Colorado hanger steak, Eggs any style, house potatoes, Chimichurri *29'
+        );
+
+        expect(result.menuText).toBe(
+            'Steak & Eggs, 4 oz Colorado hanger steak, Eggs any style, house potatoes, Chimichurri* 29'
+        );
+    });
+
     it('never removes a chef-written raw marker, including on shrimp ceviche', () => {
         const lines = [
             'Shrimp Ceviche*, lime, avocado C 24',

@@ -1204,4 +1204,37 @@ describe('redline preview helpers', () => {
         expect(rendered.html).toContain('<span class="existing-del">Make</span><span class="existing-ins">make</span>');
         expect(rendered.html).toContain('<span class="existing-del">73</span><span class="existing-ins">72</span>');
     });
+
+    // Incident err-20261009T205923Z-9699af86 (Toro Snowmass breakfast, uploaded
+    // with Word tracked changes): the tracked-inserted Enchiladas row left a blank
+    // in the baseline, and Steak & Eggs was diffed against it instead of its own
+    // baseline row, painting both rows (and Chilaquiles) with whole-word churn.
+    test('keeps a modified row paired with its own baseline after an inserted similar row', () => {
+        const base = [
+            'Traditional Eggs Benedict, poached eggs, canadian bacon, english muffin, hollandaise* G, D 28',
+            '',
+            'Steak & Eggs, 4 oz wagyu Skirt steak, Eggs any style, house potatoes, Chimichurri* 29',
+            'Chilaquiles, choice of house tomato salsa or salsa verde, crispy corn tortillas, pinto beans, eggs any style, crema, red onion, cilantro, queso fresco* D,V 25',
+            'add chorizo 3 | pork carnitas 5',
+        ].join('\n');
+        const revised = [
+            'Traditional Eggs Benedict, poached eggs, canadian bacon, english muffin, hollandaise* D,G 28',
+            'Waygu Enchiladas, farm eggs any style, barbacoa, corn tortilla, salsa roja, pepper jack cheese, cotija cheese, avocado* D 29',
+            'Steak & Eggs, 4 oz Colorado hanger steak, Eggs any style, house potatoes, Chimichurri* 29',
+            'Chilaquiles, choice of house tomato salsa or salsa verde, crispy corn tortilla chips, pinto beans, eggs any style, crema, red onion, cilantro, queso fresco* D,V 25',
+            'add chorizo 3 | pork carnitas 5',
+        ].join('\n');
+
+        const rendered = redlinePreview.renderPersistentPreview(base, revised);
+        const lines = rendered.html.split('<br>');
+        const steakLine = lines.find((line) => line.includes('Colorado'));
+
+        expect(lines.some((line) => line.startsWith('<span class="persistent-ins">') && line.includes('Waygu Enchiladas'))).toBe(true);
+        expect(steakLine).toContain('Steak &amp; Eggs, 4 oz ');
+        expect(steakLine).toContain('<span class="persistent-del">wagyu</span>');
+        expect(steakLine).toContain('<span class="persistent-ins">Colorado</span>');
+        expect(steakLine).toContain('steak, Eggs any style, house potatoes, Chimichurri* 29');
+        expect(rendered.html).not.toContain('<span class="persistent-del">Chilaquiles</span>');
+        expect(rendered.html).not.toContain('<span class="persistent-ins">Steak</span>');
+    });
 });

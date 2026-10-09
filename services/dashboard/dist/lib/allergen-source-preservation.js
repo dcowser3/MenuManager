@@ -29,10 +29,12 @@ function configuredCodes(legend) {
 }
 function extractCodes(line, validCodes) {
     const priced = (0, pre_ai_deterministic_rules_1.splitTrailingPrice)(line);
-    const match = priced.body.match(/(?:^|\s)(\*?[A-Z]{1,3}(?:\s*,\s*\*?[A-Z]{1,3})*)\s*$/);
+    // Chefs also separate codes with spaces ("D G", "VG N"); reading only the last
+    // one would drop the others when the submitted set is restored.
+    const match = priced.body.match(/(?:^|\s)(\*?[A-Z]{1,3}(?:(?:\s*,\s*|\s+)\*?[A-Z]{1,3})*)\s*$/);
     if (!match || match.index === undefined)
         return { codes: [], body: priced.body, price: priced.price };
-    const codes = match[1].split(/\s*,\s*/).map(code => code.replace(/^\*/, '').toUpperCase());
+    const codes = match[1].split(/\s*,\s*|\s+/).map(code => code.replace(/^\*/, '').toUpperCase());
     if (!codes.length || codes.some(code => !validCodes.has(code)))
         return { codes: [], body: priced.body, price: priced.price };
     return { codes, body: priced.body.slice(0, match.index).trimEnd(), price: priced.price };

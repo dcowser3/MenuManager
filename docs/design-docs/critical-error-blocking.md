@@ -60,6 +60,7 @@ Runs after the model response has passed structure checks and high-confidence ob
 - Compares submitted non-empty lines against the AI-corrected non-empty lines by position when line counts match
 - Removes any trailing price the AI added to a line that was submitted without a trailing price, while preserving other corrected text on that line
 - Restores the submitted price value if the AI changes a trailing price value
+- Reads the submitted price even when a raw marker touches it (`Chimichurri *29`, `Chimichurri 29*`) or a pre-AI step glued it to the last word (`Chimichurri29*`); such a line is never treated as price-less, so the chef's price is never stripped as "AI-added". The pre-AI and post-AI raw-marker placement rules also turn `*29` into `* 29` instead of fusing the price into the word (incident `err-20261009T205923Z-9699af86`, 2026-10-09)
 - Keeps any existing `Missing Price` suggestion, or synthesizes one if the model added a price without flagging the issue
 - Records guarded changes in Basic AI Check diagnostics and form-attempt details for incident review
 
