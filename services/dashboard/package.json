@@ -4,7 +4,7 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
-    "build": "tsc && cp -r views dist/ && cp -r public dist/",
+    "build": "tsc && cp -r views dist/ && cp -r public dist/ && cp design-comparison-rules.json dist/",
     "start": "npm run build && node dist/index.js",
     "dev": "ts-node index.ts",
     "watch": "ts-node-dev --respawn --transpile-only --clear index.ts",

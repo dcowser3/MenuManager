@@ -65,6 +65,8 @@ const submission_workflow_1 = require("./lib/submission-workflow");
 const submission_confirmation_mail_1 = require("./lib/submission-confirmation-mail");
 const approval_workflow_1 = require("./lib/approval-workflow");
 const design_approval_workflow_1 = require("./lib/design-approval-workflow");
+const design_comparison_1 = require("./lib/design-comparison");
+const design_visual_review_1 = require("./lib/design-visual-review");
 const approved_dishes_1 = require("./lib/approved-dishes");
 const approved_menus_1 = require("./lib/approved-menus");
 const approved_download_1 = require("./lib/approved-download");
@@ -541,6 +543,27 @@ async function resolveApprovedDocxDownload(approvedMenu, allowRegeneration) {
         materializeSharePoint: (contents) => materializeSharePointApprovedDocx(approvedMenu, contents),
         regenerateClean: () => regenerateCleanApprovedDocx(approvedMenu),
     });
+}
+async function resolveDesignApprovalSourceDocx(submissionId, candidatePath) {
+    try {
+        const localPath = resolveDashboardStoredPath(candidatePath, 'Design approval DOCX source', upload_security_1.ALLOWED_DOCX_EXTENSIONS);
+        await fs_1.promises.access(localPath);
+        return localPath;
+    }
+    catch {
+        // Historical approvals can outlive a container-local file. Reuse the
+        // approved-download recovery chain: SharePoint first, then a clean
+        // DOCX regenerated from the approved menu content stored in the DB.
+    }
+    const approvedMenu = await (0, approved_menus_1.getApprovedMenuDownload)(getRepoRoot(), submissionId);
+    if (!approvedMenu) {
+        throw new Error('The current approved menu source is no longer available');
+    }
+    const resolved = await resolveApprovedDocxDownload(approvedMenu, true);
+    if (!resolved.filePath) {
+        throw new Error('The current approved menu source is no longer available');
+    }
+    return resolved.filePath;
 }
 const EMPTY_EXTRACTED_PROJECT = {
     projectName: '',
@@ -1079,8 +1102,12 @@ app.get('/form-legacy', async (req, res) => {
  * Design Approval Page - Compare DOCX against PDF
  */
 app.get('/design-approval', (req, res) => {
+    const propertyCatalog = (0, property_catalog_1.buildFallbackPropertyCatalog)()
+        .filter((record) => record.is_active !== false)
+        .map((record) => record.name);
     res.render('design-approval', {
-        title: 'Design Approval'
+        title: 'Design Approval',
+        propertyCatalog,
     });
 });
 app.get('/approved-menus', async (req, res) => {
@@ -1730,16 +1757,31 @@ const approvalWorkflowHandlers = (0, approval_workflow_1.createApprovalWorkflowH
     textToParagraphHtml: approval_baseline_1.textToParagraphHtml,
     generateDocxFromForm,
 });
+const reviewDesignPdfVisuals = (0, design_visual_review_1.createDesignVisualReviewRunner)({
+    fs: fs_1.promises,
+    pathModule: path,
+    execAsync,
+    getDocxRedlinerDir,
+    callChat: llm_adapter_1.callChat,
+});
 const designApprovalWorkflowHandlers = (0, design_approval_workflow_1.createDesignApprovalWorkflowHandlers)({
     axios: internalApi,
     fs: fs_1.promises,
     pathModule: path,
     execAsync,
     DB_SERVICE_URL,
+    CLICKUP_SERVICE_URL,
+    clickupFinalizeTimeoutMs: CLICKUP_APPROVAL_FINALIZE_TIMEOUT_MS,
     getDocxRedlinerDir,
-    resolveStoredPath: resolveDashboardStoredPath,
-    compareMenuTexts,
-    extractDishesAfterApproval,
+    getDocumentStorageRoot,
+    resolveApprovedSourceDocx: resolveDesignApprovalSourceDocx,
+    compareMenuTexts: design_comparison_1.compareMenuTexts,
+    reviewPdfVisuals: (pdfPath) => reviewDesignPdfVisuals({
+        pdfPath,
+        tenantName: tenantConfig.name,
+        policies: tenantConfig.designApproval.visualPolicies,
+    }),
+    visualReviewDifferences: design_visual_review_1.designVisualReviewDifferences,
     isClientInputError: upload_security_1.isClientInputError,
 });
 /**
@@ -2829,6 +2871,27 @@ app.get('/api/submissions/search', async (req, res) => {
         res.status(error?.response?.status || 500).json({
             error: 'Failed to search approved submissions'
         });
+    }
+});
+/**
+ * Current approved menu versions available to the design team. This endpoint
+ * follows each menu entity's current-version pointer instead of searching all
+ * historical approved submissions.
+ */
+app.get('/api/design-approval/menus', async (req, res) => {
+    try {
+        const q = (0, upload_security_1.sanitizePlainTextInput)(req.query.q, { maxLength: 120 }).trim();
+        const property = (0, upload_security_1.sanitizePlainTextInput)(req.query.property, { maxLength: 120 }).trim();
+        const servicePeriod = (0, upload_security_1.sanitizePlainTextInput)(req.query.servicePeriod, { maxLength: 80 }).trim();
+        const limit = Math.max(1, Math.min(Number.parseInt(`${req.query.limit || '20'}`, 10) || 20, 50));
+        const dbResponse = await internalApi.get(`${DB_SERVICE_URL}/menus/design-eligible`, {
+            params: { q, property, servicePeriod, limit },
+        });
+        res.json(dbResponse.data || { menus: [] });
+    }
+    catch (error) {
+        console.error('Failed to list menus for design approval:', error?.response?.data || error.message);
+        res.status(error?.response?.status || 500).json({ error: 'Failed to list menus for design approval' });
     }
 });
 /**
@@ -4513,492 +4576,14 @@ async function generateDocxFromForm(submissionId, formData, options) {
     return outputPath;
 }
 /**
- * Design Approval API: Compare DOCX against PDF
+ * Design Approval API: compare a PDF against the selected menu's current
+ * approved DOCX, resolved server-side.
  */
 app.post('/api/design-approval/compare', upload.fields([
-    { name: 'docxFile', maxCount: 1 },
     { name: 'pdfFile', maxCount: 1 }
 ]), designApprovalWorkflowHandlers.compare);
 app.post('/api/design-approval/:submissionId/override', designApprovalWorkflowHandlers.saveOverride);
-// ---- Design Approval comparison helpers ----
-// Load design comparison rules
-const designRulesPath = path.join(__dirname, 'design-comparison-rules.json');
-let designComparisonRules = {};
-try {
-    designComparisonRules = JSON.parse(require('fs').readFileSync(designRulesPath, 'utf8')).rules || {};
-}
-catch { /* use defaults */ }
-const PRICE_REGEX = /\$?\d+\.?\d*/g;
-const ALLERGEN_CODES = new Set(['GF', 'V', 'VG', 'DF', 'N', 'SF', 'S', 'G', 'C', 'D', 'E', 'F']);
-function stripAccents(str) {
-    return str.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-}
-function classifyWordDiff(docxWord, pdfWord) {
-    // Price difference
-    if (PRICE_REGEX.test(docxWord) || PRICE_REGEX.test(pdfWord)) {
-        // Reset regex lastIndex
-        PRICE_REGEX.lastIndex = 0;
-        const docxPrices = docxWord.match(PRICE_REGEX) || [];
-        const pdfPrices = pdfWord.match(PRICE_REGEX) || [];
-        if (docxPrices.join() !== pdfPrices.join()) {
-            return { type: 'price', severity: 'critical' };
-        }
-    }
-    PRICE_REGEX.lastIndex = 0;
-    // Allergen code
-    const docxUpper = docxWord.replace(/[^A-Za-z]/g, '').toUpperCase();
-    const pdfUpper = pdfWord.replace(/[^A-Za-z]/g, '').toUpperCase();
-    if (ALLERGEN_CODES.has(docxUpper) || ALLERGEN_CODES.has(pdfUpper)) {
-        if (docxUpper !== pdfUpper) {
-            return { type: 'allergen', severity: 'critical' };
-        }
-    }
-    // Case-only difference — treat as info if rules say so
-    if (docxWord.toLowerCase() === pdfWord.toLowerCase()) {
-        if (designComparisonRules.treatCaseOnlyAsInfo) {
-            return { type: 'formatting', severity: 'info' };
-        }
-        return { type: 'formatting', severity: 'warning' };
-    }
-    // Diacritical difference
-    if (stripAccents(docxWord).toLowerCase() === stripAccents(pdfWord).toLowerCase() &&
-        docxWord.toLowerCase() !== pdfWord.toLowerCase()) {
-        return { type: 'diacritical', severity: 'warning' };
-    }
-    // Punctuation-only difference (e.g., trailing comma vs none)
-    if (designComparisonRules.ignorePunctuationDifferences) {
-        const docxStripped = docxWord.replace(/[^\w]/g, '').toLowerCase();
-        const pdfStripped = pdfWord.replace(/[^\w]/g, '').toLowerCase();
-        if (docxStripped === pdfStripped && docxStripped.length > 0) {
-            return { type: 'formatting', severity: 'info' };
-        }
-    }
-    // Spelling
-    return { type: 'spelling', severity: 'warning' };
-}
-function compareMenuTexts(docxText, pdfText) {
-    const differences = [];
-    const alignments = [];
-    const docxLines = docxText.split('\n').map(l => l.trim()).filter(l => l.length > 0);
-    const pdfLines = pdfText.split('\n').map(l => l.trim()).filter(l => l.length > 0);
-    // Build LCS alignment between lines
-    const m = docxLines.length;
-    const n = pdfLines.length;
-    const dp = Array(m + 1).fill(null).map(() => Array(n + 1).fill(0));
-    for (let i = 1; i <= m; i++) {
-        for (let j = 1; j <= n; j++) {
-            if (linesMatchFuzzy(docxLines[i - 1], pdfLines[j - 1])) {
-                dp[i][j] = dp[i - 1][j - 1] + 1;
-            }
-            else {
-                dp[i][j] = Math.max(dp[i - 1][j], dp[i][j - 1]);
-            }
-        }
-    }
-    const aligned = [];
-    let i = m, j = n;
-    while (i > 0 && j > 0) {
-        if (linesMatchFuzzy(docxLines[i - 1], pdfLines[j - 1])) {
-            aligned.unshift({ type: 'match', docxIdx: i - 1, pdfIdx: j - 1 });
-            i--;
-            j--;
-        }
-        else if (dp[i - 1][j] > dp[i][j - 1]) {
-            aligned.unshift({ type: 'docx_only', docxIdx: i - 1 });
-            i--;
-        }
-        else {
-            aligned.unshift({ type: 'pdf_only', pdfIdx: j - 1 });
-            j--;
-        }
-    }
-    while (i > 0) {
-        aligned.unshift({ type: 'docx_only', docxIdx: i - 1 });
-        i--;
-    }
-    while (j > 0) {
-        aligned.unshift({ type: 'pdf_only', pdfIdx: j - 1 });
-        j--;
-    }
-    // Reordering detection: try to match docx_only lines with pdf_only lines
-    if (designComparisonRules.reorderingTolerance) {
-        const docxOnlyIndices = aligned
-            .map((a, idx) => a.type === 'docx_only' ? idx : -1)
-            .filter(idx => idx >= 0);
-        const pdfOnlyIndices = aligned
-            .map((a, idx) => a.type === 'pdf_only' ? idx : -1)
-            .filter(idx => idx >= 0);
-        const matchedPdfIndices = new Set();
-        for (const dIdx of docxOnlyIndices) {
-            const docxLine = docxLines[aligned[dIdx].docxIdx];
-            for (const pIdx of pdfOnlyIndices) {
-                if (matchedPdfIndices.has(pIdx))
-                    continue;
-                const pdfLine = pdfLines[aligned[pIdx].pdfIdx];
-                if (linesMatchFuzzy(docxLine, pdfLine)) {
-                    // Convert both to a match pair
-                    aligned[dIdx] = {
-                        type: 'match',
-                        docxIdx: aligned[dIdx].docxIdx,
-                        pdfIdx: aligned[pIdx].pdfIdx
-                    };
-                    aligned[pIdx] = { type: 'match', docxIdx: -1, pdfIdx: -1 }; // mark for removal
-                    matchedPdfIndices.add(pIdx);
-                    break;
-                }
-            }
-        }
-        // Remove the placeholder entries (matched pdf_only that became redundant)
-        const filteredAligned = aligned.filter(a => !(a.type === 'match' && a.docxIdx === -1 && a.pdfIdx === -1));
-        aligned.length = 0;
-        aligned.push(...filteredAligned);
-    }
-    // Pre-process: merge price-only docx lines into adjacent match pairs
-    // e.g., DOCX has "BOTTOMLESS ENHANCEMENTS" + "+ 10" on separate lines,
-    // PDF has "BOTTOMLESS ENHANCEMENTS +10" on one line — merge the DOCX lines
-    if (designComparisonRules.ignoreWhitespaceInPrices) {
-        const mergedIndices = new Set();
-        for (let ai = 0; ai < aligned.length; ai++) {
-            if (aligned[ai].type !== 'docx_only')
-                continue;
-            const docxLine = docxLines[aligned[ai].docxIdx];
-            const isPriceLine = /^[\+\$\s]*\d+\.?\d*$/.test(docxLine.trim());
-            if (!isPriceLine)
-                continue;
-            // Find adjacent match pair and merge the price into it
-            for (let adj = ai - 1; adj <= ai + 1; adj += 2) {
-                if (adj < 0 || adj >= aligned.length)
-                    continue;
-                if (aligned[adj].type !== 'match')
-                    continue;
-                const pdfLine = pdfLines[aligned[adj].pdfIdx];
-                const priceVal = docxLine.trim().replace(/[\s\+\$]/g, '').replace(/^0+/, '');
-                const pPrices = (pdfLine.match(/[\+\$]?\d+\.?\d*/g) || []).map(p => p.replace(/[\$\+\s]/g, '').replace(/^0+/, ''));
-                if (pPrices.includes(priceVal)) {
-                    // Merge: update the DOCX line in the match to include the price
-                    const origDocxLine = docxLines[aligned[adj].docxIdx];
-                    // Normalize price format to match PDF (e.g., "+ 10" → "+10")
-                    const normalizedPrice = docxLine.trim().replace(/\s+/g, '');
-                    docxLines[aligned[adj].docxIdx] = origDocxLine + ' ' + normalizedPrice;
-                    mergedIndices.add(ai);
-                    break;
-                }
-            }
-        }
-        // Remove merged price lines from alignment
-        const filtered = aligned.filter((_, idx) => !mergedIndices.has(idx));
-        aligned.length = 0;
-        aligned.push(...filtered);
-    }
-    // Process aligned pairs
-    const ignorableWords = new Set((designComparisonRules.ignorableWords || []).map((w) => w.toLowerCase()));
-    const minWordLen = designComparisonRules.minWordLengthForMissing || 0;
-    for (const pair of aligned) {
-        if (pair.type === 'docx_only') {
-            const docxLine = docxLines[pair.docxIdx];
-            // Check if this is just a leading phrase that got stripped
-            const stripped = stripLeadingPhrases(docxLine).trim();
-            if (stripped.length === 0) {
-                // Entire line was just a leading phrase — info level
-                alignments.push({ type: 'docx_only', docxLine, docxIdx: pair.docxIdx });
-                differences.push({
-                    type: 'missing',
-                    severity: 'info',
-                    description: `Line missing in PDF (ignorable prefix only)`,
-                    docxValue: docxLine,
-                    docxLineNum: pair.docxIdx
-                });
-                continue;
-            }
-            // Check if line is only short ignorable words
-            const words = docxLine.split(/\s+/);
-            const allIgnorable = words.every(w => ignorableWords.has(w.toLowerCase().replace(/[^\w]/g, '')) || w.replace(/[^\w]/g, '').length < minWordLen);
-            alignments.push({ type: 'docx_only', docxLine, docxIdx: pair.docxIdx });
-            differences.push({
-                type: 'missing',
-                severity: allIgnorable ? 'info' : 'critical',
-                description: `Line missing in PDF`,
-                docxValue: docxLine,
-                docxLineNum: pair.docxIdx
-            });
-        }
-        else if (pair.type === 'pdf_only') {
-            const pdfLine = pdfLines[pair.pdfIdx];
-            // Check if it's just a price that was on the previous line in docx
-            const isPriceOnly = /^[\+\$\s]*\d+\.?\d*$/.test(pdfLine.trim());
-            alignments.push({ type: 'pdf_only', pdfLine, pdfIdx: pair.pdfIdx });
-            differences.push({
-                type: 'extra',
-                severity: isPriceOnly ? 'info' : 'warning',
-                description: isPriceOnly ? `Price on separate line in PDF` : `Extra line in PDF`,
-                pdfValue: pdfLine,
-                pdfLineNum: pair.pdfIdx
-            });
-        }
-        else if (pair.type === 'match') {
-            const docxLine = docxLines[pair.docxIdx];
-            const pdfLine = pdfLines[pair.pdfIdx];
-            // Even if lines "match" fuzzy, check word-by-word for differences
-            if (docxLine !== pdfLine) {
-                const { diffs: wordDiffs, wordAlignments } = compareWords(docxLine, pdfLine);
-                for (const wd of wordDiffs) {
-                    differences.push({
-                        ...wd,
-                        docxLineNum: pair.docxIdx,
-                        pdfLineNum: pair.pdfIdx
-                    });
-                }
-                alignments.push({
-                    type: 'match',
-                    docxLine,
-                    pdfLine,
-                    docxIdx: pair.docxIdx,
-                    pdfIdx: pair.pdfIdx,
-                    wordDiffs: wordAlignments
-                });
-            }
-            else {
-                alignments.push({
-                    type: 'match',
-                    docxLine,
-                    pdfLine,
-                    docxIdx: pair.docxIdx,
-                    pdfIdx: pair.pdfIdx
-                });
-            }
-        }
-    }
-    return { differences, alignments };
-}
-function stripLeadingPhrases(line) {
-    const phrases = designComparisonRules.ignoreLeadingPhrases || [];
-    let result = line;
-    for (const phrase of phrases) {
-        if (result.toLowerCase().startsWith(phrase.toLowerCase())) {
-            result = result.slice(phrase.length).trim();
-        }
-    }
-    return result;
-}
-function stripPricesFromLine(line) {
-    // Remove standalone prices like "29", "$29", "+10", "+ 10", "$29.00"
-    return line.replace(/[\+]?\s*\$?\d+\.?\d*/g, '').replace(/\s+/g, ' ').trim();
-}
-function normalizeLine(line) {
-    let norm = stripAccents(line).toLowerCase().replace(/\s+/g, ' ').trim();
-    norm = stripLeadingPhrases(norm);
-    // Remove ignorable conjunction words for matching purposes
-    if (designComparisonRules.ignoreConjunctionChanges) {
-        const ignorable = new Set(designComparisonRules.ignorableWords || []);
-        norm = norm.split(/\s+/).filter((w) => !ignorable.has(w.replace(/[^\w]/g, ''))).join(' ');
-    }
-    if (designComparisonRules.ignorePunctuationDifferences) {
-        norm = norm.replace(/[,;:.\-–—]/g, '').replace(/\s+/g, ' ').trim();
-    }
-    return norm;
-}
-function linesMatchFuzzy(a, b) {
-    if (a === b)
-        return true;
-    // Normalize: strip accents, lowercase, collapse whitespace
-    const normA = stripAccents(a).toLowerCase().replace(/\s+/g, ' ').trim();
-    const normB = stripAccents(b).toLowerCase().replace(/\s+/g, ' ').trim();
-    if (normA === normB)
-        return true;
-    // Try matching after stripping leading phrases and applying rules
-    const deepNormA = normalizeLine(a);
-    const deepNormB = normalizeLine(b);
-    if (deepNormA === deepNormB)
-        return true;
-    // Try matching with prices stripped (price on different line)
-    if (designComparisonRules.ignoreWhitespaceInPrices) {
-        const noPriceA = stripPricesFromLine(deepNormA);
-        const noPriceB = stripPricesFromLine(deepNormB);
-        if (noPriceA.length > 0 && noPriceA === noPriceB)
-            return true;
-    }
-    // Similarity based on common words
-    const wordsA = deepNormA.split(/\s+/);
-    const wordsB = deepNormB.split(/\s+/);
-    if (wordsA.length === 0 || wordsB.length === 0)
-        return false;
-    let common = 0;
-    const setB = new Set(wordsB);
-    for (const w of wordsA) {
-        if (setB.has(w))
-            common++;
-    }
-    return common / Math.max(wordsA.length, wordsB.length) > 0.5;
-}
-function compareWords(docxLine, pdfLine) {
-    const diffs = [];
-    const wordAlignments = [];
-    const ignorableWords = new Set((designComparisonRules.ignorableWords || []).map((w) => w.toLowerCase()));
-    const minWordLen = designComparisonRules.minWordLengthForMissing || 0;
-    // Strip leading phrases before comparing words
-    let processedDocx = docxLine;
-    let processedPdf = pdfLine;
-    if (designComparisonRules.ignoreLeadingPhrases) {
-        processedDocx = stripLeadingPhrases(processedDocx);
-        processedPdf = stripLeadingPhrases(processedPdf);
-    }
-    const docxWords = processedDocx.split(/\s+/).filter(w => w.length > 0);
-    const pdfWords = processedPdf.split(/\s+/).filter(w => w.length > 0);
-    // LCS on words — use case-insensitive matching for alignment
-    const m = docxWords.length;
-    const n = pdfWords.length;
-    const dp = Array(m + 1).fill(null).map(() => Array(n + 1).fill(0));
-    const wordsMatch = (a, b) => {
-        if (a === b)
-            return true;
-        if (designComparisonRules.ignoreCaseDifferences && a.toLowerCase() === b.toLowerCase())
-            return true;
-        if (designComparisonRules.ignorePunctuationDifferences) {
-            const aStripped = a.replace(/[^\w]/g, '').toLowerCase();
-            const bStripped = b.replace(/[^\w]/g, '').toLowerCase();
-            if (aStripped === bStripped && aStripped.length > 0)
-                return true;
-        }
-        return false;
-    };
-    for (let i = 1; i <= m; i++) {
-        for (let j = 1; j <= n; j++) {
-            if (wordsMatch(docxWords[i - 1], pdfWords[j - 1])) {
-                dp[i][j] = dp[i - 1][j - 1] + 1;
-            }
-            else {
-                dp[i][j] = Math.max(dp[i - 1][j], dp[i][j - 1]);
-            }
-        }
-    }
-    const waligned = [];
-    let wi = m, wj = n;
-    while (wi > 0 && wj > 0) {
-        if (wordsMatch(docxWords[wi - 1], pdfWords[wj - 1])) {
-            waligned.unshift({ type: 'same', dIdx: wi - 1, pIdx: wj - 1 });
-            wi--;
-            wj--;
-        }
-        else if (dp[wi - 1][wj] > dp[wi][wj - 1]) {
-            waligned.unshift({ type: 'docx', dIdx: wi - 1 });
-            wi--;
-        }
-        else {
-            waligned.unshift({ type: 'pdf', pIdx: wj - 1 });
-            wj--;
-        }
-    }
-    while (wi > 0) {
-        waligned.unshift({ type: 'docx', dIdx: wi - 1 });
-        wi--;
-    }
-    while (wj > 0) {
-        waligned.unshift({ type: 'pdf', pIdx: wj - 1 });
-        wj--;
-    }
-    // Pair up adjacent docx/pdf removals/additions as changes
-    let idx = 0;
-    while (idx < waligned.length) {
-        const cur = waligned[idx];
-        if (cur.type === 'docx' && idx + 1 < waligned.length && waligned[idx + 1].type === 'pdf') {
-            // This is a word change
-            const docxW = docxWords[cur.dIdx];
-            const pdfW = pdfWords[waligned[idx + 1].pIdx];
-            const classification = classifyWordDiff(docxW, pdfW);
-            diffs.push({
-                type: classification.type,
-                severity: classification.severity,
-                description: `"${docxW}" changed to "${pdfW}"`,
-                docxValue: docxW,
-                pdfValue: pdfW
-            });
-            wordAlignments.push({
-                type: 'changed',
-                docxText: docxW,
-                pdfText: pdfW,
-                classification
-            });
-            idx += 2;
-        }
-        else if (cur.type === 'pdf' && idx + 1 < waligned.length && waligned[idx + 1].type === 'docx') {
-            const docxW = docxWords[waligned[idx + 1].dIdx];
-            const pdfW = pdfWords[cur.pIdx];
-            const classification = classifyWordDiff(docxW, pdfW);
-            diffs.push({
-                type: classification.type,
-                severity: classification.severity,
-                description: `"${docxW}" changed to "${pdfW}"`,
-                docxValue: docxW,
-                pdfValue: pdfW
-            });
-            wordAlignments.push({
-                type: 'changed',
-                docxText: docxW,
-                pdfText: pdfW,
-                classification
-            });
-            idx += 2;
-        }
-        else if (cur.type === 'docx') {
-            const word = docxWords[cur.dIdx];
-            const cleanWord = word.replace(/[^\w]/g, '').toLowerCase();
-            const isIgnorable = ignorableWords.has(cleanWord) || cleanWord.length < minWordLen;
-            diffs.push({
-                type: 'missing',
-                severity: isIgnorable ? 'info' : 'critical',
-                description: `Word missing in PDF: "${word}"`,
-                docxValue: word
-            });
-            wordAlignments.push({ type: 'missing', text: word });
-            idx++;
-        }
-        else if (cur.type === 'pdf') {
-            const word = pdfWords[cur.pIdx];
-            const cleanWord = word.replace(/[^\w]/g, '').toLowerCase();
-            const isIgnorable = ignorableWords.has(cleanWord) || (designComparisonRules.ignoreConjunctionChanges && ['and', 'or', '&'].includes(cleanWord));
-            diffs.push({
-                type: 'extra',
-                severity: isIgnorable ? 'info' : 'info',
-                description: `Extra word in PDF: "${word}"`,
-                pdfValue: word
-            });
-            wordAlignments.push({ type: 'added', text: word });
-            idx++;
-        }
-        else {
-            // 'same' type — but if the actual strings differ (case only), emit formatting info
-            if (cur.type === 'same' && cur.dIdx !== undefined && cur.pIdx !== undefined) {
-                const docxW = docxWords[cur.dIdx];
-                const pdfW = pdfWords[cur.pIdx];
-                if (docxW !== pdfW) {
-                    const classification = classifyWordDiff(docxW, pdfW);
-                    diffs.push({
-                        type: classification.type,
-                        severity: classification.severity,
-                        description: `"${docxW}" changed to "${pdfW}"`,
-                        docxValue: docxW,
-                        pdfValue: pdfW
-                    });
-                    wordAlignments.push({
-                        type: 'changed',
-                        docxText: docxW,
-                        pdfText: pdfW,
-                        classification
-                    });
-                }
-                else {
-                    wordAlignments.push({ type: 'same', text: docxW });
-                }
-            }
-            else {
-                idx++;
-                continue;
-            }
-            idx++;
-        }
-    }
-    return { diffs, wordAlignments };
-}
+app.post('/api/design-approval/:submissionId/handoff', designApprovalWorkflowHandlers.retryHandoff);
 // On a fresh deployment the runtime prompt cache (sop-processor/qa_prompt.txt)
 // can be absent — initialize it from the config bundle seed
 // (config/rulebook/qa_prompt.txt) so reviews have a baseline before any

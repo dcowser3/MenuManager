@@ -143,6 +143,167 @@
             cursor: default;
         }
 
+        /* Approved-menu search — mirrors the search-first Approved Menus page. */
+        .search-card {
+            background: var(--color-background-alt);
+            border: 1px solid var(--color-border);
+            padding: 1rem;
+            margin-bottom: 1rem;
+        }
+
+        .design-menu-search-form {
+            display: flex;
+            gap: 0.75rem;
+            flex-wrap: wrap;
+            align-items: end;
+        }
+
+        .search-group {
+            flex: 1 1 220px;
+        }
+
+        .search-group label {
+            display: block;
+            font-size: 0.65rem;
+            font-weight: 500;
+            color: var(--color-text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.15em;
+            margin-bottom: 0.35rem;
+        }
+
+        .search-group input,
+        .search-group select {
+            width: 100%;
+            padding: 0.8rem 0.9rem;
+            border: 1px solid var(--color-border);
+            background: var(--color-background);
+            font-family: var(--font-body);
+            font-size: 0.9rem;
+            color: var(--color-text);
+        }
+
+        .search-group input:focus,
+        .search-group select:focus {
+            outline: none;
+            border-color: var(--color-secondary);
+        }
+
+        .results-meta {
+            min-height: 1.4rem;
+            margin: 0.9rem 0;
+            font-size: 0.72rem;
+            color: var(--color-text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+        }
+
+        .menu-list {
+            display: grid;
+            gap: 0.75rem;
+        }
+
+        .menu-card {
+            border: 1px solid var(--color-border);
+            background: var(--color-background);
+            padding: 1.1rem 1.2rem;
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: space-between;
+            gap: 1rem;
+            align-items: flex-start;
+        }
+
+        .menu-card:hover {
+            background: var(--color-background-alt);
+        }
+
+        .menu-card.selected-menu {
+            border-color: rgba(74, 124, 89, 0.55);
+            background: rgba(74, 124, 89, 0.05);
+        }
+
+        .menu-main {
+            flex: 1 1 320px;
+            min-width: 0;
+        }
+
+        .menu-main h3 {
+            font-family: var(--font-heading);
+            font-size: 1.25rem;
+            font-weight: 500;
+            color: var(--color-primary);
+            margin-bottom: 0.15rem;
+        }
+
+        .menu-property {
+            color: var(--color-secondary);
+            font-size: 0.72rem;
+            text-transform: uppercase;
+            letter-spacing: 0.12em;
+            margin-bottom: 0.55rem;
+        }
+
+        .menu-meta {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.45rem 1rem;
+            font-size: 0.78rem;
+            color: var(--color-text-light);
+        }
+
+        .menu-meta strong {
+            color: var(--color-text);
+            font-weight: 600;
+        }
+
+        .menu-actions {
+            display: flex;
+            flex-direction: column;
+            align-items: stretch;
+            gap: 0.5rem;
+            min-width: 190px;
+            flex: 0 0 190px;
+        }
+
+        .menu-actions .btn {
+            width: 100%;
+            padding: 0.7rem 1rem;
+        }
+
+        .menu-status-badge {
+            display: block;
+            padding: 0.3rem 0.75rem;
+            border: 1px solid rgba(74, 124, 89, 0.25);
+            background: rgba(74, 124, 89, 0.08);
+            color: var(--color-success);
+            text-align: center;
+            font-size: 0.58rem;
+            text-transform: uppercase;
+            letter-spacing: 0.14em;
+            font-weight: 600;
+        }
+
+        .empty-state {
+            border: 1px solid var(--color-border);
+            padding: 1.8rem 1rem;
+            text-align: center;
+            background: var(--color-background-alt);
+        }
+
+        .empty-state h3 {
+            font-family: var(--font-heading);
+            font-size: 1.2rem;
+            font-weight: 500;
+            color: var(--color-primary);
+            margin-bottom: 0.25rem;
+        }
+
+        .empty-state p {
+            color: var(--color-text-light);
+            font-size: 0.82rem;
+        }
+
         /* Upload zones */
         .upload-grid {
             display: grid;
@@ -246,6 +407,17 @@
         .btn-primary:hover:not(:disabled) {
             background: transparent;
             color: var(--color-primary);
+        }
+
+        .btn-secondary {
+            background: transparent;
+            color: var(--color-primary);
+            border-color: var(--color-primary);
+        }
+
+        .btn-secondary:hover:not(:disabled) {
+            background: var(--color-primary);
+            color: var(--color-background);
         }
 
         .btn:disabled {
@@ -497,6 +669,7 @@
         .badge-spelling { background: rgba(184, 134, 11, 0.12); color: var(--color-warning); border: 1px solid rgba(184, 134, 11, 0.2); }
         .badge-missing { background: rgba(139, 58, 58, 0.12); color: var(--color-error); border: 1px solid rgba(139, 58, 58, 0.2); }
         .badge-extra { background: rgba(139, 115, 85, 0.12); color: var(--color-secondary); border: 1px solid rgba(139, 115, 85, 0.2); }
+        .badge-visual_policy, .badge-visual_review_unavailable { background: rgba(85, 72, 139, 0.12); color: #55488b; border: 1px solid rgba(85, 72, 139, 0.25); }
         .badge-formatting { background: rgba(139, 115, 85, 0.08); color: var(--color-text-muted); border: 1px solid var(--color-border); }
 
         .badge-critical { background: rgba(139, 58, 58, 0.15); color: var(--color-error); border: 1px solid rgba(139, 58, 58, 0.3); }
@@ -518,6 +691,15 @@
         @media (max-width: 768px) {
             .upload-grid, .split-compare {
                 grid-template-columns: 1fr;
+            }
+
+            .menu-card {
+                flex-direction: column;
+            }
+
+            .menu-actions {
+                width: 100%;
+                min-width: 0;
             }
         }
 
@@ -706,90 +888,50 @@
             </div>
 
             <div class="card">
-                <h2>Required Approval</h2>
-                <p style="font-size: 0.85rem; color: var(--color-text-light); margin-bottom: 1rem;">
-                    Confirm this design has been reviewed and approved before comparing files.
+                <h2>Choose Approved Menu</h2>
+                <p style="font-size: 0.85rem; color: var(--color-text-light); margin-bottom: 1.25rem;">
+                    Select the menu this design was created for. Only the current approved version of each menu is available.
                 </p>
-
-                <div style="border: 1px solid var(--color-border-light); padding: 1rem; margin-bottom: 0.75rem;">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
-                        <span style="font-family: var(--font-heading); font-size: 1rem; font-weight: 600;"><%= tenant.shortName %> <%= tenant.approvalRoles[0].label %></span>
-                    </div>
-                    <div class="form-grid" style="grid-template-columns: 120px 1fr 1fr;">
-                        <div class="form-group">
-                            <label for="approvalCulinary">Approved? *</label>
-                            <select id="approvalCulinary" required>
-                                <option value="">Select</option>
-                                <option value="yes">Yes</option>
-                                <option value="no">No</option>
+                <div class="search-card">
+                    <form id="designMenuSearchForm" class="design-menu-search-form" onsubmit="searchDesignMenus(event)">
+                        <div class="search-group autocomplete-wrapper">
+                            <label for="designRestaurant">Restaurant</label>
+                            <input id="designRestaurant" type="text" placeholder="Restaurant or property name" autocomplete="off" oninput="onDesignRestaurantInput(this.value)" onkeydown="handleDesignRestaurantKeydown(event)">
+                            <div class="autocomplete-dropdown" id="designRestaurantDropdown"></div>
+                        </div>
+                        <div class="search-group">
+                            <label for="designServicePeriod">Service period</label>
+                            <select id="designServicePeriod">
+                                <option value="">Any service period</option>
+                                <% ['Breakfast', 'Brunch', 'Lunch', 'Dinner', 'Happy Hour', 'All Day', 'Late Night'].forEach(function(period) { %>
+                                    <option value="<%= period %>"><%= period %></option>
+                                <% }); %>
                             </select>
                         </div>
-                        <div class="form-group">
-                            <label for="culinaryApproverName">Approver Name *</label>
-                            <input type="text" id="culinaryApproverName" required placeholder="First and Last Name">
+                        <div class="search-group">
+                            <label for="designMenuKeyword">Optional keyword</label>
+                            <input id="designMenuKeyword" type="text" placeholder="Menu or file name...">
                         </div>
-                        <div class="form-group">
-                            <label>Position</label>
-                            <input type="text" value="<%= tenant.shortName %> <%= tenant.approvalRoles[0].label %>" readonly style="background: #f5f5f3; color: var(--color-text-light);">
-                        </div>
+                        <button type="submit" class="btn btn-primary">Search</button>
+                        <button type="button" id="clearDesignMenuSearchBtn" class="btn btn-secondary hidden" onclick="resetDesignMenuSearch()">Clear</button>
+                    </form>
+                </div>
+                <div id="menuSearchMeta" class="results-meta">Search by restaurant to show approved menus</div>
+                <div id="menuSearchResults" class="menu-list">
+                    <div class="empty-state">
+                        <h3>Find the approved menu</h3>
+                        <p>Pick a restaurant first, then narrow by service period or menu name if needed.</p>
                     </div>
                 </div>
-
-                <div style="border: 1px solid var(--color-border-light); padding: 1rem;">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
-                        <span style="font-family: var(--font-heading); font-size: 1rem; font-weight: 600;"><%= tenant.shortName %> <%= tenant.approvalRoles[1].label %></span>
-                    </div>
-                    <div class="form-grid" style="grid-template-columns: 120px 1fr 1fr;">
-                        <div class="form-group">
-                            <label for="approvalRegional">Approved? *</label>
-                            <select id="approvalRegional" required>
-                                <option value="">Select</option>
-                                <option value="yes">Yes</option>
-                                <option value="no">No</option>
-                            </select>
-                        </div>
-                        <div class="form-group">
-                            <label for="regionalApproverName">Approver Name *</label>
-                            <input type="text" id="regionalApproverName" required placeholder="First and Last Name">
-                        </div>
-                        <div class="form-group">
-                            <label>Position</label>
-                            <input type="text" value="<%= tenant.shortName %> <%= tenant.approvalRoles[1].label %>" readonly style="background: #f5f5f3; color: var(--color-text-light);">
-                        </div>
-                    </div>
-                </div>
+                <div id="selectedMenuNote" class="hidden" style="margin-top:0.75rem;"></div>
             </div>
 
             <div class="card">
-                <h2>Upload Documents</h2>
+                <h2>Upload Designed Menu</h2>
                 <p style="font-size: 0.85rem; color: var(--color-text-light); margin-bottom: 1.25rem;">
-                    Upload your approved Word document and the designer-created PDF to compare them for accuracy.
+                    Upload the designer-created PDF. Menu Manager will retrieve the approved Word version automatically.
                 </p>
-                <div class="form-grid" style="margin-bottom: 1rem;">
-                    <div class="form-group">
-                        <label for="docxSourceMode">Word Doc Source *</label>
-                        <select id="docxSourceMode" onchange="onDocxSourceModeChange()">
-                            <option value="upload">Upload DOCX</option>
-                            <option value="database">Find in Database</option>
-                        </select>
-                    </div>
-                </div>
-                <div id="docxDatabaseSearch" class="hidden" style="margin-bottom: 1rem;">
-                    <label for="docxSearchInput" style="display:block; font-size:0.65rem; font-weight:600; text-transform:uppercase; letter-spacing:0.12em; color: var(--color-text-muted); margin-bottom:0.35rem;">Search approved Word document</label>
-                    <input type="text" id="docxSearchInput" placeholder="Search by project, property, submitter..." style="width:100%; padding:0.65rem 0.75rem; border:1px solid var(--color-border); font-family: var(--font-body); font-size:0.85rem;" oninput="onDocxSearchInput(this.value)">
-                    <div id="docxSearchResults" class="search-results" style="margin-top:0.5rem;"></div>
-                    <div id="selectedDocxNote" class="hidden" style="margin-top:0.5rem; font-size:0.8rem; color: var(--color-success);"></div>
-                </div>
-                <div class="upload-grid">
-                    <div class="upload-zone" id="docxZone">
-                        <input type="file" id="docxFile" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" onchange="handleFileSelect(this, 'docx')">
-                        <svg class="upload-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
-                        </svg>
-                        <span class="upload-label">Approved Word Document</span>
-                        <span class="upload-hint">.docx file</span>
-                        <span class="upload-filename hidden" id="docxFilename"></span>
-                    </div>
+                <div class="upload-grid" style="grid-template-columns: 1fr;">
                     <div class="upload-zone" id="pdfZone">
                         <input type="file" id="pdfFile" accept=".pdf,application/pdf" onchange="handleFileSelect(this, 'pdf')">
                         <svg class="upload-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -804,7 +946,7 @@
 
             <div class="btn-container">
                 <button id="compareBtn" class="btn btn-primary" onclick="compareDocuments()" disabled>
-                    Compare Documents
+                    Check and Submit Design
                 </button>
             </div>
         </div>
@@ -812,6 +954,17 @@
         <!-- Step 2: Results -->
         <div id="step2" class="hidden">
             <div id="resultBanner"></div>
+
+            <div id="visualReviewCard" class="card hidden">
+                <h2>Visual AI Check</h2>
+                <p id="visualReviewStatus" style="font-size: 0.85rem; color: var(--color-text-light);"></p>
+            </div>
+
+            <div id="handoffCard" class="card hidden">
+                <h2>ClickUp Handoff</h2>
+                <p id="handoffStatus" style="font-size: 0.85rem; color: var(--color-text-light);"></p>
+                <button id="retryHandoffBtn" class="btn btn-primary hidden" onclick="retryClickUpHandoff()" style="margin-top:1rem;">Retry ClickUp Handoff</button>
+            </div>
 
             <div id="submitterDetailsCard" class="card">
                 <h2>Submitter Information <span style="font-size: 0.7rem; font-weight: 400; color: var(--color-text-muted); text-transform: uppercase; letter-spacing: 0.1em;">(Read Only)</span></h2>
@@ -832,7 +985,7 @@
             </div>
 
             <div id="projectDetailsCard" class="card">
-                <h2>Project Details <span style="font-size: 0.7rem; font-weight: 400; color: var(--color-text-muted); text-transform: uppercase; letter-spacing: 0.1em;">(Extracted from DOCX)</span></h2>
+                <h2>Approved Menu Details <span style="font-size: 0.7rem; font-weight: 400; color: var(--color-text-muted); text-transform: uppercase; letter-spacing: 0.1em;">(Current Version)</span></h2>
                 <div class="details-grid" id="projectDetailsGrid"></div>
             </div>
 
@@ -876,21 +1029,23 @@
 
             <div class="btn-container">
                 <button class="btn btn-primary" onclick="resetForm()">
-                    Upload New Documents
+                    Submit Another Design
                 </button>
             </div>
         </div>
     </div>
 
     <script>
-        let docxFileSelected = false;
         let pdfFileSelected = false;
-        let selectedDocxSubmission = null;
-        let docxSearchResults = [];
+        let selectedMenu = null;
+        let menuSearchResults = [];
+        const designPropertyCatalog = <%- JSON.stringify(propertyCatalog || []) %>;
+        let designRestaurantSuggestions = [];
+        let designRestaurantHighlightIndex = -1;
         let currentDesignApprovalSubmissionId = '';
 
         // Drag and drop
-        ['docxZone', 'pdfZone'].forEach(zoneId => {
+        ['pdfZone'].forEach(zoneId => {
             const zone = document.getElementById(zoneId);
             zone.addEventListener('dragover', (e) => {
                 e.preventDefault();
@@ -905,92 +1060,214 @@
                 const input = zone.querySelector('input[type="file"]');
                 if (e.dataTransfer.files.length > 0) {
                     input.files = e.dataTransfer.files;
-                    const type = zoneId === 'docxZone' ? 'docx' : 'pdf';
-                    handleFileSelect(input, type);
+                    handleFileSelect(input, 'pdf');
                 }
             });
         });
 
-        function onDocxSourceModeChange() {
-            const mode = document.getElementById('docxSourceMode').value;
-            const dbSection = document.getElementById('docxDatabaseSearch');
-            const docxZone = document.getElementById('docxZone');
-            const docxInput = document.getElementById('docxFile');
-
-            if (mode === 'database') {
-                dbSection.classList.remove('hidden');
-                docxZone.classList.add('hidden');
-                docxInput.value = '';
-                docxFileSelected = false;
-            } else {
-                dbSection.classList.add('hidden');
-                docxZone.classList.remove('hidden');
-                selectedDocxSubmission = null;
-                document.getElementById('selectedDocxNote').classList.add('hidden');
-            }
-
-            updateCompareButtonState();
+        function normalizeDesignSearchText(value) {
+            return String(value || '')
+                .normalize('NFD')
+                .replace(/[\u0300-\u036f]/g, '')
+                .toLowerCase()
+                .replace(/[^a-z0-9]+/g, ' ')
+                .trim();
         }
 
-        async function onDocxSearchInput(value) {
-            const query = (value || '').trim();
-            const resultsEl = document.getElementById('docxSearchResults');
+        function onDesignRestaurantInput(value) {
+            const query = normalizeDesignSearchText(value);
+            const dropdown = document.getElementById('designRestaurantDropdown');
             if (query.length < 2) {
-                resultsEl.innerHTML = '';
-                docxSearchResults = [];
+                dropdown.classList.remove('show');
+                designRestaurantSuggestions = [];
+                designRestaurantHighlightIndex = -1;
                 return;
             }
 
+            const seen = new Set();
+            designRestaurantSuggestions = designPropertyCatalog
+                .filter((name) => normalizeDesignSearchText(name).includes(query))
+                .filter((name) => {
+                    const key = normalizeDesignSearchText(name);
+                    if (seen.has(key)) return false;
+                    seen.add(key);
+                    return true;
+                })
+                .slice(0, 8);
+            designRestaurantHighlightIndex = -1;
+            if (!designRestaurantSuggestions.length) {
+                dropdown.classList.remove('show');
+                return;
+            }
+            dropdown.innerHTML = designRestaurantSuggestions.map((name, index) => `
+                <div class="autocomplete-item" data-index="${index}" onmousedown="selectDesignRestaurantSuggestion(${index})">
+                    ${highlightMatch(name, value)}
+                </div>
+            `).join('');
+            dropdown.classList.add('show');
+        }
+
+        function selectDesignRestaurantSuggestion(index) {
+            const selected = designRestaurantSuggestions[index];
+            if (!selected) return;
+            document.getElementById('designRestaurant').value = selected;
+            document.getElementById('designRestaurantDropdown').classList.remove('show');
+            designRestaurantHighlightIndex = -1;
+        }
+
+        function handleDesignRestaurantKeydown(event) {
+            const dropdown = document.getElementById('designRestaurantDropdown');
+            if (!dropdown.classList.contains('show') || !designRestaurantSuggestions.length) return;
+            if (event.key === 'ArrowDown') {
+                event.preventDefault();
+                designRestaurantHighlightIndex = Math.min(designRestaurantHighlightIndex + 1, designRestaurantSuggestions.length - 1);
+            } else if (event.key === 'ArrowUp') {
+                event.preventDefault();
+                designRestaurantHighlightIndex = Math.max(designRestaurantHighlightIndex - 1, 0);
+            } else if (event.key === 'Enter' && designRestaurantHighlightIndex >= 0) {
+                event.preventDefault();
+                selectDesignRestaurantSuggestion(designRestaurantHighlightIndex);
+                return;
+            } else if (event.key === 'Escape') {
+                dropdown.classList.remove('show');
+                designRestaurantHighlightIndex = -1;
+                return;
+            } else {
+                return;
+            }
+            dropdown.querySelectorAll('.autocomplete-item').forEach((item, itemIndex) => {
+                item.classList.toggle('highlighted', itemIndex === designRestaurantHighlightIndex);
+            });
+        }
+
+        function searchDesignMenus(event) {
+            event.preventDefault();
+            const filters = {
+                property: document.getElementById('designRestaurant').value.trim(),
+                servicePeriod: document.getElementById('designServicePeriod').value,
+                q: document.getElementById('designMenuKeyword').value.trim(),
+            };
+            document.getElementById('designRestaurantDropdown').classList.remove('show');
+            if (!filters.property && !filters.servicePeriod && !filters.q) {
+                resetDesignMenuSearch();
+                return;
+            }
+            loadDesignMenus(filters);
+        }
+
+        async function loadDesignMenus(filters) {
+            const resultsEl = document.getElementById('menuSearchResults');
+            const metaEl = document.getElementById('menuSearchMeta');
+            const clearButton = document.getElementById('clearDesignMenuSearchBtn');
+            selectedMenu = null;
+            document.getElementById('selectedMenuNote').classList.add('hidden');
+            updateCompareButtonState();
+            clearButton.classList.remove('hidden');
+            metaEl.textContent = 'Searching current approved menus...';
+            resultsEl.innerHTML = '<div class="empty-state"><h3>Searching</h3><p>Looking for the current approved menu.</p></div>';
+
             try {
-                const response = await fetch(`/api/submissions/search?q=${encodeURIComponent(query)}&limit=15`);
-                const results = await response.json();
-                docxSearchResults = Array.isArray(results) ? results : [];
-                if (!docxSearchResults.length) {
-                    resultsEl.innerHTML = '<div class="search-result-item">No approved submissions found.</div>';
+                const params = new URLSearchParams({ limit: '20' });
+                if (filters.property) params.set('property', filters.property);
+                if (filters.servicePeriod) params.set('servicePeriod', filters.servicePeriod);
+                if (filters.q) params.set('q', filters.q);
+                const response = await fetch(`/api/design-approval/menus?${params.toString()}`);
+                const data = await response.json();
+                if (!response.ok) throw new Error(data.error || 'Menu search failed');
+                menuSearchResults = Array.isArray(data.menus) ? data.menus : [];
+                if (!menuSearchResults.length) {
+                    metaEl.textContent = '0 menus';
+                    resultsEl.innerHTML = '<div class="empty-state"><h3>No approved menus found</h3><p>Try a different restaurant, service period, or keyword.</p></div>';
                     return;
                 }
-                resultsEl.innerHTML = docxSearchResults.map((r, i) => `
-                    <div class="search-result-item" onclick="selectDocxSearchResult(${i})">
-                        <strong>${escapeHtml(r.projectName || '(Untitled)')}</strong> - ${escapeHtml(r.property || 'Unknown Property')}<br>
-                        <span style="color: var(--color-text-muted);">ID: ${escapeHtml(r.id || '')}</span>
+                metaEl.textContent = `${menuSearchResults.length} ${menuSearchResults.length === 1 ? 'menu' : 'menus'} found`;
+                resultsEl.innerHTML = menuSearchResults.map((r, i) => `
+                    <div class="menu-card">
+                        <div class="menu-main">
+                            <h3>${escapeHtml(r.projectName || 'Approved Menu')}</h3>
+                            <div class="menu-property">${escapeHtml(r.property || 'Unknown Property')}</div>
+                            <div class="menu-meta">
+                                <span><strong>Service period:</strong> ${escapeHtml(r.servicePeriod || 'N/A')}</span>
+                                <span><strong>Approved:</strong> ${escapeHtml(formatApprovedDate(r.approvedAt))}</span>
+                                <span><strong>File:</strong> ${escapeHtml(r.filename || 'approved-menu.docx')}</span>
+                            </div>
+                        </div>
+                        <div class="menu-actions">
+                            <span class="menu-status-badge">Current approved</span>
+                            <button type="button" class="btn btn-primary" onclick="selectMenuSearchResult(${i})">Choose This Menu</button>
+                        </div>
                     </div>
                 `).join('');
             } catch (error) {
-                console.error('DOCX search failed:', error);
-                resultsEl.innerHTML = '<div class="search-result-item">Search failed.</div>';
+                console.error('Menu search failed:', error);
+                metaEl.textContent = 'Search unavailable';
+                resultsEl.innerHTML = '<div class="empty-state"><h3>Search failed</h3><p>Please try again.</p></div>';
             }
         }
 
-        function selectDocxSearchResult(index) {
-            const selected = docxSearchResults[index];
+        function formatApprovedDate(value) {
+            const date = new Date(value || '');
+            return Number.isNaN(date.getTime()) ? 'date unavailable' : date.toLocaleDateString();
+        }
+
+        function selectMenuSearchResult(index) {
+            const selected = menuSearchResults[index];
             if (!selected) return;
-            selectedDocxSubmission = selected;
-            const note = document.getElementById('selectedDocxNote');
-            note.textContent = `Selected: ${selected.projectName || 'Untitled'} (${selected.id})`;
+            selectedMenu = selected;
+            const note = document.getElementById('selectedMenuNote');
+            note.innerHTML = `
+                <div class="menu-card selected-menu">
+                    <div class="menu-main">
+                        <h3>${escapeHtml(selected.projectName || 'Approved Menu')}</h3>
+                        <div class="menu-property">${escapeHtml(selected.property || 'Unknown Property')}</div>
+                        <div class="menu-meta">
+                            <span><strong>Service period:</strong> ${escapeHtml(selected.servicePeriod || 'N/A')}</span>
+                            <span><strong>Approved:</strong> ${escapeHtml(formatApprovedDate(selected.approvedAt))}</span>
+                        </div>
+                    </div>
+                    <div class="menu-actions">
+                        <span class="menu-status-badge">Selected</span>
+                        <button type="button" class="btn btn-secondary" onclick="resetDesignMenuSearch()">Change Menu</button>
+                    </div>
+                </div>`;
             note.classList.remove('hidden');
-            document.getElementById('docxSearchResults').innerHTML = '';
+            document.getElementById('menuSearchResults').innerHTML = '';
+            document.getElementById('menuSearchMeta').textContent = '1 menu selected';
+            updateCompareButtonState();
+        }
+
+        function resetDesignMenuSearch() {
+            document.getElementById('designRestaurant').value = '';
+            document.getElementById('designServicePeriod').value = '';
+            document.getElementById('designMenuKeyword').value = '';
+            document.getElementById('designRestaurantDropdown').classList.remove('show');
+            document.getElementById('clearDesignMenuSearchBtn').classList.add('hidden');
+            document.getElementById('menuSearchMeta').textContent = 'Search by restaurant to show approved menus';
+            document.getElementById('menuSearchResults').innerHTML = '<div class="empty-state"><h3>Find the approved menu</h3><p>Pick a restaurant first, then narrow by service period or menu name if needed.</p></div>';
+            document.getElementById('selectedMenuNote').classList.add('hidden');
+            selectedMenu = null;
+            menuSearchResults = [];
+            designRestaurantSuggestions = [];
+            designRestaurantHighlightIndex = -1;
             updateCompareButtonState();
         }
 
         function updateCompareButtonState() {
-            const mode = document.getElementById('docxSourceMode').value;
-            const hasDocx = mode === 'database' ? !!selectedDocxSubmission : docxFileSelected;
-            document.getElementById('compareBtn').disabled = !(hasDocx && pdfFileSelected);
+            document.getElementById('compareBtn').disabled = !(selectedMenu && pdfFileSelected);
         }
 
         function handleFileSelect(input, type) {
             const file = input.files[0];
             if (!file) return;
 
-            const zone = document.getElementById(type === 'docx' ? 'docxZone' : 'pdfZone');
-            const filenameEl = document.getElementById(type === 'docx' ? 'docxFilename' : 'pdfFilename');
+            const zone = document.getElementById('pdfZone');
+            const filenameEl = document.getElementById('pdfFilename');
 
             zone.classList.add('has-file');
             filenameEl.textContent = file.name;
             filenameEl.classList.remove('hidden');
 
-            if (type === 'docx') docxFileSelected = true;
-            else pdfFileSelected = true;
+            pdfFileSelected = true;
             updateCompareButtonState();
         }
 
@@ -1012,36 +1289,15 @@
                 return;
             }
 
-            const approvalCulinary = document.getElementById('approvalCulinary').value;
-            const approvalRegional = document.getElementById('approvalRegional').value;
-            const culinaryApproverName = document.getElementById('culinaryApproverName').value.trim();
-            const regionalApproverName = document.getElementById('regionalApproverName').value.trim();
-
-            if (approvalCulinary !== 'yes' || approvalRegional !== 'yes') {
-                showAlert('Both required approvals must be marked Yes before continuing.', 'error');
-                return;
-            }
-            if (!culinaryApproverName || !regionalApproverName) {
-                showAlert('Please enter the approver name for both <%= tenant.shortName %> <%= tenant.approvalRoles[0].label %> and <%= tenant.shortName %> <%= tenant.approvalRoles[1].label %>.', 'error');
-                return;
-            }
-
-            const docxInput = document.getElementById('docxFile');
             const pdfInput = document.getElementById('pdfFile');
-            const sourceMode = document.getElementById('docxSourceMode').value;
 
             if (!pdfInput.files[0]) {
                 showAlert('Please select the PDF file', 'error');
                 return;
             }
 
-            if (sourceMode === 'upload' && !docxInput.files[0]) {
-                showAlert('Please select a DOCX file', 'error');
-                return;
-            }
-
-            if (sourceMode === 'database' && !selectedDocxSubmission) {
-                showAlert('Please select an approved Word document from the database', 'error');
+            if (!selectedMenu) {
+                showAlert('Please select the approved menu this design belongs to', 'error');
                 return;
             }
 
@@ -1051,18 +1307,10 @@
 
             const formData = new FormData();
             formData.append('pdfFile', pdfInput.files[0]);
-            if (sourceMode === 'upload') {
-                formData.append('docxFile', docxInput.files[0]);
-            } else {
-                formData.append('existingDocxSubmissionId', selectedDocxSubmission.id || '');
-            }
+            formData.append('menuId', selectedMenu.menuId || '');
             formData.append('submitterName', submitterName);
             formData.append('submitterEmail', submitterEmail);
             formData.append('submitterJobTitle', submitterJobTitle);
-            formData.append('requiredApprovals', JSON.stringify([
-                { label: '<%= tenant.shortName %> <%= tenant.approvalRoles[0].label.toLowerCase() %>', approved: approvalCulinary === 'yes', approver_name: culinaryApproverName, position: '<%= tenant.shortName %> <%= tenant.approvalRoles[0].label %>' },
-                { label: '<%= tenant.shortName %> <%= tenant.approvalRoles[1].label.toLowerCase() %>', approved: approvalRegional === 'yes', approver_name: regionalApproverName, position: '<%= tenant.shortName %> <%= tenant.approvalRoles[1].label %>' }
-            ]));
 
             try {
                 const response = await fetch('/api/design-approval/compare', {
@@ -1081,7 +1329,7 @@
             } catch (error) {
                 showAlert(error.message, 'error');
                 btn.disabled = false;
-                btn.textContent = 'Compare Documents';
+                btn.textContent = 'Check and Submit Design';
             }
         }
 
@@ -1118,10 +1366,14 @@
             // Banner
             const banner = document.getElementById('resultBanner');
             const isMatch = data.isMatch;
+            renderVisualReviewStatus(data.visualReview);
+            renderHandoffStatus(data.handoff, isMatch);
 
             if (isMatch) {
                 banner.className = 'result-banner result-pass';
-                banner.innerHTML = `<h3>Documents Match</h3><p>Your designed PDF matches the approved menu. You may proceed.</p>`;
+                banner.innerHTML = data.handoff?.handoffComplete
+                    ? `<h3>Design Approved and Sent</h3><p>The PDF passed its checks, was attached to ClickUp, and the task moved to the next stage.</p>`
+                    : `<h3>Design Checks Passed</h3><p>The PDF matches the approved menu. Review the ClickUp handoff status below.</p>`;
                 document.getElementById('summarySection').classList.add('hidden');
                 document.getElementById('mismatchOverrideCard').classList.add('hidden');
             } else {
@@ -1134,6 +1386,53 @@
                 renderDiffList(data);
                 document.getElementById('mismatchOverrideCard').classList.remove('hidden');
             }
+        }
+
+        function renderHandoffStatus(handoff, shouldShow) {
+            const card = document.getElementById('handoffCard');
+            const status = document.getElementById('handoffStatus');
+            const retry = document.getElementById('retryHandoffBtn');
+            if (!shouldShow || !handoff || handoff.status === 'not_started') {
+                card.classList.add('hidden');
+                retry.classList.add('hidden');
+                return;
+            }
+
+            card.classList.remove('hidden');
+            if (handoff.handoffComplete) {
+                const target = handoff.targetStatus ? ` to <strong>${escapeHtml(handoff.targetStatus)}</strong>` : '';
+                status.innerHTML = `The approved PDF is attached to ClickUp and the task was moved${target}.`;
+                retry.classList.add('hidden');
+                return;
+            }
+            if (handoff.attachmentUploaded) {
+                status.innerHTML = `<strong>The PDF is attached to ClickUp, but the task has not moved to its next stage.</strong> ${escapeHtml(handoff.warning || '')}`;
+            } else {
+                status.innerHTML = `<strong>The design passed, but the ClickUp handoff is incomplete.</strong> ${escapeHtml(handoff.warning || 'Retry the handoff after checking the task connection.')}`;
+            }
+            retry.classList.remove('hidden');
+        }
+
+        function renderVisualReviewStatus(review) {
+            const card = document.getElementById('visualReviewCard');
+            const status = document.getElementById('visualReviewStatus');
+            card.classList.remove('hidden');
+
+            if (!review || review.status === 'disabled') {
+                status.innerHTML = '<strong>Not run.</strong> This environment performed the text comparison only.';
+                return;
+            }
+
+            const pages = Number(review.pagesReviewed || 0);
+            const total = Number(review.totalPages || pages);
+            const model = review.model ? ` using ${escapeHtml(review.model)}` : '';
+            if (review.status === 'completed') {
+                const count = Array.isArray(review.findings) ? review.findings.length : 0;
+                status.innerHTML = `<strong>Completed${model}.</strong> Reviewed ${pages} of ${total} PDF page${total === 1 ? '' : 's'} and found ${count} visual policy issue${count === 1 ? '' : 's'}.`;
+                return;
+            }
+
+            status.innerHTML = `<strong>Could not complete the visual check.</strong> ${escapeHtml(review.message || 'A human visual review or documented override is required.')}`;
         }
 
         function renderSummary(data) {
@@ -1300,6 +1599,7 @@
             list.innerHTML = diffs.map((d, idx) => {
                 const typeBadgeClass = 'badge-' + (d.type || 'formatting');
                 const sevBadgeClass = 'badge-' + (d.severity || 'info');
+                const typeLabel = (d.type || 'other').replace(/_/g, ' ');
 
                 let detail = '';
                 if (d.docxValue && d.pdfValue) {
@@ -1307,7 +1607,12 @@
                 } else if (d.docxValue) {
                     detail = `Missing in PDF: <code>${escapeHtml(d.docxValue)}</code>`;
                 } else if (d.pdfValue) {
-                    detail = `Extra in PDF: <code>${escapeHtml(d.pdfValue)}</code>`;
+                    detail = d.type === 'visual_policy'
+                        ? `Visual evidence: <code>${escapeHtml(d.pdfValue)}</code>`
+                        : `Extra in PDF: <code>${escapeHtml(d.pdfValue)}</code>`;
+                }
+                if (d.pageNumber) {
+                    detail = `${detail ? `${detail}<br>` : ''}PDF page ${escapeHtml(String(d.pageNumber))}${d.confidence ? ` &middot; ${escapeHtml(d.confidence)} confidence` : ''}`;
                 }
 
                 const hasLineRef = d.docxLineNum !== undefined || d.pdfLineNum !== undefined;
@@ -1319,7 +1624,7 @@
                          onclick="focusDiffLine(this)"
                          title="${hasLineRef ? 'Click to view in documents' : ''}">
                         <div class="diff-item-header">
-                            <span class="badge ${typeBadgeClass}">${escapeHtml(d.type || 'other')}</span>
+                            <span class="badge ${typeBadgeClass}">${escapeHtml(typeLabel)}</span>
                             <span class="badge ${sevBadgeClass}">${escapeHtml(d.severity || 'info')}</span>
                             ${hasLineRef ? '<span style="margin-left:auto;font-size:0.65rem;color:var(--color-text-muted);text-transform:uppercase;letter-spacing:0.05em;">Click to locate</span>' : ''}
                         </div>
@@ -1395,10 +1700,15 @@
                 if (!response.ok) {
                     throw new Error(data.error || 'Failed to save override');
                 }
-                showAlert('Mismatch override saved. Submission marked approved.', 'success');
+                showAlert(data.handoff?.handoffComplete
+                    ? 'Override saved and the PDF was sent to ClickUp.'
+                    : 'Override saved. Review the ClickUp handoff status.', 'success');
                 const banner = document.getElementById('resultBanner');
                 banner.className = 'result-banner result-pass';
-                banner.innerHTML = '<h3>Mismatch Overridden</h3><p>This submission has been marked approved with override.</p>';
+                banner.innerHTML = data.handoff?.handoffComplete
+                    ? '<h3>Mismatch Overridden and Sent</h3><p>The PDF was approved by override and moved forward in ClickUp.</p>'
+                    : '<h3>Mismatch Overridden</h3><p>The PDF is approved. Review the ClickUp handoff status below.</p>';
+                renderHandoffStatus(data.handoff, true);
                 document.getElementById('mismatchOverrideCard').classList.add('hidden');
             } catch (error) {
                 showAlert(error.message || 'Failed to save override', 'error');
@@ -1408,43 +1718,53 @@
             }
         }
 
+        async function retryClickUpHandoff() {
+            if (!currentDesignApprovalSubmissionId) return;
+            const btn = document.getElementById('retryHandoffBtn');
+            btn.disabled = true;
+            btn.textContent = 'Retrying...';
+            try {
+                const response = await fetch(`/api/design-approval/${encodeURIComponent(currentDesignApprovalSubmissionId)}/handoff`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: '{}'
+                });
+                const data = await response.json();
+                if (!response.ok) throw new Error(data.error || 'ClickUp handoff failed');
+                renderHandoffStatus(data.handoff, true);
+                showAlert(data.handoff?.handoffComplete ? 'ClickUp handoff completed.' : 'ClickUp handoff is still incomplete.', data.handoff?.handoffComplete ? 'success' : 'error');
+            } catch (error) {
+                showAlert(error.message || 'ClickUp handoff failed', 'error');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Retry ClickUp Handoff';
+            }
+        }
+
         function resetForm() {
             document.getElementById('step1').classList.remove('hidden');
             document.getElementById('step2').classList.add('hidden');
             document.getElementById('summarySection').classList.add('hidden');
             document.getElementById('mismatchOverrideCard').classList.add('hidden');
+            document.getElementById('visualReviewCard').classList.add('hidden');
+            document.getElementById('handoffCard').classList.add('hidden');
             currentDesignApprovalSubmissionId = '';
 
             // Reset file inputs
-            document.getElementById('docxFile').value = '';
             document.getElementById('pdfFile').value = '';
-            document.getElementById('docxZone').classList.remove('has-file');
             document.getElementById('pdfZone').classList.remove('has-file');
-            document.getElementById('docxFilename').classList.add('hidden');
             document.getElementById('pdfFilename').classList.add('hidden');
-            docxFileSelected = false;
             pdfFileSelected = false;
-            selectedDocxSubmission = null;
-            document.getElementById('docxSourceMode').value = 'upload';
-            document.getElementById('docxDatabaseSearch').classList.add('hidden');
-            document.getElementById('docxZone').classList.remove('hidden');
-            document.getElementById('docxSearchInput').value = '';
-            document.getElementById('docxSearchResults').innerHTML = '';
-            document.getElementById('selectedDocxNote').classList.add('hidden');
+            resetDesignMenuSearch();
             document.getElementById('overrideReason').value = '';
 
             // Reset submitter fields
             document.getElementById('submitterName').value = '';
             document.getElementById('submitterEmail').value = '';
             document.getElementById('submitterJobTitle').value = '';
-            document.getElementById('approvalCulinary').value = '';
-            document.getElementById('approvalRegional').value = '';
-            document.getElementById('culinaryApproverName').value = '';
-            document.getElementById('regionalApproverName').value = '';
-
             const btn = document.getElementById('compareBtn');
             btn.disabled = true;
-            btn.textContent = 'Compare Documents';
+            btn.textContent = 'Check and Submit Design';
         }
 
         function showAlert(message, type) {
@@ -1612,7 +1932,13 @@
                     document.getElementById('submitterDropdown').classList.remove('show');
                 }, 150);
             });
-            onDocxSourceModeChange();
+            document.addEventListener('click', function(event) {
+                const dropdown = document.getElementById('designRestaurantDropdown');
+                const input = document.getElementById('designRestaurant');
+                if (!dropdown.contains(event.target) && event.target !== input) {
+                    dropdown.classList.remove('show');
+                }
+            });
             updateCompareButtonState();
             prefillSubmitterProfile();
         });

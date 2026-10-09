@@ -84,6 +84,16 @@
     "rawMarkerPlacement": "preserve",
     "rawNoticeText": "*consuming raw or undercooked meats, poultry, seafood, shellfish, or eggs may increase your risk of foodborne illness."
   },
+  "designApproval": {
+    "visualPolicies": [
+      {
+        "key": "branded_product_depiction",
+        "label": "Branded product illustration",
+        "instruction": "Do not include illustrations, photos, renderings, logos, labels, packaging, or recognizable trade dress for third-party branded products. Brand names may appear as ordinary menu text. Do not flag generic unbranded food or drink illustrations or the business's own branding.",
+        "severity": "critical"
+      }
+    ]
+  },
   "draftSessions": {
     "expiryDays": 30
   },

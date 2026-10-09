@@ -1,8 +1,23 @@
 export type LlmProvider = 'openai' | 'openrouter';
 
+export type ChatTextContentPart = {
+    type: 'text';
+    text: string;
+};
+
+export type ChatImageUrlContentPart = {
+    type: 'image_url';
+    image_url: {
+        url: string;
+        detail?: 'auto' | 'low' | 'high';
+    };
+};
+
+export type ChatContentPart = ChatTextContentPart | ChatImageUrlContentPart;
+
 export type ChatMessage = {
     role: 'system' | 'user' | 'assistant' | 'developer';
-    content: string;
+    content: string | ChatContentPart[];
 };
 
 export type ModelCapabilities = {

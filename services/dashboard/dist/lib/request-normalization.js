@@ -62,27 +62,11 @@ function normalizeDesignApprovalRequestBody(body) {
     const submitterName = (0, upload_security_1.sanitizePlainTextInput)(body?.submitterName, { maxLength: 120 });
     const submitterEmail = (0, upload_security_1.sanitizePlainTextInput)(body?.submitterEmail, { maxLength: 240 }).toLowerCase();
     const submitterJobTitle = (0, upload_security_1.sanitizePlainTextInput)(body?.submitterJobTitle, { maxLength: 120 });
-    const existingDocxSubmissionId = (0, upload_security_1.sanitizePlainTextInput)(body?.existingDocxSubmissionId, { maxLength: 128 });
-    const requiredApprovalsRaw = (0, upload_security_1.sanitizePlainTextInput)(body?.requiredApprovals, {
-        multiline: true,
-        maxLength: upload_security_1.MAX_JSON_FIELD_LENGTH,
-        trim: false,
-    }) || '[]';
-    let requiredApprovals = [];
-    try {
-        requiredApprovals = JSON.parse(requiredApprovalsRaw);
-        if (!Array.isArray(requiredApprovals)) {
-            requiredApprovals = [];
-        }
-    }
-    catch {
-        requiredApprovals = [];
-    }
+    const menuId = (0, upload_security_1.sanitizePlainTextInput)(body?.menuId, { maxLength: 128 });
     return {
         submitterName,
         submitterEmail,
         submitterJobTitle,
-        existingDocxSubmissionId,
-        requiredApprovals,
+        menuId,
     };
 }

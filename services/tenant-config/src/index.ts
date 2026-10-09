@@ -119,6 +119,22 @@ export interface TenantDraftSessions {
     expiryDays: number;
 }
 
+export interface TenantDesignVisualPolicy {
+    /** Stable key returned by the visual-review model. */
+    key: string;
+    /** Human-facing title shown in the design approval results. */
+    label: string;
+    /** Exact business rule supplied to the visual-review model. */
+    instruction: string;
+    /** Blocking level for a high-confidence violation. */
+    severity: 'critical' | 'warning';
+}
+
+export interface TenantDesignApproval {
+    /** Visual rules evaluated against rendered designer-PDF pages. */
+    visualPolicies: TenantDesignVisualPolicy[];
+}
+
 export interface TenantConfig {
     /** Full business name, e.g. "Richard Sandoval Hospitality". */
     name: string;
@@ -135,6 +151,8 @@ export interface TenantConfig {
     approvalRoles: TenantApprovalRole[];
     template: TenantTemplate;
     rulebook: TenantRulebook;
+    /** Business-specific rules for the designed-menu proof. */
+    designApproval: TenantDesignApproval;
     /** Shared draft-session settings for approved-menu click-to-edit. */
     draftSessions: TenantDraftSessions;
     /** Property catalog seed file, relative to the config dir. */
@@ -211,6 +229,16 @@ export const DEFAULT_TENANT_CONFIG: TenantConfig = {
         allergensAnchor: '### 7. ALLERGENS',
         rawMarkerPlacement: 'description_end',
         rawNoticeText: '*consuming raw or undercooked meats, poultry, seafood, shellfish, or eggs may increase your risk of foodborne illness.',
+    },
+    designApproval: {
+        visualPolicies: [
+            {
+                key: 'branded_product_depiction',
+                label: 'Branded product illustration',
+                instruction: 'Do not include illustrations, photos, renderings, logos, labels, packaging, or recognizable trade dress for third-party branded products. Brand names may appear as ordinary menu text. Do not flag generic unbranded food or drink illustrations or the business\'s own branding.',
+                severity: 'critical',
+            },
+        ],
     },
     draftSessions: {
         expiryDays: 30,

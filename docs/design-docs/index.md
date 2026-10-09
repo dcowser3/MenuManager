@@ -8,8 +8,10 @@ Catalog of design decisions and feature documentation for Menu Manager.
 | [ClickUp-Linked Approval Workflow Proposal](clickup-linked-approval-workflow-proposal.md) | Local Prototype | Browser-based approval flow linked from ClickUp that preserves the current DOCX and SharePoint handoff |
 | [Critical Error Blocking](critical-error-blocking.md) | Complete | Severity system that blocks submission on missing prices / incomplete dish names |
 | [Submitter Autofill](submitter-autofill.md) | Complete | Autocomplete from saved profiles + recent project loader |
-| [Design Approval](design-approval.md) | Built, direct-link only | DOCX vs PDF comparison tool for design proof validation; not shown on the public welcome dashboard |
+| [Design Approval](design-approval.md) | Production workflow built; direct-link rollout | Current-approved-menu selection, PDF-only submission, layout-aware text validation, tenant-configured visual AI checks, durable audit, and retryable ClickUp handoff |
 | [Design Comparison Rules](design-comparison-rules.md) | Complete | Configurable tolerance rules for design approval comparison |
+| [PDF Rule Review](pdf-rule-review.md) | Next feature priority; planned | External-property PDFs checked against tenant menu rules without a Word baseline; correction/re-upload before human review, reuse for private-event menus, and deferred intentional Word/design reconciliation |
+| [PDF Review Implementation Spec](pdf-rule-review-implementation-spec.md) | Ready for separate-task implementation | Critical-error correction/re-upload, exact-file checks, new ClickUp task with PDF attachment, recoverable handoff; human-requested revisions deferred |
 | [Approval Attestation](approval-attestation.md) | Complete | Required manager approval attestation before submission |
 | [Approved Dish Quality](approved-dish-quality.md) | Implemented | Provenance display, quality flags, idempotent extraction, and AI checks for questionable rows |
 | [Dish Name Formatting](dish-name-formatting.md) | Implemented | Deterministic dish-name bolding after Basic AI Check with conservative shared-extractor anchors |
