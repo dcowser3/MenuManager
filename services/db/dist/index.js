@@ -566,6 +566,43 @@ async function getSubmissionRecordById(id) {
     const match = Object.values(submissions).find((submission) => (submission?.id === normalizedId || submission?.legacy_id === normalizedId));
     return match || null;
 }
+async function getSubmissionRecordsByPublicIds(ids) {
+    const normalizedIds = [...new Set((ids || []).map((id) => `${id || ''}`.trim()).filter(Boolean))];
+    const records = new Map();
+    if (!normalizedIds.length)
+        return records;
+    if ((0, supabase_client_1.isSupabaseConfigured)()) {
+        const supabase = (0, supabase_client_1.getSupabaseClient)();
+        const uuidIds = normalizedIds.filter((id) => UUID_REGEX.test(id));
+        const legacyIds = normalizedIds.filter((id) => !UUID_REGEX.test(id));
+        const batches = [];
+        if (uuidIds.length) {
+            const { data, error } = await supabase.from(SUBMISSIONS_TABLE).select('*').in('id', uuidIds);
+            if (error)
+                throw new Error(`Failed to batch-load submissions: ${error.message}`);
+            batches.push(data || []);
+        }
+        if (legacyIds.length) {
+            const { data, error } = await supabase.from(SUBMISSIONS_TABLE).select('*').in('legacy_id', legacyIds);
+            if (error)
+                throw new Error(`Failed to batch-load legacy submissions: ${error.message}`);
+            batches.push(data || []);
+        }
+        for (const record of batches.flat()) {
+            const publicId = getPublicSubmissionId(record);
+            if (publicId)
+                records.set(publicId, record);
+        }
+        return records;
+    }
+    const submissions = JSON.parse(await fs_1.promises.readFile(SUBMISSIONS_DB, 'utf-8'));
+    for (const record of Object.values(submissions)) {
+        const publicId = getPublicSubmissionId(record);
+        if (normalizedIds.includes(publicId))
+            records.set(publicId, record);
+    }
+    return records;
+}
 async function findSubmissionByDisputeToken(token) {
     const normalized = `${token || ''}`.trim();
     if (!normalized)
@@ -972,6 +1009,10 @@ async function resolveBrandNewMenuId(submission, menuDecision) {
 // menu_id to the write so the link and the pointer move land together. Never
 // fatal to the approval — logs and leaves the submission unlinked on failure.
 async function injectResolvedMenuIdIfApproving(existingRecord, allowedFields, menuDecision) {
+    // A design-approval record audits a PDF proof of an existing menu; it is not
+    // a new content version and must never create or advance a menu entity.
+    if (`${existingRecord?.source || ''}`.trim() === 'design_approval')
+        return;
     const mergedStatus = `${allowedFields.status ?? existingRecord?.status ?? ''}`.trim().toLowerCase();
     if (!APPROVED_SUBMISSION_STATUSES.includes(mergedStatus))
         return;
@@ -993,6 +1034,8 @@ function shouldReconcileMenuPointer(allowedFields) {
     return APPROVED_SUBMISSION_STATUSES.includes(status) || Object.prototype.hasOwnProperty.call(allowedFields || {}, 'menu_id');
 }
 async function reconcileMenuPointerOnApproval(submission) {
+    if (`${submission?.source || ''}`.trim() === 'design_approval')
+        return;
     const status = `${submission?.status || ''}`.trim().toLowerCase();
     if (!APPROVED_SUBMISSION_STATUSES.includes(status))
         return;
@@ -1834,6 +1877,72 @@ app.get('/menus', async (req, res) => {
         res.status(500).json({ error: 'Failed to list menus' });
     }
 });
+// Current approved menu versions available to the design-team proof workflow.
+// The menus.current_submission_id pointer is authoritative, so an older approved
+// version can never be selected accidentally from this endpoint.
+app.get('/menus/design-eligible', async (req, res) => {
+    try {
+        const q = `${req.query.q || ''}`.trim();
+        const normalizedQuery = normalizeSearchValue(q);
+        const normalizedProperty = normalizeSearchValue(`${req.query.property || ''}`.trim());
+        const normalizedServicePeriod = normalizeSearchValue(`${req.query.servicePeriod || req.query.service_period || ''}`.trim());
+        const requestedLimit = Number.parseInt(`${req.query.limit || '20'}`, 10);
+        const limit = Math.max(1, Math.min(Number.isFinite(requestedLimit) ? requestedLimit : 20, 50));
+        const menus = await findMenus({ status: 'active' });
+        const submissionsById = await getSubmissionRecordsByPublicIds(menus.map((menu) => `${menu.current_submission_id || ''}`.trim()).filter(Boolean));
+        const eligible = menus.map((menu) => {
+            const currentSubmissionId = `${menu.current_submission_id || ''}`.trim();
+            if (!currentSubmissionId)
+                return null;
+            const submission = submissionsById.get(currentSubmissionId);
+            if (!submission)
+                return null;
+            const status = `${submission.status || ''}`.trim().toLowerCase();
+            if (!APPROVED_SUBMISSION_STATUSES.includes(status))
+                return null;
+            if (!isApprovedBaselineSource(submission))
+                return null;
+            if (!`${submission.final_path || ''}`.trim())
+                return null;
+            const searchValues = [
+                menu.name,
+                menu.property,
+                menu.service_period,
+                submission.project_name,
+                submission.filename,
+            ].map(normalizeSearchValue);
+            if (normalizedQuery && !searchValues.some((value) => value.includes(normalizedQuery))) {
+                return null;
+            }
+            const propertyValue = normalizeSearchValue(submission.property || menu.property || '');
+            if (normalizedProperty && !propertyValue.includes(normalizedProperty)) {
+                return null;
+            }
+            const servicePeriodValue = normalizeSearchValue(getSubmissionServicePeriod(submission) || menu.service_period || '');
+            if (normalizedServicePeriod && servicePeriodValue !== normalizedServicePeriod) {
+                return null;
+            }
+            return {
+                menuId: menu.id,
+                submissionId: getPublicSubmissionId(submission),
+                projectName: submission.project_name || menu.name || '',
+                property: submission.property || menu.property || '',
+                servicePeriod: getSubmissionServicePeriod(submission) || menu.service_period || '',
+                approvedAt: submission.reviewed_at || submission.approved_text_extracted_at || submission.updated_at || submission.created_at || '',
+                filename: submission.filename || '',
+                clickupTaskLinked: !!`${submission.clickup_task_id || ''}`.trim(),
+            };
+        })
+            .filter(Boolean)
+            .sort((a, b) => Date.parse(b.approvedAt || '') - Date.parse(a.approvedAt || ''))
+            .slice(0, limit);
+        res.json({ menus: eligible });
+    }
+    catch (error) {
+        console.error('Error listing design-eligible menus:', error.message);
+        res.status(500).json({ error: 'Failed to list menus available for design approval' });
+    }
+});
 app.post('/menus', async (req, res) => {
     try {
         const menu = await saveMenu({
@@ -2001,7 +2110,9 @@ app.post('/submissions', async (req, res) => {
         // all carry revision_base_submission_id here). Brand-new submissions get
         // their menu resolved at approval time, not now (rejected submissions
         // must never create menus).
-        if (!newSubmission.menu_id && newSubmission.revision_base_submission_id) {
+        if (`${newSubmission.source || ''}`.trim() !== 'design_approval' &&
+            !newSubmission.menu_id &&
+            newSubmission.revision_base_submission_id) {
             try {
                 const baseline = await getSubmissionRecordById(`${newSubmission.revision_base_submission_id}`);
                 if (baseline?.menu_id)

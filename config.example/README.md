@@ -17,7 +17,7 @@ swap test and for running multiple businesses' configs locally).
 
 | File | What it is |
 |------|------------|
-| `tenant.json` | All compiled-in constants: business name, branding colors/fonts/logo, email identities, default allergen key, approval roles, menu-template markers. |
+| `tenant.json` | All compiled-in constants: business name, branding colors/fonts/logo, email identities, default allergen key, approval roles, design visual policies, and menu-template markers. |
 | `rulebook/qa_prompt.txt` | The **seed** menu-review prompt for a fresh database. After the first approved prompt change in the dashboard, the live ruleset lives in the `prompt_proposals` DB table — no deploy needed to change rules. |
 | `properties.json` | The **seed** property/location catalog for a fresh database. Editable in-app after seeding. |
 | `branding/` | Optional logo / favicon image files referenced by `branding.logo`. |
@@ -30,6 +30,7 @@ swap test and for running multiple businesses' configs locally).
 - **emails.\*** — default identities. Environment variables still take precedence over these (e.g. `SMTP_FROM`, `FORM_ATTEMPT_ALERT_EMAIL`, `PUBLIC_FORM_SUPPORT_EMAIL`). `submissionConfirmationCc` is a list of extra visibility recipients copied on every successful form-submission confirmation email.
 - **allergenKey** — default allergen legend used when a submission supplies none.
 - **approvalRoles** — the named sign-offs on the design-approval screen.
+- **designApproval.visualPolicies** — artwork rules checked against rendered designer-PDF pages. Each policy has a stable `key`, reviewer-facing `label`, precise model `instruction`, and high-confidence `severity`. Use an empty list to disable visual policy checks for that tenant.
 - **template** — strings the parser uses to recognize and validate uploaded menu templates, plus the downloadable template file names. The validation *logic* is shared; only these strings change per business.
 - **rulebook.guidelinesAnchor / allergensAnchor** — the exact headings the review prompt-builder inserts prix-fixe and custom-allergen sections after. **These must appear verbatim in `rulebook/qa_prompt.txt` (and in any prompt later approved in-app)** or that injection silently no-ops.
 

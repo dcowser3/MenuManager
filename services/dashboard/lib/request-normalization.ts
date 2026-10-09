@@ -1,6 +1,5 @@
 import {
     MAX_LONG_TEXT_LENGTH,
-    MAX_JSON_FIELD_LENGTH,
     assertPathInRoot,
     sanitizePlainTextInput,
     sanitizeRichTextHtml,
@@ -106,36 +105,19 @@ export type NormalizedDesignApprovalRequest = {
     submitterName: string;
     submitterEmail: string;
     submitterJobTitle: string;
-    existingDocxSubmissionId: string;
-    requiredApprovals: any[];
+    menuId: string;
 };
 
 export function normalizeDesignApprovalRequestBody(body: any): NormalizedDesignApprovalRequest {
     const submitterName = sanitizePlainTextInput(body?.submitterName, { maxLength: 120 });
     const submitterEmail = sanitizePlainTextInput(body?.submitterEmail, { maxLength: 240 }).toLowerCase();
     const submitterJobTitle = sanitizePlainTextInput(body?.submitterJobTitle, { maxLength: 120 });
-    const existingDocxSubmissionId = sanitizePlainTextInput(body?.existingDocxSubmissionId, { maxLength: 128 });
-    const requiredApprovalsRaw = sanitizePlainTextInput(body?.requiredApprovals, {
-        multiline: true,
-        maxLength: MAX_JSON_FIELD_LENGTH,
-        trim: false,
-    }) || '[]';
-
-    let requiredApprovals: any[] = [];
-    try {
-        requiredApprovals = JSON.parse(requiredApprovalsRaw);
-        if (!Array.isArray(requiredApprovals)) {
-            requiredApprovals = [];
-        }
-    } catch {
-        requiredApprovals = [];
-    }
+    const menuId = sanitizePlainTextInput(body?.menuId, { maxLength: 128 });
 
     return {
         submitterName,
         submitterEmail,
         submitterJobTitle,
-        existingDocxSubmissionId,
-        requiredApprovals,
+        menuId,
     };
 }

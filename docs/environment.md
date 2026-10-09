@@ -135,6 +135,12 @@ These are optional. If `CLICKUP_API_TOKEN` or `CLICKUP_LIST_ID` are not set, the
 | `CLICKUP_CORRECTIONS_STATUS` | Status name that triggers normal reviewer correction download (default: `"to do"`). ClickUp `approved` is treated as passive/manual and is ignored even if configured here. |
 | `CLICKUP_CORRECTIONS_STATUSES` | Optional comma-separated trigger statuses for aliases or transitional workflows. ClickUp `approved` is treated as passive/manual and is ignored even if included. |
 | `CLICKUP_POST_APPROVAL_STATUS` | Status applied to the ClickUp task after approved DOCX processing finishes when it is not already there; Isabella direct submissions are also created in this status (default: `"to do"`). If set to passive/manual `approved`, the service falls back to `"to do"`. |
+| `DESIGN_VISUAL_REVIEW_ENABLED` | Enables designer-PDF visual policy review. If unset, it is enabled in production and in local environments that have a real `OPENAI_API_KEY`; an explicit `false` is an emergency rollback. An enabled review fails closed when it cannot finish, requiring human review or a documented override. |
+| `DESIGN_VISUAL_REVIEW_MODEL` | Vision-capable OpenAI model used for designer-PDF artwork checks (default: `gpt-5.6-terra`). This is independent of `AI_REVIEW_MODEL`. Production should pin an eval-approved snapshot when one is available. |
+| `DESIGN_VISUAL_REVIEW_MAX_PAGES` | Maximum PDF pages rendered and inspected (default `40`, bounded `1`-`100`). Exceeding it produces a blocking incomplete-review finding rather than silently approving the unreviewed pages. |
+| `DESIGN_VISUAL_REVIEW_DPI` | PDF render resolution used for model image input (default `120`, bounded `72`-`200`). |
+| `DESIGN_VISUAL_REVIEW_BATCH_SIZE` | Number of rendered pages sent per model request (default `4`, bounded `1`-`8`). |
+| `CLICKUP_POST_DESIGN_STATUS` | Exact status applied after an approved designer PDF is attached to the existing ClickUp task. It intentionally has no default because this is a tenant workflow decision. When unset, the PDF is attached and the design page clearly reports that the task still needs its next-stage status configured; retrying after configuration moves the task without uploading the PDF twice. |
 | `CLICKUP_WEBHOOK_SUBMISSION_LOOKUP_RETRIES` | Number of extra DB lookup attempts after a ClickUp review-complete webhook sees no linked submission yet (default: `5`) |
 | `CLICKUP_WEBHOOK_SUBMISSION_LOOKUP_RETRY_DELAY_MS` | Delay between those webhook submission lookup retries in milliseconds (default: `1000`) |
 

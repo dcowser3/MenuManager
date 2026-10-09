@@ -1,9 +1,49 @@
 "use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.parseExtractorJson = parseExtractorJson;
+exports.getDesignComparisonSource = getDesignComparisonSource;
 exports.createDesignApprovalWorkflowHandlers = createDesignApprovalWorkflowHandlers;
+const crypto_1 = __importDefault(require("crypto"));
 const upload_security_1 = require("./upload-security");
 const request_normalization_1 = require("./request-normalization");
 const approval_transitions_1 = require("./approval-transitions");
+const APPROVED_MENU_STATUSES = new Set(['approved', 'approved_override']);
+function publicSubmissionId(submission) {
+    return `${submission?.legacy_id || submission?.id || ''}`.trim();
+}
+function parseStoredApprovals(value) {
+    if (Array.isArray(value))
+        return value;
+    if (typeof value !== 'string')
+        return [];
+    try {
+        const parsed = JSON.parse(value);
+        return Array.isArray(parsed) ? parsed : [];
+    }
+    catch {
+        return [];
+    }
+}
+function designApprovalPayload(submission) {
+    const raw = submission?.raw_payload && typeof submission.raw_payload === 'object' && !Array.isArray(submission.raw_payload)
+        ? submission.raw_payload
+        : {};
+    if (raw.design_approval && typeof raw.design_approval === 'object') {
+        return { rawPayload: raw, designApproval: raw.design_approval };
+    }
+    const nested = raw.raw_payload && typeof raw.raw_payload === 'object' && !Array.isArray(raw.raw_payload)
+        ? raw.raw_payload
+        : {};
+    return {
+        rawPayload: Object.keys(nested).length ? nested : raw,
+        designApproval: nested.design_approval && typeof nested.design_approval === 'object'
+            ? nested.design_approval
+            : {},
+    };
+}
 function inferDesignApprovalServicePeriod(projectName, fileName) {
     const source = `${projectName || ''} ${fileName || ''}`.toLowerCase();
     const patterns = [
@@ -24,40 +64,111 @@ function inferDesignApprovalServicePeriod(projectName, fileName) {
     ];
     return patterns.find((item) => item.pattern.test(source))?.label || '';
 }
+function parseExtractorJson(stdout, extractorLabel) {
+    const output = (stdout || '').trim();
+    if (!output) {
+        throw new Error(`${extractorLabel} returned no data`);
+    }
+    try {
+        return JSON.parse(output);
+    }
+    catch {
+        // Extractors are required to keep stdout JSON-only, but a third-party
+        // library can still print a diagnostic first. Accept one complete JSON
+        // object on the final non-empty line so an upstream warning does not
+        // turn a valid upload into an opaque parser error.
+        const lines = output.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+        const jsonLine = [...lines].reverse().find((line) => line.startsWith('{') && line.endsWith('}'));
+        if (jsonLine) {
+            try {
+                return JSON.parse(jsonLine);
+            }
+            catch {
+                // Fall through to the stable workflow error below.
+            }
+        }
+        throw new Error(`${extractorLabel} returned invalid JSON`);
+    }
+}
+function getDesignComparisonSource(docxData) {
+    const source = typeof docxData?.comparison_menu_content === 'string'
+        ? docxData.comparison_menu_content
+        : (docxData?.menu_content || '');
+    return source.trim();
+}
 function createDesignApprovalWorkflowHandlers(deps) {
+    const runClickUpHandoff = async (submissionId) => {
+        try {
+            const response = await deps.axios.post(`${deps.CLICKUP_SERVICE_URL}/design-approval/finalize`, { designApprovalSubmissionId: submissionId }, { timeout: deps.clickupFinalizeTimeoutMs });
+            return response.data || { success: false, status: 'failed', handoffComplete: false };
+        }
+        catch (error) {
+            const message = error?.response?.data?.error || error?.response?.data?.details || error.message || 'ClickUp handoff failed';
+            try {
+                const currentResponse = await deps.axios.get(`${deps.DB_SERVICE_URL}/submissions/${encodeURIComponent(submissionId)}`);
+                const current = currentResponse.data || {};
+                const { rawPayload, designApproval } = designApprovalPayload(current);
+                await deps.axios.put(`${deps.DB_SERVICE_URL}/submissions/${encodeURIComponent(submissionId)}`, {
+                    raw_payload: {
+                        ...rawPayload,
+                        design_approval: {
+                            ...designApproval,
+                            handoff: {
+                                ...(designApproval.handoff || {}),
+                                status: 'failed',
+                                handoff_complete: false,
+                                error: `${message}`,
+                                last_attempt_at: new Date().toISOString(),
+                            },
+                        },
+                    },
+                });
+            }
+            catch (persistError) {
+                console.error('Failed to persist design handoff failure:', persistError.message);
+            }
+            return {
+                success: false,
+                status: 'failed',
+                handoffComplete: false,
+                warning: `${message}`,
+            };
+        }
+    };
     const compare = async (req, res) => {
         const files = req.files;
         const tempFiles = [];
-        const { submitterName, submitterEmail, submitterJobTitle, existingDocxSubmissionId, requiredApprovals, } = (0, request_normalization_1.normalizeDesignApprovalRequestBody)(req.body);
+        const { submitterName, submitterEmail, submitterJobTitle, menuId, } = (0, request_normalization_1.normalizeDesignApprovalRequestBody)(req.body);
         try {
-            if (!files.pdfFile) {
+            if (!files?.pdfFile?.[0]) {
                 return res.status(400).json({ error: 'PDF file is required' });
             }
-            let docxPath = '';
-            let docxOriginalName = 'design-approval.docx';
-            if (files.docxFile && files.docxFile[0]) {
-                docxPath = files.docxFile[0].path;
-                docxOriginalName = (0, upload_security_1.sanitizeStoredFileName)(files.docxFile[0].originalname, docxOriginalName);
-                tempFiles.push(docxPath);
-                if (!(0, upload_security_1.hasAllowedExtension)(docxOriginalName, upload_security_1.ALLOWED_DOCX_EXTENSIONS)) {
-                    return res.status(400).json({ error: 'First file must be a .docx document' });
-                }
-                await (0, upload_security_1.assertUploadedFileType)(docxPath, ['docx']);
+            if (!menuId) {
+                return res.status(400).json({ error: 'Select an approved menu before submitting the design' });
             }
-            else if (existingDocxSubmissionId) {
-                const subResponse = await deps.axios.get(`${deps.DB_SERVICE_URL}/submissions/${encodeURIComponent(existingDocxSubmissionId)}`);
-                const baselineSubmission = subResponse.data || {};
-                const candidatePath = baselineSubmission.final_path || baselineSubmission.approved_path || baselineSubmission.original_path;
-                if (!candidatePath) {
-                    return res.status(400).json({ error: 'Selected submission has no available DOCX file path' });
-                }
-                docxPath = deps.resolveStoredPath(candidatePath, 'Design approval DOCX source', upload_security_1.ALLOWED_DOCX_EXTENSIONS);
-                await deps.fs.access(docxPath);
-                docxOriginalName = (0, upload_security_1.sanitizeStoredFileName)(baselineSubmission.filename, docxOriginalName);
+            const menuResponse = await deps.axios.get(`${deps.DB_SERVICE_URL}/menus/${encodeURIComponent(menuId)}`);
+            const selectedMenu = menuResponse.data?.menu || null;
+            const sourceSubmissionId = `${selectedMenu?.current_submission_id || ''}`.trim();
+            if (!selectedMenu || selectedMenu.status !== 'active' || !sourceSubmissionId) {
+                return res.status(409).json({ error: 'The selected menu no longer has a current approved version. Refresh and select it again.' });
             }
-            else {
-                return res.status(400).json({ error: 'DOCX source is required (upload or database selection)' });
+            const subResponse = await deps.axios.get(`${deps.DB_SERVICE_URL}/submissions/${encodeURIComponent(sourceSubmissionId)}`);
+            const baselineSubmission = subResponse.data || {};
+            const baselineStatus = `${baselineSubmission.status || ''}`.trim().toLowerCase();
+            const baselineSource = `${baselineSubmission.source || ''}`.trim();
+            if (!APPROVED_MENU_STATUSES.has(baselineStatus) || (baselineSource && baselineSource !== 'form' && baselineSource !== 'clickup_history_import')) {
+                return res.status(409).json({ error: 'The selected menu version is no longer eligible for design approval. Refresh and select the current version.' });
             }
+            const canonicalSourceSubmissionId = publicSubmissionId(baselineSubmission);
+            if (!canonicalSourceSubmissionId || canonicalSourceSubmissionId !== sourceSubmissionId) {
+                return res.status(409).json({ error: 'The selected menu changed while this page was open. Refresh and select the current version.' });
+            }
+            const candidatePath = `${baselineSubmission.final_path || ''}`.trim();
+            if (!candidatePath) {
+                return res.status(409).json({ error: 'The current approved menu does not have an approved Word file available' });
+            }
+            const docxPath = await deps.resolveApprovedSourceDocx(sourceSubmissionId, candidatePath);
+            const docxOriginalName = (0, upload_security_1.sanitizeStoredFileName)(baselineSubmission.filename, 'approved-menu.docx');
             const pdfFile = files.pdfFile[0];
             tempFiles.push(pdfFile.path);
             const pdfFileName = (0, upload_security_1.sanitizeStoredFileName)(pdfFile.originalname, 'design-approval.pdf');
@@ -77,13 +188,13 @@ function createDesignApprovalWorkflowHandlers(deps) {
             }
             const extractDetailsScript = deps.pathModule.join(docxRedlinerDir, 'extract_project_details.py');
             const detailsResult = await deps.execAsync(`${pythonCmd} "${extractDetailsScript}" "${docxPath}"`, { timeout: 30000, maxBuffer: 10 * 1024 * 1024 });
-            const docxData = JSON.parse(detailsResult.stdout);
+            const docxData = parseExtractorJson(detailsResult.stdout, 'DOCX extractor');
             if (docxData.error) {
                 return res.status(400).json({ error: `DOCX extraction failed: ${docxData.error}` });
             }
             const extractPdfScript = deps.pathModule.join(docxRedlinerDir, 'extract_pdf_text.py');
             const pdfResult = await deps.execAsync(`${pythonCmd} "${extractPdfScript}" "${pdfFile.path}"`, { timeout: 30000, maxBuffer: 10 * 1024 * 1024 });
-            const pdfData = JSON.parse(pdfResult.stdout);
+            const pdfData = parseExtractorJson(pdfResult.stdout, 'PDF extractor');
             if (pdfData.error) {
                 return res.status(400).json({ error: `PDF extraction failed: ${pdfData.error}` });
             }
@@ -92,36 +203,56 @@ function createDesignApprovalWorkflowHandlers(deps) {
                     error: 'The PDF does not contain a text layer. It may be a scanned image. Please provide a PDF with selectable text.'
                 });
             }
-            const docxText = (docxData.menu_content || '').trim();
+            const docxText = getDesignComparisonSource(docxData);
             const pdfText = (pdfData.full_text || '').trim();
-            const { differences: allDifferences, alignments } = deps.compareMenuTexts(docxText, pdfText);
-            const differences = allDifferences.filter((d) => d.severity !== 'info');
+            const documentMarkup = {
+                removedContent: Array.isArray(docxData.removed_content) ? docxData.removed_content : [],
+                requiredContent: Array.isArray(docxData.required_content) ? docxData.required_content : [],
+            };
+            const { differences: allDifferences, alignments } = deps.compareMenuTexts(docxText, pdfText, documentMarkup);
+            const visualReview = await deps.reviewPdfVisuals(pdfFile.path);
+            const differences = [
+                ...allDifferences.filter((d) => d.severity !== 'info'),
+                ...deps.visualReviewDifferences(visualReview),
+            ];
             const isMatch = differences.length === 0;
             const projectDetails = docxData.project_details || {};
-            const servicePeriod = inferDesignApprovalServicePeriod(projectDetails.project_name || '', docxOriginalName || '');
-            const submissionId = `design-${Date.now()}`;
-            let dbSaved = false;
-            try {
-                await deps.axios.post(`${deps.DB_SERVICE_URL}/submissions`, (0, approval_transitions_1.buildDesignApprovalSubmissionRecord)({
-                    submissionId,
-                    submitterEmail,
-                    submitterName,
-                    submitterJobTitle,
-                    projectName: projectDetails.project_name || 'Design Approval',
-                    property: projectDetails.property || '',
-                    size: projectDetails.size || '',
-                    orientation: projectDetails.orientation || '',
-                    fileName: docxOriginalName || 'design-approval.docx',
-                    status: isMatch ? 'approved' : 'needs_correction',
-                    requiredApprovals,
-                    servicePeriod,
-                }));
-                dbSaved = true;
-                console.log(`Design approval submission saved: ${submissionId}`);
-            }
-            catch (dbError) {
-                console.error('Failed to save design approval submission:', dbError.message);
-            }
+            const servicePeriod = `${baselineSubmission.service_period || baselineSubmission.raw_payload?.servicePeriod || selectedMenu.service_period || ''}`.trim() || inferDesignApprovalServicePeriod(projectDetails.project_name || '', docxOriginalName || '');
+            const submissionId = `design-${crypto_1.default.randomUUID()}`;
+            const pdfStorageDir = deps.pathModule.join(deps.getDocumentStorageRoot(), 'design-approvals', submissionId);
+            const pdfPath = deps.pathModule.join(pdfStorageDir, pdfFileName);
+            await deps.fs.mkdir(pdfStorageDir, { recursive: true });
+            await deps.fs.copyFile(pdfFile.path, pdfPath);
+            const storedApprovals = parseStoredApprovals(baselineSubmission.approvals);
+            await deps.axios.post(`${deps.DB_SERVICE_URL}/submissions`, (0, approval_transitions_1.buildDesignApprovalSubmissionRecord)({
+                submissionId,
+                submitterEmail,
+                submitterName,
+                submitterJobTitle,
+                projectName: baselineSubmission.project_name || projectDetails.project_name || selectedMenu.name || 'Design Approval',
+                property: baselineSubmission.property || projectDetails.property || selectedMenu.property || '',
+                size: baselineSubmission.size || projectDetails.size || '',
+                orientation: baselineSubmission.orientation || projectDetails.orientation || '',
+                pdfFileName,
+                pdfPath,
+                status: isMatch ? 'approved' : 'needs_correction',
+                requiredApprovals: storedApprovals,
+                sourceMenuId: menuId,
+                sourceSubmissionId,
+                clickupTaskId: baselineSubmission.clickup_task_id,
+                differences,
+                visualReview,
+                servicePeriod,
+            }));
+            await deps.axios.post(`${deps.DB_SERVICE_URL}/assets`, (0, approval_transitions_1.buildDesignedPdfAssetRecord)({
+                submissionId,
+                sourceSubmissionId,
+                sourceMenuId: menuId,
+                pdfPath,
+                pdfFileName,
+                clickupTaskId: baselineSubmission.clickup_task_id,
+            }));
+            console.log(`Design approval submission saved: ${submissionId}`);
             if (submitterName && submitterEmail) {
                 deps.axios.post(`${deps.DB_SERVICE_URL}/submitter-profiles`, {
                     name: submitterName,
@@ -129,9 +260,9 @@ function createDesignApprovalWorkflowHandlers(deps) {
                     jobTitle: submitterJobTitle
                 }).catch((err) => console.error('Failed to save submitter profile:', err.message));
             }
-            if (isMatch && dbSaved) {
-                deps.extractDishesAfterApproval(submissionId, docxText, projectDetails.property || 'Unknown', docxPath, servicePeriod).catch((err) => console.error('Background dish extraction failed (design approval):', err));
-            }
+            const handoff = isMatch
+                ? await runClickUpHandoff(submissionId)
+                : { success: false, status: 'not_started', handoffComplete: false };
             res.json({
                 isMatch,
                 projectDetails: docxData.project_details,
@@ -139,8 +270,18 @@ function createDesignApprovalWorkflowHandlers(deps) {
                 alignments,
                 docxText,
                 pdfText,
-                requiredApprovals,
-                submissionId: dbSaved ? submissionId : undefined
+                documentMarkup,
+                visualReview,
+                requiredApprovals: storedApprovals,
+                sourceMenu: {
+                    menuId,
+                    submissionId: sourceSubmissionId,
+                    projectName: baselineSubmission.project_name || selectedMenu.name || '',
+                    property: baselineSubmission.property || selectedMenu.property || '',
+                    servicePeriod,
+                },
+                handoff,
+                submissionId,
             });
         }
         catch (error) {
@@ -166,21 +307,44 @@ function createDesignApprovalWorkflowHandlers(deps) {
                 submission = dbResponse.data;
             }
             catch (err) {
-                console.error('Failed to fetch submission for dish extraction:', err.message);
+                console.error('Failed to fetch design approval submission:', err.message);
+                return res.status(404).json({ error: 'Design approval submission not found' });
+            }
+            if (`${submission?.source || ''}`.trim() !== 'design_approval') {
+                return res.status(400).json({ error: 'Only design approval submissions can be overridden' });
             }
             await deps.axios.put(`${deps.DB_SERVICE_URL}/submissions/${encodeURIComponent(submissionId)}`, (0, approval_transitions_1.buildDesignApprovalOverrideUpdate)(reason));
-            if (submission) {
-                deps.extractDishesAfterApproval(submissionId, submission.menu_content, submission.property || 'Unknown', submission.final_path || '', submission.service_period).catch((err) => console.error('Background dish extraction failed (design override):', err));
-            }
-            res.json({ success: true });
+            const handoff = await runClickUpHandoff(submissionId);
+            res.json({ success: true, handoff });
         }
         catch (error) {
             console.error('Failed to save design approval override:', error.message);
             res.status(500).json({ error: 'Failed to save override' });
         }
     };
+    const retryHandoff = async (req, res) => {
+        try {
+            const submissionId = `${req.params?.submissionId || ''}`.trim();
+            const dbResponse = await deps.axios.get(`${deps.DB_SERVICE_URL}/submissions/${encodeURIComponent(submissionId)}`);
+            const submission = dbResponse.data || {};
+            const status = `${submission.status || ''}`.trim().toLowerCase();
+            if (`${submission.source || ''}`.trim() !== 'design_approval') {
+                return res.status(400).json({ error: 'Only design approval submissions can be handed off' });
+            }
+            if (!APPROVED_MENU_STATUSES.has(status)) {
+                return res.status(409).json({ error: 'Resolve or override the design findings before sending this PDF to ClickUp' });
+            }
+            const handoff = await runClickUpHandoff(submissionId);
+            res.json({ success: !!handoff.success, handoff });
+        }
+        catch (error) {
+            console.error('Failed to retry design approval handoff:', error.message);
+            res.status(500).json({ error: 'Failed to retry ClickUp handoff' });
+        }
+    };
     return {
         compare,
         saveOverride,
+        retryHandoff,
     };
 }

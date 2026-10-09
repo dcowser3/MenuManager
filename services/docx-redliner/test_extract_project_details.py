@@ -5,6 +5,8 @@ import os
 import tempfile
 
 from docx import Document
+from docx.enum.text import WD_COLOR_INDEX
+from docx.shared import RGBColor
 
 from extract_project_details import detect_allergen_key, extract_project_details
 
@@ -89,8 +91,57 @@ def test_extract_project_details_returns_parenthesized_allergen_key():
     assert result["allergen_key"] == "D dairy | E eggs | G gluten | PN peanuts | SY soy | TN tree nuts"
 
 
+def test_extracts_red_struck_removals_and_yellow_requirements_for_design_comparison():
+    doc = Document()
+    doc.add_paragraph("MENU")
+
+    red_item = doc.add_paragraph()
+    red_run = red_item.add_run("Kale Salad, apple, cheese D")
+    red_run.font.color.rgb = RGBColor(0xFF, 0x00, 0x00)
+
+    struck_item = doc.add_paragraph()
+    struck_run = struck_item.add_run("Yucatan Kibis, beef D")
+    struck_run.font.strike = True
+
+    partial_removal = doc.add_paragraph()
+    partial_removal.add_run("Shrimp Ceviche, avocado, ")
+    cherry = partial_removal.add_run("cherry")
+    cherry.font.color.rgb = RGBColor(0xFF, 0x00, 0x00)
+    partial_removal.add_run(" tomato S")
+
+    yellow_item = doc.add_paragraph()
+    yellow_run = yellow_item.add_run("Maduros, plantains, crema D,V")
+    yellow_run.font.highlight_color = WD_COLOR_INDEX.YELLOW
+
+    result = _save_and_extract(doc)
+
+    assert result["menu_content"] == (
+        "Kale Salad, apple, cheese D\n"
+        "Yucatan Kibis, beef D\n"
+        "Shrimp Ceviche, avocado, cherry tomato S\n"
+        "Maduros, plantains, crema D,V"
+    )
+    assert result["comparison_menu_content"] == (
+        "\n\nShrimp Ceviche, avocado, tomato S\nMaduros, plantains, crema D,V"
+    )
+    assert [(item["text"], item["scope"]) for item in result["removed_content"]] == [
+        ("Kale Salad, apple, cheese D", "line"),
+        ("Yucatan Kibis, beef D", "line"),
+        ("cherry", "fragment"),
+    ]
+    assert result["required_content"] == [{
+        "text": "Maduros, plantains, crema D,V",
+        "context": "Maduros, plantains, crema D,V",
+        "active_text": "Maduros, plantains, crema D,V",
+        "scope": "line",
+        "markers": ["yellow"],
+        "paragraph_index": 4,
+    }]
+
+
 if __name__ == "__main__":
     test_extracts_split_property_fields_from_new_template()
     test_detects_parenthesized_allergen_key()
     test_parenthesized_allergen_key_stops_before_footer_copy()
     test_extract_project_details_returns_parenthesized_allergen_key()
+    test_extracts_red_struck_removals_and_yellow_requirements_for_design_comparison()
