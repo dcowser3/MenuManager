@@ -5,6 +5,7 @@ process.env.CLICKUP_ASSIGNEE_ID = '114079264';
 process.env.CLICKUP_MARKETING_WATCHER_GROUP_NAME = 'Marketing';
 process.env.CLICKUP_CORRECTIONS_STATUS = 'approved';
 process.env.CLICKUP_POST_APPROVAL_STATUS = 'to do';
+process.env.CLICKUP_POST_DESIGN_STATUS = 'approved';
 process.env.CLICKUP_WEBHOOK_SUBMISSION_LOOKUP_RETRIES = '2';
 process.env.CLICKUP_WEBHOOK_SUBMISSION_LOOKUP_RETRY_DELAY_MS = '1';
 process.env.GRAPH_CLIENT_ID = 'graph-client-id';
@@ -34,7 +35,7 @@ jest.mock('fs', () => {
     const { Readable } = require('stream');
     return {
         ...actual,
-        existsSync: jest.fn((target) => String(target).includes('.docx') && !String(target).includes('/venv/')),
+        existsSync: jest.fn((target) => (String(target).includes('.docx') || String(target).includes('.pdf')) && !String(target).includes('/venv/')),
         createReadStream: jest.fn(() => Readable.from(Buffer.from('docx'))),
         promises: {
             ...actual.promises,
@@ -132,6 +133,7 @@ function invokeWebhookHandler(handler, { body = {} } = {}) {
 describe('browser approval finalize route', () => {
     const createTaskHandler = getRouteHandler('post', '/create-task');
     const finalizeHandler = getRouteHandler('post', '/approval/finalize');
+    const designFinalizeHandler = getRouteHandler('post', '/design-approval/finalize');
     const webhookHandler = getRouteHandler('post', '/webhook/clickup');
     const directBackfillHandler = getRouteHandler('post', '/webhook/backfill-isabella-direct');
 
@@ -190,6 +192,33 @@ describe('browser approval finalize route', () => {
                         raw_payload: {},
                     },
                 };
+            }
+            if (urlStr.includes('/submissions/design-review-1')) {
+                return {
+                    data: {
+                        id: 'design-review-1',
+                        status: 'approved',
+                        source: 'design_approval',
+                        revision_base_submission_id: 'source-1',
+                        clickup_task_id: 'cu-design',
+                        filename: 'Spring Design.pdf',
+                        raw_payload: {
+                            design_approval: {
+                                menu_id: 'menu-1',
+                                source_submission_id: 'source-1',
+                                pdf_path: '/tmp/documents/design-review-1/Spring Design.pdf',
+                                pdf_file_name: 'Spring Design.pdf',
+                                handoff: { status: 'pending' },
+                            },
+                        },
+                    },
+                };
+            }
+            if (urlStr.includes('/submissions/source-1')) {
+                return { data: { id: 'source-1', status: 'approved', clickup_task_id: 'cu-design' } };
+            }
+            if (urlStr.includes('/menus/menu-1')) {
+                return { data: { menu: { id: 'menu-1', current_submission_id: 'source-1', status: 'active' } } };
             }
             if (urlStr.includes('/properties')) {
                 return { data: { catalog: [] } };
@@ -600,6 +629,71 @@ describe('browser approval finalize route', () => {
             approved_menu_content: 'Clean Menu',
             approved_menu_content_html: '<p><strong>Clean</strong> Menu</p>',
         }));
+    });
+
+    test('uploads an approved design PDF to its existing task and moves it to the configured next stage', async () => {
+        const response = await invokeJsonHandler(designFinalizeHandler, {
+            body: { designApprovalSubmissionId: 'design-review-1' },
+        });
+
+        expect(response.status).toBe(200);
+        expect(response.body).toMatchObject({
+            success: true,
+            status: 'complete',
+            handoffComplete: true,
+            attachmentUploaded: true,
+            clickupStatusUpdated: true,
+            targetStatus: 'approved',
+            taskId: 'cu-design',
+        });
+
+        expect(axios.post.mock.calls.some((call) =>
+            String(call[0]).includes('https://api.clickup.com/api/v2/task/cu-design/attachment')
+        )).toBe(true);
+        expect(axios.put.mock.calls.some((call) =>
+            String(call[0]).includes('https://api.clickup.com/api/v2/task/cu-design') && call[1]?.status === 'approved'
+        )).toBe(true);
+
+        const auditUpdate = axios.put.mock.calls.find((call) =>
+            String(call[0]).includes('/submissions/design-review-1') && call[1]?.raw_payload?.design_approval?.handoff
+        );
+        expect(auditUpdate).toBeTruthy();
+        expect(auditUpdate[1].raw_payload.design_approval.handoff).toMatchObject({
+            status: 'complete',
+            handoff_complete: true,
+            attachment_uploaded: true,
+            status_updated: true,
+            target_status: 'approved',
+        });
+    });
+
+    test('does not upload the PDF twice when retrying only the post-design status move', async () => {
+        axios.get.mockImplementation(async (url) => {
+            const urlStr = String(url);
+            if (urlStr.includes('/submissions/design-review-1')) {
+                return { data: {
+                    id: 'design-review-1', status: 'approved', source: 'design_approval', revision_base_submission_id: 'source-1',
+                    filename: 'Spring Design.pdf',
+                    raw_payload: { design_approval: {
+                        menu_id: 'menu-1', source_submission_id: 'source-1',
+                        pdf_path: '/tmp/documents/design-review-1/Spring Design.pdf', pdf_file_name: 'Spring Design.pdf',
+                        handoff: { status: 'attachment_only', attachment_uploaded: true, attachment_id: 'att-existing', status_updated: false },
+                    } },
+                } };
+            }
+            if (urlStr.includes('/submissions/source-1')) return { data: { id: 'source-1', clickup_task_id: 'cu-design' } };
+            if (urlStr.includes('/menus/menu-1')) return { data: { menu: { current_submission_id: 'source-1' } } };
+            return { data: null };
+        });
+
+        const response = await invokeJsonHandler(designFinalizeHandler, {
+            body: { designApprovalSubmissionId: 'design-review-1' },
+        });
+
+        expect(response.body.handoffComplete).toBe(true);
+        expect(response.body.attachmentNewlyUploaded).toBe(false);
+        expect(axios.post.mock.calls.some((call) => String(call[0]).includes('/attachment'))).toBe(false);
+        expect(axios.put.mock.calls.some((call) => call[1]?.status === 'approved')).toBe(true);
     });
 
     test('triggers differ compare for uploaded-baseline modifications finalized from the approval editor', async () => {

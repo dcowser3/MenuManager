@@ -1,7 +1,7 @@
 # Design Comparison Rules
 
-> **Status:** Complete (Apr 2026)
-> **Updated:** 2026-04-03
+> **Status:** Refined for real-proof pilot
+> **Updated:** 2026-08-29
 
 ## Problem
 
@@ -9,18 +9,18 @@ The design approval DOCX-vs-PDF comparison was too strict, producing excessive f
 
 ## Solution
 
-A configurable rules file (`services/dashboard/design-comparison-rules.json`) controls comparison tolerance. The comparison engine applies these rules during fuzzy line matching, word alignment, and diff classification.
+A rules file (`services/dashboard/design-comparison-rules.json`) supplies the leading phrases, ignorable words, and minimum meaningful word length. The comparison engine also has built-in semantic handling for case, punctuation, line wrapping, proof reordering, managed footer copy, prices, allergen codes, PDF ligatures, and non-printing characters.
 
 ## Rules Reference
 
 | Rule | Default | Effect |
 |------|---------|--------|
-| `ignoreCaseDifferences` | `true` | Case-only diffs ("Tan Mimosa" vs "TAN MIMOSA") treated as info |
+| `ignoreCaseDifferences` | `true` | Documents the built-in case-insensitive matching behavior |
 | `ignoreLeadingPhrases` | `["Choice of:", ...]` | Listed prefixes stripped before comparison |
-| `ignoreConjunctionChanges` | `true` | Added/removed "or", "and", "&" treated as info |
-| `ignorePunctuationDifferences` | `true` | Punctuation-only diffs (trailing comma, colon) treated as info |
-| `ignoreWhitespaceInPrices` | `true` | Price on separate line in PDF treated as info |
-| `reorderingTolerance` | `true` | Unmatched lines re-matched across positions (reorder detection) |
+| `ignoreConjunctionChanges` | `true` | Documents conjunction handling through `ignorableWords` |
+| `ignorePunctuationDifferences` | `true` | Documents built-in punctuation-insensitive matching |
+| `ignoreWhitespaceInPrices` | `true` | Documents built-in structured price matching across lines |
+| `reorderingTolerance` | `true` | Documents built-in whole-proof layout reconciliation |
 | `minWordLengthForMissing` | `3` | Missing words shorter than this are info, not critical |
 | `ignorableWords` | `["of", "the", ...]` | These words missing/added are always info severity |
 | `treatCaseOnlyAsInfo` | `true` | Case-only word changes classified as `formatting`/`info` |
@@ -30,7 +30,7 @@ A configurable rules file (`services/dashboard/design-comparison-rules.json`) co
 - **Price changes** — different numeric values (e.g., "16" vs "18")
 - **Allergen code changes** — different codes (e.g., "GF" vs "VG")
 - **Missing dish names** — substantive words (3+ chars) absent from PDF
-- **Spelling changes** — actual word changes beyond case/punctuation/diacritical
+- **Spelling and diacritical changes** remain warnings for reviewer attention
 
 ## Architecture
 
@@ -39,10 +39,11 @@ design-comparison-rules.json (loaded once at startup)
         |
         v
 compareMenuTexts()
-  ├── linesMatchFuzzy() — uses normalizeLine() with rules
-  ├── Reordering pass — re-matches docx_only ↔ pdf_only lines
-  ├── compareWords() — word-level LCS with rule-aware matching
-  │   └── classifyWordDiff() — severity based on rules
+  ├── prepareLines() — Unicode cleanup + managed-copy separation
+  ├── selectPdfLines() — maps one source line to proof layout fragments
+  ├── compareLexicalTokens() — order-independent word matching
+  ├── appendStructuredDifferences() — price + allergen comparison
+  ├── downgradeLayoutOnlyDifferences() — whole-proof evidence check
   └── Returns { differences, alignments }
         |
         v
@@ -62,4 +63,4 @@ The split view now shows:
 
 ## Editing rules
 
-Edit `services/dashboard/design-comparison-rules.json` and restart the dashboard service. No code changes needed to adjust tolerance levels.
+Edit `services/dashboard/design-comparison-rules.json` for leading phrases, ignorable words, or minimum word length, then rebuild/restart the dashboard so the file is copied into `dist/`. Other semantic tolerances are code behavior and require comparator tests, including the four real-pair regression cases.

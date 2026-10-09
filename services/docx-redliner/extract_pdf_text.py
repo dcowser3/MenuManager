@@ -11,7 +11,10 @@ import sys
 import json
 
 try:
-    import fitz  # PyMuPDF
+    # Import the supported module name directly. PyMuPDF 1.28+ prints a
+    # deprecation warning to stdout when the legacy `fitz` shim is imported,
+    # which corrupts this script's JSON-only stdout contract.
+    import pymupdf
 except ImportError:
     print(json.dumps({"error": "PyMuPDF not installed. Run: pip install PyMuPDF"}), file=sys.stdout)
     sys.exit(1)
@@ -24,7 +27,7 @@ def extract_pdf_text(pdf_path: str) -> dict:
     Returns:
         dict with pages (list of page texts), full_text, page_count, has_text_layer
     """
-    doc = fitz.open(pdf_path)
+    doc = pymupdf.open(pdf_path)
 
     pages = []
     full_text_parts = []

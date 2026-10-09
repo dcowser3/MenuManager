@@ -13,9 +13,15 @@ type DesignApprovalSubmissionRecordInput = {
     property: string;
     size: string;
     orientation: string;
-    fileName: string;
+    pdfFileName: string;
+    pdfPath: string;
     status: 'approved' | 'needs_correction';
     requiredApprovals: any[];
+    sourceMenuId: string;
+    sourceSubmissionId: string;
+    clickupTaskId?: string;
+    differences?: any[];
+    visualReview?: any;
     servicePeriod?: string;
     now?: Date;
 };
@@ -36,6 +42,7 @@ export function buildApprovedSubmissionUpdate(input: ApprovedSubmissionUpdateInp
 }
 
 export function buildDesignApprovalSubmissionRecord(input: DesignApprovalSubmissionRecordInput) {
+    const now = input.now || new Date();
     return {
         id: input.submissionId,
         submitter_email: input.submitterEmail,
@@ -46,18 +53,61 @@ export function buildDesignApprovalSubmissionRecord(input: DesignApprovalSubmiss
         size: input.size || '',
         orientation: input.orientation || '',
         service_period: input.servicePeriod || '',
-        filename: input.fileName || 'design-approval.docx',
+        filename: input.pdfFileName || 'design-approval.pdf',
+        asset_type: 'design_pdf',
         status: input.status,
-        created_at: (input.now || new Date()).toISOString(),
+        created_at: now.toISOString(),
+        reviewed_at: input.status === 'approved' ? now.toISOString() : undefined,
         source: 'design_approval',
+        revision_base_submission_id: input.sourceSubmissionId,
+        clickup_task_id: input.clickupTaskId || undefined,
         approvals: JSON.stringify(input.requiredApprovals),
         mismatch_override: false,
+        raw_payload: {
+            design_approval: {
+                menu_id: input.sourceMenuId,
+                source_submission_id: input.sourceSubmissionId,
+                pdf_path: input.pdfPath,
+                pdf_file_name: input.pdfFileName,
+                comparison_passed: input.status === 'approved',
+                differences: input.differences || [],
+                visual_review: input.visualReview || null,
+                handoff: {
+                    status: input.status === 'approved' ? 'pending' : 'not_started',
+                },
+            },
+        },
+    };
+}
+
+export function buildDesignedPdfAssetRecord(input: {
+    submissionId: string;
+    sourceSubmissionId: string;
+    sourceMenuId: string;
+    pdfPath: string;
+    pdfFileName: string;
+    clickupTaskId?: string;
+}) {
+    return {
+        submission_id: input.submissionId,
+        revision_submission_id: input.sourceSubmissionId,
+        asset_type: 'designed_pdf',
+        source: 'design_approval',
+        storage_provider: 'local',
+        storage_path: input.pdfPath,
+        file_name: input.pdfFileName,
+        meta: {
+            source_menu_id: input.sourceMenuId,
+            source_submission_id: input.sourceSubmissionId,
+            clickup_task_id: input.clickupTaskId || null,
+        },
     };
 }
 
 export function buildDesignApprovalOverrideUpdate(reason: string, now = new Date()) {
     return {
         status: 'approved_override',
+        reviewed_at: now.toISOString(),
         mismatch_override: true,
         mismatch_override_reason: reason,
         mismatch_override_at: now.toISOString(),

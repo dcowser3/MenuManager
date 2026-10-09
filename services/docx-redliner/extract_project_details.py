@@ -12,6 +12,8 @@ import sys
 import json
 import re
 from docx import Document
+from docx.enum.text import WD_COLOR_INDEX
+from docx.text.run import Run
 
 ALLERGEN_KEYWORDS = [
     "allergen",
@@ -26,6 +28,156 @@ ALLERGEN_KEYWORDS = [
     "soy",
     "sesame",
 ]
+
+
+def _paragraph_runs(paragraph):
+    """Return all runs, including runs nested inside hyperlinks."""
+    return [Run(element, paragraph) for element in paragraph._p.xpath(".//w:r")]
+
+
+def _resolved_run_property(run, property_name):
+    value = getattr(run.font, property_name)
+    if value is None and run.style is not None:
+        value = getattr(run.style.font, property_name)
+    return value
+
+
+def _is_red_run(run) -> bool:
+    color = _resolved_run_property(run, "color")
+    rgb = getattr(color, "rgb", None) if color is not None else None
+    if rgb is None:
+        return False
+
+    value = str(rgb).upper()
+    if len(value) != 6:
+        return False
+
+    try:
+        red, green, blue = (int(value[index:index + 2], 16) for index in (0, 2, 4))
+    except ValueError:
+        return False
+
+    # Accept the bright and dark reds commonly used for menu redlines while
+    # avoiding orange/brown brand colors.
+    return red >= 128 and red >= green * 1.4 and red >= blue * 1.4
+
+
+def _is_struck_run(run) -> bool:
+    return bool(_resolved_run_property(run, "strike")) or bool(
+        _resolved_run_property(run, "double_strike")
+    )
+
+
+def _is_yellow_run(run) -> bool:
+    return _resolved_run_property(run, "highlight_color") == WD_COLOR_INDEX.YELLOW
+
+
+def _normalize_comparison_line(value: str) -> str:
+    normalized = re.sub(r"\s+", " ", value or "").strip()
+    normalized = re.sub(r"\s+([,.;:])", r"\1", normalized)
+    return normalized
+
+
+def _leading_text_is_marked(runs, flags) -> bool:
+    marked = []
+    unmarked = []
+
+    for run, flagged in zip(runs, flags):
+        leading_text = run.text.split(",", 1)[0]
+        if flagged:
+            marked.append(leading_text)
+        else:
+            unmarked.append(leading_text)
+        if "," in run.text:
+            break
+
+    marked_text = "".join(marked)
+    unmarked_text = "".join(unmarked)
+    return bool(re.search(r"\w", marked_text)) and not re.search(r"\w", unmarked_text)
+
+
+def _marked_segments(runs, flags):
+    """Join adjacent marked runs, allowing punctuation/space bridge runs."""
+    segments = []
+    current = []
+    bridge = []
+
+    for run, flagged in zip(runs, flags):
+        text = run.text
+        if not text:
+            continue
+        if flagged:
+            if bridge:
+                current.extend(bridge)
+                bridge = []
+            current.append(text)
+        elif current and re.fullmatch(r"[\s,;/&+\-–—]*", text):
+            bridge.append(text)
+        else:
+            if current:
+                segments.append(_normalize_comparison_line("".join(current)))
+            current = []
+            bridge = []
+
+    if current:
+        segments.append(_normalize_comparison_line("".join(current)))
+
+    return [segment for segment in segments if segment]
+
+
+def _extract_paragraph_comparison_intent(paragraph, paragraph_index: int):
+    """
+    Interpret the menu-markup key used by approved design briefs:
+    red text or strikethrough = remove; yellow highlight = required addition.
+    """
+    runs = _paragraph_runs(paragraph)
+    if not runs:
+        return paragraph.text, [], []
+
+    original_text = "".join(run.text for run in runs)
+    deletion_flags = [_is_red_run(run) or _is_struck_run(run) for run in runs]
+    yellow_flags = [not deleted and _is_yellow_run(run) for run, deleted in zip(runs, deletion_flags)]
+    active_text = _normalize_comparison_line(
+        "".join(run.text for run, deleted in zip(runs, deletion_flags) if not deleted)
+    )
+
+    removals = []
+    if any(deletion_flags):
+        remove_whole_line = _leading_text_is_marked(runs, deletion_flags)
+        removal_segments = [original_text] if remove_whole_line else _marked_segments(runs, deletion_flags)
+        marker_names = []
+        if any(_is_red_run(run) for run, flagged in zip(runs, deletion_flags) if flagged):
+            marker_names.append("red")
+        if any(_is_struck_run(run) for run, flagged in zip(runs, deletion_flags) if flagged):
+            marker_names.append("strikethrough")
+
+        for segment in removal_segments:
+            removals.append({
+                "text": _normalize_comparison_line(segment),
+                "context": _normalize_comparison_line(original_text),
+                "active_text": "" if remove_whole_line else active_text,
+                "scope": "line" if remove_whole_line else "fragment",
+                "markers": marker_names,
+                "paragraph_index": paragraph_index,
+            })
+        if remove_whole_line:
+            active_text = ""
+
+    requirements = []
+    if any(yellow_flags):
+        require_whole_line = _leading_text_is_marked(runs, yellow_flags)
+        required_segments = [active_text] if require_whole_line else _marked_segments(runs, yellow_flags)
+        for segment in required_segments:
+            requirements.append({
+                "text": _normalize_comparison_line(segment),
+                "context": _normalize_comparison_line(original_text),
+                "active_text": active_text,
+                "scope": "line" if require_whole_line else "fragment",
+                "markers": ["yellow"],
+                "paragraph_index": paragraph_index,
+            })
+
+    return active_text, removals, requirements
 
 
 def _normalize_allergen_label(label: str) -> str:
@@ -235,40 +387,60 @@ def extract_project_details(docx_path: str) -> dict:
             boundary_index = i
             break
 
-    # Extract menu content after boundary
-    # Also skip instruction lines that follow the boundary
-    menu_lines = []
+    # Keep the original flattened text for compatibility, and separately
+    # derive comparison text from the approved brief's red/yellow markup key.
+    menu_paragraphs = []
     if boundary_index is not None:
         for i in range(boundary_index + 1, len(doc.paragraphs)):
-            text = doc.paragraphs[i].text
+            paragraph = doc.paragraphs[i]
+            text = paragraph.text
             stripped = text.strip()
             # Skip the instruction line and standalone "MENU" markers
             if stripped == "MENU" or "Please drop the menu content below" in stripped:
                 continue
-            menu_lines.append(text)
+            menu_paragraphs.append((i, paragraph))
     else:
         # No boundary found — try to get all text after the table
         # Skip paragraphs that look like header/template content
         in_content = False
-        for paragraph in doc.paragraphs:
+        for i, paragraph in enumerate(doc.paragraphs):
             text = paragraph.text.strip()
             if in_content:
-                menu_lines.append(paragraph.text)
+                menu_paragraphs.append((i, paragraph))
             elif text and text not in field_mapping and not any(m in text for m in boundary_markers):
                 # Heuristic: start capturing after we pass table-related content
                 in_content = True
-                menu_lines.append(paragraph.text)
+                menu_paragraphs.append((i, paragraph))
+
+    menu_lines = [paragraph.text for _, paragraph in menu_paragraphs]
+    comparison_lines = []
+    removed_content = []
+    required_content = []
+    for paragraph_index, paragraph in menu_paragraphs:
+        active_text, removals, requirements = _extract_paragraph_comparison_intent(
+            paragraph,
+            paragraph_index,
+        )
+        comparison_lines.append(active_text)
+        removed_content.extend(removals)
+        required_content.extend(requirements)
 
     # Clean up: strip trailing empty lines
     while menu_lines and not menu_lines[-1].strip():
         menu_lines.pop()
+    while comparison_lines and not comparison_lines[-1].strip():
+        comparison_lines.pop()
 
     menu_content = "\n".join(menu_lines)
+    comparison_menu_content = "\n".join(comparison_lines)
     allergen_key = detect_allergen_key(doc.paragraphs)
 
     return {
         "project_details": project_details,
         "menu_content": menu_content,
+        "comparison_menu_content": comparison_menu_content,
+        "removed_content": removed_content,
+        "required_content": required_content,
         "allergen_key": allergen_key
     }
 

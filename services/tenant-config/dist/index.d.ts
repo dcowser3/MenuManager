@@ -106,6 +106,20 @@ export interface TenantDraftSessions {
     /** Number of idle days before shared menu-edit drafts expire. */
     expiryDays: number;
 }
+export interface TenantDesignVisualPolicy {
+    /** Stable key returned by the visual-review model. */
+    key: string;
+    /** Human-facing title shown in the design approval results. */
+    label: string;
+    /** Exact business rule supplied to the visual-review model. */
+    instruction: string;
+    /** Blocking level for a high-confidence violation. */
+    severity: 'critical' | 'warning';
+}
+export interface TenantDesignApproval {
+    /** Visual rules evaluated against rendered designer-PDF pages. */
+    visualPolicies: TenantDesignVisualPolicy[];
+}
 export interface TenantConfig {
     /** Full business name, e.g. "Richard Sandoval Hospitality". */
     name: string;
@@ -122,6 +136,8 @@ export interface TenantConfig {
     approvalRoles: TenantApprovalRole[];
     template: TenantTemplate;
     rulebook: TenantRulebook;
+    /** Business-specific rules for the designed-menu proof. */
+    designApproval: TenantDesignApproval;
     /** Shared draft-session settings for approved-menu click-to-edit. */
     draftSessions: TenantDraftSessions;
     /** Property catalog seed file, relative to the config dir. */

@@ -50,6 +50,10 @@ const CLICKUP_PASSIVE_STATUS_LABELS = new Set(['approved']);
 const CLICKUP_INITIAL_REVIEW_STATUS = (process.env.CLICKUP_INITIAL_REVIEW_STATUS || 'pending initial isa review').trim();
 const CLICKUP_CORRECTIONS_STATUS = normalizeStatus(process.env.CLICKUP_CORRECTIONS_STATUS || CLICKUP_DEFAULT_POST_APPROVAL_STATUS);
 const CLICKUP_POST_APPROVAL_STATUS = resolvePostApprovalStatus(process.env.CLICKUP_POST_APPROVAL_STATUS);
+// Intentionally has no default: each tenant must name the real workflow stage
+// that follows an approved design proof. The PDF can still be attached safely
+// while status movement remains visibly incomplete.
+const CLICKUP_POST_DESIGN_STATUS = `${process.env.CLICKUP_POST_DESIGN_STATUS || ''}`.trim();
 const CLICKUP_ISABELLA_DIRECT_STATUS = CLICKUP_POST_APPROVAL_STATUS || CLICKUP_DEFAULT_POST_APPROVAL_STATUS;
 const CLICKUP_MARKETING_WATCHER_GROUP_NAME = (process.env.CLICKUP_MARKETING_WATCHER_GROUP_NAME || 'Marketing').trim();
 const CLICKUP_MARKETING_WATCHER_GROUP_ID = process.env.CLICKUP_MARKETING_WATCHER_GROUP_ID || '';
@@ -423,7 +427,7 @@ app.use(express.json({
         req.rawBody = buf.toString('utf8');
     }
 }));
-app.use(['/create-task', '/approval/finalize', '/webhook/backfill-pending', '/webhook/backfill-isabella-direct', '/webhook/register', '/sharepoint/file'], requireInternalServiceAuth);
+app.use(['/create-task', '/approval/finalize', '/design-approval/finalize', '/webhook/backfill-pending', '/webhook/backfill-isabella-direct', '/webhook/register', '/sharepoint/file'], requireInternalServiceAuth);
 
 function safeTimingEqual(a: string, b: string): boolean {
     try {
@@ -2119,6 +2123,191 @@ app.post('/create-task', async (req, res) => {
         const errorDetails = describeServiceError(error);
         console.error('Error creating ClickUp task:', errorDetails.response || errorDetails.message);
         res.status(500).json({ error: 'Failed to create ClickUp task', details: errorDetails });
+    }
+});
+
+function getDesignApprovalState(submission: any): { rawPayload: any; designApproval: any } {
+    const raw = submission?.raw_payload && typeof submission.raw_payload === 'object' && !Array.isArray(submission.raw_payload)
+        ? submission.raw_payload
+        : {};
+    if (raw.design_approval && typeof raw.design_approval === 'object') {
+        return { rawPayload: raw, designApproval: raw.design_approval };
+    }
+    const nested = raw.raw_payload && typeof raw.raw_payload === 'object' && !Array.isArray(raw.raw_payload)
+        ? raw.raw_payload
+        : {};
+    return {
+        rawPayload: Object.keys(nested).length ? nested : raw,
+        designApproval: nested.design_approval && typeof nested.design_approval === 'object'
+            ? nested.design_approval
+            : {},
+    };
+}
+
+async function saveDesignApprovalHandoffState(
+    submissionId: string,
+    submission: any,
+    handoff: Record<string, any>
+): Promise<void> {
+    const { rawPayload, designApproval } = getDesignApprovalState(submission);
+    await internalApi.put(`${DB_SERVICE_URL}/submissions/${encodeURIComponent(submissionId)}`, {
+        raw_payload: {
+            ...rawPayload,
+            design_approval: {
+                ...designApproval,
+                handoff: {
+                    ...(designApproval.handoff || {}),
+                    ...handoff,
+                },
+            },
+        },
+    });
+}
+
+app.post('/design-approval/finalize', async (req, res) => {
+    const designApprovalSubmissionId = `${req.body?.designApprovalSubmissionId || ''}`.trim();
+    if (!designApprovalSubmissionId) {
+        return res.status(400).json({ error: 'designApprovalSubmissionId is required' });
+    }
+
+    let designSubmission: any = null;
+    try {
+        const designResponse = await internalApi.get(
+            `${DB_SERVICE_URL}/submissions/${encodeURIComponent(designApprovalSubmissionId)}`
+        );
+        designSubmission = designResponse.data || {};
+        const designStatus = `${designSubmission.status || ''}`.trim().toLowerCase();
+        if (`${designSubmission.source || ''}`.trim() !== 'design_approval') {
+            return res.status(400).json({ error: 'Submission is not a design approval review' });
+        }
+        if (designStatus !== 'approved' && designStatus !== 'approved_override') {
+            return res.status(409).json({ error: 'Design findings must be resolved or overridden before ClickUp handoff' });
+        }
+
+        const { designApproval } = getDesignApprovalState(designSubmission);
+        const sourceSubmissionId = `${designApproval.source_submission_id || designSubmission.revision_base_submission_id || ''}`.trim();
+        const sourceMenuId = `${designApproval.menu_id || ''}`.trim();
+        const pdfPath = `${designApproval.pdf_path || ''}`.trim();
+        const pdfFileName = sanitizeAttachmentFilename(
+            `${designApproval.pdf_file_name || designSubmission.filename || ''}`,
+            designApprovalSubmissionId,
+            '.pdf'
+        );
+        if (!sourceSubmissionId || !pdfPath) {
+            return res.status(409).json({ error: 'Design review is missing its approved-menu or PDF linkage' });
+        }
+        if (path.extname(pdfPath).toLowerCase() !== '.pdf' || !fs.existsSync(pdfPath)) {
+            return res.status(409).json({ error: 'The saved design PDF is unavailable' });
+        }
+        if (sourceMenuId) {
+            const menuResponse = await internalApi.get(`${DB_SERVICE_URL}/menus/${encodeURIComponent(sourceMenuId)}`);
+            const currentSubmissionId = `${menuResponse.data?.menu?.current_submission_id || ''}`.trim();
+            if (currentSubmissionId !== sourceSubmissionId) {
+                return res.status(409).json({
+                    error: 'A newer version of this menu is now approved. Submit a design for the current version instead.',
+                });
+            }
+        }
+
+        const sourceResponse = await internalApi.get(
+            `${DB_SERVICE_URL}/submissions/${encodeURIComponent(sourceSubmissionId)}`
+        );
+        const sourceSubmission = sourceResponse.data || {};
+        const clickupTaskId = `${sourceSubmission.clickup_task_id || designSubmission.clickup_task_id || ''}`.trim();
+        const previousHandoff = designApproval.handoff && typeof designApproval.handoff === 'object'
+            ? designApproval.handoff
+            : {};
+        const attemptedAt = new Date().toISOString();
+        let attachmentUploaded = previousHandoff.attachment_uploaded === true;
+        let attachmentNewlyUploaded = false;
+        let attachmentId = `${previousHandoff.attachment_id || ''}`.trim() || null;
+        let clickupStatusUpdated = previousHandoff.status_updated === true
+            && `${previousHandoff.target_status || ''}`.trim().toLowerCase() === CLICKUP_POST_DESIGN_STATUS.toLowerCase()
+            && !!CLICKUP_POST_DESIGN_STATUS;
+        const warnings: string[] = [];
+
+        if (!clickupTaskId) {
+            warnings.push('The approved menu is not linked to a ClickUp task.');
+        } else if (!CLICKUP_API_TOKEN) {
+            warnings.push('ClickUp API token is not configured.');
+        } else {
+            if (!attachmentUploaded) {
+                try {
+                    const attachmentResponse = await uploadTaskAttachment(
+                        clickupTaskId,
+                        pdfPath,
+                        pdfFileName,
+                        'application/pdf'
+                    );
+                    attachmentUploaded = true;
+                    attachmentNewlyUploaded = true;
+                    attachmentId = `${attachmentResponse?.id || attachmentResponse?.attachment?.id || ''}`.trim() || null;
+                    console.log(`Approved design PDF attached to ClickUp task ${clickupTaskId}`);
+                } catch (attachmentError: any) {
+                    warnings.push(`ClickUp PDF attachment upload failed: ${attachmentError.response?.data?.err || attachmentError.message}`);
+                }
+            }
+
+            if (attachmentUploaded && CLICKUP_POST_DESIGN_STATUS && !clickupStatusUpdated) {
+                try {
+                    await updateClickUpTaskStatus(clickupTaskId, CLICKUP_POST_DESIGN_STATUS);
+                    clickupStatusUpdated = true;
+                    console.log(`Moved ClickUp task ${clickupTaskId} to "${CLICKUP_POST_DESIGN_STATUS}" after design approval`);
+                } catch (statusError: any) {
+                    warnings.push(`ClickUp post-design status update failed: ${statusError.response?.data?.err || statusError.message}`);
+                }
+            } else if (attachmentUploaded && !CLICKUP_POST_DESIGN_STATUS) {
+                warnings.push('The PDF was attached, but CLICKUP_POST_DESIGN_STATUS is not configured.');
+            }
+        }
+
+        const handoffComplete = attachmentUploaded && clickupStatusUpdated;
+        const status = handoffComplete
+            ? 'complete'
+            : (attachmentUploaded ? 'attachment_only' : 'blocked');
+        const handoff = {
+            status,
+            handoff_complete: handoffComplete,
+            attachment_uploaded: attachmentUploaded,
+            attachment_newly_uploaded: attachmentNewlyUploaded,
+            attachment_id: attachmentId,
+            status_configured: !!CLICKUP_POST_DESIGN_STATUS,
+            status_updated: clickupStatusUpdated,
+            target_status: CLICKUP_POST_DESIGN_STATUS || null,
+            clickup_task_id: clickupTaskId || null,
+            last_attempt_at: attemptedAt,
+            warning: warnings.length ? warnings.join(' | ') : null,
+        };
+        await saveDesignApprovalHandoffState(designApprovalSubmissionId, designSubmission, handoff);
+
+        return res.json({
+            success: handoffComplete,
+            status,
+            handoffComplete,
+            attachmentUploaded,
+            attachmentNewlyUploaded,
+            clickupStatusUpdated,
+            statusConfigured: !!CLICKUP_POST_DESIGN_STATUS,
+            targetStatus: CLICKUP_POST_DESIGN_STATUS || null,
+            taskId: clickupTaskId || null,
+            warning: handoff.warning || undefined,
+        });
+    } catch (error: any) {
+        const details = error?.response?.data?.error || error?.response?.data || error.message;
+        console.error('Error finalizing design approval:', details);
+        if (designSubmission) {
+            try {
+                await saveDesignApprovalHandoffState(designApprovalSubmissionId, designSubmission, {
+                    status: 'failed',
+                    handoff_complete: false,
+                    error: typeof details === 'string' ? details : JSON.stringify(details),
+                    last_attempt_at: new Date().toISOString(),
+                });
+            } catch (persistError: any) {
+                console.error('Failed to persist design approval handoff error:', persistError.message);
+            }
+        }
+        return res.status(500).json({ error: 'Failed to finalize design approval', details });
     }
 });
 

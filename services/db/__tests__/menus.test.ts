@@ -226,6 +226,80 @@ describe('menu CRUD routes (JSON fallback)', () => {
     });
 });
 
+describe('design-eligible menu route (JSON fallback)', () => {
+    const handler = getRouteHandler('get', '/menus/design-eligible');
+    let menus: Record<string, any>;
+    let submissions: Record<string, any>;
+
+    beforeEach(() => {
+        menus = {
+            current: {
+                id: 'current', property: 'Tán', service_period: 'Brunch', name: 'Brunch',
+                current_submission_id: 'brunch-v2', status: 'active', updated_at: '2026-08-01T00:00:00Z',
+            },
+            retired: {
+                id: 'retired', property: 'Old Place', service_period: 'Dinner', name: 'Dinner',
+                current_submission_id: 'old-v1', status: 'retired', updated_at: '2026-08-02T00:00:00Z',
+            },
+            dinner: {
+                id: 'dinner', property: 'Tamayo', service_period: 'Dinner', name: 'Dinner',
+                current_submission_id: 'dinner-v1', status: 'active', updated_at: '2026-08-03T00:00:00Z',
+            },
+        };
+        submissions = {
+            'brunch-v1': {
+                id: 'brunch-v1', status: 'approved', source: 'form', project_name: 'Old Brunch',
+                property: 'Tán', service_period: 'Brunch', final_path: '/tmp/old.docx', reviewed_at: '2026-01-01T00:00:00Z',
+            },
+            'brunch-v2': {
+                id: 'brunch-v2', status: 'approved', source: 'form', project_name: 'Brunch',
+                property: 'Tán', service_period: 'Brunch', filename: 'brunch.docx', final_path: '/tmp/current.docx',
+                clickup_task_id: 'cu-current', reviewed_at: '2026-08-01T00:00:00Z',
+            },
+            'old-v1': {
+                id: 'old-v1', status: 'approved', source: 'form', project_name: 'Dinner',
+                property: 'Old Place', service_period: 'Dinner', final_path: '/tmp/old-place.docx',
+            },
+            'dinner-v1': {
+                id: 'dinner-v1', status: 'approved', source: 'form', project_name: 'Dinner',
+                property: 'Tamayo', service_period: 'Dinner', final_path: '/tmp/dinner.docx',
+                reviewed_at: '2026-08-03T00:00:00Z',
+            },
+        };
+        (isSupabaseConfigured as jest.Mock).mockReturnValue(false);
+        (fs.promises.readFile as jest.Mock).mockImplementation(async (target: string) => {
+            if (String(target).endsWith('menus.json')) return JSON.stringify(menus);
+            if (String(target).endsWith('submissions.json')) return JSON.stringify(submissions);
+            return '{}';
+        });
+        jest.spyOn(console, 'error').mockImplementation(() => {});
+    });
+
+    afterEach(() => jest.restoreAllMocks());
+
+    test('returns only each active menu current approved version', async () => {
+        const result = await invokeJsonHandler(handler, { query: { q: 'brunch' } });
+        expect(result.status).toBe(200);
+        expect(result.body.menus).toEqual([expect.objectContaining({
+            menuId: 'current',
+            submissionId: 'brunch-v2',
+            clickupTaskLinked: true,
+        })]);
+        expect(JSON.stringify(result.body)).not.toContain('brunch-v1');
+        expect(JSON.stringify(result.body)).not.toContain('old-v1');
+    });
+
+    test('filters by restaurant and service period for the search-first picker', async () => {
+        const result = await invokeJsonHandler(handler, {
+            query: { property: 'tan', servicePeriod: 'Brunch' },
+        });
+        expect(result.status).toBe(200);
+        expect(result.body.menus).toEqual([
+            expect.objectContaining({ menuId: 'current', submissionId: 'brunch-v2' }),
+        ]);
+    });
+});
+
 // --------------------------------------------------------------------------
 // Write path: pointer moves + brand-new resolution + inheritance (JSON fallback)
 // --------------------------------------------------------------------------
@@ -386,6 +460,32 @@ describe('menu write path (JSON fallback)', () => {
         });
         expect(res.status).toBe(201);
         expect(submissions['child'].menu_id).toBe(menuId);
+    });
+
+    test('design approval records link to a baseline without becoming menu versions', async () => {
+        const menuId = seedMenu({ current_submission_id: 'base' });
+        submissions.base = { id: 'base', status: 'approved', menu_id: menuId };
+        const created = await invokeJsonHandler(postHandler, {
+            body: {
+                id: 'design-1',
+                status: 'needs_correction',
+                source: 'design_approval',
+                revision_base_submission_id: 'base',
+                property: 'Tán',
+                service_period: 'Lunch',
+                project_name: 'Lunch',
+            },
+        });
+        expect(created.status).toBe(201);
+        expect(submissions['design-1'].menu_id).toBeUndefined();
+
+        const overridden = await invokeJsonHandler(putHandler, {
+            params: { id: 'design-1' },
+            body: { status: 'approved_override', reviewed_at: '2026-09-03T00:00:00Z' },
+        });
+        expect(overridden.status).toBe(200);
+        expect(menus[menuId].current_submission_id).toBe('base');
+        expect(Object.keys(menus)).toHaveLength(1);
     });
 
     test('POST /submissions mints an approver dispute token', async () => {
