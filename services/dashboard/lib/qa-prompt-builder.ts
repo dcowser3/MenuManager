@@ -12,6 +12,7 @@ import { AI_REVIEW_FENCES } from './review-response-contract';
 export type QaPromptSectionId =
     | 'accepted_scoped_policy'
     | 'prix_fixe'
+    | 'pricing_sections'
     | 'allergens'
     | 'corrected_menu_structure_rules'
     | 'pre_ai_deterministic_checks'
@@ -32,6 +33,10 @@ export const QA_PROMPT_SECTIONS: Record<QaPromptSectionId, { description: string
     raw_marker_placement: {
         description: 'Instructs the AI to preserve the author\'s raw-marker (*) placement as house style; missing markers are still flagged but none are moved.',
         appliesWhen: "rulebook.rawMarkerPlacement === 'preserve'",
+    },
+    pricing_sections: {
+        description: 'Per-section pricing map (prix fixe/package sections vs a la carte) detected from the menu text; keeps package-priced dishes from being flagged Missing Price while a la carte dishes still require prices.',
+        appliesWhen: 'menuType === combined, or package-priced sections detected in the menu text',
     },
     prix_fixe: {
         description: 'Prix fixe pricing/course-numbering rules; suppresses per-dish missing-price flags and requires a single top price plus numbered courses.',
@@ -96,6 +101,8 @@ export type QaPromptContext = PolicyContext & {
      * section is omitted entirely — the prompt is byte-identical to before.
      */
     nearMissBriefing?: string;
+    /** Pre-rendered per-section pricing map from pricing-sections.ts; empty when no package section was found. */
+    pricingLayoutBriefing?: string;
 };
 
 export function hasAiReviewFenceContract(prompt: string): boolean {
@@ -170,6 +177,18 @@ This is a PRIX FIXE (pre-fix) menu. Apply these special rules:
             console.log('Injected prix fixe rules into prompt');
             sections.push('prix_fixe');
         }
+    }
+
+    // Combined menus, and menus whose text reveals package-priced sections, get a
+    // per-section map so pricing rules apply only where they belong.
+    const pricingBriefing = `${ctx.pricingLayoutBriefing || ''}`.trim();
+    const combinedFallback = ctx.menuType === 'combined' && !pricingBriefing
+        ? `**PRICING SECTIONS:**\nThe submitter declared this a COMBINED menu (a la carte plus a prix fixe section), but no package header was detected automatically. Find where the prix fixe / package section starts and stops. Inside it, expect one labeled package price (PP/pp means per person) and do NOT flag Missing Price on its dishes. Everywhere else, every dish needs its own price.`
+        : '';
+    if ((pricingBriefing || combinedFallback) && !omit.has('pricing_sections')) {
+        const guidelinesAnchor = getTenantConfig().rulebook.guidelinesAnchor;
+        qaPrompt = qaPrompt.replace(guidelinesAnchor, `${guidelinesAnchor}\n${pricingBriefing || combinedFallback}\n`);
+        sections.push('pricing_sections');
     }
 
     // If custom or extracted allergens are provided, inject them into the prompt
