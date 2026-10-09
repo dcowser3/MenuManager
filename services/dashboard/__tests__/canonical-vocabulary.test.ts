@@ -153,6 +153,40 @@ describe('findNearMisses', () => {
         expect(findNearMisses('bale salad', corpus).some((hit) => hit.found === 'bale')).toBe(false);
     });
 
+    // Incident err-20261009T205923Z-9699af86 (Toro Snowmass breakfast): real words
+    // absent from approved menus were shown to the chef as misspellings.
+    test('does not report an inflection of an approved word as a near miss of another word', () => {
+        const corpus = buildCanonicalVocabulary({
+            acceptedRules: [],
+            approvedTerms: [
+                { term: 'foam', count: 92 },
+                { term: 'flamed', count: 6 },
+            ],
+        });
+        expect(findNearMisses('Cappuccino, foamed milk 8 D', corpus)).toHaveLength(0);
+    });
+
+    test('does not report two same-length substitutions as a corpus near miss', () => {
+        const corpus = buildCanonicalVocabulary({
+            acceptedRules: [],
+            approvedTerms: [{ term: 'continents', count: 7 }],
+        });
+        expect(findNearMisses('Selection of housemade salsas & condiments', corpus)).toHaveLength(0);
+    });
+
+    test('still catches an unseen omission next to an approved inflection', () => {
+        const corpus = buildCanonicalVocabulary({
+            acceptedRules: [],
+            approvedTerms: [
+                { term: 'foam', count: 92 },
+                { term: 'tamarind', count: 12 },
+            ],
+        });
+        expect(findNearMisses('foamed milk, tamrind glaze', corpus)).toEqual([
+            expect.objectContaining({ found: 'tamrind', canonical: 'tamarind' }),
+        ]);
+    });
+
     test('treats even a rare human-approved form as legitimate rather than rewriting it', () => {
         const corpus = buildCanonicalVocabulary({
             acceptedRules: [],
@@ -211,6 +245,24 @@ describe('ensureCanonicalSpellingSuggestions', () => {
             spellingDisposition: 'not_adjudicated',
             sourceToken: 'Rose',
         }));
+        const [question] = ensureCanonicalSpellingSuggestions('Rose dessert 14', [], [{
+            ...finding,
+            found: 'Rose',
+            canonical: 'rosé',
+            kind: 'ambiguous',
+        }]);
+        expect(question).not.toHaveProperty('suggestedReplacement');
+        expect(question.description).not.toMatch(/misspelled/i);
+    });
+
+    test('does not surface a both-valid plural pair the model left alone', () => {
+        expect(ensureCanonicalSpellingSuggestions('add sliced banana VG 5 | berries VG 7', [], [{
+            ...finding,
+            found: 'berries',
+            canonical: 'berry',
+            kind: 'ambiguous',
+            source: 'ambiguous_seed',
+        }])).toEqual([]);
     });
 
     test('hides an explicit valid-as-written acknowledgement and records the decision', () => {

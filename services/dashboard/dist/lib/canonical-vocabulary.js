@@ -184,6 +184,35 @@ function buildCanonicalVocabulary(params) {
     const entries = [...byCanonical.values()].sort((a, b) => a.canonical.localeCompare(b.canonical));
     return { entries, legitimate };
 }
+/**
+ * Base forms a token may be inflected from ("foamed" -> "foam", "condiments" ->
+ * "condiment", "berries" -> "berry"). Used so a regular inflection of an approved
+ * word is not reported as a near miss of some other approved word.
+ */
+function inflectionBases(token) {
+    const bases = [];
+    const add = (value) => {
+        if (value.length >= MIN_TERM_LENGTH && value !== token)
+            bases.push(value);
+    };
+    if (token.endsWith('ies'))
+        add(`${token.slice(0, -3)}y`);
+    if (token.endsWith('es'))
+        add(token.slice(0, -2));
+    if (token.endsWith('s') && !token.endsWith('ss'))
+        add(token.slice(0, -1));
+    if (token.endsWith('ied'))
+        add(`${token.slice(0, -3)}y`);
+    if (token.endsWith('ed')) {
+        add(token.slice(0, -2));
+        add(token.slice(0, -1));
+    }
+    if (token.endsWith('ing')) {
+        add(token.slice(0, -3));
+        add(`${token.slice(0, -3)}e`);
+    }
+    return bases;
+}
 function gramsOf(text) {
     return `${text || ''}`.normalize('NFC').split(/\r?\n/).flatMap(line => {
         const words = line.split(/[^\S\r\n]+/).map(w => w.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '')).filter(Boolean);
@@ -269,6 +298,10 @@ function findNearMisses(menuText, vocabulary, opts = {}) {
         }
         const candidates = [];
         const budget = gramFolded.length >= 8 ? maxTypoDistance : 1;
+        // "foamed" is foam + -ed, not a typo of "flamed": an inflection of an
+        // approved word is as legitimate as the word itself for corpus matches.
+        const inflectedFromLegitimate = inflectionBases(gramSensitive)
+            .some((base) => vocabulary.legitimate.has(base) || exactEntries.get(base)?.source === 'approved_corpus');
         const candidateEntries = new Set(variantEntries.get(gramSensitive) || []);
         for (let length = Math.max(1, gramFolded.length - budget); length <= gramFolded.length + budget; length += 1) {
             for (const entry of entriesByFoldedLength.get(length) || [])
@@ -277,7 +310,7 @@ function findNearMisses(menuText, vocabulary, opts = {}) {
         for (const entry of candidateEntries) {
             const knownVariant = (variantEntries.get(gramSensitive) || []).includes(entry);
             const accentOnly = differsOnlyByAccent(gram, entry.canonical);
-            if (entry.source === 'approved_corpus' && vocabulary.legitimate.has(gramSensitive))
+            if (entry.source === 'approved_corpus' && (vocabulary.legitimate.has(gramSensitive) || inflectedFromLegitimate))
                 continue;
             if (!knownVariant && vocabulary.legitimate.has(gramSensitive) && !accentOnly)
                 continue;
@@ -323,6 +356,13 @@ function findNearMisses(menuText, vocabulary, opts = {}) {
             // short-word budget to unrelated pairs such as Lone/Rose.
             const distance = damerauDistanceAtMost(gramFolded, accentInsensitiveKey(entry.canonical), budget);
             if (distance < 1 || distance > budget)
+                continue;
+            // Two substitutions at equal length is how two different words differ
+            // ("condiments" / "continents"), not how menu typos usually look; corpus
+            // evidence is too weak to raise it. Reviewer-rule entries keep the budget.
+            if (entry.source === 'approved_corpus'
+                && distance >= 2
+                && gramFolded.length === accentInsensitiveKey(entry.canonical).length)
                 continue;
             candidates.push({
                 entry,
@@ -513,6 +553,26 @@ function adjudicateCanonicalSpellingFindings(correctedMenu, suggestions, finding
         const alreadyReported = output.some((suggestion) => suggestionMentionsFinding(suggestion, finding));
         if (alreadyReported) {
             adjudications.push({ findingId: id, found: finding.found, canonical: finding.canonical, disposition: 'uncertain_candidate', source: finding.source });
+            continue;
+        }
+        if (finding.kind === 'ambiguous') {
+            // Both forms are valid. A plural/singular or similar pair ("berries" /
+            // "berry") is never worth a chef-facing item on model silence; an
+            // accent pair ("Rose" / "rosé") changes meaning, so ask, never correct.
+            if (differsOnlyByAccent(finding.found, finding.canonical)) {
+                output.push({
+                    type: 'Diacritics',
+                    confidence: 'medium',
+                    severity: 'normal',
+                    menuItem,
+                    description: `"${finding.found}" and "${finding.canonical}" are both valid spellings with different meanings.`,
+                    recommendation: `Confirm which one this dish means; keep "${finding.found}" if it is correct.`,
+                    spellingFindingId: id,
+                    spellingDisposition: 'not_adjudicated',
+                    sourceToken: finding.found,
+                });
+            }
+            adjudications.push({ findingId: id, found: finding.found, canonical: finding.canonical, disposition: 'not_adjudicated', source: finding.source });
             continue;
         }
         output.push({
