@@ -191,6 +191,12 @@ Instructs the AI to preserve the author's raw-marker (*) placement as house styl
 
 - id: `prompt/raw_marker_placement` · category: prompt · implementation: `services/dashboard/lib/qa-prompt-builder.ts#buildFinalPrompt`
 
+### Prompt section: pricing_sections
+
+Per-section pricing map (prix fixe/package sections vs a la carte) detected from the menu text; keeps package-priced dishes from being flagged Missing Price while a la carte dishes still require prices. Applies when: menuType === combined, or package-priced sections detected in the menu text.
+
+- id: `prompt/pricing_sections` · category: prompt · implementation: `services/dashboard/lib/qa-prompt-builder.ts#buildFinalPrompt`
+
 ### Prompt section: prix_fixe
 
 Prix fixe pricing/course-numbering rules; suppresses per-dish missing-price flags and requires a single top price plus numbered courses. Applies when: menuType === 'prix_fixe'.

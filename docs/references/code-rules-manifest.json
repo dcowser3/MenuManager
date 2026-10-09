@@ -2269,6 +2269,23 @@
       "source": "code_data"
     },
     {
+      "id": "prompt/pricing_sections",
+      "layer": "prompt_section",
+      "category": "prompt",
+      "title": "Prompt section: pricing_sections",
+      "description": "Per-section pricing map (prix fixe/package sections vs a la carte) detected from the menu text; keeps package-priced dishes from being flagged Missing Price while a la carte dishes still require prices. Applies when: menuType === combined, or package-priced sections detected in the menu text.",
+      "implementation": {
+        "file": "services/dashboard/lib/qa-prompt-builder.ts",
+        "exportName": "buildFinalPrompt"
+      },
+      "data": {
+        "sectionId": "pricing_sections",
+        "description": "Per-section pricing map (prix fixe/package sections vs a la carte) detected from the menu text; keeps package-priced dishes from being flagged Missing Price while a la carte dishes still require prices.",
+        "appliesWhen": "menuType === combined, or package-priced sections detected in the menu text"
+      },
+      "source": "code_data"
+    },
+    {
       "id": "prompt/prix_fixe",
       "layer": "prompt_section",
       "category": "prompt",

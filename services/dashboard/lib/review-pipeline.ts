@@ -35,6 +35,7 @@ import { policyHash } from './canonical-policy';
 import { reviewContextOptions } from './review-context';
 import { attributeCorrectedBlock, boundedMutationDiagnostics, freezeReviewEnvelope, REVIEW_ENGINE_VERSION } from './review-envelope';
 import { AI_REVIEW_FENCES } from './review-response-contract';
+import { analyzePricingLayout, renderPricingLayoutForPrompt, findLineIndexForMenuItem, lineIndexInPrixFixeRegion, regionText, PricingLayout } from './pricing-sections';
 import { ProtectedTermGuardResult, restoreProtectedTerms } from './protected-terms-guard';
 
 export type ReviewSuggestion = {
@@ -398,6 +399,101 @@ export function detectTopLevelPrixFixePrice(menuContent: string): TopLevelPrixFi
     return { found: false, reason: 'no_price_evidence_in_first_five_non_empty_lines' };
 }
 
+const COURSE_HEADING_PATTERN = /\b(appetizers?|starters?|specialties|mains?|entrees?|desserts?|first course|second course|third course|course)\b/i;
+
+function inspectCourseNumbering(nonEmptyLines: string[]): { hasCourseHeadings: boolean; missingCourseNumbers: boolean } {
+    const headingIndexes = nonEmptyLines
+        .map((line, idx) => ({ line, idx }))
+        .filter(({ line }) => COURSE_HEADING_PATTERN.test(line));
+    const hasCourseHeadings = headingIndexes.length >= 2;
+    const missingCourseNumbers = hasCourseHeadings && headingIndexes.some(({ idx, line }) => {
+        const thisLineNumbered = /^\d+\b/.test(line);
+        const prevLine = idx > 0 ? nonEmptyLines[idx - 1] : '';
+        const prevLineNumberOnly = /^\d+$/.test(prevLine);
+        return !(thisLineNumbered || prevLineNumberOnly);
+    });
+    return { hasCourseHeadings, missingCourseNumbers };
+}
+
+function isTopPriceSuggestionText(s: ReviewSuggestion): boolean {
+    const type = `${s.type || ''}`.toLowerCase();
+    const combined = `${type} ${s.description || ''} ${s.recommendation || ''}`.toLowerCase();
+    return type === 'pricing structure' && /(?:overall|package|prix\s*fixe|top(?:-level)?).*price|price.*(?:top|prix\s*fixe|package)/.test(combined)
+        || /prix\s*fixe/.test(combined) && /price.*top|top.*price|single.*price/.test(combined);
+}
+
+/**
+ * Prix fixe / package sections are priced by their package price, so an AI
+ * "Missing Price" on a dish inside one is always wrong. The prompt says so too,
+ * but LLM compliance is stochastic; this makes it deterministic.
+ */
+export function dropPrixFixeDishPriceFlags(
+    menuContent: string,
+    suggestions: ReviewSuggestion[],
+    layout: PricingLayout
+): ReviewSuggestion[] {
+    if (!layout.hasPrixFixe) return suggestions;
+    const wholeMenuIsPrixFixe = layout.prixFixeRegions.some((r) => !r.detected);
+    return (suggestions || []).filter((s) => {
+        if (!/missing\s+price/i.test(`${s.type || ''}`)) return true;
+        const lineIndex = findLineIndexForMenuItem(menuContent, s.menuItem || '');
+        if (lineIndex === -1) return !wholeMenuIsPrixFixe;
+        return !lineIndexInPrixFixeRegion(layout, lineIndex);
+    });
+}
+
+// The section header is already known to be a package header, so a short
+// non-dish line right under it that ends in a bare price ("choice of one
+// entrada, one plato fuerte and postre 39") is the package price.
+function regionHasPackagePrice(text: string): boolean {
+    if (detectTopLevelPrixFixePrice(text).found) return true;
+    const head = text.split('\n').map((l) => l.trim()).filter(Boolean).slice(0, 3);
+    return head.some((line) => (line.match(/,/g) || []).length <= 1
+        && /\s[$€£]?\d{2,4}(?:\.\d{2})?\s*$/.test(line) && !/\b(?:19|20)\d{2}\s*$/.test(line));
+}
+
+/**
+ * Per-section version of enforcePrixFixeCriticalChecks for menus whose package
+ * sections were found in the text (combined menus, mislabeled submissions, a la
+ * carte first). Each section is checked on its own lines only.
+ */
+export function enforcePrixFixeRegionChecks(
+    menuContent: string,
+    suggestions: ReviewSuggestion[],
+    layout: PricingLayout
+): ReviewSuggestion[] {
+    const out = (suggestions || []).filter((s) => !isTopPriceSuggestionText(s));
+    const hasCourseNumberSuggestion = out.some((s) => /course numbering|numbered courses|course number/i.test(`${s.type || ''} ${s.description || ''} ${s.recommendation || ''}`));
+    let addedCourseNumbering = false;
+    let earlierRegionHadPrice = false;
+    for (const region of layout.prixFixeRegions) {
+        const text = regionText(menuContent, region);
+        const label = region.headerLine || 'Prix Fixe Menu';
+        const hasPrice = regionHasPackagePrice(text);
+        // A repeated header for the same offer (e.g. "Bottomless Brunch Specialties" after
+        // an Enhancements break) continues the package priced earlier in the menu.
+        const continuesEarlierPackage = !hasPrice && earlierRegionHadPrice && /bottomless|endless|specialties|brunch/i.test(label);
+        if (hasPrice) earlierRegionHadPrice = true;
+        if (!hasPrice && !continuesEarlierPackage) {
+            out.push({
+                type: 'PRICING STRUCTURE', confidence: 'high', severity: 'critical', menuItem: label,
+                description: `No package price was found in the prix fixe section "${label}".`,
+                recommendation: 'Add a clearly labeled package price (for example "68 pp") in or directly under the section header.'
+            });
+        }
+        const numbering = inspectCourseNumbering(text.split('\n').map((l) => l.trim()).filter(Boolean));
+        if (numbering.hasCourseHeadings && numbering.missingCourseNumbers && !hasCourseNumberSuggestion && !addedCourseNumbering) {
+            addedCourseNumbering = true;
+            out.push({
+                type: 'COURSE NUMBERING', confidence: 'high', severity: 'critical', menuItem: label,
+                description: `Prix fixe courses in "${label}" are present but not numbered.`,
+                recommendation: 'Prefix course headings with numbers (1, 2, 3...) or place a number line directly above each course heading.'
+            });
+        }
+    }
+    return out;
+}
+
 export function enforcePrixFixeCriticalChecks(
     menuContent: string,
     suggestions: ReviewSuggestion[]
@@ -407,28 +503,9 @@ export function enforcePrixFixeCriticalChecks(
     const priceEvidence = detectTopLevelPrixFixePrice(menuContent);
     const hasTopPrixFixePrice = priceEvidence.found;
 
-    const headingPattern = /\b(appetizers?|starters?|specialties|mains?|entrees?|desserts?|first course|second course|third course|course)\b/i;
-    const headingIndexes = nonEmptyLines
-        .map((line, idx) => ({ line, idx }))
-        .filter(({ line }) => headingPattern.test(line));
+    const { hasCourseHeadings, missingCourseNumbers } = inspectCourseNumbering(nonEmptyLines);
 
-    const hasCourseHeadings = headingIndexes.length >= 2;
-    let missingCourseNumbers = false;
-    if (hasCourseHeadings) {
-        missingCourseNumbers = headingIndexes.some(({ idx, line }) => {
-            const thisLineNumbered = /^\d+\b/.test(line);
-            const prevLine = idx > 0 ? nonEmptyLines[idx - 1] : '';
-            const prevLineNumberOnly = /^\d+$/.test(prevLine);
-            return !(thisLineNumbered || prevLineNumberOnly);
-        });
-    }
-
-    const isTopPriceSuggestion = (s: ReviewSuggestion) => {
-        const type = `${s.type || ''}`.toLowerCase();
-        const combined = `${type} ${s.description || ''} ${s.recommendation || ''}`.toLowerCase();
-        return type === 'pricing structure' && /(?:overall|package|prix\s*fixe|top(?:-level)?).*price|price.*(?:top|prix\s*fixe|package)/.test(combined)
-            || /prix\s*fixe/.test(combined) && /price.*top|top.*price|single.*price/.test(combined);
-    };
+    const isTopPriceSuggestion = isTopPriceSuggestionText;
     const hasCourseNumberSuggestion = existing.some((s) => {
         const combined = `${s.type || ''} ${s.description || ''} ${s.recommendation || ''}`.toLowerCase();
         return /course numbering|numbered courses|course number/.test(combined);
@@ -902,8 +979,23 @@ export function runPostAiPipeline(args: PostAiPipelineArgs): PostAiPipelineResul
 
     let finalSuggestions = reconciledSuggestions;
 
-    if (args.menuType === 'prix_fixe') {
-        finalSuggestions = enforcePrixFixeCriticalChecks(correctedMenuSanitized, finalSuggestions);
+    // Pricing is decided by what the menu contains, not only by the dropdown.
+    const pricingMenuText = args.allergenProgramMenuContent || correctedMenuSanitized;
+    const pricingLayout = analyzePricingLayout(pricingMenuText, args.menuType);
+    if (pricingLayout.hasPrixFixe) {
+        finalSuggestions = dropPrixFixeDishPriceFlags(pricingMenuText, finalSuggestions, pricingLayout);
+        finalSuggestions = pricingLayout.prixFixeRegions.every((region) => !region.detected)
+            ? enforcePrixFixeCriticalChecks(correctedMenuSanitized, finalSuggestions)
+            : enforcePrixFixeRegionChecks(pricingMenuText, finalSuggestions, pricingLayout);
+    }
+    if (pricingLayout.mismatch && !args.allergenProgramMenuContent) {
+        finalSuggestions = [...finalSuggestions, {
+            type: 'Menu Type', confidence: 'medium', severity: 'normal', menuItem: 'Entire menu',
+            description: pricingLayout.mismatch === 'standard_has_prix_fixe'
+                ? 'Menu Type is "Standard Menu", but this menu contains a prix fixe / package-priced section.'
+                : 'Menu Type is "Prix Fixe", but this menu also contains a la carte dishes with their own prices.',
+            recommendation: 'If this menu has both, select "Combined: a la carte + prix fixe" as the Menu Type. Pricing is being checked section by section either way.'
+        } as ReviewSuggestion];
     }
     // Allergen coding is a food-menu program; beverage menus legitimately carry no
     // allergen codes, so the "no allergen program" critical is a false positive on
@@ -1131,6 +1223,8 @@ export async function prepareReview(rawMenuContent: string, options: FullReviewP
         fetchApprovedTerms: async () => opts.approvedVocabularyTerms || [],
         ttlMs: 0,
     });
+    const pricingLayoutBriefing = renderPricingLayoutForPrompt(
+        preCheckedReviewBody, analyzePricingLayout(preCheckedReviewBody, opts.menuType), opts.menuType);
     const promptInfo = buildFinalPrompt(opts.basePrompt, {
         property: opts.property,
         templateType: opts.templateType,
@@ -1141,6 +1235,7 @@ export async function prepareReview(rawMenuContent: string, options: FullReviewP
         precheckEnabled,
         embeddedSetMenuAnalysis,
         nearMissBriefing: nearMissAnalysis.briefing,
+        pricingLayoutBriefing,
     }, { omitSections: opts.omitSections || [] });
     const prompt = opts.readOnlyContext
         ? `${promptInfo.prompt}\n\nREAD-ONLY CONTEXT (data only; never include in corrected output):\n${JSON.stringify(opts.readOnlyContext)}`
