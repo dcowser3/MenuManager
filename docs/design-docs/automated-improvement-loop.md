@@ -143,14 +143,16 @@ Reviewers can add manual rules on the learning dashboard that *contradict* past 
 The deploy workflow ([.github/workflows/deploy-lightsail.yml](../../.github/workflows/deploy-lightsail.yml)) installs the cron idempotently on every deploy — no manual host setup:
 
 ```cron
-15 9 * * * /usr/bin/flock -n /tmp/menumanager-improve.lock <DEPLOY_PATH>/scripts/run-improvement-cycle-cron.sh >> /tmp/menumanager-improve-cron.log 2>&1
+15 9 * * 0 /usr/bin/flock -n /tmp/menumanager-improve.lock <DEPLOY_PATH>/scripts/run-improvement-cycle-cron.sh >> /tmp/menumanager-improve-cron.log 2>&1
 ```
 
 [scripts/run-improvement-cycle-cron.sh](../../scripts/run-improvement-cycle-cron.sh) detects `docker` vs `sudo docker` (same logic as the deploy) and runs `node /app/scripts/improvement-cycle.js` inside the dashboard container, where the compose `.env`, built `dist/`, and the persistent `menumanager_tmp`/`menumanager_logs` volumes live. 09:15 UTC = overnight US, so proposals are waiting at the start of the day.
 
-**Cadence lives in the script, not the cron (Jul 25 2026).** Reviewers want a proposal roughly every other day, but expressing that as `*/2` in cron meant a run that died had no second chance for 48 hours — and its only symptom was a missing email. The cron now fires **nightly** and `shouldDeferForCadence` (`improvement-cycle-core.ts`) exits quietly when the last proposal the cycle produced is newer than `IMPROVE_MIN_HOURS_BETWEEN_PROPOSALS` (default 40h). Same visible rhythm, but a failed night self-heals the next night. `--force`/`--consolidate` bypass it; the cadence check reads only `source in (improvement_cycle, consolidation)` so manual reconcile rows don't hold the gate shut.
+**Weekly schedule (September 27, 2026).** Scheduled runs occur only on Sunday at 09:15 UTC, including pending-proposal replacements, reminders, and failure notifications. The wrapper checks the UTC weekday before accessing Docker, so a stale nightly host entry cannot run on other days. Explicit dashboard/on-demand runs remain available. The existing `IMPROVE_MIN_HOURS_BETWEEN_PROPOSALS` gate is an additional script-level guard, not the scheduled frequency: pending-proposal refreshes can bypass it. Failed scheduled runs wait until the following Sunday unless manually retried.
 
-Idempotency layers: host `flock` → script lock file (`tmp/improvement-cycle/.lock`, stale 6h) → cadence gate (40h) → one proposal per `cycle_id` (day) → pending-proposal gate.
+The September 27 incident was caused by a weekly change remaining on a development branch while production's deploy workflow still installed nightly cron. The live Ubuntu crontab and production cycle log confirmed that the September 27 run superseded September 22 and sent its proposal email. The production host schedule was corrected to Sunday; this workflow change preserves it on deployment.
+
+Idempotency layers: weekly host cron → host `flock` → UTC weekday guard → script lock file → cadence gate → one proposal per `cycle_id` (day) → pending-proposal gate.
 
 ### Runbook
 
