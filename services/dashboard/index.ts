@@ -143,6 +143,7 @@ import {
     stripManagedFooterText,
 } from './lib/menu-footer';
 import { buildFinalPrompt } from './lib/qa-prompt-builder';
+import { decidePromptSync, loadPromptLineage, promptSha256 } from './lib/prompt-sync';
 import { buildNearMissAnalysis } from './lib/canonical-vocabulary-provider';
 import { policyHash } from './lib/canonical-policy';
 import {
@@ -5164,9 +5165,18 @@ async function ensureRuntimePromptSeed(): Promise<void> {
 // The runtime prompt file is baked into the Docker image, so a prompt approved
 // through the dashboard would be silently reverted by the next redeploy. On
 // startup, restore the latest approved proposal from the DB when it differs.
+// What the runtime prompt is and how startup decided it; served by /api/health/prompt
+// so a deploy can verify prod is on the expected prompt.
+let runtimePromptStatus: { decision: string; reason: string; lineageSource: string | null } = {
+    decision: 'not_checked', reason: 'startup_sync_pending', lineageSource: null,
+};
+
 async function syncEffectivePromptFromDb(): Promise<void> {
     try {
-        if (!isSupabaseConfigured()) return;
+        if (!isSupabaseConfigured()) {
+            runtimePromptStatus = { decision: 'keep_file', reason: 'supabase_not_configured', lineageSource: null };
+            return;
+        }
         const supabase = (await import('@menumanager/supabase-client')).getSupabaseClient();
         const { data: approvedProposals, error } = await supabase
             .from('prompt_proposals')
@@ -5174,33 +5184,52 @@ async function syncEffectivePromptFromDb(): Promise<void> {
             .in('status', ['approved', 'approved_modified'])
             .order('reviewed_at', { ascending: false })
             .limit(5);
-        if (error || !approvedProposals?.length) return;
+        if (error) {
+            runtimePromptStatus = { decision: 'keep_file', reason: 'prompt_proposals_unreadable', lineageSource: null };
+            return;
+        }
 
         const qaPromptPath = path.join(getRepoRoot(), 'sop-processor', 'qa_prompt.txt');
         const filePrompt = await fs.readFile(qaPromptPath, 'utf-8');
-        const effective = pickEffectivePrompt(approvedProposals, filePrompt);
-        if (effective.source === 'approved_proposal' && effective.prompt !== filePrompt) {
-            // The runtime file differs from the DB's latest approved prompt. Normally
-            // this is a stale Docker-baked file we should restore over. But it is ALSO
-            // exactly what a hand edit to qa_prompt.txt looks like — and those get
-            // silently reverted here (has bitten us repeatedly). Log loudly with hashes
-            // and lengths so a manual edit that is about to be lost is visible in the
-            // startup logs, and point at the tool that makes such edits durable.
-            const fileHash = crypto.createHash('sha256').update(filePrompt, 'utf8').digest('hex').slice(0, 12);
-            const dbHash = crypto.createHash('sha256').update(effective.prompt, 'utf8').digest('hex').slice(0, 12);
+        const effective = pickEffectivePrompt(approvedProposals || [], filePrompt);
+        const lineage = loadPromptLineage(getRepoRoot());
+        const decision = decidePromptSync({
+            filePrompt,
+            dbPrompt: effective.source === 'approved_proposal' ? effective.prompt : null,
+            lineage: lineage?.hashes || null,
+        });
+        runtimePromptStatus = { decision: decision.action, reason: decision.reason, lineageSource: lineage?.source || null };
+        const fileHash = promptSha256(filePrompt).slice(0, 12);
+        const dbHash = promptSha256(effective.prompt).slice(0, 12);
+
+        if (decision.action === 'keep_file' && decision.reason === 'repo_supersedes_db') {
+            // The DB copy is an older version of this repo file: keep the repo's newer
+            // prompt. The deploy step (scripts/sync-prompt-on-deploy.js) pins it in the DB.
+            console.log(`QA prompt: keeping repo file (sha256 ${fileHash}); DB approved copy (sha256 ${dbHash}) is an older repo version.`);
+            return;
+        }
+        if (decision.action === 'restore_db') {
             console.warn(
-                `Overwriting runtime QA prompt with DB approved copy — runtime file (${filePrompt.length} chars, sha256 ${fileHash}) ` +
-                `differs from DB latest approved (${effective.prompt.length} chars, sha256 ${dbHash}). ` +
-                'If the runtime file was hand-edited, those edits are being reverted now. ' +
-                'To make hand edits durable, run: node scripts/commit-runtime-prompt.js --apply'
+                `QA prompt: restoring DB approved copy (sha256 ${dbHash}) over the runtime file (sha256 ${fileHash}) — ${decision.reason === 'db_not_in_repo_history'
+                    ? 'the DB holds an approval git has never seen. Commit it: node scripts/commit-runtime-prompt.js --pull'
+                    : 'no prompt lineage available to tell which copy is newer.'}`
             );
             await fs.writeFile(qaPromptPath, effective.prompt, 'utf-8');
-            console.log('Restored approved QA prompt from prompt_proposals (file was stale after redeploy).');
         }
     } catch (error: any) {
+        runtimePromptStatus = { decision: 'keep_file', reason: `sync_failed: ${error?.message || error}`, lineageSource: null };
         console.warn('Effective-prompt sync skipped:', error?.message || error);
     }
 }
+
+app.get('/api/health/prompt', async (_req, res) => {
+    try {
+        const prompt = await fs.readFile(path.join(getRepoRoot(), 'sop-processor', 'qa_prompt.txt'), 'utf-8');
+        res.json({ sha256: promptSha256(prompt), length: prompt.length, ...runtimePromptStatus });
+    } catch (error: any) {
+        res.status(500).json({ error: 'QA prompt unreadable' });
+    }
+});
 
 // Final JSON error handler. Registered AFTER every route so it can catch errors
 // thrown by route middleware (multer, etc.) — the body-parser error handler near

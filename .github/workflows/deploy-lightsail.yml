@@ -127,6 +127,19 @@ jobs:
           # so every deploy since the gate landed (1a15310) shipped nothing live.
           "${COMPOSE[@]}" run --rm --no-deps -T dashboard node /app/scripts/check-schema-drift.js </dev/null
 
+          # QA prompt: make this commit's sop-processor/qa_prompt.txt the approved prompt
+          # when it is newer than the DB copy. The image has no .git, so the host writes
+          # the sha256 of every committed version into the shared tmp volume first.
+          # Without this step the dashboard's startup sync restored the DB copy over every
+          # repo edit (prod ran the Jul 30 prompt until Oct 13 2026). Never blocks.
+          # See docs/design-docs/white-label-config.md ("QA rulebook: seed vs. runtime vs. DB").
+          mkdir -p tmp
+          git log --format=%H -- sop-processor/qa_prompt.txt | while read -r commit; do
+            git show "$commit:sop-processor/qa_prompt.txt" | sha256sum | cut -d' ' -f1
+          done > tmp/prompt-lineage.txt
+          echo "QA prompt lineage: $(wc -l < tmp/prompt-lineage.txt) committed versions"
+          "${COMPOSE[@]}" run --rm --no-deps -T -e DEPLOY_COMMIT="$(git rev-parse --short HEAD)" dashboard node /app/scripts/sync-prompt-on-deploy.js </dev/null
+
           # --force-recreate: `up --build` rebuilds images but Compose may leave a
           # running container on its OLD image if it thinks nothing changed, so a
           # deploy can report success while prod keeps serving the previous code
@@ -149,6 +162,25 @@ jobs:
 
               sleep 3
             done
+          fi
+
+          # Confirm prod serves this commit's QA prompt. The startup sync runs just after
+          # the server starts listening, so wait for it to report a decision.
+          if command -v curl >/dev/null 2>&1; then
+            expected_prompt_sha="$(sha256sum sop-processor/qa_prompt.txt | cut -d' ' -f1)"
+            served_prompt=""
+            for attempt in $(seq 1 20); do
+              served_prompt="$(curl -fsS http://localhost:3005/api/health/prompt || true)"
+              case "$served_prompt" in
+                *'"decision":"not_checked"'*|'') sleep 3 ;;
+                *) break ;;
+              esac
+            done
+            echo "Served QA prompt: $served_prompt"
+            case "$served_prompt" in
+              *"\"sha256\":\"$expected_prompt_sha\""*) echo "QA prompt check passed: prod serves this commit's prompt" ;;
+              *) echo "::warning::Prod is NOT serving this commit's QA prompt (expected sha256 $expected_prompt_sha). See the sync-prompt-on-deploy output above and /alerts." ;;
+            esac
           fi
 
           # Install/refresh the improvement-cycle cron (idempotent).

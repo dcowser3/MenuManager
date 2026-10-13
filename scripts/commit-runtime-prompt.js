@@ -21,6 +21,8 @@
  *   node scripts/commit-runtime-prompt.js --apply --expected-db-sha256 <full-sha256>
  *   node scripts/commit-runtime-prompt.js --apply --reviewer "Derian" --note "re-apply allergen rules"
  *   node scripts/commit-runtime-prompt.js --file path/to/qa_prompt.txt --apply
+ *   node scripts/commit-runtime-prompt.js --pull         # write the DB's approved prompt into the
+ *                                                        # repo file so a dashboard approval can be committed
  *
  * Inside a container (where the tmp/db volume lives), same script:
  *   docker compose -f docker-compose.dev.yml exec -T dashboard node /app/scripts/commit-runtime-prompt.js --apply
@@ -48,6 +50,7 @@ function parseArgs(argv) {
         reviewer: 'manual reconcile (commit-runtime-prompt.js)',
         note: null,
         expectedDbSha256: null,
+        pull: false,
     };
     for (let i = 2; i < argv.length; i += 1) {
         const arg = argv[i];
@@ -57,6 +60,7 @@ function parseArgs(argv) {
         else if (arg === '--reviewer') args.reviewer = `${argv[++i] || args.reviewer}`;
         else if (arg === '--note') args.note = `${argv[++i] || ''}`;
         else if (arg === '--expected-db-sha256') args.expectedDbSha256 = `${argv[++i] || ''}`.trim().toLowerCase();
+        else if (arg === '--pull') args.pull = true;
         else if (arg === '--help' || arg === '-h') args.help = true;
         else console.warn(`Ignoring unknown argument: ${arg}`);
     }
@@ -103,6 +107,45 @@ function pickEffective(rows) {
     return { prompt: `${top.final_prompt || top.proposed_prompt}`, row: top };
 }
 
+/**
+ * Insert an approved prompt_proposals row whose prompt becomes the DB's latest approved
+ * copy. Optional columns are dropped one by one if this Supabase lacks them (mirrors
+ * improvement-cycle.js insert fallbacks).
+ */
+async function insertApprovedPrompt(supabase, { prompt, previousPrompt, cycleId, reviewer, notes, analysis, source, reviewedAt }) {
+    let row = {
+        cycle_id: cycleId,
+        current_prompt: previousPrompt,
+        proposed_prompt: prompt,
+        final_prompt: prompt,
+        prompt_diff: null,
+        correction_rule_count: 0,
+        submission_count: 0,
+        llm_analysis: analysis,
+        llm_model: 'manual',
+        status: 'approved',
+        reviewer_name: reviewer,
+        reviewer_notes: notes,
+        reviewed_at: reviewedAt || new Date().toISOString(),
+        source,
+        prompt_length: prompt.length,
+    };
+
+    const optionalCols = ['source', 'prompt_length', 'reviewer_notes', 'llm_analysis', 'prompt_diff', 'current_prompt', 'final_prompt'];
+    let insertError;
+    for (let attempt = 0; attempt < optionalCols.length + 1; attempt += 1) {
+        ({ error: insertError } = await supabase.from(PROMPT_PROPOSALS_TABLE).insert(row));
+        if (!insertError) break;
+        // Strip whichever optional column PostgREST complained about and retry.
+        const offending = optionalCols.find((c) => new RegExp(`\\b${c}\\b`, 'i').test(insertError.message || '') && c in row);
+        if (!offending) break;
+        console.warn(`prompt_proposals.${offending} unavailable on this DB; retrying without it. (${insertError.message})`);
+        const { [offending]: _dropped, ...rest } = row;
+        row = rest;
+    }
+    if (insertError) throw new Error(`Failed to insert approved proposal: ${insertError.message}`);
+}
+
 async function main() {
     const args = parseArgs(process.argv);
     if (args.help) {
@@ -131,6 +174,13 @@ async function main() {
     if (error) throw new Error(`Failed to read prompt_proposals: ${error.message}`);
 
     const effective = pickEffective(rows);
+    if (args.pull) {
+        if (!effective) throw new Error('No approved prompt in the DB to pull.');
+        fs.writeFileSync(args.file, effective.prompt, 'utf8');
+        console.log(`Wrote DB approved prompt (proposal ${effective.row.id}, sha256 ${sha(effective.prompt).slice(0, 12)}) to ${args.file}.`);
+        console.log('Review the diff, merge any repo-only edits back in, commit, and push. The deploy then pins the committed file.');
+        return;
+    }
     const runtimeHash = sha(runtimePrompt);
     const dbHash = effective ? sha(effective.prompt) : '';
     const assessment = assessPromptReconciliation(runtimeHash, dbHash, args.expectedDbSha256);
@@ -165,40 +215,16 @@ async function main() {
         'Manual reconciliation: pinned the live runtime qa_prompt.txt as the approved source of truth so hand edits survive restarts.',
     ];
     if (args.note) noteParts.push(args.note);
-
-    // Full row, then degrade gracefully if optional columns are missing on this
-    // Supabase (mirrors improvement-cycle.js insert fallbacks).
-    let row = {
-        cycle_id: cycleId,
-        current_prompt: effective ? effective.prompt : runtimePrompt,
-        proposed_prompt: runtimePrompt,
-        final_prompt: runtimePrompt,
-        prompt_diff: null,
-        correction_rule_count: 0,
-        submission_count: 0,
-        llm_analysis: 'Manual reconciliation — no LLM analysis. Content copied verbatim from the runtime prompt file.',
-        llm_model: 'manual',
-        status: 'approved',
-        reviewer_name: args.reviewer,
-        reviewer_notes: noteParts.join(' '),
-        reviewed_at: nowIso,
+    await insertApprovedPrompt(supabase, {
+        prompt: runtimePrompt,
+        previousPrompt: effective ? effective.prompt : runtimePrompt,
+        cycleId,
+        reviewer: args.reviewer,
+        notes: noteParts.join(' '),
+        analysis: 'Manual reconciliation — no LLM analysis. Content copied verbatim from the runtime prompt file.',
         source: 'manual_reconcile',
-        prompt_length: runtimePrompt.length,
-    };
-
-    const optionalCols = ['source', 'prompt_length', 'reviewer_notes', 'llm_analysis', 'prompt_diff', 'current_prompt', 'final_prompt'];
-    let insertError;
-    for (let attempt = 0; attempt < optionalCols.length + 1; attempt += 1) {
-        ({ error: insertError } = await supabase.from(PROMPT_PROPOSALS_TABLE).insert(row));
-        if (!insertError) break;
-        // Strip whichever optional column PostgREST complained about and retry.
-        const offending = optionalCols.find((c) => new RegExp(`\\b${c}\\b`, 'i').test(insertError.message || '') && c in row);
-        if (!offending) break;
-        console.warn(`prompt_proposals.${offending} unavailable on this DB; retrying without it. (${insertError.message})`);
-        const { [offending]: _dropped, ...rest } = row;
-        row = rest;
-    }
-    if (insertError) throw new Error(`Failed to insert approved proposal: ${insertError.message}`);
+        reviewedAt: nowIso,
+    });
 
     console.log(`\n✅ Inserted approved proposal (cycle_id ${cycleId}). DB latest approved now equals the runtime file.`);
     console.log('   Next dashboard restart: syncEffectivePromptFromDb() is a no-op and the hand edits persist.');
@@ -213,7 +239,10 @@ if (require.main === module) {
 }
 
 module.exports = {
+    PROMPT_PROPOSALS_TABLE,
     assessPromptReconciliation,
+    getSupabase,
+    insertApprovedPrompt,
     parseArgs,
     pickEffective,
     sha,

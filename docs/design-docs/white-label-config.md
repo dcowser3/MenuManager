@@ -74,40 +74,47 @@ nothing (this has bitten us):
    Read fresh on every review by `dashboard/index.ts` and `ai-review/index.ts`
    (no restart needed for edits). The dashboard's improvement cycle also writes
    approved prompt changes back to this file.
-3. **DB override (wins on restart):** on dashboard startup,
-   `syncEffectivePromptFromDb()` restores the latest **approved prompt proposal
-   from the DB** over the runtime file when they differ. A hand edit to the
-   runtime file can therefore be reverted by the next restart — durable manual
-   changes should go through the prompt-proposal/approval flow (or be reconciled
-   with the latest approved proposal in the DB).
+3. **DB approved copy:** the latest approved row in `prompt_proposals`. On
+   dashboard startup `syncEffectivePromptFromDb()` decides which copy runs, using
+   the repo's history of the prompt file (`lib/prompt-sync.ts`):
 
-Rule of thumb: hot-fix in `sop-processor/qa_prompt.txt`, then make it durable
-via the proposal flow; touch `config/rulebook/qa_prompt.txt` only when changing
-what a *fresh* install starts with.
+   | Situation | Result |
+   |---|---|
+   | Repo file and DB copy are the same text | Nothing to do |
+   | DB copy is an older committed version of the repo file | **Repo file wins.** The deploy step pins it in the DB |
+   | DB copy is not in the repo history (a dashboard approval git has never seen) | DB copy wins, and the deploy raises a `qa_prompt_not_in_git` alert |
+   | No history available | DB copy wins (previous behavior), with a warning |
 
-**Making a hand edit durable without the proposal flow.** Run
-`node scripts/commit-runtime-prompt.js` (dry run — reports whether the DB's
-latest approved prompt still matches the runtime file) and then
-`node scripts/commit-runtime-prompt.js --apply` to insert an `approved`
-`prompt_proposals` row equal to the current `sop-processor/qa_prompt.txt`. That
-row becomes the latest approved proposal, so `syncEffectivePromptFromDb()` finds
-DB == file and the next restart is a no-op instead of a revert. Re-run it after
-any hand edit. For production or a repository-shipped prompt migration, add
-`--expected-db-sha256 <full-current-db-sha256>`: the script refuses to write if
-another reviewer changed the approved DB prompt after the hash was captured.
-Run the committed image as a one-off container **before** the dashboard starts
-and overwrites its image copy, for example:
+   "History" is the sha256 of every committed version of
+   `sop-processor/qa_prompt.txt`. Production reads it from `tmp/prompt-lineage.txt`,
+   which the deploy writes on the host (the image has no `.git`); a local checkout
+   reads it from git, so a local hand edit is no longer reverted on restart.
 
-```bash
-docker compose run --rm --no-deps -T dashboard \
-  node /app/scripts/commit-runtime-prompt.js --apply \
-  --expected-db-sha256 <full-current-db-sha256>
-```
+**Why this changed (2026-10-13).** The old rule was "the DB copy always wins on
+restart". Every repo edit to the prompt was reverted on deploy, and dashboard
+approvals re-stamped the stale copy, so prod ran the **Jul 30 2026** prompt until
+Oct 13 while seven repo prompt commits (including "allergen codes are suggestions
+only") never reached the model.
 
-As a safety net, `syncEffectivePromptFromDb()` now logs a loud
-warning (with lengths + sha256) whenever it is about to overwrite a runtime file
-that differs from the DB copy, so a hand edit that is about to be lost is visible
-in the startup logs.
+**How a repo edit ships now.** Edit `sop-processor/qa_prompt.txt`, commit, push.
+The deploy (`.github/workflows/deploy-lightsail.yml`) writes the lineage file,
+runs `scripts/sync-prompt-on-deploy.js` in a one-off container before the stack is
+swapped (pins the repo prompt when it supersedes the DB copy; never blocks the
+deploy), and after startup checks `GET /api/health/prompt` (sha256, length,
+decision) against the committed file, printing a GitHub warning if prod is not
+serving it.
+
+**How a dashboard approval gets into git.** An approval in the dashboard writes
+the runtime file and the DB, but not git, so the next deploy keeps it and raises a
+`qa_prompt_not_in_git` alert. Run `node scripts/commit-runtime-prompt.js --pull` to
+write the DB copy into `sop-processor/qa_prompt.txt`, merge any repo-only edits,
+commit, and push.
+
+**Manual tools.** `node scripts/commit-runtime-prompt.js` (dry run) reports drift
+between the runtime file and the DB copy; `--apply` pins the runtime file
+immediately (add `--expected-db-sha256 <full-current-db-sha256>` to refuse if
+another reviewer changed the DB copy meanwhile). The startup sync sees new rows
+only on the next restart.
 
 ## Verification
 
