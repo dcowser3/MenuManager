@@ -833,9 +833,9 @@ describe('experience menus and the managed raw notice', () => {
     test('a standard menu still blocks on missing prices', () => {
         expect(run('standard', true).criticalSuggestions).toContainEqual(expect.objectContaining({ type: 'Missing Price' }));
     });
-    test('a managed raw notice drops the "advisory not included" critical', () => {
+    test('a "notice not included" finding is always dropped (code owns the notice)', () => {
         expect(run('experience', true).criticalSuggestions).toEqual([]);
-        expect(run('experience', false).criticalSuggestions).toContainEqual(expect.objectContaining({ type: 'General' }));
+        expect(run('experience', false).criticalSuggestions).toEqual([]);
     });
     test('dropExperienceMenuPriceFindings keeps non-price findings', () => {
         const spelling = { type: 'Spelling', description: 'Boa should be Bao.', recommendation: 'Change it.' };

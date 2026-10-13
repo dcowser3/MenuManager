@@ -1,5 +1,6 @@
 import * as path from 'path';
 import { MAX_LONG_TEXT_LENGTH, buildMenuFilename, sanitizePlainTextInput, sanitizeRichTextHtml } from './upload-security';
+import { containsAnyRawNotice, readRawNoticeNotNeeded } from './menu-footer';
 import {
     buildApprovalFinalizeRequest,
     buildApprovedSubmissionUpdate,
@@ -245,7 +246,13 @@ export function createApprovalWorkflowHandlers(deps: ApprovalWorkflowDeps) {
             const footerMetadata = deps.normalizeMenuFooter(menuContentTextRaw, fallbackAllergens);
             const normalizedMenuContent = footerMetadata.body || deps.stripManagedFooterText(deps.coalesceString(submission.menu_content, rawPayload.menuContent), fallbackAllergens);
             const effectiveAllergens = footerMetadata.normalizedAllergenLine || deps.normalizeAllergenLegend(fallbackAllergens) || deps.DEFAULT_ALLERGEN_KEY;
-            const shouldAddRawNotice = !footerMetadata.hadRawNotice && deps.detectRawUndercookedContent(normalizedMenuContent);
+            // Respect the chef's "doesn't need the notice" choice from submission, and never
+            // add a second notice when any wording of one is already there.
+            const shouldAddRawNotice = !footerMetadata.hadRawNotice
+                && !containsAnyRawNotice(menuContentTextRaw)
+                && !containsAnyRawNotice(footerMetadata.preservedFooterText)
+                && !readRawNoticeNotNeeded(rawPayload.form_payload)
+                && deps.detectRawUndercookedContent(normalizedMenuContent);
 
             const approvedDir = deps.pathModule.join(deps.getSubmissionDocumentDir(projectName, property, submission.id || submissionId), 'approved');
             const approvedPath = deps.pathModule.join(approvedDir, `${submission.id || submissionId}-approved.docx`);

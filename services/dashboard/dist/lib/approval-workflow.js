@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.createApprovalWorkflowHandlers = createApprovalWorkflowHandlers;
 const upload_security_1 = require("./upload-security");
+const menu_footer_1 = require("./menu-footer");
 const approval_transitions_1 = require("./approval-transitions");
 function createApprovalWorkflowHandlers(deps) {
     // Menu-as-entity (Phase 2): a brand-new submission (no menu link, no lineage)
@@ -177,7 +178,13 @@ function createApprovalWorkflowHandlers(deps) {
             const footerMetadata = deps.normalizeMenuFooter(menuContentTextRaw, fallbackAllergens);
             const normalizedMenuContent = footerMetadata.body || deps.stripManagedFooterText(deps.coalesceString(submission.menu_content, rawPayload.menuContent), fallbackAllergens);
             const effectiveAllergens = footerMetadata.normalizedAllergenLine || deps.normalizeAllergenLegend(fallbackAllergens) || deps.DEFAULT_ALLERGEN_KEY;
-            const shouldAddRawNotice = !footerMetadata.hadRawNotice && deps.detectRawUndercookedContent(normalizedMenuContent);
+            // Respect the chef's "doesn't need the notice" choice from submission, and never
+            // add a second notice when any wording of one is already there.
+            const shouldAddRawNotice = !footerMetadata.hadRawNotice
+                && !(0, menu_footer_1.containsAnyRawNotice)(menuContentTextRaw)
+                && !(0, menu_footer_1.containsAnyRawNotice)(footerMetadata.preservedFooterText)
+                && !(0, menu_footer_1.readRawNoticeNotNeeded)(rawPayload.form_payload)
+                && deps.detectRawUndercookedContent(normalizedMenuContent);
             const approvedDir = deps.pathModule.join(deps.getSubmissionDocumentDir(projectName, property, submission.id || submissionId), 'approved');
             const approvedPath = deps.pathModule.join(approvedDir, `${submission.id || submissionId}-approved.docx`);
             const approvedFileName = submission.filename || (0, upload_security_1.buildMenuFilename)(projectName, property, deps.coalesceString(submission.service_period, rawPayload.servicePeriod), deps.coalesceString(submission.date_needed, rawPayload.dateNeeded));

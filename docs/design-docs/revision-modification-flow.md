@@ -205,8 +205,7 @@ When a chef uploads an unapproved DOCX:
    - `existing-del` → red strikethrough, `existing-ins` → yellow highlight (same formatting as `persistent-del`/`persistent-ins`).
    - Submission-time footer normalization removes chef-supplied allergen legends from the editable body, normalizes the allergen key, and appends one managed allergen legend.
    - Legal/price/footer copy after the allergen legend, including AED service-charge text and venue-specific foodborne warnings, is preserved and appended after the managed allergen legend instead of being rewritten to the canonical warning.
-   - If no foodborne warning is present but the menu is marked or detected as containing raw/undercooked items, the workflow appends the canonical foodborne warning.
-   - The AI check is told the same decision (`rawNoticeManaged`), so a warning that will be appended is never reported missing; see `critical-error-blocking.md` (Managed foodborne notice).
+   - The foodborne warning is normally already in the menu text: the editor keeps it visible and the AI check adds it when the menu has raw items. If a raw menu still reaches submit without one, the workflow appends the canonical warning, unless the chef ticked "This menu doesn't need the raw/undercooked foodborne notice". See `critical-error-blocking.md` (Foodborne notice).
 
 ## Notes / Limits
 

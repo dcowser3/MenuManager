@@ -841,9 +841,9 @@ function runPostAiPipeline(args) {
     if (args.templateType !== 'beverage') {
         finalSuggestions = enforceAllergenProgramCheck(args.allergenProgramMenuContent || correctedMenuSanitized, finalSuggestions, args.effectiveReviewAllergens);
     }
-    if (args.managedRawNoticePresent) {
-        finalSuggestions = finalSuggestions.filter(suggestion => !(0, menu_footer_1.isGenericMissingCanonicalRawNoticeFinding)(suggestion));
-    }
+    // The foodborne notice is owned by code (added to the returned menu when the
+    // menu needs it), so a model finding that it is missing is never actionable.
+    finalSuggestions = finalSuggestions.filter(suggestion => !(0, menu_footer_1.isGenericMissingCanonicalRawNoticeFinding)(suggestion));
     finalSuggestions = detectKnownTextArtifactSuggestions(correctedMenuSanitized, finalSuggestions);
     const spellingAdjudication = (0, canonical_vocabulary_1.adjudicateCanonicalSpellingFindings)(correctedMenuSanitized, finalSuggestions, args.canonicalSpellingFindings || []);
     finalSuggestions = spellingAdjudication.suggestions;
@@ -975,7 +975,6 @@ async function prepareReview(rawMenuContent, options) {
         embeddedSetMenuAnalysis,
         nearMissBriefing: nearMissAnalysis.briefing,
         pricingLayoutBriefing,
-        rawNoticeManaged: managedRawNoticePresent,
     }, { omitSections: opts.omitSections || [] });
     const prompt = opts.readOnlyContext
         ? `${promptInfo.prompt}\n\nREAD-ONLY CONTEXT (data only; never include in corrected output):\n${JSON.stringify(opts.readOnlyContext)}`

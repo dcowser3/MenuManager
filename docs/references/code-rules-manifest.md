@@ -428,11 +428,17 @@ The corrected menu is stripped of managed footer content (allergen legend, raw n
 
 - id: `post-ai/footer-strip` · category: footer · implementation: `services/dashboard/lib/menu-footer.ts#stripManagedFooterText`
 
-### Managed raw-notice finding suppression
+### Raw-notice finding suppression
 
-Only a canonical tenant raw-food notice may suppress a whole-menu generic missing-notice duplicate; dish-specific, malformed, negated, or unrelated safety findings remain actionable.
+The foodborne notice is owned by code, so any whole-menu "notice missing" finding from the model is dropped (any wording: warning, notice, advisory, footer, disclaimer, statement); dish-specific raw-marker findings remain actionable.
 
 - id: `post-ai/managed-raw-notice-suppression` · category: footer · implementation: `services/dashboard/lib/menu-footer.ts#isGenericMissingCanonicalRawNoticeFinding`
+
+### Code-owned foodborne notice
+
+The returned menu carries the foodborne notice: the chef's own notice line is put back, or the standard notice is appended when a dish has a raw marker (*) or an always-raw preparation, unless the chef ticked "This menu doesn't need the raw/undercooked foodborne notice". Never a critical.
+
+- id: `delivery/code-owned-raw-notice` · category: footer · implementation: `services/dashboard/lib/menu-footer.ts#ensureRawNoticeInMenu`
 
 ## Layer 5 — Reconciliation and deterministic critical checks
 

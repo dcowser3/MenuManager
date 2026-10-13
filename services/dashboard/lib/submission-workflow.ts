@@ -10,6 +10,7 @@ import {
     sanitizeStoredFileName,
 } from './upload-security';
 import { normalizeSubmissionBody } from './request-normalization';
+import { containsAnyRawNotice, readRawNoticeNotNeeded } from './menu-footer';
 import {
     describeServiceError,
     mergeClickUpHandoffMetadata,
@@ -307,7 +308,6 @@ export function createSubmissionWorkflowHandlers(deps: SubmissionWorkflowDeps) {
                 fileDeliveryNotes,
                 turnaroundDays,
                 containsRawUndercooked,
-                suppressRawNotice,
                 chefPersistentDiff,
                 skipAiReview,
             } = req.body;
@@ -478,11 +478,17 @@ export function createSubmissionWorkflowHandlers(deps: SubmissionWorkflowDeps) {
                 safeSubmissionMode === 'modification' && normalizedPersistentDiffHtml
                     ? normalizedPersistentDiffHtml
                     : normalizedMenuContentHtml;
+            // The notice is normally already in the menu text (the AI check adds it when
+            // the menu needs it). This append is the safety net for a menu submitted
+            // without it; the chef's "doesn't need the notice" box always wins.
             const selectedRawFlag = `${containsRawUndercooked}` === 'true' || containsRawUndercooked === true;
-            const suppressedRawFlag = `${suppressRawNotice}` === 'true' || suppressRawNotice === true;
+            const rawNoticeNotNeeded = readRawNoticeNotNeeded(req.body);
             const detectedRawFlag = deps.detectRawUndercookedContent(normalizedMenuContent);
-            const hadRawNotice = footerMetadata.hadRawNotice || explicitFooterMetadata.hadRawNotice;
-            const shouldAddRawNotice = !hadRawNotice && !suppressedRawFlag && (selectedRawFlag || detectedRawFlag);
+            const hadRawNotice = footerMetadata.hadRawNotice
+                || explicitFooterMetadata.hadRawNotice
+                || containsAnyRawNotice(safeMenuContent)
+                || containsAnyRawNotice(safePreservedFooterText || '');
+            const shouldAddRawNotice = !hadRawNotice && !rawNoticeNotNeeded && (selectedRawFlag || detectedRawFlag);
 
             const submissionId = `form-${Date.now()}`;
             const formAttemptId = sanitizePlainTextInput(

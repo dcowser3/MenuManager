@@ -39,6 +39,7 @@ const path = __importStar(require("path"));
 const tenant_config_1 = require("@menumanager/tenant-config");
 const upload_security_1 = require("./upload-security");
 const request_normalization_1 = require("./request-normalization");
+const menu_footer_1 = require("./menu-footer");
 const clickup_handoff_1 = require("./clickup-handoff");
 function getRequestHostname(req) {
     const hostHeader = `${req?.hostname || (typeof req?.get === 'function' ? req.get('host') : '') || req?.headers?.host || ''}`.trim();
@@ -210,7 +211,7 @@ function createSubmissionWorkflowHandlers(deps) {
     };
     const submitMenu = async (req, res) => {
         try {
-            const { width, height, printWidth, printHeight, printRegion, printSize, folded, digitalWidth, digitalHeight, cropMarks, bleedMarks, fileSizeLimit, fileSizeLimitMb, fileDeliveryNotes, turnaroundDays, containsRawUndercooked, suppressRawNotice, chefPersistentDiff, skipAiReview, } = req.body;
+            const { width, height, printWidth, printHeight, printRegion, printSize, folded, digitalWidth, digitalHeight, cropMarks, bleedMarks, fileSizeLimit, fileSizeLimitMb, fileDeliveryNotes, turnaroundDays, containsRawUndercooked, chefPersistentDiff, skipAiReview, } = req.body;
             const { safeSubmitterName, safeSubmitterEmail, safeSubmitterJobTitle, safeProjectName, safeProperty, safeOrientation, safeMenuType, safeServicePeriod, safeTemplateType, safeDateNeeded, safeAssetType, safeHotelName, safeCityCountryInput, safeAllergens, safeMenuContent, safeMenuContentHtml, safePersistentDiffHtml, safePreservedFooterText, safeFileDeliveryNotes, safeSubmissionMode, safeRevisionBaseSubmissionId, safeRevisionSource, safeRevisionBaselineFileName, safeBaseApprovedMenuContent, safeMenuImageFileName, normalizedApprovals, normalizedCriticalOverrides, safeRevisionBaselineDocPath, safeMenuImagePath, } = (0, request_normalization_1.normalizeSubmissionBody)(req.body, deps.getTempUploadsDir());
             const wantsPrint = safeAssetType === 'PRINT' || safeAssetType === 'BOTH';
             const wantsDigital = safeAssetType === 'DIGITAL' || safeAssetType === 'BOTH';
@@ -341,11 +342,17 @@ function createSubmissionWorkflowHandlers(deps) {
             const docxMenuContentHtml = safeSubmissionMode === 'modification' && normalizedPersistentDiffHtml
                 ? normalizedPersistentDiffHtml
                 : normalizedMenuContentHtml;
+            // The notice is normally already in the menu text (the AI check adds it when
+            // the menu needs it). This append is the safety net for a menu submitted
+            // without it; the chef's "doesn't need the notice" box always wins.
             const selectedRawFlag = `${containsRawUndercooked}` === 'true' || containsRawUndercooked === true;
-            const suppressedRawFlag = `${suppressRawNotice}` === 'true' || suppressRawNotice === true;
+            const rawNoticeNotNeeded = (0, menu_footer_1.readRawNoticeNotNeeded)(req.body);
             const detectedRawFlag = deps.detectRawUndercookedContent(normalizedMenuContent);
-            const hadRawNotice = footerMetadata.hadRawNotice || explicitFooterMetadata.hadRawNotice;
-            const shouldAddRawNotice = !hadRawNotice && !suppressedRawFlag && (selectedRawFlag || detectedRawFlag);
+            const hadRawNotice = footerMetadata.hadRawNotice
+                || explicitFooterMetadata.hadRawNotice
+                || (0, menu_footer_1.containsAnyRawNotice)(safeMenuContent)
+                || (0, menu_footer_1.containsAnyRawNotice)(safePreservedFooterText || '');
+            const shouldAddRawNotice = !hadRawNotice && !rawNoticeNotNeeded && (selectedRawFlag || detectedRawFlag);
             const submissionId = `form-${Date.now()}`;
             const formAttemptId = (0, upload_security_1.sanitizePlainTextInput)((typeof req.get === 'function' ? req.get('x-menumanager-attempt-id') : '') || req.body?.attemptId, { maxLength: 100 }) || null;
             const draftSessionToken = (0, upload_security_1.sanitizePlainTextInput)(req.body?.draftSessionToken, { maxLength: 160 }).trim();

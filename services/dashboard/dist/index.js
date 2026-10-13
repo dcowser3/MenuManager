@@ -3332,11 +3332,12 @@ async function handleBasicCheck(req, res) {
         }
         const reviewFooterMetadata = (0, menu_footer_1.normalizeMenuFooter)(textForReview, allergens || '');
         const sanitizedMenuContent = (0, menu_footer_1.normalizeMenuFooter)(menuContent, allergens || '');
-        // The form appends the foodborne notice itself when the raw checkbox is set or raw
-        // items are detected; the footer is stripped from the review text either way. The
-        // review must treat it as present, or it reports it missing (incident Tan CRS DDLM
-        // Event, 2026-10-13).
-        const rawNoticeManaged = reviewFooterMetadata.hadRawNotice || req.body?.rawNoticeManaged === true;
+        // The foodborne notice is owned by code: it is stripped from what the AI sees, the
+        // AI never judges it, and ensureRawNoticeInMenu puts it back (or adds the standard
+        // one) on the returned menu so the chef always sees it. The chef can say a menu
+        // does not need it (incident Tan CRS DDLM Event, 2026-10-13).
+        const rawNoticeNotNeeded = req.body?.rawNoticeNotNeeded === true;
+        const withRawNotice = (menu) => (0, menu_footer_1.ensureRawNoticeInMenu)(menu, menuContent, { notNeeded: rawNoticeNotNeeded }).text;
         // Same fallback as submit/approval: without it a key-less form disabled the
         // allergen-code lock and the AI's added codes were delivered (incident
         // err-20261009T205923Z-9699af86).
@@ -3389,7 +3390,7 @@ async function handleBasicCheck(req, res) {
                 acceptedCorrectionRules,
                 approvedVocabularyTerms,
                 precheckEnabled: BASIC_AI_PRECHECK_ENABLED,
-                managedRawNoticePresent: rawNoticeManaged,
+                managedRawNoticePresent: reviewFooterMetadata.hadRawNotice,
                 contextProvenance: 'basic_http',
             });
             preAiDeterministic = coordinatorPreparation.preAiDeterministic;
@@ -3416,7 +3417,6 @@ async function handleBasicCheck(req, res) {
             precheckEnabled: BASIC_AI_PRECHECK_ENABLED,
             embeddedSetMenuAnalysis,
             nearMissBriefing: nearMissAnalysis.briefing,
-            rawNoticeManaged,
         });
         const additionalContext = (0, upload_security_1.sanitizePlainTextInput)(req.body?.readOnlyContext, { multiline: true, maxLength: upload_security_1.MAX_LONG_TEXT_LENGTH });
         const revisionContext = changedOnlyMode
@@ -3485,7 +3485,7 @@ async function handleBasicCheck(req, res) {
         catch (aiError) {
             const errorDetails = (0, clickup_handoff_1.describeServiceError)(aiError);
             const aiFailure = sanitizeBasicCheckFailure(errorDetails);
-            const deterministicFallbackMenu = getDeterministicFallbackMenu();
+            const deterministicFallbackMenu = withRawNotice(getDeterministicFallbackMenu());
             const fallbackMessage = preAiDeterministic.appliedCorrections.length > 0
                 ? 'AI check is temporarily unavailable. Deterministic pre-check corrections were applied, and you can still submit this menu for manual review.'
                 : 'AI check is temporarily unavailable. No automated suggestions were applied, but you can still submit this menu for manual review.';
@@ -3596,7 +3596,7 @@ async function handleBasicCheck(req, res) {
         }
         const feedback = qaResponse?.data?.feedback;
         if (typeof feedback !== 'string' || !feedback.trim()) {
-            const deterministicFallbackMenu = getDeterministicFallbackMenu();
+            const deterministicFallbackMenu = withRawNotice(getDeterministicFallbackMenu());
             const aiFailure = {
                 reason: 'ai_review_malformed_response',
                 status: qaResponse?.status,
@@ -3753,7 +3753,7 @@ async function handleBasicCheck(req, res) {
             canonicalSpellingFindings: nearMissAnalysis.findings,
             precheckEnabled: BASIC_AI_PRECHECK_ENABLED,
             checkId: basicCheckId,
-            managedRawNoticePresent: rawNoticeManaged,
+            managedRawNoticePresent: reviewFooterMetadata.hadRawNotice,
         });
         const { parsed, postAiDeterministic, protectedTerms, titleGuard, structureGuard, guardedCorrectedMenu, allergenGuard, appliedHc, setMenuGuard, priceIntegrityGuard, correctedAfterHighConfidence, correctedMenuSanitized, reconciliation, reconciledSuggestions, spellingAdjudications, finalSuggestions: attemptFinalSuggestions, hasCriticalErrors: attemptHasCriticalErrors, criticalSuggestions: attemptCriticalSuggestions, } = postPipeline;
         const originalMenuSanitized = sanitizedMenuContent.body;
@@ -3796,12 +3796,11 @@ async function handleBasicCheck(req, res) {
         console.log('Spelling adjudications:', spellingAdjudications.length);
         console.log('Has changes:', correctedMenuSanitized !== originalMenuSanitized);
         console.log('===========================');
-        const finalCorrectedMenu = changedOnlyMode
-            ? changedOnlyMergedMenu
-            : authoritative?.correctedMenu || correctedMenuSanitized;
-        const finalHasChanges = changedOnlyMode
+        const rawNoticeResult = (0, menu_footer_1.ensureRawNoticeInMenu)(changedOnlyMode ? changedOnlyMergedMenu : authoritative?.correctedMenu || correctedMenuSanitized, menuContent, { notNeeded: rawNoticeNotNeeded });
+        const finalCorrectedMenu = rawNoticeResult.text;
+        const finalHasChanges = rawNoticeResult.added || (changedOnlyMode
             ? changedOnlyMergedMenu !== menuContent
-            : correctedMenuSanitized !== originalMenuSanitized;
+            : correctedMenuSanitized !== originalMenuSanitized);
         const dishNameFormatting = buildBasicCheckDishNameFormatting(finalCorrectedMenu, { property, servicePeriod });
         void (0, form_attempt_logging_1.logFormAttemptEvent)({
             attemptId,
@@ -4332,25 +4331,8 @@ function stripRawNoticeFromHtml(html) {
     return stripManagedFooterFromHtml(html);
 }
 function detectRawUndercookedContent(text) {
-    const normalized = (text || '').toLowerCase();
-    if (!normalized.trim())
-        return false;
-    if (/\*/.test(normalized))
-        return true;
-    const terms = [
-        'raw',
-        'undercooked',
-        'carpaccio',
-        'tartare',
-        'ceviche',
-        'tiradito',
-        'crudo',
-        'sashimi',
-        'oyster',
-        'oysters',
-        'rare'
-    ];
-    return terms.some((term) => normalized.includes(term));
+    // One rule for the AI check, submit, and approval (see menuNeedsRawNotice).
+    return (0, menu_footer_1.menuNeedsRawNotice)(text);
 }
 /**
  * OLD: Parse AI feedback into structured suggestions with confidence levels (DEPRECATED - keeping for fallback)

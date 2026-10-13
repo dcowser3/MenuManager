@@ -2537,10 +2537,11 @@
                         <label for="allergensInput">Allergen Key (Optional)</label>
                         <textarea id="allergensInput" class="allergens-input" placeholder="Paste your allergen key here, e.g.: G contains gluten | V vegetarian | D contains dairy | S contain shellfish | N contain nuts | VG vegan"></textarea>
                         <p class="allergens-hint">If left blank, the default <%= tenant.shortName %> allergen codes will be used for review.</p>
-                        <label class="raw-toggle" for="containsRawUndercooked">
-                            <input type="checkbox" id="containsRawUndercooked">
-                            This menu contains raw or undercooked items (include foodborne notice)
+                        <label class="raw-toggle" for="rawNoticeNotNeeded">
+                            <input type="checkbox" id="rawNoticeNotNeeded">
+                            This menu doesn't need the raw/undercooked foodborne notice
                         </label>
+                        <p class="allergens-hint">The notice is added automatically when the menu has raw or undercooked items.</p>
                     </div>
                 </div>
             </div>
@@ -2688,9 +2689,9 @@
                         <textarea id="allergensInputStep2" class="allergens-input" placeholder="Paste your allergen key here, e.g.: G contains gluten | V vegetarian | D contains dairy | S contain shellfish | N contain nuts | VG vegan"></textarea>
                         <div id="step2AllergenDetectedBadge" class="allergen-detected-badge hidden">Prefilled from uploaded baseline</div>
                         <p class="allergens-hint">If left blank, the default <%= tenant.shortName %> allergen codes will be used for review.</p>
-                        <label class="raw-toggle" for="containsRawUndercookedStep2">
-                            <input type="checkbox" id="containsRawUndercookedStep2">
-                            This menu contains raw or undercooked items (include foodborne notice)
+                        <label class="raw-toggle" for="rawNoticeNotNeededStep2">
+                            <input type="checkbox" id="rawNoticeNotNeededStep2">
+                            This menu doesn't need the raw/undercooked foodborne notice
                         </label>
                     </div>
                     <div id="originalMenuDisplay" style="display: none;"></div>
@@ -2813,7 +2814,6 @@
         let aiCheckCompletedCount = 0;
         let lastAiCheckedMenuText = '';
         let requiresAiRerun = false;
-        let suppressRawNotice = false;
         let uploadedMenuImagePath = '';
         let uploadedMenuImageFileName = '';
         let importedNewMenuDocFileName = '';
@@ -3436,8 +3436,7 @@
                     allergenLine ||
                     isLikelyAllergenLegendHeader(normalized) ||
                     /^all\s+prices\b/i.test(normalized) ||
-                    /^we\s+welcome\s+enquiries\b/i.test(normalized) ||
-                    isLikelyRawNoticeLine(normalized)
+                    /^we\s+welcome\s+enquiries\b/i.test(normalized)
                 );
             }
 
@@ -3458,6 +3457,7 @@
 	            const menuLines = [];
 	            let allergenLines = [];
 	            let hadRawNotice = false;
+	            const rawNoticeLines = [];
 	            const preservedFooterLines = [];
 	            let inFooter = false;
 
@@ -3474,9 +3474,15 @@
 	                    continue;
 	                }
 
-	                if (isRawNotice) hadRawNotice = true;
+	                if (isRawNotice) {
+	                    // The foodborne notice stays visible in the editor; it is not a
+	                    // hidden footer. One sitting in the footer block moves to the end.
+	                    hadRawNotice = true;
+	                    rawNoticeLines.push(line);
+	                    continue;
+	                }
 
-	                if (inFooter || isPriceFooter || isWelcomeFooter || isRawNotice) {
+	                if (inFooter || isPriceFooter || isWelcomeFooter) {
 	                    if (line) preservedFooterLines.push(line);
 	                    continue;
 	                }
@@ -3486,6 +3492,7 @@
 
             while (menuLines.length && menuLines[0] === '') menuLines.shift();
             while (menuLines.length && menuLines[menuLines.length - 1] === '') menuLines.pop();
+            if (rawNoticeLines.length) menuLines.push('', rawNoticeLines[0]);
             const normalized = [];
             let prevEmpty = false;
             for (const cl of menuLines) {
@@ -4122,22 +4129,18 @@
         }
 
         function setupRawToggleSync() {
-            const step1 = document.getElementById('containsRawUndercooked');
-            const step2 = document.getElementById('containsRawUndercookedStep2');
+            const step1 = document.getElementById('rawNoticeNotNeeded');
+            const step2 = document.getElementById('rawNoticeNotNeededStep2');
             if (!step1 || !step2) return;
 
             step1.addEventListener('change', () => {
-                if (document.activeElement === step2) return;
                 step2.checked = step1.checked;
-                suppressRawNotice = false;
-                renderAllergenLegend();
+                onRawNoticeNotNeededChanged();
             });
 
             step2.addEventListener('change', () => {
-                if (document.activeElement === step1) return;
                 step1.checked = step2.checked;
-                suppressRawNotice = false;
-                renderAllergenLegend();
+                onRawNoticeNotNeededChanged();
             });
         }
 
@@ -4161,83 +4164,50 @@
             renderAllergenLegend();
         }
 
-        function getContainsRawSelection() {
-            const step2 = document.getElementById('containsRawUndercookedStep2');
-            const step1 = document.getElementById('containsRawUndercooked');
-            const step2Visible = step2 && !document.getElementById('step2AllergensSection').classList.contains('hidden');
-            if (step2Visible) {
-                return !!step2.checked;
-            }
-            return !!(step1 && step1.checked);
+        // The foodborne notice is owned by the system: the AI check adds it to the menu
+        // text when the menu has raw or undercooked items, and it stays visible in the
+        // editor. The only choice left to the chef is "this menu doesn't need it".
+        function getRawNoticeNotNeeded() {
+            const step1 = document.getElementById('rawNoticeNotNeeded');
+            const step2 = document.getElementById('rawNoticeNotNeededStep2');
+            return !!((step1 && step1.checked) || (step2 && step2.checked));
         }
 
-        function setContainsRawSelection(checked) {
-            const step1 = document.getElementById('containsRawUndercooked');
-            const step2 = document.getElementById('containsRawUndercookedStep2');
+        function setRawNoticeNotNeeded(checked) {
+            const step1 = document.getElementById('rawNoticeNotNeeded');
+            const step2 = document.getElementById('rawNoticeNotNeededStep2');
             if (step1) step1.checked = !!checked;
             if (step2) step2.checked = !!checked;
-            renderAllergenLegend();
         }
 
-        function detectRawUndercookedFromMenuText(menuText) {
-            const content = (menuText || '').toLowerCase();
-            if (!content.trim()) return false;
-            if (content.includes('*')) return true;
-            return [
-                'raw',
-                'undercooked',
-                'carpaccio',
-                'tartare',
-                'ceviche',
-                'tiradito',
-                'crudo',
-                'sashimi',
-                'oyster',
-                'oysters',
-                'rare'
-            ].some((term) => content.includes(term));
-        }
-
-        function getReviewedMenuTextForDetection() {
-            const reviewedArea = document.getElementById('reviewedContentArea');
-            if (reviewedArea && !document.getElementById('step2').classList.contains('hidden')) {
-                return extractCleanTextFromReviewedArea(reviewedArea);
+        // Ticking the box takes the notice out of the menu right away, so the choice is
+        // visible. Unticking leaves the menu alone; the next AI check adds it if needed.
+        function onRawNoticeNotNeededChanged() {
+            if (!getRawNoticeNotNeeded()) {
+                markAiCheckStale();
+                return;
             }
-            return (quill && quill.getText) ? quill.getText().trim() : '';
-        }
-
-        function getEffectiveRawNoticeDecision() {
-            const selected = getContainsRawSelection();
-            const detected = detectRawUndercookedFromMenuText(getReviewedMenuTextForDetection());
-            return {
-                selected,
-                detected,
-                shouldAdd: !suppressRawNotice && (selected || detected)
-            };
-        }
-
-        const PASTED_RAW_NOTICE_PATTERN = /consuming\s+raw\s+or\s+undercooked/i;
-
-        // The foodborne notice is a managed footer: the review strips it from the menu
-        // body and the submission appends it. Tell the AI check whether it will be
-        // appended, so the review does not report it missing.
-        function willAddManagedRawNotice(menuText) {
-            return getEffectiveRawNoticeDecision().shouldAdd || PASTED_RAW_NOTICE_PATTERN.test(menuText || '');
-        }
-
-        // A pasted notice disappears from the editor after the check (it is moved to
-        // the managed footer). Keep it on and say so, instead of looking like the AI
-        // deleted it (incident Tan CRS DDLM Event, 2026-10-13).
-        function explainManagedRawNotice(submittedMenuText) {
-            if (!PASTED_RAW_NOTICE_PATTERN.test(submittedMenuText || '')) return;
-            suppressRawNotice = false;
-            setContainsRawSelection(true);
-            showAlert('The foodborne illness notice is added automatically at the bottom of the printed menu, so it is no longer shown in the editor. "Contains raw or undercooked items" is now checked.', 'info');
-        }
-
-        function toggleRawNoticeSuppression() {
-            suppressRawNotice = !suppressRawNotice;
-            renderAllergenLegend();
+            let removed = false;
+            const reviewedArea = document.getElementById('reviewedContentArea');
+            if (reviewedArea) {
+                Array.from(reviewedArea.children).forEach((block) => {
+                    if (isLikelyRawNoticeLine(block.textContent || '')) {
+                        block.remove();
+                        removed = true;
+                    }
+                });
+                if (removed) handleReviewedAreaInput();
+            }
+            if (quill && quill.getLines) {
+                quill.getLines().slice().reverse().forEach((line) => {
+                    const text = (line.domNode && line.domNode.textContent) || '';
+                    if (isLikelyRawNoticeLine(text)) {
+                        quill.deleteText(quill.getIndex(line), line.length());
+                        removed = true;
+                    }
+                });
+            }
+            markAiCheckStale();
         }
 
         function renderAllergenLegend() {
@@ -4337,8 +4307,7 @@
                 displayReviewedContent('');
                 quill.setText('');
                 setAllergenInputValue('');
-                setContainsRawSelection(false);
-                suppressRawNotice = false;
+                setRawNoticeNotNeeded(false);
                 importedNewMenuDocFileName = '';
                 if (newMenuDocSelectedNote) {
                     newMenuDocSelectedNote.classList.remove('show');
@@ -4387,8 +4356,7 @@
             selectedRevisionBaseline = null;
             selectedNote.classList.remove('show');
             selectedNote.textContent = '';
-            setContainsRawSelection(false);
-            suppressRawNotice = false;
+                setRawNoticeNotNeeded(false);
             setAllergenAutoDetectedBadge(false);
             preservedManagedFooterText = '';
 
@@ -4525,8 +4493,7 @@
             persistentDiffSummary = { insertions: 0, deletions: 0 };
             baselineFreshnessOverrideKey = '';
             setAllergenInputValue(normalizedBaseline.allergens || '');
-            setContainsRawSelection(!!normalizedBaseline.hadRawNotice);
-            suppressRawNotice = false;
+            setRawNoticeNotNeeded(false);
             setAllergenAutoDetectedBadge(!!normalizedBaseline.allergens);
 
             applyProjectPrefill(selected);
@@ -4864,10 +4831,8 @@
 
             preservedManagedFooterText = normalizedMenu.footerText || '';
             const detectedAllergens = normalizedMenu.allergens || data.extractedAllergenKey || '';
-            const detectedRawNotice = !!(data.containsRawNotice || normalizedMenu.hadRawNotice);
             setAllergenInputValue(detectedAllergens || '');
-            setContainsRawSelection(detectedRawNotice);
-            suppressRawNotice = false;
+            setRawNoticeNotNeeded(false);
             setAllergenAutoDetectedBadge(!!detectedAllergens);
             setQuillMenuContentFromUpload(importedMenuText, importedMenuHtml);
             resetAiStateAfterMenuImport();
@@ -4923,10 +4888,8 @@
                     applyExtractedProjectToForm(data.extractedProject);
                 }
                 const detectedAllergens = normalizedBaseline.allergens || data.extractedAllergenKey || '';
-                const detectedRawNotice = !!(data.containsRawNotice || normalizedBaseline.hadRawNotice);
                 setAllergenInputValue(detectedAllergens || DEFAULT_ALLERGEN_KEY);
-                setContainsRawSelection(detectedRawNotice);
-                suppressRawNotice = false;
+                setRawNoticeNotNeeded(false);
                 setAllergenAutoDetectedBadge(!!detectedAllergens);
 
                 quill.setText(baseApprovedMenuContent || '');
@@ -5040,8 +5003,7 @@
                 const normalizedBaseline = stripBaselineFooter(data.visibleText || '', data.extractedAllergenKey || '');
                 preservedManagedFooterText = normalizedBaseline.footerText || '';
                 setAllergenInputValue(normalizedBaseline.allergens || '');
-                setContainsRawSelection(!!normalizedBaseline.hadRawNotice);
-                suppressRawNotice = false;
+                setRawNoticeNotNeeded(false);
                 setAllergenAutoDetectedBadge(!!normalizedBaseline.allergens);
 
                 // Use the accepted/current side of the uploaded redlines for Quill / submission.
@@ -5190,8 +5152,7 @@
             const normalizedBaseline = stripBaselineFooter(data.visibleText || '', data.extractedAllergenKey || '');
             preservedManagedFooterText = normalizedBaseline.footerText || '';
             setAllergenInputValue(normalizedBaseline.allergens || '');
-            setContainsRawSelection(!!normalizedBaseline.hadRawNotice);
-            suppressRawNotice = false;
+            setRawNoticeNotNeeded(false);
             setAllergenAutoDetectedBadge(!!normalizedBaseline.allergens);
 
             baseApprovedMenuContent = revisionComparison.currentText || normalizedBaseline.menu || '';
@@ -7100,7 +7061,7 @@
                 menuType,
                 baselineMenuContent: baselineForAiReview,
                 reviewMode,
-                rawNoticeManaged: willAddManagedRawNotice(menuContent),
+                rawNoticeNotNeeded: getRawNoticeNotNeeded(),
                 ...getAttemptMetadata({
                     menuTextLength: menuContent.length,
                     menuHtmlLength: richHtmlForMetrics.length,
@@ -7161,7 +7122,6 @@
                 } else {
                     showAlert('AI check complete! Review the suggestions below.', 'success');
                 }
-                if (!data.aiUnavailable) explainManagedRawNotice(menuContent);
 
             } catch (error) {
                 console.error('Error:', error);
@@ -7641,7 +7601,7 @@
                 menuType,
                 baselineMenuContent: baselineForAiReview,
                 reviewMode,
-                rawNoticeManaged: willAddManagedRawNotice(menuContent),
+                rawNoticeNotNeeded: getRawNoticeNotNeeded(),
                 ...getAttemptMetadata({
                     menuTextLength: menuContent.length,
                     menuHtmlLength: richHtmlForMetrics.length,
@@ -7704,7 +7664,6 @@
                 } else {
                     showAlert('AI check re-run complete! Review updated suggestions.', 'success');
                 }
-                if (!data.aiUnavailable) explainManagedRawNotice(menuContent);
 
             } catch (error) {
                 console.error('Error re-running check:', error);
@@ -8118,8 +8077,7 @@
                 dateNeeded: document.getElementById('dateNeeded').value,
                 assetType: assetTypeValue,
                 allergens: getAllergenInputValue(),
-                containsRawUndercooked: getContainsRawSelection(),
-                suppressRawNotice: suppressRawNotice,
+                rawNoticeNotNeeded: getRawNoticeNotNeeded(),
                 menuContent: menuContentText,
                 menuContentHtml: menuContentHtml,
                 persistentDiffHtml: persistentDiffHtml,
@@ -8457,7 +8415,7 @@
                     printRegion: valueFor('printRegion'),
                     printSize: valueFor('printSize'),
                     allergens: getAllergenInputValue(),
-                    containsRawUndercooked: getContainsRawSelection(),
+                    rawNoticeNotNeeded: getRawNoticeNotNeeded(),
                     submitterName: valueFor('submitterName'),
                     submitterEmail: valueFor('submitterEmail'),
                     submitterJobTitle: valueFor('submitterJobTitle'),
@@ -8571,7 +8529,7 @@
             }
 
             if (fields.allergens !== undefined) setAllergenInputValue(fields.allergens || '');
-            if (fields.containsRawUndercooked !== undefined) setContainsRawSelection(!!fields.containsRawUndercooked);
+            if (fields.rawNoticeNotNeeded !== undefined) setRawNoticeNotNeeded(!!fields.rawNoticeNotNeeded);
             toggleAssetFields();
             togglePrintRegionFields();
             toggleFileSizeLimit();

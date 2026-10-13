@@ -208,10 +208,8 @@ Note: Use ONLY these allergen codes when checking allergen compliance. Do not us
         sections.push('changed_only_scope');
     }
     if (!omit.has('footer_rules')) {
-        finalPrompt = `${finalPrompt}\n\nIMPORTANT FOOTER RULES:\n- Do NOT review or suggest changes for the allergen legend/footer boilerplate.\n- Do NOT review or suggest changes for the standard foodborne illness warning/footer boilerplate.\n- The canonical foodborne illness warning is: ${menu_footer_1.RAW_NOTICE_TEXT}\n- Those footer lines are system-managed outside this review scope.`;
-        if (ctx.rawNoticeManaged) {
-            finalPrompt = `${finalPrompt}\n- For THIS menu the foodborne illness warning is already selected and will be printed below the menu automatically. It is intentionally absent from the text you received. Do NOT report it as missing and do NOT add it to CORRECTED MENU.`;
-        }
+        finalPrompt = `${finalPrompt}\n\nIMPORTANT FOOTER RULES:\n- Do NOT review or suggest changes for the allergen legend/footer boilerplate.\n- Do NOT review or suggest changes for the standard foodborne illness warning/footer boilerplate.\n- The canonical foodborne illness warning is: ${menu_footer_1.RAW_NOTICE_TEXT}\n- Those footer lines are system-managed outside this review scope.
+- The system adds the foodborne illness warning automatically to every menu that needs it, so it is intentionally absent from the text you received. Never report it as missing and never add it to CORRECTED MENU. Still flag individual raw or undercooked dishes that lack a raw marker (*).`;
         sections.push('footer_rules');
     }
     if (!omit.has('add_on_price_rules')) {

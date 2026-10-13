@@ -209,10 +209,9 @@ describe('experience menus and managed raw notice', () => {
         expect(prompt).toContain('EXPERIENCE MENU (PRE-BOOKED) - NO PRICES');
         expect(prompt).not.toContain('PRICING SECTIONS: a la carte everywhere');
     });
-    test('a managed raw notice is declared present so the model does not report it missing', () => {
-        const managed = (0, qa_prompt_builder_1.buildFinalPrompt)(BASE_PROMPT, { precheckEnabled: false, embeddedSetMenuAnalysis: EMPTY_SET_MENU, rawNoticeManaged: true });
-        const unmanaged = (0, qa_prompt_builder_1.buildFinalPrompt)(BASE_PROMPT, { precheckEnabled: false, embeddedSetMenuAnalysis: EMPTY_SET_MENU });
-        expect(managed.prompt).toContain('will be printed below the menu automatically');
-        expect(unmanaged.prompt).not.toContain('will be printed below the menu automatically');
+    test('the model is always told the system owns the foodborne notice', () => {
+        const { prompt } = (0, qa_prompt_builder_1.buildFinalPrompt)(BASE_PROMPT, { precheckEnabled: false, embeddedSetMenuAnalysis: EMPTY_SET_MENU });
+        expect(prompt).toContain('The system adds the foodborne illness warning automatically');
+        expect(prompt).toContain('Never report it as missing');
     });
 });

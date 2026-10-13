@@ -400,8 +400,9 @@ Dish Name* ALLERGENS PRICE
 4. Sushi/sashimi items need the * marker; allergen codes stay as submitted (suggest a fish code only if the menu's allergen key defines one)
 
 #### 8.3 Required Footer
-Culinary pages MUST include:
+Culinary pages with raw or undercooked items carry:
 `*CONSUMING RAW OR UNDERCOOKED MEATS, POULTRY, SEAFOOD, SHELLFISH, OR EGGS MAY INCREASE YOUR RISK OF FOODBORNE ILLNESS`
+The system adds this footer automatically whenever a menu needs it, so it may be absent from the text you review. Never report it as missing and never add it; your job is the raw marker (*) on each raw or undercooked dish.
 
 ---
 

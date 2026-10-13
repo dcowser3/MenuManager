@@ -54,6 +54,10 @@ const { logAlert } = supabaseClient;
 const dashboardModule = require('../index');
 const app = dashboardModule.default;
 const { runFullReviewPipeline } = require('../lib/review-pipeline');
+const { canonicalRawNoticeText, ensureRawNoticeInMenu } = require('../lib/menu-footer');
+// The returned menu carries the foodborne notice whenever it has raw items: code
+// owns the notice and keeps it visible (Tan CRS DDLM Event, 2026-10-13).
+const FALLBACK_MENU_WITH_NOTICE = `Guacamole - $12\nCeviche* $15\n\n${canonicalRawNoticeText()}`;
 const { shouldNotifyFormAttemptFailure } = dashboardModule;
 const mockedAxios = axios;
 
@@ -850,6 +854,57 @@ describe('Dashboard Modification Workflow (local, mocked externals)', () => {
         expect(generatedFormData.menuContentHtml).not.toContain('crustaceans');
     });
 
+    // The foodborne notice is owned by code (Tan CRS DDLM Event, 2026-10-13). At submit
+    // the append is only a safety net, and the chef's "doesn't need it" box wins.
+    describe('foodborne notice at submit', () => {
+        const submitWith = async (menuLines, extra = {}) => {
+            fs.promises.writeFile.mockClear();
+            const payload = {
+                submitterName: 'Chef Footer', submitterEmail: 'chef@example.com', submitterJobTitle: 'Executive Chef',
+                projectName: 'Notice Project', property: 'Test Property',
+                width: '8.5', height: '11', printWidth: '8.5', printHeight: '11', printRegion: 'US', printSize: '',
+                folded: 'no', digitalWidth: '', digitalHeight: '', cropMarks: 'no', bleedMarks: 'no',
+                fileSizeLimit: 'no', fileSizeLimitMb: '', fileDeliveryNotes: '', orientation: 'Portrait',
+                menuType: 'standard', servicePeriod: 'dinner', templateType: 'food', turnaroundDays: 5,
+                dateNeeded: '2026-03-03', hotelName: '', cityCountry: 'Denver, USA', assetType: 'PRINT', allergens: '',
+                menuContent: menuLines.join('\n'),
+                menuContentHtml: menuLines.map((line) => `<p>${line}</p>`).join(''),
+                approvals: [{ approved: true, name: 'GM', position: 'GM' }], criticalOverrides: [],
+                submissionMode: 'new', revisionSource: 'database', revisionBaseSubmissionId: '',
+                revisionBaselineDocPath: '', revisionBaselineFileName: '', baseApprovedMenuContent: '',
+                chefPersistentDiff: { insertions: 0, deletions: 0 },
+                ...extra,
+            };
+            const response = await invokeJsonHandler(submitHandler, payload);
+            expect(response.status).toBe(200);
+            const formDataWrite = fs.promises.writeFile.mock.calls.find(([filePath]) => String(filePath).endsWith('_formdata.json'));
+            return JSON.parse(formDataWrite[1]);
+        };
+
+        test('appends the notice to a raw menu that reached submit without it', async () => {
+            const formData = await submitWith(['CANAPES', 'Salmon tiradito, saffron aguachile*']);
+            expect(formData.shouldAddRawNotice).toBe(true);
+        });
+
+        test('never appends when the chef says the menu does not need it', async () => {
+            const formData = await submitWith(['CANAPES', 'Salmon tiradito, saffron aguachile*'], { rawNoticeNotNeeded: true });
+            expect(formData.shouldAddRawNotice).toBe(false);
+        });
+
+        test('does not treat "strawberry" as a raw item', async () => {
+            const formData = await submitWith(['DESSERT', 'Strawberry shortcake, whipped cream 14']);
+            expect(formData.shouldAddRawNotice).toBe(false);
+        });
+
+        test('keeps a venue-worded notice instead of adding the standard one', async () => {
+            const formData = await submitWith([
+                'CANAPES', 'Salmon tiradito, saffron aguachile*', '',
+                'Consuming raw or undercooked items may increase your risk of foodborne illness.',
+            ]);
+            expect(formData.shouldAddRawNotice).toBe(false);
+        });
+    });
+
     test('basic-check changed_only short-circuits when there are no changed lines', async () => {
         const payload = {
             menuContent: 'Guacamole - $12',
@@ -1014,7 +1069,7 @@ describe('Dashboard Modification Workflow (local, mocked externals)', () => {
         });
         expect(offlineCalls).toBe(1);
         expect(http.status).toBe(200);
-        expect(http.body.correctedMenu).toBe(offline.finalCorrectedMenu);
+        expect(http.body.correctedMenu).toBe(ensureRawNoticeInMenu(offline.finalCorrectedMenu, payload.menuContent).text);
         expect(http.body.suggestions).toEqual(offline.finalSuggestions);
         expect(http.body.hasCriticalErrors).toBe(offline.authoritative.hasCriticalErrors);
         expect(http.body.reviewStatus).toEqual(offline.reviewStatus);
@@ -1065,7 +1120,7 @@ describe('Dashboard Modification Workflow (local, mocked externals)', () => {
         });
         expect(offlineCalls).toBe(1);
         expect(http.body.correctedMenu).toBe(payload.menuContent);
-        expect(http.body.correctedMenu).toBe(offline.finalCorrectedMenu);
+        expect(http.body.correctedMenu).toBe(ensureRawNoticeInMenu(offline.finalCorrectedMenu, payload.menuContent).text);
         expect(http.body.suggestions).toEqual(offline.finalSuggestions);
         expect(http.body.hasCriticalErrors).toBe(offline.authoritative.hasCriticalErrors);
         expect(http.body.reviewStatus).toEqual(offline.reviewStatus);
@@ -1663,7 +1718,7 @@ describe('Dashboard Modification Workflow (local, mocked externals)', () => {
         expect(response.body.success).toBe(true);
         expect(response.body.aiUnavailable).toBe(true);
         expect(response.body.manualReviewRequired).toBe(true);
-        expect(response.body.correctedMenu).toBe('Guacamole - $12\nCeviche* $15');
+        expect(response.body.correctedMenu).toBe(FALLBACK_MENU_WITH_NOTICE);
         expect(response.body.suggestions).toEqual([]);
         expect(response.body.hasChanges).toBe(true);
         expect(response.body.hasCriticalErrors).toBe(false);
@@ -1700,7 +1755,7 @@ describe('Dashboard Modification Workflow (local, mocked externals)', () => {
         expect(response.body.success).toBe(true);
         expect(response.body.aiUnavailable).toBe(true);
         expect(response.body.manualReviewRequired).toBe(true);
-        expect(response.body.correctedMenu).toBe('Guacamole - $12\nCeviche* $15');
+        expect(response.body.correctedMenu).toBe(FALLBACK_MENU_WITH_NOTICE);
         expect(response.body.suggestions).toEqual([]);
         expect(response.body.hasChanges).toBe(true);
         expect(response.body.hasCriticalErrors).toBe(false);
@@ -1823,7 +1878,7 @@ describe('Dashboard Modification Workflow (local, mocked externals)', () => {
         expect(statusResponse.body.result.success).toBe(true);
         expect(statusResponse.body.result.aiUnavailable).toBe(true);
         expect(statusResponse.body.result.manualReviewRequired).toBe(true);
-        expect(statusResponse.body.result.correctedMenu).toBe('Guacamole - $12\nCeviche* $15');
+        expect(statusResponse.body.result.correctedMenu).toBe(FALLBACK_MENU_WITH_NOTICE);
         expect(statusResponse.body.result.suggestions).toEqual([]);
         expect(statusResponse.body.result.hasChanges).toBe(true);
         expect(statusResponse.body.result.aiFailure).toMatchObject({

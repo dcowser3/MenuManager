@@ -5,6 +5,11 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.RAW_NOTICE_PATTERN = exports.RAW_NOTICE_TEXT = exports.canonicalRawNoticeText = exports.DEFAULT_RAW_NOTICE_TEXT = void 0;
 exports.isCanonicalRawNoticeLine = isCanonicalRawNoticeLine;
+exports.isAnyRawNoticeLine = isAnyRawNoticeLine;
+exports.menuNeedsRawNotice = menuNeedsRawNotice;
+exports.ensureRawNoticeInMenu = ensureRawNoticeInMenu;
+exports.readRawNoticeNotNeeded = readRawNoticeNotNeeded;
+exports.containsAnyRawNotice = containsAnyRawNotice;
 exports.containsCanonicalRawNotice = containsCanonicalRawNotice;
 exports.isGenericMissingCanonicalRawNoticeFinding = isGenericMissingCanonicalRawNoticeFinding;
 exports.normalizeWhitespace = normalizeWhitespace;
@@ -27,6 +32,75 @@ function isCanonicalRawNoticeLine(line) {
     const observed = normalizedNotice(line);
     const canonical = normalizedNotice((0, exports.canonicalRawNoticeText)());
     return !!observed && (observed === canonical || observed === canonical.replace(', shellfish', ''));
+}
+/**
+ * Any foodborne-illness notice line, standard wording or a venue's own
+ * ("Consuming raw or undercooked items may increase ... foodborne illness").
+ * Only the standard wording is a managed footer (stripped from the AI's input,
+ * see isLikelyRawNoticeLine); this broader test answers "is a notice already
+ * there?", so a venue notice is never followed by a second, appended one.
+ */
+function isAnyRawNoticeLine(line) {
+    if (isCanonicalRawNoticeLine(line))
+        return true;
+    const normalized = normalizeWhitespace(line).toLowerCase();
+    return normalized.includes('raw or undercooked') && normalized.includes('foodborne illness');
+}
+// Preparations that are always raw or undercooked. Word-bounded (the old
+// substring check matched "raw" inside "strawberry"), and deliberately narrow:
+// plain "raw" ("raw honey") and "rare" ("rare bourbon") are not dishes. The raw
+// marker (*) is the main signal; pre-AI rules add it to clear raw dishes.
+const RAW_ITEM_TERMS = /\b(?:undercooked|tartare|carpaccio|crudo|sashimi|tiradito|medium[-\s]rare)\b/i;
+/**
+ * Does this menu need the foodborne-illness notice? Yes when any dish line
+ * carries a raw marker (*) or names a raw preparation. The notice line itself
+ * and other footer lines never count.
+ */
+function menuNeedsRawNotice(text) {
+    return `${text || ''}`.split('\n').some((line) => {
+        const trimmed = line.trim();
+        if (!trimmed || isAnyRawNoticeLine(trimmed))
+            return false;
+        return trimmed.includes('*') || RAW_ITEM_TERMS.test(trimmed);
+    });
+}
+/**
+ * The notice is owned by code and kept visible in the menu text. The review
+ * strips it from what the AI sees; this puts it back on the returned menu:
+ * the chef's own notice line if they had one, otherwise the standard notice
+ * when the menu needs it and the chef has not said it does not.
+ */
+function ensureRawNoticeInMenu(menuText, submittedText, options = {}) {
+    const menu = `${menuText || ''}`.replace(/\s+$/, '');
+    if (containsAnyRawNotice(menu))
+        return { text: menu, added: false };
+    const submittedNotice = `${submittedText || ''}`.split('\n').map((line) => line.trim()).find((line) => isAnyRawNoticeLine(line));
+    if (submittedNotice)
+        return { text: `${menu}\n\n${submittedNotice}`, added: false };
+    if (options.notNeeded || !menuNeedsRawNotice(menu))
+        return { text: menu, added: false };
+    return { text: `${menu}\n\n${(0, exports.canonicalRawNoticeText)()}`, added: true };
+}
+/**
+ * The chef's "this menu doesn't need the raw/undercooked notice" choice, read from
+ * a form body (or its stored copy). suppressRawNotice is the older name for it.
+ */
+function readRawNoticeNotNeeded(formBody) {
+    let body = formBody;
+    if (typeof body === 'string') {
+        try {
+            body = JSON.parse(body);
+        }
+        catch {
+            body = null;
+        }
+    }
+    if (!body || typeof body !== 'object')
+        return false;
+    return `${body.rawNoticeNotNeeded}` === 'true' || `${body.suppressRawNotice}` === 'true';
+}
+function containsAnyRawNotice(value) {
+    return `${value || ''}`.split(/[|\n]/).some((segment) => isAnyRawNoticeLine(segment));
 }
 function containsCanonicalRawNotice(value) {
     return (value || '').split(/[|\n]/).some(segment => isCanonicalRawNoticeLine(segment));
