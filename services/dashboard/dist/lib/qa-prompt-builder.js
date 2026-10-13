@@ -27,6 +27,10 @@ exports.QA_PROMPT_SECTIONS = {
         description: 'Prix fixe pricing/course-numbering rules; suppresses per-dish missing-price flags and requires a single top price plus numbered courses.',
         appliesWhen: "menuType === 'prix_fixe'",
     },
+    experience_menu: {
+        description: 'Experience (pre-booked) menus carry no prices; tells the model not to flag or add prices anywhere on the menu.',
+        appliesWhen: "menuType === 'experience'",
+    },
     allergens: {
         description: 'Injects the custom or footer-extracted allergen key and restricts allergen checking to those codes.',
         appliesWhen: 'effective allergen legend is non-empty',
@@ -133,9 +137,23 @@ This is a PRIX FIXE (pre-fix) menu. Apply these special rules:
             sections.push('prix_fixe');
         }
     }
+    if (ctx.menuType === 'experience' && !omit.has('experience_menu')) {
+        const experienceSection = `
+**EXPERIENCE MENU (PRE-BOOKED) - NO PRICES:**
+This menu is for a pre-booked experience; guests pay for the booking, not per item.
+- No dish, drink, course, or package on this menu needs a price. Do NOT report Missing Price, pricing structure, or price formatting issues anywhere on this menu.
+- Do NOT add prices to CORRECTED MENU.
+- All other standard rules still apply (spelling, accents, allergens, raw markers, etc.).
+`;
+        const guidelinesAnchor = (0, tenant_config_1.getTenantConfig)().rulebook.guidelinesAnchor;
+        qaPrompt = qaPrompt.includes(guidelinesAnchor)
+            ? qaPrompt.replace(guidelinesAnchor, `${guidelinesAnchor}\n${experienceSection}`)
+            : `${qaPrompt}\n${experienceSection}`;
+        sections.push('experience_menu');
+    }
     // Combined menus, and menus whose text reveals package-priced sections, get a
     // per-section map so pricing rules apply only where they belong.
-    const pricingBriefing = `${ctx.pricingLayoutBriefing || ''}`.trim();
+    const pricingBriefing = ctx.menuType === 'experience' ? '' : `${ctx.pricingLayoutBriefing || ''}`.trim();
     const combinedFallback = ctx.menuType === 'combined' && !pricingBriefing
         ? `**PRICING SECTIONS:**\nThe submitter declared this a COMBINED menu (a la carte plus a prix fixe section), but no package header was detected automatically. Find where the prix fixe / package section starts and stops. Inside it, expect one labeled package price (PP/pp means per person) and do NOT flag Missing Price on its dishes. Everywhere else, every dish needs its own price.`
         : '';
@@ -191,6 +209,9 @@ Note: Use ONLY these allergen codes when checking allergen compliance. Do not us
     }
     if (!omit.has('footer_rules')) {
         finalPrompt = `${finalPrompt}\n\nIMPORTANT FOOTER RULES:\n- Do NOT review or suggest changes for the allergen legend/footer boilerplate.\n- Do NOT review or suggest changes for the standard foodborne illness warning/footer boilerplate.\n- The canonical foodborne illness warning is: ${menu_footer_1.RAW_NOTICE_TEXT}\n- Those footer lines are system-managed outside this review scope.`;
+        if (ctx.rawNoticeManaged) {
+            finalPrompt = `${finalPrompt}\n- For THIS menu the foodborne illness warning is already selected and will be printed below the menu automatically. It is intentionally absent from the text you received. Do NOT report it as missing and do NOT add it to CORRECTED MENU.`;
+        }
         sections.push('footer_rules');
     }
     if (!omit.has('add_on_price_rules')) {

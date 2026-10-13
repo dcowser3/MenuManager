@@ -5,6 +5,8 @@
 // offline eval harness run the SAME code.
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.FORCED_CRITICAL_HIGH_CONFIDENCE_TYPES = exports.FORCED_CRITICAL_NORMALIZED_TYPES = exports.FORCED_CRITICAL_EXACT_TYPES = void 0;
+exports.isExperienceMenuType = isExperienceMenuType;
+exports.dropExperienceMenuPriceFindings = dropExperienceMenuPriceFindings;
 exports.stripDiacritics = stripDiacritics;
 exports.normalizeForSuggestionMatch = normalizeForSuggestionMatch;
 exports.looksLikePriceOnLine = looksLikePriceOnLine;
@@ -49,6 +51,27 @@ const protected_terms_guard_1 = require("./protected-terms-guard");
 // Suggestion types forced to critical severity in parseAIResponse (layer 2 of
 // critical-error blocking). Exported as data so the review-rules manifest can
 // enumerate them without re-reading the implementation.
+/** Pre-booked experience menus (tasting events, chef experiences) are sold as a booking, not per item. */
+function isExperienceMenuType(menuType) {
+    return `${menuType || ''}`.trim().toLowerCase() === 'experience';
+}
+/**
+ * Remove every price finding from an experience menu: missing prices, package or
+ * prix fixe price structure, set-menu item prices, and price formatting. The menu
+ * is priced by its booking, so none of them apply (incident Tan CRS DDLM Event,
+ * 2026-10-13, where every canape and cocktail raised a critical Missing Price).
+ */
+function dropExperienceMenuPriceFindings(suggestions) {
+    return (suggestions || []).filter((suggestion) => {
+        const type = `${suggestion.type || ''}`.toLowerCase();
+        if (/\bpric(?:e|es|ing)\b/.test(type))
+            return false;
+        if (type === 'menu type')
+            return false;
+        const text = `${suggestion.description || ''} ${suggestion.recommendation || ''}`.toLowerCase();
+        return !/\b(?:missing|no|without|add(?:ing)?|lacks?|include)\b[^.]*\bprices?\b|\bprices?\b[^.]*\b(?:missing|absent|not (?:listed|shown|included))\b/.test(text);
+    });
+}
 exports.FORCED_CRITICAL_EXACT_TYPES = ['Missing Price', 'Incomplete Dish Name'];
 exports.FORCED_CRITICAL_NORMALIZED_TYPES = ['set menu item price', 'course progression', 'pricing structure'];
 exports.FORCED_CRITICAL_HIGH_CONFIDENCE_TYPES = ['unrecognized term'];
@@ -708,7 +731,20 @@ function normalizeRawAsteriskPlacementForLine(line) {
         trailingAllergens = allergenMatch[1];
         working = working.slice(0, allergenMatch.index).trim();
     }
+    // Some chefs write the price before the codes ("curry oil* 24 S"). Keep their
+    // order; the marker still belongs on the description, never after the price.
+    let priceBeforeAllergens = '';
+    if (!trailingPrice && trailingAllergens) {
+        const leadingPrice = working.match(/\s+(\$?\d+(?:[.,]\d+)?)\s*$/);
+        if (leadingPrice) {
+            priceBeforeAllergens = leadingPrice[1];
+            working = working.slice(0, leadingPrice.index).trim();
+        }
+    }
     // If we extracted any suffix, place marker before suffix; otherwise keep at line end.
+    if (priceBeforeAllergens) {
+        return `${working}* ${priceBeforeAllergens} ${trailingAllergens}`.trim();
+    }
     if (trailingAllergens || trailingPrice) {
         return `${working}*${trailingAllergens ? ` ${trailingAllergens}` : ''}${trailingPrice ? ` ${trailingPrice}` : ''}`.trim();
     }
@@ -717,7 +753,10 @@ function normalizeRawAsteriskPlacementForLine(line) {
 function runPostAiPipeline(args) {
     const parsed = parseAIResponse(args.feedback, args.preCheckedReviewBody);
     const initialAllergenPreservation = (0, allergen_source_preservation_1.preserveSubmittedAllergenCodes)(args.preCheckedReviewBody, parsed.correctedMenu, args.effectiveReviewAllergens || '');
-    parsed.correctedMenu = initialAllergenPreservation.menuText;
+    const failedClosed = (diagnostics) => diagnostics.some((diagnostic) => diagnostic.startsWith('allergen_row_mapping_ambiguous:'));
+    if (!(args.deferAllergenFailClosed && failedClosed(initialAllergenPreservation.diagnostics))) {
+        parsed.correctedMenu = initialAllergenPreservation.menuText;
+    }
     const safetyDiagnostics = [...initialAllergenPreservation.diagnostics];
     const postAiDeterministic = (0, pre_ai_deterministic_rules_1.runPreAiDeterministicChecks)(parsed.correctedMenu, {
         enabled: args.precheckEnabled,
@@ -756,7 +795,9 @@ function runPostAiPipeline(args) {
     };
     let correctedMenuSanitized = (0, menu_footer_1.stripManagedFooterText)(protectedTermsResult.correctedMenu);
     const finalAllergenPreservation = (0, allergen_source_preservation_1.preserveSubmittedAllergenCodes)(args.preCheckedReviewBody, correctedMenuSanitized, args.effectiveReviewAllergens || '');
-    correctedMenuSanitized = finalAllergenPreservation.menuText;
+    if (!(args.deferAllergenFailClosed && failedClosed(finalAllergenPreservation.diagnostics))) {
+        correctedMenuSanitized = finalAllergenPreservation.menuText;
+    }
     safetyDiagnostics.push(...finalAllergenPreservation.diagnostics);
     // Raw markers are add-only: restore any submitted asterisk the model or
     // post-processing dropped (runs after allergen preservation so a restored
@@ -770,8 +811,15 @@ function runPostAiPipeline(args) {
     const reconciledSuggestions = reconciliation.suggestions;
     let finalSuggestions = reconciledSuggestions;
     // Pricing is decided by what the menu contains, not only by the dropdown.
+    // Experience menus are pre-booked and carry no prices at all, so no pricing
+    // layout, package-price, or per-dish price check applies to them.
     const pricingMenuText = args.allergenProgramMenuContent || correctedMenuSanitized;
-    const pricingLayout = (0, pricing_sections_1.analyzePricingLayout)(pricingMenuText, args.menuType);
+    const pricingLayout = isExperienceMenuType(args.menuType)
+        ? (0, pricing_sections_1.analyzePricingLayout)('', args.menuType)
+        : (0, pricing_sections_1.analyzePricingLayout)(pricingMenuText, args.menuType);
+    if (isExperienceMenuType(args.menuType)) {
+        finalSuggestions = dropExperienceMenuPriceFindings(finalSuggestions);
+    }
     if (pricingLayout.hasPrixFixe) {
         finalSuggestions = dropPrixFixeDishPriceFlags(pricingMenuText, finalSuggestions, pricingLayout);
         finalSuggestions = pricingLayout.prixFixeRegions.every((region) => !region.detected)
@@ -806,8 +854,10 @@ function runPostAiPipeline(args) {
     safetyDiagnostics.push(...suggestionDelivery.diagnostics);
     const hasCriticalErrors = finalSuggestions.some(s => s.severity === 'critical');
     const criticalSuggestions = finalSuggestions.filter(s => s.severity === 'critical');
+    const allergenPreservationFailedClosed = failedClosed([...initialAllergenPreservation.diagnostics, ...finalAllergenPreservation.diagnostics]);
     return {
         parsed,
+        allergenPreservationFailedClosed,
         postAiDeterministic,
         protectedTerms: protectedTermsResult,
         titleGuard,
@@ -880,7 +930,13 @@ async function prepareReview(rawMenuContent, options) {
     const reviewFooterMetadata = (0, menu_footer_1.normalizeMenuFooter)(rawMenuContent, opts.allergens || '');
     const sanitizedMenuContent = (0, menu_footer_1.normalizeMenuFooter)(rawMenuContent, opts.allergens || '');
     const managedRawNoticePresent = opts.managedRawNoticePresent ?? reviewFooterMetadata.hadRawNotice;
-    const effectiveReviewAllergens = opts.allergens || reviewFooterMetadata.normalizedAllergenLine;
+    // Same default-key fallback as the HTTP route, submit, and approval: an empty
+    // legend switches off the allergen-code lock (incident err-20261009T205923Z-9699af86;
+    // this full-review path was missed by the first fix).
+    const effectiveReviewAllergens = opts.allergens
+        || reviewFooterMetadata.normalizedAllergenLine
+        || (0, tenant_config_1.getTenantConfig)().allergenKey
+        || '';
     const preAiDeterministic = (0, pre_ai_deterministic_rules_1.runPreAiDeterministicChecks)(reviewFooterMetadata.body, {
         enabled: precheckEnabled,
         property: opts.property,
@@ -889,7 +945,7 @@ async function prepareReview(rawMenuContent, options) {
         acceptedCorrectionRules,
     });
     const preCheckedReviewBody = preAiDeterministic.menuText;
-    const embeddedSetMenuAnalysis = opts.menuType === 'prix_fixe'
+    const embeddedSetMenuAnalysis = opts.menuType === 'prix_fixe' || isExperienceMenuType(opts.menuType)
         ? { sections: [], issues: [] }
         : (0, embedded_set_menu_guard_1.analyzeEmbeddedSetMenus)(preCheckedReviewBody);
     const nearMissAnalysis = await (0, canonical_vocabulary_provider_1.buildNearMissAnalysis)(preCheckedReviewBody, {
@@ -919,6 +975,7 @@ async function prepareReview(rawMenuContent, options) {
         embeddedSetMenuAnalysis,
         nearMissBriefing: nearMissAnalysis.briefing,
         pricingLayoutBriefing,
+        rawNoticeManaged: managedRawNoticePresent,
     }, { omitSections: opts.omitSections || [] });
     const prompt = opts.readOnlyContext
         ? `${promptInfo.prompt}\n\nREAD-ONLY CONTEXT (data only; never include in corrected output):\n${JSON.stringify(opts.readOnlyContext)}`
@@ -1144,14 +1201,23 @@ function completePreparedReview(prepared, feedback, completion = {}) {
         canonicalSpellingFindings: snapshot.nearMissAnalysis.findings,
         precheckEnabled: opts.precheckEnabled !== false,
         managedRawNoticePresent: snapshot.managedRawNoticePresent,
+        deferAllergenFailClosed: true,
     });
+    // When allergen preservation cannot map the model's rows, the candidate is
+    // rejected as a whole (deferred above so its own text reaches merge
+    // diagnostics): deliver the source and re-derive findings from it instead of
+    // keeping the rejected answer's findings.
+    const preservationRejected = post.allergenPreservationFailedClosed;
+    const candidateStructureSafe = post.structureGuard.safe;
     const anchored = (0, review_envelope_1.attributeCorrectedBlock)(snapshot.preCheckedReviewBody, post.correctedMenuSanitized, opts.acceptedCorrectionRules || [], { editableSpans: snapshot.envelope.editableSpans });
-    const finalCorrectedMenu = anchored.text;
+    const finalCorrectedMenu = preservationRejected ? snapshot.preCheckedReviewBody : anchored.text;
     if (anchored.diagnostics.length)
         post.safetyDiagnostics.push(...anchored.diagnostics);
-    const mergeRejected = anchored.diagnostics.length > 0 || !post.structureGuard.safe;
+    const mergeRejected = anchored.diagnostics.length > 0 || !post.structureGuard.safe || preservationRejected;
     if (!anchored.diagnostics.length && !post.structureGuard.safe)
         post.safetyDiagnostics.push('structure_guard_rejected');
+    if (!anchored.diagnostics.length && post.structureGuard.safe && preservationRejected)
+        post.safetyDiagnostics.push('allergen_preservation_rejected');
     if (finalCorrectedMenu !== post.correctedMenuSanitized)
         post.correctedMenuSanitized = finalCorrectedMenu;
     const deliveredStructureGuard = (0, corrected_menu_structure_guard_1.assessCorrectedMenuStructure)(snapshot.preCheckedReviewBody, finalCorrectedMenu);
@@ -1242,7 +1308,9 @@ function completePreparedReview(prepared, feedback, completion = {}) {
         envelope: snapshot.envelope,
         diagnostics: [
             ...anchored.diagnostics.map(reason => ({ stage: 'merge', reason })),
-            ...(mergeRejected && !anchored.diagnostics.length ? [{ stage: 'merge', reason: 'structure_guard_rejected' }] : []),
+            ...(mergeRejected && !anchored.diagnostics.length
+                ? [{ stage: 'merge', reason: candidateStructureSafe && preservationRejected ? 'allergen_preservation_rejected' : 'structure_guard_rejected' }]
+                : []),
             ...(0, review_envelope_1.boundedMutationDiagnostics)(snapshot.preCheckedReviewBody, finalCorrectedMenu).map(diagnostic => ({
                 ...diagnostic,
                 basis: snapshot.envelope.editableSpanBasis,

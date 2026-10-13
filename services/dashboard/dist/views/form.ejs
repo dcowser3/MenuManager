@@ -2245,6 +2245,7 @@
                             <option value="standard">Standard Menu</option>
                             <option value="prix_fixe">Prix Fixe / Pre-Fix</option>
                             <option value="combined">Combined: A La Carte + Prix Fixe</option>
+                            <option value="experience">Experience (pre-booked, no prices)</option>
                         </select>
                         <div id="menuTypeError" class="field-error hidden"></div>
                     </div>
@@ -4213,6 +4214,25 @@
                 detected,
                 shouldAdd: !suppressRawNotice && (selected || detected)
             };
+        }
+
+        const PASTED_RAW_NOTICE_PATTERN = /consuming\s+raw\s+or\s+undercooked/i;
+
+        // The foodborne notice is a managed footer: the review strips it from the menu
+        // body and the submission appends it. Tell the AI check whether it will be
+        // appended, so the review does not report it missing.
+        function willAddManagedRawNotice(menuText) {
+            return getEffectiveRawNoticeDecision().shouldAdd || PASTED_RAW_NOTICE_PATTERN.test(menuText || '');
+        }
+
+        // A pasted notice disappears from the editor after the check (it is moved to
+        // the managed footer). Keep it on and say so, instead of looking like the AI
+        // deleted it (incident Tan CRS DDLM Event, 2026-10-13).
+        function explainManagedRawNotice(submittedMenuText) {
+            if (!PASTED_RAW_NOTICE_PATTERN.test(submittedMenuText || '')) return;
+            suppressRawNotice = false;
+            setContainsRawSelection(true);
+            showAlert('The foodborne illness notice is added automatically at the bottom of the printed menu, so it is no longer shown in the editor. "Contains raw or undercooked items" is now checked.', 'info');
         }
 
         function toggleRawNoticeSuppression() {
@@ -7080,6 +7100,7 @@
                 menuType,
                 baselineMenuContent: baselineForAiReview,
                 reviewMode,
+                rawNoticeManaged: willAddManagedRawNotice(menuContent),
                 ...getAttemptMetadata({
                     menuTextLength: menuContent.length,
                     menuHtmlLength: richHtmlForMetrics.length,
@@ -7140,6 +7161,7 @@
                 } else {
                     showAlert('AI check complete! Review the suggestions below.', 'success');
                 }
+                if (!data.aiUnavailable) explainManagedRawNotice(menuContent);
 
             } catch (error) {
                 console.error('Error:', error);
@@ -7619,6 +7641,7 @@
                 menuType,
                 baselineMenuContent: baselineForAiReview,
                 reviewMode,
+                rawNoticeManaged: willAddManagedRawNotice(menuContent),
                 ...getAttemptMetadata({
                     menuTextLength: menuContent.length,
                     menuHtmlLength: richHtmlForMetrics.length,
@@ -7681,6 +7704,7 @@
                 } else {
                     showAlert('AI check re-run complete! Review updated suggestions.', 'success');
                 }
+                if (!data.aiUnavailable) explainManagedRawNotice(menuContent);
 
             } catch (error) {
                 console.error('Error re-running check:', error);

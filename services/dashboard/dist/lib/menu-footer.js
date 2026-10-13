@@ -37,8 +37,12 @@ function isGenericMissingCanonicalRawNoticeFinding(suggestion) {
     const combined = `${type} ${suggestion?.description || ''} ${suggestion?.recommendation || ''}`.trim().toLowerCase();
     const wholeMenu = !item || /^(entire menu|whole menu|menu|general)$/.test(item);
     const rawFoodDomain = /\b(raw|undercooked|foodborne|raw[-\s]?food|raw[-\s]?consumption)\b/.test(combined);
-    const genericWarning = /(standard|canonical|required|foodborne|raw or undercooked).*(warning|notice)/.test(combined)
-        || /(warning|notice).*(standard|canonical|required|foodborne|raw or undercooked)/.test(combined);
+    // Models word the same finding many ways ("warning", "notice", "advisory",
+    // "footer", "disclaimer", "statement"); matching only two of them let a managed
+    // notice still raise a critical (incident Tan CRS DDLM Event, 2026-10-13).
+    const noticeNoun = '(warning|notice|advisory|footer|disclaimer|disclosure|statement|language)';
+    const genericWarning = new RegExp(`(standard|canonical|required|foodborne|raw or undercooked).*${noticeNoun}`).test(combined)
+        || new RegExp(`${noticeNoun}.*(standard|canonical|required|foodborne|raw or undercooked)`).test(combined);
     const missing = /\b(missing|absent|add|include)\b/.test(combined);
     const dishSpecific = /(marker|asterisk|dish|item|steak|tartare|specific)/.test(combined);
     const quotedOrNegated = /\b(todo|quoted|quote|not missing|already present|do not add|don't add)\b/.test(combined);

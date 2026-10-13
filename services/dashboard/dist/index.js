@@ -3332,6 +3332,11 @@ async function handleBasicCheck(req, res) {
         }
         const reviewFooterMetadata = (0, menu_footer_1.normalizeMenuFooter)(textForReview, allergens || '');
         const sanitizedMenuContent = (0, menu_footer_1.normalizeMenuFooter)(menuContent, allergens || '');
+        // The form appends the foodborne notice itself when the raw checkbox is set or raw
+        // items are detected; the footer is stripped from the review text either way. The
+        // review must treat it as present, or it reports it missing (incident Tan CRS DDLM
+        // Event, 2026-10-13).
+        const rawNoticeManaged = reviewFooterMetadata.hadRawNotice || req.body?.rawNoticeManaged === true;
         // Same fallback as submit/approval: without it a key-less form disabled the
         // allergen-code lock and the AI's added codes were delivered (incident
         // err-20261009T205923Z-9699af86).
@@ -3348,7 +3353,7 @@ async function handleBasicCheck(req, res) {
             acceptedCorrectionRules,
         });
         let preCheckedReviewBody = preAiDeterministic.menuText;
-        let embeddedSetMenuAnalysis = menuType === 'prix_fixe'
+        let embeddedSetMenuAnalysis = menuType === 'prix_fixe' || menuType === 'experience'
             ? { sections: [], issues: [] }
             : (0, embedded_set_menu_guard_1.analyzeEmbeddedSetMenus)(preCheckedReviewBody);
         const diagnosticsPromptSections = [];
@@ -3384,7 +3389,7 @@ async function handleBasicCheck(req, res) {
                 acceptedCorrectionRules,
                 approvedVocabularyTerms,
                 precheckEnabled: BASIC_AI_PRECHECK_ENABLED,
-                managedRawNoticePresent: reviewFooterMetadata.hadRawNotice,
+                managedRawNoticePresent: rawNoticeManaged,
                 contextProvenance: 'basic_http',
             });
             preAiDeterministic = coordinatorPreparation.preAiDeterministic;
@@ -3411,6 +3416,7 @@ async function handleBasicCheck(req, res) {
             precheckEnabled: BASIC_AI_PRECHECK_ENABLED,
             embeddedSetMenuAnalysis,
             nearMissBriefing: nearMissAnalysis.briefing,
+            rawNoticeManaged,
         });
         const additionalContext = (0, upload_security_1.sanitizePlainTextInput)(req.body?.readOnlyContext, { multiline: true, maxLength: upload_security_1.MAX_LONG_TEXT_LENGTH });
         const revisionContext = changedOnlyMode
@@ -3747,7 +3753,7 @@ async function handleBasicCheck(req, res) {
             canonicalSpellingFindings: nearMissAnalysis.findings,
             precheckEnabled: BASIC_AI_PRECHECK_ENABLED,
             checkId: basicCheckId,
-            managedRawNoticePresent: reviewFooterMetadata.hadRawNotice,
+            managedRawNoticePresent: rawNoticeManaged,
         });
         const { parsed, postAiDeterministic, protectedTerms, titleGuard, structureGuard, guardedCorrectedMenu, allergenGuard, appliedHc, setMenuGuard, priceIntegrityGuard, correctedAfterHighConfidence, correctedMenuSanitized, reconciliation, reconciledSuggestions, spellingAdjudications, finalSuggestions: attemptFinalSuggestions, hasCriticalErrors: attemptHasCriticalErrors, criticalSuggestions: attemptCriticalSuggestions, } = postPipeline;
         const originalMenuSanitized = sanitizedMenuContent.body;

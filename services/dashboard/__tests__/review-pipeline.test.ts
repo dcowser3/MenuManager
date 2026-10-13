@@ -24,6 +24,8 @@ import {
     enforcePrixFixeCriticalChecks,
     detectTopLevelPrixFixePrice,
     normalizeRawAsteriskPlacement,
+    prepareReview,
+    dropExperienceMenuPriceFindings,
     parseAIResponse,
     reconcileCriticalSuggestionsAgainstCorrectedMenuWithDiagnostics,
     runPostAiPipeline,
@@ -912,3 +914,87 @@ describe('prod audit 47df1fe9 (2026-09-26): suggestions must match the delivered
         expect(allergen[2].recommendation).toBe('Confirm whether S is intended; remove it if the adobo marinade and salsa criolla contain no shellfish.');
     });
 });
+
+// Incident Tan CRS DDLM Event (2026-10-13, Giancarlo): a pre-booked experience
+// menu with no prices, and a pasted foodborne notice the review "removed".
+describe('experience menus and the managed raw notice', () => {
+    const experienceMenu = [
+        'Canapés',
+        'Salmon tiradito, saffron aguachile, mango relish, salsa macha (served in spoons)*',
+        'Short rib enchiladas, zucchini blossom sauce D',
+    ].join('\n');
+    const priceCriticals = [
+        { type: 'Missing Price', menuItem: 'Salmon tiradito', severity: 'critical', confidence: 'high', description: 'The canapé does not show a price.', recommendation: 'Add a price.' },
+        { type: 'Missing Price', menuItem: 'Short rib enchiladas', severity: 'critical', confidence: 'high', description: 'The canapé does not show a price.', recommendation: 'Add a price.' },
+    ];
+    const noticeCritical = {
+        type: 'General', menuItem: 'Entire menu', severity: 'critical', confidence: 'medium',
+        description: 'The required raw and undercooked foodborne-illness advisory is not included.',
+        recommendation: 'Add the standard footer: *CONSUMING RAW OR UNDERCOOKED MEATS, POULTRY, SEAFOOD, SHELLFISH, OR EGGS MAY INCREASE YOUR RISK OF FOODBORNE ILLNESS',
+    };
+    const run = (menuType: string, managedRawNoticePresent: boolean, corrected = experienceMenu) => runPostAiPipeline({
+        feedback: buildFeedback(corrected, [...priceCriticals, noticeCritical]),
+        preCheckedReviewBody: experienceMenu,
+        menuType,
+        acceptedCorrectionRules: [],
+        embeddedSetMenuAnalysis: { sections: [], issues: [] },
+        precheckEnabled: false,
+        managedRawNoticePresent,
+        effectiveReviewAllergens: 'G contains gluten | V vegetarian | D contains dairy | S contain shellfish | N contain nuts | VG vegan',
+    });
+
+    test('an experience menu raises no price findings and is not blocked', () => {
+        const result = run('experience', true);
+        expect(result.finalSuggestions.filter((s: any) => /price/i.test(s.type || ''))).toEqual([]);
+        expect(result.hasCriticalErrors).toBe(false);
+    });
+
+    test('an experience menu still never gains an AI-invented price', () => {
+        const result = run('experience', true, experienceMenu.replace('sauce D', 'sauce D 18'));
+        expect(result.correctedMenuSanitized).toContain('zucchini blossom sauce D');
+        expect(result.correctedMenuSanitized).not.toContain('sauce D 18');
+        expect(result.finalSuggestions.filter((s: any) => /price/i.test(s.type || ''))).toEqual([]);
+    });
+
+    test('a standard menu still blocks on missing prices', () => {
+        expect(run('standard', true).criticalSuggestions).toContainEqual(expect.objectContaining({ type: 'Missing Price' }));
+    });
+
+    test('a managed raw notice drops the "advisory not included" critical', () => {
+        expect(run('experience', true).criticalSuggestions).toEqual([]);
+        expect(run('experience', false).criticalSuggestions).toContainEqual(expect.objectContaining({ type: 'General' }));
+    });
+
+    test('dropExperienceMenuPriceFindings keeps non-price findings', () => {
+        const spelling = { type: 'Spelling', description: 'Boa should be Bao.', recommendation: 'Change it.' };
+        expect(dropExperienceMenuPriceFindings([...priceCriticals, spelling])).toEqual([spelling]);
+    });
+});
+
+describe('prepareReview allergen key', () => {
+    // Incident err-20261009T205923Z-9699af86 follow-up: full-mode reviews (every
+    // uploaded DOCX) built their own legend without the tenant default key.
+    test('falls back to the tenant default key when the form and menu have none', async () => {
+        const { getTenantConfig } = jest.requireActual('@menumanager/tenant-config');
+        const prepared: any = await prepareReview('BREAKFAST\nBreakfast Tacos, scrambled eggs GF 22', {
+            basePrompt: 'BASE', acceptedCorrectionRules: [], precheckEnabled: false,
+        } as any);
+        expect(prepared.effectiveReviewAllergens).toBe(getTenantConfig().allergenKey);
+    });
+});
+
+describe('raw marker placement with the price before the allergen codes', () => {
+    // Snowmass dinner 2026-10-09: "curry oil* 24 S" became "curry oil 24* S".
+    test('post-AI placement keeps the marker on the description', () => {
+        expect(normalizeRawAsteriskPlacement('Hokkaido scallop ceviche, basil oil, curry oil* 24 S'))
+            .toBe('Hokkaido scallop ceviche, basil oil, curry oil* 24 S');
+        expect(normalizeRawAsteriskPlacement('Hokkaido scallop ceviche, basil oil, curry oil 24* S'))
+            .toBe('Hokkaido scallop ceviche, basil oil, curry oil* 24 S');
+    });
+
+    test('pre-AI placement keeps the marker on the description', () => {
+        expect(runPreAiDeterministicChecks('Hokkaido scallop ceviche, curry leche de tigre, basil oil, curry oil* 24 S').menuText)
+            .toBe('Hokkaido scallop ceviche, curry leche de tigre, basil oil, curry oil* 24 S');
+    });
+});
+

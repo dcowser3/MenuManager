@@ -19,7 +19,7 @@ export type SubmissionStatus =
     | 'deleted';
 
 // Menu types
-export type MenuType = 'standard' | 'prix_fixe';
+export type MenuType = 'standard' | 'prix_fixe' | 'combined' | 'experience';
 export type TemplateType = 'food' | 'beverage';
 
 // User roles

@@ -1285,9 +1285,13 @@ describe('Dashboard Modification Workflow (local, mocked externals)', () => {
 
         expect(response.status).toBe(200);
         expect(response.body.success).toBe(true);
+        // The AI-added price is stripped, and so are the AI-added codes: with no key on
+        // the form the tenant default key applies, so the allergen lock keeps the
+        // chef's (empty) code set (incident err-20261009T205923Z-9699af86).
         expect(response.body.correctedMenu).toContain(
-            'Tuna Tartare, ponzu macha, radish, habanero aioli, avocado, cilantro, charred corn tlayudas* D,G,N'
+            'Tuna Tartare, ponzu macha, radish, habanero aioli, avocado, cilantro, charred corn tlayudas*\n'
         );
+        expect(response.body.correctedMenu).not.toContain('tlayudas* D,G,N');
         expect(response.body.correctedMenu).not.toContain('tlayudas* D,G,N 24');
         expect(response.body.suggestions).toEqual([
             expect.objectContaining({

@@ -3772,6 +3772,11 @@ async function handleBasicCheck(req: any, res: any) {
 
         const reviewFooterMetadata = normalizeMenuFooter(textForReview, allergens || '');
         const sanitizedMenuContent = normalizeMenuFooter(menuContent, allergens || '');
+        // The form appends the foodborne notice itself when the raw checkbox is set or raw
+        // items are detected; the footer is stripped from the review text either way. The
+        // review must treat it as present, or it reports it missing (incident Tan CRS DDLM
+        // Event, 2026-10-13).
+        const rawNoticeManaged = reviewFooterMetadata.hadRawNotice || req.body?.rawNoticeManaged === true;
         // Same fallback as submit/approval: without it a key-less form disabled the
         // allergen-code lock and the AI's added codes were delivered (incident
         // err-20261009T205923Z-9699af86).
@@ -3788,7 +3793,7 @@ async function handleBasicCheck(req: any, res: any) {
             acceptedCorrectionRules,
         });
         let preCheckedReviewBody = preAiDeterministic.menuText;
-        let embeddedSetMenuAnalysis = menuType === 'prix_fixe'
+        let embeddedSetMenuAnalysis = menuType === 'prix_fixe' || menuType === 'experience'
             ? { sections: [], issues: [] }
             : analyzeEmbeddedSetMenus(preCheckedReviewBody);
         const diagnosticsPromptSections: string[] = [];
@@ -3826,7 +3831,7 @@ async function handleBasicCheck(req: any, res: any) {
                 acceptedCorrectionRules,
                 approvedVocabularyTerms,
                 precheckEnabled: BASIC_AI_PRECHECK_ENABLED,
-                managedRawNoticePresent: reviewFooterMetadata.hadRawNotice,
+                managedRawNoticePresent: rawNoticeManaged,
                 contextProvenance: 'basic_http',
             });
             preAiDeterministic = coordinatorPreparation.preAiDeterministic;
@@ -3854,6 +3859,7 @@ async function handleBasicCheck(req: any, res: any) {
             precheckEnabled: BASIC_AI_PRECHECK_ENABLED,
             embeddedSetMenuAnalysis,
             nearMissBriefing: nearMissAnalysis.briefing,
+            rawNoticeManaged,
         });
         const additionalContext = sanitizePlainTextInput(req.body?.readOnlyContext, { multiline: true, maxLength: MAX_LONG_TEXT_LENGTH });
         const revisionContext = changedOnlyMode
@@ -4206,7 +4212,7 @@ async function handleBasicCheck(req: any, res: any) {
             canonicalSpellingFindings: nearMissAnalysis.findings,
             precheckEnabled: BASIC_AI_PRECHECK_ENABLED,
             checkId: basicCheckId,
-            managedRawNoticePresent: reviewFooterMetadata.hadRawNotice,
+            managedRawNoticePresent: rawNoticeManaged,
         });
         const {
             parsed,

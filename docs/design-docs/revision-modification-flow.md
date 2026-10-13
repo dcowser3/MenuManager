@@ -206,6 +206,7 @@ When a chef uploads an unapproved DOCX:
    - Submission-time footer normalization removes chef-supplied allergen legends from the editable body, normalizes the allergen key, and appends one managed allergen legend.
    - Legal/price/footer copy after the allergen legend, including AED service-charge text and venue-specific foodborne warnings, is preserved and appended after the managed allergen legend instead of being rewritten to the canonical warning.
    - If no foodborne warning is present but the menu is marked or detected as containing raw/undercooked items, the workflow appends the canonical foodborne warning.
+   - The AI check is told the same decision (`rawNoticeManaged`), so a warning that will be appended is never reported missing; see `critical-error-blocking.md` (Managed foodborne notice).
 
 ## Notes / Limits
 

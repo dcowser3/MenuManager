@@ -203,6 +203,12 @@ Prix fixe pricing/course-numbering rules; suppresses per-dish missing-price flag
 
 - id: `prompt/prix_fixe` · category: prompt · implementation: `services/dashboard/lib/qa-prompt-builder.ts#buildFinalPrompt`
 
+### Prompt section: experience_menu
+
+Experience (pre-booked) menus carry no prices; tells the model not to flag or add prices anywhere on the menu. Applies when: menuType === 'experience'.
+
+- id: `prompt/experience_menu` · category: prompt · implementation: `services/dashboard/lib/qa-prompt-builder.ts#buildFinalPrompt`
+
 ### Prompt section: allergens
 
 Injects the custom or footer-extracted allergen key and restricts allergen checking to those codes. Applies when: effective allergen legend is non-empty.

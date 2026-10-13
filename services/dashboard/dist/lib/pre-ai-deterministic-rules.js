@@ -751,7 +751,21 @@ function normalizeRawAsteriskPlacementForLine(line) {
         trailingAllergens = allergenMatch[1];
         working = working.slice(0, allergenMatch.index).trim();
     }
+    // Some chefs write the price before the codes ("curry oil* 24 S"). Keep their
+    // order; the marker still belongs on the description, never after the price
+    // (Snowmass dinner 2026-10-09 became "curry oil 24* S").
+    let priceBeforeAllergens = '';
+    if (!trailingPrice && trailingAllergens) {
+        const leadingPrice = working.match(new RegExp(`\\s+(${exports.TRAILING_PRICE_PATTERN})\\s*$`, 'i'));
+        if (leadingPrice) {
+            priceBeforeAllergens = leadingPrice[1];
+            working = working.slice(0, leadingPrice.index).trim();
+        }
+    }
     working = working.replace(/\s*[-–—:]\s*$/, '').trim();
+    if (priceBeforeAllergens) {
+        return `${working}* ${priceBeforeAllergens} ${trailingAllergens}`.trim();
+    }
     if (!trailingAllergens && !trailingPrice) {
         if (/^[A-Za-zÀ-ÖØ-öø-ÿ0-9 '&-]+$/.test(working) && !working.includes(',')) {
             return original;

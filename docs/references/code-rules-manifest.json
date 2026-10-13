@@ -2303,6 +2303,23 @@
       "source": "code_data"
     },
     {
+      "id": "prompt/experience_menu",
+      "layer": "prompt_section",
+      "category": "prompt",
+      "title": "Prompt section: experience_menu",
+      "description": "Experience (pre-booked) menus carry no prices; tells the model not to flag or add prices anywhere on the menu. Applies when: menuType === 'experience'.",
+      "implementation": {
+        "file": "services/dashboard/lib/qa-prompt-builder.ts",
+        "exportName": "buildFinalPrompt"
+      },
+      "data": {
+        "sectionId": "experience_menu",
+        "description": "Experience (pre-booked) menus carry no prices; tells the model not to flag or add prices anywhere on the menu.",
+        "appliesWhen": "menuType === 'experience'"
+      },
+      "source": "code_data"
+    },
+    {
       "id": "prompt/allergens",
       "layer": "prompt_section",
       "category": "prompt",

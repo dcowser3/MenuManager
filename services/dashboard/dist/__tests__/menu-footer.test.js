@@ -38,3 +38,21 @@ describe('menu-footer (extracted from index.ts)', () => {
         expect((0, menu_footer_1.isLikelyAllergenLegendLine)('add chorizo 5 | mushrooms 4')).toBe(false);
     });
 });
+describe('isGenericMissingCanonicalRawNoticeFinding wording', () => {
+    // Tan CRS DDLM Event (2026-10-13): the managed notice still raised a critical
+    // because the model called it an "advisory" / "footer", not a warning or notice.
+    test.each([
+        ['The required raw and undercooked foodborne-illness advisory is not included.', 'Add the standard footer: *CONSUMING RAW OR UNDERCOOKED MEATS, POULTRY, SEAFOOD, SHELLFISH, OR EGGS MAY INCREASE YOUR RISK OF FOODBORNE ILLNESS'],
+        ['The required raw and undercooked food warning is not included.', 'Add: *CONSUMING RAW OR UNDERCOOKED MEATS, POULTRY, SEAFOOD, SHELLFISH, OR EGGS MAY INCREASE YOUR RISK OF FOODBORNE ILLNESS'],
+        ['The standard raw consumption disclaimer is missing.', 'Include the foodborne illness statement at the bottom.'],
+    ])('recognizes "%s"', (description, recommendation) => {
+        expect((0, menu_footer_1.isGenericMissingCanonicalRawNoticeFinding)({ type: 'General', menuItem: 'Entire menu', severity: 'critical', description, recommendation })).toBe(true);
+    });
+    test('still keeps a dish-specific raw marker finding', () => {
+        expect((0, menu_footer_1.isGenericMissingCanonicalRawNoticeFinding)({
+            type: 'Raw Item', menuItem: 'Entire menu',
+            description: 'The tiradito needs a raw marker asterisk; the required advisory references it.',
+            recommendation: 'Add an asterisk to the dish.',
+        })).toBe(false);
+    });
+});

@@ -26,7 +26,7 @@ function replayOriginalResponseDeterministically(audit, context, acceptedCorrect
         templateType: context.templateType,
         effectiveReviewAllergens: context.allergens,
         acceptedCorrectionRules,
-        embeddedSetMenuAnalysis: context.menuType === 'prix_fixe'
+        embeddedSetMenuAnalysis: context.menuType === 'prix_fixe' || context.menuType === 'experience'
             ? { sections: [], issues: [] }
             : analyzeEmbeddedSetMenus(preCheckedReviewBody),
         precheckEnabled: true,
