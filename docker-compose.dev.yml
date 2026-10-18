@@ -173,6 +173,8 @@ services:
       - ./tmp:/app/tmp
       - ./samples:/app/samples:ro
       - ./config:/app/config:ro
+      # runtime contract artifacts (e.g. contextual-compound-descriptors-v1.json) load from docs/references
+      - ./docs/references:/app/docs/references:ro
       - ./.env:/app/.env:ro
     depends_on:
       - db
