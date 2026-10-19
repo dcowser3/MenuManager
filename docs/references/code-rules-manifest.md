@@ -418,7 +418,7 @@ For detected embedded set menus (package title + total price + choice-of heading
 
 ### Price integrity guard
 
-Prevents the AI from adding or changing trailing prices: corrected-menu prices are reconciled against the submitted text and unauthorized price edits are reverted.
+Prevents the AI from adding or changing trailing prices: corrected-menu prices are reconciled against the submitted text and unauthorized price edits are reverted. A price is only stripped as AI-added when none of its numbers appear on the submitted line; reformatting the chef's own price (76/326 -> 76 | 326) is always kept.
 
 - id: `post-ai/price-integrity-guard` · category: pricing · implementation: `services/dashboard/lib/price-integrity-guard.ts#guardCorrectedMenuPrices`
 

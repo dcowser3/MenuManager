@@ -31,14 +31,19 @@ type TrailingPriceMatch = {
 };
 
 const PRICE_SEGMENT = String.raw`(?:(?:[$\u20ac\u00a3]\s*)?\d{1,4}(?:,\d{3})*(?:[.]\d{1,2})?|MKT|MP|market\s+price)`;
+// Multi-price lines (glass | bottle, half | full) arrive as "76 | 326",
+// "76/326" or "80-345". All three mean the same thing.
+const MULTI_PRICE_SEPARATOR = String.raw`\s*[|/\u2013-]\s*`;
 const TRAILING_PRICE_RE = new RegExp(
-    String.raw`^(?<before>.*?)(?<separator>\s+)(?<price>${PRICE_SEGMENT}(?:\s*\|\s*${PRICE_SEGMENT})*)(?<pp>\s*(?:pp|PP))?(?<trailing>\s*)$`,
+    String.raw`^(?<before>.*?)(?<separator>\s+)(?<price>${PRICE_SEGMENT}(?:${MULTI_PRICE_SEPARATOR}${PRICE_SEGMENT})*)(?<pp>\s*(?:pp|PP))?(?<trailing>\s*)$`,
     'i'
 );
+// Unparsed numeric tail on a submitted line ("Clarita-80/345", "Mercado -76/326").
+const SUBMITTED_NUMERIC_TAIL_RE = /[$\u20ac\u00a3]?\d[\d.,/|\s\u2013-]*\*?\s*$/u;
 
 function normalizePriceValue(value: string): string {
     return (value || '')
-        .split('|')
+        .split(/\s*[|/\u2013]\s*|(?<=\d)\s*-\s*(?=[$\u20ac\u00a3]?\d)/)
         .map((part) => {
             const compact = part
                 .toLowerCase()
@@ -92,6 +97,28 @@ function submittedLineEndsWithPriceDigits(line: string, normalizedPrice: string)
     }
     const escaped = normalizedPrice.replace(/\./g, '\\.');
     return new RegExp(`(?:^|[^\\d.,])[$\u20ac\u00a3]?${escaped}(?:\\.0{1,2})?\\*?\\s*$`).test(line || '');
+}
+
+function numericTokens(value: string): string[] {
+    return ((value || '').match(/\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?/g) || [])
+        .map((token) => String(Number(token.replace(/,/g, ''))));
+}
+
+/**
+ * True when every number in the corrected price already appears on the
+ * submitted line, in whatever format the chef typed it ("76/326",
+ * "Clarita-80/345", "Chimichurri29*"). The AI only reformatted the chef's
+ * price, so the guard must leave it alone. Stripping is reserved for prices
+ * whose numbers are nowhere in the submission: that is the only case the guard
+ * can be sure the AI invented them.
+ */
+function submittedLineContainsPriceNumbers(line: string, price: string): boolean {
+    const priceNumbers = numericTokens(price);
+    if (priceNumbers.length === 0) {
+        return false;
+    }
+    const submittedNumbers = new Set(numericTokens(line));
+    return priceNumbers.every((token) => submittedNumbers.has(token));
 }
 
 function stripTrailingAllergenCluster(line: string): string {
@@ -222,11 +249,24 @@ export function guardCorrectedMenuPrices(
             continue;
         }
 
+        if (submittedLineContainsPriceNumbers(originalLine, correctedPrice.price)) {
+            continue;
+        }
+
         const menuItem = deriveMenuItem(originalLine || correctedLine);
         let guardedLine: string | null = null;
         let reason: PriceIntegrityGuardChange['reason'] | null = null;
+        const unparsedSubmittedTail = originalPrice
+            ? null
+            : (originalLine.replace(/\*/g, '').match(SUBMITTED_NUMERIC_TAIL_RE)?.[0] || '').trim();
 
-        if (!originalPrice) {
+        if (!originalPrice && unparsedSubmittedTail) {
+            // The chef typed something price-like that we cannot parse. That is
+            // not proof the line had no price, so restore what they typed
+            // instead of deleting it and blocking them with a critical.
+            guardedLine = `${correctedPrice.lineWithoutPrice} ${unparsedSubmittedTail}`.trimEnd();
+            reason = 'changed_price';
+        } else if (!originalPrice) {
             guardedLine = correctedPrice.lineWithoutPrice;
             reason = 'added_price';
             if (!hasMissingPriceSuggestionForMenuItem(nextSuggestions, menuItem)) {
@@ -249,7 +289,7 @@ export function guardCorrectedMenuPrices(
             originalLine,
             correctedLine,
             guardedLine,
-            originalPrice: originalPrice?.price || null,
+            originalPrice: originalPrice?.price || unparsedSubmittedTail || null,
             correctedPrice: correctedPrice.price,
         });
     }

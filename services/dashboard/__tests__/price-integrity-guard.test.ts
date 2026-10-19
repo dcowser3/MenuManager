@@ -137,4 +137,68 @@ describe('guardCorrectedMenuPrices', () => {
             expect(result.changes).toEqual([expect.objectContaining({ reason: 'changed_price', originalPrice: '29' })]);
         });
     });
+
+    // Maya Dubai cocktail menu, 2026-10-19 (attempt a906ed74): glass/bottle
+    // prices typed as "76/326" or "80-345" were not recognized as prices, so the
+    // AI's "76 | 326" reformat was stripped as "AI-added" and every margarita got
+    // a blocking Missing Price critical. The chef retried three formats.
+    describe('multi-price lines in formats the parser does not know', () => {
+        it.each([
+            ['slash', 'Mercado 76/326', 'Mercado 76 | 326'],
+            ['hyphen', 'Avocado 80-345', 'Avocado 80 | 345'],
+            ['spaced slash', 'Clarita 80 / 345', 'Clarita 80 | 345'],
+            ['en dash', 'Clarita 80\u2013345', 'Clarita 80 | 345'],
+            ['glued with hyphen', 'Clarita-80/345', 'Clarita 80 | 345'],
+            ['spaced leading hyphen', 'Mercado -76/326', 'Mercado 76 | 326'],
+        ])('keeps the chef\'s price written with a %s', (_label, original, corrected) => {
+            const result = guardCorrectedMenuPrices(original, corrected, []);
+
+            expect(result.correctedMenu).toBe(corrected);
+            expect(result.changes).toEqual([]);
+            expect(result.suggestions).toEqual([]);
+        });
+
+        it('keeps the full Maya margarita section intact', () => {
+            const original = [
+                'Margaritas',
+                'Mercado 76/326',
+                'blanco tequila, passion fruit, lime, spicy tincture',
+                'Avocado 80-345',
+                'silver tequila, avocado, lime, agave, orange liqueur',
+                'Margarita Flight 240',
+            ].join('\n');
+            const corrected = original
+                .replace('76/326', '76 | 326')
+                .replace('80-345', '80 | 345');
+
+            const result = guardCorrectedMenuPrices(original, corrected, []);
+
+            expect(result.correctedMenu).toBe(corrected);
+            expect(result.suggestions).toEqual([]);
+        });
+
+        it('still restores the chef\'s value when the AI changes a slash price', () => {
+            const result = guardCorrectedMenuPrices('Mercado 76/326', 'Mercado 76 | 330', []);
+
+            expect(result.correctedMenu).toBe('Mercado 76/326');
+            expect(result.changes).toEqual([expect.objectContaining({ reason: 'changed_price' })]);
+            expect(result.suggestions).toEqual([]);
+        });
+
+        it('restores an unparseable submitted price instead of deleting it and blocking', () => {
+            const result = guardCorrectedMenuPrices('Clarita-80/345', 'Clarita 85 | 345', []);
+
+            expect(result.correctedMenu).toBe('Clarita 80/345');
+            expect(result.suggestions).toEqual([]);
+        });
+
+        it('still strips a price whose numbers appear nowhere in the submission', () => {
+            const result = guardCorrectedMenuPrices('Mercado, blanco tequila, lime', 'Mercado, blanco tequila, lime 76 | 326', []);
+
+            expect(result.correctedMenu).toBe('Mercado, blanco tequila, lime');
+            expect(result.suggestions).toEqual([
+                expect.objectContaining({ type: 'Missing Price', severity: 'critical' }),
+            ]);
+        });
+    });
 });
