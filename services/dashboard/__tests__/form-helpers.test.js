@@ -13,6 +13,7 @@ const {
     parseExtractedSize,
     searchTextIncludes,
     shouldBlockSubmitForStaleAiCheck,
+    groupCriticalSuggestions,
     tokenizePropertyHint,
 } = require('../public/js/form-helpers');
 
@@ -324,6 +325,44 @@ describe('stale AI check submit gate', () => {
     test('allows submitting edits made after the first completed AI check', () => {
         expect(shouldBlockSubmitForStaleAiCheck(true, 1)).toBe(false);
         expect(shouldBlockSubmitForStaleAiCheck(true, 2)).toBe(false);
+    });
+});
+
+describe('groupCriticalSuggestions', () => {
+    const missing = (item) => ({ type: 'Missing Price', severity: 'critical', menuItem: item });
+
+    test('groups repeated critical types into one unit at the first position', () => {
+        const suggestions = [
+            { type: 'Allergen Code', severity: 'critical' },
+            missing('Mercado'),
+            missing('Clarita'),
+            { type: 'Spelling', severity: 'normal' },
+            missing('Avocado'),
+        ];
+        expect(groupCriticalSuggestions(suggestions)).toEqual([
+            { kind: 'single', index: 0 },
+            { kind: 'group', key: 'missing price', type: 'Missing Price', indexes: [1, 2, 4] },
+            { kind: 'single', index: 3 },
+        ]);
+    });
+
+    test('leaves a lone critical and repeated non-critical suggestions ungrouped', () => {
+        const suggestions = [
+            missing('Mercado'),
+            { type: 'Spelling', severity: 'normal' },
+            { type: 'Spelling', severity: 'normal' },
+        ];
+        expect(groupCriticalSuggestions(suggestions)).toEqual([
+            { kind: 'single', index: 0 },
+            { kind: 'single', index: 1 },
+            { kind: 'single', index: 2 },
+        ]);
+    });
+
+    test('matches types case-insensitively and tolerates empty input', () => {
+        const units = groupCriticalSuggestions([missing('A'), { type: ' missing price ', severity: 'critical' }]);
+        expect(units).toEqual([{ kind: 'group', key: 'missing price', type: 'Missing Price', indexes: [0, 1] }]);
+        expect(groupCriticalSuggestions(null)).toEqual([]);
     });
 });
 

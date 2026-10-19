@@ -278,6 +278,38 @@
         return completed < unlockAfter;
     }
 
+    // Collapse critical suggestions that share a type (e.g. 20x "Missing Price")
+    // into one group so the submitter can override them in a single click.
+    // Returns render units in original order; a group sits where its first
+    // member was. Indexes always refer to the input array.
+    function groupCriticalSuggestions(suggestions, minGroupSize) {
+        const list = Array.isArray(suggestions) ? suggestions : [];
+        const minSize = Number.parseInt(String(minGroupSize || 2), 10) || 2;
+        const keyFor = (s) => String((s && s.type) || '').trim().toLowerCase();
+        const indexesByKey = new Map();
+        list.forEach((s, idx) => {
+            if (!s || s.severity !== 'critical' || !keyFor(s)) return;
+            const key = keyFor(s);
+            if (!indexesByKey.has(key)) indexesByKey.set(key, []);
+            indexesByKey.get(key).push(idx);
+        });
+
+        const units = [];
+        const emitted = new Set();
+        list.forEach((s, idx) => {
+            const key = s && s.severity === 'critical' ? keyFor(s) : '';
+            const groupIndexes = key ? indexesByKey.get(key) : null;
+            if (groupIndexes && groupIndexes.length >= minSize) {
+                if (emitted.has(key)) return;
+                emitted.add(key);
+                units.push({ kind: 'group', key, type: String(s.type).trim(), indexes: groupIndexes.slice() });
+                return;
+            }
+            units.push({ kind: 'single', index: idx });
+        });
+        return units;
+    }
+
     function extractSuggestionChangePair(recommendation) {
         const text = String(recommendation || '').trim();
         if (!text) return null;
@@ -454,6 +486,7 @@
         findCatalogMatchesFromHints,
         isPreviouslySavedActiveDraft,
         shouldBlockSubmitForStaleAiCheck,
+        groupCriticalSuggestions,
     };
     if (typeof module !== 'undefined' && module.exports) {
         module.exports = api;

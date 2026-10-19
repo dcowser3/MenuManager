@@ -1168,6 +1168,30 @@
             text-decoration: line-through;
         }
 
+        .critical-group-items {
+            font-size: 0.75rem;
+            color: var(--color-text);
+            margin: 0.25rem 0;
+        }
+
+        .critical-group-count {
+            font-weight: 600;
+        }
+
+        .critical-group details {
+            margin-top: 0.6rem;
+        }
+
+        .critical-group summary {
+            cursor: pointer;
+            font-size: 0.7rem;
+            color: var(--color-text-muted);
+        }
+
+        .critical-group details .suggestion-item {
+            margin-top: 0.5rem;
+        }
+
         .suggestion-actions {
             display: flex;
             flex-wrap: wrap;
@@ -7508,15 +7532,96 @@
         function overrideCriticalError(idx) {
             criticalErrorOverrides[idx] = !criticalErrorOverrides[idx];
 
-            // Re-render just the affected card
+            // Re-render just the affected card, or its whole group so the
+            // group's "Override all" button reflects the new state.
             const card = document.querySelector(`.suggestion-item[data-suggestion-index="${idx}"]`);
-            if (card && aiCheckResults && aiCheckResults.suggestions[idx]) {
+            const groupEl = card && card.closest('.critical-group');
+            if (groupEl) {
+                rerenderCriticalGroup(groupEl);
+            } else if (card && aiCheckResults && aiCheckResults.suggestions[idx]) {
                 const newCard = document.createElement('div');
                 newCard.innerHTML = renderSuggestionCard(aiCheckResults.suggestions[idx], idx);
                 card.replaceWith(newCard.firstElementChild);
             }
 
             updateSubmitButtonState();
+        }
+
+        function getCriticalGroupIndexes(groupEl) {
+            return String(groupEl?.dataset?.groupIndexes || '')
+                .split(',')
+                .map((value) => Number.parseInt(value, 10))
+                .filter((value) => Number.isInteger(value));
+        }
+
+        function overrideCriticalGroup(button) {
+            const groupEl = button && button.closest('.critical-group');
+            const indexes = getCriticalGroupIndexes(groupEl);
+            if (!indexes.length) return;
+            const allOverridden = indexes.every((i) => criticalErrorOverrides[i]);
+            indexes.forEach((i) => {
+                criticalErrorOverrides[i] = !allOverridden;
+            });
+            rerenderCriticalGroup(groupEl);
+            updateSubmitButtonState();
+        }
+
+        function rerenderCriticalGroup(groupEl) {
+            if (!groupEl || !aiCheckResults || !aiCheckResults.suggestions) return;
+            const indexes = getCriticalGroupIndexes(groupEl);
+            const wasOpen = !!groupEl.querySelector('details')?.open;
+            const wrapper = document.createElement('div');
+            wrapper.innerHTML = renderCriticalGroup({
+                kind: 'group',
+                key: groupEl.dataset.criticalGroup || '',
+                type: aiCheckResults.suggestions[indexes[0]]?.type || '',
+                indexes
+            }, aiCheckResults.suggestions);
+            const next = wrapper.firstElementChild;
+            if (wasOpen) next.querySelector('details')?.setAttribute('open', '');
+            groupEl.replaceWith(next);
+        }
+
+        function renderCriticalGroup(group, suggestions) {
+            const members = group.indexes.map((i) => suggestions[i]).filter(Boolean);
+            const count = group.indexes.length;
+            const allOverridden = group.indexes.every((i) => criticalErrorOverrides[i]);
+            const first = members[0] || {};
+            const sameDescription = members.every((m) => m.description === first.description);
+            const sameRecommendation = members.every((m) => m.recommendation === first.recommendation);
+            const itemNames = members.map((m) => m.menuItem).filter(Boolean);
+            const btnText = allOverridden ? `Undo Override (all ${count})` : `Override all ${count} — AI May Be Wrong`;
+            const btnClass = allOverridden ? 'critical-override-btn overridden' : 'critical-override-btn';
+            return `
+                <div class="suggestion-item critical-error critical-group ${allOverridden ? 'overridden' : ''}" data-critical-group="${escapeHtml(group.key)}" data-group-indexes="${group.indexes.join(',')}">
+                    <div class="suggestion-type">
+                        ${escapeHtml(group.type)}
+                        <span class="severity-badge-critical">CRITICAL</span>
+                        <span class="critical-group-count">&times; ${count}</span>
+                    </div>
+                    ${itemNames.length ? `<div class="critical-group-items"><strong>Items:</strong> ${itemNames.map(escapeHtml).join(', ')}</div>` : ''}
+                    ${sameDescription && first.description ? `<div class="suggestion-detail">${escapeHtml(first.description)}</div>` : ''}
+                    ${sameRecommendation && first.recommendation ? `<div style="color: var(--color-success); font-size: 0.75rem; margin-top: 0.25rem;"><strong>Recommendation:</strong> ${escapeHtml(first.recommendation)}</div>` : ''}
+                    <div class="suggestion-actions">
+                        <button class="${btnClass}" onclick="overrideCriticalGroup(this)">${btnText}</button>
+                    </div>
+                    <details>
+                        <summary>Review each one individually (${count})</summary>
+                        ${group.indexes.map((i) => suggestions[i] ? renderSuggestionCard(suggestions[i], i) : '').join('')}
+                    </details>
+                </div>
+            `;
+        }
+
+        function renderSuggestionCards(suggestions) {
+            const grouper = window.formHelpers && window.formHelpers.groupCriticalSuggestions;
+            if (typeof grouper !== 'function') {
+                return suggestions.map((suggestion, idx) => renderSuggestionCard(suggestion, idx)).join('');
+            }
+            return grouper(suggestions).map((unit) => unit.kind === 'group'
+                ? renderCriticalGroup(unit, suggestions)
+                : renderSuggestionCard(suggestions[unit.index], unit.index)
+            ).join('');
         }
 
         function applySuggestionChange(idx) {
@@ -7912,12 +8017,12 @@
                 `;
 
                 if (sortedSuggestions.length > 0) {
-                    html += sortedSuggestions.map((suggestion, idx) => renderSuggestionCard(suggestion, idx)).join('');
+                    html += renderSuggestionCards(sortedSuggestions);
                 }
 
                 suggestionsDisplay.innerHTML = html;
             } else if (sortedSuggestions.length > 0) {
-                suggestionsDisplay.innerHTML = sortedSuggestions.map((suggestion, idx) => renderSuggestionCard(suggestion, idx)).join('');
+                suggestionsDisplay.innerHTML = renderSuggestionCards(sortedSuggestions);
             } else {
                 suggestionsDisplay.innerHTML = `
                     <div class="suggestion-item" style="border-left: 3px solid var(--color-success);">
