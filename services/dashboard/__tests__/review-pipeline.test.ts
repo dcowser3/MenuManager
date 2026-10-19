@@ -16,6 +16,7 @@ jest.mock('@menumanager/tenant-config', () => {
 });
 
 import {
+    downgradeBeverageMenuWideAllergenFindings,
     FORCED_CRITICAL_EXACT_TYPES,
     FORCED_CRITICAL_HIGH_CONFIDENCE_TYPES,
     FORCED_CRITICAL_NORMALIZED_TYPES,
@@ -995,6 +996,59 @@ describe('raw marker placement with the price before the allergen codes', () => 
     test('pre-AI placement keeps the marker on the description', () => {
         expect(runPreAiDeterministicChecks('Hokkaido scallop ceviche, curry leche de tigre, basil oil, curry oil* 24 S').menuText)
             .toBe('Hokkaido scallop ceviche, curry leche de tigre, basil oil, curry oil* 24 S');
+    });
+});
+
+// Maya Dubai cocktail menu (2026-10-19) and Zengo/Aqimero drink lists: the model
+// raised a blocking "no allergen codes" critical on drink-only menus, which are
+// not required to carry allergen codes. Beverage template keeps it as a note.
+describe('beverage menus and menu-wide allergen findings', () => {
+    const menu = 'Margaritas\nMercado 76 | 326\nblanco tequila, passion fruit, lime';
+    const menuWide = {
+        type: 'Allergen Code',
+        menuItem: 'Entire menu',
+        severity: 'critical',
+        confidence: 'medium',
+        description: 'No dishes or beverages on this menu carry allergen codes.',
+        recommendation: 'Code the menu per the allergen key.',
+    };
+    const itemSpecific = {
+        type: 'Allergen Code',
+        menuItem: 'Smoking Michelada Loco',
+        severity: 'critical',
+        confidence: 'medium',
+        description: 'Corona lager indicates gluten.',
+        recommendation: 'Confirm whether G applies.',
+    };
+
+    const run = (templateType?: string) => runPostAiPipeline({
+        feedback: buildFeedback(menu, [menuWide]),
+        preCheckedReviewBody: menu,
+        templateType,
+        acceptedCorrectionRules: [],
+        embeddedSetMenuAnalysis: { sections: [], issues: [] },
+        precheckEnabled: false,
+    });
+
+    test('keeps the finding but does not block on a beverage menu', () => {
+        const result = run('beverage');
+
+        expect(result.finalSuggestions).toContainEqual(expect.objectContaining({
+            type: 'Allergen Code', menuItem: 'Entire menu', severity: 'normal',
+        }));
+        expect(result.hasCriticalErrors).toBe(false);
+    });
+
+    test.each(['food', 'food_beverage', undefined])('still blocks on template %s', (templateType) => {
+        expect(run(templateType).hasCriticalErrors).toBe(true);
+    });
+
+    test('downgrades only menu-wide findings', () => {
+        const out = downgradeBeverageMenuWideAllergenFindings([menuWide, itemSpecific, {
+            ...menuWide, menuItem: 'Beverages', description: 'No allergen key is provided.',
+        }]);
+
+        expect(out.map((s) => s.severity)).toEqual(['normal', 'critical', 'normal']);
     });
 });
 

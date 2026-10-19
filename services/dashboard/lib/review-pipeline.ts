@@ -628,6 +628,22 @@ function lineCarriesConfiguredAllergenCode(line: string, validCodes: Set<string>
     return hasConfiguredCluster && (hasTrailingPrice || compactCodePrice || hasTrailingCodes);
 }
 
+/**
+ * Drink-only menus (beverage template) are not required to carry allergen codes.
+ * The model still raises menu-wide "no allergen codes / no allergen key"
+ * criticals on them, so keep the finding as a non-blocking note. Item-specific
+ * allergen findings are left untouched.
+ */
+export function downgradeBeverageMenuWideAllergenFindings<T extends { type?: string; menuItem?: string; description?: string; severity?: string }>(suggestions: T[]): T[] {
+    return (suggestions || []).map((s) => {
+        if (s.severity !== 'critical') return s;
+        if (!`${s.type || ''}`.toLowerCase().includes('allergen')) return s;
+        const menuWide = /^(?:entire|whole|full)\s+menu$|^(?:all|every)\s+(?:items|dishes|drinks|beverages)$|^menu$/i.test(`${s.menuItem || ''}`.trim())
+            || /^(?:no|none)\b[^.]*\b(?:allergen\s+)?(?:codes?|key|legend)\b/i.test(`${s.description || ''}`.trim());
+        return menuWide ? { ...s, severity: 'normal' } : s;
+    });
+}
+
 export function enforceAllergenProgramCheck(
     menuContent: string,
     suggestions: ReviewSuggestion[],
@@ -1070,6 +1086,8 @@ export function runPostAiPipeline(args: PostAiPipelineArgs): PostAiPipelineResul
     // them. Gate to food menus (default when templateType is unset).
     if (args.templateType !== 'beverage') {
         finalSuggestions = enforceAllergenProgramCheck(args.allergenProgramMenuContent || correctedMenuSanitized, finalSuggestions, args.effectiveReviewAllergens);
+    } else {
+        finalSuggestions = downgradeBeverageMenuWideAllergenFindings(finalSuggestions);
     }
     // The foodborne notice is owned by code (added to the returned menu when the
     // menu needs it), so a model finding that it is missing is never actionable.

@@ -354,7 +354,7 @@ The full deterministic pre-AI pass is re-applied to the AI-corrected menu so the
 
 ### Complete-menu allergen-program presence check
 
-Food-menu revision checks use the complete current menu to test for any configured allergen code. Absolute no-code AI claims are removed when coded dishes exist; partial and item-specific concerns remain. A zero-code menu receives a critical program finding.
+Food-menu revision checks use the complete current menu to test for any configured allergen code. Absolute no-code AI claims are removed when coded dishes exist; partial and item-specific concerns remain. A zero-code menu receives a critical program finding. Beverage-template menus skip that critical, and model-raised menu-wide allergen criticals on them are downgraded to non-blocking notes.
 
 - id: `post-ai/allergen-program-presence` · category: allergen_codes · implementation: `services/dashboard/lib/review-pipeline.ts#enforceAllergenProgramCheck`
 
