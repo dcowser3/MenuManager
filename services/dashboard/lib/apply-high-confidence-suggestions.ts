@@ -4,6 +4,8 @@
  * corrected text so the chef UI matches the intended behavior.
  */
 
+import { matchTrailingPrice } from './price-shapes';
+
 export type SuggestionForAutoApply = {
     type?: string;
     confidence?: string;
@@ -234,10 +236,10 @@ function applyRawAsteriskOnLine(line: string): string | null {
     let trailingPrice = '';
     let trailingAllergens = '';
 
-    const priceMatch = working.match(/\s+(\$?\d+(?:[.,]\d+)?(?:\s*\|\s*\$?\d+(?:[.,]\d+)?)?)\s*$/);
+    const priceMatch = matchTrailingPrice(working);
     if (priceMatch) {
-        trailingPrice = priceMatch[1];
-        working = working.slice(0, priceMatch.index).trim();
+        trailingPrice = priceMatch.price;
+        working = priceMatch.before.trim();
     }
 
     const allergenMatch = working.match(/\s+([A-Z]{1,3}(?:,[A-Z]{1,3})*)\s*$/);

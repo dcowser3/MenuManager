@@ -14,6 +14,7 @@ import { guardAllergenAlphabetizationSuggestions } from './allergen-suggestion-g
 import { reconcileSuggestionsWithDeliveredMenu } from './suggestion-delivery-reconciliation';
 import { preserveSubmittedAllergenCodes } from './allergen-source-preservation';
 import { guardCorrectedMenuRawMarkers } from './raw-marker-integrity-guard';
+import { CURRENCY_CODES, PRICE_NUMBER_SOURCE, PRICE_SHAPE_SOURCE, isStandalonePrice, lineHasPrice, matchTrailingPrice, priceNumbers } from './price-shapes';
 import { applyHighConfidenceSuggestionsToMenu } from './apply-high-confidence-suggestions';
 import {
     EmbeddedSetMenuAnalysis,
@@ -143,21 +144,10 @@ function escapeRegExp(value: string): string {
     return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-// One trailing amount: "14", "$12", "12.50", "1,450", "2450", "AED 80", "80AED", "MP".
-const LINE_PRICE_AMOUNT = String.raw`(?:(?:[$\u20ac\u00a3]|(?:AED|USD|QAR|SAR|EUR|GBP)\s?)?\d{1,4}(?:,\d{3})*(?:[.,]\d{1,2})?(?:\s?(?:AED|USD|QAR|SAR|EUR|GBP))?|MP|MKT|market\s+price)`;
-// Glass/bottle style multi-prices: "76/326", "80-345", "16 | 80".
-const LINE_PRICE_RE = new RegExp(
-    String.raw`(?:^|[\s\-|/\u2013])${LINE_PRICE_AMOUNT}(?:\s*[|/\u2013-]\s*${LINE_PRICE_AMOUNT})*\*?(?:\s+[A-Z]{1,3}(?:,[A-Z]{1,3})*)?\s*$`,
-    'i'
-);
-
 export function looksLikePriceOnLine(line: string): boolean {
-    const compact = (line || '').trim();
     // Used to clear AI "Missing Price" criticals, so it must recognize every
     // price shape chefs actually type. A miss leaves a false blocking critical.
-    if (!LINE_PRICE_RE.test(compact)) return false;
-    // A bare vintage year ("Chateau Margaux 2015") is not a price.
-    return !/(?:^|\s)(?:19|20)\d{2}\*?\s*$/.test(compact);
+    return lineHasPrice(line);
 }
 
 function isLikelyContinuationLine(previousLine: string, nextLine: string): boolean {
@@ -385,15 +375,16 @@ export interface TopLevelPrixFixePriceEvidence {
     reason?: string;
 }
 
-const PRICE_AMOUNT = String.raw`\d{1,4}(?:[.,]\d{1,2})?`;
+const PRICE_AMOUNT = PRICE_NUMBER_SOURCE;
+const PRICE_CURRENCY_CODE = `(?:${CURRENCY_CODES.join('|')})`;
 const EXPLICIT_PRICE_PATTERNS: Array<{ reason: string; pattern: RegExp }> = [
     { reason: 'per_person_marker', pattern: new RegExp(`\\b(${PRICE_AMOUNT})\\s*(?:pp\\b|per\\s+person\\b)`, 'i') },
     { reason: 'currency_symbol', pattern: new RegExp(`([$€£])\\s*(${PRICE_AMOUNT})\\b`, 'i') },
-    { reason: 'currency_code', pattern: new RegExp(`\\b(?:(${PRICE_AMOUNT})\\s*(AED|USD|EUR|GBP|CAD|AUD)|(AED|USD|EUR|GBP|CAD|AUD)\\s*(${PRICE_AMOUNT}))\\b`, 'i') },
-    { reason: 'wine_pairing', pattern: new RegExp(`\\b(${PRICE_AMOUNT})\\s*(?:\\|\\s*)?(?:wine|beverage|alcohol)\\s+pairing\\b`, 'i') },
+    { reason: 'currency_code', pattern: new RegExp(`\\b(?:(${PRICE_AMOUNT})\\s*${PRICE_CURRENCY_CODE}|${PRICE_CURRENCY_CODE}\\s*(${PRICE_AMOUNT}))\\b`, 'i') },
+    // "85 | 40 wine pairing", "95/145 with pairing", "95 with wine pairing".
+    { reason: 'wine_pairing', pattern: new RegExp(`(?:^|\\s)(${PRICE_SHAPE_SOURCE})\\s*(?:\\|\\s*)?(?:with\\s+)?(?:(?:wine|beverage|alcohol|cocktail|drinks?)\\s+)?pairings?\\b`, 'i') },
 ];
 const PACKAGE_PRICE_CONTEXT = /\b(?:prix\s*fixe|bottomless|set\s+menu|selection\s+per\s+course|choice(?:\s+one)?\s+selection\s+per\s+course|choice\s+per\s+course|omakase|package)\b/i;
-const STANDALONE_PRICE = new RegExp(`^\\s*([$€£]?${PRICE_AMOUNT})(?:\\s*(?:pp|per\\s+person))?\\s*$`, 'i');
 const NUMERIC_TOKEN = new RegExp(`\\b${PRICE_AMOUNT}\\b`, 'g');
 
 export function detectTopLevelPrixFixePrice(menuContent: string): TopLevelPrixFixePriceEvidence {
@@ -408,9 +399,8 @@ export function detectTopLevelPrixFixePrice(menuContent: string): TopLevelPrixFi
             }
         }
 
-        const standaloneMatch = line.match(STANDALONE_PRICE);
-        if (standaloneMatch && !/\b(?:19|20)\d{2}\b/.test(line)) {
-            return { found: true, matchedLine: line, matchedLineIndex: lineIndex, matchedToken: standaloneMatch[1], reason: 'standalone_price' };
+        if (isStandalonePrice(line)) {
+            return { found: true, matchedLine: line, matchedLineIndex: lineIndex, matchedToken: line, reason: 'standalone_price' };
         }
 
         if (!PACKAGE_PRICE_CONTEXT.test(line) || /,.*,.+\b\d{1,4}(?:[.,]\d{1,2})?\s*$/.test(line)) continue;
@@ -480,8 +470,12 @@ export function dropPrixFixeDishPriceFlags(
 function regionHasPackagePrice(text: string): boolean {
     if (detectTopLevelPrixFixePrice(text).found) return true;
     const head = text.split('\n').map((l) => l.trim()).filter(Boolean).slice(0, 3);
-    return head.some((line) => (line.match(/,/g) || []).length <= 1
-        && /\s[$€£]?\d{2,4}(?:\.\d{2})?\s*$/.test(line) && !/\b(?:19|20)\d{2}\s*$/.test(line));
+    return head.some((line) => {
+        if ((line.match(/,/g) || []).length > 1) return false;
+        const price = matchTrailingPrice(line);
+        // A single digit is a course count or quantity, not a package price.
+        return !!price && priceNumbers(price.price).some((n) => Number(n) >= 10);
+    });
 }
 
 /**
@@ -589,7 +583,6 @@ export function enforcePrixFixeCriticalChecks(
 // the flag fires on every review. Detection is conservative: a line "has codes"
 // when, after stripping a trailing price token, it ends in a cluster of 1-2
 // uppercase code tokens (comma-separated, no spaces), e.g. "... G,D 24".
-const TRAILING_PRICE_FOR_ALLERGEN_CHECK = /\s+(?:[$\u20ac\u00a3]|(?:AED|USD|QAR|SAR|EUR|GBP)\s?)?\d+(?:[.,]\d+)?(?:\s*[|/\u2013-]\s*\$?\d+(?:[.,]\d+)?)*(?:\s?(?:AED|USD|QAR|SAR|EUR|GBP))?(?:\s*(?:each|pp|per\s*person))?\s*$/i;
 
 function parseAllergenCodesForProgramCheck(allergenLegend?: string): Set<string> {
     const configuredLegend = `${allergenLegend || getTenantConfig().allergenKey || ''}`;
@@ -609,7 +602,7 @@ function lineCarriesConfiguredAllergenCode(line: string, validCodes: Set<string>
     if (!line || validCodes.size === 0) return false;
     if (/allergen|contains|gluten|vegetarian|vegan/i.test(line) && /\|/.test(line)) return false;
 
-    const hasTrailingPrice = TRAILING_PRICE_FOR_ALLERGEN_CHECK.test(line);
+    const hasTrailingPrice = !!matchTrailingPrice(line);
     const clusters = line.match(/\b[A-Z]{1,3}(?:,[A-Z]{1,3})*(?=\d|\b)/g) || [];
     const hasConfiguredCluster = clusters.some((cluster) => {
         const codes = cluster.split(',');
@@ -884,10 +877,10 @@ function normalizeRawAsteriskPlacementForLine(line: string): string {
     let trailingPrice = '';
     let trailingAllergens = '';
 
-    const priceMatch = working.match(/\s+(\$?\d+(?:[.,]\d+)?(?:\s*\|\s*\d+(?:[.,]\d+)?)?)\s*$/);
+    const priceMatch = matchTrailingPrice(working);
     if (priceMatch) {
-        trailingPrice = priceMatch[1];
-        working = working.slice(0, priceMatch.index).trim();
+        trailingPrice = priceMatch.price;
+        working = priceMatch.before.trim();
     }
 
     const allergenMatch = working.match(/\s+([A-Z]{1,3}(?:,[A-Z]{1,3})*)\s*$/);
@@ -900,10 +893,10 @@ function normalizeRawAsteriskPlacementForLine(line: string): string {
     // order; the marker still belongs on the description, never after the price.
     let priceBeforeAllergens = '';
     if (!trailingPrice && trailingAllergens) {
-        const leadingPrice = working.match(/\s+(\$?\d+(?:[.,]\d+)?)\s*$/);
+        const leadingPrice = matchTrailingPrice(working);
         if (leadingPrice) {
-            priceBeforeAllergens = leadingPrice[1];
-            working = working.slice(0, leadingPrice.index).trim();
+            priceBeforeAllergens = leadingPrice.price;
+            working = leadingPrice.before.trim();
         }
     }
 

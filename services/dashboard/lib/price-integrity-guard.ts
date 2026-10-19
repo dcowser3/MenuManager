@@ -1,3 +1,5 @@
+import { CURRENCY_CODES, isBareYearPrice, matchTrailingPrice, priceNumbers } from './price-shapes';
+
 export type PriceIntegritySuggestion = {
     type?: string;
     confidence?: string;
@@ -30,17 +32,11 @@ type TrailingPriceMatch = {
     lineWithoutPrice: string;
 };
 
-const PRICE_SEGMENT = String.raw`(?:(?:[$\u20ac\u00a3]\s*)?\d{1,4}(?:,\d{3})*(?:[.]\d{1,2})?|MKT|MP|market\s+price)`;
-// Multi-price lines (glass | bottle, half | full) arrive as "76 | 326",
-// "76/326" or "80-345". All three mean the same thing.
-const MULTI_PRICE_SEPARATOR = String.raw`\s*[|/\u2013-]\s*`;
-const TRAILING_PRICE_RE = new RegExp(
-    String.raw`^(?<before>.*?)(?<separator>\s+)(?<price>${PRICE_SEGMENT}(?:${MULTI_PRICE_SEPARATOR}${PRICE_SEGMENT})*)(?<pp>\s*(?:pp|PP))?(?<trailing>\s*)$`,
-    'i'
-);
 // Unparsed numeric tail on a submitted line ("Clarita-80/345", "Mercado -76/326").
 // A leading apostrophe keeps a two-digit vintage intact ("'99").
 const SUBMITTED_NUMERIC_TAIL_RE = /['\u2019]?[$\u20ac\u00a3]?\d[\d.,/|\s\u2013-]*\*?\s*$/u;
+
+const CURRENCY_CODE_RE = new RegExp(`${CURRENCY_CODES.join('|')}`, 'gi');
 
 function normalizePriceValue(value: string): string {
     return (value || '')
@@ -49,8 +45,10 @@ function normalizePriceValue(value: string): string {
             const compact = part
                 .toLowerCase()
                 .replace(/market\s+price/g, 'mp')
+                .replace(CURRENCY_CODE_RE, '')
+                .replace(/,(\d{1,2})$/, '.$1')
                 .replace(/[\u20ac\u00a3$,\s]/g, '')
-                .replace(/pp$/i, '');
+                .replace(/(?:pp|perperson|each)$/i, '');
             if (/^\d+(?:\.\d+)?$/.test(compact)) {
                 return String(Number(compact));
             }
@@ -60,20 +58,17 @@ function normalizePriceValue(value: string): string {
 }
 
 function extractTrailingPrice(line: string): TrailingPriceMatch | null {
-    const match = (line || '').match(TRAILING_PRICE_RE);
-    if (!match?.groups) {
-        return null;
-    }
-
-    const price = `${match.groups.price || ''}${match.groups.pp || ''}`.trim();
-    if (!price) {
+    // Years are read as prices here so an AI rewrite of a vintage ('99 -> 1999)
+    // can be restored; guardCorrectedMenuPrices never strips one.
+    const match = matchTrailingPrice(line, { allowYear: true });
+    if (!match) {
         return null;
     }
 
     return {
-        price,
-        normalizedPrice: normalizePriceValue(price),
-        lineWithoutPrice: `${match.groups.before || ''}${match.groups.trailing || ''}`.trimEnd(),
+        price: match.price,
+        normalizedPrice: normalizePriceValue(match.price),
+        lineWithoutPrice: `${match.before}${match.trailing}`.trimEnd(),
     };
 }
 
@@ -100,11 +95,6 @@ function submittedLineEndsWithPriceDigits(line: string, normalizedPrice: string)
     return new RegExp(`(?:^|[^\\d.,])[$\u20ac\u00a3]?${escaped}(?:\\.0{1,2})?\\*?\\s*$`).test(line || '');
 }
 
-function numericTokens(value: string): string[] {
-    return ((value || '').match(/\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?/g) || [])
-        .map((token) => String(Number(token.replace(/,/g, ''))));
-}
-
 /**
  * True when every number in the corrected price already appears on the
  * submitted line, in whatever format the chef typed it ("76/326",
@@ -114,12 +104,12 @@ function numericTokens(value: string): string[] {
  * can be sure the AI invented them.
  */
 function submittedLineContainsPriceNumbers(line: string, price: string): boolean {
-    const priceNumbers = numericTokens(price);
-    if (priceNumbers.length === 0) {
+    const correctedNumbers = priceNumbers(price);
+    if (correctedNumbers.length === 0) {
         return false;
     }
-    const submittedNumbers = new Set(numericTokens(line));
-    return priceNumbers.every((token) => submittedNumbers.has(token));
+    const submittedNumbers = new Set(priceNumbers(line));
+    return correctedNumbers.every((token) => submittedNumbers.has(token));
 }
 
 function stripTrailingAllergenCluster(line: string): string {
@@ -254,10 +244,6 @@ export function guardCorrectedMenuPrices(
             continue;
         }
 
-        // A zero amount is part of a name ("HEINEKEN 0.0"), never a price.
-        if (/^0(?:\|0)*$/.test(correctedPrice.normalizedPrice)) {
-            continue;
-        }
 
         const menuItem = deriveMenuItem(originalLine || correctedLine);
         let guardedLine: string | null = null;
@@ -272,6 +258,9 @@ export function guardCorrectedMenuPrices(
             // instead of deleting it and blocking them with a critical.
             guardedLine = `${correctedPrice.lineWithoutPrice} ${unparsedSubmittedTail}`.trimEnd();
             reason = 'changed_price';
+        } else if (!originalPrice && isBareYearPrice(correctedPrice.price)) {
+            // A bare year is a vintage, not a price; never strip it or block.
+            continue;
         } else if (!originalPrice) {
             guardedLine = correctedPrice.lineWithoutPrice;
             reason = 'added_price';

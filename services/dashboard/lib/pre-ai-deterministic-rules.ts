@@ -1,6 +1,7 @@
 import { resolveCanonicalPolicies, permitsSeparatorVariants } from './canonical-policy';
 import { involvesContextDependentTerm } from './improvement-cycle-core';
 import { CONTEXTUAL_COMPOUND_DESCRIPTOR_CONTRACT } from './contextual-compound-descriptor-contract';
+import { matchTrailingPrice, splitTrailingPrice } from './price-shapes';
 
 export type PreAiCorrectionSource = 'built_in' | 'accepted_correction_rule';
 
@@ -204,16 +205,8 @@ const LEARNED_RULE_CHANGE_TYPES = new Set([
     'punctuation',
 ]);
 
-export const TRAILING_PRICE_PATTERN = '(?:(?:[$€£]\\s*)?\\d{1,4}(?:,\\d{3})*(?:[.]\\d{1,2})?|MKT|MP|market\\s+price)';
-
 /** Shared trailing-price grammar for deterministic rules and source-bound delivery. */
-export function splitTrailingPrice(line: string): { body: string; price: string } {
-    const value = `${line || ''}`;
-    const match = value.match(new RegExp(`\\s+(${TRAILING_PRICE_PATTERN}(?:\\s*\\|\\s*${TRAILING_PRICE_PATTERN})?(?:\\s*(?:pp|PP))?)\\s*$`, 'i'));
-    return match && match.index !== undefined
-        ? { body: value.slice(0, match.index).trimEnd(), price: value.slice(match.index) }
-        : { body: value, price: '' };
-}
+export { splitTrailingPrice };
 
 function escapeRegExp(s: string): string {
     return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -765,9 +758,8 @@ function normalizeAllergenClusterOnLine(
         return { line: original, corrections: [] };
     }
 
-    const priceMatch = original.match(new RegExp(`(\\s+${TRAILING_PRICE_PATTERN}(?:\\s*\\|\\s*${TRAILING_PRICE_PATTERN})?(?:\\s*(?:pp|PP))?)\\s*$`, 'i'));
-    const priceSuffix = priceMatch?.[1] || '';
-    const withoutPrice = priceMatch ? original.slice(0, priceMatch.index).trimEnd() : original.trimEnd();
+    const { body, price: priceSuffix } = splitTrailingPrice(original);
+    const withoutPrice = body.trimEnd();
     const clusterMatch = withoutPrice.match(/(\s+\*?\s*)([A-Za-z]{1,3}(?:\s*,\s*[A-Za-z]{1,3})*)\s*$/);
     if (!clusterMatch?.[2]) {
         return { line: original, corrections: [] };
@@ -809,9 +801,8 @@ function ensureTresLechesVegetarianCodeOnLine(
         return { line: original, corrections: [] };
     }
 
-    const priceMatch = original.match(new RegExp(`(\\s+${TRAILING_PRICE_PATTERN}(?:\\s*\\|\\s*${TRAILING_PRICE_PATTERN})?(?:\\s*(?:pp|PP))?)\\s*$`, 'i'));
-    const priceSuffix = priceMatch?.[1] || '';
-    const withoutPrice = priceMatch ? original.slice(0, priceMatch.index).trimEnd() : original.trimEnd();
+    const { body, price: priceSuffix } = splitTrailingPrice(original);
+    const withoutPrice = body.trimEnd();
     const clusterMatch = withoutPrice.match(/(\s+\*?\s*)([A-Za-z]{1,3}(?:\s*,\s*[A-Za-z]{1,3})*)\s*$/);
 
     if (clusterMatch?.[2]) {
@@ -923,10 +914,10 @@ function normalizeRawAsteriskPlacementForLine(line: string): string {
     let trailingPrice = '';
     let trailingAllergens = '';
 
-    const priceMatch = working.match(new RegExp(`\\s+(${TRAILING_PRICE_PATTERN}(?:\\s*\\|\\s*${TRAILING_PRICE_PATTERN})?)\\s*$`, 'i'));
+    const priceMatch = matchTrailingPrice(working);
     if (priceMatch) {
-        trailingPrice = priceMatch[1];
-        working = working.slice(0, priceMatch.index).trim();
+        trailingPrice = priceMatch.price;
+        working = priceMatch.before.trim();
     }
 
     const allergenMatch = working.match(/\s+([A-Z]{1,3}(?:,[A-Z]{1,3})*)\s*$/);
@@ -940,10 +931,10 @@ function normalizeRawAsteriskPlacementForLine(line: string): string {
     // (Snowmass dinner 2026-10-09 became "curry oil 24* S").
     let priceBeforeAllergens = '';
     if (!trailingPrice && trailingAllergens) {
-        const leadingPrice = working.match(new RegExp(`\\s+(${TRAILING_PRICE_PATTERN})\\s*$`, 'i'));
+        const leadingPrice = matchTrailingPrice(working);
         if (leadingPrice) {
-            priceBeforeAllergens = leadingPrice[1];
-            working = working.slice(0, leadingPrice.index).trim();
+            priceBeforeAllergens = leadingPrice.price;
+            working = leadingPrice.before.trim();
         }
     }
 
@@ -1013,7 +1004,7 @@ function shouldAddRawAsterisk(line: string): boolean {
     if (/:/.test(line) && /\b[A-Z]{1,3}\s*,/.test(line)) {
         return false;
     }
-    const hasPrice = new RegExp(`\\s+${TRAILING_PRICE_PATTERN}(?:\\s*(?:pp|PP))?\\s*$`, 'i').test(line);
+    const hasPrice = !!matchTrailingPrice(line);
     const hasTrailingAllergenCluster = /\s+[A-Z]{1,3}(?:,[A-Z]{1,3})*\s*$/.test(line.trim());
     const hasDescriptionComma = line.includes(',');
     if (!hasPrice && (!hasTrailingAllergenCluster || !hasDescriptionComma)) {

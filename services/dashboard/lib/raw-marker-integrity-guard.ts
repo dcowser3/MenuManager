@@ -10,6 +10,8 @@
  * is kept.
  */
 
+import { matchTrailingPrice } from './price-shapes';
+
 export type RawMarkerIntegrityChange = {
     lineIndex: number;
     originalLine: string;
@@ -25,7 +27,6 @@ export type RawMarkerIntegrityGuardResult = {
 
 const RAW_NOTICE_PATTERN = /consuming\s+raw\s+or\s+undercooked/i;
 
-const TRAILING_PRICE = /\s+(?:(?:[$€£]\s*)?\d{1,4}(?:,\d{3})*(?:[.]\d{1,2})?|MKT|MP|market\s+price)(?:\s*\|\s*(?:(?:[$€£]\s*)?\d{1,4}(?:,\d{3})*(?:[.]\d{1,2})?|MKT|MP|market\s+price))*(?:\s*(?:pp|per\s+person|each))?\s*$/i;
 const TRAILING_ALLERGENS = /\s+[A-Z]{1,3}(?:\s*,\s*[A-Z]{1,3})*\s*$/;
 
 function withoutMarkers(line: string): string {
@@ -46,8 +47,8 @@ export function insertRawMarker(line: string): string {
     let working = line.slice(leading.length).trimEnd();
     let suffix = '';
 
-    const price = working.match(TRAILING_PRICE);
-    if (price && price.index !== undefined && price.index > 0) {
+    const price = matchTrailingPrice(working);
+    if (price && price.index > 0) {
         suffix = working.slice(price.index) + suffix;
         working = working.slice(0, price.index);
     }
