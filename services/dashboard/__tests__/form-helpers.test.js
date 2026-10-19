@@ -317,13 +317,13 @@ describe('stale AI check submit gate', () => {
         expect(shouldBlockSubmitForStaleAiCheck(false, 1)).toBe(false);
     });
 
-    test('blocks a stale menu after only one completed AI check', () => {
-        expect(shouldBlockSubmitForStaleAiCheck(true, 1)).toBe(true);
+    test('blocks a stale menu before any AI check has completed', () => {
+        expect(shouldBlockSubmitForStaleAiCheck(true, 0)).toBe(true);
     });
 
-    test('allows stale edits after the second completed AI check', () => {
+    test('allows submitting edits made after the first completed AI check', () => {
+        expect(shouldBlockSubmitForStaleAiCheck(true, 1)).toBe(false);
         expect(shouldBlockSubmitForStaleAiCheck(true, 2)).toBe(false);
-        expect(shouldBlockSubmitForStaleAiCheck(true, 3)).toBe(false);
     });
 });
 

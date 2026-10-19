@@ -3501,7 +3501,7 @@
             if (typeof helper === 'function') {
                 return helper(requiresAiRerun, aiCheckCompletedCount);
             }
-            return requiresAiRerun && aiCheckCompletedCount < 2;
+            return requiresAiRerun && aiCheckCompletedCount < 1;
         }
 
         function onSubmissionModeChange() {

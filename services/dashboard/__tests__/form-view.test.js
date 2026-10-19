@@ -729,7 +729,7 @@ describe('dashboard form modification source chooser', () => {
         expect(template).toContain('let aiCheckCompletedCount = 0;');
         expect(template).toContain('aiCheckCompletedCount += 1;');
         expect(template).toContain('window.formHelpers.shouldBlockSubmitForStaleAiCheck');
-        expect(template).toContain('return requiresAiRerun && aiCheckCompletedCount < 2;');
+        expect(template).toContain('return requiresAiRerun && aiCheckCompletedCount < 1;');
         expect(template).toContain('if (!skipAiReview && shouldBlockSubmitForStaleAiCheck())');
         expect(template).toContain('submittedWithPostSecondAiEdit: requiresAiRerun && !shouldBlockSubmitForStaleAiCheck()');
         expect(template).not.toContain('if (!skipAiReview && requiresAiRerun)');

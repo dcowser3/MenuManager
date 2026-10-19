@@ -274,7 +274,7 @@
     function shouldBlockSubmitForStaleAiCheck(requiresAiRerun, completedCheckCount, unlockAfterCount) {
         if (!requiresAiRerun) return false;
         const completed = Number.parseInt(String(completedCheckCount || 0), 10) || 0;
-        const unlockAfter = Number.parseInt(String(unlockAfterCount || 2), 10) || 2;
+        const unlockAfter = Number.parseInt(String(unlockAfterCount || 1), 10) || 1;
         return completed < unlockAfter;
     }
 
