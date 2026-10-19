@@ -165,6 +165,7 @@ import {
     supersededProposalReviewBlock,
 } from './lib/improvement-cycle-core';
 import { planApprovedExpectationActivation } from './lib/expectation-versioning';
+import { formatLearningLoadLog, loadLearningComparison } from './lib/learning-comparison-loader';
 
 export {
     sanitizePlainTextInput,
@@ -2589,52 +2590,32 @@ app.get('/learning', async (_req, res) => {
 });
 
 app.get('/learning/submission/:submissionId', async (req, res) => {
+    const pageStartedAt = Date.now();
     try {
         const { submissionId } = req.params;
-        let [learningRevisionResult, submissionResult, correctionRulesResult, propertiesResult] = await Promise.all([
-            internalApi.get(`${DIFFER_SERVICE_URL}/learning/submissions/${encodeURIComponent(submissionId)}/revision`, { timeout: 3500 })
+        const [learningDetailResult, submissionResult, correctionRulesResult, propertiesResult] = await Promise.all([
+            loadLearningComparison({
+                differUrl: DIFFER_SERVICE_URL,
+                submissionId,
+                get: (url, options) => internalApi.get(url, options),
+            }),
+            internalApi.get(`${DB_SERVICE_URL}/submissions/${encodeURIComponent(submissionId)}`, { timeout: 8000 })
                 .then((r: any) => ({ ok: true, data: r.data, error: '' }))
-                .catch((e: any) => ({ ok: false, data: null, error: e?.message || 'request failed' })),
-            internalApi.get(`${DB_SERVICE_URL}/submissions/${encodeURIComponent(submissionId)}`, { timeout: 3500 })
-                .then((r: any) => ({ ok: true, data: r.data, error: '' }))
-                .catch((e: any) => ({ ok: false, data: null, error: e?.message || 'request failed' })),
-            internalApi.get(`${DB_SERVICE_URL}/correction-rules?submission_id=${encodeURIComponent(submissionId)}`, { timeout: 3500 })
+                .catch((e: any) => ({ ok: false, data: null, error: `${e?.response?.status || e?.code || ''} ${e?.message || 'request failed'}`.trim() })),
+            internalApi.get(`${DB_SERVICE_URL}/correction-rules?submission_id=${encodeURIComponent(submissionId)}`, { timeout: 8000 })
                 .then((r: any) => ({ ok: true, data: r.data, error: '' }))
                 .catch((e: any) => ({ ok: false, data: [], error: e?.message || 'request failed' })),
-            internalApi.get(`${DB_SERVICE_URL}/properties`, { timeout: 3500 })
+            internalApi.get(`${DB_SERVICE_URL}/properties`, { timeout: 8000 })
                 .then((r: any) => ({ ok: true, data: r.data, error: '' }))
                 .catch((e: any) => ({ ok: false, data: { properties: [] }, error: e?.message || 'request failed' })),
         ]);
-        let learningDetailResult: any = { ok: false, data: null, error: 'comparison revision unavailable' };
-        const initialRevision = (learningRevisionResult as any).data?.comparison_revision;
-        if ((learningRevisionResult as any).ok && initialRevision) {
-            learningDetailResult = await internalApi
-                .get(`${DIFFER_SERVICE_URL}/learning/submissions/${encodeURIComponent(submissionId)}?comparison_revision=${encodeURIComponent(initialRevision)}`, { timeout: 3500 })
-                .then((r: any) => ({ ok: true, data: r.data, error: '' }))
-                .catch((e: any) => ({ ok: false, data: null, error: e?.message || 'request failed' }));
-        }
-
-        // Browser approval finalization creates the differ comparison just before sending
-        // the reviewer here. A slow filesystem write used to make this first GET lose a
-        // race and render a 404; refreshing worked because the comparison had completed.
-        // Briefly retry the read so the first navigation is the useful explanations page.
-        if (!(learningDetailResult as any).ok && (submissionResult as any).ok) {
-            for (let attempt = 0; attempt < 4 && !(learningDetailResult as any).ok; attempt++) {
-                await new Promise((resolve) => setTimeout(resolve, 250));
-                learningRevisionResult = await internalApi
-                    .get(`${DIFFER_SERVICE_URL}/learning/submissions/${encodeURIComponent(submissionId)}/revision`, { timeout: 3500 })
-                    .then((r: any) => ({ ok: true, data: r.data, error: '' }))
-                    .catch((e: any) => ({ ok: false, data: null, error: e?.message || 'request failed' }));
-                const retryRevision = (learningRevisionResult as any).data?.comparison_revision;
-                if (!(learningRevisionResult as any).ok || !retryRevision) continue;
-                learningDetailResult = await internalApi
-                    .get(`${DIFFER_SERVICE_URL}/learning/submissions/${encodeURIComponent(submissionId)}?comparison_revision=${encodeURIComponent(retryRevision)}`, { timeout: 3500 })
-                    .then((r: any) => ({ ok: true, data: r.data, error: '' }))
-                    .catch((e: any) => ({ ok: false, data: null, error: e?.message || 'request failed' }));
-            }
-        }
+        const learningLog = formatLearningLoadLog(submissionId, learningDetailResult)
+            + ` submission_ok=${submissionResult.ok} rules_ok=${correctionRulesResult.ok} page=${Date.now() - pageStartedAt}ms`;
+        if (learningDetailResult.ok && submissionResult.ok) console.log(learningLog);
+        else console.warn(learningLog);
 
         if (!(submissionResult as any).ok || !(submissionResult as any).data) {
+            console.warn(`[learning-page] submission=${submissionId} rendering 404: submission read failed: ${submissionResult.error}`);
             return res.status(404).render('error', { message: 'Learning details not found for this submission' });
         }
 
@@ -2655,9 +2636,15 @@ app.get('/learning/submission/:submissionId', async (req, res) => {
             savedCorrectionRules,
             locationOptions,
             learningUnavailable: !(learningDetailResult as any).ok,
+        }, (renderError: any, html: string) => {
+            if (renderError) {
+                console.error(`[learning-page] submission=${submissionId} template render failed:`, renderError.stack || renderError.message);
+                return res.status(500).render('error', { message: 'Failed to load learning submission details' });
+            }
+            res.send(html);
         });
     } catch (error: any) {
-        console.error('Error loading learning submission detail page:', error.message);
+        console.error(`[learning-page] submission=${req.params.submissionId} failed:`, error.stack || error.message);
         res.status(500).render('error', {
             message: 'Failed to load learning submission details'
         });

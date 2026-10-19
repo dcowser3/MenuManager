@@ -584,6 +584,7 @@ app.get('/learning/submissions/:submissionId/revision', async (req, res) => {
 });
 
 app.get('/learning/submissions/:submissionId', async (req, res) => {
+    const startedAt = Date.now();
     try {
         const submissionId = `${req.params.submissionId || ''}`.trim();
         const requestedRevision = `${req.query?.comparison_revision || ''}`.trim();
@@ -603,12 +604,20 @@ app.get('/learning/submissions/:submissionId', async (req, res) => {
             });
         }
 
+        const extractStartedAt = Date.now();
         const aiDraftText = await extractText(latest.ai_draft_path);
+        const draftExtractMs = Date.now() - extractStartedAt;
         const currentSourceHash = sha256Text(aiDraftText);
         if (latest.source_snapshot_sha256 && latest.source_snapshot_sha256 !== currentSourceHash) {
             return res.status(409).json({ error: 'The frozen learning comparison source has changed.' });
         }
+        const finalExtractStartedAt = Date.now();
         const finalText = await extractText(latest.final_path);
+        const finalExtractMs = Date.now() - finalExtractStartedAt;
+        const totalMs = Date.now() - startedAt;
+        if (totalMs > 2000) {
+            console.warn(`[learning-detail] slow read submission=${submissionId} total=${totalMs}ms draft_extract=${draftExtractMs}ms final_extract=${finalExtractMs}ms`);
+        }
         if (latest.final_snapshot_sha256 && latest.final_snapshot_sha256 !== sha256Text(finalText)) {
             return res.status(409).json({ error: 'The frozen learning comparison output has changed.' });
         }
