@@ -3309,7 +3309,15 @@
             }
 
             if (!startResponse.ok || !startData.checkId) {
-                throw new Error(startData.error || `Failed to start AI check (${startResponse.status || 'server error'})`);
+                // Never lock the submitter out because the AI check broke: fall back to manual review.
+                return buildBasicCheckFallback(
+                    fallbackContext.menuContent,
+                    fallbackContext.reviewMode,
+                    fallbackContext.changedLineCount,
+                    'AI check could not start. No automated suggestions were applied, but you can still submit this menu for manual review.',
+                    startResponse.status || 0,
+                    { aiFailure: { reason: 'basic_check_start_failed', status: startResponse.status || 0, error: startData.error || null } }
+                );
             }
 
             const startedAt = Date.now();
@@ -3347,7 +3355,15 @@
                 }
 
                 if (!statusResponse.ok) {
-                    throw new Error(statusData.error || `Failed to read AI check status (${statusResponse.status || 'server error'})`);
+                    // e.g. 404 when a server restart dropped the in-memory job.
+                    return buildBasicCheckFallback(
+                        fallbackContext.menuContent,
+                        fallbackContext.reviewMode,
+                        fallbackContext.changedLineCount,
+                        'AI check was interrupted. No automated suggestions were applied, but you can still submit this menu for manual review.',
+                        statusResponse.status || 0,
+                        { checkId: startData.checkId, aiFailure: { reason: 'basic_check_status_failed', status: statusResponse.status || 0, error: statusData.error || null } }
+                    );
                 }
 
                 if (statusData.status === 'pending') {

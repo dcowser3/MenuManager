@@ -735,6 +735,18 @@ describe('dashboard form modification source chooser', () => {
         expect(template).not.toContain('if (!skipAiReview && requiresAiRerun)');
     });
 
+    test('a broken or interrupted AI check falls back to manual review instead of locking submit', () => {
+        const template = fs.readFileSync(
+            path.join(__dirname, '..', 'views', 'form.ejs'),
+            'utf8'
+        );
+
+        expect(template).not.toContain('throw new Error(startData.error');
+        expect(template).not.toContain('throw new Error(statusData.error');
+        expect(template).toContain("reason: 'basic_check_start_failed'");
+        expect(template).toContain("reason: 'basic_check_status_failed'");
+    });
+
     test('uses the main submit button to re-run a stale AI check', () => {
         const template = fs.readFileSync(
             path.join(__dirname, '..', 'views', 'form.ejs'),
