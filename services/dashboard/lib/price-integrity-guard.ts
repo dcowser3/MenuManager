@@ -39,7 +39,8 @@ const TRAILING_PRICE_RE = new RegExp(
     'i'
 );
 // Unparsed numeric tail on a submitted line ("Clarita-80/345", "Mercado -76/326").
-const SUBMITTED_NUMERIC_TAIL_RE = /[$\u20ac\u00a3]?\d[\d.,/|\s\u2013-]*\*?\s*$/u;
+// A leading apostrophe keeps a two-digit vintage intact ("'99").
+const SUBMITTED_NUMERIC_TAIL_RE = /['\u2019]?[$\u20ac\u00a3]?\d[\d.,/|\s\u2013-]*\*?\s*$/u;
 
 function normalizePriceValue(value: string): string {
     return (value || '')
@@ -250,6 +251,11 @@ export function guardCorrectedMenuPrices(
         }
 
         if (submittedLineContainsPriceNumbers(originalLine, correctedPrice.price)) {
+            continue;
+        }
+
+        // A zero amount is part of a name ("HEINEKEN 0.0"), never a price.
+        if (/^0(?:\|0)*$/.test(correctedPrice.normalizedPrice)) {
             continue;
         }
 

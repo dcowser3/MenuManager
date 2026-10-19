@@ -143,10 +143,21 @@ function escapeRegExp(value: string): string {
     return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+// One trailing amount: "14", "$12", "12.50", "1,450", "2450", "AED 80", "80AED", "MP".
+const LINE_PRICE_AMOUNT = String.raw`(?:(?:[$\u20ac\u00a3]|(?:AED|USD|QAR|SAR|EUR|GBP)\s?)?\d{1,4}(?:,\d{3})*(?:[.,]\d{1,2})?(?:\s?(?:AED|USD|QAR|SAR|EUR|GBP))?|MP|MKT|market\s+price)`;
+// Glass/bottle style multi-prices: "76/326", "80-345", "16 | 80".
+const LINE_PRICE_RE = new RegExp(
+    String.raw`(?:^|[\s\-|/\u2013])${LINE_PRICE_AMOUNT}(?:\s*[|/\u2013-]\s*${LINE_PRICE_AMOUNT})*\*?(?:\s+[A-Z]{1,3}(?:,[A-Z]{1,3})*)?\s*$`,
+    'i'
+);
+
 export function looksLikePriceOnLine(line: string): boolean {
     const compact = (line || '').trim();
-    // Handles "... - 8", "... 14", "... $12", "... 12.50"
-    return /(?:^|[\s\-|])\$?\d{1,3}(?:[.,]\d{1,2})?\s*$/.test(compact);
+    // Used to clear AI "Missing Price" criticals, so it must recognize every
+    // price shape chefs actually type. A miss leaves a false blocking critical.
+    if (!LINE_PRICE_RE.test(compact)) return false;
+    // A bare vintage year ("Chateau Margaux 2015") is not a price.
+    return !/(?:^|\s)(?:19|20)\d{2}\*?\s*$/.test(compact);
 }
 
 function isLikelyContinuationLine(previousLine: string, nextLine: string): boolean {
@@ -578,7 +589,7 @@ export function enforcePrixFixeCriticalChecks(
 // the flag fires on every review. Detection is conservative: a line "has codes"
 // when, after stripping a trailing price token, it ends in a cluster of 1-2
 // uppercase code tokens (comma-separated, no spaces), e.g. "... G,D 24".
-const TRAILING_PRICE_FOR_ALLERGEN_CHECK = /\s+\$?\d+(?:[.,]\d+)?(?:\s*(?:each|pp|per\s*person))?\s*$/i;
+const TRAILING_PRICE_FOR_ALLERGEN_CHECK = /\s+(?:[$\u20ac\u00a3]|(?:AED|USD|QAR|SAR|EUR|GBP)\s?)?\d+(?:[.,]\d+)?(?:\s*[|/\u2013-]\s*\$?\d+(?:[.,]\d+)?)*(?:\s?(?:AED|USD|QAR|SAR|EUR|GBP))?(?:\s*(?:each|pp|per\s*person))?\s*$/i;
 
 function parseAllergenCodesForProgramCheck(allergenLegend?: string): Set<string> {
     const configuredLegend = `${allergenLegend || getTenantConfig().allergenKey || ''}`;

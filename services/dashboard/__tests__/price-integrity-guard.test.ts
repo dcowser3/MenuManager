@@ -192,6 +192,32 @@ describe('guardCorrectedMenuPrices', () => {
             expect(result.suggestions).toEqual([]);
         });
 
+        // tán, 2026-08-29: the AI fixed "HEINEKEN O.O" to "HEINEKEN 0.0" and the
+        // guard read 0.0 as an invented price.
+        it('does not treat a zero in a product name as an AI-added price', () => {
+            const result = guardCorrectedMenuPrices('HEINEKEN O.O', 'HEINEKEN 0.0', []);
+
+            expect(result.correctedMenu).toBe('HEINEKEN 0.0');
+            expect(result.suggestions).toEqual([]);
+        });
+
+        it('restores a two-digit vintage with its apostrophe', () => {
+            const result = guardCorrectedMenuPrices("Chateau Margaux '99", 'Chateau Margaux 1999', []);
+
+            expect(result.correctedMenu).toBe("Chateau Margaux '99");
+            expect(result.suggestions).toEqual([]);
+        });
+
+        it.each([
+            ["Chateau Margaux '99 450", "Chateau Margaux '99 450"],
+            ["Opus One '18 95/480", "Opus One '18 95 | 480"],
+        ])('keeps a priced wine with a two-digit vintage: %s', (original, corrected) => {
+            const result = guardCorrectedMenuPrices(original, corrected, []);
+
+            expect(result.correctedMenu).toBe(corrected);
+            expect(result.suggestions).toEqual([]);
+        });
+
         it('still strips a price whose numbers appear nowhere in the submission', () => {
             const result = guardCorrectedMenuPrices('Mercado, blanco tequila, lime', 'Mercado, blanco tequila, lime 76 | 326', []);
 
