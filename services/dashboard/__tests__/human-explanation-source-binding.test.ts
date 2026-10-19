@@ -1,6 +1,7 @@
 import {
     buildHumanExplanationSourceBinding,
     HUMAN_EXPLANATION_COORDINATE_BASIS,
+    HUMAN_EXPLANATION_EDITOR_BASELINE_STAGE,
     HUMAN_EXPLANATION_SOURCE_STAGE,
     isHumanExplanationSourceBinding,
     matchesSubmittedDraftToLearningComparison,
@@ -111,6 +112,31 @@ describe('human explanation source binding', () => {
         expect(matchesSubmittedDraftToLearningComparison(submission, comparison, 'submission-2')).toBe(false);
         expect(matchesSubmittedDraftToLearningComparison(submission, { ...comparison, source_attempt_id: 'attempt-2' }, 'submission-1')).toBe(false);
         expect(matchesSubmittedDraftToLearningComparison(submission, { ...comparison, ai_draft_path: '/app/tmp/two.docx' }, 'submission-1')).toBe(false);
+    });
+
+    test('binds an editor-baseline comparison to the submitted DOCX and keeps its stage', () => {
+        const input = {
+            submissionId: 'submission-1',
+            attemptId: 'attempt-1',
+            auditId: null,
+            sourceDocumentPath: '/app/tmp/original.docx',
+            sourceSnapshotSha256: digest('title\nDish, lemons G 8'),
+            comparisonRevision: 'comparison-b1',
+            sourceExtractionVersion: 'differ-source-extraction-v1',
+            sourceStage: HUMAN_EXPLANATION_EDITOR_BASELINE_STAGE,
+            correction: correction(),
+        };
+        const binding = buildHumanExplanationSourceBinding(input);
+
+        expect(binding).toMatchObject({ source_stage: HUMAN_EXPLANATION_EDITOR_BASELINE_STAGE, source_document_path: '/app/tmp/original.docx', audit_id: null });
+        expect(isHumanExplanationSourceBinding(binding)).toBe(true);
+        expect(isHumanExplanationSourceBinding({ ...binding, source_stage: HUMAN_EXPLANATION_SOURCE_STAGE })).toBe(false);
+        expect(() => buildHumanExplanationSourceBinding({ ...input, sourceStage: 'model_said_so' })).toThrow('source_stage');
+
+        const submission = { id: 'submission-1', form_attempt_id: 'attempt-1', ai_draft_path: '/app/tmp/draft.docx', original_path: '/app/tmp/original.docx' };
+        const comparison = { source_attempt_id: 'attempt-1', ai_draft_path: '/app/tmp/draft.docx', source_stage: HUMAN_EXPLANATION_EDITOR_BASELINE_STAGE, source_path: '/app/tmp/original.docx' };
+        expect(matchesSubmittedDraftToLearningComparison(submission, comparison, 'submission-1')).toBe(true);
+        expect(matchesSubmittedDraftToLearningComparison(submission, { ...comparison, source_path: '/app/tmp/other.docx' }, 'submission-1')).toBe(false);
     });
 
     test('rejects tampered coordinates or revision identity after persistence', () => {

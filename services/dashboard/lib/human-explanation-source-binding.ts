@@ -7,6 +7,13 @@ import { createHash } from 'crypto';
  */
 export const HUMAN_EXPLANATION_SOURCE_BINDING_VERSION = 'human-explanation-source-binding-v1';
 export const HUMAN_EXPLANATION_SOURCE_STAGE = 'differ_ai_draft_v1';
+// The differ now diffs from the approval editor's starting text (the submitted
+// DOCX, tracked changes accepted) so only the reviewer's own edits are listed.
+export const HUMAN_EXPLANATION_EDITOR_BASELINE_STAGE = 'differ_editor_baseline_v1';
+export const HUMAN_EXPLANATION_SOURCE_STAGES = new Set([
+    HUMAN_EXPLANATION_SOURCE_STAGE,
+    HUMAN_EXPLANATION_EDITOR_BASELINE_STAGE,
+]);
 export const HUMAN_EXPLANATION_COORDINATE_BASIS = 'utf16_line_span_v1';
 export const HUMAN_EXPLANATION_BINDING_METHOD = 'exact_content_hash_v1';
 export const HUMAN_EXPLANATION_SUBMITTED_DRAFT_METHOD = 'submitted_draft_comparison_hash_v1';
@@ -17,6 +24,12 @@ export const HUMAN_EXPLANATION_AUDIT_STAGES = new Set([
 
 /** Only the durable draft for this exact submission and attempt can replace an audit text match. */
 export function matchesSubmittedDraftToLearningComparison(submission: any, learning: any, submissionId: string): boolean {
+    if (learning?.source_stage === HUMAN_EXPLANATION_EDITOR_BASELINE_STAGE
+        && !(typeof submission?.original_path === 'string'
+            && submission.original_path.length > 0
+            && submission.original_path === learning?.source_path)) {
+        return false;
+    }
     return submission?.id === submissionId
         && typeof submission?.form_attempt_id === 'string'
         && submission.form_attempt_id.length > 0
@@ -97,8 +110,13 @@ export function buildHumanExplanationSourceBinding(input: {
     matchedAuditSnapshotSha256?: unknown;
     comparisonRevision: unknown;
     sourceExtractionVersion: unknown;
+    sourceStage?: unknown;
     correction: SourceCorrection;
 }): HumanExplanationSourceBinding {
+    const sourceStage = input.sourceStage == null ? HUMAN_EXPLANATION_SOURCE_STAGE : text(input.sourceStage, 'source_stage').trim();
+    if (!HUMAN_EXPLANATION_SOURCE_STAGES.has(sourceStage)) {
+        throw new Error('source_stage is not an approved learning comparison stage.');
+    }
     const submissionId = text(input.submissionId, 'submission_id').trim();
     const attemptId = text(input.attemptId, 'attempt_id').trim();
     const sourceDocumentPath = input.sourceDocumentPath == null ? undefined : text(input.sourceDocumentPath, 'source_document_path').trim();
@@ -158,7 +176,7 @@ export function buildHumanExplanationSourceBinding(input: {
         comparison_revision: comparisonRevision,
         source_extraction_version: sourceExtractionVersion,
         binding_method: sourceDocumentPath ? HUMAN_EXPLANATION_SUBMITTED_DRAFT_METHOD : HUMAN_EXPLANATION_BINDING_METHOD,
-        source_stage: HUMAN_EXPLANATION_SOURCE_STAGE,
+        source_stage: sourceStage,
         coordinate_basis: HUMAN_EXPLANATION_COORDINATE_BASIS,
         source_snapshot_sha256: sourceSnapshotSha256,
         matched_audit_stage: matchedAuditStage,
@@ -187,6 +205,7 @@ export function isHumanExplanationSourceBinding(value: unknown): value is HumanE
             matchedAuditSnapshotSha256: binding.matched_audit_snapshot_sha256,
             comparisonRevision: binding.comparison_revision,
             sourceExtractionVersion: binding.source_extraction_version,
+            sourceStage: binding.source_stage,
             correction: {
                 correction_id: binding.correction_id,
                 line_index: binding.span?.line_index,
@@ -201,7 +220,7 @@ export function isHumanExplanationSourceBinding(value: unknown): value is HumanE
         });
         return binding.version === HUMAN_EXPLANATION_SOURCE_BINDING_VERSION
             && binding.case_id === `learning:${binding.submission_id}:${binding.correction_id}`
-            && binding.source_stage === HUMAN_EXPLANATION_SOURCE_STAGE
+            && binding.source_stage === rebuilt.source_stage
             && binding.coordinate_basis === HUMAN_EXPLANATION_COORDINATE_BASIS
             && binding.binding_method === rebuilt.binding_method
             && binding.source_revision_id === rebuilt.source_revision_id

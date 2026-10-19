@@ -111,7 +111,8 @@ import {
 import {
     buildHumanExplanationSourceBinding,
     HUMAN_EXPLANATION_COORDINATE_BASIS,
-    HUMAN_EXPLANATION_SOURCE_STAGE,
+    HUMAN_EXPLANATION_EDITOR_BASELINE_STAGE,
+    HUMAN_EXPLANATION_SOURCE_STAGES,
     matchesSubmittedDraftToLearningComparison,
 } from './lib/human-explanation-source-binding';
 import { listActionablePendingCorrectionRules } from './lib/learning-dashboard-rules';
@@ -2677,7 +2678,7 @@ async function resolveHumanExplanationSourceBinding(payload: any): Promise<{ bin
         throw new CorrectionRuleValidationError('The correction is not present in the trusted learning comparison');
     }
     if (learning.comparison_revision !== comparisonRevision
-        || learning.source_stage !== HUMAN_EXPLANATION_SOURCE_STAGE
+        || !HUMAN_EXPLANATION_SOURCE_STAGES.has(learning.source_stage)
         || learning.coordinate_basis !== HUMAN_EXPLANATION_COORDINATE_BASIS
         || typeof learning.source_snapshot_sha256 !== 'string'
         || typeof learning.source_extraction_version !== 'string'
@@ -2688,7 +2689,25 @@ async function resolveHumanExplanationSourceBinding(payload: any): Promise<{ bin
     }
     let source: any;
     let sourceDocumentPath: string | undefined;
-    try {
+    // The editor baseline is the submitted DOCX, never an AI audit response, so
+    // it binds to that exact document rather than searching the audit table.
+    const bindToSubmittedDocument = async () => {
+        const submissionResult = await internalApi.get(
+            `${DB_SERVICE_URL}/submissions/${encodeURIComponent(submissionId)}`,
+            { timeout: 3500 },
+        );
+        const submission = submissionResult.data || {};
+        if (!matchesSubmittedDraftToLearningComparison(submission, learning, submissionId)) {
+            throw new CorrectionRuleValidationError('The comparison draft does not match this submission and form attempt');
+        }
+        source = { submission_id: submission.id, attempt_id: submission.form_attempt_id };
+        sourceDocumentPath = learning.source_stage === HUMAN_EXPLANATION_EDITOR_BASELINE_STAGE
+            ? submission.original_path
+            : submission.ai_draft_path;
+    };
+    if (learning.source_stage === HUMAN_EXPLANATION_EDITOR_BASELINE_STAGE) {
+        await bindToSubmittedDocument();
+    } else try {
         const sourceResult = await internalApi.get(
             `${DB_SERVICE_URL}/submissions/${encodeURIComponent(submissionId)}/review-source-binding?source_snapshot_sha256=${encodeURIComponent(learning.source_snapshot_sha256)}&attempt_id=${encodeURIComponent(learning.source_attempt_id)}`,
             { timeout: 3500 },
@@ -2699,16 +2718,7 @@ async function resolveHumanExplanationSourceBinding(payload: any): Promise<{ bin
         // generated footer. Its extracted text then cannot equal an earlier AI
         // response even though it is the exact draft shown in this comparison.
         if (error?.response?.status !== 409 || error?.response?.data?.exact_candidate_count !== 0) throw error;
-        const submissionResult = await internalApi.get(
-            `${DB_SERVICE_URL}/submissions/${encodeURIComponent(submissionId)}`,
-            { timeout: 3500 },
-        );
-        const submission = submissionResult.data || {};
-        if (!matchesSubmittedDraftToLearningComparison(submission, learning, submissionId)) {
-            throw new CorrectionRuleValidationError('The comparison draft does not match this submission and form attempt');
-        }
-        source = { submission_id: submission.id, attempt_id: submission.form_attempt_id };
-        sourceDocumentPath = submission.ai_draft_path;
+        await bindToSubmittedDocument();
     }
     const audit = source.audit || {};
     const binding = buildHumanExplanationSourceBinding({
@@ -2721,6 +2731,7 @@ async function resolveHumanExplanationSourceBinding(payload: any): Promise<{ bin
         matchedAuditSnapshotSha256: audit.source_snapshot_sha256,
         comparisonRevision: learning.comparison_revision,
         sourceExtractionVersion: learning.source_extraction_version,
+        sourceStage: learning.source_stage,
         correction,
     });
     return {

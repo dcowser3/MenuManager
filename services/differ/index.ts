@@ -36,6 +36,7 @@ import {
     LEARNING_SOURCE_STAGE,
     sha256Text,
 } from './lib/learning-source-revision';
+import { loadComparisonSource } from './lib/comparison-source';
 import {
     BoldFormattingSignal,
     extractBoldFormattingSignals,
@@ -97,6 +98,30 @@ async function extractDocxCleanPayload(filePath: string): Promise<ExtractedDocum
     };
 }
 
+// The approval editor's starting text: the submitted DOCX with tracked changes
+// accepted (extract_clean_menu_text.py --mode unapproved -> clean_visible_text).
+async function extractEditorBaselineText(filePath: string): Promise<string> {
+    const repoRoot = getRepoRoot();
+    const scriptPath = path.join(repoRoot, 'services', 'docx-redliner', 'extract_clean_menu_text.py');
+    const venvPython = path.join(repoRoot, 'services', 'docx-redliner', 'venv', 'bin', 'python');
+    const python = fsSync.existsSync(venvPython) ? `"${venvPython}"` : 'python3';
+    const { stdout } = await execAsync(`${python} "${scriptPath}" "${filePath}" --mode unapproved`, {
+        timeout: 120000,
+        maxBuffer: 10 * 1024 * 1024,
+    });
+    const payload = JSON.parse((stdout || '{}').trim() || '{}');
+    if (payload.error) {
+        throw new Error(payload.error);
+    }
+    return String(payload.clean_visible_text || payload.visible_text || '').trim();
+}
+
+const comparisonSourceExtractors = {
+    extractAiDraftText: (filePath: string) => extractText(filePath),
+    extractEditorBaselineText,
+    fileExists: (filePath: string) => fsSync.existsSync(filePath),
+};
+
 type TrainingEntry = {
     submission_id: string;
     timestamp: string;
@@ -117,6 +142,8 @@ type TrainingEntry = {
     source_attempt_id?: string;
     source_extraction_version?: string;
     source_stage?: string;
+    // Document the comparison diffs from; absent on AI-draft entries.
+    source_path?: string;
     coordinate_basis?: string;
     source_snapshot_sha256?: string;
     final_snapshot_sha256?: string;
@@ -291,11 +318,15 @@ app.post('/compare', async (req, res) => {
             }
         }
 
-        const aiDraftText = aiDraftDocument.text;
+        const diffSource = await loadComparisonSource(
+            { aiDraftPath: ai_draft_path, originalPath: original_path },
+            { ...comparisonSourceExtractors, extractAiDraftText: async () => aiDraftDocument.text },
+        );
+        const sourceText = diffSource.text;
         const finalText = finalDocument.text;
-        const sourceSnapshotSha256 = sha256Text(aiDraftText);
-        const differences = analyzeDocuments(aiDraftText, finalText);
-        const replacements = extractReplacementSignals(aiDraftText, finalText);
+        const sourceSnapshotSha256 = sha256Text(sourceText);
+        const differences = analyzeDocuments(sourceText, finalText);
+        const replacements = extractReplacementSignals(sourceText, finalText);
         const boldFormattingSignals = extractBoldFormattingSignals({
             aiDraftHtml: aiDraftDocument.html,
             finalHtml: finalDocument.html,
@@ -304,7 +335,7 @@ app.post('/compare', async (req, res) => {
         const hasChanges = differences.hasChanges || boldFormattingSignals.length > 0;
 
         if (!hasChanges) {
-            const skipReason = 'final approved document matches the AI draft';
+            const skipReason = 'final approved document matches the document the reviewer started from';
             console.log(`⏭️  Skipping learning comparison for ${submission_id}: ${skipReason}`);
             return res.status(200).json({
                 success: true,
@@ -321,7 +352,7 @@ app.post('/compare', async (req, res) => {
         const trainingEntry: TrainingEntry = {
             submission_id,
             timestamp: new Date().toISOString(),
-            ai_draft_length: aiDraftText.length,
+            ai_draft_length: aiDraftDocument.text.length,
             final_length: finalText.length,
             changes_detected: hasChanges,
             change_percentage: differences.changePercentage,
@@ -333,10 +364,11 @@ app.post('/compare', async (req, res) => {
             ...(reviewCompletedAt ? { review_completed_at: reviewCompletedAt } : {}),
             changed_by_human: true,
             learning_eligible: true,
-            comparison_revision: comparisonRevision(submission_id, sourceAttemptId, sourceSnapshotSha256, finalText),
+            comparison_revision: comparisonRevision(submission_id, sourceAttemptId, sourceSnapshotSha256, finalText, diffSource.stage),
             source_attempt_id: sourceAttemptId,
             source_extraction_version: LEARNING_SOURCE_EXTRACTION_VERSION,
-            source_stage: LEARNING_SOURCE_STAGE,
+            source_stage: diffSource.stage,
+            source_path: diffSource.path,
             coordinate_basis: LEARNING_COORDINATE_BASIS,
             source_snapshot_sha256: sourceSnapshotSha256,
             final_snapshot_sha256: sha256Text(finalText),
@@ -360,7 +392,8 @@ app.post('/compare', async (req, res) => {
             JSON.stringify(
                 {
                     ...trainingEntry,
-                    ai_draft_excerpt: aiDraftText.substring(0, 700),
+                    ai_draft_excerpt: aiDraftDocument.text.substring(0, 700),
+                    source_excerpt: sourceText.substring(0, 700),
                     final_excerpt: finalText.substring(0, 700),
                 },
                 null,
@@ -371,6 +404,7 @@ app.post('/compare', async (req, res) => {
         const learnedRules = await rebuildLearnedRules();
 
         console.log(`✅ Comparison complete for ${submission_id}`);
+        console.log(`   Source: ${diffSource.stage} (${path.basename(diffSource.path)})`);
         console.log(`   Changes detected: ${hasChanges ? 'YES' : 'NO'}`);
         console.log(`   Replacement signals: ${replacements.length}`);
         console.log(`   Bold formatting signals: ${boldFormattingSignals.length}`);
@@ -605,9 +639,14 @@ app.get('/learning/submissions/:submissionId', async (req, res) => {
         }
 
         const extractStartedAt = Date.now();
-        const aiDraftText = await extractText(latest.ai_draft_path);
+        const comparisonSource = await loadComparisonSource({
+            aiDraftPath: latest.ai_draft_path,
+            sourceStage: latest.source_stage || LEARNING_SOURCE_STAGE,
+            sourcePath: latest.source_path,
+        }, comparisonSourceExtractors);
+        const sourceText = comparisonSource.text;
         const draftExtractMs = Date.now() - extractStartedAt;
-        const currentSourceHash = sha256Text(aiDraftText);
+        const currentSourceHash = sha256Text(sourceText);
         if (latest.source_snapshot_sha256 && latest.source_snapshot_sha256 !== currentSourceHash) {
             return res.status(409).json({ error: 'The frozen learning comparison source has changed.' });
         }
@@ -621,10 +660,10 @@ app.get('/learning/submissions/:submissionId', async (req, res) => {
         if (latest.final_snapshot_sha256 && latest.final_snapshot_sha256 !== sha256Text(finalText)) {
             return res.status(409).json({ error: 'The frozen learning comparison output has changed.' });
         }
-        const lineCorrections = extractLineCorrections(aiDraftText, finalText);
-        const dishCorrections = extractDishCorrections(aiDraftText, finalText).map((correction) => ({
+        const lineCorrections = extractLineCorrections(sourceText, finalText);
+        const dishCorrections = extractDishCorrections(sourceText, finalText).map((correction) => ({
             ...correction,
-            source_span: sourceSpanForLine(aiDraftText, correction.line_index, correction.before_line),
+            source_span: sourceSpanForLine(sourceText, correction.line_index, correction.before_line),
         }));
 
         res.json({
@@ -640,7 +679,8 @@ app.get('/learning/submissions/:submissionId', async (req, res) => {
             comparison_revision: latest.comparison_revision || null,
             source_attempt_id: latest.source_attempt_id || null,
             source_extraction_version: latest.source_extraction_version || null,
-            source_stage: latest.source_stage || LEARNING_SOURCE_STAGE,
+            source_stage: comparisonSource.stage,
+            source_path: comparisonSource.path,
             coordinate_basis: latest.coordinate_basis || LEARNING_COORDINATE_BASIS,
             source_snapshot_sha256: latest.source_snapshot_sha256 || currentSourceHash,
         });
@@ -754,6 +794,11 @@ app.post('/learning/recompute-signals', async (_req, res) => {
             try {
                 const aiDraftDocument = await extractDocument(entry.ai_draft_path);
                 const finalDocument = await extractDocument(entry.final_path);
+                const sourceText = (await loadComparisonSource({
+                    aiDraftPath: entry.ai_draft_path,
+                    sourceStage: entry.source_stage || LEARNING_SOURCE_STAGE,
+                    sourcePath: entry.source_path,
+                }, { ...comparisonSourceExtractors, extractAiDraftText: async () => aiDraftDocument.text })).text;
                 let originalDocument: ExtractedDocumentPayload | undefined;
                 if (entry.original_path) {
                     try {
@@ -763,26 +808,25 @@ app.post('/learning/recompute-signals', async (_req, res) => {
                     }
                 }
 
-                const aiDraftText = aiDraftDocument.text;
                 const finalText = finalDocument.text;
-                const replacements = extractReplacementSignals(aiDraftText, finalText);
+                const replacements = extractReplacementSignals(sourceText, finalText);
                 const boldFormattingSignals = extractBoldFormattingSignals({
                     aiDraftHtml: aiDraftDocument.html,
                     finalHtml: finalDocument.html,
                     originalHtml: originalDocument?.html,
                 });
-                const hasChanges = aiDraftText.trim() !== finalText.trim() || boldFormattingSignals.length > 0;
+                const hasChanges = sourceText.trim() !== finalText.trim() || boldFormattingSignals.length > 0;
                 replacementCount += replacements.length;
                 recomputed += 1;
 
                 refreshed.push({
                     ...entry,
-                    ai_draft_length: aiDraftText.length,
+                    ai_draft_length: aiDraftDocument.text.length,
                     final_length: finalText.length,
                     changes_detected: hasChanges,
                     change_percentage: (() => {
-                        const lengthDiff = Math.abs(finalText.length - aiDraftText.length);
-                        const maxLen = Math.max(aiDraftText.length, finalText.length) || 1;
+                        const lengthDiff = Math.abs(finalText.length - sourceText.length);
+                        const maxLen = Math.max(sourceText.length, finalText.length) || 1;
                         return (lengthDiff / maxLen) * 100;
                     })(),
                     learning_signals: {
@@ -935,7 +979,7 @@ function sourceSpanForLine(source: string, lineIndex: number, beforeLine: string
         return { row_index: rowIndex, start_utf16: startUtf16, end_utf16: startUtf16 };
     }
     if (line !== beforeLine) {
-        throw new Error(`Unable to bind learning correction line ${rowIndex} to its AI draft source span.`);
+        throw new Error(`Unable to bind learning correction line ${rowIndex} to its comparison source span.`);
     }
     return { row_index: rowIndex, start_utf16: startUtf16, end_utf16: startUtf16 + beforeLine.length };
 }
@@ -1078,7 +1122,7 @@ type RuleExampleRecord = ReplacementExample & {
     timestamp: string;
     ai_draft_path: string;
     final_path: string;
-    evidence_source: 'ai_draft_vs_final_approved_docx';
+    evidence_source: 'ai_draft_vs_final_approved_docx' | 'editor_baseline_vs_final_approved_docx';
     comparison_source?: string;
     review_source?: string;
 };
@@ -1151,9 +1195,13 @@ async function findRuleExamplesForReplacement(input: {
         searchedSubmissionIds.add(entry.submission_id);
 
         try {
-            const aiDraftText = await extractText(entry.ai_draft_path);
+            const source = await loadComparisonSource({
+                aiDraftPath: entry.ai_draft_path,
+                sourceStage: entry.source_stage || LEARNING_SOURCE_STAGE,
+                sourcePath: entry.source_path,
+            }, comparisonSourceExtractors);
             const finalText = await extractText(entry.final_path);
-            const matches = extractReplacementExamples(aiDraftText, finalText, input.originalText, input.correctedText);
+            const matches = extractReplacementExamples(source.text, finalText, input.originalText, input.correctedText);
 
             for (const match of matches) {
                 examples.push({
@@ -1162,7 +1210,7 @@ async function findRuleExamplesForReplacement(input: {
                     timestamp: entry.timestamp,
                     ai_draft_path: entry.ai_draft_path,
                     final_path: entry.final_path,
-                    evidence_source: 'ai_draft_vs_final_approved_docx',
+                    evidence_source: source.stage === LEARNING_SOURCE_STAGE ? 'ai_draft_vs_final_approved_docx' : 'editor_baseline_vs_final_approved_docx',
                     comparison_source: entry.comparison_source,
                     review_source: entry.review_source,
                 });

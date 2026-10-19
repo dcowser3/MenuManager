@@ -157,7 +157,7 @@ are allowed, but there must be exactly one matching audit stage: the audited
 from both audit stages because the reviewer edited the form after AI review or
 the DOCX generator added footer text. When no audit stage matches, the dashboard
 instead requires the differ's frozen draft path and attempt ID to exactly match
-the durable submission's `ai_draft_path` and `form_attempt_id`. The differ has
+the durable submission's `ai_draft_path` and `form_attempt_id`. For `differ_editor_baseline_v1` comparisons the audit lookup is skipped (the source is the submitted DOCX, not an AI response) and the binding also requires the submission's `original_path` to equal the comparison's `source_path`; the binding records `source_stage` and `source_document_path` accordingly. The differ has
 already re-extracted the draft and verified its frozen source hash. This binds
 the explanation to that specific submitted menu and comparison revision without
 mistaking the earlier AI response for the submitted DOCX. Ambiguous audit
@@ -235,7 +235,9 @@ Reviewers can also add an accepted rule directly from `GET /learning` without op
 
 ### Flow 2: System-Proposed Rules
 
-**Trigger:** After a human-reviewed final approval calls `POST /compare` with `comparison_source: "human_review_final_approval"` and `changed_by_human: true`, the differ service verifies that the final approved DOCX differs from the AI draft sent to Isabella. Text differences and bold-formatting audit differences can both save learning evidence, but only text replacement patterns are considered for rule proposals.
+**Trigger:** After a human-reviewed final approval calls `POST /compare` with `comparison_source: "human_review_final_approval"` and `changed_by_human: true`, the differ service verifies that the final approved DOCX differs from the document Isabella started editing from.
+
+**Comparison source (Oct 2026):** the differ diffs from the approval editor's starting text — the submitted DOCX (`original_path`) with its tracked changes accepted, extracted by `extract_clean_menu_text.py --mode unapproved` (`clean_visible_text`). Entries record `source_stage: "differ_editor_baseline_v1"` and `source_path`. Before this, the source was the AI's raw `-draft.docx`, which the chef had partly declined in the form, so every declined AI suggestion (raw-marker asterisks, spelling fixes) was listed on the explanations page as an Isabella correction and the line diff misaligned around them (Fairmont Chicago breakfast, `ced4c315…`). If the submitted DOCX is missing or unreadable, the differ falls back to the AI draft (`differ_ai_draft_v1`); existing entries are re-read with the stage they were frozen with. A second approval-editor submit replaces the comparison, still diffed from the original submitted DOCX, so the page shows both rounds of Isabella's edits together. Text differences and bold-formatting audit differences can both save learning evidence, but only text replacement patterns are considered for rule proposals.
 
 Before aggregating a replacement, differ matches changed lines by same-dish identity. Lines from deleted or replacement dishes are ignored for learning, so removed menu items do not create spelling or diacritic proposals.
 

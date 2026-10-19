@@ -19,7 +19,7 @@ This feature captures human reviewer corrections and feeds stable correction pat
    - confidence
 5. Dashboard surfaces system-proposed rules for human review. Accepted correction rules are available to the Basic AI Check deterministic pre-AI pass before `ai-review` is called; they are no longer appended as an automatic prompt overlay.
 
-The differ skips learning for quick approvals, imports/backfills, AI-only changes, missing provenance flags, and final DOCX files that are identical to the AI draft. Eligible training entries are upserted by submission/source before aggregation so repeated finalization cannot inflate occurrences.
+The differ skips learning for quick approvals, imports/backfills, AI-only changes, missing provenance flags, and final DOCX files that are identical to the document the reviewer started from (the submitted DOCX with tracked changes accepted; the AI draft only when that DOCX is unavailable — see learning-pipeline-v2.md). Eligible training entries are upserted by submission/source before aggregation so repeated finalization cannot inflate occurrences.
 
 ## New Differ Endpoints
 
