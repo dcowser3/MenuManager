@@ -24,8 +24,9 @@
  *   node scripts/replay-guard-criticals.js --since 2026-10-01
  *   node scripts/replay-guard-criticals.js --json
  *
- * Exits 1 when any same_line false block is found, so it gates a price-shape
- * change. Baseline: docs/design-docs/critical-error-blocking.md.
+ * Exits 1 when any same_line or neighbor_line false block is found, so it
+ * gates any change to price-shapes.ts or the guard. Baseline:
+ * docs/design-docs/critical-error-blocking.md.
  */
 
 const fs = require('fs');
@@ -177,7 +178,7 @@ async function main() {
     replayed += 1;
     criticals.push(...found);
   }
-  const falseBlocks = criticals.filter((c) => c.kind === 'same_line');
+  const falseBlocks = criticals.filter((c) => c.kind !== 'absent');
   const countOf = (kind) => criticals.filter((c) => c.kind === kind).length;
 
   if (args.json) {
@@ -186,7 +187,7 @@ async function main() {
     console.log(`Completed audits since ${args.since}: ${rows.length} (${replayed} replayable)`);
     console.log(`Code-made Missing Price criticals: ${criticals.length} in ${new Set(criticals.map((c) => c.auditId)).size} audits`);
     console.log(`  same_line (false block, price shape unknown): ${countOf('same_line')}`);
-    console.log(`  neighbor_line (price on a nearby submitted line): ${countOf('neighbor_line')}`);
+    console.log(`  neighbor_line (false block, price typed on the line below): ${countOf('neighbor_line')}`);
     console.log(`  absent (real catch): ${countOf('absent')}`);
     for (const c of criticals) {
       console.log(`\n${c.kind}  ${c.createdAt.slice(0, 10)}  ${c.property || '-'} / ${c.project || '-'}  [${c.auditId}]`);

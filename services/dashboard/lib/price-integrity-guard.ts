@@ -190,6 +190,69 @@ function buildOriginalLineLookup(
     return lookup;
 }
 
+function significantWords(line: string): string[] {
+    return normalizeForSuggestionMatch(line).split(' ').filter((word) => word.length > 2 && /[a-z]/.test(word));
+}
+
+function wordsMostlyOn(line: string, correctedWords: Set<string>): boolean {
+    const words = significantWords(line);
+    if (words.length === 0) return false;
+    const found = words.filter((word) => correctedWords.has(word)).length;
+    return found / words.length >= 0.6;
+}
+
+// A price typed on its own line or table cell sits below the item, at most
+// after one wrapped description line.
+const FOLLOWING_PRICE_LINES = 2;
+
+/**
+ * True when the chef typed this price on a line below the item and the AI
+ * merged it onto the item line: "Pinot Noir - Savart, Champagne" / "1,980",
+ * "Pork Belly Guacamole, ..." / "D,G 18", or a wrapped description whose last
+ * line ends in the price. The price came from
+ * the submitter, so stripping it would delete their content and block them.
+ * Only lines the AI visibly merged count; a price copied from the next item's
+ * own line (or from any line above) is still treated as invented.
+ */
+function priceTypedOnMergedFollowingLine(
+    originalLineRefs: Array<{ line: string; index: number }>,
+    pairedPosition: number,
+    correctedPrice: TrailingPriceMatch
+): boolean {
+    const numbers = priceNumbers(correctedPrice.price);
+    if (numbers.length === 0) return false;
+    const correctedWords = new Set(significantWords(correctedPrice.lineWithoutPrice));
+
+    // The guard pairs lines by first segment, so two "Cabernet Sauvignon, ..."
+    // wines can be crossed. Also start from the submitted line the AI line
+    // actually came from.
+    const starts = new Set<number>(pairedPosition >= 0 ? [pairedPosition] : []);
+    originalLineRefs.forEach((ref, position) => {
+        if (significantWords(ref.line).length >= 2 && wordsMostlyOn(ref.line, correctedWords)) {
+            starts.add(position);
+        }
+    });
+
+    for (const start of starts) {
+        for (let offset = 1; offset <= FOLLOWING_PRICE_LINES; offset++) {
+            const following = originalLineRefs[start + offset]?.line.trim();
+            if (!following) break;
+            const followingNumbers = new Set(priceNumbers(following));
+            if (numbers.every((n) => followingNumbers.has(n))) {
+                // A cell with no words ("1,980", "16000", "D,G 18") is the
+                // item's price; a line with words must have been merged.
+                if (significantWords(following).length === 0) return true;
+                const body = matchTrailingPrice(following, { allowYear: true })?.before || following;
+                if (wordsMostlyOn(body, correctedWords)) return true;
+                break;
+            }
+            // A wrapped description line in between must itself be merged.
+            if (!wordsMostlyOn(following, correctedWords)) break;
+        }
+    }
+    return false;
+}
+
 export function guardCorrectedMenuPrices(
     originalMenu: string,
     correctedMenu: string,
@@ -241,6 +304,14 @@ export function guardCorrectedMenuPrices(
         }
 
         if (submittedLineContainsPriceNumbers(originalLine, correctedPrice.price)) {
+            continue;
+        }
+
+        if (!originalPrice && priceTypedOnMergedFollowingLine(
+            originalLineRefs,
+            originalLineRefs.indexOf(originalRef),
+            correctedPrice
+        )) {
             continue;
         }
 

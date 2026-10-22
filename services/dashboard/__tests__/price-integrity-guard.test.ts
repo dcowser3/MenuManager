@@ -227,4 +227,88 @@ describe('guardCorrectedMenuPrices', () => {
             ]);
         });
     });
+
+    // Replay of prod audits since 2026-07-01: 49 guard-made Missing Price
+    // criticals were on prices the chef typed on the line below the item (a
+    // wine-list price cell, or a wrapped description). The AI merged the price
+    // onto the item line and the guard stripped it and blocked the chef.
+    describe('prices typed on the line below the item', () => {
+        it('keeps a price typed in its own cell (Maya premium wine menu, 2026-07-03)', () => {
+            const original = [
+                'Pinot Noir – Frédéric Savart, "L\'Ouverture", Champagne, France',
+                '',
+                '1,980',
+                '',
+                'Pinot Noir, Chardonnay, Meunier – Henriot, Champagne, France',
+                '',
+                '3,500',
+            ].join('\n');
+            const corrected = [
+                'Pinot Noir – Frédéric Savart, "L\'Ouverture", Champagne, France 1,980',
+                '',
+                'Pinot Noir, Chardonnay, Meunier – Henriot, Champagne, France 3,500',
+            ].join('\n');
+
+            const result = guardCorrectedMenuPrices(original, corrected, []);
+
+            expect(result.correctedMenu).toBe(corrected);
+            expect(result.suggestions).toEqual([]);
+        });
+
+        it('keeps the price on a wrapped description line (Toro Toro Fort Worth, 2026-07-29)', () => {
+            const original = [
+                'Grilled Cauliflower , peanut-chili sauce, chimichurri, poblano cheese fondue,',
+                'spiced pepitas ,D,N,V 34',
+                'De la Parrilla',
+            ].join('\n');
+            const corrected = [
+                'Grilled Cauliflower, peanut-chili sauce, chimichurri, poblano cheese fondue, spiced pepitas, D,N,V 34',
+                'De la Parrilla',
+            ].join('\n');
+
+            const result = guardCorrectedMenuPrices(original, corrected, []);
+
+            expect(result.correctedMenu).toBe(corrected);
+            expect(result.suggestions).toEqual([]);
+        });
+
+        it.each([
+            ['a five-digit cell', 'Corvina, Rondinella – Dal Forno Amarone, Italy (Magnum)\n15000', 'Corvina, Rondinella – Dal Forno Amarone, Italy (Magnum) 15,000'],
+            ['a codes-and-price cell', 'Pork Belly Guacamole, cotija cheese, chips\nD,G 18', 'Pork Belly Guacamole, cotija cheese, chips D,G 18'],
+        ])('keeps a price typed in %s (Maya wine 2026-07-03, Tamayo 2026-07-09)', (_label, original, corrected) => {
+            const result = guardCorrectedMenuPrices(original, corrected, []);
+
+            expect(result.correctedMenu).toBe(corrected);
+            expect(result.suggestions).toEqual([]);
+        });
+
+        it('still strips a price copied from the line above (Tamayo CHICKEN TINGA, 2026-07-13)', () => {
+            const original = [
+                'CHICKEN TINGA SOPES D,G 48',
+                'CARNE ASADA SOPES D,G 60',
+                'CHICKEN TINGA',
+                'PASTEL DE CHOCOLATE D,V',
+            ].join('\n');
+            const corrected = original.replace(/^CHICKEN TINGA$/m, 'CHICKEN TINGA D 48');
+
+            const result = guardCorrectedMenuPrices(original, corrected, []);
+
+            expect(result.correctedMenu).toBe(original.replace(/^CHICKEN TINGA$/m, 'CHICKEN TINGA D'));
+            expect(result.suggestions).toEqual([
+                expect.objectContaining({ type: 'Missing Price', menuItem: 'CHICKEN TINGA', severity: 'critical' }),
+            ]);
+        });
+
+        it('still strips the next item\'s price copied onto an unpriced item', () => {
+            const original = 'Mercado, blanco tequila, lime\nAvocado, silver tequila, avocado 80';
+            const corrected = 'Mercado, blanco tequila, lime 80\nAvocado, silver tequila, avocado 80';
+
+            const result = guardCorrectedMenuPrices(original, corrected, []);
+
+            expect(result.correctedMenu).toBe(original);
+            expect(result.suggestions).toEqual([
+                expect.objectContaining({ type: 'Missing Price', severity: 'critical' }),
+            ]);
+        });
+    });
 });
