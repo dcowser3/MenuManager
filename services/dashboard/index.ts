@@ -876,6 +876,15 @@ async function getPropertyCatalogFromDb(): Promise<PropertyCatalogRecord[]> {
     return fallbackCatalog;
 }
 
+// Restaurant autocomplete lists must match what /form offers, so they read the
+// same DB-backed catalog (falls back to config/properties.json on DB failure).
+async function getActivePropertyNames(): Promise<string[]> {
+    const catalog = await getPropertyCatalogFromDb();
+    return catalog
+        .filter((record) => record.is_active !== false)
+        .map((record) => record.name);
+}
+
 function resolveCityCountryFromCatalog(property: string, catalog: PropertyCatalogRecord[]): string {
     const match = catalog.find((item) => item.name.toLowerCase() === property.toLowerCase());
     if (!match) return '';
@@ -1362,10 +1371,8 @@ app.get('/form-legacy', async (req, res) => {
 /**
  * Design Approval Page - Compare DOCX against PDF
  */
-app.get('/design-approval', (req, res) => {
-    const propertyCatalog = buildFallbackPropertyCatalog()
-        .filter((record) => record.is_active !== false)
-        .map((record) => record.name);
+app.get('/design-approval', async (req, res) => {
+    const propertyCatalog = await getActivePropertyNames();
     res.render('design-approval', {
         title: 'Design Approval',
         propertyCatalog,
@@ -1405,9 +1412,7 @@ app.get('/approved-menus', async (req, res) => {
             }
         }
 
-        const propertyCatalog = buildFallbackPropertyCatalog()
-            .filter((record) => record.is_active !== false)
-            .map((record) => record.name);
+        const propertyCatalog = await getActivePropertyNames();
 
         res.render('approved-menus', {
             title: 'Approved Menus',
