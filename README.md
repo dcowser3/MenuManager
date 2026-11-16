@@ -32,6 +32,8 @@ Clean approved-menu extraction also collapses accidental repeated in-line spaces
 
 After a revision is approved, only a known `revision_base_submission_id` lineage relationship supersedes its parent; unrelated menus in the same property and service period remain editable. When a prior approved DOCX is uploaded as a baseline, the form may suggest a matching approved menu, but it records a lineage link only if the user explicitly confirms it.
 
+"Is there a newer version of this menu?" is decided by menu identity (the menu's current-version pointer, then lineage), never by property and service period. A draft's text and project details are never replaced by another menu: a superseded draft is blocked with a link to open the current version in a new tab. The server rejects a draft submission that does not match its draft, a modification with no menu or project-detail changes, and a repeated click of the same submission. Retire a bad submission with `node scripts/retire-submission.js <id>` (dry run by default), never by setting its status by hand. See the [2026-11-16 incident note](docs/design-docs/incident-2026-11-16-load-newer-menu.md).
+
 Approved DOCX files require a shared persistent `DOCUMENT_STORAGE_ROOT` in multi-app production deployments. The clean-download route can recover from SharePoint or stored approved content when the local artifact is missing; the original-approved route is served only from the reviewer file or its SharePoint copy. See [document storage](docs/design-docs/document-storage.md) and the [operations playbook](docs/operations-playbook.md).
 
 ## Start Here

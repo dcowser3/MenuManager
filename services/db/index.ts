@@ -1113,7 +1113,10 @@ async function reconcileMenuPointerOnApproval(submission: any): Promise<void> {
     if (menu.current_submission_id) {
         if (menu.current_submission_id === submissionPublicId) return; // already the tip
         const currentPointer = await getSubmissionRecordById(menu.current_submission_id);
-        if (currentPointer && getApprovedTimestamp(submission) < getApprovedTimestamp(currentPointer)) {
+        if (currentPointer && submissionMatchesId(currentPointer, submissionPublicId)) return; // same row, other id form
+        // A pointer left on a retired/deleted row never blocks a real approval.
+        if (currentPointer && isApprovedSubmissionRecord(currentPointer)
+            && getApprovedTimestamp(submission) < getApprovedTimestamp(currentPointer)) {
             return; // older version approved late — don't move the pointer backward
         }
     }
@@ -1289,9 +1292,13 @@ export function htmlTextMatchesApproved(html: any, approvedText: any): boolean {
     return !!normalizedHtml && !!normalizedApproved && normalizedHtml === normalizedApproved;
 }
 
-export function mapApprovedSubmissionForClient(submission: any, latestForPropertyService?: any | null): any {
+// Client shape of an approved baseline. Freshness ("is there a newer version")
+// is NOT part of this payload: it is decided by menu identity in
+// resolveBaselineFreshness(). The former isLatestForPropertyService /
+// latestForPropertyService fields were removed on 2026-11-16 because property +
+// service period does not identify a menu.
+export function mapApprovedSubmissionForClient(submission: any): any {
     const publicId = getPublicSubmissionId(submission);
-    const latestPublicId = latestForPropertyService ? getPublicSubmissionId(latestForPropertyService) : '';
 
     return {
         id: publicId,
@@ -1336,16 +1343,7 @@ export function mapApprovedSubmissionForClient(submission: any, latestForPropert
         allergens: submission.allergens || '',
         status: submission.status,
         menuId: submission.menu_id || null,
-        isLatestForPropertyService: latestForPropertyService ? latestPublicId === publicId : null,
-        latestForPropertyService: latestForPropertyService ? {
-            id: latestPublicId,
-            projectName: latestForPropertyService.project_name || '',
-            property: latestForPropertyService.property || '',
-            servicePeriod: getSubmissionServicePeriod(latestForPropertyService),
-            reviewedAt: latestForPropertyService.reviewed_at || latestForPropertyService.approved_text_extracted_at || latestForPropertyService.updated_at || latestForPropertyService.created_at || '',
-            updatedAt: latestForPropertyService.updated_at || latestForPropertyService.created_at || '',
-            filename: latestForPropertyService.filename || '',
-        } : null,
+        idAliases: submissionIdForms(submission),
     };
 }
 
@@ -1383,6 +1381,53 @@ async function findLatestApprovedByPropertyService(property: string, servicePeri
         .filter((submission) => normalizeApprovedLookupValue(submission.property) === propertyKey)
         .filter((submission) => normalizeApprovedLookupValue(getSubmissionServicePeriod(submission)) === serviceKey)
         .sort((a, b) => getApprovedTimestamp(b) - getApprovedTimestamp(a))[0] || null;
+}
+
+// All distinct approved menus for a property + service period, each at its
+// current version: menu entities via their (resilient) pointer, plus approved
+// rows not yet linked to a menu, deduped by project name (newest wins).
+async function findApprovedMenusForPropertyService(property: string, servicePeriod: string): Promise<any[]> {
+    const propertyKey = normalizeApprovedLookupValue(property);
+    const serviceKey = normalizeApprovedLookupValue(servicePeriod);
+    if (!propertyKey || !serviceKey) return [];
+    const byName = new Map<string, any>();
+    const menus = await findMenus({ property, servicePeriod, status: 'active' });
+    for (const menu of menus) {
+        const current = await resolveMenuCurrentSubmission(menu);
+        if (!current || !current.final_path) continue;
+        const key = normalizeApprovedLookupValue(current.project_name || menu.name);
+        const existing = byName.get(key);
+        if (!existing || getApprovedTimestamp(current) > getApprovedTimestamp(existing)) byName.set(key, current);
+    }
+
+    let candidates: any[] = [];
+    if (isSupabaseConfigured()) {
+        const { data, error } = await getSupabaseClient()
+            .from(SUBMISSIONS_TABLE)
+            .select('*')
+            .in('status', APPROVED_SUBMISSION_STATUSES)
+            .not('final_path', 'is', null)
+            .ilike('property', property)
+            .limit(500);
+        if (error) throw new Error(error.message);
+        candidates = data || [];
+    } else {
+        candidates = Object.values(JSON.parse(await fs.readFile(SUBMISSIONS_DB, 'utf-8')));
+    }
+    const linkedNames = new Set(byName.keys());
+    for (const row of candidates
+        .filter(isApprovedSubmissionRecord)
+        .filter((row) => !!row.final_path)
+        .filter(isApprovedBaselineSource)
+        .filter((row) => !`${row.menu_id || ''}`.trim())
+        .filter((row) => normalizeApprovedLookupValue(row.property) === propertyKey)
+        .filter((row) => normalizeApprovedLookupValue(getSubmissionServicePeriod(row)) === serviceKey)) {
+        const key = normalizeApprovedLookupValue(row.project_name);
+        if (linkedNames.has(key)) continue; // menu entity already represents this name
+        const existing = byName.get(key);
+        if (!existing || getApprovedTimestamp(row) > getApprovedTimestamp(existing)) byName.set(key, row);
+    }
+    return [...byName.values()].sort((a, b) => `${a.project_name || ''}`.localeCompare(`${b.project_name || ''}`));
 }
 
 async function getSubmissionRecordsByIds(ids: string[]): Promise<any[]> {
@@ -1441,6 +1486,160 @@ function toSupersededBy(child: any): any {
         id: getPublicSubmissionId(child),
         projectName: child?.project_name || '',
         approvedAt: child?.reviewed_at || child?.updated_at || child?.created_at || '',
+    };
+}
+
+// ---------------------------------------------------------------------------
+// Baseline freshness by MENU IDENTITY (2026-11-16 incident fix).
+// A baseline is stale only when a newer approved version of the SAME menu
+// exists. Property + service period is never an input: one property can file
+// several different menus under one service period.
+// ---------------------------------------------------------------------------
+
+// Both public forms of a submission id. Rows carry a uuid `id` and, for form
+// submissions, a `legacy_id`; references (menu pointer, lineage, drafts) may
+// hold either form, so every comparison must check both.
+export function submissionIdForms(submission: any): string[] {
+    return [...new Set([submission?.legacy_id, submission?.id]
+        .map((value) => `${value || ''}`.trim())
+        .filter(Boolean))];
+}
+
+export function submissionMatchesId(submission: any, id: string): boolean {
+    const normalized = `${id || ''}`.trim();
+    return !!normalized && submissionIdForms(submission).includes(normalized);
+}
+
+function isApprovedSubmissionRecord(submission: any): boolean {
+    return APPROVED_SUBMISSION_STATUSES.includes(`${submission?.status || ''}`.trim().toLowerCase());
+}
+
+// Newest approved content version linked to a menu (design-approval proofs
+// and other non-baseline sources excluded).
+async function findNewestApprovedForMenu(menuId: string): Promise<any | null> {
+    const normalizedMenuId = `${menuId || ''}`.trim();
+    if (!normalizedMenuId) return null;
+    let candidates: any[] = [];
+    if (isSupabaseConfigured()) {
+        const { data, error } = await getSupabaseClient()
+            .from(SUBMISSIONS_TABLE)
+            .select('*')
+            .eq('menu_id', normalizedMenuId)
+            .in('status', APPROVED_SUBMISSION_STATUSES);
+        if (error) throw new Error(`Failed to load menu versions: ${error.message}`);
+        candidates = data || [];
+    } else {
+        candidates = Object.values(JSON.parse(await fs.readFile(SUBMISSIONS_DB, 'utf-8')));
+    }
+    return candidates
+        .filter((row) => `${row?.menu_id || ''}`.trim() === normalizedMenuId)
+        .filter(isApprovedSubmissionRecord)
+        .filter(isApprovedBaselineSource)
+        .sort((a, b) => getApprovedTimestamp(b) - getApprovedTimestamp(a))[0] || null;
+}
+
+// Resilient menu pointer reader. The pointer is authoritative while it
+// resolves to an approved submission. When it resolves to a retired/deleted/
+// missing row (e.g. a submission set to status='deleted' directly), fall back
+// to the newest approved version with that menu_id and, when `repair` is set,
+// move the pointer there so later readers agree.
+export async function resolveMenuCurrentSubmission(menu: any, options: { repair?: boolean } = {}): Promise<any | null> {
+    if (!menu?.id) return null;
+    const pointer = `${menu.current_submission_id || ''}`.trim();
+    if (pointer) {
+        const record = await getSubmissionRecordById(pointer);
+        if (record && isApprovedSubmissionRecord(record) && isApprovedBaselineSource(record)) return record;
+    }
+    const fallback = await findNewestApprovedForMenu(menu.id);
+    if (pointer && options.repair) {
+        const fallbackId = fallback ? getPublicSubmissionId(fallback) : '';
+        if (fallbackId && !submissionMatchesId(fallback, pointer)) {
+            console.warn(`Menu ${menu.id}: pointer ${pointer} is not an approved submission; repairing to ${fallbackId}`);
+            try {
+                await saveMenu({ ...menu, current_submission_id: fallbackId, updated_at: new Date().toISOString() });
+            } catch (error: any) {
+                console.error(`Menu ${menu.id}: pointer repair failed (read result kept):`, error.message);
+            }
+        } else if (!fallback) {
+            console.warn(`Menu ${menu.id}: pointer ${pointer} is not an approved submission and no approved version remains`);
+        }
+    }
+    return fallback;
+}
+
+export type BaselineFreshness = {
+    baselineId: string;
+    baselineIdForms: string[];
+    stale: boolean;
+    // How the answer was decided: menu_pointer | lineage | unknown | baseline_not_found
+    basis: 'menu_pointer' | 'lineage' | 'unknown' | 'baseline_not_found';
+    menuId: string | null;
+    newerVersion: any | null; // raw submission row of the newer approved version
+};
+
+// Rule 1 resolution order:
+//  (a) baseline has menu_id and that menu has a current version: stale iff
+//      the current approved version is a different submission (both id forms).
+//  (b) no menu_id: stale iff an approved lineage child exists
+//      (revision_base_submission_id points at either id form).
+//  (c) neither known: not stale. Unknown lineage never gates.
+export async function resolveBaselineFreshness(baselineIdOrRecord: any): Promise<BaselineFreshness> {
+    const baseline = typeof baselineIdOrRecord === 'string'
+        ? await getSubmissionRecordById(baselineIdOrRecord)
+        : baselineIdOrRecord;
+    const requestedId = typeof baselineIdOrRecord === 'string' ? baselineIdOrRecord.trim() : getPublicSubmissionId(baselineIdOrRecord);
+    if (!baseline) {
+        return { baselineId: requestedId, baselineIdForms: requestedId ? [requestedId] : [], stale: false, basis: 'baseline_not_found', menuId: null, newerVersion: null };
+    }
+    const idForms = submissionIdForms(baseline);
+    const result: BaselineFreshness = {
+        baselineId: getPublicSubmissionId(baseline),
+        baselineIdForms: idForms,
+        stale: false,
+        basis: 'unknown',
+        menuId: null,
+        newerVersion: null,
+    };
+
+    const menuId = `${baseline.menu_id || ''}`.trim();
+    if (menuId) {
+        const menu = await getMenuById(menuId);
+        result.menuId = menuId;
+        if (menu && (menu.current_submission_id || '').trim()) {
+            result.basis = 'menu_pointer';
+            const current = await resolveMenuCurrentSubmission(menu, { repair: true });
+            if (current && !idForms.some((id) => submissionMatchesId(current, id))) {
+                result.stale = true;
+                result.newerVersion = current;
+            }
+            return result;
+        }
+        // A menu link without a usable pointer is "not known" for gating.
+        return result;
+    }
+
+    const childrenByParent = await findApprovedChildren(idForms);
+    const children = Object.values(childrenByParent)
+        .flat()
+        .filter(isApprovedBaselineSource)
+        .filter((child) => !idForms.some((id) => submissionMatchesId(child, id)))
+        .sort((a, b) => getApprovedTimestamp(b) - getApprovedTimestamp(a));
+    if (children.length) {
+        result.basis = 'lineage';
+        result.stale = true;
+        result.newerVersion = children[0];
+    }
+    return result;
+}
+
+function toBaselineFreshnessPayload(freshness: BaselineFreshness): any {
+    return {
+        baselineId: freshness.baselineId,
+        baselineIdForms: freshness.baselineIdForms,
+        stale: freshness.stale,
+        basis: freshness.basis,
+        menuId: freshness.menuId,
+        newerVersion: freshness.newerVersion ? mapApprovedSubmissionForClient(freshness.newerVersion) : null,
     };
 }
 
@@ -1740,36 +1939,27 @@ app.post('/draft-sessions', async (req, res) => {
             return res.status(400).json({ error: 'Drafts can only start from approved form submissions' });
         }
 
-        const servicePeriod = getSubmissionServicePeriod(submission);
-        const latest = await findLatestApprovedByPropertyService(`${submission.property || ''}`, servicePeriod);
-        const baseline = mapApprovedSubmissionForClient(submission, latest || submission);
+        const baseline = mapApprovedSubmissionForClient(submission);
         const baseId = baseline.id || baseSubmissionId;
 
-        // Phase 3 gating: prefer the menu pointer. A draft must start from the
-        // menu's current version — not an outdated one. When the baseline has no
-        // menu yet (pre-backfill), fall back to the old lineage-children gate.
+        // Gating by menu identity (resolveBaselineFreshness): a draft must start
+        // from the menu's current version. Pointer comparisons check both id
+        // forms and survive a pointer left on a retired row. When the baseline
+        // has no menu yet (pre-backfill), lineage children decide.
         const menuId = `${submission.menu_id || ''}`.trim();
-        let draftKey = baseId;
-        if (menuId) {
-            const menu = await getMenuById(menuId);
-            const currentVersionId = `${menu?.current_submission_id || ''}`.trim();
-            if (currentVersionId && currentVersionId !== baseId) {
-                const currentRecord = await getSubmissionRecordById(currentVersionId);
+        const draftKey = menuId || baseId;
+        const freshness = await resolveBaselineFreshness(submission);
+        if (freshness.stale && freshness.newerVersion) {
+            if (freshness.basis === 'menu_pointer') {
                 return res.status(409).json({
                     error: 'A newer version of this menu has been approved. Edit the current version instead.',
-                    currentVersion: currentRecord ? mapApprovedSubmissionForClient(currentRecord, currentRecord) : { id: currentVersionId },
+                    currentVersion: mapApprovedSubmissionForClient(freshness.newerVersion),
                 });
             }
-            draftKey = menuId;
-        } else {
-            const approvedChildren = await findApprovedChildren([baseId]);
-            const children = approvedChildren[baseId] || [];
-            if (children.length) {
-                return res.status(409).json({
-                    error: 'This menu has been superseded by an approved revision.',
-                    supersededBy: toSupersededBy(children[0]),
-                });
-            }
+            return res.status(409).json({
+                error: 'This menu has been superseded by an approved revision.',
+                supersededBy: toSupersededBy(freshness.newerVersion),
+            });
         }
 
         const findActiveDraft = () => (menuId ? findActiveDraftForMenu(menuId) : findActiveDraftForBase(baseId));
@@ -1865,15 +2055,14 @@ app.get('/draft-sessions/:token', async (req, res) => {
 
         const currentDraft = await expireDraftIfNeeded(draft);
         const baselineSubmission = await getSubmissionRecordById(currentDraft.base_submission_id);
-        const servicePeriod = getSubmissionServicePeriod(baselineSubmission);
-        const latest = baselineSubmission
-            ? await findLatestApprovedByPropertyService(`${baselineSubmission.property || ''}`, servicePeriod)
-            : null;
-        const baseline = baselineSubmission
-            ? mapApprovedSubmissionForClient(baselineSubmission, latest || baselineSubmission)
+        const baseline = baselineSubmission ? mapApprovedSubmissionForClient(baselineSubmission) : null;
+        // Freshness by menu identity so the form (draft-open banner, submit
+        // block) and the dashboard submit guard read one authoritative answer.
+        const baselineFreshness = baselineSubmission
+            ? toBaselineFreshnessPayload(await resolveBaselineFreshness(baselineSubmission))
             : null;
 
-        res.json(toDraftClientPayload(currentDraft, baseline));
+        res.json({ ...toDraftClientPayload(currentDraft, baseline), baselineFreshness });
     } catch (error: any) {
         console.error('Error loading draft session:', error.message);
         res.status(500).json({ error: 'Failed to load draft session' });
@@ -2000,10 +2189,24 @@ app.get('/menus/design-eligible', async (req, res) => {
             menus.map((menu) => `${menu.current_submission_id || ''}`.trim()).filter(Boolean)
         );
 
-        const eligible = menus.map((menu) => {
+        // Pointer stays authoritative while it resolves to an approved row. A
+        // pointer left on a retired/deleted row falls back to that menu's newest
+        // approved version (and is repaired) so the menu does not vanish here.
+        const currentByMenuId = new Map<string, any>();
+        for (const menu of menus) {
             const currentSubmissionId = `${menu.current_submission_id || ''}`.trim();
-            if (!currentSubmissionId) return null;
-            const submission = submissionsById.get(currentSubmissionId);
+            if (!currentSubmissionId) continue;
+            const pointed = submissionsById.get(currentSubmissionId);
+            if (pointed && isApprovedSubmissionRecord(pointed) && isApprovedBaselineSource(pointed)) {
+                currentByMenuId.set(menu.id, pointed);
+                continue;
+            }
+            const fallback = await resolveMenuCurrentSubmission(menu, { repair: true });
+            if (fallback) currentByMenuId.set(menu.id, fallback);
+        }
+
+        const eligible = menus.map((menu) => {
+            const submission = currentByMenuId.get(menu.id);
             if (!submission) return null;
             const status = `${submission.status || ''}`.trim().toLowerCase();
             if (!APPROVED_SUBMISSION_STATUSES.includes(status)) return null;
@@ -2161,6 +2364,38 @@ app.post('/submissions/dispute/:token', async (req, res) => {
 });
 
 // Named submission routes must remain before /submissions/:id.
+// Is there a newer approved version of THIS baseline's menu? Decided by menu
+// identity (pointer, then lineage), never by property + service period.
+app.get('/submissions/baseline-freshness', async (req, res) => {
+    try {
+        const id = `${req.query.id || req.query.submissionId || ''}`.trim();
+        if (!id) return res.status(400).json({ error: 'id is required' });
+        const freshness = await resolveBaselineFreshness(id);
+        if (freshness.basis === 'baseline_not_found') return res.status(404).json({ error: 'Baseline not found', ...toBaselineFreshnessPayload(freshness) });
+        return res.json(toBaselineFreshnessPayload(freshness));
+    } catch (error: any) {
+        console.error('Error resolving baseline freshness:', error.message);
+        return res.status(500).json({ error: 'Failed to resolve baseline freshness' });
+    }
+});
+
+// Every distinct approved menu filed under a property + service period, each
+// at its current version. Used by the brand-new form to say "approved menus
+// already exist here" and let the chef pick one by name. Never used to decide
+// whether a baseline is stale.
+app.get('/submissions/approved-for-service', async (req, res) => {
+    try {
+        const property = `${req.query.property || ''}`.trim();
+        const servicePeriod = `${req.query.servicePeriod || req.query.service_period || ''}`.trim();
+        if (!property || !servicePeriod) return res.status(400).json({ error: 'property and servicePeriod are required' });
+        const menus = await findApprovedMenusForPropertyService(property, servicePeriod);
+        return res.json({ menus: menus.map((row) => mapApprovedSubmissionForClient(row)) });
+    } catch (error: any) {
+        console.error('Error listing approved menus for service:', error.message);
+        return res.status(500).json({ error: 'Failed to list approved menus for this service' });
+    }
+});
+
 app.get('/submissions/lineage-children', async (req, res) => {
     try {
         const ids = `${req.query.ids || req.query.submissionIds || ''}`.split(',').map((id) => id.trim()).filter(Boolean);
@@ -2627,18 +2862,27 @@ app.get('/submissions/search', async (req, res) => {
             return getApprovedTimestamp(b) - getApprovedTimestamp(a);
         });
 
-        const latestCache = new Map<string, any | null>();
-        const results = await Promise.all(sourceRows.map(async (s) => {
-            const property = `${s.property || ''}`.trim();
-            const servicePeriod = getSubmissionServicePeriod(s);
-            const cacheKey = `${normalizeApprovedLookupValue(property)}|${normalizeApprovedLookupValue(servicePeriod)}`;
-            let latest = latestCache.get(cacheKey);
-            if (!latestCache.has(cacheKey)) {
-                latest = await findLatestApprovedByPropertyService(property, servicePeriod);
-                latestCache.set(cacheKey, latest);
+        // "Current version of its menu" badge by menu identity only. Rows with
+        // no menu link (or a pointer that does not resolve to an approved row)
+        // get null: unknown, never "older".
+        const menusById = new Map((await getMenusByIds(sourceRows.map((row) => `${row.menu_id || ''}`.trim()).filter(Boolean)))
+            .map((menu) => [menu.id, menu]));
+        const pointerRecords = await getSubmissionRecordsByIds([...menusById.values()]
+            .map((menu) => `${menu.current_submission_id || ''}`.trim()).filter(Boolean));
+        const results = sourceRows.map((row) => {
+            const menu = menusById.get(`${row.menu_id || ''}`.trim());
+            const pointer = `${menu?.current_submission_id || ''}`.trim();
+            let isCurrentMenuVersion: boolean | null = null;
+            if (pointer) {
+                if (submissionMatchesId(row, pointer)) {
+                    isCurrentMenuVersion = true;
+                } else {
+                    const pointerRecord = pointerRecords.find((record) => submissionMatchesId(record, pointer));
+                    if (pointerRecord && isApprovedSubmissionRecord(pointerRecord)) isCurrentMenuVersion = false;
+                }
             }
-            return mapApprovedSubmissionForClient(s, latest);
-        }));
+            return { ...mapApprovedSubmissionForClient(row), isCurrentMenuVersion };
+        });
 
         res.json(results);
     } catch (error) {
@@ -2734,6 +2978,10 @@ app.get('/submissions/properties', async (_req, res) => {
 
 // Latest approved submission for a property/service pair. Falls back to the
 // legacy project/property lookup when servicePeriod is not provided.
+// NON-AUTHORITATIVE HINT: a property can file several menus under one service
+// period, so this is never a freshness signal. The submission form no longer
+// calls it (it uses /submissions/baseline-freshness and
+// /submissions/approved-for-service); kept for older callers and debugging.
 // IMPORTANT: Must come BEFORE /submissions/:id
 app.get('/submissions/latest-approved', async (req, res) => {
     try {
@@ -2752,7 +3000,7 @@ app.get('/submissions/latest-approved', async (req, res) => {
             return res.status(404).json({ error: 'No approved submission found' });
         }
 
-        res.json(mapApprovedSubmissionForClient(match, match));
+        res.json(mapApprovedSubmissionForClient(match));
     } catch (error) {
         console.error('Error finding latest approved submission:', error);
         res.status(500).json({ error: 'Failed to find approved submission' });

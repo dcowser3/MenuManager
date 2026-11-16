@@ -497,11 +497,14 @@ describe('dashboard form modification source chooser', () => {
             'utf8'
         );
 
+        // Contract changed 2026-11-16 (Load Newer Menu incident): copy now comes
+        // from public/js/baseline-freshness.js, Cancel is the focused secondary
+        // button, and the replacing button is never primary-styled.
         expect(template).toContain('id="baselineFreshnessModal"');
         expect(template).toContain('role="dialog" aria-modal="true"');
-        expect(template).toContain('id="baselineFreshnessCancelBtn" class="btn btn-quiet">Cancel</button>');
-        expect(template).toContain('Continue as Brand New');
-        expect(template).toContain('Use Existing Menu');
+        expect(template).toContain('id="baselineFreshnessCancelBtn" class="btn btn-secondary">Cancel</button>');
+        expect(template).toContain('id="baselineFreshnessLoadBtn" class="btn btn-quiet"');
+        expect(template).toContain('MenuBaselineFreshness.createFreshnessDialog(');
         expect(template).toContain('latestBaselineFreshnessIssue = issue;');
         expect(template).not.toContain('if (issue) showBaselineFreshnessWarning(issue);');
     });

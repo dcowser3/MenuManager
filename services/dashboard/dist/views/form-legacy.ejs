@@ -12,6 +12,7 @@
     <script src="https://cdn.quilljs.com/1.3.6/quill.js"></script>
     <script src="/js/form-helpers.js"></script>
     <script src="/js/form-submission.js"></script>
+    <script src="/js/baseline-freshness.js?v=20261116"></script>
     <script src="/js/diff-core.js"></script>
     <script src="/js/redline-preview.js?v=20260613-extract-leading-trim"></script>
     <style>
@@ -2297,14 +2298,16 @@
 
     <div id="baselineFreshnessModal" class="baseline-conflict-modal" role="dialog" aria-modal="true" aria-labelledby="baselineFreshnessTitle" aria-describedby="baselineFreshnessMessage">
         <div class="baseline-conflict-dialog">
-            <div class="baseline-conflict-kicker">Existing approved menu found</div>
-            <h2 id="baselineFreshnessTitle">Use the existing approved menu?</h2>
+            <div class="baseline-conflict-kicker">Approved menu check</div>
+            <h2 id="baselineFreshnessTitle">Approved menu check</h2>
             <p id="baselineFreshnessMessage"></p>
             <div id="baselineFreshnessDetail" class="baseline-conflict-detail"></div>
+            <div id="baselineFreshnessCandidates" class="baseline-conflict-candidates" hidden></div>
             <div class="baseline-conflict-actions">
-                <button type="button" id="baselineFreshnessCancelBtn" class="btn btn-quiet">Cancel</button>
-                <button type="button" id="baselineFreshnessContinueBtn" class="btn btn-secondary">Continue Anyway</button>
-                <button type="button" id="baselineFreshnessLoadBtn" class="btn btn-primary">Load Existing Menu</button>
+                <!-- Cancel takes default focus; the content-replacing button is never primary-styled. -->
+                <button type="button" id="baselineFreshnessCancelBtn" class="btn btn-secondary">Cancel</button>
+                <button type="button" id="baselineFreshnessContinueBtn" class="btn btn-secondary">Keep my baseline</button>
+                <button type="button" id="baselineFreshnessLoadBtn" class="btn btn-quiet" hidden>Replace</button>
             </div>
         </div>
     </div>
@@ -2348,10 +2351,9 @@
         let uploadedMenuImageFileName = '';
         let importedNewMenuDocFileName = '';
         let preservedManagedFooterText = '';
-        let baselineFreshnessOverrideKey = '';
         let baselineFreshnessCheckTimer = null;
-        let baselineFreshnessDialogState = null;
         let latestBaselineFreshnessIssue = null;
+        const submitGuard = MenuBaselineFreshness.createSubmitGuard(() => document.getElementById('submitBtn'));
         let formAttemptId = getOrCreateFormAttemptId();
         const DEFAULT_ALLERGEN_KEY = <%- JSON.stringify(defaultAllergenKey || '') %>;
         const MAX_MENU_UPLOAD_BYTES = <%= maxUploadBytes %>;
@@ -2581,7 +2583,15 @@
             }
 
             if (!startResponse.ok || !startData.checkId) {
-                throw new Error(startData.error || `Failed to start AI check (${startResponse.status || 'server error'})`);
+                // Never lock the submitter out because the AI check broke: fall back to manual review.
+                return buildBasicCheckFallback(
+                    fallbackContext.menuContent,
+                    fallbackContext.reviewMode,
+                    fallbackContext.changedLineCount,
+                    'AI check could not start. No automated suggestions were applied, but you can still submit this menu for manual review.',
+                    startResponse.status || 0,
+                    { aiFailure: { reason: 'basic_check_start_failed', status: startResponse.status || 0, error: startData.error || null } }
+                );
             }
 
             const startedAt = Date.now();
@@ -2619,7 +2629,15 @@
                 }
 
                 if (!statusResponse.ok) {
-                    throw new Error(statusData.error || `Failed to read AI check status (${statusResponse.status || 'server error'})`);
+                    // e.g. 404 when a server restart dropped the in-memory job.
+                    return buildBasicCheckFallback(
+                        fallbackContext.menuContent,
+                        fallbackContext.reviewMode,
+                        fallbackContext.changedLineCount,
+                        'AI check was interrupted. No automated suggestions were applied, but you can still submit this menu for manual review.',
+                        statusResponse.status || 0,
+                        { checkId: startData.checkId, aiFailure: { reason: 'basic_check_status_failed', status: statusResponse.status || 0, error: statusData.error || null } }
+                    );
                 }
 
                 if (statusData.status === 'pending') {
@@ -2870,7 +2888,6 @@
                 clearPropertyError();
                 updateServicePeriodOptions(propertyField.value);
                 applyCurrentMenuSizeDefaults();
-                baselineFreshnessOverrideKey = '';
                 scheduleBaselineFreshnessCheck();
             });
 
@@ -2878,7 +2895,6 @@
             if (servicePeriodField) {
                 servicePeriodField.addEventListener('change', () => {
                     applyCurrentMenuSizeDefaults();
-                    baselineFreshnessOverrideKey = '';
                     scheduleBaselineFreshnessCheck();
                 });
             }
@@ -2949,7 +2965,6 @@
             });
             propertyInput.addEventListener('change', function() {
                 updateServicePeriodOptions(propertyInput.value);
-                baselineFreshnessOverrideKey = '';
                 scheduleBaselineFreshnessCheck();
             });
         });
@@ -3501,7 +3516,7 @@
             if (typeof helper === 'function') {
                 return helper(requiresAiRerun, aiCheckCompletedCount);
             }
-            return requiresAiRerun && aiCheckCompletedCount < 2;
+            return requiresAiRerun && aiCheckCompletedCount < 1;
         }
 
         function onSubmissionModeChange() {
@@ -3577,7 +3592,6 @@
                 }
                 setAllergenAutoDetectedBadge(false);
                 applyTurnaroundDefaults(true, false);
-                baselineFreshnessOverrideKey = '';
             }
             updateRevisionPreCheckLayout();
         }
@@ -3695,18 +3709,6 @@
             };
         }
 
-        function baselineFreshnessKey(issue) {
-            const latestId = publicSubmissionId(issue?.latest || {});
-            const selectedId = publicSubmissionId(issue?.selected || {}) || revisionBaseSubmissionId || '';
-            return [
-                issue?.type || '',
-                normalizeBaselineMatchValue(issue?.property || ''),
-                normalizeBaselineMatchValue(issue?.servicePeriod || ''),
-                selectedId,
-                latestId
-            ].join('|');
-        }
-
         function formatApprovedDate(value) {
             if (!value) return 'unknown date';
             const date = new Date(value);
@@ -3720,16 +3722,72 @@
             return `${name}${approvedAt ? ` (${formatApprovedDate(approvedAt)})` : ''}`;
         }
 
-        async function fetchLatestApprovedForCurrentService(property, servicePeriod) {
-            if (!property || !servicePeriod) return null;
-            const params = new URLSearchParams({ property, servicePeriod });
-            const response = await fetch(`/api/submissions/latest-approved?${params.toString()}`);
+        async function fetchBaselineFreshness(baselineId) {
+            const id = `${baselineId || ''}`.trim();
+            if (!id) return null;
+            const response = await fetch(`/api/submissions/baseline-freshness?${new URLSearchParams({ id }).toString()}`);
             if (response.status === 404) return null;
             const data = await response.json();
             if (!response.ok) {
-                throw new Error(data.error || 'Latest approved lookup failed');
+                throw new Error(data.error || 'Baseline freshness lookup failed');
             }
             return data;
+        }
+
+        async function fetchApprovedMenusForService(property, servicePeriod) {
+            if (!property || !servicePeriod) return [];
+            const params = new URLSearchParams({ property, servicePeriod });
+            const response = await fetch(`/api/submissions/approved-for-service?${params.toString()}`);
+            const data = await response.json();
+            if (!response.ok) {
+                throw new Error(data.error || 'Approved menu lookup failed');
+            }
+            return Array.isArray(data.menus) ? data.menus : [];
+        }
+
+        function getCurrentMenuTextForComparison() {
+            const step2 = document.getElementById('step2');
+            const reviewedArea = document.getElementById('reviewedContentArea');
+            if (step2 && !step2.classList.contains('hidden') && reviewedArea) {
+                return extractCleanTextFromReviewedArea(reviewedArea);
+            }
+            return quill ? quill.getText() : '';
+        }
+
+        function getEditedLineCountForReplace() {
+            const current = getCurrentMenuTextForComparison();
+            if (submissionMode === 'modification' && baseApprovedMenuContent) {
+                return MenuBaselineFreshness.countMenuLineChanges(baseApprovedMenuContent, current).total;
+            }
+            return MenuBaselineFreshness.countMenuLineChanges('', current).total;
+        }
+
+        function collectProjectDetailsForComparison() {
+            const valueOf = (id) => (document.getElementById(id)?.value || '').trim();
+            const assetType = valueOf('assetType');
+            const isPrint = assetType === 'PRINT' || assetType === 'BOTH';
+            const isDigital = assetType === 'DIGITAL' || assetType === 'BOTH';
+            return {
+                projectName: valueOf('projectName'),
+                templateType: valueOf('templateType'),
+                menuType: valueOf('menuType'),
+                servicePeriod: valueOf('servicePeriod'),
+                orientation: valueOf('orientation'),
+                assetType,
+                printWidth: isPrint ? valueOf('widthPrint') : '',
+                printHeight: isPrint ? valueOf('heightPrint') : '',
+                printRegion: isPrint ? valueOf('printRegion') : '',
+                printSize: isPrint ? valueOf('printSize') : '',
+                digitalWidth: isDigital ? valueOf('widthDigital') : '',
+                digitalHeight: isDigital ? valueOf('heightDigital') : '',
+                folded: isPrint ? valueOf('folded') : '',
+                cropMarks: isPrint ? valueOf('cropMarks') : '',
+                bleedMarks: isPrint ? valueOf('bleedMarks') : '',
+                fileSizeLimit: isPrint ? valueOf('fileSizeLimit') : '',
+                fileSizeLimitMb: isPrint ? valueOf('fileSizeLimitMb') : '',
+                fileDeliveryNotes: isPrint ? valueOf('fileDeliveryNotes') : '',
+                allergens: getAllergenInputValue(),
+            };
         }
 
         function applyApprovedBaseline(selected, options = {}) {
@@ -3754,7 +3812,6 @@
             baseApprovedMenuContentHtml = '';
             preservedManagedFooterText = normalizedBaseline.footerText || '';
             persistentDiffSummary = { insertions: 0, deletions: 0 };
-            baselineFreshnessOverrideKey = '';
             setAllergenInputValue(normalizedBaseline.allergens || '');
             setContainsRawSelection(!!normalizedBaseline.hadRawNotice);
             suppressRawNotice = false;
@@ -3766,7 +3823,7 @@
             renderPersistentPreview(baseApprovedMenuContent, baseApprovedMenuContent);
 
             const selectedNote = document.getElementById('revisionSelectedNote');
-            const latestNote = selected.isLatestForPropertyService === false ? ' (older than latest for this service)' : '';
+            const latestNote = selected.isCurrentMenuVersion === false ? ' (an older version of this menu)' : '';
             selectedNote.textContent = `Loaded approved baseline: ${selected.projectName || 'Untitled'} (${selected.id})${latestNote}`;
             selectedNote.classList.add('show');
             document.getElementById('submissionSearchResults').innerHTML = '';
@@ -3783,151 +3840,64 @@
             applyApprovedBaseline(latest);
         }
 
+        // "Newer" is decided by menu identity on the server (menu pointer, then
+        // lineage). Property + service period only feeds the brand-new
+        // "approved menus already exist here" list and the mismatch check.
         async function getBaselineFreshnessIssue() {
             if (submissionMode === 'modification' && (unapprovedMode || revisionSource === 'uploaded_unapproved')) {
                 return null;
             }
-
             const { property, servicePeriod } = getCurrentPropertyService();
-            if (!property || !servicePeriod) return null;
-
-            const latest = await fetchLatestApprovedForCurrentService(property, servicePeriod);
-            if (!latest) return null;
-
             const selectedId = `${revisionBaseSubmissionId || ''}`.trim();
-            const selected = selectedRevisionBaseline;
-            const currentPropertyKey = normalizeBaselineMatchValue(property);
-            const currentServiceKey = normalizeBaselineMatchValue(servicePeriod);
-
-            if (submissionMode === 'modification' && selectedId && selected) {
-                const selectedPropertyKey = normalizeBaselineMatchValue(selected.property);
-                const selectedServiceKey = normalizeBaselineMatchValue(selected.servicePeriod);
-                if (selectedPropertyKey !== currentPropertyKey || selectedServiceKey !== currentServiceKey) {
-                    return { type: 'mismatch', property, servicePeriod, selected, latest };
+            let freshness = null;
+            let existingMenus = [];
+            if (submissionMode === 'modification') {
+                if (selectedId && selectedRevisionBaseline) {
+                    freshness = await fetchBaselineFreshness(selectedId);
                 }
-                if (publicSubmissionId(latest) && publicSubmissionId(latest) !== selectedId) {
-                    return { type: 'stale', property, servicePeriod, selected, latest };
-                }
-                return null;
+            } else if (property && servicePeriod) {
+                existingMenus = await fetchApprovedMenusForService(property, servicePeriod);
             }
-
-            return { type: 'existing', property, servicePeriod, selected: null, latest };
-        }
-
-        function getBaselineFreshnessCopy(issue) {
-            const fallback = {
-                title: 'Use the existing approved menu?',
-                message: 'There is an approved menu for this property and service period. Loading it as the baseline keeps this submission connected to the current approved version.',
-                detail: '',
-                loadLabel: 'Use Existing Menu',
-                continueLabel: 'Continue Anyway'
-            };
-            if (!issue) return fallback;
-
-            const latestLabel = formatBaselineLabel(issue.latest);
-            if (issue.type === 'mismatch') {
-                return {
-                    title: 'This baseline does not match the form',
-                    message: `The loaded baseline is for ${issue.selected.property || 'another property'} / ${issue.selected.servicePeriod || 'another service'}, but the form is set to ${issue.property} / ${issue.servicePeriod}.`,
-                    detail: `Latest approved menu for this form: ${latestLabel}`,
-                    loadLabel: 'Load Matching Menu',
-                    continueLabel: 'Keep Current Baseline'
-                };
-            }
-            if (issue.type === 'stale') {
-                return {
-                    title: 'A newer approved menu exists',
-                    message: `A newer approved ${issue.servicePeriod} menu exists for ${issue.property}. Loading it prevents design from reviewing changes against an older baseline.`,
-                    detail: `Newest approved menu: ${latestLabel}`,
-                    loadLabel: 'Load Newer Menu',
-                    continueLabel: 'Keep Older Baseline'
-                };
-            }
-            return {
-                title: 'An approved menu already exists',
-                message: `An approved ${issue.servicePeriod} menu already exists for ${issue.property}. If this is a revision, load the existing menu and make changes from that baseline.`,
-                detail: `Existing approved menu: ${latestLabel}`,
-                loadLabel: 'Use Existing Menu',
-                continueLabel: 'Continue as Brand New'
-            };
-        }
-
-        function closeBaselineFreshnessDialog(result) {
-            const modal = document.getElementById('baselineFreshnessModal');
-            if (modal) {
-                modal.classList.remove('show');
-            }
-            if (!baselineFreshnessDialogState || typeof baselineFreshnessDialogState.resolve !== 'function') {
-                baselineFreshnessDialogState = null;
-                return;
-            }
-            const resolve = baselineFreshnessDialogState.resolve;
-            baselineFreshnessDialogState = null;
-            resolve(result);
-        }
-
-        function showBaselineFreshnessWarning(issue, options = {}) {
-            if (!issue) return true;
-            const key = baselineFreshnessKey(issue);
-            if (baselineFreshnessOverrideKey === key && !options.force) {
-                return true;
-            }
-
-            if (baselineFreshnessDialogState && baselineFreshnessDialogState.key === key) {
-                return baselineFreshnessDialogState.promise;
-            }
-
-            const modal = document.getElementById('baselineFreshnessModal');
-            const titleEl = document.getElementById('baselineFreshnessTitle');
-            const messageEl = document.getElementById('baselineFreshnessMessage');
-            const detailEl = document.getElementById('baselineFreshnessDetail');
-            const loadBtn = document.getElementById('baselineFreshnessLoadBtn');
-            const continueBtn = document.getElementById('baselineFreshnessContinueBtn');
-            const cancelBtn = document.getElementById('baselineFreshnessCancelBtn');
-            if (!modal || !titleEl || !messageEl || !detailEl || !loadBtn || !continueBtn || !cancelBtn) {
-                return false;
-            }
-
-            if (baselineFreshnessDialogState) {
-                closeBaselineFreshnessDialog(false);
-            }
-
-            const copy = getBaselineFreshnessCopy(issue);
-            titleEl.textContent = copy.title;
-            messageEl.textContent = copy.message;
-            detailEl.textContent = copy.detail;
-            loadBtn.textContent = copy.loadLabel;
-            continueBtn.textContent = copy.continueLabel;
-
-            let resolveDialog;
-            const promise = new Promise((resolve) => {
-                resolveDialog = resolve;
+            return MenuBaselineFreshness.classifyIssue({
+                submissionMode,
+                unapprovedMode,
+                revisionSource,
+                selected: selectedRevisionBaseline,
+                selectedId,
+                freshness,
+                property,
+                servicePeriod,
+                existingMenus,
             });
-            baselineFreshnessDialogState = { key, resolve: resolveDialog, promise };
-
-            loadBtn.onclick = () => {
-                closeBaselineFreshnessDialog(false);
-                loadLatestApprovedBaseline(issue.latest);
-            };
-            continueBtn.onclick = () => {
-                baselineFreshnessOverrideKey = key;
-                closeBaselineFreshnessDialog(true);
-                showAlert('Existing-menu warning acknowledged for this property and service.', 'info');
-            };
-            cancelBtn.onclick = () => closeBaselineFreshnessDialog(false);
-
-            modal.classList.add('show');
-            setTimeout(() => loadBtn.focus(), 0);
-            return promise;
         }
 
+        const baselineFreshnessDialog = MenuBaselineFreshness.createFreshnessDialog({
+            elements: {
+                modal: document.getElementById('baselineFreshnessModal'),
+                title: document.getElementById('baselineFreshnessTitle'),
+                message: document.getElementById('baselineFreshnessMessage'),
+                detail: document.getElementById('baselineFreshnessDetail'),
+                list: document.getElementById('baselineFreshnessCandidates'),
+                loadBtn: document.getElementById('baselineFreshnessLoadBtn'),
+                continueBtn: document.getElementById('baselineFreshnessContinueBtn'),
+                cancelBtn: document.getElementById('baselineFreshnessCancelBtn'),
+            },
+            defer: (fn) => setTimeout(fn, 0),
+            onLoad: (record) => loadLatestApprovedBaseline(record),
+            onKeep: () => showAlert('Keeping your baseline. You will not be asked again about this menu.', 'info'),
+        });
+
+        // Asked at most once per issue: a "keep" answer is honored at submit.
         async function ensureBaselineFreshnessBeforeContinue() {
             try {
                 const issue = await getBaselineFreshnessIssue();
-                return await showBaselineFreshnessWarning(issue, { force: true });
+                return await baselineFreshnessDialog.ask(issue, {
+                    inDraft: false,
+                    editedLineCount: getEditedLineCountForReplace(),
+                });
             } catch (error) {
                 console.error('Baseline freshness check failed:', error);
-                showAlert('Could not verify the latest approved menu for this property and service. Please continue carefully.', 'warning');
+                showAlert('Could not check for a newer version of this menu. Please continue carefully.', 'warning');
                 return true;
             }
         }
@@ -3967,7 +3937,7 @@
                     <div class="search-result-item" onclick="selectRevisionResult(${idx})">
                         <strong>${escapeHtml(r.projectName || '(Untitled)')}</strong> - ${escapeHtml(r.property || 'Unknown Property')}<br>
                         <span style="color: var(--color-text-muted);">Service: ${escapeHtml(r.servicePeriod || 'N/A')} | Approved: ${escapeHtml(formatApprovedDate(r.reviewedAt || r.updatedAt))} | ID: ${escapeHtml(r.id)}</span>
-                        ${r.isLatestForPropertyService === null ? '' : `<span style="display:inline-block;margin-left:0.4rem;color:${r.isLatestForPropertyService === false ? 'var(--color-warning)' : 'var(--color-success)'};font-weight:600;">${r.isLatestForPropertyService === false ? 'Older version' : 'Latest for service'}</span>`}
+                        ${r.isCurrentMenuVersion === true || r.isCurrentMenuVersion === false ? `<span style="display:inline-block;margin-left:0.4rem;color:${r.isCurrentMenuVersion === false ? 'var(--color-warning)' : 'var(--color-success)'};font-weight:600;">${r.isCurrentMenuVersion === false ? 'Older version of this menu' : 'Current version'}</span>` : ''}
                     </div>
                 `).join('');
             } catch (error) {
@@ -4670,7 +4640,6 @@
             setSelectValue('orientation', p.orientation);
             setSelectValue('menuType', p.menuType);
             updateServicePeriodOptions(p.property || '', p.servicePeriod || '');
-            baselineFreshnessOverrideKey = '';
             scheduleBaselineFreshnessCheck();
             setSelectValue('templateType', p.templateType);
             setSelectValue('assetType', p.assetType);
@@ -4881,7 +4850,6 @@
             propertySuggestHighlightIndex = -1;
             updateServicePeriodOptions(selected);
             applyCurrentMenuSizeDefaults();
-            baselineFreshnessOverrideKey = '';
             scheduleBaselineFreshnessCheck();
         }
 
@@ -5310,8 +5278,8 @@
 
         document.addEventListener('keydown', function(e) {
             if (e.key === 'Escape') {
-                if (baselineFreshnessDialogState) {
-                    closeBaselineFreshnessDialog(false);
+                if (baselineFreshnessDialog.isOpen()) {
+                    baselineFreshnessDialog.close(false);
                     return;
                 }
                 closeFullscreenView();
@@ -6761,7 +6729,19 @@
             uploadedMenuImageFileName = data.menuImageFileName || file.name;
         }
 
+        // Submit is guarded synchronously at click: the in-flight flag and the
+        // disabled button are set before any await. Re-enabled on failure or cancel.
         async function submitMenu(skipAiReview = false) {
+            if (!submitGuard.begin()) return;
+            let submitted = false;
+            try {
+                submitted = (await submitMenuOnce(skipAiReview)) === true;
+            } finally {
+                if (submitted) submitGuard.release(); else submitGuard.end();
+            }
+        }
+
+        async function submitMenuOnce(skipAiReview = false) {
             if (!validateStep1()) {
                 return;
             }
@@ -6792,6 +6772,21 @@
             }
 
             if (!(await ensureBaselineFreshnessBeforeContinue())) {
+                return;
+            }
+
+            // A modification with zero changed lines and no project-detail change
+            // is not a submission (the server enforces the same rule).
+            if (MenuBaselineFreshness.isZeroChangeModification({
+                submissionMode,
+                unapprovedMode,
+                revisionSource,
+                baseline: selectedRevisionBaseline,
+                baselineText: baseApprovedMenuContent,
+                currentText: getCurrentMenuTextForComparison(),
+                details: collectProjectDetailsForComparison(),
+            })) {
+                showAlert(`Nothing changed from the approved menu "${selectedRevisionBaseline?.projectName || 'this menu'}". Edit the menu text or a project detail before submitting a modification.`, 'error');
                 return;
             }
 
@@ -7031,6 +7026,7 @@
                     showAlert(data.clickup.warning, 'warning');
                 }
                 prepareForNextSubmission();
+                return true;
 
             } catch (error) {
                 console.error('Error:', error);

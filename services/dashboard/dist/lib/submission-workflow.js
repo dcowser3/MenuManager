@@ -34,12 +34,14 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getMissingRequiredSubmissionFieldLabels = getMissingRequiredSubmissionFieldLabels;
+exports.listProjectDetailChanges = listProjectDetailChanges;
 exports.createSubmissionWorkflowHandlers = createSubmissionWorkflowHandlers;
 const path = __importStar(require("path"));
 const tenant_config_1 = require("@menumanager/tenant-config");
 const upload_security_1 = require("./upload-security");
 const request_normalization_1 = require("./request-normalization");
 const menu_footer_1 = require("./menu-footer");
+const changed_lines_1 = require("./changed-lines");
 const clickup_handoff_1 = require("./clickup-handoff");
 function getRequestHostname(req) {
     const hostHeader = `${req?.hostname || (typeof req?.get === 'function' ? req.get('host') : '') || req?.headers?.host || ''}`.trim();
@@ -87,6 +89,68 @@ function getMissingRequiredSubmissionFieldLabels(fields) {
 }
 function buildMissingRequiredSubmissionFieldsError(labels) {
     return `Please complete these required fields: ${labels.join(', ')}.`;
+}
+function normalizeComparableDetail(value) {
+    if (value === null || value === undefined)
+        return '';
+    if (value === true)
+        return 'yes';
+    if (value === false)
+        return '';
+    return `${value}`.trim().toLowerCase().replace(/\s+/g, ' ');
+}
+function normalizeComparableFlag(value) {
+    return value === true || `${value || ''}`.trim().toLowerCase() === 'yes' || `${value || ''}`.trim().toLowerCase() === 'true' ? 'yes' : '';
+}
+function idSetForBaseline(...sources) {
+    const ids = new Set();
+    for (const source of sources) {
+        const values = Array.isArray(source) ? source : [source];
+        for (const value of values) {
+            const normalized = `${value || ''}`.trim();
+            if (normalized)
+                ids.add(normalized);
+        }
+    }
+    return ids;
+}
+function formatApprovalDate(value) {
+    const parsed = Date.parse(`${value || ''}`);
+    if (Number.isNaN(parsed))
+        return 'an unknown date';
+    return new Date(parsed).toISOString().slice(0, 10);
+}
+// Project details that make a modification a real change even when the menu
+// text is identical (size, orientation, asset type, ...). Request-only fields
+// (date needed, turnaround, submitter, approvers) are deliberately excluded:
+// they change on every request and say nothing about the menu.
+function listProjectDetailChanges(baseline, submitted) {
+    const comparisons = [
+        ['project name', baseline?.project_name, submitted.projectName, 'text'],
+        ['template type', baseline?.template_type || 'food', submitted.templateType, 'text'],
+        ['menu type', baseline?.menu_type || 'standard', submitted.menuType || 'standard', 'text'],
+        ['service period', baseline?.service_period, submitted.servicePeriod, 'text'],
+        ['orientation', baseline?.orientation, submitted.orientation, 'text'],
+        ['asset type', baseline?.asset_type, submitted.assetType, 'text'],
+        ['print width', baseline?.print_width, submitted.printWidth, 'text'],
+        ['print height', baseline?.print_height, submitted.printHeight, 'text'],
+        ['print region', baseline?.print_region, submitted.printRegion, 'text'],
+        ['print size', baseline?.print_size, submitted.printSize, 'text'],
+        ['digital width', baseline?.digital_width, submitted.digitalWidth, 'text'],
+        ['digital height', baseline?.digital_height, submitted.digitalHeight, 'text'],
+        ['folded', baseline?.folded, submitted.folded, 'flag'],
+        ['crop marks', baseline?.crop_marks, submitted.cropMarks, 'flag'],
+        ['bleed marks', baseline?.bleed_marks, submitted.bleedMarks, 'flag'],
+        ['file size limit', baseline?.file_size_limit, submitted.fileSizeLimit, 'flag'],
+        ['file size limit (MB)', baseline?.file_size_limit_mb, submitted.fileSizeLimitMb, 'text'],
+        ['file delivery notes', baseline?.file_delivery_notes, submitted.fileDeliveryNotes, 'text'],
+        ['allergen line', baseline?.allergens, submitted.allergens, 'text'],
+    ];
+    return comparisons
+        .filter(([, before, after, kind]) => kind === 'flag'
+        ? normalizeComparableFlag(before) !== normalizeComparableFlag(after)
+        : normalizeComparableDetail(before) !== normalizeComparableDetail(after))
+        .map(([label]) => label);
 }
 function createSubmissionWorkflowHandlers(deps) {
     const publicSupportEmail = deps.PUBLIC_FORM_SUPPORT_EMAIL || (0, tenant_config_1.getTenantConfig)().emails.publicSupport;
@@ -209,7 +273,7 @@ function createSubmissionWorkflowHandlers(deps) {
             res.status(deps.isClientInputError(error) ? 400 : 500).json({ error: 'Failed to upload menu image', details: error.message });
         }
     };
-    const submitMenu = async (req, res) => {
+    const submitMenuOnce = async (req, res) => {
         try {
             const { width, height, printWidth, printHeight, printRegion, printSize, folded, digitalWidth, digitalHeight, cropMarks, bleedMarks, fileSizeLimit, fileSizeLimitMb, fileDeliveryNotes, turnaroundDays, containsRawUndercooked, chefPersistentDiff, skipAiReview, } = req.body;
             const { safeSubmitterName, safeSubmitterEmail, safeSubmitterJobTitle, safeProjectName, safeProperty, safeOrientation, safeMenuType, safeServicePeriod, safeTemplateType, safeDateNeeded, safeAssetType, safeHotelName, safeCityCountryInput, safeAllergens, safeMenuContent, safeMenuContentHtml, safePersistentDiffHtml, safePreservedFooterText, safeFileDeliveryNotes, safeSubmissionMode, safeRevisionBaseSubmissionId, safeRevisionSource, safeRevisionBaselineFileName, safeBaseApprovedMenuContent, safeMenuImageFileName, normalizedApprovals, normalizedCriticalOverrides, safeRevisionBaselineDocPath, safeMenuImagePath, } = (0, request_normalization_1.normalizeSubmissionBody)(req.body, deps.getTempUploadsDir());
@@ -357,8 +421,9 @@ function createSubmissionWorkflowHandlers(deps) {
             const formAttemptId = (0, upload_security_1.sanitizePlainTextInput)((typeof req.get === 'function' ? req.get('x-menumanager-attempt-id') : '') || req.body?.attemptId, { maxLength: 100 }) || null;
             const draftSessionToken = (0, upload_security_1.sanitizePlainTextInput)(req.body?.draftSessionToken, { maxLength: 160 }).trim();
             let draftSessionId = null;
+            let draft = null;
             if (draftSessionToken && deps.getDraftSession) {
-                const draft = await deps.getDraftSession(draftSessionToken);
+                draft = await deps.getDraftSession(draftSessionToken);
                 draftSessionId = `${draft?.id || ''}`.trim() || null;
                 if (draft?.status === 'submitted') {
                     const error = new Error('This shared draft has already been submitted. Reload the edit link to view the submitted state.');
@@ -369,6 +434,111 @@ function createSubmissionWorkflowHandlers(deps) {
                     const error = new Error('This shared draft has expired. Start a fresh edit from the approved menu.');
                     error.statusCode = 410;
                     throw error;
+                }
+            }
+            // Every guard below runs before any DOCX, submission row, or ClickUp
+            // task exists. A rejection is a plain-language 4xx the form shows,
+            // and is logged to form_attempt_logs as `submit_rejected`.
+            const rejectSubmission = (statusCode, code, message, extra = {}) => {
+                void Promise.resolve(deps.logFormAttemptEvent?.({
+                    attemptId: formAttemptId,
+                    eventType: 'submit_rejected',
+                    route: '/api/form/submit',
+                    statusCode,
+                    submitterEmail: safeSubmitterEmail,
+                    submitterName: safeSubmitterName,
+                    projectName: safeProjectName,
+                    property: normalizedProperty,
+                    servicePeriod: safeServicePeriod,
+                    templateType: normalizedTemplateType,
+                    submissionMode: safeSubmissionMode,
+                    revisionSource: safeRevisionSource,
+                    draftSessionId,
+                    errorMessage: message,
+                    details: {
+                        code,
+                        revisionBaseSubmissionId: safeRevisionBaseSubmissionId || null,
+                        draftBaseSubmissionId: draft?.base_submission_id || null,
+                        ...extra,
+                    },
+                })).catch((logError) => console.error('Failed to log rejected submission:', logError?.message || logError));
+                console.warn(`Submission rejected (${code}): ${message}`);
+                return res.status(statusCode).json({ error: message, code, ...extra });
+            };
+            if (draft && draft.status === 'active') {
+                const draftBaseline = draft.baseline || {};
+                const draftBaseName = `${draftBaseline.projectName || 'the approved menu'}`;
+                const draftBaseIds = idSetForBaseline(draft.base_submission_id, draftBaseline.id, draftBaseline.idAliases, draft.baselineFreshness?.baselineIdForms);
+                // (3a) The body must be an edit of the draft's own baseline.
+                if (safeSubmissionMode !== 'modification' || !safeRevisionBaseSubmissionId || !draftBaseIds.has(safeRevisionBaseSubmissionId)) {
+                    return rejectSubmission(409, 'draft_baseline_mismatch', `This submission does not match its draft. The draft is an edit of "${draftBaseName}", but the form sent a different menu. Nothing was submitted. Reload the draft link and try again.`, { draftBaseline: { id: draftBaseline.id || draft.base_submission_id, projectName: draftBaseline.projectName || '' } });
+                }
+                // (3b) Server is the authority on staleness at submit time.
+                let freshness = draft.baselineFreshness || null;
+                if (!freshness && deps.getBaselineFreshness) {
+                    try {
+                        freshness = await deps.getBaselineFreshness(`${draft.base_submission_id || safeRevisionBaseSubmissionId}`);
+                    }
+                    catch (freshnessError) {
+                        // Unknown lineage never gates.
+                        console.warn('Baseline freshness unavailable at submit (not gating):', freshnessError?.message || freshnessError);
+                    }
+                }
+                if (freshness?.stale) {
+                    const newer = freshness.newerVersion || {};
+                    return rejectSubmission(409, 'draft_baseline_stale', `A newer version of this menu ("${newer.projectName || draftBaseName}", approved ${formatApprovalDate(newer.reviewedAt || newer.updatedAt)}) was approved after this draft started. Nothing was submitted, and this draft and its saved text were not changed. Open the current version to make your edits.`, { newerVersion: { id: newer.id || '', projectName: newer.projectName || '', reviewedAt: newer.reviewedAt || newer.updatedAt || '' } });
+                }
+                // (3c) Name or template type moving away from the draft's
+                // baseline needs an explicit confirmation from the chef.
+                const metadataChanges = [];
+                if (normalizeComparableDetail(draftBaseline.projectName) !== normalizeComparableDetail(safeProjectName)) {
+                    metadataChanges.push({ field: 'project name', from: `${draftBaseline.projectName || ''}`, to: safeProjectName });
+                }
+                if (normalizeComparableDetail(draftBaseline.templateType || 'food') !== normalizeComparableDetail(normalizedTemplateType)) {
+                    metadataChanges.push({ field: 'template type', from: `${draftBaseline.templateType || 'food'}`, to: normalizedTemplateType });
+                }
+                const metadataChangeConfirmed = req.body?.metadataChangeConfirmed === true || req.body?.metadataChangeConfirmed === 'true';
+                if (metadataChanges.length && !metadataChangeConfirmed) {
+                    const described = metadataChanges.map((change) => `${change.field} from "${change.from}" to "${change.to}"`).join(' and ');
+                    return rejectSubmission(409, 'metadata_change_unconfirmed', `This draft would change the ${described}. Nothing was submitted. Confirm the change in the form, then submit again.`, { metadataChanges });
+                }
+            }
+            // (4) A modification of a database baseline with zero changed menu
+            // lines and no project-detail change is not a submission. Compared
+            // against the baseline loaded from the database (never the request's
+            // baseApprovedMenuContent), with the Basic AI check's line comparison.
+            // Brand-new and uploaded-baseline/unapproved flows are not gated.
+            const unapprovedModeRequested = req.body?.unapprovedMode === true || req.body?.unapprovedMode === 'true';
+            if (safeSubmissionMode === 'modification' && safeRevisionSource === 'database' && safeRevisionBaseSubmissionId
+                && !unapprovedModeRequested && deps.getApprovedBaseline) {
+                let baselineRow = null;
+                try {
+                    baselineRow = await deps.getApprovedBaseline(safeRevisionBaseSubmissionId);
+                }
+                catch (baselineError) {
+                    // Fail toward keeping the chef's submission.
+                    console.warn('Zero-change guard skipped: baseline unavailable:', baselineError?.message || baselineError);
+                }
+                const baselineText = `${baselineRow?.approved_menu_content || baselineRow?.menu_content || ''}`;
+                if (baselineRow && baselineText.trim()) {
+                    const baselineBody = deps.normalizeMenuFooter(baselineText, '').body;
+                    const lineChanges = (0, changed_lines_1.countMenuLineChanges)(baselineBody, normalizedMenuContent);
+                    const detailChanges = listProjectDetailChanges(baselineRow, {
+                        projectName: safeProjectName,
+                        templateType: normalizedTemplateType,
+                        menuType: safeMenuType,
+                        servicePeriod: safeServicePeriod,
+                        orientation: safeOrientation,
+                        assetType: safeAssetType,
+                        printWidth, printHeight, printRegion, printSize,
+                        digitalWidth, digitalHeight,
+                        folded, cropMarks, bleedMarks, fileSizeLimit, fileSizeLimitMb,
+                        fileDeliveryNotes: safeFileDeliveryNotes,
+                        allergens: footerMetadata.normalizedAllergenLine || safeAllergens || baselineRow.allergens || '',
+                    });
+                    if (lineChanges.total === 0 && detailChanges.length === 0) {
+                        return rejectSubmission(422, 'no_changes', `Nothing changed from the approved menu "${baselineRow.project_name || 'this menu'}". Edit the menu text or a project detail before submitting a modification. Nothing was submitted.`, { baselineId: safeRevisionBaseSubmissionId });
+                    }
                 }
             }
             const localTestingRequest = isLocalDashboardRequest(req);
@@ -736,6 +906,62 @@ function createSubmissionWorkflowHandlers(deps) {
                 details: error.message
             });
         }
+    };
+    // (6) Idempotent submit: a repeat of the same form attempt id + draft token
+    // within the window (e.g. two clicks 300 ms apart) waits for and returns the
+    // first submission instead of creating a second one. A failed first attempt
+    // is forgotten so a genuine retry runs normally.
+    const idempotencyWindowMs = deps.submitIdempotencyWindowMs ?? 2 * 60 * 1000;
+    const recentSubmits = new Map();
+    const buildSubmitIdempotencyKey = (req) => {
+        const attemptId = (0, upload_security_1.sanitizePlainTextInput)((typeof req.get === 'function' ? req.get('x-menumanager-attempt-id') : '') || req.body?.attemptId, { maxLength: 100 }).trim();
+        if (!attemptId)
+            return null;
+        const draftToken = (0, upload_security_1.sanitizePlainTextInput)(req.body?.draftSessionToken, { maxLength: 160 }).trim();
+        return `${attemptId}|${draftToken}`;
+    };
+    const submitMenu = async (req, res) => {
+        const now = Date.now();
+        for (const [key, entry] of recentSubmits) {
+            if (now - entry.startedAt > idempotencyWindowMs)
+                recentSubmits.delete(key);
+        }
+        const key = buildSubmitIdempotencyKey(req);
+        if (key) {
+            const existing = recentSubmits.get(key);
+            if (existing) {
+                const first = await existing.result;
+                if (first.status < 400 && first.body?.success) {
+                    console.warn(`Duplicate submit for attempt ${key.split('|')[0]} returned first submission ${first.body.submissionId}`);
+                    return res.status(first.status).json({ ...first.body, duplicateOfFirstSubmission: true });
+                }
+                if (recentSubmits.get(key) === existing)
+                    recentSubmits.delete(key);
+            }
+        }
+        let settle;
+        const result = new Promise((resolve) => { settle = resolve; });
+        if (key)
+            recentSubmits.set(key, { startedAt: now, result });
+        const capture = {
+            statusCode: 200,
+            status(code) { this.statusCode = code; return this; },
+            json(body) { settle({ status: this.statusCode || 200, body }); return this; },
+        };
+        try {
+            await submitMenuOnce(req, capture);
+        }
+        catch (error) {
+            settle({ status: 500, body: { error: 'Failed to submit menu', details: error?.message || 'Unknown error' } });
+        }
+        settle({ status: 500, body: { error: 'Failed to submit menu', details: 'No response was produced' } });
+        const outcome = await result;
+        if (key && !(outcome.status < 400 && outcome.body?.success)) {
+            const entry = recentSubmits.get(key);
+            if (entry && entry.result === result)
+                recentSubmits.delete(key);
+        }
+        return res.status(outcome.status).json(outcome.body);
     };
     return {
         uploadMenuImage,
