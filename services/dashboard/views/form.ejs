@@ -12,6 +12,7 @@
     <script src="/vendor/quill-1.3.6/quill.js"></script>
     <script src="/js/form-helpers.js"></script>
     <script src="/js/form-submission.js"></script>
+    <script src="/js/baseline-freshness.js?v=20261116"></script>
     <script src="/js/rich-text-editor.js?v=20260918-safari-selection"></script>
     <script src="/js/diff-core.js"></script>
     <script src="/js/redline-preview.js?v=20260613-extract-leading-trim"></script>
@@ -2789,14 +2790,20 @@
 
     <div id="baselineFreshnessModal" class="baseline-conflict-modal" role="dialog" aria-modal="true" aria-labelledby="baselineFreshnessTitle" aria-describedby="baselineFreshnessMessage">
         <div class="baseline-conflict-dialog">
-            <div class="baseline-conflict-kicker">Existing approved menu found</div>
-            <h2 id="baselineFreshnessTitle">Use the existing approved menu?</h2>
+            <div class="baseline-conflict-kicker">Approved menu check</div>
+            <h2 id="baselineFreshnessTitle">Approved menu check</h2>
             <p id="baselineFreshnessMessage"></p>
             <div id="baselineFreshnessDetail" class="baseline-conflict-detail"></div>
+            <div id="baselineFreshnessCandidates" class="baseline-conflict-candidates" hidden></div>
+            <form id="baselineFreshnessOpenCurrentForm" method="POST" action="/api/drafts" target="_blank" rel="noopener" hidden>
+                <input type="hidden" name="baseSubmissionId" id="baselineFreshnessOpenCurrentId" value="">
+                <button type="submit" class="btn btn-secondary">Open the current version in a new tab</button>
+            </form>
             <div class="baseline-conflict-actions">
-                <button type="button" id="baselineFreshnessCancelBtn" class="btn btn-quiet">Cancel</button>
-                <button type="button" id="baselineFreshnessContinueBtn" class="btn btn-secondary">Continue Anyway</button>
-                <button type="button" id="baselineFreshnessLoadBtn" class="btn btn-primary">Load Existing Menu</button>
+                <!-- Cancel takes default focus; the content-replacing button is never primary-styled. -->
+                <button type="button" id="baselineFreshnessCancelBtn" class="btn btn-secondary">Cancel</button>
+                <button type="button" id="baselineFreshnessContinueBtn" class="btn btn-secondary">Keep my baseline</button>
+                <button type="button" id="baselineFreshnessLoadBtn" class="btn btn-quiet" hidden>Replace</button>
             </div>
         </div>
     </div>
@@ -2852,10 +2859,16 @@
         let draftApplying = false;
         let draftRequiresFreshSubmitterIdentity = false;
         let preservedManagedFooterText = '';
-        let baselineFreshnessOverrideKey = '';
         let baselineFreshnessCheckTimer = null;
-        let baselineFreshnessDialogState = null;
         let latestBaselineFreshnessIssue = null;
+        // In a draft session the baseline id is pinned to the draft's base: no
+        // code path may swap in another baseline (2026-11-16 incident).
+        const draftBaselineLock = MenuBaselineFreshness.createDraftBaselineLock(draftSession ? {
+            id: draftSession.base_submission_id,
+            idAliases: (draftSession.baseline && draftSession.baseline.idAliases) || [],
+        } : null);
+        let draftBaselineStaleIssue = null;
+        const submitGuard = MenuBaselineFreshness.createSubmitGuard(() => document.getElementById('submitBtn'));
         let formAttemptId = getOrCreateFormAttemptId();
         const DEFAULT_ALLERGEN_KEY = <%- JSON.stringify(defaultAllergenKey || '') %>;
         const MAX_MENU_UPLOAD_BYTES = <%= maxUploadBytes %>;
@@ -3652,7 +3665,6 @@
                 clearPropertyError();
                 updateServicePeriodOptions(propertyField.value);
                 applyCurrentMenuSizeDefaults();
-                baselineFreshnessOverrideKey = '';
                 scheduleBaselineFreshnessCheck();
             });
 
@@ -3660,7 +3672,6 @@
             if (servicePeriodField) {
                 servicePeriodField.addEventListener('change', () => {
                     applyCurrentMenuSizeDefaults();
-                    baselineFreshnessOverrideKey = '';
                     scheduleBaselineFreshnessCheck();
                 });
             }
@@ -3743,7 +3754,6 @@
             });
             propertyInput.addEventListener('change', function() {
                 updateServicePeriodOptions(propertyInput.value);
-                baselineFreshnessOverrideKey = '';
                 scheduleBaselineFreshnessCheck();
             });
         });
@@ -4316,7 +4326,7 @@
                     recentLoader.style.display = 'flex';
                 }
                 previewSection.classList.remove('show');
-                revisionBaseSubmissionId = null;
+                setRevisionBaseSubmissionId(null);
                 uploadedBaselineLineageSuggestion = null;
                 uploadedBaselineLineageConfirmed = false;
                 selectedRevisionBaseline = null;
@@ -4355,7 +4365,6 @@
                 }
                 setAllergenAutoDetectedBadge(false);
                 applyTurnaroundDefaults(true, false);
-                baselineFreshnessOverrideKey = '';
             }
             updateRevisionPreCheckLayout();
         }
@@ -4392,7 +4401,7 @@
             unapprovedPanel.classList.remove('show');
 
             // Reset common state
-            revisionBaseSubmissionId = null;
+            setRevisionBaseSubmissionId(null);
             selectedRevisionBaseline = null;
             selectedNote.classList.remove('show');
             selectedNote.textContent = '';
@@ -4402,7 +4411,7 @@
 
             if (useUnapproved) {
                 unapprovedPanel.classList.add('show');
-                revisionBaseSubmissionId = null;
+                setRevisionBaseSubmissionId(null);
                 revisionSearchResults = [];
                 baseApprovedMenuContentHtml = '';
                 document.getElementById('submissionSearchResults').innerHTML = '';
@@ -4410,7 +4419,7 @@
                 editHerePanel.classList.add('show');
                 if (useUpload) {
                     uploadPanel.classList.add('show');
-                    revisionBaseSubmissionId = null;
+                    setRevisionBaseSubmissionId(null);
                     revisionSearchResults = [];
                     baseApprovedMenuContentHtml = '';
                     document.getElementById('submissionSearchResults').innerHTML = '';
@@ -4472,18 +4481,6 @@
             };
         }
 
-        function baselineFreshnessKey(issue) {
-            const latestId = publicSubmissionId(issue?.latest || {});
-            const selectedId = publicSubmissionId(issue?.selected || {}) || revisionBaseSubmissionId || '';
-            return [
-                issue?.type || '',
-                normalizeBaselineMatchValue(issue?.property || ''),
-                normalizeBaselineMatchValue(issue?.servicePeriod || ''),
-                selectedId,
-                latestId
-            ].join('|');
-        }
-
         function formatApprovedDate(value) {
             if (!value) return 'unknown date';
             const date = new Date(value);
@@ -4497,20 +4494,103 @@
             return `${name}${approvedAt ? ` (${formatApprovedDate(approvedAt)})` : ''}`;
         }
 
-        async function fetchLatestApprovedForCurrentService(property, servicePeriod) {
-            if (!property || !servicePeriod) return null;
-            const params = new URLSearchParams({ property, servicePeriod });
-            const response = await fetch(`/api/submissions/latest-approved?${params.toString()}`);
+        async function fetchBaselineFreshness(baselineId) {
+            const id = `${baselineId || ''}`.trim();
+            if (!id) return null;
+            const response = await fetch(`/api/submissions/baseline-freshness?${new URLSearchParams({ id }).toString()}`);
             if (response.status === 404) return null;
             const data = await response.json();
             if (!response.ok) {
-                throw new Error(data.error || 'Latest approved lookup failed');
+                throw new Error(data.error || 'Baseline freshness lookup failed');
             }
             return data;
         }
 
+        async function fetchApprovedMenusForService(property, servicePeriod) {
+            if (!property || !servicePeriod) return [];
+            const params = new URLSearchParams({ property, servicePeriod });
+            const response = await fetch(`/api/submissions/approved-for-service?${params.toString()}`);
+            const data = await response.json();
+            if (!response.ok) {
+                throw new Error(data.error || 'Approved menu lookup failed');
+            }
+            return Array.isArray(data.menus) ? data.menus : [];
+        }
+
+        // Starts (or resumes) an edit of another approved version in a new tab
+        // through the same POST /api/drafts path as "Edit This Menu". The
+        // current page and its draft are left untouched.
+        function openMenuVersionInNewTab(submissionId) {
+            const form = document.getElementById('baselineFreshnessOpenCurrentForm');
+            const input = document.getElementById('baselineFreshnessOpenCurrentId');
+            if (!form || !input || !submissionId) return;
+            input.value = submissionId;
+            form.submit();
+        }
+
+        function setRevisionBaseSubmissionId(nextId) {
+            if (draftSessionToken && draftBaselineLock.active && !draftBaselineLock.allows(nextId)) {
+                console.warn('Blocked a baseline change inside a draft session:', nextId);
+                return false;
+            }
+            revisionBaseSubmissionId = nextId;
+            return true;
+        }
+
+        function getCurrentMenuTextForComparison() {
+            const step2 = document.getElementById('step2');
+            const reviewedArea = document.getElementById('reviewedContentArea');
+            if (step2 && !step2.classList.contains('hidden') && reviewedArea) {
+                return extractCleanTextFromReviewedArea(reviewedArea);
+            }
+            return quill ? quill.getText() : '';
+        }
+
+        function getEditedLineCountForReplace() {
+            const current = getCurrentMenuTextForComparison();
+            if (submissionMode === 'modification' && baseApprovedMenuContent) {
+                return MenuBaselineFreshness.countMenuLineChanges(baseApprovedMenuContent, current).total;
+            }
+            return MenuBaselineFreshness.countMenuLineChanges('', current).total;
+        }
+
+        function collectProjectDetailsForComparison() {
+            const valueOf = (id) => (document.getElementById(id)?.value || '').trim();
+            const assetType = valueOf('assetType');
+            const isPrint = assetType === 'PRINT' || assetType === 'BOTH';
+            const isDigital = assetType === 'DIGITAL' || assetType === 'BOTH';
+            return {
+                projectName: valueOf('projectName'),
+                templateType: valueOf('templateType'),
+                menuType: valueOf('menuType'),
+                servicePeriod: valueOf('servicePeriod'),
+                orientation: valueOf('orientation'),
+                assetType,
+                printWidth: isPrint ? valueOf('widthPrint') : '',
+                printHeight: isPrint ? valueOf('heightPrint') : '',
+                printRegion: isPrint ? valueOf('printRegion') : '',
+                printSize: isPrint ? valueOf('printSize') : '',
+                digitalWidth: isDigital ? valueOf('widthDigital') : '',
+                digitalHeight: isDigital ? valueOf('heightDigital') : '',
+                folded: isPrint ? valueOf('folded') : '',
+                cropMarks: isPrint ? valueOf('cropMarks') : '',
+                bleedMarks: isPrint ? valueOf('bleedMarks') : '',
+                fileSizeLimit: isPrint ? valueOf('fileSizeLimit') : '',
+                fileSizeLimitMb: isPrint ? valueOf('fileSizeLimitMb') : '',
+                fileDeliveryNotes: isPrint ? valueOf('fileDeliveryNotes') : '',
+                allergens: getAllergenInputValue(),
+            };
+        }
+
         function applyApprovedBaseline(selected, options = {}) {
-            if (!selected) return;
+            if (!selected) return false;
+            // Hard guard: a draft session never takes on another baseline's
+            // content, project fields, or id.
+            if (draftSessionToken && draftBaselineLock.active && !draftBaselineLock.allows(selected)) {
+                console.warn('Refused to apply a different baseline inside a draft session:', selected.id);
+                showAlert('This draft can only edit its own menu. Open other menus in a new tab.', 'error');
+                return false;
+            }
 
             document.getElementById('submissionModeModification').checked = true;
             document.getElementById('submissionModeNew').checked = false;
@@ -4521,7 +4601,7 @@
             document.getElementById('modWorkflowEditHere').checked = true;
             onModificationSourceChange();
 
-            revisionBaseSubmissionId = selected.id;
+            setRevisionBaseSubmissionId(selected.id);
             selectedRevisionBaseline = selected;
             revisionSource = 'database';
             revisionBaselineDocPath = '';
@@ -4531,7 +4611,6 @@
             baseApprovedMenuContentHtml = stripManagedFooterHtml(selected.approvedMenuContentHtml || '');
             preservedManagedFooterText = normalizedBaseline.footerText || '';
             persistentDiffSummary = { insertions: 0, deletions: 0 };
-            baselineFreshnessOverrideKey = '';
             setAllergenInputValue(normalizedBaseline.allergens || '');
             setRawNoticeNotNeeded(false);
             setAllergenAutoDetectedBadge(!!normalizedBaseline.allergens);
@@ -4546,7 +4625,7 @@
             renderPersistentPreview(baseApprovedMenuContent, baseApprovedMenuContent);
 
             const selectedNote = document.getElementById('revisionSelectedNote');
-            const latestNote = selected.isLatestForPropertyService === false ? ' (older than latest for this service)' : '';
+            const latestNote = selected.isCurrentMenuVersion === false ? ' (an older version of this menu)' : '';
             selectedNote.textContent = `Loaded approved baseline: ${selected.projectName || 'Untitled'} (${selected.id})${latestNote}`;
             selectedNote.classList.add('show');
             document.getElementById('submissionSearchResults').innerHTML = '';
@@ -4555,159 +4634,77 @@
                 showAlert('Approved baseline loaded. Revision tracking mode is active.', 'success');
             }
             scheduleBaselineFreshnessCheck();
+            return true;
         }
 
         async function loadLatestApprovedBaseline(latest) {
             const latestId = publicSubmissionId(latest);
             if (!latestId) return;
+            if (draftSessionToken) return; // never replace a draft's content
             applyApprovedBaseline(latest);
         }
 
+        // "Newer" is decided by menu identity on the server (menu pointer, then
+        // lineage). Property + service period only feeds the brand-new
+        // "approved menus already exist here" list and the mismatch check.
         async function getBaselineFreshnessIssue() {
             if (submissionMode === 'modification' && (unapprovedMode || revisionSource === 'uploaded_unapproved')) {
                 return null;
             }
-
             const { property, servicePeriod } = getCurrentPropertyService();
-            if (!property || !servicePeriod) return null;
-
-            const latest = await fetchLatestApprovedForCurrentService(property, servicePeriod);
-            if (!latest) return null;
-
             const selectedId = `${revisionBaseSubmissionId || ''}`.trim();
-            const selected = selectedRevisionBaseline;
-            const currentPropertyKey = normalizeBaselineMatchValue(property);
-            const currentServiceKey = normalizeBaselineMatchValue(servicePeriod);
-
-            if (submissionMode === 'modification' && selectedId && selected) {
-                const selectedPropertyKey = normalizeBaselineMatchValue(selected.property);
-                const selectedServiceKey = normalizeBaselineMatchValue(selected.servicePeriod);
-                if (selectedPropertyKey !== currentPropertyKey || selectedServiceKey !== currentServiceKey) {
-                    return { type: 'mismatch', property, servicePeriod, selected, latest };
+            let freshness = null;
+            let existingMenus = [];
+            if (submissionMode === 'modification') {
+                if (selectedId && selectedRevisionBaseline) {
+                    freshness = await fetchBaselineFreshness(selectedId);
                 }
-                if (publicSubmissionId(latest) && publicSubmissionId(latest) !== selectedId) {
-                    return { type: 'stale', property, servicePeriod, selected, latest };
-                }
-                return null;
+            } else if (property && servicePeriod) {
+                existingMenus = await fetchApprovedMenusForService(property, servicePeriod);
             }
-
-            return { type: 'existing', property, servicePeriod, selected: null, latest };
-        }
-
-        function getBaselineFreshnessCopy(issue) {
-            const fallback = {
-                title: 'Use the existing approved menu?',
-                message: 'There is an approved menu for this property and service period. Loading it as the baseline keeps this submission connected to the current approved version.',
-                detail: '',
-                loadLabel: 'Use Existing Menu',
-                continueLabel: 'Continue Anyway'
-            };
-            if (!issue) return fallback;
-
-            const latestLabel = formatBaselineLabel(issue.latest);
-            if (issue.type === 'mismatch') {
-                return {
-                    title: 'This baseline does not match the form',
-                    message: `The loaded baseline is for ${issue.selected.property || 'another property'} / ${issue.selected.servicePeriod || 'another service'}, but the form is set to ${issue.property} / ${issue.servicePeriod}.`,
-                    detail: `Latest approved menu for this form: ${latestLabel}`,
-                    loadLabel: 'Load Matching Menu',
-                    continueLabel: 'Keep Current Baseline'
-                };
-            }
-            if (issue.type === 'stale') {
-                return {
-                    title: 'A newer approved menu exists',
-                    message: `A newer approved ${issue.servicePeriod} menu exists for ${issue.property}. Loading it prevents design from reviewing changes against an older baseline.`,
-                    detail: `Newest approved menu: ${latestLabel}`,
-                    loadLabel: 'Load Newer Menu',
-                    continueLabel: 'Keep Older Baseline'
-                };
-            }
-            return {
-                title: 'An approved menu already exists',
-                message: `An approved ${issue.servicePeriod} menu already exists for ${issue.property}. If this is a revision, load the existing menu and make changes from that baseline.`,
-                detail: `Existing approved menu: ${latestLabel}`,
-                loadLabel: 'Use Existing Menu',
-                continueLabel: 'Continue as Brand New'
-            };
-        }
-
-        function closeBaselineFreshnessDialog(result) {
-            const modal = document.getElementById('baselineFreshnessModal');
-            if (modal) {
-                modal.classList.remove('show');
-            }
-            if (!baselineFreshnessDialogState || typeof baselineFreshnessDialogState.resolve !== 'function') {
-                baselineFreshnessDialogState = null;
-                return;
-            }
-            const resolve = baselineFreshnessDialogState.resolve;
-            baselineFreshnessDialogState = null;
-            resolve(result);
-        }
-
-        function showBaselineFreshnessWarning(issue, options = {}) {
-            if (!issue) return true;
-            const key = baselineFreshnessKey(issue);
-            if (baselineFreshnessOverrideKey === key && !options.force) {
-                return true;
-            }
-
-            if (baselineFreshnessDialogState && baselineFreshnessDialogState.key === key) {
-                return baselineFreshnessDialogState.promise;
-            }
-
-            const modal = document.getElementById('baselineFreshnessModal');
-            const titleEl = document.getElementById('baselineFreshnessTitle');
-            const messageEl = document.getElementById('baselineFreshnessMessage');
-            const detailEl = document.getElementById('baselineFreshnessDetail');
-            const loadBtn = document.getElementById('baselineFreshnessLoadBtn');
-            const continueBtn = document.getElementById('baselineFreshnessContinueBtn');
-            const cancelBtn = document.getElementById('baselineFreshnessCancelBtn');
-            if (!modal || !titleEl || !messageEl || !detailEl || !loadBtn || !continueBtn || !cancelBtn) {
-                return false;
-            }
-
-            if (baselineFreshnessDialogState) {
-                closeBaselineFreshnessDialog(false);
-            }
-
-            const copy = getBaselineFreshnessCopy(issue);
-            titleEl.textContent = copy.title;
-            messageEl.textContent = copy.message;
-            detailEl.textContent = copy.detail;
-            loadBtn.textContent = copy.loadLabel;
-            continueBtn.textContent = copy.continueLabel;
-
-            let resolveDialog;
-            const promise = new Promise((resolve) => {
-                resolveDialog = resolve;
+            return MenuBaselineFreshness.classifyIssue({
+                submissionMode,
+                unapprovedMode,
+                revisionSource,
+                selected: selectedRevisionBaseline,
+                selectedId,
+                freshness,
+                property,
+                servicePeriod,
+                existingMenus,
             });
-            baselineFreshnessDialogState = { key, resolve: resolveDialog, promise };
-
-            loadBtn.onclick = () => {
-                closeBaselineFreshnessDialog(false);
-                loadLatestApprovedBaseline(issue.latest);
-            };
-            continueBtn.onclick = () => {
-                baselineFreshnessOverrideKey = key;
-                closeBaselineFreshnessDialog(true);
-                showAlert('Existing-menu warning acknowledged for this property and service.', 'info');
-            };
-            cancelBtn.onclick = () => closeBaselineFreshnessDialog(false);
-
-            modal.classList.add('show');
-            setTimeout(() => loadBtn.focus(), 0);
-            return promise;
         }
 
+        const baselineFreshnessDialog = MenuBaselineFreshness.createFreshnessDialog({
+            elements: {
+                modal: document.getElementById('baselineFreshnessModal'),
+                title: document.getElementById('baselineFreshnessTitle'),
+                message: document.getElementById('baselineFreshnessMessage'),
+                detail: document.getElementById('baselineFreshnessDetail'),
+                list: document.getElementById('baselineFreshnessCandidates'),
+                loadBtn: document.getElementById('baselineFreshnessLoadBtn'),
+                continueBtn: document.getElementById('baselineFreshnessContinueBtn'),
+                cancelBtn: document.getElementById('baselineFreshnessCancelBtn'),
+                openCurrentForm: document.getElementById('baselineFreshnessOpenCurrentForm'),
+                openCurrentInput: document.getElementById('baselineFreshnessOpenCurrentId'),
+            },
+            defer: (fn) => setTimeout(fn, 0),
+            onLoad: (record) => loadLatestApprovedBaseline(record),
+            onKeep: () => showAlert('Keeping your baseline. You will not be asked again about this menu.', 'info'),
+        });
+
+        // Asked at most once per issue: a "keep" answer is honored at submit.
+        // In a draft, a stale baseline blocks (no load action is ever offered).
         async function ensureBaselineFreshnessBeforeContinue() {
             try {
                 const issue = await getBaselineFreshnessIssue();
-                return await showBaselineFreshnessWarning(issue, { force: true });
+                return await baselineFreshnessDialog.ask(issue, {
+                    inDraft: !!draftSessionToken,
+                    editedLineCount: getEditedLineCountForReplace(),
+                });
             } catch (error) {
                 console.error('Baseline freshness check failed:', error);
-                showAlert('Could not verify the latest approved menu for this property and service. Please continue carefully.', 'warning');
+                showAlert('Could not check for a newer version of this menu. Please continue carefully.', 'warning');
                 return true;
             }
         }
@@ -4747,7 +4744,7 @@
                     <div class="search-result-item" onclick="selectRevisionResult(${idx})">
                         <strong>${escapeHtml(r.projectName || '(Untitled)')}</strong> - ${escapeHtml(r.property || 'Unknown Property')}<br>
                         <span style="color: var(--color-text-muted);">Service: ${escapeHtml(r.servicePeriod || 'N/A')} | Approved: ${escapeHtml(formatApprovedDate(r.reviewedAt || r.updatedAt))} | ID: ${escapeHtml(r.id)}</span>
-                        ${r.isLatestForPropertyService === null ? '' : `<span style="display:inline-block;margin-left:0.4rem;color:${r.isLatestForPropertyService === false ? 'var(--color-warning)' : 'var(--color-success)'};font-weight:600;">${r.isLatestForPropertyService === false ? 'Older version' : 'Latest for service'}</span>`}
+                        ${r.isCurrentMenuVersion === true || r.isCurrentMenuVersion === false ? `<span style="display:inline-block;margin-left:0.4rem;color:${r.isCurrentMenuVersion === false ? 'var(--color-warning)' : 'var(--color-success)'};font-weight:600;">${r.isCurrentMenuVersion === false ? 'Older version of this menu' : 'Current version'}</span>` : ''}
                     </div>
                 `).join('');
             } catch (error) {
@@ -4913,7 +4910,7 @@
             const { data, file, status } = result;
             try {
                 revisionSource = 'uploaded_baseline';
-                revisionBaseSubmissionId = null;
+                setRevisionBaseSubmissionId(null);
                 uploadedBaselineLineageSuggestion = data.lineageSuggestion || null;
                 uploadedBaselineLineageConfirmed = false;
                 revisionBaselineDocPath = data.baselineDocPath || '';
@@ -4973,8 +4970,8 @@
             const no = document.createElement('button');
             no.type = 'button'; no.className = 'btn btn-secondary'; no.style.marginLeft = '0.5rem'; no.textContent = 'No, this is a separate menu';
             const state = document.createElement('span'); state.style.marginLeft = '0.5rem';
-            yes.onclick = () => { revisionBaseSubmissionId = suggestion.id; uploadedBaselineLineageConfirmed = true; state.textContent = 'Will link this revision.'; };
-            no.onclick = () => { revisionBaseSubmissionId = null; uploadedBaselineLineageConfirmed = false; state.textContent = 'Will not link this revision.'; };
+            yes.onclick = () => { setRevisionBaseSubmissionId(suggestion.id); uploadedBaselineLineageConfirmed = true; state.textContent = 'Will link this revision.'; };
+            no.onclick = () => { setRevisionBaseSubmissionId(null); uploadedBaselineLineageConfirmed = false; state.textContent = 'Will not link this revision.'; };
             container.append(line, yes, no, state);
             container.style.display = '';
         }
@@ -5030,7 +5027,7 @@
                 unapprovedOriginalHtml = revisionComparison.originalHtml || '';
                 unapprovedEditorHtml = revisionComparison.editorHtml || '';
                 revisionSource = 'uploaded_unapproved';
-                revisionBaseSubmissionId = null;
+                setRevisionBaseSubmissionId(null);
                 revisionBaselineDocPath = data.baselineDocPath || '';
                 revisionBaselineFileName = data.baselineFileName || file.name;
                 baseApprovedMenuContent = revisionComparison.currentText || data.visibleText || '';
@@ -5179,7 +5176,7 @@
             unapprovedOriginalHtml = revisionComparison.originalHtml || '';
             unapprovedEditorHtml = revisionComparison.editorHtml || '';
             revisionSource = 'uploaded_unapproved';
-            revisionBaseSubmissionId = null;
+            setRevisionBaseSubmissionId(null);
             revisionBaselineDocPath = data.baselineDocPath || '';
             revisionBaselineFileName = data.baselineFileName || file.name;
             baseApprovedMenuContent = revisionComparison.currentText || data.visibleText || '';
@@ -5712,6 +5709,12 @@
 
         function applyProjectPrefill(p) {
             if (!p) return;
+            // Project fields of a draft come only from the draft's own baseline.
+            if (draftSessionToken && draftBaselineLock.active && !draftBaselineLock.allows(p)) {
+                console.warn('Refused to prefill project fields from another menu inside a draft session');
+                showAlert('This draft keeps its own project details. Start a new submission to reuse another menu\'s details.', 'warning');
+                return;
+            }
             const toYesNo = (value, fallback = 'no') => {
                 if (value === true || value === 'true' || value === 1 || value === '1' || value === 'yes') return 'yes';
                 if (value === false || value === 'false' || value === 0 || value === '0' || value === 'no') return 'no';
@@ -5724,7 +5727,6 @@
             setSelectValue('orientation', p.orientation);
             setSelectValue('menuType', p.menuType);
             updateServicePeriodOptions(p.property || '', p.servicePeriod || '');
-            baselineFreshnessOverrideKey = '';
             scheduleBaselineFreshnessCheck();
             setSelectValue('templateType', p.templateType);
             setSelectValue('assetType', p.assetType);
@@ -5935,7 +5937,6 @@
             propertySuggestHighlightIndex = -1;
             updateServicePeriodOptions(selected);
             applyCurrentMenuSizeDefaults();
-            baselineFreshnessOverrideKey = '';
             scheduleBaselineFreshnessCheck();
         }
 
@@ -6357,8 +6358,8 @@
 
         document.addEventListener('keydown', function(e) {
             if (e.key === 'Escape') {
-                if (baselineFreshnessDialogState) {
-                    closeBaselineFreshnessDialog(false);
+                if (baselineFreshnessDialog.isOpen()) {
+                    baselineFreshnessDialog.close(false);
                     return;
                 }
                 closeFullscreenView();
@@ -8058,7 +8059,20 @@
             uploadedMenuImageFileName = data.menuImageFileName || file.name;
         }
 
+        // Submit is guarded synchronously at click: the in-flight flag and the
+        // disabled button are set before any await, so a second click 300 ms
+        // later is a no-op. Re-enabled on failure or cancel.
         async function submitMenu(skipAiReview = false) {
+            if (!submitGuard.begin()) return;
+            let submitted = false;
+            try {
+                submitted = (await submitMenuOnce(skipAiReview)) === true;
+            } finally {
+                if (submitted) submitGuard.release(); else submitGuard.end();
+            }
+        }
+
+        async function submitMenuOnce(skipAiReview = false) {
             if (!validateStep1()) {
                 return;
             }
@@ -8090,6 +8104,40 @@
 
             if (!(await ensureBaselineFreshnessBeforeContinue())) {
                 return;
+            }
+
+            // A modification with zero changed lines and no project-detail change
+            // is not a submission (the server enforces the same rule).
+            if (MenuBaselineFreshness.isZeroChangeModification({
+                submissionMode,
+                unapprovedMode,
+                revisionSource,
+                baseline: selectedRevisionBaseline,
+                baselineText: baseApprovedMenuContent,
+                currentText: getCurrentMenuTextForComparison(),
+                details: collectProjectDetailsForComparison(),
+            })) {
+                showAlert(`Nothing changed from the approved menu "${selectedRevisionBaseline?.projectName || 'this menu'}". Edit the menu text or a project detail before submitting a modification.`, 'error');
+                return;
+            }
+
+            // In a draft, changing the menu name or template type away from the
+            // draft's baseline needs an explicit confirmation.
+            let metadataChangeConfirmed = false;
+            if (draftSessionToken && draftSession?.baseline) {
+                const changes = [];
+                const fromName = `${draftSession.baseline.projectName || ''}`.trim();
+                const toName = document.getElementById('projectName').value.trim();
+                if (fromName.toLowerCase() !== toName.toLowerCase()) changes.push(`Menu name: "${fromName}" → "${toName}"`);
+                const fromType = `${draftSession.baseline.templateType || 'food'}`.trim();
+                const toType = document.getElementById('templateType').value;
+                if (fromType.toLowerCase() !== `${toType}`.toLowerCase()) changes.push(`Template type: "${fromType}" → "${toType}"`);
+                if (changes.length) {
+                    if (!window.confirm(`This draft started from "${fromName}". You changed:\n\n${changes.join('\n')}\n\nSubmit with these changes?`)) {
+                        return;
+                    }
+                    metadataChangeConfirmed = true;
+                }
             }
 
             if (isEditMode) {
@@ -8217,7 +8265,8 @@
                 skipAiReview: !!skipAiReview,
                 menuImagePath: '',
                 menuImageFileName: '',
-                draftSessionToken: draftSessionToken || ''
+                draftSessionToken: draftSessionToken || '',
+                metadataChangeConfirmed
             };
 
             const submitStartedAt = Date.now();
@@ -8350,6 +8399,7 @@
                 // Remember this submitter for next time (Phase 4).
                 saveSubmitterProfile();
                 prepareForNextSubmission();
+                return true;
 
             } catch (error) {
                 console.error('Error:', error);
@@ -8570,6 +8620,13 @@
 
         async function saveDraftNow() {
             if (!draftSessionToken || draftAutosaveBlocked || draftApplying) return;
+            // Never persist content that belongs to a different baseline.
+            if (draftBaselineLock.active && !draftBaselineLock.allows(revisionBaseSubmissionId)) {
+                draftAutosaveBlocked = true;
+                setDraftSaveStatus('Not saved');
+                console.warn('Draft autosave refused: editor baseline differs from the draft baseline', revisionBaseSubmissionId);
+                return;
+            }
             try {
                 const response = await fetch(`/api/drafts/${encodeURIComponent(draftSessionToken)}`, {
                     method: 'PUT',
@@ -8749,16 +8806,31 @@
                 setDraftReadonly('This shared draft has expired. Start a fresh edit from the approved menu.');
             }
 
-            // Surface staleness at open instead of waiting for the continue-step
-            // dialog. Banner only — the dialog's "Load Newer Menu" action would
-            // overwrite this draft's saved edits under the old baseline id.
+            // Surface staleness at open, decided by menu identity (the db's
+            // baselineFreshness), never by property + service period. Banner
+            // only: a draft's content is never replaced, and the AI check and
+            // submit are blocked by ensureBaselineFreshnessBeforeContinue().
             if (draftSession.status === 'active') {
                 (async () => {
                     try {
-                        const issue = await getBaselineFreshnessIssue();
-                        if (issue && (issue.type === 'stale' || issue.type === 'mismatch')) {
-                            const latestLabel = formatBaselineLabel(issue.latest);
-                            showAlert(`A newer approved ${issue.servicePeriod} menu exists for ${issue.property} (${latestLabel}). This draft is editing an older version of the menu.`, 'warning', { persistent: true });
+                        const freshness = draftSession.baselineFreshness !== undefined
+                            ? draftSession.baselineFreshness
+                            : await fetchBaselineFreshness(draftSession.base_submission_id);
+                        const issue = MenuBaselineFreshness.classifyIssue({
+                            submissionMode: 'modification',
+                            revisionSource: 'database',
+                            selected: draftSession.baseline,
+                            selectedId: draftSession.base_submission_id,
+                            freshness,
+                        });
+                        if (issue && issue.type === 'stale') {
+                            draftBaselineStaleIssue = issue;
+                            const newer = issue.latest || {};
+                            const approvedOn = formatApprovedDate(newer.reviewedAt || newer.updatedAt);
+                            showAlert(`A newer version of this menu ("${newer.projectName || 'approved menu'}", approved ${approvedOn}) was approved after this draft started. This draft can't be checked or submitted. Your saved text is untouched, so you can copy what you need from it.`, 'warning', {
+                                persistent: true,
+                                actions: [{ label: 'Open the current version in a new tab', onClick: () => openMenuVersionInNewTab(publicSubmissionId(newer)) }],
+                            });
                         }
                     } catch (error) {
                         console.error('Draft baseline staleness check failed:', error);

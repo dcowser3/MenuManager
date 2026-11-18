@@ -114,14 +114,18 @@ Fields include provider/path/source to allow future migration from local filesys
 Dashboard service:
 
 - `GET /api/submissions/search`
-- `GET /api/submissions/latest-approved` (property + service-period canonical lookup, with project/property fallback for older callers)
+- `GET /api/submissions/latest-approved` (non-authoritative property + service-period hint; the form no longer calls it)
+- `GET /api/submissions/baseline-freshness?id=` (is there a newer approved version of this baseline's menu — menu identity only)
+- `GET /api/submissions/approved-for-service?property=&servicePeriod=` (every approved menu in a service period, by name)
 - `POST /api/modification/baseline-upload`
 - `POST /api/modification/unapproved-upload`
 
 DB service:
 
 - `GET /submissions/search`
-- `GET /submissions/latest-approved`
+- `GET /submissions/latest-approved` (non-authoritative hint)
+- `GET /submissions/baseline-freshness`
+- `GET /submissions/approved-for-service`
 - `POST /assets`
 - `GET /assets/by-submission/:submissionId`
 
@@ -130,6 +134,15 @@ ClickUp integration:
 - Webhook now extracts/stores canonical approved text from Isabella upload.
 - Task creation now includes modification metadata and attaches uploaded baseline DOCX when provided.
 - Form submit persists the generated DOCX and baseline asset before triggering the full Tier 2 AI review asynchronously, so uploaded approved-baseline modification submissions are not held open by slow OpenAI review calls.
+
+## Baseline Freshness and Submit Guards (2026-11-16)
+
+See the [incident note](incident-2026-11-16-load-newer-menu.md). In short:
+
+- The form asks "is there a newer version?" by **menu identity** (menu pointer, then lineage), never by property + service period. Search results show "Current version" / "Older version of this menu" from the menu pointer.
+- Where loading another baseline is still offered (non-draft flows), the dialog names the menu ("Replace your menu with \"…\"?"), states how many edited lines would be discarded and asks a second time when there are any, focuses Cancel, never styles the replacing button as primary, and asks once per issue (a "keep" answer holds at submit). In brand-new mode with several approved menus for the service period, it lists them by name.
+- A modification of a database baseline with zero changed lines and no project-detail change is blocked on the form and rejected by the server (422). Size, orientation, asset type and other detail-only changes are allowed. Uploaded-baseline and unapproved-upload flows are not gated.
+- Submit is disabled synchronously at click and the server de-duplicates a repeat of the same attempt within 2 minutes.
 
 ## ClickUp Behavior for Modifications
 

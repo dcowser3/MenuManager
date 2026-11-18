@@ -56,9 +56,13 @@ describe('draft session resume behavior (form view)', () => {
         expect(t).toMatch(/applyDraftFormState\(draftSession\.form_state \|\| \{\}\);[\s\S]*draftSession\.status === 'active'[\s\S]*setDateNeededMinimumFromTurnaround\(true\);/);
     });
 
-    test('opening a draft on a non-latest baseline warns at open, not only at continue', () => {
+    // Contract changed 2026-11-16 (Load Newer Menu incident): staleness at open
+    // is decided by menu identity (draftSession.baselineFreshness from the db),
+    // and the banner names the newer version instead of a property + service
+    // "latest". See baseline-freshness-client.test.js for behavior coverage.
+    test('opening a draft on a superseded baseline warns at open, not only at continue', () => {
         const t = readForm();
         expect(t).toContain('Draft baseline staleness check failed');
-        expect(t).toContain('This draft is editing an older version of the menu.');
+        expect(t).toContain('was approved after this draft started. This draft can\'t be checked or submitted.');
     });
 });

@@ -62,6 +62,7 @@ const upload_security_1 = require("./lib/upload-security");
 const internal_auth_1 = require("@menumanager/internal-auth");
 const review_contract_1 = require("@menumanager/review-contract");
 const submission_workflow_1 = require("./lib/submission-workflow");
+const changed_lines_1 = require("./lib/changed-lines");
 const submission_confirmation_mail_1 = require("./lib/submission-confirmation-mail");
 const approval_workflow_1 = require("./lib/approval-workflow");
 const design_approval_workflow_1 = require("./lib/design-approval-workflow");
@@ -90,6 +91,7 @@ const canonical_policy_1 = require("./lib/canonical-policy");
 const review_pipeline_1 = require("./lib/review-pipeline");
 const improvement_cycle_core_1 = require("./lib/improvement-cycle-core");
 const expectation_versioning_1 = require("./lib/expectation-versioning");
+const learning_comparison_loader_1 = require("./lib/learning-comparison-loader");
 var upload_security_2 = require("./lib/upload-security");
 Object.defineProperty(exports, "sanitizePlainTextInput", { enumerable: true, get: function () { return upload_security_2.sanitizePlainTextInput; } });
 Object.defineProperty(exports, "sanitizeRichTextHtml", { enumerable: true, get: function () { return upload_security_2.sanitizeRichTextHtml; } });
@@ -682,6 +684,14 @@ async function getPropertyCatalogFromDb() {
     }
     return fallbackCatalog;
 }
+// Restaurant autocomplete lists must match what /form offers, so they read the
+// same DB-backed catalog (falls back to config/properties.json on DB failure).
+async function getActivePropertyNames() {
+    const catalog = await getPropertyCatalogFromDb();
+    return catalog
+        .filter((record) => record.is_active !== false)
+        .map((record) => record.name);
+}
 function resolveCityCountryFromCatalog(property, catalog) {
     const match = catalog.find((item) => item.name.toLowerCase() === property.toLowerCase());
     if (!match)
@@ -1102,10 +1112,8 @@ app.get('/form-legacy', async (req, res) => {
 /**
  * Design Approval Page - Compare DOCX against PDF
  */
-app.get('/design-approval', (req, res) => {
-    const propertyCatalog = (0, property_catalog_1.buildFallbackPropertyCatalog)()
-        .filter((record) => record.is_active !== false)
-        .map((record) => record.name);
+app.get('/design-approval', async (req, res) => {
+    const propertyCatalog = await getActivePropertyNames();
     res.render('design-approval', {
         title: 'Design Approval',
         propertyCatalog,
@@ -1141,9 +1149,7 @@ app.get('/approved-menus', async (req, res) => {
                 menuCards = menuCards.filter((card) => card.versions.some((version) => version.submissionId === submissionId || version.legacyId === submissionId));
             }
         }
-        const propertyCatalog = (0, property_catalog_1.buildFallbackPropertyCatalog)()
-            .filter((record) => record.is_active !== false)
-            .map((record) => record.name);
+        const propertyCatalog = await getActivePropertyNames();
         res.render('approved-menus', {
             title: 'Approved Menus',
             menuCards,
@@ -1706,6 +1712,17 @@ const submissionWorkflowHandlers = (0, submission_workflow_1.createSubmissionWor
         const response = await internalApi.get(`${DB_SERVICE_URL}/draft-sessions/${encodeURIComponent(token)}`, { timeout: 5000 });
         return response.data;
     },
+    getBaselineFreshness: async (baselineId) => {
+        const response = await internalApi.get(`${DB_SERVICE_URL}/submissions/baseline-freshness`, {
+            params: { id: baselineId }, timeout: 5000,
+        });
+        return response.data;
+    },
+    getApprovedBaseline: async (baselineId) => {
+        const response = await internalApi.get(`${DB_SERVICE_URL}/submissions/${encodeURIComponent(baselineId)}`, { timeout: 5000 });
+        return response.data;
+    },
+    logFormAttemptEvent: (event) => (0, form_attempt_logging_1.logFormAttemptEvent)(event),
     lockDraftSession: async (token, submittedSubmissionId) => {
         const response = await internalApi.post(`${DB_SERVICE_URL}/draft-sessions/${encodeURIComponent(token)}/submit`, {
             submittedSubmissionId,
@@ -2213,51 +2230,33 @@ app.get('/learning', async (_req, res) => {
     }
 });
 app.get('/learning/submission/:submissionId', async (req, res) => {
+    const pageStartedAt = Date.now();
     try {
         const { submissionId } = req.params;
-        let [learningRevisionResult, submissionResult, correctionRulesResult, propertiesResult] = await Promise.all([
-            internalApi.get(`${DIFFER_SERVICE_URL}/learning/submissions/${encodeURIComponent(submissionId)}/revision`, { timeout: 3500 })
+        const [learningDetailResult, submissionResult, correctionRulesResult, propertiesResult] = await Promise.all([
+            (0, learning_comparison_loader_1.loadLearningComparison)({
+                differUrl: DIFFER_SERVICE_URL,
+                submissionId,
+                get: (url, options) => internalApi.get(url, options),
+            }),
+            internalApi.get(`${DB_SERVICE_URL}/submissions/${encodeURIComponent(submissionId)}`, { timeout: 8000 })
                 .then((r) => ({ ok: true, data: r.data, error: '' }))
-                .catch((e) => ({ ok: false, data: null, error: e?.message || 'request failed' })),
-            internalApi.get(`${DB_SERVICE_URL}/submissions/${encodeURIComponent(submissionId)}`, { timeout: 3500 })
-                .then((r) => ({ ok: true, data: r.data, error: '' }))
-                .catch((e) => ({ ok: false, data: null, error: e?.message || 'request failed' })),
-            internalApi.get(`${DB_SERVICE_URL}/correction-rules?submission_id=${encodeURIComponent(submissionId)}`, { timeout: 3500 })
+                .catch((e) => ({ ok: false, data: null, error: `${e?.response?.status || e?.code || ''} ${e?.message || 'request failed'}`.trim() })),
+            internalApi.get(`${DB_SERVICE_URL}/correction-rules?submission_id=${encodeURIComponent(submissionId)}`, { timeout: 8000 })
                 .then((r) => ({ ok: true, data: r.data, error: '' }))
                 .catch((e) => ({ ok: false, data: [], error: e?.message || 'request failed' })),
-            internalApi.get(`${DB_SERVICE_URL}/properties`, { timeout: 3500 })
+            internalApi.get(`${DB_SERVICE_URL}/properties`, { timeout: 8000 })
                 .then((r) => ({ ok: true, data: r.data, error: '' }))
                 .catch((e) => ({ ok: false, data: { properties: [] }, error: e?.message || 'request failed' })),
         ]);
-        let learningDetailResult = { ok: false, data: null, error: 'comparison revision unavailable' };
-        const initialRevision = learningRevisionResult.data?.comparison_revision;
-        if (learningRevisionResult.ok && initialRevision) {
-            learningDetailResult = await internalApi
-                .get(`${DIFFER_SERVICE_URL}/learning/submissions/${encodeURIComponent(submissionId)}?comparison_revision=${encodeURIComponent(initialRevision)}`, { timeout: 3500 })
-                .then((r) => ({ ok: true, data: r.data, error: '' }))
-                .catch((e) => ({ ok: false, data: null, error: e?.message || 'request failed' }));
-        }
-        // Browser approval finalization creates the differ comparison just before sending
-        // the reviewer here. A slow filesystem write used to make this first GET lose a
-        // race and render a 404; refreshing worked because the comparison had completed.
-        // Briefly retry the read so the first navigation is the useful explanations page.
-        if (!learningDetailResult.ok && submissionResult.ok) {
-            for (let attempt = 0; attempt < 4 && !learningDetailResult.ok; attempt++) {
-                await new Promise((resolve) => setTimeout(resolve, 250));
-                learningRevisionResult = await internalApi
-                    .get(`${DIFFER_SERVICE_URL}/learning/submissions/${encodeURIComponent(submissionId)}/revision`, { timeout: 3500 })
-                    .then((r) => ({ ok: true, data: r.data, error: '' }))
-                    .catch((e) => ({ ok: false, data: null, error: e?.message || 'request failed' }));
-                const retryRevision = learningRevisionResult.data?.comparison_revision;
-                if (!learningRevisionResult.ok || !retryRevision)
-                    continue;
-                learningDetailResult = await internalApi
-                    .get(`${DIFFER_SERVICE_URL}/learning/submissions/${encodeURIComponent(submissionId)}?comparison_revision=${encodeURIComponent(retryRevision)}`, { timeout: 3500 })
-                    .then((r) => ({ ok: true, data: r.data, error: '' }))
-                    .catch((e) => ({ ok: false, data: null, error: e?.message || 'request failed' }));
-            }
-        }
+        const learningLog = (0, learning_comparison_loader_1.formatLearningLoadLog)(submissionId, learningDetailResult)
+            + ` submission_ok=${submissionResult.ok} rules_ok=${correctionRulesResult.ok} page=${Date.now() - pageStartedAt}ms`;
+        if (learningDetailResult.ok && submissionResult.ok)
+            console.log(learningLog);
+        else
+            console.warn(learningLog);
         if (!submissionResult.ok || !submissionResult.data) {
+            console.warn(`[learning-page] submission=${submissionId} rendering 404: submission read failed: ${submissionResult.error}`);
             return res.status(404).render('error', { message: 'Learning details not found for this submission' });
         }
         const learningDetail = learningDetailResult.data || {
@@ -2276,10 +2275,16 @@ app.get('/learning/submission/:submissionId', async (req, res) => {
             savedCorrectionRules,
             locationOptions,
             learningUnavailable: !learningDetailResult.ok,
+        }, (renderError, html) => {
+            if (renderError) {
+                console.error(`[learning-page] submission=${submissionId} template render failed:`, renderError.stack || renderError.message);
+                return res.status(500).render('error', { message: 'Failed to load learning submission details' });
+            }
+            res.send(html);
         });
     }
     catch (error) {
-        console.error('Error loading learning submission detail page:', error.message);
+        console.error(`[learning-page] submission=${req.params.submissionId} failed:`, error.stack || error.message);
         res.status(500).render('error', {
             message: 'Failed to load learning submission details'
         });
@@ -2307,7 +2312,7 @@ async function resolveHumanExplanationSourceBinding(payload) {
         throw new learning_correction_rules_1.CorrectionRuleValidationError('The correction is not present in the trusted learning comparison');
     }
     if (learning.comparison_revision !== comparisonRevision
-        || learning.source_stage !== human_explanation_source_binding_1.HUMAN_EXPLANATION_SOURCE_STAGE
+        || !human_explanation_source_binding_1.HUMAN_EXPLANATION_SOURCE_STAGES.has(learning.source_stage)
         || learning.coordinate_basis !== human_explanation_source_binding_1.HUMAN_EXPLANATION_COORDINATE_BASIS
         || typeof learning.source_snapshot_sha256 !== 'string'
         || typeof learning.source_extraction_version !== 'string'
@@ -2318,24 +2323,35 @@ async function resolveHumanExplanationSourceBinding(payload) {
     }
     let source;
     let sourceDocumentPath;
-    try {
-        const sourceResult = await internalApi.get(`${DB_SERVICE_URL}/submissions/${encodeURIComponent(submissionId)}/review-source-binding?source_snapshot_sha256=${encodeURIComponent(learning.source_snapshot_sha256)}&attempt_id=${encodeURIComponent(learning.source_attempt_id)}`, { timeout: 3500 });
-        source = sourceResult.data || {};
-    }
-    catch (error) {
-        // A submitted DOCX may contain the reviewer's later form edits and the
-        // generated footer. Its extracted text then cannot equal an earlier AI
-        // response even though it is the exact draft shown in this comparison.
-        if (error?.response?.status !== 409 || error?.response?.data?.exact_candidate_count !== 0)
-            throw error;
+    // The editor baseline is the submitted DOCX, never an AI audit response, so
+    // it binds to that exact document rather than searching the audit table.
+    const bindToSubmittedDocument = async () => {
         const submissionResult = await internalApi.get(`${DB_SERVICE_URL}/submissions/${encodeURIComponent(submissionId)}`, { timeout: 3500 });
         const submission = submissionResult.data || {};
         if (!(0, human_explanation_source_binding_1.matchesSubmittedDraftToLearningComparison)(submission, learning, submissionId)) {
             throw new learning_correction_rules_1.CorrectionRuleValidationError('The comparison draft does not match this submission and form attempt');
         }
         source = { submission_id: submission.id, attempt_id: submission.form_attempt_id };
-        sourceDocumentPath = submission.ai_draft_path;
+        sourceDocumentPath = learning.source_stage === human_explanation_source_binding_1.HUMAN_EXPLANATION_EDITOR_BASELINE_STAGE
+            ? submission.original_path
+            : submission.ai_draft_path;
+    };
+    if (learning.source_stage === human_explanation_source_binding_1.HUMAN_EXPLANATION_EDITOR_BASELINE_STAGE) {
+        await bindToSubmittedDocument();
     }
+    else
+        try {
+            const sourceResult = await internalApi.get(`${DB_SERVICE_URL}/submissions/${encodeURIComponent(submissionId)}/review-source-binding?source_snapshot_sha256=${encodeURIComponent(learning.source_snapshot_sha256)}&attempt_id=${encodeURIComponent(learning.source_attempt_id)}`, { timeout: 3500 });
+            source = sourceResult.data || {};
+        }
+        catch (error) {
+            // A submitted DOCX may contain the reviewer's later form edits and the
+            // generated footer. Its extracted text then cannot equal an earlier AI
+            // response even though it is the exact draft shown in this comparison.
+            if (error?.response?.status !== 409 || error?.response?.data?.exact_candidate_count !== 0)
+                throw error;
+            await bindToSubmittedDocument();
+        }
     const audit = source.audit || {};
     const binding = (0, human_explanation_source_binding_1.buildHumanExplanationSourceBinding)({
         submissionId: source.submission_id,
@@ -2347,6 +2363,7 @@ async function resolveHumanExplanationSourceBinding(payload) {
         matchedAuditSnapshotSha256: audit.source_snapshot_sha256,
         comparisonRevision: learning.comparison_revision,
         sourceExtractionVersion: learning.source_extraction_version,
+        sourceStage: learning.source_stage,
         correction,
     });
     return {
@@ -2910,6 +2927,41 @@ app.get('/api/submissions/latest-approved', async (req, res) => {
         res.status(error?.response?.status || 500).json(error?.response?.data || { error: 'Failed to fetch approved submission' });
     }
 });
+/**
+ * Proxy: is there a newer approved version of this baseline's MENU? Decided by
+ * menu identity in the db service (pointer, then lineage), never by property +
+ * service period. Named route: keep before any /api/submissions/:id route.
+ */
+app.get('/api/submissions/baseline-freshness', async (req, res) => {
+    try {
+        const id = (0, upload_security_1.sanitizePlainTextInput)(req.query.id, { maxLength: 120 }).trim();
+        if (!id)
+            return res.status(400).json({ error: 'id is required' });
+        const dbResponse = await internalApi.get(`${DB_SERVICE_URL}/submissions/baseline-freshness`, { params: { id } });
+        res.json(dbResponse.data);
+    }
+    catch (error) {
+        res.status(error?.response?.status || 500).json(error?.response?.data || { error: 'Failed to check baseline freshness' });
+    }
+});
+/**
+ * Proxy: every distinct approved menu for a property + service period, each at
+ * its current version. Brand-new mode lists these by name so the chef picks
+ * one; it is never used to decide staleness.
+ */
+app.get('/api/submissions/approved-for-service', async (req, res) => {
+    try {
+        const property = (0, upload_security_1.sanitizePlainTextInput)(req.query.property, { maxLength: 255 }).trim();
+        const servicePeriod = (0, upload_security_1.sanitizePlainTextInput)(req.query.servicePeriod, { maxLength: 80 }).trim();
+        if (!property || !servicePeriod)
+            return res.status(400).json({ error: 'property and servicePeriod are required' });
+        const dbResponse = await internalApi.get(`${DB_SERVICE_URL}/submissions/approved-for-service`, { params: { property, servicePeriod } });
+        res.json(dbResponse.data || { menus: [] });
+    }
+    catch (error) {
+        res.status(error?.response?.status || 500).json(error?.response?.data || { error: 'Failed to list approved menus for this service' });
+    }
+});
 app.post('/api/drafts', async (req, res) => {
     try {
         const baseSubmissionId = (0, upload_security_1.sanitizePlainTextInput)(req.body?.baseSubmissionId || req.body?.base_submission_id, { maxLength: 120 }).trim();
@@ -3273,7 +3325,7 @@ async function handleBasicCheck(req, res) {
         let changedLineCount = 0;
         let changedIndices = [];
         if (changedOnlyMode) {
-            const changedOnlyText = extractChangedLinesForReview(baselineMenuContent, menuContent);
+            const changedOnlyText = (0, changed_lines_1.extractChangedLinesForReview)(baselineMenuContent, menuContent);
             changedLineCount = changedOnlyText.changedLineCount;
             changedIndices = changedOnlyText.changedIndices;
             if (changedLineCount === 0) {
@@ -4242,29 +4294,9 @@ app.get('/api/form/basic-check/status/:checkId', (req, res) => {
     });
 });
 // enforcePrixFixeCriticalChecks moved to ./lib/review-pipeline.
-function extractChangedLinesForReview(baselineText, currentText) {
-    const baseLines = baselineText.split('\n').map(l => l.trim()).filter(Boolean);
-    const baseSet = new Set(baseLines.map(normalizeReviewLine));
-    const changedLines = [];
-    const changedIndices = [];
-    for (const [index, line] of currentText.split('\n').entries()) {
-        if (!line.trim())
-            continue;
-        const norm = normalizeReviewLine(line);
-        if (!baseSet.has(norm)) {
-            changedLines.push(line.trim());
-            changedIndices.push(index);
-        }
-    }
-    return {
-        text: changedLines.join('\n'),
-        changedLineCount: changedLines.length,
-        changedIndices,
-    };
-}
 function mergeChangedLineCorrections(fullText, baselineText, correctedChangedText) {
     const baseLines = baselineText.split('\n').map(l => l.trim()).filter(Boolean);
-    const baseSet = new Set(baseLines.map(normalizeReviewLine));
+    const baseSet = new Set(baseLines.map(changed_lines_1.normalizeReviewLine));
     const correctedChangedLines = (correctedChangedText || '')
         .split('\n')
         .map(l => l.trim())
@@ -4275,7 +4307,7 @@ function mergeChangedLineCorrections(fullText, baselineText, correctedChangedTex
         const trimmed = fullLines[i].trim();
         if (!trimmed)
             continue;
-        if (!baseSet.has(normalizeReviewLine(trimmed))) {
+        if (!baseSet.has((0, changed_lines_1.normalizeReviewLine)(trimmed))) {
             changedIndices.push(i);
         }
     }
@@ -4296,14 +4328,6 @@ function mergeChangedLineCorrections(fullText, baselineText, correctedChangedTex
         }
     }
     return { merged: mergedLines.join('\n'), correctionsApplied, bailed: false };
-}
-function normalizeReviewLine(line) {
-    return (line || '')
-        .toLowerCase()
-        .replace(/\s+/g, ' ')
-        .replace(/[“”"]/g, '"')
-        .replace(/[’']/g, "'")
-        .trim();
 }
 function buildBasicCheckDishNameFormatting(menuContent, options) {
     try {

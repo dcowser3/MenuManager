@@ -52,6 +52,7 @@ import {
     COORDINATOR_SCHEMA_VERSION,
 } from '@menumanager/review-contract';
 import { createSubmissionWorkflowHandlers } from './lib/submission-workflow';
+import { extractChangedLinesForReview, normalizeReviewLine } from './lib/changed-lines';
 import {
     SubmissionConfirmationInput,
     buildSubmissionConfirmationCc,
@@ -2029,6 +2030,17 @@ const submissionWorkflowHandlers = createSubmissionWorkflowHandlers({
         const response = await internalApi.get(`${DB_SERVICE_URL}/draft-sessions/${encodeURIComponent(token)}`, { timeout: 5000 });
         return response.data;
     },
+    getBaselineFreshness: async (baselineId: string) => {
+        const response = await internalApi.get(`${DB_SERVICE_URL}/submissions/baseline-freshness`, {
+            params: { id: baselineId }, timeout: 5000,
+        });
+        return response.data;
+    },
+    getApprovedBaseline: async (baselineId: string) => {
+        const response = await internalApi.get(`${DB_SERVICE_URL}/submissions/${encodeURIComponent(baselineId)}`, { timeout: 5000 });
+        return response.data;
+    },
+    logFormAttemptEvent: (event: Record<string, any>) => logFormAttemptEvent(event as any),
     lockDraftSession: async (token: string, submittedSubmissionId: string) => {
         const response = await internalApi.post(`${DB_SERVICE_URL}/draft-sessions/${encodeURIComponent(token)}/submit`, {
             submittedSubmissionId,
@@ -3323,6 +3335,39 @@ app.get('/api/submissions/latest-approved', async (req, res) => {
         res.json(dbResponse.data);
     } catch (error: any) {
         res.status(error?.response?.status || 500).json(error?.response?.data || { error: 'Failed to fetch approved submission' });
+    }
+});
+
+/**
+ * Proxy: is there a newer approved version of this baseline's MENU? Decided by
+ * menu identity in the db service (pointer, then lineage), never by property +
+ * service period. Named route: keep before any /api/submissions/:id route.
+ */
+app.get('/api/submissions/baseline-freshness', async (req, res) => {
+    try {
+        const id = sanitizePlainTextInput(req.query.id, { maxLength: 120 }).trim();
+        if (!id) return res.status(400).json({ error: 'id is required' });
+        const dbResponse = await internalApi.get(`${DB_SERVICE_URL}/submissions/baseline-freshness`, { params: { id } });
+        res.json(dbResponse.data);
+    } catch (error: any) {
+        res.status(error?.response?.status || 500).json(error?.response?.data || { error: 'Failed to check baseline freshness' });
+    }
+});
+
+/**
+ * Proxy: every distinct approved menu for a property + service period, each at
+ * its current version. Brand-new mode lists these by name so the chef picks
+ * one; it is never used to decide staleness.
+ */
+app.get('/api/submissions/approved-for-service', async (req, res) => {
+    try {
+        const property = sanitizePlainTextInput(req.query.property, { maxLength: 255 }).trim();
+        const servicePeriod = sanitizePlainTextInput(req.query.servicePeriod, { maxLength: 80 }).trim();
+        if (!property || !servicePeriod) return res.status(400).json({ error: 'property and servicePeriod are required' });
+        const dbResponse = await internalApi.get(`${DB_SERVICE_URL}/submissions/approved-for-service`, { params: { property, servicePeriod } });
+        res.json(dbResponse.data || { menus: [] });
+    } catch (error: any) {
+        res.status(error?.response?.status || 500).json(error?.response?.data || { error: 'Failed to list approved menus for this service' });
     }
 });
 
@@ -4742,29 +4787,6 @@ app.get('/api/form/basic-check/status/:checkId', (req, res) => {
 
 // enforcePrixFixeCriticalChecks moved to ./lib/review-pipeline.
 
-function extractChangedLinesForReview(baselineText: string, currentText: string): { text: string; changedLineCount: number; changedIndices: number[] } {
-    const baseLines = baselineText.split('\n').map(l => l.trim()).filter(Boolean);
-
-    const baseSet = new Set(baseLines.map(normalizeReviewLine));
-    const changedLines: string[] = [];
-
-    const changedIndices: number[] = [];
-    for (const [index, line] of currentText.split('\n').entries()) {
-        if (!line.trim()) continue;
-        const norm = normalizeReviewLine(line);
-        if (!baseSet.has(norm)) {
-            changedLines.push(line.trim());
-            changedIndices.push(index);
-        }
-    }
-
-    return {
-        text: changedLines.join('\n'),
-        changedLineCount: changedLines.length,
-        changedIndices,
-    };
-}
-
 function mergeChangedLineCorrections(
     fullText: string,
     baselineText: string,
@@ -4808,14 +4830,6 @@ function mergeChangedLineCorrections(
     return { merged: mergedLines.join('\n'), correctionsApplied, bailed: false };
 }
 
-function normalizeReviewLine(line: string): string {
-    return (line || '')
-        .toLowerCase()
-        .replace(/\s+/g, ' ')
-        .replace(/[“”"]/g, '"')
-        .replace(/[’']/g, "'")
-        .trim();
-}
 
 function buildBasicCheckDishNameFormatting(
     menuContent: string,

@@ -23,7 +23,7 @@ A submission's parent is `revision_base_submission_id`. Already stored for the t
 - A menu is **superseded** iff an *approved* submission points at it as parent. Rejected/pending children don't supersede.
 - The **tip** of a chain is the approved submission with no approved child. The tip is the only editable version.
 - Menus with no known children are never blocked — unknown lineage means "don't gate," never "guess." A false lineage link (wrongly greying out a live menu) is worse than a missing one.
-- `findLatestApprovedByPropertyService` (property + service period) is demoted to a **soft fallback warning** where lineage is unknown — the existing baseline-freshness confirm dialog, not a hard block. It must no longer be treated as authoritative "latest," precisely because of the Holidays & Events case.
+- Property + service period is **never** an input to "stale" (finished 2026-11-16, see [incident note](incident-2026-11-16-load-newer-menu.md)). `resolveBaselineFreshness()` in the db service decides it by menu identity: (a) the baseline's menu has a current version that is a different approved submission → stale; (b) no `menu_id` → an approved lineage child → stale; (c) otherwise not stale. Both public id forms are compared. `findLatestApprovedByPropertyService` survives only behind `GET /submissions/latest-approved` as a non-authoritative hint the form no longer calls.
 - If a node ends up with multiple approved children (possible: draft submit + a doc-upload submit both claiming the same parent), the tip is the child with the latest `reviewed_at`. Surface the anomaly in the lineage data rather than hiding it.
 
 ### Invariant: at most one active draft per approved menu
@@ -49,7 +49,7 @@ Each card resolves to exactly one edit-action state (downloads are always availa
 | Editable | Tip of chain (or unknown lineage), no active draft | `Edit This Menu` (unchanged) |
 | In progress | Active draft exists for this baseline | Badge: **In progress — last saved \<relative time\>**. Primary button: `Resume Editing`. Secondary link: `Discard and start over` (confirmation required). |
 | Superseded | An approved child exists (known lineage only) | `Edit This Menu` disabled. Notice: "A newer version was approved \<date\>" with a link to the tip's card / `Edit Latest Version`. |
-| Possibly stale | Not latest by property+service period, but lineage unknown | No gating. Existing baseline-freshness confirm dialog fires on draft open, as today. |
+| Possibly stale | (Removed 2026-11-16.) Property + service period no longer implies staleness; unknown lineage never warns or gates. | — |
 
 Security note: `Resume Editing` on a public page hands the draft to anyone who can view Approved Menus. This is consistent with the existing model — drafts are already link-shareable bearer capabilities and the dashboard has no accounts — but it widens exposure from "people given the link" to "anyone browsing the dashboard." Accepted for now; revisit if/when the dashboard grows auth. Rate limiting on token lookup stays.
 
@@ -62,7 +62,7 @@ Drafts have no identity until submit. For the badge and dashboard to say more th
 - Draft `form_state` now persists the Submitter Information and Required Approval sections (`submitterName/Email/JobTitle`, both approver groups, additional-approver visibility). Previously these were silently dropped on resume, which also meant `last_edited_by` only populated if the user happened to retype their name in that session.
 - The drafts/lineage batch lookups on `/approved-menus` now join on **both** public ids. Drafts store `base_submission_id` via `getPublicSubmissionId` (legacy_id preferred) while the card list keys rows uuid-first; rows with both ids never matched, so the In-progress/Resume card state never rendered and `Edit This Menu` silently resumed an existing draft.
 - Opening a previously saved draft shows an explicit "You are resuming an in-progress draft last saved …" banner (all entry paths, including shared links).
-- Opening an active draft whose baseline is not the latest for its property + service period shows a persistent warning banner at open. The pre-existing confirm dialog still fires at continue/submit; the banner deliberately does not offer "Load Newer Menu" because that would overwrite the draft's saved edits under the old baseline id.
+- Opening an active draft whose baseline is superseded **by menu identity** (`draftSession.baselineFreshness` from `GET /draft-sessions/:token`) shows a persistent banner naming the newer version and its approval date, with "Open the current version in a new tab". (Before 2026-11-16 this used property + service period, which pointed chefs at different menus.)
 - **September 2026 resume fix:** a previously saved shared draft no longer carries its prior editor's Submitter Information into the final submission. Name, email, and job title are cleared on resume, remembered-browser profile prefill is suppressed for that load, and the resume banner tells the current person to identify themselves. The read-only Date Needed is recalculated from today's date plus the saved turnaround so an idle draft cannot retain an expired date and dead-end at submit.
 
 ### In-progress dashboard
@@ -88,6 +88,27 @@ This also closes the loop for the download → edit in Word → re-upload cycle:
 
 With chains complete for all guided flows, "show me how the Tán dinner menu evolved over the year" is a walk up `revision_base_submission_id` — approved docs, dates, diffs. A marketing-facing timeline view is explicitly **out of scope** here; this design just guarantees the data exists.
 
+## Draft safety rules (2026-11-16)
+
+After the [Load Newer Menu incident](incident-2026-11-16-load-newer-menu.md):
+
+- **A draft's content is never replaced by another baseline.** In a draft session the freshness dialog offers no load action. `applyApprovedBaseline()` and `applyProjectPrefill()` refuse a baseline other than the draft's base, every write to `revisionBaseSubmissionId` goes through a setter pinned to the draft's base (`MenuBaselineFreshness.createDraftBaselineLock`), and autosave refuses to persist content under a different baseline.
+- **Stale drafts block, they do not swap.** If the draft's baseline is stale by menu identity, Run Basic AI Check and Submit are blocked with a dialog naming the newer version and its approval date, plus a button that opens the current version in a new tab (`POST /api/drafts`, `target="_blank"`). The draft and its saved text stay untouched.
+- **The server is the authority at submit.** `POST /api/form/submit` with a `draftSessionToken` returns 409 when the body's `revisionBaseSubmissionId` is not the draft's base (either id form), when the base is stale at submit time, or when the project name / template type differs from the base without `metadataChangeConfirmed: true` (the form sets it only after a confirm dialog showing old and new values). Rejections are logged as `submit_rejected` in `form_attempt_logs` and happen before any DOCX, submission row, or ClickUp task exists.
+- **Zero-change modifications are not submissions** (422, `code: no_changes`), compared against the database baseline with the AI check's line comparison in both directions. Project-detail-only changes are allowed.
+- **One click, one submission.** The form disables Submit synchronously at click; the server returns the first submission for a repeat of the same attempt id + draft token within 2 minutes.
+
+## Retiring a submission
+
+Never set `status = 'deleted'` by hand: it leaves `menus.current_submission_id` on a deleted row. Use:
+
+```bash
+node scripts/retire-submission.js <submission id> [more ids...]          # dry run
+node scripts/retire-submission.js <submission id> [more ids...] --apply  # writes, backup in tmp/
+```
+
+It marks the submission deleted and moves the menu pointer back to the newest other approved version (or clears it) in the same run, with guarded writes. Readers are also resilient: when a pointer resolves to a non-approved row, `resolveMenuCurrentSubmission()` falls back to the newest approved version with that `menu_id` and repairs the pointer (`/menus/design-eligible`, `POST /draft-sessions`, freshness checks).
+
 ## Endpoints
 
 Dashboard:
@@ -98,11 +119,17 @@ Dashboard:
 - `/approved-menus` search results enriched per card with `{ activeDraft: { lastSavedAt, lastEditedBy }, supersededBy: { id, approvedAt } }` — one batch lookup for the result set, not N+1 per card.
 - Submit path (uploaded-baseline mode) accepts the confirmed lineage id → `revision_base_submission_id`.
 
+Freshness (2026-11-16):
+
+- `GET /api/submissions/baseline-freshness?id=` → db `GET /submissions/baseline-freshness` — `{ stale, basis: menu_pointer|lineage|unknown, newerVersion, baselineIdForms, menuId }`.
+- `GET /api/submissions/approved-for-service?property=&servicePeriod=` → db `GET /submissions/approved-for-service` — every distinct approved menu in that service period at its current version, for the brand-new "choose by name" list. Never a staleness signal.
+- `GET /draft-sessions/:token` includes `baselineFreshness`; client baselines include `idAliases` (both id forms).
+
 DB service: matching query support — active-draft lookup by `base_submission_id` (single + batch), draft listing by status, approved-children lookup by `revision_base_submission_id` (batch), baseline-text match endpoint for the upload flow. Supabase index on `draft_sessions(base_submission_id, status)` and `submissions(revision_base_submission_id)`; JSON fallback per `db` conventions. Named routes before `/:token`.
 
 ## Edge Cases
 
-- **Draft open while baseline gets superseded** (e.g., someone else lands a doc-upload submission on the same parent): existing baseline-freshness check on draft open/submit already handles the dialog; the card badge should reflect both states (in progress *and* superseded), with the dialog resolving what happens to the draft.
+- **Draft open while baseline gets superseded** (e.g., someone else lands a doc-upload submission on the same parent): the draft-open banner and the continue/submit check block the draft and link to the current version; the server rejects the submit (409). The draft is never rewritten.
 - **Submitted/expired/discarded drafts** clear the in-progress state immediately.
 - **Expiry** (30-day idle, existing) continues to apply; expired drafts free the slot the same way discard does.
 
